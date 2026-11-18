@@ -1,4 +1,6 @@
-//! The objects and the edges between them, the links to their pages, and the parsing every domain reads: selectors, pods, DNS names, untrusted text, upstream URLs, and environments.
+//! The objects of a cluster, the edges between them, the URLs of their
+//! pages, and the parsers that every domain shares: selectors, pods, DNS
+//! names, untrusted text, upstream URLs, and environments.
 
 pub mod dns;
 pub mod edges;

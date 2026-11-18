@@ -1,15 +1,14 @@
-//! The words the environment block shows.  Everything else in it is a
-//! `Secret`'s or a `ConfigMap`'s name.
+//! The heading and the counts of a pod's environment block.
 
 use super::{Environment, Keys, Kind, Source};
 
-/// The note under the block, which states why it shows no value.
+/// The note under the block that tells the reader why it lists no values.
 pub const NAMES_ONLY: &str =
     "Names only, never values: transect reads the pod spec, not the Secrets or ConfigMaps.";
 
 impl Environment {
     /// "Environment · 29 variables", or "Environment" when the spec sets
-    /// none and the block lists only what volumes mount.
+    /// no variables.
     pub fn heading(&self) -> String {
         match self.variables {
             0 => "Environment".into(),
@@ -18,7 +17,7 @@ impl Environment {
         }
     }
 
-    /// "21 plain values", or none.
+    /// "21 plain values", or `None` when there are none.
     pub fn plain_text(&self) -> Option<String> {
         match self.plain {
             0 => None,
@@ -27,7 +26,7 @@ impl Environment {
         }
     }
 
-    /// "2 from the pod's own fields", or none.
+    /// "2 from the pod's own fields", or `None` when there are none.
     pub fn fields_text(&self) -> Option<String> {
         (self.fields > 0).then(|| format!("{} from the pod's own fields", self.fields))
     }
@@ -87,7 +86,7 @@ mod tests {
         Some("21 plain values"),
         Some("2 from the pod's own fields")
     )]
-    fn the_counts(
+    fn writes_counts_as_text(
         #[case] environment: Environment,
         #[case] heading: &str,
         #[case] plain: Option<&str>,
@@ -120,7 +119,7 @@ mod tests {
     #[case::several(source(named(4), false), "4 keys")]
     #[case::one_mounted(source(named(1), true), "1 key · mounted")]
     #[case::every(source(Keys::Every, false), "every key")]
-    fn a_sources_keys(#[case] source: Source, #[case] text: &str) {
+    fn writes_the_keys_of_a_source(#[case] source: Source, #[case] text: &str) {
         assert_eq!(source.keys_text(), text);
     }
 }

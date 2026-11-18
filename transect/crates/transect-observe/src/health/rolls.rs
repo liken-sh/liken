@@ -1,10 +1,10 @@
-//! Restarts that followed another workload's rollout onto the same
-//! machines.  When a `DaemonSet`'s new pods restart a service that every
-//! other workload on the machine depends on, such as a shared system
-//! bus, the restarts happen on each machine shortly after the new pod
-//! starts there, one machine at a time, in the order the rollout reaches
-//! them.  When the same timing repeats on several machines, it
-//! identifies the cause.
+//! Finds container restarts that follow another workload's rollout on
+//! the same machine. A new `DaemonSet` pod, for example, can restart a
+//! service that other workloads on the machine depend on, such as a
+//! shared system bus. Their containers then restart on each machine
+//! shortly after the new pod starts there. When that happens on at
+//! least `MACHINES` machines, transect reports the rollout as the likely
+//! cause.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -15,15 +15,15 @@ use kube::ResourceExt;
 use transect_cluster::workloads::Revisions;
 use transect_graph::edges::Object;
 
-/// How long after another workload's pod starts on a machine a restart
-/// there counts as following it.
+/// How many seconds after another workload's pod starts on a machine a
+/// restart on that machine counts as following it.
 const WINDOW_SECONDS: i64 = 120;
 
-/// The minimum number of machines on which restarts must follow a
-/// rollout before transect treats the timing as more than chance.
+/// The fewest machines on which restarts must follow a rollout before
+/// transect reports it.
 const MACHINES: usize = 2;
 
-/// One container of a workload's pod that last stopped at `at`.
+/// The last stop of a restarted container of a workload's pod.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Restart {
     pub workload: Object,
@@ -33,7 +33,7 @@ pub struct Restart {
 }
 
 /// A pod of a workload's newest revision that started on `machine` at
-/// `at`: one step of a rollout.
+/// `at`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Rolled {
     pub workload: Object,
@@ -41,8 +41,8 @@ pub struct Rolled {
     pub at: Timestamp,
 }
 
-/// The workload whose rollout the restarts followed, and on how many
-/// machines they did.
+/// The workload whose rollout the restarts followed, and the number of
+/// machines where they followed it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AfterRoll {
     pub rolled: String,
@@ -51,7 +51,7 @@ pub struct AfterRoll {
 
 /// For each workload and container, the other workload whose rollout
 /// its restarts followed on the most machines, when that is at least
-/// `MACHINES`.  A tie goes to the workload that sorts first.
+/// `MACHINES`.  When two workloads tie, the one that sorts first wins.
 pub fn after_rolls(
     restarts: &[Restart],
     rolled: &[Rolled],
@@ -115,9 +115,9 @@ pub fn restarts_of(pod: &Pod, owner: &Object) -> Vec<Restart> {
         .collect()
 }
 
-/// When `pod` started on its machine, if it is a pod of its
-/// controller's newest revision.  Such a pod was created at or after
-/// the time of that revision.
+/// When `pod` started on its machine, if it belongs to its controller's
+/// newest revision, which is when it was created at or after that
+/// revision. A pod with no start time counts from its creation.
 pub fn rolled_of(pod: &Pod, owner: &Object, revisions: &Revisions) -> Option<Rolled> {
     let namespace = pod.namespace()?;
     let controller = pod
@@ -128,8 +128,8 @@ pub fn rolled_of(pod: &Pod, owner: &Object, revisions: &Revisions) -> Option<Rol
         "DaemonSet" | "StatefulSet" => {
             revisions.newest(&namespace, &controller.kind, &controller.name)
         }
-        // A `Deployment` names each `ReplicaSet` after itself and the
-        // pod template's hash, which its pods have as a label.
+        // A `Deployment` names each `ReplicaSet` `<deployment>-<hash>`,
+        // where the hash is the pod's `pod-template-hash` label.
         "ReplicaSet" => {
             let hash = pod.labels().get("pod-template-hash")?;
             let deployment = controller.name.strip_suffix(&format!("-{hash}"))?;

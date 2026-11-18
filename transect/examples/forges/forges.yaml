@@ -1,6 +1,6 @@
-# The page layouts of the public forges, which code links follow.  A
-# forge a cluster serves itself, behind an Ingress to a gitea or forgejo
-# image, is found by that image, at any host.
+# The URL layouts of the public forges, which transect uses to link to
+# code.  A forge that the cluster runs itself, behind an Ingress to a
+# gitea or forgejo image, is recognized by that image at any host.
 apiVersion: transect.liken.sh/v1alpha1
 kind: Forge
 metadata:
@@ -21,8 +21,8 @@ spec:
   tree: '{repository}/-/tree/{ref}/{path}'
   commit: '{repository}/-/commit/{sha}'
 ---
-# Gitea and Forgejo, and Codeberg, which runs Forgejo.  Their directory
-# pages name whether a ref is a branch, a tag, or a commit.
+# Gitea and Forgejo, and Codeberg, which runs Forgejo.  Their tree
+# URLs include whether the ref is a branch, a tag, or a commit.
 apiVersion: transect.liken.sh/v1alpha1
 kind: Forge
 metadata:

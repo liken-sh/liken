@@ -1,20 +1,21 @@
-//! The conditions a custom resource reports, as the chips its box shows
-//! in the middle of its kind's diagram.  The condition that its knowledge
-//! names as the sign that the object works comes first, then the rest in
-//! the order the operator writes them.  Only that first condition takes a
-//! color.  The rest, and the first condition when it is at rest, draw
-//! gray.
+//! The conditions of a custom resource, drawn as chips in the object's
+//! box at the center of its kind's diagram.  The health condition that
+//! the kind's knowledge names, or `Ready`, comes first, and the rest
+//! keep their order in `status.conditions`.  Only the health condition
+//! gets a colored dot.  The others are gray, because transect cannot
+//! tell whether their `True` is good or bad.  The health condition is
+//! gray too when it is `False` with one of the kind's calm reasons.
 
 use serde_json::Value;
 
 use transect_graph::untrusted::capped;
 use transect_observe::health::{Deciding, Level};
 
-/// The most conditions a box shows, so an operator that writes many
+/// Caps the chips, so that an operator that writes many conditions
 /// does not push the box's other lines out.
-const MOST: usize = 4;
+const MAX_CHIPS: usize = 4;
 
-/// The longest a chip's words run.
+/// The most characters in a chip's text.
 const CHIP_CHARS: usize = 40;
 
 /// One condition as a chip: "Screen: present", "Power applied".
@@ -24,7 +25,7 @@ pub struct Chip {
     /// The condition's message, for the chip's title.
     pub title: Option<String>,
     pub status: Status,
-    /// The level its dot draws, or none for a gray dot.
+    /// The color of the chip's dot, or `None` for gray.
     pub level: Option<Level>,
 }
 
@@ -35,15 +36,16 @@ pub enum Status {
     Unknown,
 }
 
-/// The first chips of `data`'s `status.conditions`, the deciding one
-/// first, as many as the object's box in the diagram shows.
+/// The first `MAX_CHIPS` chips of `data`'s `status.conditions`, with
+/// the health condition first.
 pub fn chips(data: &Value, deciding: &Deciding) -> Vec<Chip> {
     let mut chips = every_chip(data, deciding);
-    chips.truncate(MOST);
+    chips.truncate(MAX_CHIPS);
     chips
 }
 
-/// Every chip of `data`'s `status.conditions`, the deciding one first.
+/// Every chip of `data`'s `status.conditions`, the health condition
+/// first.
 pub fn every_chip(data: &Value, deciding: &Deciding) -> Vec<Chip> {
     let healthy = Some(deciding.condition.as_str());
     let conditions = data.pointer("/status/conditions").and_then(Value::as_array);
@@ -72,11 +74,10 @@ pub fn every_chip(data: &Value, deciding: &Deciding) -> Vec<Chip> {
     found.into_iter().map(|(_, chip)| chip).collect()
 }
 
-/// A condition in words: its type split where its capitals are, then
-/// its reason after a colon, unless the type already contains the
-/// reason, as "PowerApplied" contains "Applied".  With no reason to add,
-/// a False condition is written "Not ready" and an Unknown one "Ready
-/// unknown".
+/// A condition's chip text: its type split into words, then its reason
+/// after a colon, unless the type already contains the reason, as
+/// "PowerApplied" contains "Applied".  With no reason to add, a False
+/// "Ready" becomes "Not ready" and an Unknown one "Ready unknown".
 fn words(kind: &str, reason: Option<&str>, status: Status) -> String {
     let named = spaced(kind);
     let reason = reason

@@ -4,7 +4,7 @@
 //! each severity value, the labels that name an object or a machine,
 //! and the prefix that Prometheus adds to a label that collides with a
 //! scrape target's own label.  So the cluster declares these
-//! conventions, and transect's code does not contain them.
+//! conventions in its `MetricsSource`, not in transect's code.
 
 use serde::Deserialize;
 
@@ -29,20 +29,20 @@ pub struct Source {
     pub objects: Vec<ObjectLabel>,
     /// The label that names a pod's container.
     pub container: Option<String>,
-    /// The labels whose value is a `Node`'s name.  A machine that these
-    /// labels name takes precedence over a namespace that the labels
-    /// name with no object other than a pod.
+    /// The labels whose value is a `Node`'s name.  When an alert has
+    /// one of these labels and names no object except a pod, the alert
+    /// is about the machine, not about the pod's namespace.
     #[serde(default)]
     pub node_labels: Vec<String>,
     /// The labels whose value is a scrape address.  When no other label
-    /// names a machine, a scrape address names one by its `Node`'s
-    /// name, one of its addresses, or a host name whose first label is
-    /// the `Node`'s name.
+    /// names a machine, a scrape address identifies one if it is a
+    /// `Node`'s name, one of its addresses, or a host name whose first
+    /// label is the `Node`'s name.
     #[serde(default)]
     pub instance_labels: Vec<String>,
     /// The labels that a scrape target adds to every series.  When the
     /// exported namespace label is present, these labels describe the
-    /// exporter.
+    /// exporter, not the object that the alert is about.
     #[serde(default)]
     pub scrape_labels: Vec<String>,
     /// The prefix that Prometheus adds to an object's label when it
@@ -52,9 +52,9 @@ pub struct Source {
     pub annotations: Annotations,
 }
 
-/// The severity label and what its values mean.  A value in no list,
-/// or no value at all, is a warning, because an alert that someone
-/// wrote is firing.
+/// The severity label and what its values mean.  An alert whose value
+/// is in no list, or that has no severity label, counts as a warning,
+/// because someone wrote a rule for it and it is firing.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Severity {
@@ -62,7 +62,8 @@ pub struct Severity {
     /// The values that color what an alert is about as failing.
     #[serde(default)]
     pub failing: Vec<String>,
-    /// The values that only note an alert.
+    /// The values that make an alert a notice, which "Now" lists and the
+    /// page draws gray.
     #[serde(default)]
     pub notice: Vec<String>,
     /// The values of alerts that never need attention, such as a
@@ -90,7 +91,8 @@ pub struct Annotations {
 }
 
 impl Source {
-    /// The section as declared, or why it does not validate.
+    /// Normalizes `url` with `base_url`, or returns why the section is
+    /// not valid.
     pub fn validated(mut self) -> Result<Self, String> {
         self.url = self.url.as_deref().map(base_url).transpose()?;
         let empty = |label: &str| label.trim().is_empty();
@@ -106,7 +108,7 @@ impl Source {
             .find(|o| empty(&o.label) || empty(&o.kind))
         {
             return Err(format!(
-                "alerts.objects names an empty label or kind: {:?}",
+                "alerts.objects has an entry with an empty label or kind, label {:?}",
                 object.label
             ));
         }
@@ -119,7 +121,7 @@ impl Source {
             .iter()
             .any(|labels| labels.iter().any(|label| empty(label)))
         {
-            return Err("alerts names an empty label".into());
+            return Err("alerts.nodeLabels, alerts.instanceLabels, or alerts.scrapeLabels has an empty label".into());
         }
         Ok(self)
     }

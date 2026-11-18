@@ -1,6 +1,6 @@
-//! The card beside an object's board: its kind's description from the
-//! CRD, the workloads whose controllers reconcile it, the GitOps objects
-//! that apply it, and its kind's knowledge when it has some.
+//! The card shown beside an object's board: the kind's description from
+//! its CRD, the workloads that reconcile the object, the GitOps objects
+//! that apply it, and the kind's knowledge when it has any.
 
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use k8s_openapi::jiff::Timestamp;
@@ -53,11 +53,11 @@ pub fn card(
     }
 }
 
-/// Its kind with its group, its namespace, and its age, each with the
-/// label the card gives it.  For a custom kind, which an operator
-/// reconciles, the list also states that no controller was found.  The
-/// card shows these facts only when it has no controller to name.  A
-/// kind of Kubernetes's own has no operator to find.
+/// The kind with its API group, the namespace, and the age. A custom
+/// kind also gets "controlled by: no controller found", because some
+/// operator should reconcile it. The card shows these facts only when it
+/// has nothing else to show: no CRD description, controller, GitOps
+/// object, or knowledge.
 fn facts(
     object: &Object,
     meta: Option<&ObjectMeta>,
@@ -104,7 +104,7 @@ mod tests {
         Object::new("", "PersistentVolume", None, "pv-1"),
         vec![("kind", "PersistentVolume"), ("age", "2d")]
     )]
-    fn says_what_where_and_how_old(#[case] object: Object, #[case] expected: Vec<(&str, &str)>) {
+    fn lists_kind_namespace_and_age(#[case] object: Object, #[case] expected: Vec<(&str, &str)>) {
         let meta: ObjectMeta =
             serde_yaml::from_str("{creationTimestamp: '2026-01-01T00:00:00Z'}").unwrap();
         let now: Timestamp = "2026-01-03T00:00:00Z".parse().unwrap();

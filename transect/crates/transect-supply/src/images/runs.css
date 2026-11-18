@@ -1,7 +1,6 @@
-/* The Runs box on a workload's page: a table with one row for each
-   image that the workload runs, on the same row color as the guards.
-   Names and revisions are monospace, as names are everywhere.  A long
-   image name wraps at any character instead of widening the table. */
+/* The Runs box on a workload's page has the same frame as the guards
+   box. A long value wraps at any character so it does not widen the
+   table. */
 
 .runs {
   padding: 12px 14px;
@@ -39,9 +38,8 @@
   overflow-wrap: anywhere;
 }
 
-/* A commit's short hash and an age are short and are useful only when
-   whole, so they never wrap.  The image and repository columns wrap
-   instead to make room. */
+/* A short commit hash or an age is unreadable when it wraps, so the
+   commit and rolled columns never wrap. */
 .runs-table .runs-whole {
   white-space: nowrap;
   overflow-wrap: normal;
@@ -55,8 +53,8 @@
 
 .runs-table a:hover { text-decoration: underline; }
 
-/* The description from the image's labels, under its row, in the
-   prose face. */
+/* The image's description and documentation link, on a row under the
+   image's row. */
 .runs-about td {
   padding-bottom: 8px;
   font-family: "Source Sans 3", system-ui, sans-serif;

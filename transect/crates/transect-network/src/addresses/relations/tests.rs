@@ -14,7 +14,7 @@ use transect_graph::edges::{Edge, Graph, Kind, Plurals, Provenance};
 use transect_resources::knowledge::edges;
 
 fn player() -> Object {
-    Object::new("widgets.example.com", "Player", Some("shop"), "front-room")
+    Object::new("widgets.example.com", "Player", Some("shop"), "player-1")
 }
 
 fn broker() -> Object {
@@ -22,7 +22,7 @@ fn broker() -> Object {
 }
 
 fn remote() -> Object {
-    Object::new("widgets.example.com", "Remote", Some("shop"), "hall")
+    Object::new("widgets.example.com", "Remote", Some("shop"), "remote-1")
 }
 
 fn receiver() -> Object {
@@ -34,12 +34,14 @@ fn claim() -> Object {
 }
 
 fn idle_pod() -> Object {
-    Object::new("", "Pod", Some("shop"), "front-room-idle")
+    Object::new("", "Pod", Some("shop"), "player-1-idle")
 }
 
-/// A `Player` in shop whose pod is front-room-idle, a `Remote` it
-/// names, a broker in another namespace behind the `Service` broker,
-/// and one machine, alpha.
+/// A `Player` in `shop` that owns the pod `player-1-idle`, a `Remote`
+/// in `shop`, a `Deployment` in `messages` behind the `Service`
+/// `broker`, and the node `alpha`. The `ResourceClaim` `idle` has a
+/// radio and a GPU, and the graph already has the `Player`'s edge to
+/// the radio.
 struct Cluster {
     addresses: Addresses,
     graph: Graph,
@@ -72,14 +74,14 @@ fn cluster() -> Cluster {
             "widgets.example.com",
             "Player",
             Some("shop"),
-            "front-room",
+            "player-1",
             vec![],
         ),
         (
             "widgets.example.com",
             "Remote",
             Some("shop"),
-            "hall",
+            "remote-1",
             vec![],
         ),
         ("apps", "Deployment", Some("messages"), "broker", vec![]),
@@ -87,8 +89,8 @@ fn cluster() -> Cluster {
             "",
             "Pod",
             Some("shop"),
-            "front-room-idle",
-            vec![("widgets.example.com/v1", "Player", "front-room")],
+            "player-1-idle",
+            vec![("widgets.example.com/v1", "Player", "player-1")],
         ),
     ]);
     let known = HashSet::from([
@@ -177,7 +179,7 @@ impl Cluster {
     vec![Endpoint::Outside("api.example.com".into())]
 )]
 #[case::not_one_address(Names::Address, "two words", vec![])]
-#[case::a_watched_object(object(remote()), "hall", vec![Endpoint::Object(remote())])]
+#[case::a_watched_object(object(remote()), "remote-1", vec![Endpoint::Object(remote())])]
 #[case::a_kind_transect_does_not_watch(
     object(receiver()),
     "amp",
@@ -192,7 +194,7 @@ impl Cluster {
     ]
 )]
 #[case::a_value(Names::Value, "tv-1", vec![])]
-fn reaches_what_each_relation_names(
+fn resolves_each_relation_to_its_endpoints(
     cluster: Cluster,
     #[case] names: Names,
     #[case] value: &str,
@@ -203,18 +205,18 @@ fn reaches_what_each_relation_names(
 }
 
 #[rstest]
-fn draws_only_what_the_api_does_not_already_say(cluster: Cluster) {
+fn draws_only_edges_the_graph_and_ownership_lack(cluster: Cluster) {
     let relations = [
         relation(
             Some(Kind::RunsOn),
             "alpha",
             object(Object::new("", "Node", None, "alpha")),
         ),
-        relation(Some(Kind::DependsOn), "front-room-idle", object(idle_pod())),
+        relation(Some(Kind::DependsOn), "player-1-idle", object(idle_pod())),
         relation(Some(Kind::Holds), "idle", object(claim())),
         relation(None, "tv-1", Names::Value),
-        relation(Some(Kind::DependsOn), "hall", object(remote())),
-        relation(Some(Kind::DependsOn), "hall", object(remote())),
+        relation(Some(Kind::DependsOn), "remote-1", object(remote())),
+        relation(Some(Kind::DependsOn), "remote-1", object(remote())),
     ];
     assert_eq!(
         cluster.edges(&relations),

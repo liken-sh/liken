@@ -1,7 +1,7 @@
-//! Top owners as the nodes of the loop graph.  A pod, its `ReplicaSet`,
-//! and its `Deployment` come up together, so they count as one part in a
-//! cold start; the managed-by edges, which run from each owned object
-//! straight to its top owner, fold each object into that owner.
+//! Maps each object to its top owner, because loop detection treats a
+//! pod, its `ReplicaSet`, and its `Deployment` as one node: they come up
+//! together in a cold start. Each `ManagedBy` edge already runs from an
+//! owned object to its top owner, so one lookup folds the object into it.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -9,10 +9,10 @@ use crate::edges::{Endpoint, Graph, Kind};
 
 pub struct Owners<'a> {
     top: HashMap<&'a Endpoint, &'a Endpoint>,
-    /// The namespaces of the objects folded into each top owner, and its
-    /// own.  A cluster-scoped owner, such as a catalog that owns a pod,
-    /// is in the namespaces its objects are in, so a loop through it
-    /// shows on those namespaces.
+    /// The namespaces of the objects folded into each top owner. A
+    /// cluster-scoped owner, such as a catalog that owns a pod, has no
+    /// namespace of its own, so a loop through it is reported on the
+    /// namespaces of the objects it owns.
     namespaces: HashMap<&'a Endpoint, BTreeSet<&'a str>>,
 }
 
@@ -35,8 +35,8 @@ impl<'a> Owners<'a> {
         self.top.get(end).copied().unwrap_or(end)
     }
 
-    /// The namespaces `owner` is in: its own, and those of the objects
-    /// folded into it.
+    /// The namespace of `owner`, if it has one, and the namespaces of the
+    /// objects folded into it.
     pub fn namespaces<'b>(&'b self, owner: &'b Endpoint) -> impl Iterator<Item = &'b str> {
         let folded = self.namespaces.get(owner).into_iter().flatten().copied();
         namespace(owner).into_iter().chain(folded)

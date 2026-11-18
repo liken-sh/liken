@@ -1,6 +1,6 @@
-//! The layer kind knowledge names for a namespace: the layer of the
-//! kinds whose objects are in it.  When its kinds name different
-//! layers, the highest of them wins, and the namespace card names each.
+//! The layer that `KindKnowledge` places a namespace in, from the kinds
+//! of the objects in it. When the kinds give different layers, the
+//! highest layer is used, and the namespace's card lists each one.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
@@ -9,21 +9,22 @@ use super::{Kinds, plural_label};
 use crate::layers::Layers;
 use transect_graph::edges::{Object, Plurals, Provenance};
 
-/// The layers a namespace's kinds name, and the one that places it.
+/// The layers that a namespace's kinds give, and the one it is placed
+/// in.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Named {
     /// The highest layer among them.
     pub layer: String,
-    /// Each kind, as a card prints its plural, with the layer it names,
-    /// highest layer first.
+    /// Each kind's plural label with its layer, highest layer first.
     pub kinds: Vec<(String, String)>,
-    /// The `layer` of the first kind knowledge that names `layer`.
+    /// The `layer` field of the first `KindKnowledge` that gives `layer`.
     pub provenance: Provenance,
 }
 
-/// The layer each namespace's kinds name, by namespace, among `objects`.
-/// `layers` gives the order, top to bottom; the knowledge in `kinds`
-/// names only declared layers.
+/// The layer of each namespace that has an object in `objects` whose
+/// `KindKnowledge` gives a layer, keyed by namespace. `layers` gives the
+/// order, top to bottom, and a layer that it does not declare is
+/// ignored.
 pub fn named<'a>(
     kinds: &Kinds,
     objects: impl IntoIterator<Item = &'a Object>,
@@ -76,7 +77,7 @@ pub fn named<'a>(
 }
 
 impl Named {
-    /// The layer of the namespace, by name, for the map.
+    /// Each namespace's layer name, keyed by namespace, for the map.
     pub fn layers(named: &HashMap<String, Self>) -> HashMap<String, String> {
         let layers = named
             .iter()
@@ -168,7 +169,7 @@ mod tests {
         Some("Its Gadgets and Widgets place it in apps.")
     )]
     #[case::no_layer("{}", "{}", None)]
-    fn names_the_layer_its_kinds_name(
+    fn describes_the_layer_its_kinds_name(
         #[case] widget: &str,
         #[case] gadget: &str,
         #[case] line: Option<&str>,

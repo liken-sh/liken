@@ -1,5 +1,6 @@
-//! The edge graph of one snapshot: every source's edges, those intent
-//! states among them, and the kinds a reader can turn on and off.
+//! Builds the edge graph of one snapshot from every source of edges,
+//! including the edges that intent declares, and lists the edge kinds
+//! that a reader can turn on and off.
 
 use std::collections::{HashMap, HashSet};
 
@@ -15,18 +16,18 @@ use transect_ground::storage;
 use transect_network::addresses::{self, Readers, Stated, StatedReading, Unread};
 use transect_network::entry;
 use transect_network::policy::Allowed;
-use transect_resources::intent::{Listed, Said};
+use transect_resources::intent::{Listed, ObjectIntent};
 
-/// One list field of what intent states about an object.
-type Field = for<'a> fn(&'a Said) -> Option<&'a Listed>;
+/// Picks one list out of the intent written on an object.
+type Field = for<'a> fn(&'a ObjectIntent) -> Option<&'a Listed>;
 
 impl Snapshot {
-    /// Every edge the stores and intent give, and the entries of intent
-    /// that name nothing `transect` can read, by the workload whose card
-    /// shows them.  `workloads` gives each workload's pod labels, which
-    /// a `Service`'s selector is matched against, and its pod specs, whose
-    /// addresses resolve through the selects and routes-to edges to the
-    /// workloads behind them.
+    /// The graph of every edge that the stores and intent give, and the
+    /// intent entries that match nothing `transect` can read, grouped by
+    /// the workload whose card shows them. `workloads` supplies the pod
+    /// labels that a `Service`'s selector matches, and the pod templates
+    /// whose addresses resolve, through the selects and routes-to edges,
+    /// to the workloads behind them.
     pub fn graph(
         &self,
         workloads: &Workloads,
@@ -95,15 +96,14 @@ impl Snapshot {
         graph.add(guessed);
         graph.add(self.outsides.fold(referred));
         graph.add(between);
-        // The policy edges are added last, because they are the most
-        // numerous kind after pods and every query the sources above
-        // make would scan them.
+        // The policy edges are numerous. Adding them last means the
+        // queries that the sources above make do not scan them.
         graph.add(allowed.edges());
         (graph, stated.unread)
     }
 
-    /// The controlled-by edges of the custom resources `by_object` gave
-    /// no controller, attributed by kind.
+    /// The controlled-by edges for custom resources that `by_object` has
+    /// no edge for, found from the kind of the resource.
     fn controlled_by_kind(
         &self,
         pods: &[&Pod],
@@ -146,7 +146,7 @@ impl Snapshot {
     }
 
     /// Each `Deployment`, `StatefulSet`, and `DaemonSet`, with the
-    /// package its labels and annotations name.
+    /// package that its labels and annotations identify.
     fn packaged_workloads(&self) -> Vec<(Object, ownership::Package)> {
         let of = |kind: &str, meta: &k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta| {
             let name = meta.name.as_deref()?;
@@ -168,8 +168,9 @@ impl Snapshot {
         deployments.chain(sets).chain(daemons).collect()
     }
 
-    /// The edges intent's `depends-on` and `authenticates-through` lists
-    /// draw, resolved against `graph` as the configured addresses are.
+    /// The edges from the `depends-on` and `authenticates-through` lists
+    /// of intent, resolved against `graph` the same way as the addresses
+    /// in configuration.
     fn stated(&self, graph: &Graph, workloads: &Workloads) -> Stated {
         let described = self.described();
         let known = self.known_objects();
@@ -181,9 +182,12 @@ impl Snapshot {
         let reading = self.reading(graph, &known, &readers);
         let mut stated = Stated::default();
         let lists = [
-            (Kind::DependsOn, (|said| said.depends_on.as_ref()) as Field),
-            (Kind::AuthenticatesThrough, |said| {
-                said.authenticates_through.as_ref()
+            (
+                Kind::DependsOn,
+                (|intent| intent.depends_on.as_ref()) as Field,
+            ),
+            (Kind::AuthenticatesThrough, |intent| {
+                intent.authenticates_through.as_ref()
             }),
         ];
         for (kind, field) in lists {
@@ -196,15 +200,15 @@ impl Snapshot {
         stated
     }
 
-    /// Every object `transect` watches that an entry or a reference can
-    /// name: each object intent can be written on, and every workload.
+    /// Every object that an intent entry or a reference can point to:
+    /// each object that intent can describe, and every workload.
     pub(super) fn known_objects(&self) -> HashSet<Object> {
         let mut known: HashSet<Object> = self.described().into_iter().map(|(o, _)| o).collect();
         known.extend(self.ownership.all_workloads().cloned());
         known
     }
 
-    /// What entries and references resolve against.
+    /// The context for resolving intent entries and references to objects.
     pub(super) fn reading<'a>(
         &'a self,
         graph: &'a Graph,
@@ -221,9 +225,10 @@ impl Snapshot {
         }
     }
 
-    /// The edge kinds a reader can turn on and off here: every kind
-    /// whose source this cluster has.  A kind with an edge always has
-    /// its source, so these are also every kind with an edge.
+    /// The edge kinds that a reader can turn on and off for this
+    /// cluster. These are all of `TOGGLED`, except `ReconcilesFrom` when
+    /// there is no GitOps source and `Holds` when there is no device
+    /// source.
     pub fn offered(&self) -> Vec<Kind> {
         TOGGLED
             .into_iter()

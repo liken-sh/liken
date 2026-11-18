@@ -1,5 +1,6 @@
-//! A `Role`'s or a `ClusterRole`'s rules as a table, and a binding's
-//! role and subjects.
+//! The sections of an object page for a `Role` or `ClusterRole` (a
+//! table of its rules) and for a `RoleBinding` or `ClusterRoleBinding`
+//! (the role it grants and the subjects it grants it to).
 
 use k8s_openapi::api::rbac::v1::{PolicyRule, RoleRef, Subject};
 use kube::ResourceExt;
@@ -34,7 +35,10 @@ pub fn rules(snapshot: &Snapshot, object: &Object) -> Vec<Section> {
     ]
 }
 
-/// One row per rule: its verbs, API groups, resources, and names.
+/// One row per rule: its verbs, API groups, resources, and resource
+/// names. The core API group shows as "core". An empty list shows as
+/// "none" for groups and resources, and as "any" for names. A rule's
+/// non-resource URLs replace its resources.
 pub fn table(rules: &[PolicyRule]) -> Table {
     let join = |values: &Option<Vec<String>>, all: &str| match values.as_deref() {
         None | Some([]) => all.to_string(),

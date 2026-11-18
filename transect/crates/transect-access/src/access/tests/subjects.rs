@@ -1,12 +1,10 @@
-//! Bindings whose subject or role the API server treats as a special
-//! case, each in a cluster of a few objects.
+//! Tests of bindings that the API server treats specially because of
+//! their subject or their role.
 
 use rstest::rstest;
 
 use super::*;
 
-/// A ServiceAccount, a ClusterRole that may read Secrets, and a Role
-/// that may exec into pods, in namespace `shop`.
 const ROLES: &str = r#"
 kind: ServiceAccount
 metadata: {namespace: shop, name: web}
@@ -74,11 +72,11 @@ fn reads_each_binding_as_the_api_server_does(
 ) {
     let cluster = format!("{ROLES}---\n{bindings}");
     let access = reduce(&cluster, Vec::new(), Vec::new());
-    assert_eq!(said(&access, account, capability), expected);
+    assert_eq!(grant_lines(&access, account, capability), expected);
 }
 
 #[test]
-fn a_service_account_with_no_namespace_in_a_clusterrolebinding_names_no_account() {
+fn a_service_account_with_no_namespace_in_a_clusterrolebinding_adds_no_account() {
     let cluster = format!(
         "{ROLES}---
 kind: ClusterRoleBinding

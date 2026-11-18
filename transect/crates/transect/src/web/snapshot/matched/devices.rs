@@ -1,6 +1,6 @@
-//! The conditions of `DeviceKnowledge` for a driver no `ResourceSlice`
-//! publishes devices of, or that names an attribute none of its
-//! devices has.
+//! The conditions for a `DeviceKnowledge` entry that matches nothing:
+//! a driver that no `ResourceSlice` publishes a device of, or an
+//! attribute that none of the driver's devices has.
 
 use super::super::Snapshot;
 use transect_resources::resources::{Condition, DocId};
@@ -17,9 +17,10 @@ impl Snapshot {
                 .every_listed()
                 .filter(|device| device.driver == known.driver)
                 .collect();
-            let mut say = |message: String| found.push((known.doc, Condition::unmatched(message)));
+            let mut report =
+                |message: String| found.push((known.doc, Condition::unmatched(message)));
             if devices.is_empty() {
-                say(format!(
+                report(format!(
                     "no ResourceSlice publishes a device of the driver {}",
                     known.driver
                 ));
@@ -33,13 +34,14 @@ impl Snapshot {
             };
             let title = known.title.iter().map(|title| ("title".to_string(), title));
             let facts = known.facts.iter().enumerate();
-            let facts = facts.map(|(at, fact)| (format!("facts[{at}]"), &fact.attribute));
+            let facts = facts.map(|(index, fact)| (format!("facts[{index}]"), &fact.attribute));
             let references = known.references.iter().enumerate();
-            let references = references.map(|(at, r)| (format!("references[{at}]"), &r.attribute));
+            let references =
+                references.map(|(index, r)| (format!("references[{index}]"), &r.attribute));
             for (field, attribute) in title.chain(facts).chain(references) {
                 if !has(attribute) {
-                    say(format!(
-                        "{field} names the attribute {attribute}, which no device of the driver has"
+                    report(format!(
+                        "{field} refers to the attribute {attribute}, which no device of the driver has"
                     ));
                 }
             }

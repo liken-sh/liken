@@ -1,6 +1,6 @@
-//! The open namespace's boxes: one per workload, with the small helpers
-//! grouped into one box.  In a namespace of many sidecars and relays,
-//! the group keeps the boxes of the main workloads easy to find.
+//! The workload boxes of the open namespace. Small helper workloads,
+//! such as relays and exporters, share one box, so the main workloads
+//! are easy to find in a namespace that has many helpers.
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
@@ -20,24 +20,22 @@ use transect_observe::health::{Health, Level};
 pub struct WorkloadBox {
     pub title: Title,
     pub line: Line,
-    /// Where a custom resource's controller runs, which starts its line.
+    /// Where a custom resource's controller runs. The box shows it
+    /// before `line`.
     pub managed_by: Option<ManagedBy>,
-    /// The machines its pods run on, by name, each once.  A workload
-    /// with no pod running, such as a CronJob between runs, lists where
-    /// its last pods ran.
+    /// The machines its pods run on. A workload with no running pod,
+    /// such as a CronJob between runs, lists the machines that its
+    /// finished pods ran on.
     pub machines: Vec<String>,
     pub health: Health,
-    /// A CronJob or a Job, which does not run all the time.  Its box has
-    /// a dashed border.
+    /// A built-in CronJob or Job.
     pub scheduled: bool,
-    /// The workload's page.  The box of small helpers, and a bare pod,
-    /// which has no workload page, have no link.
+    /// The workload's page. The helpers' box and a bare pod have no
+    /// link.
     pub href: Option<String>,
 }
 
 impl WorkloadBox {
-    /// The box's classes: a CronJob's or a Job's is dashed, and a
-    /// workload that needs attention gets --warm, as its parcel would.
     pub fn class(&self) -> String {
         let mut class = String::from("workload");
         if self.scheduled {
@@ -58,18 +56,16 @@ pub enum Title {
     Helpers(Vec<String>),
 }
 
-/// The facts a box reads about one workload.
+/// A workload, its pods, and how many of those pods have not finished.
 struct Facts<'a> {
     workload: &'a Object,
     pods: &'a [&'a Pod],
     running: usize,
 }
 
-/// The boxes for `workloads`, the namespace's top owners.  `pods` gives
-/// each workload's pods, `services` the namespace's Services,
-/// `by_workload` each workload's health, and `managers` where each
-/// custom resource's controller runs.  The busiest workloads come
-/// first, then the helpers' box, then the CronJobs and Jobs.
+/// The boxes for `workloads`, the namespace's top owners. Workloads with
+/// the most running pods come first, then the helpers' box, then the
+/// CronJobs and Jobs.
 pub fn boxes(
     workloads: &[&Object],
     pods: &HashMap<Object, Vec<&Pod>>,
@@ -110,8 +106,8 @@ pub fn boxes(
             regular.push((facts.running, one));
         }
     }
-    // The box of helpers is for a namespace that has several, so one
-    // helper alone gets a box like any other workload.
+    // A single helper gets its own box, because a group of one saves no
+    // room.
     let helpers_box = if helpers.len() > 1 {
         Some(group(helpers))
     } else {
@@ -185,8 +181,8 @@ fn line_of(facts: &Facts, objects: &Objects) -> Line {
     }
 }
 
-/// The API server defaults `spec.replicas` to 1 when it is left out.  A
-/// single replica has nothing to spread.
+/// Kubernetes defaults an unset `spec.replicas` to 1. A single replica
+/// has no spread across machines to show.
 fn replicas(replicas: Option<i32>, template: Option<&PodSpec>) -> Line {
     let replicas = replicas.unwrap_or(1);
     let spread = if replicas > 1 {
@@ -201,10 +197,10 @@ fn is_scheduled(workload: &Object) -> bool {
     !ownership::custom(workload) && matches!(workload.kind.as_str(), "CronJob" | "Job")
 }
 
-/// A small helper runs one pod with no volume of its own, and no Service
-/// sends it traffic: a relay, a sidecar service, an exporter.  Custom
-/// kinds are never helpers, since an operator runs each for a reason
-/// of its own.
+/// A helper is a built-in Deployment, StatefulSet, or DaemonSet that
+/// runs one pod, mounts no storage, and that no Service selects. A
+/// custom kind is never a helper, because an operator runs each one for
+/// its own purpose.
 fn is_helper(facts: &Facts, services: &[Arc<Service>]) -> bool {
     let built_in = matches!(
         facts.workload.kind.as_str(),
@@ -223,9 +219,9 @@ fn is_helper(facts: &Facts, services: &[Arc<Service>]) -> bool {
         && !running.iter().any(|pod| selected_by_service(pod, services))
 }
 
-/// Whether `pod` mounts storage of its own: a claim, or an ephemeral
-/// volume that makes one.  Every pod mounts its service account token
-/// and often a ConfigMap or Secret, and those are not storage.
+/// Storage is a PersistentVolumeClaim or an ephemeral volume, which
+/// creates one. A ConfigMap, a Secret, or the service account token
+/// does not count.
 fn has_volume(pod: &Pod) -> bool {
     let volumes = pod.spec.as_ref().and_then(|spec| spec.volumes.as_ref());
     volumes
@@ -234,8 +230,8 @@ fn has_volume(pod: &Pod) -> bool {
         .any(|volume| volume.persistent_volume_claim.is_some() || volume.ephemeral.is_some())
 }
 
-/// Whether a Service in `pod`'s namespace selects it.  A Service with
-/// no selector names its endpoints by hand and selects nothing.
+/// A Service with no selector selects no pods, because its endpoints
+/// are set by hand.
 fn selected_by_service(pod: &Pod, services: &[Arc<Service>]) -> bool {
     let labels = pod.labels();
     services
@@ -265,8 +261,8 @@ fn machines(pods: &[&Pod]) -> Vec<String> {
     machines.into_iter().collect()
 }
 
-/// The helpers' box: their names in order, every machine one runs on,
-/// and the worst of their health.
+/// The helpers' box lists every helper's reasons, so its level is the
+/// worst level of any helper.
 fn group(mut helpers: Vec<(Facts, WorkloadBox)>) -> WorkloadBox {
     helpers.sort_by(|(a, _), (b, _)| a.workload.name.cmp(&b.workload.name));
     let names = helpers

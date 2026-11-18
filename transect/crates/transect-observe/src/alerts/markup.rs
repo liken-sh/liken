@@ -7,18 +7,18 @@
 //! block-level Markdown, such as headings and lists, or images.  An
 //! image's `!` stays as text before the link its brackets make.
 
-/// `text` escaped for HTML, with its inline Markdown drawn.
+/// `text` escaped for HTML, with its inline Markdown rendered.
 pub fn inline(text: &str) -> String {
     let mut html = String::with_capacity(text.len());
     let mut rest = text;
     let mut previous = None;
     while let Some(first) = rest.chars().next() {
-        let (drawn, used) = token(rest, previous).unwrap_or_else(|| {
+        let (rendered, used) = token(rest, previous).unwrap_or_else(|| {
             let mut one = String::new();
             escape_into(&mut one, first);
             (one, first.len_utf8())
         });
-        html.push_str(&drawn);
+        html.push_str(&rendered);
         previous = rest[..used].chars().last();
         rest = &rest[used..];
     }
@@ -43,8 +43,8 @@ fn escape_into(html: &mut String, c: char) {
     }
 }
 
-/// The HTML for the mark at the start of `rest` and how many bytes of
-/// `rest` it used, or `None` when `rest` starts with plain text.
+/// The HTML for the Markdown at the start of `rest` and how many bytes
+/// of `rest` it used, or `None` when `rest` starts with plain text.
 fn token(rest: &str, previous: Option<char>) -> Option<(String, usize)> {
     match rest.chars().next()? {
         '[' => link(rest),
@@ -187,12 +187,12 @@ mod tests {
         "the http protocol, and ahttps://x.test",
         "the http protocol, and ahttps://x.test"
     )]
-    fn draws_inline_markdown(#[case] text: &str, #[case] expected: impl AsRef<str>) {
+    fn renders_inline_markdown(#[case] text: &str, #[case] expected: impl AsRef<str>) {
         assert_eq!(inline(text), expected.as_ref());
     }
 
     #[test]
-    fn escapes_without_drawing() {
+    fn escapes_without_rendering() {
         assert_eq!(escape("<b>*a*</b>"), "&lt;b&gt;*a*&lt;/b&gt;");
     }
 }

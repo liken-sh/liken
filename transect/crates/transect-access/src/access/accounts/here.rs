@@ -1,8 +1,8 @@
-//! The accounts matrix of one namespace has a row for each account that
-//! may do one of the six there.  A row has a full block where the
-//! account may, filled where a binding grants it and outlined where it
-//! follows, and the role or the step that it goes through.  Accounts
-//! with the same marks are grouped together.
+//! The rows of one namespace's accounts matrix: one row for each
+//! account that has any capability in `ALL` in the namespace.  A row
+//! also shows the role that grants a capability, or the step that the
+//! capability follows by.  Rows with the same marks are next to each
+//! other.
 
 use super::super::account::{Account, Where};
 use super::super::{ALL, Access, Capability, Cell, Held};
@@ -11,7 +11,8 @@ use super::words;
 use transect_graph::edges::Object;
 
 /// The rows of the accounts that may act in `namespace`, and,
-/// separately, the rows of Kubernetes' own components and controllers.
+/// separately, the rows of Kubernetes' own components and controllers,
+/// which are the accounts bound only by the default bindings.
 pub fn rows(access: &Access, namespace: &str, look: &Look) -> (Vec<Row>, Vec<Row>) {
     let mut rows: Vec<(Vec<u8>, Row)> = Vec::new();
     let mut controllers: Vec<(Vec<u8>, Row)> = Vec::new();
@@ -41,8 +42,8 @@ pub fn rows(access: &Access, namespace: &str, look: &Look) -> (Vec<Row>, Vec<Row
     (tighten(rows), tighten(controllers))
 }
 
-/// `rows` sorted by their marks and then by name, each marked tight
-/// when the row below has the same marks.
+/// Sorts `rows` by their marks and then by name, and sets `tight` on
+/// each row whose next row has the same marks.
 fn tighten(mut rows: Vec<(Vec<u8>, Row)>) -> Vec<Row> {
     rows.sort_by(|(a, row_a), (b, row_b)| (a, &row_a.name).cmp(&(b, &row_b.name)));
     let keys: Vec<Vec<u8>> = rows.iter().map(|(key, _)| key.clone()).collect();
@@ -55,9 +56,11 @@ fn tighten(mut rows: Vec<(Vec<u8>, Row)>) -> Vec<Row> {
         .collect()
 }
 
-/// The mark of `capability` in `namespace`: filled where a binding
-/// there grants it, outlined where it follows there, with "by name"
-/// beside it when every grant or step limits it to names.
+/// The mark for `capability` in `namespace`, or `None` when the account
+/// does not have it there.  It is filled when a binding grants the
+/// capability in the namespace, and outlined when it only follows from
+/// other capabilities.  It is labeled "by name" when every grant or
+/// step is limited to named objects.
 fn mark(
     access: &Access,
     account: &Account,
@@ -92,9 +95,9 @@ fn mark(
     })
 }
 
-/// The row of `account` in `namespace`: its marks, the first role that
-/// grants it one of them there, and the step of the first capability
-/// that follows.
+/// The row for `account` in `namespace`: its marks, the first role that
+/// grants it a capability there, a count and list of any other such
+/// roles, and the step of the first capability that only follows.
 fn row(
     access: &Access,
     account: &Account,

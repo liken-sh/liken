@@ -1,15 +1,12 @@
-//! An `Ingress` as the entry draws it: the hosts it answers for, the
-//! controller class that serves it, the workload that runs that
-//! controller, as `serving` finds it, and the source of its TLS
-//! certificate.  The certificate comes from a `Secret`, or from the
-//! issuer that kind knowledge's `referencedBy` with role `issues-tls`
-//! finds in the `Ingress`'s annotations.
+//! An `Ingress` as a workload page shows it: its hosts, its class, the
+//! workload that runs the class's ingress controller, and where its TLS
+//! certificate comes from.
 
 use k8s_openapi::api::networking::v1::Ingress;
 use kube::ResourceExt;
 
 use super::serving::{Served, Serving};
-use super::traffic::{self, Answers, Traffic};
+use super::traffic::{self, Traffic, TrafficResults};
 use transect_graph::edges::{Endpoint, Plurals};
 use transect_graph::links::Reference;
 
@@ -20,15 +17,15 @@ const CLASS_ANNOTATION: &str = "kubernetes.io/ingress.class";
 #[derive(Debug, PartialEq)]
 pub struct IngressBox {
     pub name: String,
-    /// Every host its rules name, each once, in the order they name
-    /// them.  A rule with no host answers for any.
+    /// The distinct hosts in its rules, in order of first appearance.
+    /// A rule with no host matches every host and adds none here.
     pub hosts: Vec<String>,
     pub class: Option<String>,
     pub tls: Tls,
     /// The workload that runs its class's controller, when one is found.
     pub controller: Option<Reference>,
-    /// Whether that workload is a guess, because no `IngressController`
-    /// declares the class's controller.
+    /// True when no `IngressController` declares the class's
+    /// controller, so `controller` is a guess.
     pub controller_guessed: bool,
     pub namespace: String,
     /// Each `Service` and port it routes to.
@@ -40,17 +37,20 @@ pub struct IngressBox {
 
 #[derive(Debug, PartialEq)]
 pub enum Tls {
-    /// No TLS section: it serves plain HTTP.
+    /// `spec.tls` is absent or empty, so it serves plain HTTP.
     None,
-    /// A certificate from a `Secret`, however that `Secret` was made.
+    /// `spec.tls` is set and the caller found no issuer, so the
+    /// certificate is only known as a `Secret`.
     Secret,
-    /// A certificate the named issuer issues, linked to its page.
+    /// `spec.tls` is set, and the `Reference` links to the page of the
+    /// certificate's issuer.
     Issuer(Reference),
 }
 
 impl IngressBox {
-    /// The box of `ingress`, whose certificate `issuer` issues when one
-    /// does.
+    /// `issuer` is the issuer of the certificate, when the caller found
+    /// one.  The box has no controller and no traffic until `served_by`
+    /// and `with_traffic` add them.
     pub fn build(ingress: &Ingress, issuer: Option<Reference>) -> Self {
         let spec = ingress.spec.as_ref();
         let rules = spec.and_then(|spec| spec.rules.as_ref());
@@ -89,14 +89,14 @@ impl IngressBox {
         }
     }
 
-    /// The box with its backends' traffic from `answers`.
-    pub fn with_traffic(self, answers: Answers) -> Self {
-        let traffic = traffic::of(&self.namespace, &self.backends, answers);
+    /// Adds the traffic of each backend, read from `results`.
+    pub fn with_traffic(self, results: TrafficResults) -> Self {
+        let traffic = traffic::of(&self.namespace, &self.backends, results);
         Self { traffic, ..self }
     }
 
-    /// The box with the workload that runs its controller, as
-    /// `serving` finds it.
+    /// Adds the workload that runs the class's controller, as `serving`
+    /// finds it.
     pub fn served_by(self, serving: &Serving, plurals: &Plurals) -> Self {
         let (found, guessed) = match serving.of(self.class.as_deref()) {
             Some(Served::Declared(object)) => (Some(object), false),

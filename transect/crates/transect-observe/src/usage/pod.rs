@@ -1,13 +1,11 @@
-//! What each container uses right now, from the results of the
-//! `MetricsSource`'s container queries, and what each pod uses as the
-//! sum of its containers.  transect sums here instead of in a second
-//! query, so a pod's total equals the sum of the containers that its
-//! page lists.
+//! Per-container usage from the results of the `MetricsSource`'s
+//! container queries, and per-pod usage as the sum of a pod's
+//! containers. transect sums the containers itself instead of running a
+//! second query, so a pod's total always equals the sum of the
+//! containers on its page.
 //!
-//! The series have the pod's namespace and name, but different scrape
-//! configs put the `Node`'s name in different labels.  So code that
-//! needs a pod's machine reads it from the `Pod`'s `spec.nodeName`
-//! instead.
+//! The keys hold no `Node` name, because scrape configs differ in which
+//! label of a container's series holds it.
 
 use std::collections::HashMap;
 
@@ -20,9 +18,9 @@ pub type PodKey = (String, String);
 /// A container's pod and its own name.
 pub type ContainerKey = (PodKey, String);
 
-/// Stores each sample under its container, by the `labels` that name
-/// the container.  The function leaves out a sample that lacks one of
-/// the labels, because that sample does not belong to a container.
+/// Maps each container to the value of its sample, using `labels` to
+/// find the container's namespace, pod, and name. A sample that lacks
+/// one of those labels is skipped, because it is not about a container.
 pub fn by_container(samples: Vec<Sample>, labels: &ContainerLabels) -> HashMap<ContainerKey, f64> {
     samples
         .into_iter()
@@ -35,7 +33,7 @@ pub fn by_container(samples: Vec<Sample>, labels: &ContainerLabels) -> HashMap<C
         .collect()
 }
 
-/// Each pod's containers added up.
+/// The sum of each pod's container values.
 pub fn by_pod(containers: &HashMap<ContainerKey, f64>) -> HashMap<PodKey, f64> {
     let mut pods: HashMap<PodKey, f64> = HashMap::new();
     for ((pod, _), value) in containers {
@@ -56,7 +54,7 @@ mod tests {
     }
 
     #[rstest]
-    fn files_samples_by_namespace_pod_and_container() {
+    fn keys_samples_by_namespace_pod_and_container() {
         let labels = crate::usage::fixtures::container_labels();
         let containers = by_container(
             vec![

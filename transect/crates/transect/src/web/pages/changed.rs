@@ -1,4 +1,4 @@
-//! The `/changed` page, and the sidebar's share of the same list.
+//! The `/changed` page.
 
 use k8s_openapi::jiff::Timestamp;
 

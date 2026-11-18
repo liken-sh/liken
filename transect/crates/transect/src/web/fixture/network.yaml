@@ -1,14 +1,8 @@
-# A hub on its machine's network, in a namespace whose `NetworkPolicy`
-# selects every pod.  The policy limits the log shipper's callers and
-# not the hub's, because no `NetworkPolicy` applies to a pod on its
-# machine's network.  The hub holds a host port and a host path, and
-# its `host-access` annotation states why.
-#
-# A ledger store that nothing outside the cluster reaches.  Three
-# policies admit callers to its three ports: the storefront on its SQL
-# port, every pod of the operations namespace on its status port, and
-# the machines' addresses, where the hub calls from, on its metrics
-# port.
+# A hub with `hostNetwork`, in a namespace where a `NetworkPolicy`
+# selects every pod. The policy limits who can call the log shipper but
+# not who can call the hub, because a `NetworkPolicy` does not apply to
+# a pod on its machine's network. The hub also uses a host port and a
+# host path, and its `host-access` annotation gives the reason.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata: {namespace: acme-ops, name: ops-from-ops}
@@ -61,6 +55,10 @@ status:
   conditions: [{type: Ready, status: 'True'}]
   containerStatuses: [{name: main, ready: true, restartCount: 0, image: example.test/device-hub-image:1, imageID: '', state: {running: {}}}]
 ---
+# A database that nothing outside the cluster reaches. Each of its three
+# ports admits different callers: the storefront to the SQL port, every
+# pod of `acme-ops` to the status port, and the machines' addresses,
+# where the hub calls from, to the metrics port.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata: {namespace: acme-ledger, name: ledger-store, uid: ledger-store}

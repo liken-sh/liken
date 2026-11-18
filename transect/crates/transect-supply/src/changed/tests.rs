@@ -186,9 +186,9 @@ const MEMORY: &str =
 const HOT: &str = "{type: MemoryPressure, status: \"True\", reason: KubeletHasInsufficientMemory, lastTransitionTime: \"2026-01-02T09:00:00Z\"}";
 const NOT_READY: &str = "{type: Ready, status: \"Unknown\", reason: NodeStatusUnknown, lastTransitionTime: \"2026-01-02T08:00:00Z\"}";
 
-/// A reboot changes every condition within a minute, so the list shows
-/// the conditions as one entry.  A condition that changed alone has its
-/// own entry.
+/// Conditions that changed within a minute of each other, as after a
+/// reboot, make one entry.  A condition that changed alone has its own
+/// entry.
 #[rstest]
 #[case::a_reboot(vec![READY, DISK, MEMORY], vec![("10:00", "machine-a became ready; DiskPressure and MemoryPressure became False")])]
 #[case::apart(vec![READY, HOT], vec![("09:00", "machine-a: MemoryPressure became True: KubeletHasInsufficientMemory"), ("10:00", "machine-a became ready")])]

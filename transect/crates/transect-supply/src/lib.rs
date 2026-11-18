@@ -1,6 +1,6 @@
-//! Where each running image comes from, and what transect reads about
-//! it: images, forges, GitOps, what changed, and a scanner's findings
-//! and vulnerabilities.
+//! What transect reads about the workloads that run in the cluster:
+//! image labels and registry mirrors, forges, GitOps appliers, recent
+//! changes, findings such as log-pattern matches, and vulnerabilities.
 
 pub mod changed;
 pub mod findings;

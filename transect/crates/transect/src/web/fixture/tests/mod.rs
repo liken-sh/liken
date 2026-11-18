@@ -1,7 +1,6 @@
-//! Tests of each domain's reading of the fixture cluster.  The fixture
-//! builds a `Snapshot`, so it reads every domain, and these tests are
-//! in the binary crate beside it, because the tests of a lower crate
-//! cannot use the fixture.
+//! Tests that read each domain from the fixture cluster. They are in
+//! this crate because the fixture builds a `Snapshot`, and the domain
+//! crates that this crate depends on cannot depend on it.
 
 mod gitops;
 mod vulnerabilities;

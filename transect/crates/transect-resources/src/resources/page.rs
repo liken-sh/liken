@@ -1,6 +1,7 @@
-//! The `/resources` page: each file under `--resources`, each document
-//! in it by kind and name, and its conditions, with those the live
-//! cluster gives added to the ones loading gave.
+//! The `/resources` page.  It lists each file under `--resources`, the
+//! documents in it by kind and name, and each document's conditions:
+//! the condition from loading it, and the conditions from comparing it
+//! to the live cluster.
 
 use askama::Template;
 
@@ -29,7 +30,9 @@ pub struct DocumentRow {
 }
 
 impl ResourcesPage {
-    /// The page for `loaded`, with each of `live` added to its document.
+    /// The page for `loaded`, with each condition in `live` added to the
+    /// document at its `DocId`.  A condition whose `DocId` matches no
+    /// document is dropped.
     pub fn build(loaded: &Directory, live: Vec<(DocId, Condition)>) -> Self {
         let mut files: Vec<FileRow> = loaded
             .files
@@ -65,7 +68,8 @@ impl ResourcesPage {
         "/events/resources"
     }
 
-    /// One line on what the directory holds, or why there is none.
+    /// One line that counts the documents and files, or says that
+    /// `transect` was started without a directory.
     pub fn summary(&self) -> String {
         let Some(dir) = &self.dir else {
             return "transect was started with no --resources directory.".into();

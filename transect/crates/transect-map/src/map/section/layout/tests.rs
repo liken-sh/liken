@@ -31,7 +31,7 @@ fn beside(count: usize, left: usize, right: usize) -> Shape {
     }
 }
 
-/// Whether any two boxes of `layout` overlap, edges included.
+/// Whether any two boxes of `layout` overlap or touch.
 fn overlapping(layout: &Layout) -> bool {
     let all = layout.all();
     let pairs = all
@@ -149,7 +149,10 @@ fn a_fan_keeps_clear_of_a_side_column_that_holds_a_box(
     let found = layout(&[shape]);
     let tier = &found.rows[0].boxes[0];
     let ends = (tier[0].x, tier[tier.len() - 1].right());
-    assert!(ends.0 >= left && ends.1 <= right, "{ends:?}");
+    assert!(
+        ends.0 >= left && ends.1 <= right,
+        "the fan spans {ends:?}, want within {left}..{right}"
+    );
     assert_eq!(ends.0, left);
     assert!(!overlapping(&found));
 }

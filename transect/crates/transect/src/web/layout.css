@@ -1,6 +1,6 @@
 /*
- * The page frame every elevation shares: type, the masthead, and the
- * row that holds the map beside a sidebar.  Colors come from liken's
+ * The frame that every page shares: type, the masthead, and the row
+ * that holds the map beside a sidebar.  Colors come from liken's
  * tokens in `/static/brand/liken.css`.
  */
 
@@ -36,8 +36,8 @@
   }
 }
 
-/* Every page keeps the scrollbar's gutter, so a page that scrolls and
-   one that does not put the sidebar at the same x. */
+/* Every page reserves the scrollbar's gutter, so the sidebar is at the
+   same horizontal position whether or not the page scrolls. */
 html { scrollbar-gutter: stable; }
 
 body {
@@ -52,21 +52,20 @@ body {
 
 a { color: var(--link); }
 
-/* One style for a linked name on every page: the link color with no
-   underline, and the underline on hover, so a board of names stays
-   calm and a reader still sees where a click goes.  A name with no
-   page keeps the ink around it. */
+/* A linked name has the link color and an underline only on hover, so
+   a board full of names does not look busy. */
 .object-link { text-decoration: none; }
 .object-link:hover { text-decoration: underline; }
-/* A name such as `namespace/name` breaks after its slash, where the
-   macro puts a <wbr>: each part wraps as a whole, and breaks inside
-   only when it is wider than the line.  An inline block takes no
-   underline from its link, so it draws its own. */
+/* A name such as `namespace/name` wraps at the <wbr> after its slash,
+   and breaks inside a part only when that part is wider than the line.
+   An inline block does not inherit its link's underline, so it sets
+   its own. */
 .name-part { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }
 .object-link:hover .name-part { text-decoration: underline; }
 
-/* The masthead is one row of 60px: the wordmark, the crumb, and the
-   site's navigation.  The crumb is cut short before the row wraps. */
+/* The masthead holds the wordmark, the breadcrumb, and the site's
+   navigation. It is at least 60px tall, and wraps onto more rows when
+   its items do not fit. */
 :root { --masthead-height: 60px; }
 
 .masthead {
@@ -98,8 +97,8 @@ a { color: var(--link); }
    while the image loads. */
 .mark { flex: none; }
 
-/* The crumb stays on one line, and its last name is cut short before
-   the crumb wraps. */
+/* The breadcrumb stays on one line. When it is wider than the
+   masthead, its last name ends in an ellipsis. */
 .elevation {
   min-width: 0;
   display: flex;
@@ -135,10 +134,9 @@ a { color: var(--link); }
 /* The link to the lens the page is in. */
 .masthead-current { color: var(--ink); }
 
-/* The edge kinds filter the page's picture, so they are in its main
-   column, small and to the right, directly above what they filter.  A
-   reader turns them now and then and reads the picture all the time.
-   A kind turned off goes faint. */
+/* The edge-kind checkboxes filter the page's drawing, so they are in
+   its main column, small and right-aligned, directly above it.  A kind
+   that is turned off is drawn faint. */
 .edge-menu {
   position: relative;
   margin-bottom: -6px;
@@ -147,8 +145,8 @@ a { color: var(--link); }
   color: var(--ink-muted);
 }
 
-/* On the cluster and namespace maps the bands follow, with no gap of
-   their own, so the row keeps its distance from them. */
+/* On the cluster and namespace maps the bands below the menu have no
+   top margin, so the menu sets the gap. */
 .cluster > .edge-menu { margin-bottom: 10px; }
 
 .edge-kinds {
@@ -171,16 +169,15 @@ a { color: var(--link); }
   color: var(--ink-faint);
 }
 
-/* Wide, every kind fits on one line above the picture, so the menu's
-   control hides and its kinds show whether or not it is open. */
+/* On a wide window every kind fits on one line, so the menu's toggle
+   is hidden and the kinds show whether or not the menu is open. */
 @media (min-width: 1261px) {
   .edge-menu > summary { display: none; }
   .edge-menu::details-content { content-visibility: visible; }
 }
 
-/* Narrow, the kinds would wrap onto several lines, so they fold behind
-   the "Edges" control at the right and open as a list below it, over
-   the picture. */
+/* On a narrow window the kinds would wrap onto several lines, so they
+   fold behind the "Edges" toggle and open as a list over the drawing. */
 @media (max-width: 1260px) {
   .edge-label { display: none; }
 
@@ -219,8 +216,9 @@ a { color: var(--link); }
 
 .edge-kind-off { color: var(--ink-faint); }
 
-/* What each kind means, and what the kinds change on a page that draws
-   no lines, show only in the folded list; inline, they are titles. */
+/* The meaning of each kind, and what the kinds change on a page that
+   draws no lines, show only in the folded list.  On a wide window they
+   are tooltips. */
 .edge-affects,
 .edge-kind-meaning { display: none; }
 
@@ -249,14 +247,14 @@ a { color: var(--link); }
   font-weight: 600;
 }
 
-/* A crumb that names an object, such as a namespace, is in the map's
-   monospace, as the object's parcel is. */
+/* A breadcrumb entry that names an object, such as a namespace, uses
+   the map's monospace font, like the object's box. */
 .elevation-name { font-family: var(--mono); }
 
-/* The page holds one view, the block a push replaces.  In the view the
-   map takes the row's free width, and a sidebar placed after it keeps
-   its own fixed width.  Below 1000px the map needs the whole width, so
-   the view stacks the sidebar under it. */
+/* The page holds one view, the block that a pushed update replaces.
+   The map takes the free width, and the sidebar after it keeps its own
+   width.  Below 1000px the map needs the whole width, so the sidebar
+   moves under it. */
 .page {
   flex: 1;
   display: flex;
@@ -274,30 +272,25 @@ a { color: var(--link); }
   min-width: 0;
 }
 
-/* Stacked, the map pads its right side as its left, because no sidebar
-   is beside it to pad the gap. */
+/* With the sidebar below, the map pads its right side like its left. */
 @media (max-width: 1000px) {
   .view { flex-direction: column; }
   .view > main { padding-right: 32px; }
 }
 
-/* The sidebar holds the card and flows with the page: it has no scroll
-   box of its own, so the window's scrollbar is the only one, and a card
-   taller than the window is read by scrolling the page.  Its words wrap
-   at any character, so a long address never widens it or scrolls it
-   sideways. */
+/* The sidebar holds the card and has no scroll box of its own, so a
+   card taller than the window scrolls with the page.  Its words wrap at
+   any character, so a long address does not widen it. */
 .view > .sidebar { align-self: flex-start; }
 .sidebar { overflow-wrap: anywhere; }
 
-/* Every table keeps its header row in view while its rows scroll, and
-   a matrix its row of machines.  The masthead scrolls away, so a header
-   sticks at the top of the window.  No table scrolls in a box of its
-   own: a box that scrolls is where a header would stick, and its
-   bottom edge and scrollbar would hide below the window.  A table fits
-   its column by wrapping its names, and a table too wide for the
-   column beside the card takes the page's width (`.view-wide`).  A
-   header is painted in its box's color, which each box sets in
-   `--table-ground`, so rows pass under it instead of showing through. */
+/* A table's header row sticks to the top of the window while its rows
+   scroll.  No table scrolls inside a box of its own, because the header
+   would then stick inside that box, and the box's scrollbar could be
+   below the window.  A table too wide for the column beside the card
+   uses `.view-wide` to take the page's width.  Each box sets its
+   background color in `--table-ground`, and the header fills with it,
+   so rows that scroll under the header do not show through. */
 :root { --table-ground: var(--page); }
 
 .card,
@@ -314,16 +307,14 @@ th,
   background: var(--table-ground);
 }
 
-/* A row's own heading, and a heading over a run of rows, scroll with
-   their rows: only the header row stays. */
+/* A heading inside the body scrolls with its rows. */
 tbody th {
   position: static;
   background: none;
 }
 
-/* A page whose table or drawing needs more than the column beside the
-   card: below 1400px the card drops below it, and the page takes the
-   window's width. */
+/* For a page whose table or drawing is wider than the column beside the
+   card, the card moves below it under 1400px. */
 @media (max-width: 1400px) {
   .view-wide { flex-direction: column; }
   .view-wide > main { padding-right: 32px; }
@@ -331,8 +322,8 @@ tbody th {
 }
 
 /* A page of eight columns, such as a namespace's ports matrix, needs
-   the column beside the card to be about 1200px, so its card drops
-   below under 1600px. */
+   about 1200px beside the card, so the card moves below it under
+   1600px. */
 @media (max-width: 1600px) {
   .view-wider { flex-direction: column; }
   .view-wider > main { padding-right: 32px; }

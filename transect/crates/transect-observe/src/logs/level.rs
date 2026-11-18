@@ -1,10 +1,12 @@
-//! Whether a log line looks like an error or a warning.  The rule is
-//! deliberately small, and this list is all of it:
+//! Classifies a log line as an error, a warning, or plain.  The rules
+//! are short so that a person can predict the result, and the first
+//! rule that matches decides:
 //!
 //! 1. A level field, `level`, `lvl`, or `severity`, written as
-//!    `level=error` or `"level":"error"`, whose value starts with
-//!    `err`, `fatal`, `panic`, or `crit` is an error, and one that
-//!    starts with `warn` is a warning, in any case.
+//!    `level=error` or `"level":"error"`, decides on its own.  A value
+//!    that starts with `err`, `fatal`, `panic`, or `crit` is an error,
+//!    one that starts with `warn` is a warning, in any case, and any
+//!    other value is plain, so `level=info msg="error budget"` is plain.
 //! 2. A panic, Rust's `panicked at` anywhere in the line or Go's
 //!    `panic:` at its start, is an error.
 //! 3. A klog header, `E1108` or `W1108` with the month and day, at the
@@ -14,10 +16,11 @@
 //!    warning.  Lowercase words do not count, because an ordinary line
 //!    such as "retrying after error" is not an error.
 //!
-//! When transect reads a line from a log store, and the line's level
-//! field holds a value that the `LogSource`'s `levels` name, the line
-//! gets that level instead, because the store read that value from the
-//! line's own structure or from the runtime that wrote the line.
+//! When a line read from a log store has a level field that starts with
+//! a value in one of the `LogSource`'s `levels` lists, that list sets
+//! the level instead.  The store took the value from the line's own
+//! structure or from the runtime that wrote the line, so it is more
+//! reliable than these rules.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Level {
@@ -38,8 +41,9 @@ pub fn level(line: &str) -> Level {
         .unwrap_or_else(|| words(line))
 }
 
-/// The level that the value of the first level field names, matched by
-/// the start of the value.
+/// The level that the first level field's value starts with, or
+/// `Plain` for any other value.  `None` when the line has no level
+/// field.
 fn field(line: &str) -> Option<Level> {
     let lower = line.to_ascii_lowercase();
     for name in FIELDS {

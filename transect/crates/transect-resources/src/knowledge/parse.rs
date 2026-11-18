@@ -1,7 +1,6 @@
-//! Reading one `KindKnowledge` resource out of its YAML document, and
-//! the checks that need nothing but the document: a name of the form
-//! `<plural>.<group>`, edge kinds from `transect`'s vocabulary, and a
-//! `disruptions` value `transect` reads.
+//! Parses one `KindKnowledge` document, and runs the checks that need
+//! only that document: the form of the name, and the values of `edge`,
+//! `role`, and `disruptions`.
 
 use serde::Deserialize;
 
@@ -10,7 +9,7 @@ use crate::resources::DocId;
 use transect_graph::edges::Kind;
 use transect_graph::untrusted::capped;
 
-/// The longest a summary runs on a card, in characters.
+/// A card shows at most this many characters of a summary.
 const SUMMARY_CHARS: usize = 300;
 
 #[derive(Deserialize)]
@@ -59,7 +58,8 @@ struct Spec {
 #[serde(deny_unknown_fields)]
 struct Healthy {
     condition: String,
-    /// Reasons a `False` gives when the object is at rest, not broken.
+    /// Reasons that, on a `False` condition, mean the object is at rest
+    /// rather than broken, so the map draws it gray.
     #[serde(default)]
     calm: Vec<String>,
 }
@@ -70,7 +70,8 @@ struct Controller {
     image: String,
 }
 
-/// One annotation that names objects of the kind, as written.
+/// One `referencedBy` entry: an annotation on objects of another kind
+/// whose value is the name of an object of this kind.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Referrer {
@@ -81,7 +82,7 @@ struct Referrer {
     role: Option<String>,
 }
 
-/// One reference as written.
+/// One `references` entry, as written in the document.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Written {
@@ -92,21 +93,21 @@ struct Written {
     address: bool,
     edge: Option<String>,
     label: Option<String>,
-    /// The far object's field that holds this field's value.
+    /// The field of the referenced object that must equal this field's
+    /// value.
     #[serde(rename = "match")]
     matched: Option<String>,
-    /// Whether `match` may join a far object in another namespace.
+    /// Whether `match` may match an object in another namespace.
     #[serde(default, rename = "acrossNamespaces")]
     across_namespaces: bool,
     role: Option<String>,
 }
 
-/// The kind knowledge `value` declares, or why it does not validate.
 pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<KindKnowledge, String> {
     let document: Document = serde_yaml::from_value(value).map_err(|error| error.to_string())?;
     let name = document.metadata.name;
     let (plural, group) = split_name(&name).ok_or_else(|| {
-        format!("the name {name:?} is not the custom resource definition's, <plural>.<group>")
+        format!("the name {name:?} is not <plural>.<group>, the form of a custom resource definition's name")
     })?;
     let spec = document.spec;
     let references = spec
@@ -172,10 +173,11 @@ pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<KindKnowledge, Stri
     })
 }
 
-/// The plural and the group of a custom resource definition's name,
-/// such as `caches` and `cache.example.io` of `caches.cache.example.io`.
-/// A group has a dot in it, so a name with one dot is a core kind's or
-/// a typo, and either way names no custom kind.
+/// Splits a custom resource definition's name, such as
+/// `caches.cache.example.io`, into its plural and its group. The API
+/// server requires the group of a custom resource definition to contain
+/// a dot, so a name with only one dot is a built-in kind or a typo, and
+/// returns `None`.
 fn split_name(name: &str) -> Option<(&str, &str)> {
     let (plural, group) = name.split_once('.')?;
     let lower = |part: &str| {
@@ -189,7 +191,7 @@ fn split_name(name: &str) -> Option<(&str, &str)> {
 fn referrer(written: Referrer) -> Result<ReferencedBy, String> {
     if !written.name.contains("{name}") {
         return Err(format!(
-            "name {:?} has no {{name}}, so it would name every object of the kind alike",
+            "name {:?} has no {{name}}, so it would match every object of the kind",
             written.name
         ));
     }
@@ -203,7 +205,6 @@ fn referrer(written: Referrer) -> Result<ReferencedBy, String> {
     })
 }
 
-/// The role `role` names, or why `transect` cannot read it.
 fn role(role: Option<&str>) -> Result<Option<Role>, String> {
     match role {
         None => Ok(None),
@@ -216,17 +217,19 @@ fn role(role: Option<&str>) -> Result<Option<Role>, String> {
 
 fn reference(written: Written) -> Result<Reference, String> {
     if written.matched.is_some() && written.kind.is_none() {
-        return Err("match names a field of the far object, so it needs a kind".into());
+        return Err("match reads a field of the referenced object, so kind is required".into());
     }
     if written.across_namespaces && written.matched.is_none() {
-        return Err("acrossNamespaces widens a match, so it needs match".into());
+        return Err("acrossNamespaces applies to match, so match is required".into());
     }
     let role = role(written.role.as_deref())?;
     if role.is_some() && written.kind.is_none() {
-        return Err("role describes what an object does, so it needs a kind".into());
+        return Err("role applies to a referenced object, so kind is required".into());
     }
     let target = match (written.kind, written.address) {
-        (Some(_), true) => return Err("names both a kind and an address".into()),
+        (Some(_), true) => {
+            return Err("kind and address are both set, and a reference has one target".into());
+        }
         (Some(kind), false) => Target::Object {
             kind,
             group: written.group,
@@ -253,9 +256,10 @@ fn reference(written: Written) -> Result<Reference, String> {
     })
 }
 
-/// The edge kind a reference's `edge` names.  The vocabulary is fixed,
-/// since loops, the cascade, and the edge row read edge kinds; a verb an
-/// operator invents belongs in `label`.
+/// The edge `Kind` for the text of a reference's `edge`. The kinds are
+/// a fixed set because loop detection, the loss cascade, and the map's
+/// edge row match on them. A reference that needs another verb writes
+/// it in `label`.
 pub fn edge_kind(edge: &str) -> Option<Kind> {
     Some(match edge {
         "runs on" => Kind::RunsOn,
@@ -419,15 +423,15 @@ mod tests {
     )]
     #[case::a_kind_and_an_address(
         "{references: [{path: spec.a, kind: Service, address: true}]}",
-        "references[0]: names both"
+        "references[0]: kind and address are both set"
     )]
     #[case::a_match_with_no_kind(
         "{references: [{path: status.radio, match: status.address}]}",
-        "references[0]: match names a field of the far object, so it needs a kind"
+        "references[0]: match reads a field of the referenced object"
     )]
     #[case::a_role_with_no_kind(
         "{references: [{path: spec.issuer, role: issues-tls}]}",
-        "references[0]: role describes what an object does, so it needs a kind"
+        "references[0]: role applies to a referenced object"
     )]
     #[case::an_unknown_field("{healthy: {condition: Ready}, colour: blue}", "unknown field")]
     #[case::other_disruptions("{disruptions: never}", "transect reads only \"operator\"")]

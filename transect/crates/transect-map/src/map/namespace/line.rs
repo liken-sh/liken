@@ -1,7 +1,7 @@
-//! The line under each workload's name on the namespace page gives how
-//! many pods the workload asks for and how it spreads them, or how its
-//! last run went.  This file reads the facts, and `sentence.rs` writes
-//! the words.
+//! The line under each workload's name on the namespace page: how many
+//! pods the workload asks for and how it spreads them, or how its last
+//! run went. This file reads the facts, and `sentence.rs` writes the
+//! words.
 
 use k8s_openapi::api::batch::v1::CronJob;
 use k8s_openapi::api::core::v1::Pod;
@@ -11,17 +11,19 @@ pub use transect_ground::guards::Spread;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Line {
-    /// A Deployment or StatefulSet: the replicas it asks for, and how
-    /// its pod template spreads them across machines, if it does.
+    /// A Deployment or StatefulSet: its replicas, and how its pod
+    /// template spreads them across machines, if it does.
     Replicas {
         replicas: i32,
         spread: Option<Spread>,
     },
-    /// A DaemonSet: how many machines it runs a pod on.
+    /// A DaemonSet: `status.desiredNumberScheduled`, the number of
+    /// machines it should run a pod on.
     OnMachines(i32),
     LastRun(LastRun),
     Job(JobState),
-    /// Any other kind, such as a custom one: how many pods it runs.
+    /// Any other kind, such as a custom one: how many of its pods have
+    /// not finished.
     Pods(usize),
     /// The box that groups small helpers.
     Helpers,
@@ -37,21 +39,21 @@ pub enum LastRun {
     Suspended,
 }
 
-/// The state of a Job, read from its pods, because transect watches a
-/// Job only for its owner references.
+/// The state of a Job. `transect` stores only the metadata of each Job,
+/// so it reads the state from the Job's pods.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JobState {
     Running,
     Succeeded,
     Failed,
-    /// Its pods are gone, so nothing is left to show how it went.
+    /// Its pods are gone, so nothing shows how it went.
     NoPods,
 }
 
-/// How `cron_job`'s last run went.  The controller sets
-/// `lastScheduleTime` when it starts a run and `lastSuccessfulTime` when
-/// one completes, so with no run active, a last success older than the
-/// last schedule means the last run failed.
+/// The CronJob controller sets `lastScheduleTime` when it starts a run
+/// and `lastSuccessfulTime` when a run succeeds. So when no run is
+/// active, a `lastSuccessfulTime` that is missing or older than
+/// `lastScheduleTime` means the last run failed.
 pub fn last_run(cron_job: &CronJob) -> LastRun {
     if cron_job.spec.suspend == Some(true) {
         return LastRun::Suspended;
@@ -75,9 +77,10 @@ pub fn last_run(cron_job: &CronJob) -> LastRun {
     }
 }
 
-/// The state of a Job from `pods`: running while any pod runs, then
-/// succeeded when any pod succeeded, because a Job that retries keeps
-/// the pods that failed before its last good one.
+/// A Job is running while any pod has not finished, and otherwise
+/// succeeded when any pod succeeded. A Job that retries keeps the pods
+/// that failed before the one that succeeded, so one success outweighs
+/// those failures.
 pub fn job_state(pods: &[&Pod]) -> JobState {
     let phase = |pod: &&Pod| pod.status.as_ref().and_then(|s| s.phase.clone());
     if pods.iter().any(|pod| !finished(pod)) {

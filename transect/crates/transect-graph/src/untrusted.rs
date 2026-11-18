@@ -1,20 +1,18 @@
-//! Text that someone stored in the cluster or an image, which a card
-//! shows: an image's labels, an annotation, an `Intent` resource.  Anyone
-//! who can write the object writes the text, so each value is cut to a
-//! length a card can hold and stripped of control characters and of
-//! the marks that change the direction text runs in, and a URL is kept
-//! as a link only when it is plain `http` or `https`.  The templates
-//! escape every value as well.
+//! Cleaning of text that a card shows from the cluster or an image, such
+//! as an image label, an annotation, or an `Intent` resource. Anyone who
+//! can write the object controls the text, so each value is shortened
+//! to fit a card, control characters and text direction marks are
+//! removed, and a URL becomes a link only when it is plain `http` or
+//! `https`. The templates also escape every value.
 
 pub mod markdown;
 
-/// The longest a link may be, in characters.
+/// The longest URL, in characters, that becomes a link.
 const LINK_CHARS: usize = 300;
 
-/// Whether a page may show `c` from untrusted text: not a control
-/// character, and not a mark that changes the direction text runs in.
-/// A right-to-left override makes the text after it read backwards,
-/// so a name or a log line could show as something else.
+/// Whether a page may show `c` from untrusted text. Direction marks are
+/// dropped because a right-to-left override reverses the text after it,
+/// which can make a name or a log line look like something else.
 pub fn shown(c: char) -> bool {
     let bidi = matches!(
         c,
@@ -23,8 +21,9 @@ pub fn shown(c: char) -> bool {
     !c.is_control() && !bidi
 }
 
-/// `text` on one line, without control characters or direction marks,
-/// cut to `chars` with an ellipsis, or none when nothing is left.
+/// `text` as one line with whitespace collapsed and control characters
+/// and direction marks removed, cut to `chars` characters with a final
+/// ellipsis. It returns none when nothing is left.
 pub fn capped(text: &str, chars: usize) -> Option<String> {
     let line: String = text
         .chars()
@@ -42,8 +41,10 @@ pub fn capped(text: &str, chars: usize) -> Option<String> {
     }
 }
 
-/// `text` as a link a page may hold: `http` or `https`, with nothing a
-/// browser would read as the end of the URL.
+/// `text`, trimmed, when it is an `http` or `https` URL of at most
+/// `LINK_CHARS` printable ASCII characters with none of `"`, `'`, `<`,
+/// `>`, `\`, or a backtick, which could end the attribute or tag around
+/// it.
 pub fn link(text: &str) -> Option<String> {
     let text = text.trim();
     let scheme = text.starts_with("https://") || text.starts_with("http://");
@@ -68,7 +69,7 @@ mod tests {
     #[case::an_isolate("a\u{2066}b\u{2069}c", Some("abc"))]
     #[case::direction_marks("a\u{200E}b\u{200F}c\u{061C}d", Some("abcd"))]
     #[case::right_to_left_text("שלום", Some("שלום"))]
-    fn keeps_text_to_one_plain_line(#[case] text: &str, #[case] expected: Option<&str>) {
+    fn collapses_text_to_one_plain_line(#[case] text: &str, #[case] expected: Option<&str>) {
         assert_eq!(capped(text, 200).as_deref(), expected);
     }
 
@@ -85,7 +86,10 @@ mod tests {
     #[case::a_quote("https://docs.example.com/\"onmouseover=x", None)]
     #[case::a_space("https://docs.example.com/a b", None)]
     #[case::text("see the README", None)]
-    fn keeps_a_link_only_when_it_is_plain_http(#[case] text: &str, #[case] expected: Option<&str>) {
+    fn accepts_a_link_only_when_it_is_plain_http(
+        #[case] text: &str,
+        #[case] expected: Option<&str>,
+    ) {
         assert_eq!(link(text).as_deref(), expected);
     }
 }

@@ -1,4 +1,5 @@
-//! What each store keeps of the objects it holds, and what it drops.
+//! Tests which fields each store keeps of its objects and which fields
+//! it drops.
 
 use rstest::rstest;
 
@@ -78,8 +79,8 @@ fn keeps_what_a_pod_is_read_for() {
     );
 }
 
-/// A running pod, with `meta` and `status` added to its metadata and
-/// its status.
+/// A running pod, trimmed by `pod`, with the YAML fragments `meta` and
+/// `status` appended to its metadata and its status.
 fn running(meta: &str, status: &str) -> Pod {
     let text = format!(
         "metadata: {{name: job-1{meta}}}\nspec: {SPEC}\nstatus: {{phase: Running{status}}}"
@@ -95,12 +96,9 @@ fn running(meta: &str, status: &str) -> Pod {
 #[case::a_grace_period(", deletionGracePeriodSeconds: 30", "")]
 #[case::an_observed_generation("", ", observedGeneration: 2")]
 #[case::its_machines_address("", ", hostIP: 10.0.0.1, hostIPs: [{ip: 10.0.0.1}]")]
-fn a_pod_that_differs_only_in_what_nothing_reads_reads_the_same(
-    #[case] meta: &str,
-    #[case] status: &str,
-) {
-    let (held, event) = (running("", ""), running(meta, status));
-    assert!(crate::cluster::change::same(&held, &event, &[]));
+fn a_pod_that_differs_only_in_unread_fields_is_the_same(#[case] meta: &str, #[case] status: &str) {
+    let (stored, event) = (running("", ""), running(meta, status));
+    assert!(crate::cluster::change::same(&stored, &event, &[]));
 }
 
 #[rstest]

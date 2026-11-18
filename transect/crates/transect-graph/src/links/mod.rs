@@ -1,8 +1,8 @@
-//! Every object's page, and the one way a page names an object: its
-//! name, linked to its page when it has one, and plain text when it has
-//! none, so no name links to a page that does not exist.  `object_link`
-//! in `link.html` draws every such name, and `map::pages::Pages`
-//! decides which objects have a page.
+//! The URL of every object's page, and how a page writes an object's
+//! name: as a link to the object's page when it has one, and as plain
+//! text when it has none, so no link leads to a page that does not
+//! exist.  `object_link` in `link.html` draws every such name, and
+//! `map::pages::Pages` decides which objects have a page.
 
 use std::fmt::Write;
 
@@ -17,10 +17,11 @@ pub use name::{kind_and_name_in, name_in};
 pub use reference::{Named, Reference};
 pub use sentence::{Linker, Part, Piece, listed, text};
 
-/// The path of `object`'s page at the URL every kind but a pod and a
-/// `Node` shares, or none for a kind with no such URL: under its
-/// namespace, or under `/cluster` for a kind outside any.  This is only
-/// the URL's shape; `Pages` decides whether a page exists there.
+/// The path of `object`'s page, under its namespace or under `/cluster`
+/// when the object has no namespace.  A `Namespace`, a `Node`, and a
+/// `PersistentVolume` have their own paths, and a kind that
+/// `kinds::url_of` cannot name returns none.  It does not check that a
+/// page exists at the path, which `Pages` decides.
 pub fn page(object: &Object, plurals: &Plurals) -> Option<String> {
     match (object.group.as_str(), object.kind.as_str()) {
         ("", "Namespace") => return Some(namespace(&object.name)),
@@ -36,8 +37,8 @@ pub fn page(object: &Object, plurals: &Plurals) -> Option<String> {
     })
 }
 
-/// The page a link to `object` opens: a pod's own page, or the path any
-/// other kind shares.
+/// The path that a link to `object` opens: `pod`'s path for a pod, and
+/// `page`'s path for every other kind.
 pub fn link(object: &Object, plurals: &Plurals) -> Option<String> {
     match (object.group.as_str(), object.kind.as_str()) {
         ("", "Pod") => Some(pod(object.namespace.as_deref()?, &object.name)),
@@ -45,12 +46,12 @@ pub fn link(object: &Object, plurals: &Plurals) -> Option<String> {
     }
 }
 
-/// The access page of a group that no object represents.
+/// The path of the access page of a group that no object represents.
 pub fn group(name: &str) -> String {
     format!("/access/accounts/groups/{}", segment(name))
 }
 
-/// The access page of a user that no object represents.
+/// The path of the access page of a user that no object represents.
 pub fn user(name: &str) -> String {
     format!("/access/accounts/users/{}", segment(name))
 }
@@ -59,14 +60,14 @@ pub fn namespace(name: &str) -> String {
     format!("/namespaces/{}", segment(name))
 }
 
-/// The page of every object of the custom kind `plural` of `group`,
-/// across namespaces.
+/// The path of the page that lists the objects of the custom kind
+/// `plural` of `group` in every namespace.
 pub fn kind(group: &str, plural: &str) -> String {
     format!("/kinds/{}", kinds::url_name(group, plural))
 }
 
-/// The list of one kind's objects in `namespace`, by the kind's name
-/// in a URL, such as `widgets.example.io`.
+/// The path of the list of one kind's objects in `namespace`.
+/// `resource` is the kind's name in a URL, such as `widgets.example.io`.
 pub fn objects(namespace: &str, resource: &str) -> String {
     format!("/namespaces/{}/{resource}", segment(namespace))
 }
@@ -79,7 +80,7 @@ pub fn machine(name: &str) -> String {
     format!("/machines/{}", segment(name))
 }
 
-/// A claim's page, which shows the volume bound to it.
+/// The path of a claim's page, which shows the volume bound to it.
 pub fn claim(namespace: &str, name: &str) -> String {
     format!(
         "/namespaces/{}/persistentvolumeclaims/{}",
@@ -88,8 +89,8 @@ pub fn claim(namespace: &str, name: &str) -> String {
     )
 }
 
-/// A device's place on its machine's page, or none for a device that
-/// no one machine publishes.
+/// The path of a device's line on its machine's page, or none when the
+/// device does not belong to one machine.
 pub fn device(device: &Device) -> Option<String> {
     let machine = machine(device.machine.as_deref()?);
     Some(format!(
@@ -98,9 +99,9 @@ pub fn device(device: &Device) -> Option<String> {
     ))
 }
 
-/// The id of a device's line on its machine's page: its driver and
-/// name, with every character but ASCII letters, digits, `-`, and `_`
-/// replaced by a dash.
+/// The HTML id of a device's line on its machine's page.  It is built
+/// from the driver and name, with every character other than an ASCII
+/// letter, digit, `-`, or `_` replaced by `-`.
 pub fn device_anchor(driver: &str, name: &str) -> String {
     let id = format!("device-{driver}-{name}");
     id.chars()
@@ -117,23 +118,23 @@ pub fn pod(namespace: &str, name: &str) -> String {
     format!("/namespaces/{}/pods/{}", segment(namespace), segment(name))
 }
 
-/// `text` with every byte but the URL's unreserved characters
-/// percent-encoded, so a name cannot end the query or the link.
+/// `text` with every byte except the unreserved characters of a URL
+/// percent-encoded, so `text` cannot end a query or a link early.
 pub fn percent_encoded(text: &str) -> String {
     encoded(text, b"")
 }
 
-/// `name` as one segment of a URL's path.  Most names are DNS labels
-/// and pass unchanged, and so does the `:` that RBAC names use; any byte
-/// that could end the segment or the path, such as `/`, `?`, `#`, or a
-/// space, is percent-encoded, so a `ClusterRole` named `a?b` links to its
-/// own page.
+/// `name` as one segment of a URL path.  A DNS label comes back
+/// unchanged, and so do the `:` and `@` in RBAC names.  Every other
+/// byte outside the unreserved characters, such as `/`, `?`, `#`, or a
+/// space, is percent-encoded, so a `ClusterRole` named `a?b` still links
+/// to its own page.
 pub fn segment(name: &str) -> String {
     encoded(name, b":@")
 }
 
-/// `text` with every byte but the unreserved characters and `keep`
-/// percent-encoded.
+/// `text` with every byte percent-encoded except the unreserved
+/// characters and the bytes in `keep`.
 fn encoded(text: &str, keep: &[u8]) -> String {
     let mut encoded = String::with_capacity(text.len());
     for byte in text.bytes() {
@@ -150,9 +151,9 @@ fn encoded(text: &str, keep: &[u8]) -> String {
     encoded
 }
 
-/// `path` with each `%XX` read as its byte, as the server's router,
-/// axum's `Path`, reads it, for the tests that render a page from a
-/// link the way the server would.
+/// `path` with each `%XX` decoded to its byte, as axum's `Path` decodes
+/// it in the server.  Tests use it to render a page from a link the way
+/// the server does.
 #[cfg(any(test, feature = "fixtures"))]
 pub fn percent_decoded(path: &str) -> String {
     let bytes = path.as_bytes();
@@ -194,7 +195,10 @@ mod tests {
         Some("/namespaces/shop/caches.cache.example.io/sessions")
     )]
     #[case::cluster_scoped(None, Some("/cluster/caches.cache.example.io/sessions"))]
-    fn the_shared_url(#[case] namespace: Option<&str>, #[case] expected: Option<&str>) {
+    fn builds_a_path_with_or_without_a_namespace(
+        #[case] namespace: Option<&str>,
+        #[case] expected: Option<&str>,
+    ) {
         let object = Object::new("cache.example.io", "Cache", namespace, "sessions");
         assert_eq!(page(&object, &plurals()).as_deref(), expected);
     }
@@ -202,7 +206,7 @@ mod tests {
     #[rstest]
     #[case::on_a_machine(Some("alpha"), Some("/machines/alpha#device-gpu-example-com-card-0"))]
     #[case::on_no_one_machine(None, None)]
-    fn a_device_links_to_its_line_on_its_machine(
+    fn links_a_device_to_its_line_on_its_machine(
         #[case] machine: Option<&str>,
         #[case] expected: Option<&str>,
     ) {

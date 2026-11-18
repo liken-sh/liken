@@ -1,29 +1,29 @@
-//! The ports on the workload's left edge, and the lines that end at
-//! them.  Each port is placed at the height of the first line that ends
-//! at it, when there is room, and the lines nest into it.
+//! The workload's ports, drawn as sockets on its left edge, and the
+//! lines that end at them.
 
 use super::reach::{Port, SOCKET_GAP, SOCKET_H, SOCKET_W, SOCKET_X, TOP, WORKLOAD_W, WORKLOAD_X};
 use super::route::{across, lanes};
 use super::{Drawing, Socket, WORKLOAD, height};
 use transect_map::map::section_drawing::{Point, Rect, SectionBox, Style};
 
-/// Where a line ends: a port, or the workload's edge, for any port.
+/// Where a line ends: at the socket of the port with this index, or on
+/// the workload's edge when the line is for any port.  The number in
+/// `Edge` only keeps each edge end distinct.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum End {
     Port(usize),
     Edge(usize),
 }
 
-/// A line on its way to the workload: the point after its gate where it
-/// starts, whose height the line keeps, where it ends, and its style.
+/// A line to the workload.  `from` is where it starts, after its gate.
 pub struct Arrival {
     pub from: Point,
     pub end: End,
     pub style: Style,
 }
 
-/// Adds the lines from `from` to each of `ports`, or one to the
-/// workload's edge, for any port, when there are none.
+/// Adds a line from `from` to each of `ports`.  When `ports` is empty,
+/// adds one line to the workload's edge, which means any port.
 pub fn arrive(arrivals: &mut Vec<Arrival>, from: Point, ports: &[usize], style: Style) {
     if ports.is_empty() {
         let end = End::Edge(arrivals.len());
@@ -35,13 +35,14 @@ pub fn arrive(arrivals: &mut Vec<Arrival>, from: Point, ports: &[usize], style: 
     }
 }
 
-/// Places the ports on the workload's left edge, each at the height of
-/// the first line that ends at it when there is room, and places the
-/// workload around them.  Then it draws each line from its start to its
-/// port.  A line for any port, such as "any pod" from inside the
-/// cluster, ends on the edge just under the last port and not at its
-/// own height, so the workload keeps the height that its ports and
-/// words need.
+/// Draws the sockets on the workload's left edge, the workload around
+/// them, and each line.  A socket is at the height of the highest line
+/// that ends at it, pushed down to keep `SOCKET_GAP` from the socket
+/// above.  Sockets that no line reaches go below the others.  A line
+/// for any port, such as "any pod" from inside the cluster, ends at its
+/// own height, but no lower than just below the lowest socket that a
+/// line reaches, so it does not make the workload taller than its
+/// sockets and text need.
 pub fn ports(
     drawing: &mut Drawing,
     arrivals: &[Arrival],
@@ -130,9 +131,8 @@ pub fn ports(
             Some((arrival.from, Point { x, y: *at }, arrival.style))
         })
         .collect();
-    // The lanes nest when the lines are sorted by the height they leave
-    // at, from the top, and the lines from one start are sorted by the
-    // height they arrive at.
+    // `lanes` keeps lines from crossing only when they are sorted by the
+    // height they leave at, and then by the height they arrive at.
     ends.sort_by_key(|(from, to, _)| (from.y, to.y));
     let froms: Vec<i32> = ends.iter().map(|(from, _, _)| from.y).collect();
     let tos: Vec<i32> = ends.iter().map(|(_, to, _)| to.y).collect();

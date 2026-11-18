@@ -1,28 +1,32 @@
-//! What each report of a findings kind scanned, as the kind's own page
-//! lists it: the report, its workload, its container, the digest that
-//! it names, and whether a pod runs that digest.  A person who writes
-//! the `findings` knowledge can check its effect on this page.
+//! The rows of a findings kind's own page, one for each report: the
+//! report, its workload and container, the image digest that it
+//! scanned, its counts by severity, and whether a pod still runs that
+//! digest.  A person who writes the `findings` knowledge uses the page to
+//! check what transect reads with it.
 
 use transect_graph::edges::{Object, Plurals};
 use transect_graph::links::Part;
 
 use super::Vulnerabilities;
 
-/// One report's row.
+/// One row of the page, for one report.
 #[derive(Debug, PartialEq)]
 pub struct Scan {
     pub report: Part,
     pub workload: Part,
     pub container: String,
     pub digest: String,
-    /// The report's own counts by severity, as its summary gives them.
+    /// The counts by severity from the report's own summary, without the
+    /// severities whose count is zero.
     pub summary: String,
-    /// "current" or "stale".
+    /// "current" when a pod of the workload runs the digest, otherwise
+    /// "stale".
     pub state: &'static str,
 }
 
 impl Vulnerabilities {
-    /// The rows of the reports of `group` and `kind`, by workload.
+    /// One row for each report of `group` and `kind`.  A report that has
+    /// no container or digest shows "—" for it.
     pub fn scans(&self, group: &str, kind: &str, plurals: &Plurals) -> Vec<Scan> {
         let named = |object: &Object| Part {
             text: transect_graph::links::kind_and_name_in(object, None),

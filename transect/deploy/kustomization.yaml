@@ -1,12 +1,12 @@
-# The kustomize base for transect: its account, the read-only roles
-# that account holds, the Deployment, its Service, and its
-# NetworkPolicy. The base creates no Namespace and names none, so an
-# overlay sets `namespace:`, and kustomize moves the account's bindings
-# with it.
+# The kustomize base for transect: a ServiceAccount, the read-only
+# roles bound to it, the Deployment, its Service, and its
+# NetworkPolicy. The base creates no Namespace and sets none, so an
+# overlay sets `namespace:`, and kustomize updates the subjects of the
+# account's bindings to match.
 #
-# This base is for the cluster owner to take. `liken` does not apply
-# it and does not name it. Take it through your own GitOps with
-# patches of your own:
+# The cluster owner applies this base. `liken` does not apply it and
+# does not refer to it. Include it from your own GitOps repository and
+# add your own patches:
 #
 #   resources:
 #     - <this directory, or the transect-deploy OCI artifact>
@@ -22,12 +22,12 @@
 #     - name: ghcr.io/liken-sh/transect
 #       newTag: <a version of ghcr.io/liken-sh/transect>
 #
-# The base ships no Ingress, because how a cluster exposes transect
-# and through which sign-in belongs to that cluster. An overlay adds
-# the Ingress, the NetworkPolicy rule that admits its ingress
-# controller, the TRANSECT_* env for its Prometheus, Alertmanager, and
-# log store, a ClusterRole for the custom groups it serves, and the
-# volume of transect's own resources.
+# The base has no Ingress, because each cluster decides how to expose
+# transect and which sign-in to put in front of it. An overlay adds the
+# Ingress, the NetworkPolicy rule that admits its ingress controller,
+# the TRANSECT_* environment variables for its Prometheus,
+# Alertmanager, and log store, a ClusterRole for the custom groups it
+# serves, and the volume for transect's own resources.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 

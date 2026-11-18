@@ -1,18 +1,18 @@
-//! The row of machines to switch between, in the machines band's
-//! groups: the control plane first and the workers after it, each group
-//! after the band's gray label.  The groups take no border of their
-//! own, because a ring marks the machine shown.
+//! The row of links on a machine page that switches to another machine.
+//! It lists the control plane machines first and the workers after them,
+//! in the same groups and with the same labels as the machines band.
 
 use transect_ground::machines::{Machine, groups};
 
-/// One machine in the row to switch between.
+/// A link to one machine in the row.
 #[derive(Debug, PartialEq)]
 pub struct Switch {
     pub name: String,
     pub current: bool,
     pub control_plane: bool,
-    /// The band's label for the group it starts, "control plane" or
-    /// "workers", or none inside a group or when the band draws none.
+    /// The band's label for the group that starts at this machine,
+    /// "control plane" or "workers". It is `None` for every other
+    /// machine, and for all of them when the band draws no labels.
     pub label: Option<&'static str>,
 }
 
@@ -30,8 +30,7 @@ impl Switch {
     }
 }
 
-/// A switch for each of `machines`, in the band's groups, with the one
-/// named `current` marked.
+/// Marks the machine named `current`.
 pub fn switches(machines: &[Machine], current: &str) -> Vec<Switch> {
     let groups = groups(machines);
     let mut switches = Vec::new();
@@ -95,11 +94,11 @@ mod tests {
     fn orders_the_control_plane_first(
         #[case] nodes: &[(&str, bool)],
         #[case] current: &str,
-        #[case] shown: &[&str],
+        #[case] expected: &[&str],
     ) {
         let machines: Vec<Machine> = nodes.iter().map(|&(n, cp)| machine(n, cp)).collect();
-        let found = switches(&machines, current);
-        let said: Vec<String> = found
+        let row = switches(&machines, current);
+        let rendered: Vec<String> = row
             .iter()
             .map(|s| {
                 let label = s.label.map(|l| format!("{l} ")).unwrap_or_default();
@@ -107,6 +106,6 @@ mod tests {
                 format!("{label}{}{current}", s.name)
             })
             .collect();
-        assert_eq!(said, shown);
+        assert_eq!(rendered, expected);
     }
 }

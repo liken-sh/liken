@@ -1,19 +1,18 @@
-//! The words that show a loop, on a card and in the cluster sidebar.
-//! These templates are the only words; everything else is a name from
-//! the loop.
+//! The text that describes a loop on a card and in the cluster sidebar.
+//! Every word of it comes from this file, and the rest is the names of
+//! the loop's members.
 
 use super::{Cycle, Endpoint, Kind, Loop, Step};
 
-/// The most members a title names before it counts them instead.
+/// The most members a title lists before it gives a count instead.
 const NAMED: usize = 4;
 
-/// What a loop means, under its title.
 const MEANING: &str = "Each of these needs another of them to start. \
     While all of them run, the loop has no effect; a cold start must start one without the others.";
 
 impl Loop {
-    /// "A loop: forge and deploy", or "A loop of 6 namespaces" when it has
-    /// more than `NAMED` members.
+    /// "A loop: forge and deploy", or "A loop of 6 namespaces" when there
+    /// are more than `NAMED` members.
     pub fn title(&self) -> String {
         let names = &self.namespaces;
         match names.as_slice() {
@@ -25,16 +24,17 @@ impl Loop {
         }
     }
 
-    /// What any loop means, the same for each.
+    /// The explanation shown under a loop's title, the same for every
+    /// loop.
     pub fn meaning(&self) -> &'static str {
         MEANING
     }
 }
 
 impl Step {
-    /// The edges by which this member needs the next, as "reconciles
-    /// from", or "reconciles from and depends on" when edges of more
-    /// than one kind join the two.
+    /// The relation of this member to the next one: "reconciles from",
+    /// or "reconciles from and depends on" when edges of more than one
+    /// kind join the two.
     pub fn verb(&self) -> String {
         let mut verbs: Vec<&str> = Vec::new();
         for verb in self.kinds.iter().map(|&kind| verb(kind)) {
@@ -47,16 +47,17 @@ impl Step {
 }
 
 impl Cycle {
-    /// The member the cycle starts from and returns to.
+    /// The member where the cycle starts and ends.
     pub fn first(&self) -> &str {
         self.steps.first().map_or("", |step| step.member.as_str())
     }
 }
 
-/// How a link names one member: an object by its kind, and its name
-/// after its namespace, because a loop's members are in more than one and
-/// an applier often shares its workload's name; a machine as a
-/// machine; a box outside the cluster by the address that names it.
+/// The text for one member of a loop. An object shows its kind and its
+/// `namespace/name`, because the members come from several namespaces
+/// and an applier often has the same name as the workload it applies. A
+/// system outside the cluster shows as the address or driver name that
+/// identifies it.
 pub fn name(end: &Endpoint) -> String {
     match end {
         Endpoint::Object(object) => crate::links::kind_and_name_in(object, None),
@@ -69,8 +70,9 @@ pub fn name(end: &Endpoint) -> String {
     }
 }
 
-/// The verb phrase for one kind of edge.  Owner references and a custom
-/// resource's controller mean the same to a reader: something controls it.
+/// The verb phrase for one kind of edge. `ManagedBy` and `ControlledBy`
+/// both read "is controlled by", because to a person an owner reference
+/// and a custom resource's controller mean the same thing.
 fn verb(kind: Kind) -> &'static str {
     match kind {
         Kind::ReconcilesFrom => "reconciles from",
@@ -106,7 +108,7 @@ mod tests {
     #[case::three(&["a", "b", "c"], "A loop: a, b, and c")]
     #[case::four(&["a", "b", "c", "d"], "A loop: a, b, c, and d")]
     #[case::many(&["a", "b", "c", "d", "e"], "A loop of 5 namespaces")]
-    fn titles_a_loop_by_its_members(#[case] namespaces: &[&str], #[case] title: &str) {
+    fn titles_a_loop_with_its_members(#[case] namespaces: &[&str], #[case] title: &str) {
         assert_eq!(named(namespaces).title(), title);
     }
 
@@ -125,7 +127,10 @@ mod tests {
         &[Kind::DependsOn, Kind::ControlledBy, Kind::StoresOn],
         "depends on and is controlled by and stores on"
     )]
-    fn names_the_edges_of_an_arrow(#[case] kinds: &[Kind], #[case] verb: &str) {
+    fn joins_the_verbs_of_the_edges_between_two_members(
+        #[case] kinds: &[Kind],
+        #[case] verb: &str,
+    ) {
         assert_eq!(step(kinds).verb(), verb);
     }
 
@@ -144,7 +149,7 @@ mod tests {
         Endpoint::Device(crate::edges::fixtures::device("radio.example.com", "alpha", "usb-1")),
         "device radio usb-1 on alpha"
     )]
-    fn names_each_member(#[case] end: Endpoint, #[case] expected: &str) {
+    fn writes_each_kind_of_member(#[case] end: Endpoint, #[case] expected: &str) {
         assert_eq!(name(&end), expected);
     }
 }

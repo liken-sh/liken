@@ -1,15 +1,16 @@
-//! A watch on Secrets' metadata, for the intent annotations written on
-//! them, only when the person who runs `transect` turns it on.
+//! An optional metadata watch on `Secret`s, which reads the intent
+//! annotations that people write on them. It runs only with
+//! `--secret-annotations`.
 //!
-//! Kubernetes has no permission for a `Secret`'s metadata alone: an
-//! identity that may list Secrets may read their data.  So by default
-//! `transect` reads a `Secret`'s intent from the object that writes it,
-//! and watches Secrets only with `--secret-annotations`, for an
-//! identity that already has that access, such as a workstation's
-//! admin kubeconfig.  The watch asks for metadata only, so the API
-//! server sends no `Secret`'s data, and it keeps only `transect`'s own
-//! annotations, because another annotation can hold the data itself,
-//! as the copy of the manifest that `kubectl apply` writes does.
+//! RBAC has no permission that allows reading a `Secret`'s metadata
+//! without its data, so an identity that may list `Secret`s may also
+//! read their contents. So by default `transect` reads a `Secret`'s
+//! intent from the object that writes the `Secret`, and the flag is for
+//! an identity that already has that access, such as a workstation's
+//! admin kubeconfig. The watch requests metadata only, so the API
+//! server sends no `Secret` data. It also drops every annotation but
+//! `transect`'s own, because another annotation can contain the data,
+//! as `kubectl.kubernetes.io/last-applied-configuration` does.
 
 use std::sync::Arc;
 
@@ -23,13 +24,13 @@ use super::discovery::{Optional, Refusal, State};
 use super::reflect::{Changes, reflect_cut};
 use transect_resources::resources::field;
 
-/// Secrets as metadata, when the watch is on.
+/// The `Secret` metadata store, which is empty unless the watch is on.
 #[derive(Clone, Default)]
 pub struct SecretStore(Option<Optional<Store<PartialObjectMeta<Secret>>>>);
 
 impl SecretStore {
-    /// Starts finding whether `transect` may list Secrets, and a watch of
-    /// their metadata once it may.
+    /// Starts checking whether `transect` may list `Secret`s, and starts
+    /// the metadata watch once it may.
     pub fn discover(client: &Client, changes: &Changes) -> Self {
         let (probing, starting) = (client.clone(), client.clone());
         let started = changes.clone();
@@ -41,16 +42,16 @@ impl SecretStore {
         )))
     }
 
-    /// Resolves once discovery has first answered, and the store, when
-    /// the watch is on, holds its first full list.
+    /// Resolves once the first list check has finished and, when the
+    /// watch is on, the store has its first full list.
     pub async fn synced(&self) {
         if let Some(optional) = &self.0 {
             optional.settled().await;
         }
     }
 
-    /// Every Secret's metadata as of now, or none when the watch is off
-    /// or `transect` may not list Secrets.
+    /// Every `Secret`'s metadata, or `None` when the watch is off or
+    /// `transect` may not list `Secret`s.
     pub fn state(&self) -> Option<Vec<Arc<PartialObjectMeta<Secret>>>> {
         match self.0.as_ref()?.state() {
             State::On(store) => Some(store.state()),
@@ -59,24 +60,24 @@ impl SecretStore {
     }
 }
 
-/// Whether a list of one `Secret`'s metadata succeeds.  An `Api` of
-/// metadata asks the API server for metadata alone, so neither this
-/// list nor the watch includes a `Secret`'s data.
+/// Succeeds when `transect` may list `Secret` metadata. An `Api` of
+/// `PartialObjectMeta` requests metadata only, so this list receives no
+/// `Secret` data.
 async fn listable(client: Client) -> Result<(), Refusal> {
     let secrets: Api<PartialObjectMeta<Secret>> = Api::all(client);
     let one = ListParams::default().limit(1);
     secrets.list(&one).await.inspect_err(|error| {
-        tracing::warn!(%error, "cannot list Secrets; --secret-annotations reads none");
+        tracing::warn!(%error, "Listing Secrets did not succeed, so --secret-annotations shows no annotations");
     })?;
     Ok(())
 }
 
-/// A `Secret`'s metadata cut to what `keep_ours` keeps.
 fn trim(secret: &mut PartialObjectMeta<Secret>) {
     keep_ours(&mut secret.metadata);
 }
 
-/// `meta` with no managed fields and no annotation but `transect`'s own.
+/// Removes the managed fields and every annotation that is not one of
+/// `transect`'s own from `meta`.
 fn keep_ours(meta: &mut ObjectMeta) {
     meta.managed_fields = None;
     if let Some(annotations) = &mut meta.annotations {
@@ -91,7 +92,7 @@ mod tests {
     use super::*;
 
     #[rstest]
-    fn keeps_only_transects_annotations() {
+    fn removes_every_annotation_but_transects() {
         let mut meta: ObjectMeta = serde_yaml::from_str(
             "{name: login, annotations: {transect.liken.sh/depends-on: db, kubectl.kubernetes.io/last-applied-configuration: '{\"data\": {}}', example.com/note: x}}",
         )

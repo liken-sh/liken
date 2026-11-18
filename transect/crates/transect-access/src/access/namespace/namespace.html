@@ -47,7 +47,7 @@
 {%- for way in one.ways %}
 <tr class="ax-row{% if !loop.last %} ax-row-tight{% endif %}">
 {%- if loop.first %}<th scope="row" rowspan="{{ one.span() }}">{% call links::object_link(one.name.text, one.name.href, "ax-name") %}{% endcall %}<span class="ax-sub">{{ one.serves }}</span></th>{% endif %}
-<td class="ax-text ax-way">{% if let Some(machine) = way.machine %}{% call links::object_link(machine.text, machine.href, "") %}{% endcall %}{% endif %}<span class="ax-way-name">{{ way.name }}</span>{% if let Some((text, said)) = way.said %} <span title="{{ text }}">{% call provenance::mark(said) %}{% endcall %}</span>{% endif %}<span class="ax-sub">
+<td class="ax-text ax-way">{% if let Some(machine) = way.machine %}{% call links::object_link(machine.text, machine.href, "") %}{% endcall %}{% endif %}<span class="ax-way-name">{{ way.name }}</span>{% if let Some((text, declared_at)) = way.declared_at %} <span title="{{ text }}">{% call provenance::mark(declared_at) %}{% endcall %}</span>{% endif %}<span class="ax-sub">
 {%- for via in way.via %}{% if !loop.first %}, {% endif %}{% call links::object_link(via.text, via.href, "") %}{% endcall %}{% endfor -%}
 {%- if let Some(how) = way.how %}{% if !way.via.is_empty() %} · {% endif %}{{ how }}{% endif -%}
 </span></td>

@@ -1,9 +1,8 @@
-//! Selects which Prometheus transect queries: the one that
-//! `--prometheus` names, or else the one that the `MetricsSource` names
-//! by its `url` or its `service`.  The source can change while transect
-//! runs, so every poller selects the Prometheus again on each round.
-//! The pollers share one client for as long as the address stays the
-//! same.
+//! Chooses which Prometheus transect queries: the address in
+//! `--prometheus`, or else the address that the `MetricsSource` gives
+//! in its `url` or `service`. The `MetricsSource` can change while
+//! transect runs, so each poller chooses again on every round. The
+//! pollers share one client until the address changes.
 
 use std::sync::{Arc, Mutex};
 
@@ -14,13 +13,13 @@ use transect_resources::resources::Field;
 
 #[derive(Clone)]
 pub struct Reaching {
-    /// `--prometheus`, which takes precedence over the source's address.
+    /// The `--prometheus` address. It overrides the source's address.
     flag: Option<String>,
-    /// The cluster's DNS domain, at the end of a `Service`'s DNS name.
+    /// The cluster's DNS domain, the suffix of a `Service`'s DNS name.
     domain: String,
     source: Field<Option<MetricsSource>>,
-    /// The last client built.  `prometheus` reuses it while the address
-    /// stays the same.
+    /// The last client built. `prometheus` returns it while the address
+    /// is unchanged.
     client: Arc<Mutex<Option<Prometheus>>>,
 }
 
@@ -34,18 +33,17 @@ impl Reaching {
         }
     }
 
-    /// The watched source.  A poller waits on it, so the poller wakes
-    /// when the resources change.
+    /// The watched `MetricsSource` field. A poller waits on it, so the
+    /// poller runs again when the resource changes.
     pub fn resources(&self) -> Field<Option<MetricsSource>> {
         self.source.clone()
     }
 
-    /// The `MetricsSource` as of now.
     pub fn source(&self) -> Option<MetricsSource> {
         self.source.read()
     }
 
-    /// The base URL of the Prometheus to query now, or none when neither
+    /// The base URL of the Prometheus to query, or `None` when neither
     /// the flag nor a `MetricsSource` gives one.
     pub fn url(&self) -> Option<String> {
         let source = self.source.read();
@@ -58,7 +56,8 @@ impl Reaching {
         )
     }
 
-    /// The client for the Prometheus to query now, or none.
+    /// A client for the Prometheus at `url()`, or `None` when there is
+    /// no address or the client cannot be built.
     pub fn prometheus(&self) -> Option<Prometheus> {
         let url = self.url()?;
         let mut client = self.client.lock().unwrap_or_else(|held| held.into_inner());
@@ -71,7 +70,7 @@ impl Reaching {
                 Some(built)
             }
             Err(error) => {
-                tracing::warn!(%url, %error, "cannot build a client for Prometheus");
+                tracing::warn!(%url, %error, "The Prometheus client was not built");
                 None
             }
         }
@@ -109,7 +108,7 @@ mod tests {
         Some("http://prometheus.monitoring.svc.cluster.local:9090")
     )]
     #[case::nothing(None, "{}", None)]
-    fn asks_the_flags_prometheus_then_the_sources(
+    fn the_flag_overrides_the_source_address(
         #[case] flag: Option<&str>,
         #[case] spec: &str,
         #[case] url: Option<&str>,

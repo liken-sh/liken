@@ -1,16 +1,14 @@
-//! Attribution by package: the workload whose labels show it was
-//! installed with a CRD is taken, as a guess, for the controller of
-//! that CRD's kind.
+//! Guesses the controller of a kind from the labels of its CRD.
 //!
-//! An operator's chart or manifests often label its CRDs and its
-//! `Deployment` alike with the `app.kubernetes.io/` labels Kubernetes
-//! recommends: `part-of`, `instance`, and `name`, narrowed by
-//! `component`.  So a kind whose objects run no pods, and so have no
-//! `ServiceAccount` to follow from RBAC, can still lead to the workload
-//! that reconciles it.  Shared labels show that two objects were
-//! installed together, not that one reconciles the other, so every
-//! attribution made here is drawn as a guess.  No package manager's own
-//! keys are read here.
+//! The chart or manifests of an operator often put the same
+//! recommended `app.kubernetes.io/` labels on its CRDs and on its
+//! `Deployment`: `part-of`, `instance`, and `name`, and `component` to
+//! tell the workloads of one application apart. So a kind whose
+//! controller RBAC does not show can still lead to the workload that
+//! reconciles it. Shared labels show only that the two were installed
+//! together, not that one reconciles the other, so every match is drawn
+//! as a guess. The labels of a package manager, such as Helm's, are not
+//! read.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -19,24 +17,23 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 
 use transect_graph::edges::Object;
 
-/// The labels that name the application an object is part of.  A CRD's
-/// controller has every one of these that the CRD has.
+/// The labels that name the application that an object belongs to.
 const IDENTITY: [&str; 3] = [
     "app.kubernetes.io/part-of",
     "app.kubernetes.io/instance",
     "app.kubernetes.io/name",
 ];
 
-/// The label that names the part of the application an object is,
-/// which narrows several workloads of one application to the one
-/// whose component matches the CRD's.
+/// The label that names which part of the application an object is.
+/// When several workloads match a CRD's identity labels, the controller
+/// is the one with the same component as the CRD.
 const COMPONENT: &str = "app.kubernetes.io/component";
 
-/// What an object's labels and annotations state about the package it
-/// came from, by key.
+/// An object's labels and annotations whose keys are in `IDENTITY` or
+/// are `COMPONENT`, which this module calls its package keys.
 pub type Package = BTreeMap<String, String>;
 
-/// `meta`'s package keys, from its labels and its annotations.
+/// The package of `meta`, without keys whose value is empty.
 pub fn package(meta: &ObjectMeta) -> Package {
     let labels = meta.labels.iter().flatten();
     let annotations = meta.annotations.iter().flatten();
@@ -47,13 +44,14 @@ pub fn package(meta: &ObjectMeta) -> Package {
         .collect()
 }
 
-/// Whether `key` is one of the package keys, which a CRD keeps in its
-/// store when its other labels and annotations are dropped.
+/// Whether `key` is a package key. The CRD store keeps these labels and
+/// annotations and drops the others.
 pub fn kept(key: &str) -> bool {
     IDENTITY.contains(&key) || key == COMPONENT
 }
 
-/// Each custom kind's CRD, by group and kind: its name and its package.
+/// The name and package of the CRD of each custom kind, by group and
+/// kind.
 #[derive(Debug, Default)]
 pub struct Packages(HashMap<(String, String), (String, Package)>);
 
@@ -67,16 +65,16 @@ impl Packages {
         Self(read.collect())
     }
 
-    /// The CRD of `group`/`kind`, by name, with its package.
     pub fn of(&self, group: &str, kind: &str) -> Option<&(String, Package)> {
         self.0.get(&(group.to_string(), kind.to_string()))
     }
 }
 
-/// The one workload of `workloads` that `crd`'s package names, with the
-/// labels that matched it, `key=value`: the workload that has every
-/// identity label the CRD has, narrowed by component when several
-/// match.  None when no workload matches, or several are left.
+/// Returns the workload whose package matches `crd`'s, with the
+/// `key=value` labels that matched. A workload matches when it has the
+/// CRD's value for every identity label that the CRD has. When several
+/// match, only those with the CRD's `component` are kept. Returns `None`
+/// when no workload matches, or when more than one still does.
 pub fn matched<'a>(
     crd: &Package,
     workloads: impl IntoIterator<Item = (&'a Object, &'a Package)>,
@@ -110,8 +108,8 @@ pub fn matched<'a>(
     let [(workload, _)] = found.as_slice() else {
         return None;
     };
-    let said = keys.iter().map(|key| format!("{key}={}", crd[*key]));
-    Some(((*workload).clone(), said.collect()))
+    let matched_labels = keys.iter().map(|key| format!("{key}={}", crd[*key]));
+    Some(((*workload).clone(), matched_labels.collect()))
 }
 
 #[cfg(test)]
@@ -135,9 +133,9 @@ mod tests {
     const INSTANCE: &str = "app.kubernetes.io/instance";
     const NAME: &str = "app.kubernetes.io/name";
 
-    /// Three workloads of one suite, each its own component, two of one
-    /// instance, each its own name, and one whose package names no
-    /// application.
+    /// `sources` and `applier` are components of one suite. `certs` and
+    /// `certs-webhook` are of one instance with different names.
+    /// `scanner` has none of the package labels.
     fn workloads() -> Vec<(Object, Package)> {
         vec![
             (
@@ -196,11 +194,11 @@ mod tests {
     ) {
         let workloads = workloads();
         let found = matched(&crd, workloads.iter().map(|(o, p)| (o, p)));
-        let found = found.map(|(workload, said)| (workload.name, said));
-        let expected = expected.map(|(name, said)| {
+        let found = found.map(|(workload, matched)| (workload.name, matched));
+        let expected = expected.map(|(name, matched)| {
             (
                 name.to_string(),
-                said.into_iter().map(String::from).collect(),
+                matched.into_iter().map(String::from).collect(),
             )
         });
         assert_eq!(found, expected);

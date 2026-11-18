@@ -1,32 +1,32 @@
-//! The Runs box on a workload's page: one row per image that the
-//! workload's pods run.  Each fact has its own labeled cell, so the
-//! image, its source repository, its version, its commit, and the time
-//! of the last rollout show as separate facts, not as one run of lines.
+//! The Runs box on a workload's page: a row for each image that the
+//! workload's pods run, with the image's source repository, version,
+//! commit, and the time of the last rollout.
 
 use super::origin::Origin;
 use crate::forge::Commit;
 
-/// The rows of a workload's Runs box.
 #[derive(Debug, Default, PartialEq)]
 pub struct Runs {
     pub rows: Vec<Row>,
 }
 
-/// One image a workload runs, once per digest its pods run.
+/// One row of the Runs box.  An image has a row for each distinct origin
+/// among the digests that its pods run, so during a rollout one image
+/// can have two rows.
 #[derive(Debug, PartialEq)]
 pub struct Row {
     pub image: String,
-    /// The repository its source label names, without the scheme.
+    /// The image's source label, without the scheme or a trailing `.git`.
     pub repository: Option<String>,
     /// Why the repository and commit cells are empty, when they are.
     pub note: Option<String>,
     pub version: Option<String>,
     pub commit: Option<Cell>,
-    /// When the workload last rolled out, which is the same in every row
-    /// of the workload.
+    /// When the workload last rolled out. Every row of the workload
+    /// has the same value.
     pub rolled: Option<String>,
-    /// The description from the image's labels, unless the card already
-    /// opens with that description.
+    /// The description from the image's labels, unless the card's
+    /// opening line is already that description.
     pub description: Option<String>,
     pub documentation: Option<String>,
 }
@@ -39,11 +39,10 @@ pub struct Cell {
 }
 
 impl Runs {
-    /// The rows for `images`, in order.  Each image gets one row for each
-    /// of its origins in `origins`, or one row with no origin when
-    /// transect has not looked up its labels.  `describes` returns
-    /// whether a row shows its image's description.  A row leaves the
-    /// description out when the card already opens with it.
+    /// The rows for `images`, in order: one row for each origin of the
+    /// image in `origins`, or one row with no origin when `origins` has
+    /// none for it.  A row shows its image's description only when
+    /// `describes` returns true for the image.
     pub fn of(
         images: &[String],
         origins: &[(String, Origin)],
@@ -153,7 +152,7 @@ mod tests {
         Option<String>,
     );
 
-    /// The cells of the one row of `shop:1.4.2` with `origin`.
+    /// The cells of the only row for `shop:1.4.2` with `origin`.
     fn cells(origin: Option<Origin>, describes: bool) -> Cells {
         let images = vec!["shop:1.4.2".to_string()];
         let origins: Vec<(String, Origin)> =
@@ -162,7 +161,7 @@ mod tests {
             describes
         });
         let [row] = &runs.rows[..] else {
-            panic!("one row, not {}", runs.rows.len())
+            panic!("Runs::of returned {} rows, want 1", runs.rows.len())
         };
         let commit = row.commit.as_ref().map(|cell| cell.text.clone());
         (

@@ -1,10 +1,9 @@
-//! Quick search: an index of every object with a page and the fixed
-//! pages, ranked by how a name matches what was typed.  A custom kind
-//! is found by any of its names, and an object also by its kind's
-//! names.  The index is built once per change of the cluster, and a
-//! query is a scored scan of it, which on a cluster of a few hundred
-//! pods takes well under a millisecond.  Health never changes the
-//! order, so one query gives the same list each time.
+//! Quick search over the fixed pages and every object, kind, and host
+//! that has a page. The model builds the `Index` once for each change of
+//! the cluster, and each query scores every entry by how well a name
+//! matches. A custom kind matches by any of its names, and an object
+//! also matches by its kind's names. Health does not affect the order,
+//! so a query returns the same list until the cluster changes.
 
 mod page;
 mod rank;
@@ -17,52 +16,59 @@ use rank::{Match, rank};
 
 use transect_graph::edges::Object;
 
-/// What kind of thing an entry is, in the order that breaks ties.
+/// What an entry is. Entries that match equally are ordered by the
+/// order of these variants.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Sort {
     Page,
-    /// A custom kind, which opens its page of every object of it.
+    /// A custom kind, which opens a page listing every object of it.
     Kind,
     Namespace,
     Workload,
     Machine,
-    /// A ground box: something outside the cluster that it reaches.
+    /// Something outside the cluster that the cluster reaches, such as
+    /// a storage backend or an outside address.
     Ground,
-    /// A custom resource with a page that is not a workload, or a GitOps
-    /// object.
+    /// A custom resource that has a page and is not a workload, or a
+    /// GitOps object.
     Object,
-    /// A host an Ingress answers for, which opens the workload behind it.
+    /// A host that an Ingress serves, which opens the workload behind
+    /// it.
     Host,
     Pod,
 }
 
-/// One thing search can find.
+/// One thing that a query can find.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Entry {
     /// What a query is matched against.
     pub name: String,
-    /// The other names it goes by, matched as its name is, such as a
+    /// The other names it has, matched the way its name is, such as a
     /// kind's singular, plural, and short names.
     pub aliases: Vec<String>,
-    /// The names of its kind, which match below every match on a name,
-    /// so a kind's objects follow the kind's own row.
+    /// The names of its kind. A match on one of these ranks below every
+    /// match on `name` or `aliases`, so a kind's objects follow the
+    /// kind's own row.
     pub kind_names: Arc<[String]>,
-    /// The word after the name, such as "Deployment" or "machine".
+    /// The word shown after the name, such as "Deployment" or
+    /// "machine".
     pub kind: String,
     pub sort: Sort,
-    /// Where it is, such as its namespace, or what a host opens.
+    /// Where it is, such as its namespace, or the workload that a host
+    /// opens.
     pub context: Option<String>,
     pub href: String,
-    /// The object it is, whose health its row's dot shows.
+    /// The object that the entry opens. Its row's dot shows the object's
+    /// health.
     pub object: Option<Object>,
-    /// The lenses its row offers besides the overview, as label and URL.
+    /// The other views that its row links to, such as the access tab, as
+    /// label and URL.
     pub lenses: Vec<(&'static str, String)>,
 }
 
 impl Entry {
-    /// How `self` and `other` order by where they are, among entries of
-    /// one name.  A kind's context is its API group, so kinds of one name
-    /// order by group in DNS order.
+    /// A kind's context is its API group, so kinds of the same name order
+    /// by group, in DNS order.
     fn context_order(&self, other: &Entry) -> std::cmp::Ordering {
         match (self.sort, &self.context, &other.context) {
             (Sort::Kind, Some(a), Some(b)) => transect_graph::dns::order(a, b),
@@ -71,13 +77,12 @@ impl Entry {
     }
 }
 
-/// Every entry, in the order an empty query lists the fixed pages.
 #[derive(Debug, Default)]
 pub struct Index {
     entries: Vec<Entry>,
 }
 
-/// The most rows one query shows.
+/// The most rows that one query returns.
 pub const MOST: usize = 20;
 
 impl Index {
@@ -85,17 +90,17 @@ impl Index {
         Self { entries }
     }
 
-    /// The index with `more` entries added.
     pub fn with(mut self, more: Vec<Entry>) -> Self {
         self.entries.extend(more);
         self
     }
 
-    /// The entries that match `query`, best first, at most `MOST`: by
-    /// how the name matches, then by kind, then by name.  An empty query
-    /// lists the fixed pages.  Names that contain the query's letters
-    /// only scattered show when nothing matched better, because beside a
-    /// real match they are noise.
+    /// The entries that match `query`, best first, at most `MOST`. They
+    /// are ordered by how the name matches, then by `Sort`, then by
+    /// name. An empty query returns the fixed pages in the order they
+    /// were added. A name that contains the query's letters only scattered
+    /// through it is returned only when no entry matches better, because
+    /// beside a real match it is noise.
     pub fn find(&self, query: &str) -> Vec<&Entry> {
         let query = query.trim().to_lowercase();
         if query.is_empty() {

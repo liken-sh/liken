@@ -1,12 +1,12 @@
-//! Watches on RBAC's roles and bindings, which controller attribution
-//! reads to find who may write each custom kind's status.
+//! Watches on the RBAC roles and bindings, which `transect` reads to
+//! find which controller may write each custom kind's status.
 //!
 //! Every cluster serves these kinds, but the `ServiceAccount` that
-//! `transect` runs as may be refused some of them, such as Roles across
-//! namespaces.  Each kind is tried in the background with a list of one
-//! object, and again after a transient failure.  A kind that `transect`
-//! may not list, or has not listed yet, gets no store, and the cards
-//! state that controllers may be missing because of it.
+//! `transect` runs as may not be allowed to list some of them, such as
+//! `Role`s in all namespaces. So a background probe lists one object of
+//! each kind, and retries after a transient failure. A kind has no
+//! store until its probe succeeds, and while it has none, the cards say
+//! that controllers may be missing.
 
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -39,8 +39,9 @@ impl RbacStores {
         }
     }
 
-    /// Resolves once each RBAC kind has first answered, and each store
-    /// `transect` could start holds its first full list.
+    /// Resolves once the probe of each RBAC kind has finished or is
+    /// retrying. A store that started has its first full list by then,
+    /// unless that list took longer than `ATTEMPT` in `discovery`.
     pub async fn synced(&self) {
         self.cluster_roles.settled().await;
         self.roles.settled().await;
@@ -48,7 +49,7 @@ impl RbacStores {
         self.role_bindings.settled().await;
     }
 
-    /// Who may write each custom kind's status, as of now.
+    /// Who may write each custom kind's status.
     pub fn grants(&self) -> Grants {
         let (cluster_roles, roles) = (state(&self.cluster_roles), state(&self.roles));
         let cluster_role_bindings = state(&self.cluster_role_bindings);
@@ -85,8 +86,7 @@ pub struct RbacObjects {
 }
 
 impl RbacStores {
-    /// Every role and binding as of now, with none of a kind `transect`
-    /// may not list.
+    /// Every role and binding, and none of a kind that has no store.
     pub fn objects(&self) -> RbacObjects {
         RbacObjects {
             cluster_roles: state(&self.cluster_roles).unwrap_or_default(),
@@ -118,8 +118,8 @@ where
     )
 }
 
-/// Tries a list of one object, so a kind `transect` may not list is found
-/// by the probe instead of as a watch that fails forever.
+/// Lists one object, so that a kind `transect` may not list is found
+/// here, before a watch starts that would fail on every retry.
 async fn listable<K>(client: Client) -> Result<(), Refusal>
 where
     K: Resource<DynamicType = ()> + Clone + DeserializeOwned + Debug,
@@ -128,13 +128,13 @@ where
     api.list(&ListParams::default().limit(1))
         .await
         .inspect_err(|error| {
-            tracing::warn!(kind = %K::kind(&()), %error, "cannot list this RBAC kind; transect finds no controller from its grants");
+            tracing::warn!(kind = %K::kind(&()), %error, "Listing this RBAC kind did not complete, so transect finds no controller from its grants");
         })?;
     Ok(())
 }
 
-/// Every object of an RBAC kind `transect` watches, or none for one it
-/// does not.
+/// Every object of an RBAC kind, or `None` when `transect` has no store
+/// for that kind.
 fn state<K>(store: &Optional<Store<K>>) -> Option<Vec<Arc<K>>>
 where
     K: Resource<DynamicType = ()> + Clone + Send + Sync + 'static,

@@ -1,9 +1,9 @@
-//! The top owners of pods that are gone.  A pod's owner reference is
-//! deleted with the pod, but a reader on the page of a pod that a
-//! rollout replaced still wants its workload, which runs the pod that
-//! replaced it.  So each model keeps the owner of every owned pod that
-//! left since the model before it, and copies forward what that model
-//! kept.
+//! Remembers the top owner of each deleted pod. A pod's owner
+//! references are deleted with the pod, but a person who opens the page
+//! of a pod that a rollout replaced needs a link to its workload, which
+//! runs the replacement. So each new `Model` records the owner of every
+//! pod that was deleted since the previous `Model`, and copies the
+//! owners that the previous `Model` recorded.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -14,10 +14,9 @@ use k8s_openapi::api::core::v1::Pod;
 use super::Ownership;
 use transect_graph::edges::Object;
 
-/// How long a gone pod's owner is kept.  A link to a pod that a rollout
-/// replaced an hour ago still leads to its workload.  Past that, the
-/// memory would grow with every rollout for links few readers still
-/// hold.
+/// How long a deleted pod's owner is remembered. Without a limit,
+/// memory grows with every rollout, to serve links that few people
+/// still open.
 const KEEP: Duration = Duration::from_secs(60 * 60);
 
 /// A pod by its namespace and name.
@@ -25,11 +24,12 @@ type Key = (String, String);
 
 #[derive(Debug, Default)]
 pub struct Departed {
-    /// Each gone pod's top owner, and when the pod was first missed.
+    /// Each deleted pod's top owner, and when a `Model` first found the
+    /// pod missing.
     pods: HashMap<Key, (Object, Instant)>,
 }
 
-/// The pods of one model and what owned each.
+/// The previous `Model`'s pods, ownership, and deleted pods.
 pub struct Before<'a> {
     pub departed: &'a Departed,
     pub pods: &'a [Arc<Pod>],
@@ -37,10 +37,10 @@ pub struct Before<'a> {
 }
 
 impl Departed {
-    /// The pods `before` held, or had kept, that `pods` does not hold,
-    /// each with its top owner.  A pod with no owner has no workload to
-    /// point to, so it is not kept, and one kept longer than `KEEP` is
-    /// dropped.
+    /// Records each pod of `before` that is not in `pods`, with its top
+    /// owner, and keeps each earlier record that is younger than `KEEP`
+    /// and whose pod has not come back. A pod with no owner has no
+    /// workload to link to, so it is not recorded.
     pub fn after(before: Before, pods: &[Arc<Pod>], now: Instant) -> Self {
         let here: HashSet<(&str, &str)> = pods.iter().filter_map(|pod| key(pod)).collect();
         let present = |(namespace, name): &Key| here.contains(&(namespace.as_str(), name.as_str()));
@@ -63,7 +63,6 @@ impl Departed {
         Self { pods: departed }
     }
 
-    /// The top owner of the gone pod `namespace/name`, if it had one.
     pub fn owner(&self, namespace: &str, name: &str) -> Option<&Object> {
         let key = (namespace.to_owned(), name.to_owned());
         self.pods.get(&key).map(|(owner, _)| owner)
@@ -87,7 +86,8 @@ mod tests {
         Arc::new(serde_yaml::from_str(&yaml).unwrap())
     }
 
-    /// The pods `web-1` of the `Deployment` `web`, and `debug`, alone.
+    /// The pod `web-1`, which the `Deployment` `web` owns through a
+    /// `ReplicaSet`, and the pod `debug`, which has no owner.
     fn before() -> (Vec<Arc<Pod>>, Ownership) {
         let ownership = build(&[
             (
@@ -109,8 +109,9 @@ mod tests {
         (vec![pod("web-1"), pod("debug")], ownership)
     }
 
-    /// What is kept of `name` once the pods are `after`, `later` after
-    /// the model that first missed `web-1`.
+    /// The owner recorded for `name` when the pods are `after`, in a
+    /// `Model` built `later` than the one that first found `web-1`
+    /// missing.
     fn kept(after: &[&str], later: Duration, name: &str) -> Option<Object> {
         let (pods, ownership) = before();
         let start = Instant::now();

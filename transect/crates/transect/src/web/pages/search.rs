@@ -1,6 +1,6 @@
-//! The rows a quick search query shows: what the query names as an
-//! address first, then the index's matches, each with the health of
-//! what it opens.
+//! The rows of a quick search. The rows for what the query matches as an
+//! address come first, then the matches in the search index. Each row
+//! shows the health of the object it opens.
 
 use std::collections::{HashMap, HashSet};
 
@@ -35,12 +35,11 @@ pub fn search_results(model: &Model, query: &str, list: &'static str) -> Results
     }
 }
 
-/// The health of each namespace, workload, pod, and machine `entries`
-/// name, as the map assesses it this minute.  A namespace or workload
-/// the assessment finds nothing wrong with is healthy, a pod's health is
-/// what the pod rules find in it, and a machine is failing while its
-/// `Node` is not `Ready`.  Other kinds have no assessment and are left
-/// out.
+/// The health level of each namespace, workload, pod, and machine in
+/// `entries`, as the map assesses it for the current minute. A
+/// namespace or workload with nothing wrong is healthy. A pod's level
+/// comes from `health::pod_reasons`. A machine is failing while its
+/// `Node` is not `Ready`. Other kinds have no level and are left out.
 fn levels(model: &Model, entries: &[&Entry]) -> HashMap<Object, Level> {
     let now = Timestamp::now();
     let minute = model.minute(now);
@@ -98,8 +97,8 @@ mod tests {
     use super::*;
     use crate::web::fixture;
 
-    /// The fixture cluster with a pod of its own whose one container
-    /// is in `CrashLoopBackOff`, and its first machine `NotReady`.
+    /// The fixture cluster with an extra pod whose only container is in
+    /// `CrashLoopBackOff`, and with its first machine not `Ready`.
     fn model() -> Model {
         let mut snapshot = fixture::snapshot();
         snapshot.pods.push(Arc::new(

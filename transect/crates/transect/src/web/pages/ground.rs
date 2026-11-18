@@ -1,9 +1,12 @@
-//! A ground box's page, read from the snapshot: the `Outside` its name
-//! names, or the backend of that name, with the claims it keeps, the
-//! workloads whose volumes are on it, and what reaches it.
+//! The page at `/ground/{name}` for a system outside the cluster, such
+//! as an NFS server, that workloads store data on or depend on. The
+//! outside-systems band of the cluster map has one box for each such system. The
+//! page shows the `Outside` that declares the system, when one does,
+//! the claims on it, the workloads whose volumes are on it, and the
+//! objects that depend on it.
 //!
-//! The page and every link to it read the same lookup, `gathered`, so
-//! a link to a ground box opens a page.
+//! `ground_page` and `ground_link` both call `gathered`, so a link
+//! exists exactly when the page does.
 
 use std::collections::BTreeSet;
 
@@ -14,10 +17,11 @@ use transect_ground::outside::Outside;
 use transect_ground::storage::{self, Type};
 use transect_map::map::ground::{Ground, GroundPage};
 
-/// What the snapshot holds of the ground box `name` names.
+/// What the snapshot holds about one outside system.
 struct Gathered<'a> {
     outside: Option<&'a Outside>,
-    /// Its `Outside`'s name, or the backend's.
+    /// The name of the `Outside`, or the backend's name when no
+    /// `Outside` lists it.
     name: &'a str,
     title: &'a str,
     claims: Vec<(&'a Claim, &'a Type)>,
@@ -25,11 +29,12 @@ struct Gathered<'a> {
     dependents: Vec<Object>,
 }
 
-/// The ground box `name` names: an `Outside` by its name, by an address
-/// or driver it lists, or by its title, or a backend no `Outside` lists
-/// that a claim, a volume, or an edge of any kind reaches.  Each name of
-/// one `Outside` gathers the same box.  `None` when nothing outside the
-/// cluster goes by that name.
+/// Collects what the snapshot holds about the outside system `name`.
+/// `name` can be the name or the title of an `Outside`, or an address
+/// or a driver that an `Outside` lists, and each of these finds the same
+/// system. It can also be a backend that no `Outside` lists but that a
+/// claim, a pod's inline NFS volume, or an edge refers to. Returns
+/// `None` when nothing in the snapshot refers to `name`.
 fn gathered<'a>(model: &'a Model, name: &'a str) -> Option<Gathered<'a>> {
     let snapshot = &model.snapshot;
     let outsides = &snapshot.outsides;
@@ -37,6 +42,8 @@ fn gathered<'a>(model: &'a Model, name: &'a str) -> Option<Gathered<'a>> {
     let name = outside.map_or(name, |outside| outside.name.as_str());
     let title = outside.map_or(name, |outside| outside.title.as_str());
     let claims = snapshot.storage.claims_on(title);
+    // The page lists edges of every kind, whatever kinds the URL turns
+    // off.
     let graph = model.graph(&Shown::parse(None));
     let end = Endpoint::Outside(title.to_string());
     let reaching = |stores: bool| -> BTreeSet<Object> {
@@ -69,8 +76,8 @@ fn gathered<'a>(model: &'a Model, name: &'a str) -> Option<Gathered<'a>> {
     })
 }
 
-/// The page of the ground box `name` names, or `None` when nothing
-/// outside the cluster goes by that name.
+/// The page of the outside system `name`, or `None` when nothing in
+/// the snapshot refers to `name`.
 pub fn ground_page(model: &Model, name: &str) -> Option<GroundPage> {
     let gathered = gathered(model, name)?;
     let snapshot = &model.snapshot;
@@ -84,12 +91,11 @@ pub fn ground_page(model: &Model, name: &str) -> Option<GroundPage> {
         consoles: snapshot.outsides.consoles_of(gathered.name),
     };
     let page = GroundPage::build(gathered.name, ground, |object| pages.href(object));
-    // The page reads every edge kind whatever the URL turns off, so it
-    // shows no edge kinds to turn off.
     Some(page)
 }
 
-/// The link to the ground box `name` names, when it has a page.
+/// The link to the page of the outside system `name`, or `None` when
+/// it has no page.
 pub fn ground_link(model: &Model, name: &str) -> Option<String> {
     gathered(model, name).map(|gathered| model.snapshot.outsides.page_of(gathered.name))
 }

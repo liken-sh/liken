@@ -1,29 +1,28 @@
-//! A page's visible text: its HTML with the tags stripped, one block to
-//! a line, so a golden changes when a page's words do and not when its
-//! markup does.  A log line's level is drawn as a color, so the text
-//! names it in brackets before the line, as `[error]`.  The goldens are drawn at the fixture's pinned time, so
-//! every age reads the same on each run.
+//! A page's visible text: its HTML with the tags removed, one block per
+//! line. A golden file of this text changes when a page's words change,
+//! and not when only its markup changes. The page shows a log line's
+//! level only by its color, so the text writes the level in brackets
+//! before the line, as `[error]`.
 
-/// The tags that run inside a line of text.  Every other tag ends a
-/// line, so each block of the page reads on a line of its own.
+/// The tags that stay inside a line of text. Every other tag ends the
+/// line, so each block of the page is on its own line.
 const INLINE: &[&str] = &[
     "a", "abbr", "b", "code", "em", "i", "kbd", "label", "mark", "s", "small", "span", "strong",
     "sub", "sup", "time", "u",
 ];
 
-/// The tags that mark a place a line may break, which a reader never
-/// sees, so the words around one run together.
+/// The tags that mark where the browser may break a line. The text on
+/// either side joins with no space.
 const BREAKS: &[&str] = &["wbr"];
 
-/// The opening tag of one part of a name such as `namespace/name`,
-/// which the link macro wraps as a whole.  A reader reads the parts as
-/// one word, so the part's tags part nothing.
+/// The opening tag that the link macro puts around each part of a name
+/// such as `namespace/name`. The parts are one word, so these tags add
+/// no space.
 const NAME_PART: &str = "<span class=\"name-part\">";
 
-/// The elements whose contents a reader never sees as text.
+/// The elements whose contents a reader does not see as text.
 const HIDDEN: &[&str] = &["script", "style", "template"];
 
-/// The visible text of `html`, a line per block.
 pub fn visible(html: &str) -> String {
     let mut lines: Vec<String> = Vec::new();
     let mut line = String::new();
@@ -63,7 +62,8 @@ pub fn visible(html: &str) -> String {
     read.join("\n") + "\n"
 }
 
-/// The level a log line's tag draws it at, as the text names it.
+/// The `[error] ` or `[warning] ` prefix for a log line's tag, or an
+/// empty string for any other tag.
 fn level(tag: &str) -> &'static str {
     let classes = tag
         .split_once("class=\"")
@@ -76,7 +76,7 @@ fn level(tag: &str) -> &'static str {
     }
 }
 
-/// The lower-case name of the tag `tag`, such as `div` for `</div>`.
+/// The lower-case element name of `tag`, such as `div` for `</div>`.
 fn tag_name(tag: &str) -> String {
     let inner = tag.trim_start_matches('<').trim_start_matches('/');
     let name = inner.split(|c: char| c.is_whitespace() || c == '>' || c == '/');
@@ -86,7 +86,7 @@ fn tag_name(tag: &str) -> String {
         .to_ascii_lowercase()
 }
 
-/// `text` with its character references read.
+/// `text` with its character references replaced by the characters.
 fn decoded(text: &str) -> String {
     let mut out = String::new();
     let mut rest = text;
@@ -137,7 +137,6 @@ fn reference(name: &str) -> Option<char> {
     named.or_else(number)
 }
 
-/// `text` with each run of white space one space, and none at its ends.
 fn collapsed(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -158,12 +157,12 @@ mod tests {
     #[case::comments_hidden("<p>a<!-- not <b>this</b> --> b</p>", "a b\n")]
     #[case::references_read("<p>a &amp; b &#x27;c&#39; &middot; d</p>", "a & b 'c' · d\n")]
     #[case::white_space_collapsed("<p>\n  a\n   b  </p>", "a b\n")]
-    #[case::a_line_break_parts_nothing("<p>shop/<wbr>web</p>", "shop/web\n")]
-    #[case::a_names_parts_part_nothing(
+    #[case::a_break_opportunity_adds_no_space("<p>shop/<wbr>web</p>", "shop/web\n")]
+    #[case::the_parts_of_a_name_join(
         "<p>Deployment <span class=\"name-part\">shop/</span><wbr><span class=\"name-part\">web</span> is down</p>",
         "Deployment shop/web is down\n"
     )]
-    #[case::inline_tags_part_words("<p><b>Down</b><i>critical</i></p>", "Down critical\n")]
+    #[case::inline_tags_separate_words("<p><b>Down</b><i>critical</i></p>", "Down critical\n")]
     #[case::log_levels_named(
         "<div class=\"log-line log-error\">refused</div><div class=\"log-line\">ok</div>",
         "[error] refused\nok\n"

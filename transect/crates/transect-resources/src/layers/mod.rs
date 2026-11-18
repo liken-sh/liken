@@ -1,14 +1,15 @@
-//! The layers of the map: which band each namespace is drawn in.
+//! The layers of the map: the horizontal bands that namespaces are
+//! drawn in.
 //!
-//! One `Layers` resource lists the layers top to bottom.  A namespace
-//! belongs to the first layer with a selector that matches its labels,
-//! unless its layer annotation names a layer outright.  When neither
-//! places a namespace, it takes the layer that the kind knowledge of its
-//! custom resources names.  Kind knowledge comes last because the
-//! cluster's own `Layers` describes its layers more exactly than an
-//! operator can.  A namespace that nothing places is drawn in the
-//! unsorted band, so a missing assignment shows on the map instead of
-//! being guessed.
+//! A `Layers` resource lists the layers from top to bottom. A namespace
+//! goes in the layer that its `layer` annotation sets. Without the
+//! annotation, it goes in the first layer with a selector that matches
+//! the namespace's labels. When neither places it, it goes in the layer
+//! that the kind knowledge of its custom resources gives. Kind knowledge
+//! comes last because the cluster's own `Layers` is more specific than
+//! a default that the project of a kind ships. A namespace that nothing
+//! places goes in the unsorted band, so a missing assignment shows on
+//! the map.
 
 mod parse;
 
@@ -18,14 +19,15 @@ pub use parse::{Layer, parse};
 
 use crate::resources::{Condition, DocId, annotation};
 
-/// The annotation on a `Namespace` that names its layer, after the
-/// prefix, overriding every layer's selectors.
+/// The key of the `Namespace` annotation that sets its layer, after the
+/// `transect.liken.sh/` prefix.
 pub const LAYER_FIELD: &str = "layer";
 
 #[derive(Debug, Default)]
 pub struct Layers {
     layers: Vec<Layer>,
-    /// The document that declared them, or none when no file did.
+    /// The document the layers were read from, or `None` when no file
+    /// declared any.
     pub doc: Option<DocId>,
 }
 
@@ -37,7 +39,6 @@ impl Layers {
         }
     }
 
-    /// The layers declared in `text`, one `Layers` document.
     #[cfg(any(test, feature = "fixtures"))]
     pub fn from_yaml(text: &str) -> anyhow::Result<Self> {
         let value = serde_yaml::from_str(text)?;
@@ -45,8 +46,9 @@ impl Layers {
         Ok(Self::new(layers, DocId::default()))
     }
 
-    /// A condition for each selector that matches none of `namespaces`,
-    /// which is most often a namespace renamed or a label misspelled.
+    /// A condition for each selector that matches none of `namespaces`.
+    /// Such a selector usually means that a namespace was renamed or a
+    /// label is misspelled.
     pub fn unmatched<'a>(
         &self,
         namespaces: impl IntoIterator<Item = &'a ObjectMeta>,
@@ -77,12 +79,12 @@ impl Layers {
         self.layers.iter().map(|layer| layer.name.as_str())
     }
 
-    /// The index of the layer `namespace` belongs to, or `None` for the
-    /// unsorted band.  `known` is the layer its kinds' knowledge names,
-    /// which places it only when neither its annotation nor a selector
-    /// does.  An annotation that names no declared layer also places it
-    /// in the unsorted band, because falling back to the selectors would
-    /// hide the typo.
+    /// The index of the layer for `namespace`, or `None` for the
+    /// unsorted band. `known` is the layer that kind knowledge gives the
+    /// namespace, and it applies only when neither the annotation nor a
+    /// selector places the namespace. An annotation that sets an
+    /// undeclared layer returns `None` with no fallback to the
+    /// selectors, so the typo shows on the map.
     pub fn place(&self, namespace: &ObjectMeta, known: Option<&str>) -> Option<usize> {
         if let Some(named) = annotation(namespace.annotations.as_ref(), LAYER_FIELD) {
             return self.position(named);
@@ -91,14 +93,13 @@ impl Layers {
             .or_else(|| known.and_then(|known| self.position(known)))
     }
 
-    /// Whether `namespace`'s annotation or a selector places it, so its
-    /// kinds' knowledge does not.
+    /// Whether the annotation or a selector places `namespace`, so that
+    /// kind knowledge does not apply to it.
     pub fn decides(&self, namespace: &ObjectMeta) -> bool {
         let annotated = annotation(namespace.annotations.as_ref(), LAYER_FIELD).is_some();
         annotated || self.selected(namespace).is_some()
     }
 
-    /// The index of the layer named `name`.
     pub fn position(&self, name: &str) -> Option<usize> {
         self.layers.iter().position(|layer| layer.name == name)
     }
@@ -120,8 +121,9 @@ pub mod fixtures {
 
     use super::*;
 
-    /// A `Namespace`'s metadata as the API server returns it, including the
-    /// `kubernetes.io/metadata.name` label it sets on every namespace.
+    /// The metadata of a `Namespace`, with the
+    /// `kubernetes.io/metadata.name` label that the API server adds to
+    /// every namespace.
     pub fn namespace(name: &str, labels: &[(&str, &str)], layer: Option<&str>) -> ObjectMeta {
         let mut all_labels: BTreeMap<String, String> = labels
             .iter()

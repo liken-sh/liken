@@ -1,4 +1,5 @@
-//! The map's elevations: their view models, templates, and styles.
+//! The view models and templates of the map's pages, from the cluster
+//! down to a pod.
 
 mod bar;
 mod cluster;
@@ -43,45 +44,39 @@ use transect_ground::loss;
 use transect_ground::machines::{self, Machine};
 use transect_ground::storage::Ground;
 
-/// The cluster elevation as a whole page.  Its `main` block holds the map
-/// and the sidebar, and renders on its own as the fragment that a pushed
-/// update replaces.
+/// The cluster map page. Its `main` block, with the map and the sidebar,
+/// also renders alone, as the fragment that a pushed update replaces.
 #[derive(Template)]
 #[template(path = "map/cluster.html", blocks = ["main"])]
 pub struct ClusterPage {
     pub map: ClusterMap,
-    /// The selected namespace.  The crumb names it, and the event stream's
-    /// URL includes it.
     pub selected: Option<Selected>,
     pub machines: Vec<Machine>,
-    /// Why the machines band draws no used bars, when it draws none.
+    /// Why the machines band shows no usage bars, when it shows none.
     pub usage_note: Option<transect_resources::resources::OffLine>,
-    /// Why no strip names a device, when the holds edge kind is turned
+    /// Why no machine strip lists a device, when the `holds` edge kind is
     /// off.
     pub devices_note: Option<&'static str>,
     pub ground: Ground,
     pub sidebar: Sidebar,
-    /// The selected namespace's card, which the page shows in place of the
+    /// The selected namespace's card. The page shows it instead of the
     /// sidebar.
     pub card: Option<NamespaceCard>,
-    /// What the loss of a set of machines takes down.  The page shows it in
-    /// place of the sidebar when it shows a loss.
+    /// What losing a set of machines takes down. The page shows it in
+    /// place of the sidebar.
     pub loss: Option<loss::Sidebar>,
-    /// The main column's row of edge kinds.
     pub edge_row: EdgeRow,
 }
 
 impl ClusterPage {
-    /// The machines band's groups, in the order it draws them.
     pub fn machine_groups(&self) -> Vec<machines::Group<'_>> {
         machines::groups(&self.machines)
     }
 
-    /// The crumb: the cluster alone, or with a namespace selected, the
-    /// cluster and the layer as links and the namespace as the current
-    /// place.  The cluster always links home, even on the map itself, so
-    /// it clears a selection.  The layer links to the map scrolled to its
-    /// band.
+    /// The breadcrumb: the cluster, then the predicted loss when there is
+    /// one, or else the selected namespace's layer, then the selected
+    /// namespace. The cluster always links to `/`, even on the map
+    /// itself, so that clicking it clears the selection and the loss.
     pub fn crumbs(&self) -> Vec<Crumb> {
         match (&self.selected, &self.loss) {
             (Some(selected), Some(loss)) if !loss.all_real() => vec![
@@ -101,28 +96,27 @@ impl ClusterPage {
         }
     }
 
-    /// Whether the card lists the namespace's workloads as chips.  It does,
-    /// because the map's parcel shows only their count.
+    /// Whether the card lists the namespace's workloads as chips. It
+    /// does, because the namespace's box on the map shows only their
+    /// count.
     pub fn card_workloads(&self) -> bool {
         true
     }
 
-    /// Whether the card leads to the access of the selected namespace.
     pub fn card_lens(&self) -> bool {
         true
     }
 
-    /// Where the card's name leads: the selected namespace's page.
     pub fn card_link(&self) -> Option<String> {
         self.selected
             .as_ref()
             .map(|selected| format!("/namespaces/{}", selected.namespace))
     }
 
-    /// The URL of the event stream for the view this page shows.  It comes
-    /// from the selection the map found and the machines the cluster has,
-    /// not the raw query, so a link to a namespace or a machine that is
-    /// gone streams the plain cluster.
+    /// The URL of the event stream for this page's view. It is built from
+    /// the selection and the loss, not from the raw query string, so a
+    /// link to a namespace or machine that no longer exists streams the
+    /// plain cluster.
     pub fn events_url(&self) -> String {
         match (&self.selected, &self.loss) {
             (Some(selected), Some(loss)) if !loss.all_real() => format!(
@@ -138,16 +132,17 @@ impl ClusterPage {
         }
     }
 
-    /// Whether the page shows something other than `/`, so Escape and a
-    /// click on empty map go back to it.  A loss that is all real is what
-    /// `/` shows.
+    /// Whether the page shows something other than `/`, so that Escape
+    /// and a click on empty map leave it. A loss of only the machines
+    /// that are already lost predicts nothing, so it is the same view as
+    /// `/`.
     pub fn away(&self) -> bool {
-        let asked = self.loss.as_ref().is_some_and(|loss| !loss.all_real());
-        self.selected.is_some() || asked
+        let lost = self.loss.as_ref().is_some_and(|loss| !loss.all_real());
+        self.selected.is_some() || lost
     }
 
-    /// Where Escape goes: back to the loss from a namespace selected in
-    /// it, and otherwise to `/`.
+    /// Where Escape goes: to the loss view when a namespace is selected
+    /// inside it, and to `/` otherwise.
     pub fn away_href(&self) -> String {
         match (&self.selected, &self.loss) {
             (Some(_), Some(loss)) if !loss.all_real() => format!("/?lose={}", loss.param()),

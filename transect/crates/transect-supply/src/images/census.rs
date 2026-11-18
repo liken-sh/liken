@@ -1,8 +1,6 @@
-//! A count of the running images by registry: how many have no source
-//! label, and how many transect cannot read and why.  The cluster's
-//! findings show these counts.  transect counts per registry, so the
-//! counts for images built locally stay separate from the counts for
-//! images pulled from elsewhere.
+//! For each registry, how many running images have no source label, and
+//! how many transect cannot read, with the reason.  The cluster's
+//! findings show these counts, and list the images by registry.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -12,13 +10,13 @@ use k8s_openapi::api::core::v1::Pod;
 use super::{Failure, ImageRef, Known, Lookup, parse};
 use transect_graph::pods::finished;
 
-/// One registry's running images without a source label.
+/// The running images of one registry that have no source label.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Gap {
     pub registry: String,
     /// How many have no source label.
     pub unlabelled: usize,
-    /// How many transect has read the labels of.
+    /// How many of the registry's images transect has read the labels of.
     pub read: usize,
 }
 
@@ -28,21 +26,24 @@ pub struct Unreadable {
     pub registry: String,
     pub images: usize,
     pub failure: Failure,
-    /// The mirror transect read the registry's host from, as a finding
-    /// names it.
+    /// The mirror that transect read the registry through, as the
+    /// finding names it.
     pub mirror: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Census {
-    /// The registries with an unlabelled image, the most first.
+    /// The registries with an unlabelled image, most unlabelled images
+    /// first.
     pub gaps: Vec<Gap>,
-    /// Each registry and reason, by registry and then by reason.
+    /// One entry for each registry and reason, sorted by registry and
+    /// then by reason.
     pub unreadable: Vec<Unreadable>,
 }
 
-/// Counts the images that the unfinished pods in `pods` run, and counts
-/// each digest once.
+/// Counts the images that the unfinished pods in `pods` run, each digest
+/// once.  An image whose labels transect has not read yet is in neither
+/// count.
 pub fn census(pods: &[Arc<Pod>], known: &Known) -> Census {
     let images: BTreeSet<ImageRef> = pods
         .iter()
@@ -83,9 +84,8 @@ pub fn census(pods: &[Arc<Pod>], known: &Known) -> Census {
         })
         .collect();
     gaps.sort_by_key(|gap| std::cmp::Reverse(gap.unlabelled));
-    // Sort by registry, then by failure, in the order of the map's keys.
-    // A count changes when transect reads images again, so an order by
-    // count would move the lines between two renders.
+    // The map's key order sorts by registry, then by failure. Sorting by
+    // count would reorder the lines whenever a count changes.
     let unreadable: Vec<Unreadable> = unreadable
         .into_iter()
         .map(|((registry, _), (images, failure))| Unreadable {
@@ -114,7 +114,7 @@ mod tests {
         }
     }
 
-    /// A pod in `phase` whose one container runs `image`.
+    /// A pod in `phase` whose only container runs `image`.
     fn pod(name: &str, phase: &str, image: &ImageRef) -> Arc<Pod> {
         Arc::new(
             serde_yaml::from_str(&format!(

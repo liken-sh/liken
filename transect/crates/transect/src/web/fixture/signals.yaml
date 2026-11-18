@@ -1,12 +1,12 @@
-# What the fixture's signals answer, as each source would: the alerts
+# The responses of the fixture's signal sources: the alerts that
 # Alertmanager reports as firing, in the shape of `GET /api/v2/alerts`,
-# and the series Prometheus answers each instant query of the fixture's
-# `MetricsSource` with, by the query.
+# and the series that Prometheus returns for each instant query of the
+# fixture's `MetricsSource`, matched by query.
 #
-# The alerts give one example of each place an alert attaches: an
-# object in a namespace, a machine, the cluster, and one an
-# exporter reports about another namespace.  No page shows the
-# watchdog.
+# The alerts cover each thing an alert can belong to: an object in a
+# namespace, a machine, the cluster, and an object in one namespace that
+# an exporter in another namespace reports on.  transect drops an alert
+# whose severity is `none`, such as `Watchdog`, so no page shows it.
 alerts:
   - labels: {alertname: LedgerExporterDown, severity: critical, namespace: acme-ledger, deployment: ledger-exporter}
     annotations: {summary: The ledger exporter is not answering., description: 'It has not answered a scrape for 10 minutes. [View the runbook](https://runbooks.example.test/ledger/exporter-down?window=10m&source=alert-rule-annotation-with-a-long-unbroken-address-that-never-wraps) or see https://dashboards.example.test/d/ledger-exporter/overview-of-every-exporter-answering-the-ledger-scrapes.'}
@@ -61,9 +61,9 @@ prometheus:
   - query: claim_bytes_used
     samples:
       - {labels: {namespace: acme-ledger, claim: data-ledger-db-0}, value: 3221225472}
-# The rows the log store answers the tail of the storefront's first
-# pod with, newest first, as the store gives them: one line of each
-# level its level field names, and one whose level field names none.
+# The rows the log store returns for the tail of the storefront's first
+# pod, newest first: one line for each level that the `levels` lists
+# match, and one line whose level matches none.
 logs:
   - namespace: acme-shop
     pod: storefront-rs-one

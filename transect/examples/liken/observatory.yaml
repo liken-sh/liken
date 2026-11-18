@@ -1,16 +1,17 @@
-# Kind knowledge for observatory-operator's kinds that report a Ready
-# condition, as observatory-operator would ship it.  Between
-# reservations every one of them reports Ready False with the reason
-# Idle ("Not reserved"), and a device on the shelf reports Inventory:
-# both mean at rest, not broken.  The reasons are the phases in
-# observatory-operator's status.go, observatory/site.go, and
-# observatory/device.go.
+# Kind knowledge for the kinds of observatory-operator that report a
+# Ready condition. Between reservations each of these objects has Ready
+# False with the reason Idle, and a device that names no parent has the
+# reason Inventory. Both mean the object is not in use, not that it is
+# broken, so `calm` lists them. They are the phases `PhaseIdle` in
+# observatory-operator's `observatory/site.go` and `DeviceInventory` in
+# `observatory/device.go`.
 #
-# Each piece of equipment names what it is part of: a camera, filter
-# wheel, focuser, or guider its optical train, a train, tube, mount, or
-# guider its telescope, and a telescope its observatory, so each board
-# nests in the one above it.  A guider names both its train and its
-# telescope, and nests under its train.
+# Each kind of equipment has references to the object that it is part
+# of: a camera, filter wheel, focuser, or guider refers to its optical
+# train. A train, tube, mount, or guider refers to its telescope, and a
+# telescope refers to its observatory. So each object's board nests
+# under the board of the object above it.  A guider refers to both its
+# train and its telescope, and nests under its train.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:

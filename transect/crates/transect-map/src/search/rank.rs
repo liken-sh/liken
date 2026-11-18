@@ -1,7 +1,9 @@
-//! How well a name matches a query: the whole name, then its start,
-//! then the start of a word in it after `-`, `.`, `/`, or `_`, then the
-//! query whole anywhere inside it, then its letters in order with others
-//! between, the tighter the better.  Case does not count.
+//! Ranks how well a name matches a search query, ignoring case. From
+//! best to worst, the query is the whole name, a prefix of the name, a
+//! prefix of a word in the name (words start after `-`, `.`, `/`, or
+//! `_`), a substring of the name, or a set of letters that appear in
+//! the name in order with other letters between them. Among those
+//! scattered matches, a shorter span ranks higher.
 
 /// How a name matches, best first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -15,8 +17,8 @@ pub enum Match {
     Subsequence(usize),
 }
 
-/// How `name` matches `query`, which is lowercase, or none when it does
-/// not.
+/// How `name` matches `query`, or `None` when it does not. `query` must
+/// be lowercase.
 pub fn rank(name: &str, query: &str) -> Option<Match> {
     let name = name.to_lowercase();
     if name == query {
@@ -37,9 +39,9 @@ pub fn rank(name: &str, query: &str) -> Option<Match> {
     span(&name, query).map(Match::Subsequence)
 }
 
-/// The fewest bytes of `name` that contain `query`'s letters in order,
-/// from the first matched letter to the last, or none when no stretch
-/// of it does.
+/// The length in bytes of the shortest stretch of `name`, from its first
+/// matched letter to its last, that contains the letters of `query` in
+/// order. Returns `None` when `name` has no such stretch.
 fn span(name: &str, query: &str) -> Option<usize> {
     let first = query.chars().next()?;
     let starts = name.match_indices(first).map(|(at, _)| at);

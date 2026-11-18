@@ -1,14 +1,14 @@
-//! What quick search finds of the scanners' reports: the
-//! vulnerabilities page, when some knowledge describes a findings
-//! report, and each id a current report contains, which opens its page.
+//! Quick search entries for vulnerability scanners' reports: one for the
+//! vulnerabilities page, and one for each finding id in a current report
+//! that links to that id's page.
 
 use std::sync::Arc;
 
 use super::{Entry, Sort};
 use transect_supply::vulnerabilities::{Vulnerabilities, link};
 
-/// The entries of `vulnerabilities`, or none when no knowledge
-/// describes a findings report.
+/// Returns no entries when no loaded `KindKnowledge` has a `findings`
+/// section, because then the cluster has no kind of findings report.
 pub fn entries(vulnerabilities: &Vulnerabilities) -> Vec<Entry> {
     if !vulnerabilities.described {
         return Vec::new();
@@ -31,7 +31,7 @@ pub fn entries(vulnerabilities: &Vulnerabilities) -> Vec<Entry> {
         kind: "finding".into(),
         sort: Sort::Object,
         context: vulnerabilities
-            .holding(id)
+            .reports_with(id)
             .next()
             .map(|(_, f)| f.severity.to_lowercase()),
         href: link(id),

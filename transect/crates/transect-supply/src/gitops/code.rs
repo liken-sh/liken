@@ -1,6 +1,7 @@
-//! A card's link to code: the directory where an object is declared,
-//! read from the object's reconciles-from edges, and whether the
-//! object's applier is ready.
+//! Where an object is declared in git, for the link to code on its
+//! card.  transect finds it by following the object's reconciles-from
+//! edges to an applier, and reports the directory the applier applies
+//! and whether the applier is ready.
 
 use super::forge::{self, Place};
 use super::{Found, GitOps, Ready};
@@ -10,17 +11,18 @@ use transect_graph::edges::{Endpoint, Graph, Kind, Object};
 /// Where one object is declared.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Code {
-    /// The applier that installed it from a chart, when a chart did.
+    /// The applier that installed the object from a chart, if a chart
+    /// installed it.
     pub release: Option<Release>,
-    /// The applier that applied it from a directory, or applied its
-    /// release.
+    /// The applier that applied the object from a directory, or applied
+    /// the release that installed it.
     pub declared: Option<Declared>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Release {
     pub object: Object,
-    /// The address of the release's page, set when the card links it.
+    /// The address of the release's page, when the card links to it.
     pub href: Option<String>,
     pub chart: Option<String>,
     /// The URL of the repository the chart comes from.
@@ -30,14 +32,14 @@ pub struct Release {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Declared {
     pub applier: Object,
-    /// The address of the applier's page, set when the card links it.
+    /// The address of the applier's page, when the card links to it.
     pub href: Option<String>,
     pub ready: Ready,
     /// The directory that the applier applies in its repository, or
     /// `None` when transect cannot read where the applier fetches from.
     pub place: Option<Place>,
     /// The repository's URL, which the card compares with the
-    /// repository a running image was built from.
+    /// repository that a running image was built from.
     pub repository: Option<String>,
     /// Whether the source label of a running image names that
     /// repository.
@@ -47,7 +49,7 @@ pub struct Declared {
 impl Code {
     /// Where `end` is declared, found by following its reconciles-from
     /// edges in `graph` to the applier of a directory, or to a release
-    /// and the applier that applied the release.  Returns `None` when no
+    /// and the applier that applied the release.  It is `None` when no
     /// edge from `end` leads to an applier.
     pub fn of(graph: &Graph, gitops: &GitOps, forges: &Forges, end: &Endpoint) -> Option<Self> {
         let by = applier(graph, gitops, end, |_| true)?;
@@ -87,9 +89,9 @@ impl Code {
 }
 
 impl GitOps {
-    /// Whether `object` installs a chart rather than applying a
-    /// directory.  It does when its kind's knowledge reads a chart and
-    /// no directory, or reads both and the object has no directory.
+    /// Whether `object` installs a chart instead of applying a
+    /// directory: its kind's knowledge reads a chart, and either reads
+    /// no directory or finds none on the object.
     pub fn installs_a_chart(&self, object: &Object) -> bool {
         let Some(fields) = self.fields_of(object) else {
             return false;
@@ -100,8 +102,8 @@ impl GitOps {
         fields.chart.is_some() && (fields.directory.is_none() || directory.is_none())
     }
 
-    /// The repository `found` fetches from and the ref it follows: its
-    /// own, or its source's.
+    /// The repository that `found` fetches from, and the ref it follows.
+    /// They are its own, or its source's when it has no URL of its own.
     pub fn fetches_from<'a>(&'a self, found: &'a Found) -> Option<(&'a str, &'a super::GitRef)> {
         if let Some(url) = &found.url {
             return Some((url, &found.reference));
@@ -111,8 +113,9 @@ impl GitOps {
     }
 }
 
-/// The first applier that `end` reconciles from and that `wanted`
-/// accepts.
+/// The first object that `end` reconciles from that is an applier and
+/// that `wanted` accepts.  An applier is an object whose kind's
+/// knowledge has `applies`.
 fn applier<'a>(
     graph: &'a Graph,
     gitops: &GitOps,

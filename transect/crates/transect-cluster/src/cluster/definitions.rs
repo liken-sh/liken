@@ -1,9 +1,10 @@
-//! A watch on CustomResourceDefinitions, each cut to the parts that
-//! describe its kind, when `transect` may list them.
+//! A watch on `CustomResourceDefinition`s, each trimmed to the parts
+//! that describe its kind, when `transect` may list them.
 //!
-//! Discovery runs in the background, as it does for attachments, so an
-//! identity that may not list CRDs still gets its map.  Its custom
-//! kinds' cards then use their images' descriptions instead.
+//! A background probe checks whether `transect` may list CRDs, as it
+//! does for `VolumeAttachment`s, so an account that may not list them
+//! still gets its map. The cards of custom kinds then use the
+//! descriptions from their images instead of the CRDs'.
 
 use std::sync::Arc;
 
@@ -20,8 +21,8 @@ use super::trim;
 pub struct DefinitionStore(Optional<Store<CustomResourceDefinition>>);
 
 impl DefinitionStore {
-    /// Starts finding whether `transect` may list CRDs, and a watch once
-    /// it may.
+    /// Starts probing whether `transect` may list CRDs, and starts a
+    /// watch when it may.
     pub fn discover(client: &Client, changes: &Changes) -> Self {
         let (probing, starting) = (client.clone(), client.clone());
         let started = changes.clone();
@@ -33,13 +34,14 @@ impl DefinitionStore {
         ))
     }
 
-    /// Resolves once discovery has first answered, and the store, when
-    /// it may list CRDs, holds its first full list.
+    /// Resolves once the probe has finished or is retrying. When the
+    /// probe succeeded, the store has its first full list by then,
+    /// unless that list took longer than `ATTEMPT` in `discovery`.
     pub async fn synced(&self) {
         self.0.settled().await;
     }
 
-    /// Every CRD as of now, or none while the list is refused.
+    /// Every CRD, or none when the store is not running.
     pub fn state(&self) -> Vec<Arc<CustomResourceDefinition>> {
         match self.0.state() {
             State::On(store) => store.state(),
@@ -48,12 +50,14 @@ impl DefinitionStore {
     }
 }
 
-/// Whether a list of one CRD succeeds.  Every API server serves them.
+/// Succeeds when a list of CRDs, limited to one object, succeeds. Every
+/// API server serves the kind, so the probe checks only that
+/// `transect` may list it.
 async fn listable(client: Client) -> Result<(), Refusal> {
     let crds: Api<CustomResourceDefinition> = Api::all(client);
     let one = ListParams::default().limit(1);
     crds.list_metadata(&one).await.inspect_err(|error| {
-        tracing::warn!(%error, "cannot list CustomResourceDefinitions");
+        tracing::warn!(%error, "Listing CustomResourceDefinitions did not complete");
     })?;
     Ok(())
 }

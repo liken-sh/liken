@@ -1,15 +1,16 @@
-//! The plural of every kind the API serves, from discovery, which names
-//! a kind in a URL as kubectl does, such as `repositories` for a
-//! `Repository`.  A plural is the API's to choose, not a rule of
-//! English, so none is ever made from a kind's name.
+//! Reads the resource name (plural) of every kind the API serves from
+//! API discovery. A URL names a kind by its plural, such as
+//! `repositories` for `Repository`. The API's author chooses the
+//! plural, so it is never derived from the kind.
 //!
-//! Discovery runs once at the start, in the background, one request per
-//! API group.  It keeps each kind's resource at the version its group
-//! prefers, too, so a custom kind watched at that version needs no
-//! discovery of its own.  A group that does not answer, such as an
-//! aggregated API whose server is down, leaves out only its own kinds.
-//! A custom kind installed later gets its plural when it owns
-//! something, from the discovery of owner kinds.
+//! Discovery runs in the background at startup, with one request per
+//! API group, and retries after a transient failure. It also records
+//! each kind's resource at the version its group prefers, so a custom
+//! kind watched at that version needs no discovery of its own. When one
+//! group's request fails, such as for an aggregated API whose server is
+//! down, only that group's kinds are missing. `Cluster::plurals` adds
+//! the plural of each watched custom kind, so a kind installed after
+//! discovery has one too.
 
 use std::collections::HashMap;
 
@@ -52,7 +53,7 @@ impl PluralStore {
         self.0.settled().await;
     }
 
-    /// Every plural discovery found, or none before it answers.
+    /// Every plural found, or an empty map before discovery finishes.
     pub fn plurals(&self) -> Plurals {
         match self.0.state() {
             State::On(Discovered(plurals, ..)) => plurals,
@@ -60,8 +61,8 @@ impl PluralStore {
         }
     }
 
-    /// Every kind discovery found that is not namespaced, or none
-    /// before it answers.
+    /// Every cluster-scoped kind found, or an empty set before
+    /// discovery finishes.
     pub fn cluster_scoped(&self) -> ClusterScoped {
         match self.0.state() {
             State::On(Discovered(_, scoped, _)) => scoped,
@@ -69,8 +70,8 @@ impl PluralStore {
         }
     }
 
-    /// Each kind's resource at its group's preferred version, or none
-    /// before discovery answers.
+    /// Each kind's resource at its group's preferred version, or an
+    /// empty map before discovery finishes.
     pub fn preferred(&self) -> Preferred {
         match self.0.state() {
             State::On(Discovered(.., preferred)) => preferred,
@@ -93,7 +94,7 @@ async fn read(client: Client) -> Result<(Plurals, ClusterScoped, Preferred), Ref
             match client.list_api_group_resources(&version).await {
                 Ok(list) => Some((group, list)),
                 Err(error) => {
-                    tracing::warn!(%version, %error, "no plurals from this API group");
+                    tracing::warn!(%version, %error, "Listing the resources of an API group did not succeed, so its kinds have no plurals");
                     None
                 }
             }
@@ -109,8 +110,8 @@ async fn read(client: Client) -> Result<(Plurals, ClusterScoped, Preferred), Ref
     Ok((plurals(&lists), cluster_scoped(&lists), preferred(&lists)))
 }
 
-/// Each resource in `lists` with its group.  A subresource, such as
-/// `pods/log`, shares its kind with its resource and is left out.
+/// Each resource in `lists` with its group. Subresources, such as
+/// `pods/log`, are skipped because they have their parent's kind.
 fn resources(lists: &[(String, APIResourceList)]) -> impl Iterator<Item = (&String, &APIResource)> {
     let resources = lists
         .iter()
@@ -130,8 +131,8 @@ fn plurals(lists: &[(String, APIResourceList)]) -> Plurals {
         .collect()
 }
 
-/// Each kind in `lists` as its resource at the version its list is of,
-/// which is the version its group prefers.
+/// Each kind in `lists` as a resource at the version of its list, which
+/// is its group's preferred version.
 fn preferred(lists: &[(String, APIResourceList)]) -> Preferred {
     let list_of = |group: &String| lists.iter().find(|(name, _)| name == group);
     resources(lists)
@@ -188,7 +189,7 @@ mod tests {
     #[case::a_custom_kind("source.example.io", "Repository", Some("repositories"))]
     #[case::a_core_kind("", "Pod", Some("pods"))]
     #[case::a_kind_no_group_serves("source.example.io", "Bucket", None)]
-    fn takes_each_plural_from_discovery(
+    fn reads_each_plural_from_discovery(
         #[case] group: &str,
         #[case] kind: &str,
         #[case] plural: Option<&str>,
@@ -211,7 +212,7 @@ mod tests {
     #[rstest]
     #[case::a_namespaced_kind("Pod", false)]
     #[case::a_cluster_scoped_kind("Node", true)]
-    fn takes_each_scope_from_discovery(#[case] kind: &str, #[case] scoped: bool) {
+    fn reads_each_scope_from_discovery(#[case] kind: &str, #[case] scoped: bool) {
         let lists = [(String::new(), list(&[("pods", "Pod"), ("nodes", "Node")]))];
         let found = cluster_scoped(&lists);
         assert_eq!(found.contains(&(String::new(), kind.to_owned())), scoped);
@@ -221,7 +222,7 @@ mod tests {
     #[case::a_custom_kind("source.example.io", "Repository", Some(("v1beta2", "source.example.io/v1beta2", "repositories")))]
     #[case::a_core_kind("", "Pod", Some(("v1", "v1", "pods")))]
     #[case::a_kind_no_group_serves("source.example.io", "Bucket", None)]
-    fn keeps_each_kind_at_its_groups_preferred_version(
+    fn records_each_kind_at_its_groups_preferred_version(
         #[case] group: &str,
         #[case] kind: &str,
         #[case] expected: Option<(&str, &str, &str)>,

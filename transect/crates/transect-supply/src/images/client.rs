@@ -2,24 +2,26 @@
 //! API: the manifest by digest, the platform's manifest when that is an
 //! index, and the config blob it names.
 //!
-//! transect sends a request first with the token or credential that
-//! last read the repository, while it lasts, and anonymously when there
-//! is none.  A registry that
-//! requires a token names a realm in its challenge, and transect requests
-//! an anonymous token from that realm.  transect sends its credential
-//! only when the registry refuses the anonymous token and transect was
-//! given a credential for the registry.  A registry often serves a blob
-//! by a redirect to object storage on another host.  The HTTP client
-//! drops the `Authorization` header on a redirect to another host, so a
-//! registry's token is never sent to the storage, and `auth::heeded`
-//! leaves a challenge from the storage unanswered.
+//! The first request to a repository uses the cached token or
+//! credential for it, if one has not expired, and is anonymous
+//! otherwise.  After a refusal, `auth::next` picks what to try: an
+//! anonymous token from the realm in the registry's challenge, then the
+//! registry's credential, sent as Basic or in a token request.  transect
+//! sends a credential only after a refusal, and only when it has one for
+//! that registry.
 //!
-//! transect requests each body by its digest and keeps the body only when
-//! it hashes to that digest, so the content that transect keeps for a
+//! A registry often serves a blob through a redirect to object storage
+//! on another host.  reqwest drops the `Authorization` header on a
+//! redirect to another host, so the registry's token never reaches the
+//! storage host.  A refusal from the storage host fails the read
+//! (`auth::same_origin`), so transect never sends a credential in reply.
+//!
+//! Each body is requested by its digest and is returned only when its
+//! hash equals that digest, so the content that transect returns for a
 //! digest is the content the digest names.
 //!
-//! When a host has a mirror, transect reads from the mirror instead, with
-//! the mirror's credentials.
+//! When a host has a mirror, transect reads from the mirror instead,
+//! using the mirror's credentials.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -37,26 +39,28 @@ use super::mirror::{self, Mirror, Mirrors, RegistryMirror};
 use super::{Failure, ImageRef, Provenance, Want, api_server, labels};
 use transect_resources::resources::Field;
 
-/// The longest one request may take, so a registry that stops answering
-/// blocks one of the few concurrent reads for seconds, not forever.
+/// The longest one request may take.  A registry that stops responding
+/// holds one of the `task::CONCURRENT` reads for at most this long.
 const TIMEOUT: Duration = Duration::from_secs(15);
-/// The most bytes transect reads of one answer.  A manifest or a config
-/// blob is a few kilobytes, so an answer far larger is not one of them.
+/// The most bytes transect reads from one response.  A manifest or a
+/// config blob is a few kilobytes, so a much larger response is
+/// something else.
 const MAX_BODY: usize = 4 << 20;
 
 pub struct Registries {
     http: reqwest::Client,
     credentials: Credentials,
-    /// The mirrors that the flags name, which take precedence over the
-    /// resources' mirrors.
+    /// The mirrors set by command-line flags, which take precedence over
+    /// the `RegistryMirror` resources.
     flags: Mirrors,
-    /// The RegistryMirrors of transect's resources, which name
-    /// mirrors too.
+    /// The mirrors that `RegistryMirror` resources declare.
     resources: Option<Field<Vec<RegistryMirror>>>,
-    /// The client for the API, which reads a mirror at the API server's
-    /// address.
+    /// The Kubernetes client, used when a mirror is the API server
+    /// itself.
     api: Option<kube::Client>,
-    /// The last token each repository was read with.
+    /// The cached authentication for each (registry, repository), and
+    /// when it expires: a token as soon as the realm issues it, or a
+    /// credential after a request with it as Basic succeeds.
     tokens: Mutex<HashMap<(String, String), (Auth, Instant)>>,
 }
 
@@ -76,9 +80,9 @@ impl Registries {
         })
     }
 
-    /// Returns these registries set to read each host that the flags or
-    /// the resources' RegistryMirrors name from its mirror, and to read
-    /// a mirror at the API server's address through `api`.
+    /// Returns these registries set to read each host that `flags` or
+    /// the `RegistryMirror` resources name from its mirror.  A mirror
+    /// at the API server's address is read through `api`.
     pub fn with_mirrors(
         self,
         flags: Mirrors,
@@ -93,13 +97,16 @@ impl Registries {
         }
     }
 
-    /// The current mirror of each host.
+    /// The mirror of each host, from the flags and the current
+    /// resources.
     pub fn mirrors(&self) -> Mirrors {
         let resources = self.resources.as_ref().map(Field::read);
         mirror::merged(&self.flags, resources.as_deref().unwrap_or_default())
     }
 
-    /// The labels of the image `want` names, for its platform.
+    /// The labels of the image `want` names, for its platform.  The
+    /// image's digest may name an index, and then the manifest for the
+    /// platform is read from it.
     pub async fn provenance(&self, want: &Want) -> Result<Provenance, Failure> {
         let image = &want.image;
         let manifest = |digest: String| async move {
@@ -123,10 +130,10 @@ impl Registries {
         labels::provenance(&blob)
     }
 
-    /// Returns the manifest or blob that `digest` names under `kind`, only
-    /// when the body hashes to `digest`.  This function checks the digest
-    /// before it puts the digest in the path, because a digest from a
-    /// manifest is whatever text the registry wrote.
+    /// Returns the manifest or blob that `digest` names under `kind`,
+    /// only when the body hashes to `digest`.  It validates `digest`
+    /// before putting it in the request path, because a digest read from
+    /// a manifest is text that the registry chose.
     async fn content(
         &self,
         image: &ImageRef,
@@ -144,8 +151,8 @@ impl Registries {
         }
     }
 
-    /// The body at `path` under the repository, from the registry or
-    /// its mirror.
+    /// The body at `path` under the image's repository, from the
+    /// registry or from its mirror.
     async fn get(&self, image: &ImageRef, path: &str, accept: &str) -> Result<Vec<u8>, Failure> {
         let repository = &image.repository;
         match self.mirrors().get(&image.registry) {
@@ -165,9 +172,9 @@ impl Registries {
         }
     }
 
-    /// Returns the body at `url`.  It sends the credential of `registry`
-    /// when the registry requests one, and answers each challenge with
-    /// the step that `auth::next` returns.
+    /// Returns the body at `url`.  It responds to each authentication
+    /// challenge with the step that `auth::next` chooses, and sends the
+    /// credential of `registry` only when that step calls for it.
     async fn get_from(
         &self,
         url: &str,
@@ -181,8 +188,9 @@ impl Registries {
         let mut auth = self.cached(&key);
         let mut tried = Tried::default();
         let mut last: Option<Challenge> = None;
-        // Each pass tries one more form of authentication, and there are
-        // three to try.
+        // Each refusal moves to a form of authentication that `tried`
+        // does not record yet, and `auth::next` fails when none is left,
+        // so the loop ends after a few requests.
         for _ in 0..4 {
             let response = self.send(url, accept, auth.as_ref()).await?;
             let status = response.status().as_u16();
@@ -192,8 +200,8 @@ impl Registries {
                 }
                 return read(response).await;
             }
-            let heeded = auth::heeded(&requested, response.url());
-            if !matches!(status, 401 | 403 | 429) || !heeded {
+            let same_origin = auth::same_origin(&requested, response.url());
+            if !matches!(status, 401 | 403 | 429) || !same_origin {
                 return Err(failure(status, response).await);
             }
             let challenge = response.headers().get(WWW_AUTHENTICATE);
@@ -254,9 +262,10 @@ impl Registries {
     }
 
     /// Requests a token from `realm`.  It returns `None` when the realm
-    /// refuses to give one, and `next` then treats that as a refusal of
-    /// the request.  The realm is whatever address the challenge named,
-    /// so no part of the realm's answer except a token reaches a page.
+    /// refuses to issue one, and `auth::next` then treats the original
+    /// request as refused.  The realm is an address that the registry's
+    /// challenge supplied, so nothing from its response except the token
+    /// is passed on to a page.
     async fn token(
         &self,
         realm: &str,
@@ -296,9 +305,9 @@ impl Registries {
         (Instant::now() < *until).then(|| auth.clone())
     }
 
-    /// Keeps `auth` for the repository until 10 seconds before its
-    /// lifetime ends, so the next read of the repository skips the
-    /// refusal and the token request.
+    /// Caches `auth` for the repository until 10 seconds before its
+    /// lifetime ends, so the next read of the repository does not repeat
+    /// the refused request and the token request.
     fn keep(&self, key: (String, String), auth: Auth, lifetime: Duration) {
         let lifetime = lifetime.saturating_sub(Duration::from_secs(10));
         if lifetime.is_zero() {
@@ -312,7 +321,7 @@ impl Registries {
     }
 }
 
-/// The body of a response, up to `MAX_BODY`.
+/// The body of a response, or `TooLarge` when it exceeds `MAX_BODY`.
 async fn read(mut response: reqwest::Response) -> Result<Vec<u8>, Failure> {
     let mut body = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(|_| Failure::Unreachable)? {
@@ -324,10 +333,11 @@ async fn read(mut response: reqwest::Response) -> Result<Vec<u8>, Failure> {
     Ok(body)
 }
 
-/// Why a request that the registry did not refuse failed.  A registry
-/// answers a request for a digest it does not have with a 404 and an
-/// error in JSON, but a host that is not a registry answers with its own
-/// 404 page.
+/// The failure for a response that is not a success and not an
+/// authentication challenge.  A registry responds to a digest it does
+/// not have with a 404 and a JSON `errors` body, while a host that is
+/// not a registry returns its own 404 page, so the two get different
+/// failures.
 async fn failure(status: u16, response: reqwest::Response) -> Failure {
     if status != 404 {
         return Failure::Status(status);

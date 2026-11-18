@@ -1,8 +1,7 @@
-//! Every resource read from the directory under `--resources`, sorted
-//! by kind into the domain that reads it.  The sorting names every
-//! domain, so it is here, in the binary.  `resources` reads the
-//! directory and keeps the overlays, and each domain parses its own
-//! kind and reads its own field through `resources::Field`.
+//! The resources read from the directory that `--resources` names,
+//! sorted by kind to the domain crate that parses each kind. The sort
+//! must know every domain crate, so it is in the binary. The
+//! `resources` crate reads the directory and applies the overlays.
 
 #[cfg(test)]
 mod examples;
@@ -21,29 +20,25 @@ use transect_resources::resources::{Condition, Directory, DocId, Sorts};
 use transect_supply::forge::Forge;
 use transect_supply::images::mirror::{self, RegistryMirror};
 
-/// Every resource read from the directory, and what each file held.
+/// The parsed resources. `directory` has the condition of each file.
 #[derive(Debug, Default)]
 pub struct Loaded {
     pub directory: Directory,
     pub layers: Layers,
     pub intents: Vec<Intent>,
     pub kinds: Vec<KindKnowledge>,
-    /// What each DRA driver's devices are, by the driver's name.
     pub devices: Vec<DeviceKnowledge>,
     pub outsides: Vec<Outside>,
     pub mirrors: Vec<RegistryMirror>,
-    /// The cluster's log store, of which it declares at most one.
     pub log_source: Option<LogSource>,
     pub log_patterns: Vec<LogPattern>,
-    /// The queries the cluster declares for Prometheus, of which it
-    /// declares at most one set.
     pub metrics_source: Option<MetricsSource>,
-    /// The ingress controllers, by the identifier an `IngressClass`
-    /// names.
+    /// Each matches an `IngressClass` by its `spec.controller`.
     pub ingress_controllers: Vec<IngressController>,
-    /// The forges whose page layouts the links to code follow.
+    /// The URL layout of each forge, used to build links to code.
     pub forges: Vec<Forge>,
-    /// How each load balancer's listeners name the `Service` they serve.
+    /// How each load balancer's listeners identify the `Service` they
+    /// serve.
     pub load_balancers: Vec<LoadBalancerController>,
 }
 
@@ -136,8 +131,9 @@ impl Sorts for Loaded {
     }
 }
 
-/// Keeps `parsed` in `kept` unless `same` finds one there already, in
-/// which case the one read first is used and `twice` gives the reason.
+/// Adds `parsed` to `kept`. When `same` matches an entry already in
+/// `kept`, the entry read first stays, and the condition has the
+/// message from `twice`.
 fn first<T>(
     kept: &mut Vec<T>,
     parsed: Result<T, String>,
@@ -157,16 +153,16 @@ fn first<T>(
     }
 }
 
-/// Keeps `parsed` in `slot`, a resource a cluster declares at most one
-/// of, called `what`, unless one is there already.
-fn only<T>(slot: &mut Option<T>, parsed: Result<T, String>, what: &str) -> Condition {
+/// Stores `parsed` in `kept` for a kind that a cluster declares at most
+/// once. When `kept` is already set, the first stays.
+fn only<T>(kept: &mut Option<T>, parsed: Result<T, String>, what: &str) -> Condition {
     match parsed {
-        Ok(_) if slot.is_some() => Condition::left_out(
+        Ok(_) if kept.is_some() => Condition::left_out(
             "Duplicate",
             format!("a cluster declares one {what}, and the one read first is used"),
         ),
         Ok(one) => {
-            *slot = Some(one);
+            *kept = Some(one);
             Condition::loaded()
         }
         Err(message) => Condition::left_out("Invalid", message),

@@ -2,15 +2,14 @@
 //! `PersistentVolume` and on to where the data is stored, which is an
 //! NFS server, an iSCSI target, a CSI driver, or one machine's own disk.
 //!
-//! The ground band draws the backends outside the cluster, one box per
+//! The outside-systems band draws the backends outside the cluster, one box per
 //! address that a volume names, or one per CSI driver when the volume
 //! names no address, with the box's volumes counted by type.  The
 //! Kubernetes API does not show that several drivers and addresses
 //! belong to one storage appliance, so they stay separate boxes unless
-//! an `Outside` resource groups them.  A volume on one machine is not in
-//! the ground band, because its data is stored on that machine.  The
-//! same is true of a volume of a CSI driver whose `data-on` is
-//! `machines`.
+//! an `Outside` resource groups them.  A volume whose data is stored on
+//! a machine's own disk is not in the outside-systems band.  That includes each
+//! volume of a CSI driver whose `data-on` is `machines`.
 
 mod console;
 mod ground;
@@ -31,7 +30,7 @@ use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use transect_graph::edges::{Claim, Object, Provenance};
 
 /// The CSI drivers that store their volumes on the disks of the machines
-/// that mount them, each with the provenance of the intent that states
+/// that mount them, each with the provenance of the intent that declares
 /// it.
 pub type OnMachines = HashMap<String, Provenance>;
 
@@ -60,7 +59,7 @@ pub enum Backend {
 }
 
 impl Backend {
-    /// The name of the ground box that shows this backend, or `None` for
+    /// The name of the outside system that shows this backend, or `None` for
     /// a machine's disk, which is inside the cluster.
     pub fn outside(&self) -> Option<&str> {
         match self {
@@ -70,7 +69,7 @@ impl Backend {
     }
 }
 
-/// What a ground box counts its volumes by.
+/// What an outside system's box counts its volumes by.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Type {
     Nfs,
@@ -86,9 +85,9 @@ pub enum Type {
 pub struct Volume {
     pub backend: Backend,
     pub kind: Type,
-    /// The provenance of the intent that states where the volume stores
+    /// The provenance of the intent that declares where the volume stores
     /// its data, when the API alone does not show it.
-    pub stated: Option<Provenance>,
+    pub declared_in: Option<Provenance>,
 }
 
 #[derive(Debug, Default)]
@@ -97,12 +96,13 @@ pub struct Storage {
     volumes: HashMap<String, Volume>,
     /// Every claim, and the name of the volume bound to it, if any.
     claims: HashMap<Claim, Option<String>>,
-    /// The size of each claim, as its quantity is written, such as "8Gi".
+    /// The size of each claim as its quantity is written, such as
+    /// "8Gi".
     sizes: HashMap<Claim, String>,
     /// The access modes each claim asks for, such as `ReadWriteOnce`.
     modes: HashMap<Claim, Vec<String>>,
     /// The machines each volume is attached to, by the volume's name,
-    /// from the VolumeAttachments that a CSI driver's attacher writes.
+    /// from the cluster's `VolumeAttachment` objects.
     attachments: HashMap<String, Vec<String>>,
 }
 
@@ -119,8 +119,9 @@ impl Storage {
         Self::placed(claims, volumes, classes, &OnMachines::new())
     }
 
-    /// Does what `build` does, and places the volumes of each driver
-    /// that `on_machines` lists on the machines that mount them.
+    /// Follows every claim to its volume as `build` does.  A volume of
+    /// a CSI driver that `on_machines` lists is placed on the machines
+    /// that mount it.
     pub fn placed<'a>(
         claims: impl IntoIterator<Item = &'a PersistentVolumeClaim>,
         volumes: impl IntoIterator<Item = &'a PersistentVolume>,
@@ -135,11 +136,11 @@ impl Storage {
             .into_iter()
             .filter_map(|volume| {
                 let name = volume.metadata.name.clone()?;
-                let (backend, kind, stated) = source(volume, &provisioners, on_machines)?;
+                let (backend, kind, declared_in) = source(volume, &provisioners, on_machines)?;
                 let volume = Volume {
                     backend,
                     kind,
-                    stated,
+                    declared_in,
                 };
                 Some((name, volume))
             })
@@ -170,8 +171,9 @@ impl Storage {
         }
     }
 
-    /// This storage with each backend outside the cluster renamed by
-    /// `rename`, so that several backends of one system count as one.
+    /// This storage with the name of each backend outside the cluster
+    /// passed through `rename`, so that the backends of one storage
+    /// appliance share one outside system's box.
     pub fn renamed(mut self, rename: impl Fn(&str) -> String) -> Self {
         for volume in self.volumes.values_mut() {
             match &mut volume.backend {
@@ -187,7 +189,8 @@ impl Storage {
         self.sizes.get(claim).map(String::as_str)
     }
 
-    /// The volume bound to `claim`, or `None` while it waits for one.
+    /// The volume bound to `claim`, or `None` when the claim is unbound,
+    /// unknown, or bound to a volume that `Storage` left out.
     pub fn volume_of(&self, claim: &Claim) -> Option<&Volume> {
         self.volumes.get(self.claims.get(claim)?.as_deref()?)
     }
@@ -221,7 +224,7 @@ impl Storage {
             .count()
     }
 
-    /// The claims bound to a volume in the ground box `name`, each with
+    /// The claims bound to a volume on the outside system `name`, each with
     /// its volume's type, sorted by type and then by namespace and name.
     pub fn claims_on(&self, name: &str) -> Vec<(&Claim, &Type)> {
         let mut found: Vec<(&Claim, &Type)> = self
@@ -236,7 +239,7 @@ impl Storage {
         found
     }
 
-    /// Each ground box and the number of its volumes of each type.
+    /// Each outside system's box and the number of its volumes of each type.
     /// Without `namespace`, the count includes every volume in the
     /// cluster.  With `namespace`, it includes only the volumes that the
     /// namespace's claims are bound to.
@@ -264,9 +267,9 @@ impl Storage {
     }
 }
 
-/// A bound claim's capacity, which can be more than the claim requested
-/// when a provisioner rounds up.  When the claim has no capacity yet,
-/// this function returns the storage that the claim requests.
+/// The size of `claim`: its capacity once bound, which can be more than
+/// the request when a provisioner rounds up, and its requested storage
+/// until then.
 fn size(claim: &PersistentVolumeClaim) -> Option<String> {
     let capacity = claim.status.as_ref().and_then(|s| s.capacity.as_ref());
     let requests = claim.spec.as_ref().and_then(|spec| {
@@ -338,7 +341,8 @@ pub mod fixtures {
         ))
     }
 
-    /// A claim in `namespace`, bound to the volume `bound` when it names one.
+    /// A claim in `namespace`, bound to the volume `bound` when there is
+    /// one.
     pub fn claim(namespace: &str, name: &str, bound: Option<&str>) -> PersistentVolumeClaim {
         let spec = bound
             .map(|volume| format!("volumeName: {volume}"))

@@ -12,8 +12,8 @@ fn yaml<K: DeserializeOwned>(text: &str) -> Arc<K> {
     Arc::new(serde_yaml::from_str(text).unwrap())
 }
 
-/// A pod in `shop`, ready or not, controlled by `owner`, given as its
-/// `apiVersion`, kind, and name.
+/// A pod in `shop` with the given readiness and phase. `owner` is the
+/// `apiVersion`, kind, and name of its controller owner reference.
 fn pod(name: &str, owner: (&str, &str, &str), ready: bool, phase: &str) -> Arc<Pod> {
     let (api_version, kind, owner) = owner;
     yaml(&format!(
@@ -64,9 +64,9 @@ fn cron_job(name: &str) -> Arc<CronJob> {
     ))
 }
 
-/// The cluster these tests read: a `Deployment` `web` of three, a cache
-/// run by an operator through a `StatefulSet` of two, a database whose
-/// operator runs two pods itself, and a `CronJob`.
+/// A `Deployment` `web` of three replicas, a `Cache` that runs a
+/// `StatefulSet` of two, a `Database` that owns its three pods directly,
+/// and a `CronJob`.
 struct Shop {
     deployments: Vec<Arc<Deployment>>,
     stateful_sets: Vec<Arc<StatefulSet>>,
@@ -114,7 +114,7 @@ impl Shop {
     }
 }
 
-/// What a test reads of one workload.
+/// The properties of one workload that the tests compare.
 #[derive(Debug, PartialEq)]
 struct Read {
     replicas: Option<i32>,

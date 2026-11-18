@@ -1,26 +1,27 @@
-//! Sets of ports, as a rule's `ports` admit them: by protocol, a port or
-//! a range from `port` to `endPort`, or every port.
+//! Sets of ports that a `NetworkPolicy` rule's `ports` admit: a port or
+//! a range from `port` to `endPort` of one protocol, or every port.
 //!
-//! A connection is allowed only on a port both ends' policies admit, so
-//! sets need union, across the rules of one end, and intersection,
-//! across the two ends.  Each set is kept merged and sorted, so two sets
-//! that admit the same ports compare equal and a card can group callers
-//! by the ports they reach.
+//! A connection is allowed only on a port that the policies of both
+//! ends admit. So the rules of one end combine by union, and the two
+//! ends combine by intersection. Each set is kept sorted, with
+//! overlapping and adjacent spans merged, so two sets that admit the same ports are
+//! equal, and a card can group callers by the ports they reach.
 
 use k8s_openapi::api::networking::v1::NetworkPolicyPort;
 use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
 
-/// The protocol that applies when a port names none, as in the API.
+/// The protocol of a rule's port that sets none, as the API defines.
 pub const DEFAULT_PROTOCOL: &str = "TCP";
 
 const HIGHEST: u16 = u16::MAX;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Ports {
-    /// Every port of every protocol: a rule that lists no ports.
+    /// Every port of every protocol, which is what a rule with no
+    /// `ports` admits.
     Any,
-    /// The spans listed, sorted and merged.  An empty list is no port
-    /// at all.
+    /// The listed spans, sorted and merged. An empty list admits no
+    /// port.
     Listed(Vec<Span>),
 }
 
@@ -32,8 +33,8 @@ pub struct Span {
     pub last: u16,
 }
 
-/// A port a pod's container names, which a rule's named port resolves
-/// to on the pod the connection reaches.
+/// A named container port of a pod. A rule's named port resolves to
+/// its number on the pod that the connection reaches.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NamedPort {
     pub name: String,
@@ -48,7 +49,7 @@ impl Default for Ports {
 }
 
 impl Ports {
-    /// No port at all, which is what a union starts from.
+    /// The empty set, which is where a union starts.
     pub fn none() -> Self {
         Self::Listed(Vec::new())
     }
@@ -92,10 +93,12 @@ impl Ports {
         }
     }
 
-    /// The ports a rule's `ports` admit on a pod with `named` ports.  An
-    /// empty list admits every port.  A named port admits the number
-    /// the pod gives that name with the same protocol, and nothing on a
-    /// pod that gives it none, which is how the API server reads it.
+    /// The ports that a rule's `ports` admit on a pod with the `named`
+    /// container ports. An empty list admits every port. A named port
+    /// admits the number that the pod gives that name with the same
+    /// protocol, and admits nothing on a pod that does not define it.
+    /// A port with no number admits its whole protocol, and an
+    /// `endPort` below the port is ignored.
     pub fn of_rule(ports: &[NetworkPolicyPort], named: &[NamedPort]) -> Self {
         if ports.is_empty() {
             return Self::Any;
@@ -124,8 +127,8 @@ impl Ports {
         Self::merged(spans)
     }
 
-    /// `spans` sorted, with each overlapping or adjacent pair of one
-    /// protocol joined.
+    /// The set of `spans`, sorted, with overlapping or adjacent spans
+    /// of one protocol merged.
     fn merged(mut spans: Vec<Span>) -> Self {
         spans.sort();
         let mut merged: Vec<Span> = Vec::new();

@@ -1,13 +1,13 @@
-# A vulnerability scanner's reports, one per container's image, read
-# through the findings knowledge in `resources.yaml`.  The storefront's
-# report is current.  The ledger's report names a digest that its pod
-# does not run, so it is stale.  The listings `Deployment` runs two
-# containers, each with a report, and the storefront's report and the
-# report of its `main` container share one id.  Findings come with and
-# without a fix, with and without a score, and two have the scanner's
-# UNKNOWN severity.  The
-# storefront's report repeats one finding exactly, and names one id for
-# two packages with different scores and severities.
+# Vulnerability scanner reports, one per container image, read through
+# the `findings` section of the `ImageReport` kind knowledge in
+# `resources.yaml`.  The storefront's report is current.  The ledger's
+# report is stale, because its digest is not the one its pod runs.  The
+# `listings` `Deployment` runs two containers and has a report for each,
+# and its `main` report shares CVE-2026-0001 and its title with the
+# storefront's report.  The findings cover a fix and no fix, a score
+# and no score, and the scanner's UNKNOWN severity.  The storefront's
+# report lists one finding twice, and lists CVE-2026-0001 for two
+# packages with different scores and severities.
 apiVersion: apps/v1
 kind: Deployment
 metadata: {namespace: acme-shop, name: listings, uid: listings}

@@ -1,8 +1,8 @@
-//! Reasons from the log source's searches across the cluster: the
-//! error lines of each workload, by the level field, and each error or
-//! warning pattern's matches by namespace.  These searches cover every
-//! pod, so when they exist, transect uses them in place of the counts
-//! from the tails of the pods whose pages were opened.
+//! Health reasons from the log source's searches across the cluster:
+//! the count of each workload's error lines, and the matches of each
+//! `Error` or `Warning` pattern.  A search covers every pod, so when the
+//! error search succeeds, its counts replace the counts from the logs
+//! that transect tails for the pod pages that someone opened.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -15,15 +15,14 @@ use super::{Reason, Seen, minutes_between};
 use crate::logs::evidence::Evidence;
 use crate::logs::patterns::Severity;
 use crate::logs::sample::Sample;
-use crate::logs::search::{Asked, Count, Searched};
+use crate::logs::search::{Count, SearchTarget, Searched};
 use transect_cluster::ownership::Ownership;
 use transect_graph::edges::Object;
 
-/// Where a count's lines came from.  A reader's first question is which
-/// workload logged them, so the origin of a running pod is its
-/// workload.  The origin of a gone pod is also a workload when the
-/// pod's name is that of a pod of a `Job` or a `CronJob` still in the
-/// cluster.  The origin of any other gone pod is the pod itself.
+/// Which workload or pod logged a count's lines.  For a running pod it
+/// is the pod's top owner.  For a pod that is gone it is the `Job` or
+/// `CronJob` that the pod's name matches, if that object is still in
+/// the cluster, and otherwise the pod itself.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Origin {
     Workload(Object),
@@ -34,8 +33,6 @@ pub enum Origin {
 }
 
 impl Origin {
-    /// The origin's name, which is the workload's name or the pod's, or
-    /// empty for `NoPod`.
     pub fn name(&self) -> &str {
         match self {
             Self::Workload(workload) => &workload.name,
@@ -45,8 +42,8 @@ impl Origin {
     }
 }
 
-/// One count of a search's matches in one namespace, from one origin,
-/// with the counts it sums.
+/// The sum of a search's counts for one namespace and one origin, with
+/// the counts that it sums.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Tally {
     pub namespace: String,
@@ -75,11 +72,8 @@ impl<'a> Running<'a> {
     }
 }
 
-/// `counts` summed into tallies, with the most matches first, then by
-/// name.  The function sums by the top owner for each pod that is still
-/// in `pods` or is named for a `Job` or a `CronJob`, by pod for the
-/// other pods that are gone, and by namespace for lines that the source
-/// names no pod for.
+/// `counts` summed by namespace and `Origin`, with the most matches
+/// first, then by namespace and origin.
 pub fn by_workload(counts: &[Count], pods: &[Arc<Pod>], ownership: &Ownership) -> Vec<Tally> {
     let running = Running::of(pods);
     let mut tallies: HashMap<(String, Origin), Vec<Count>> = HashMap::new();
@@ -136,9 +130,10 @@ pub fn anchor(pattern: &str) -> String {
     format!("matching-{pattern}")
 }
 
-/// One reason, by namespace, for each workload whose pods the search
-/// counted error lines for.  The function leaves out a count for a pod
-/// that is gone, unless the pod's name matches it to a workload.
+/// A reason for each workload whose pods logged error lines, paired with
+/// its namespace.  It leaves out the lines of a pod that is gone and
+/// whose name matches no `Job` or `CronJob`, the lines that the log
+/// source names no pod for, and a tally with no time for its last match.
 pub fn errors(
     counts: &[Count],
     seen: &Seen,
@@ -172,13 +167,13 @@ pub fn errors(
     reasons
 }
 
-/// One reason, with its namespace, for each workload whose pods an
-/// error or warning pattern matched recently.  The function also
-/// returns one for each pod that is gone, and one for each namespace's
-/// lines that the source names no pod for.  Older matches, a pattern of
-/// severity worth-knowing, and the matches of a `CronJob` in `settled`,
-/// whose last run succeeded, are a finding instead, because a run that
-/// logs an error and then retries to success needs no attention.
+/// A reason for each `Origin` whose lines an `Error` or `Warning` pattern
+/// matched within the pattern's window, paired with its namespace.  The
+/// other matches are findings, which `worth_knowing` in
+/// `transect-supply` lists: older matches, the matches of a
+/// `WorthKnowing` pattern, and the matches of a `CronJob` in `settled`,
+/// whose last run succeeded.  A `CronJob` that logs an error and then
+/// succeeds on a retry needs no attention.
 pub fn matched(
     searched: &Searched,
     settled: &HashSet<Object>,
@@ -192,7 +187,7 @@ pub fn matched(
         let (Severity::Error | Severity::Warning, Ok(counts)) = (pattern.severity, found) else {
             continue;
         };
-        let samples = searched.samples(&Asked::Pattern(pattern.name.clone()));
+        let samples = searched.samples(&SearchTarget::Pattern(pattern.name.clone()));
         let anchor = anchor(&pattern.name);
         for tally in by_workload(counts, pods, ownership) {
             let minutes_ago = tally.last.map_or(0, |last| minutes_between(last, now));
@@ -215,7 +210,6 @@ pub fn matched(
     reasons
 }
 
-/// Whether `origin` is a workload in `settled`.
 pub fn is_settled(origin: &Origin, settled: &HashSet<Object>) -> bool {
     matches!(origin, Origin::Workload(workload) if settled.contains(workload))
 }

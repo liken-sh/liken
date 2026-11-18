@@ -1,6 +1,6 @@
-//! One row of an accounts matrix: a mark for each capability, the roles
-//! that grant them, and the step that the capabilities that follow go
-//! through.
+//! One account's row of the accounts matrix: a mark for each
+//! capability, the roles that grant them, and the step by which the
+//! account gets a capability that no role grants it directly.
 
 use super::super::account::{Account, Hop, Where};
 use super::super::capability::ALL;
@@ -9,26 +9,26 @@ use super::words;
 use transect_graph::edges::Object;
 use transect_resources::intent::Line;
 
-/// The most namespaces that a short block names beside it.  The rest
-/// are in its title.
+/// How many namespaces a short block lists by name.  Its title lists
+/// all of them.
 const NAMED: usize = 2;
 
-/// One account's row.
 #[derive(Debug, PartialEq)]
 pub struct Row {
     pub name: String,
     pub href: Option<String>,
-    /// Why the account is bound as it is, from its intent.
+    /// Why the account is bound, from its intent.
     pub why: Option<Line>,
     pub cells: Vec<Option<Mark>>,
-    /// The first role that grants it one of the six, the others' count,
-    /// and their names.
+    /// The first role that grants the account any capability.
     pub role: Option<Named>,
+    /// How many other roles grant it one, and their names.
     pub more: Option<(usize, String)>,
-    /// The step that its first capability that follows goes through.
+    /// The step behind the first outlined mark that the heading above
+    /// the row does not already explain.
     pub step: Option<Step>,
-    /// Whether the row below has the same marks, so no rule is drawn
-    /// between them.
+    /// Whether the next row has the same marks, so the page draws no
+    /// rule between them.
     pub tight: bool,
 }
 
@@ -39,8 +39,9 @@ pub struct Named {
     pub href: Option<String>,
 }
 
-/// The step that a row's capabilities follow by, as words before and
-/// after the account that the step goes through.
+/// A step in words.  `before` and `after` surround the account that the
+/// step goes through, which the page can link, and `title` explains the
+/// step in full.
 #[derive(Debug, PartialEq)]
 pub struct Step {
     pub before: &'static str,
@@ -49,9 +50,10 @@ pub struct Step {
     pub title: String,
 }
 
-/// A cell's mark: a filled block where a binding grants the capability,
-/// an outlined one where it follows, full width for every namespace and
-/// short for some, named beside it.
+/// A cell's mark.  A filled block means that a binding grants the
+/// capability, and an outlined block means that it follows from another
+/// grant.  A full-width block covers every namespace.  A short block
+/// covers some, and `scope` lists them.
 #[derive(Debug, PartialEq)]
 pub struct Mark {
     pub granted: bool,
@@ -61,9 +63,9 @@ pub struct Mark {
 }
 
 impl Row {
-    /// The "through" cell as one line of text: the role, how many
-    /// others, and the step, for the hover on a cell that the column's
-    /// width cuts short.
+    /// The "through" cell as one line of text: the role, how many other
+    /// roles, and the step.  The page shows it as the hover text of a
+    /// cell that the column width cuts off.
     pub fn line(&self) -> Option<String> {
         let mut line = self
             .role
@@ -99,8 +101,8 @@ impl Mark {
     }
 }
 
-/// What a row reads besides the access: each object's page, and the
-/// intent on each account.
+/// What a row needs besides the access: the page of each object and the
+/// intent of each account.
 pub struct Look<'a> {
     pub href: &'a dyn Fn(&Object) -> Option<String>,
     pub why: &'a dyn Fn(&Object) -> Option<Line>,
@@ -117,7 +119,7 @@ impl Look<'_> {
         }
     }
 
-    /// `account` by its name alone, for a line that already states that
+    /// `account` by its short name, for a line that already says that
     /// it is an account.
     pub fn short(&self, account: &Account) -> Named {
         Named {
@@ -134,9 +136,9 @@ impl Look<'_> {
     }
 }
 
-/// The row of `account`, whose access is `held`, in a run whose heading
-/// names `through`, the step from which the first five follow in every
-/// namespace, when it names one.
+/// The row of `account`, whose access is `held`.  When the heading of
+/// the rows above names a step, `through` is that step, and the first
+/// five capabilities follow from it in every namespace.
 pub fn row(
     access: &Access,
     account: &Account,
@@ -178,11 +180,11 @@ pub fn row(
     }
 }
 
-/// The step of the first capability whose mark is outlined, with the
-/// step in every namespace when the capability follows there.  Under a
-/// heading that names `heading`, the first five capabilities follow by
-/// that step, and a step with the same words is the heading's step, so
-/// the row names neither of them.
+/// The step behind the row's first outlined mark: its step in every
+/// namespace when it has one, and otherwise its step in the first
+/// namespace.  Under a heading that names a step, the heading already
+/// explains the first five capabilities, so the row skips them, and it
+/// returns no step that reads the same as the heading's.
 fn step(
     access: &Access,
     account: &Account,
@@ -211,10 +213,11 @@ fn step(
     })
 }
 
-/// The mark of `capability` for `account`.  A grant in every namespace
-/// is drawn before a step in every namespace, which is drawn before a
-/// grant in some, so a mark always shows the most that the account may
-/// do.
+/// The mark of `capability` for `account`.  The mark shows the most
+/// that the account may do, so a grant in every namespace wins over a
+/// step in every namespace, which wins over a grant in some namespaces.
+/// A full-width mark needs a grant or step that no list of object names
+/// limits.
 fn mark(
     access: &Access,
     account: &Account,
@@ -279,8 +282,9 @@ fn mark(
     })
 }
 
-/// The namespaces a short block names: the first two, and how many
-/// more, with "by name" when every grant there names its objects.
+/// The text of a short block: the first `NAMED` namespaces, how many
+/// more there are, and "by name" when the grants there are limited to
+/// named objects.
 fn scope<'a>(places: impl Iterator<Item = &'a Where>, by_name: bool) -> String {
     let names: Vec<&str> = places
         .map(|place| match place {

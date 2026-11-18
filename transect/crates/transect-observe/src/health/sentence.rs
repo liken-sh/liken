@@ -1,6 +1,6 @@
-//! The sentence that each reason renders as.  These templates hold the
-//! only fixed words that a finding shows, and every other part of the
-//! sentence is a name or a number from the reason.
+//! The sentence that each `Reason` displays as.  The fixed words of
+//! every finding are here, and the names and numbers come from the
+//! `Reason`'s fields.
 
 use std::fmt;
 
@@ -187,8 +187,8 @@ impl fmt::Display for Reason {
 }
 
 impl Reason {
-    /// Where a log reason's lines came from, with a few of the lines,
-    /// when the search returned any.
+    /// Where a log reason's lines came from, with a sample of them, when
+    /// the search returned any.
     pub fn evidence(&self) -> Option<&Evidence> {
         match self {
             Self::Matched { evidence, .. } | Self::LoggedErrors { evidence, .. } => {
@@ -252,14 +252,14 @@ impl Reason {
 /// The text after a `CronJob`'s matches when its last run succeeded.
 pub const SETTLED: &str = "and its last run succeeded";
 
-/// The words for the pod that a log search counted lines from, when
-/// that pod is gone.
+/// Describes the pod that a log search counted lines from, when that
+/// pod no longer exists.
 pub const GONE_POD: &str = "a pod that no longer exists";
 
 /// Where a log search's lines came from, when the source named no pod.
 pub const FROM_NO_POD: &str = "from a pod the log source does not name";
 
-/// `count` and `noun`, with an "s" on the noun for any count but one.
+/// `count` and `noun`, with the noun plural for any count but one.
 pub fn times(count: impl Into<i64>, noun: &str) -> String {
     let count = count.into();
     let plural = count != 1;

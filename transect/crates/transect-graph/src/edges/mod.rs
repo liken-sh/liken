@@ -1,13 +1,12 @@
-//! The edge graph: how the cluster's parts relate, as edges between
-//! objects, machines, and boxes outside the cluster.
+//! The edge graph: typed edges between objects, machines, devices, and
+//! systems outside the cluster.
 //!
-//! Each edge kind comes from its own domain module, which turns the
-//! cluster's stores into edges, and the graph is built from those once
-//! per change of the cluster and shared by every view.  Building it
-//! fresh keeps every source a pure function; the graph becomes
-//! incremental only if a build gets slow.  Views query the graph, for
-//! example for the edges that touch a namespace, and never walk the
-//! sources themselves.
+//! Each edge kind comes from the module of the domain it describes,
+//! which turns the cluster's stores into edges.  The graph is built
+//! again from all of them on each change of the cluster, and every view
+//! shares it.  Building it from scratch keeps every source a pure
+//! function of the stores.  Views query the graph and never read the
+//! sources.
 
 mod claim;
 mod device;
@@ -35,55 +34,55 @@ pub use shown::{Shown, TOGGLED};
 pub enum Kind {
     /// A pod runs on a machine, from its `spec.nodeName`.
     RunsOn,
-    /// An object is managed by its top owner, found by walking its
-    /// owner references up until an owner has none.
+    /// An object is managed by its top owner, which is found by
+    /// following owner references up until an owner has none.
     ManagedBy,
-    /// A workload stores on where its claims' volumes keep their data:
-    /// a box in the ground band, or the machine a local volume is on.
+    /// A workload stores data on what backs its claims' volumes: a
+    /// storage system outside the cluster, or the machine of a local
+    /// volume.
     StoresOn,
-    /// A `Service` selects a workload: its selector matches the labels of
-    /// the workload's pods, or of its pod template when none runs.
+    /// A `Service` selects a workload: its selector matches the labels
+    /// of the workload's pods, or of its pod templates when it has no
+    /// pods.
     Selects,
-    /// An `Ingress` routes to a `Service` that one of its backends names.
+    /// An `Ingress` routes to a `Service` that one of its backends
+    /// names.
     RoutesTo,
-    /// A workload depends on what an address it is configured with
+    /// A workload depends on what an address in its configuration
     /// resolves to: the workload behind a `Service`, or a machine.
     DependsOn,
-    /// An object reconciles from what a GitOps tool applied it from: the
-    /// applier whose marks it has, as kind knowledge's `applies`
-    /// names them, and each applier from its source.
+    /// An object is reconciled from the source of the GitOps object
+    /// that applies it.  The `applies` field of a kind's knowledge says
+    /// how to find which object of that kind applied a given object.
     ReconcilesFrom,
-    /// A custom resource is managed by its controller's workload: one
-    /// whose `ServiceAccount` may write the kind's status under RBAC,
-    /// narrowed by the field manager that writes it.  It is its own
-    /// kind, apart from `ManagedBy`, because walks that read owner
-    /// references to find what a workload owns must not follow it into
-    /// the operator.
+    /// A custom resource is controlled by the workload that reconciles
+    /// it.  The API does not record this, so it is inferred from RBAC,
+    /// the status field managers, and the controller's image.  It is not
+    /// `ManagedBy`, because code that follows owner references to find
+    /// what a workload owns must not follow this edge into the operator.
     ControlledBy,
     /// A workload is allowed to call another: the target's ingress
-    /// NetworkPolicies and the caller's egress ones both admit it.  Only
-    /// a target that policy isolates has these edges, because any
-    /// workload may call a target that policy leaves open.
+    /// `NetworkPolicy` rules and the caller's egress rules both admit
+    /// the call.  Only a target that some policy isolates for ingress
+    /// has these edges, because any workload may call any other target.
     AllowedToCall,
-    /// A workload holds a device that Dynamic Resource Allocation gave
-    /// one of its pods: the claim's allocation names the device, and the
-    /// `ResourceSlice` that publishes it names its machine.
+    /// A workload's pods hold a device that Dynamic Resource Allocation
+    /// allocated to their claim.
     Holds,
     /// An application signs its users in through an identity provider,
-    /// as intent's `authenticates-through` states.  It is its own kind,
-    /// apart from `DependsOn`, because the loss of the provider stops
-    /// sign-in and leaves the rest of the application running.
+    /// as intent's `authenticates-through` field declares.  It is not
+    /// `DependsOn`, because when the provider is down the application
+    /// keeps running and only sign-in fails.
     AuthenticatesThrough,
-    /// An object is part of another, as kind knowledge declares: a
-    /// camera of an optical train, a train of a telescope.  An object's
-    /// board draws it as nesting.  Loops do not count it and a cascade
-    /// does not follow it, because a part keeps working when the record
-    /// of what it is part of is deleted.
+    /// An object is part of another, as kind knowledge declares, such as
+    /// a camera that is part of an optical train.  An object's page draws
+    /// its parts nested inside it.  Loops and a cascade ignore this edge,
+    /// because a part keeps working when the larger object is deleted.
     PartOf,
 }
 
 impl Kind {
-    /// What an edge of the kind means, in one line, for the edge row.
+    /// One line on what an edge of this kind means, for the edge row.
     pub fn meaning(self) -> &'static str {
         match self {
             Self::RunsOn => "A pod runs on a machine.",
@@ -101,7 +100,7 @@ impl Kind {
         }
     }
 
-    /// The kind in the words its tags, card lines, and edge row use.
+    /// The kind as a phrase, for tags, card lines, and the edge row.
     pub fn words(self) -> &'static str {
         match self {
             Self::RunsOn => "runs on",
@@ -119,9 +118,9 @@ impl Kind {
         }
     }
 
-    /// The kind in words from the far end, for a list of the objects
-    /// an edge of it leaves: an `Ingress`'s page lists under "routes to
-    /// it" what routes to it, not what it routes to.
+    /// The kind as a phrase from the `to` end, for a list of the objects
+    /// at the `from` end of its edges.  A `Service`'s page lists under
+    /// "routes to it" the `Ingress` objects that route to it.
     pub fn toward(self) -> &'static str {
         match self {
             Self::RunsOn => "runs on it",
@@ -140,10 +139,10 @@ impl Kind {
     }
 }
 
-/// An object in the cluster, by API group, kind, namespace, and name.
-/// The group distinguishes two kinds of one name, such as two operators'
-/// `Cluster`; the core group is empty.  A cluster-scoped object has no
-/// namespace.
+/// An object in the cluster, identified by API group, kind, namespace,
+/// and name.  The group tells apart two kinds with one name, such as the
+/// `Cluster` kinds of two operators.  The core group is empty.  A
+/// cluster-scoped object has no namespace.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Object {
     pub group: String,
@@ -152,30 +151,32 @@ pub struct Object {
     pub name: String,
 }
 
-/// The plural of each custom kind, by group and kind, as discovery
-/// gives it.
+/// The plural of each custom kind, keyed by group and kind, as API
+/// discovery returns it.
 pub type Plurals = std::collections::HashMap<(String, String), String>;
 
-/// The kinds that are not namespaced, by group and kind, as discovery
-/// gives them, so a name that refers to one has no namespace.
+/// The kinds that are not namespaced, by group and kind, as API
+/// discovery returns them.  A reference to an object of one of these
+/// kinds has no namespace.
 pub type ClusterScoped = std::collections::HashSet<(String, String)>;
 
-/// Either end of an edge.
+/// An end of an edge: the `from` end or the `to` end.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Endpoint {
     Object(Object),
-    /// A machine, by its `Node`'s name.
+    /// A machine, identified by its `Node`'s name.
     Machine(String),
-    /// A box in the ground band, outside the cluster, such as a storage
-    /// server, by the address or driver that names it.
+    /// A system outside the cluster, such as a storage server,
+    /// identified by its address or by the driver that reaches it.  The
+    /// map draws it as a box in its outside-systems band.
     Outside(String),
     /// A device that a driver publishes in a `ResourceSlice`.
     Device(Device),
 }
 
-/// A kind and a name as a reader says them: "Deployment web".  A name
-/// that only repeats its kind, as a `Catalog` named `catalog` does, is
-/// written once, as the kind.
+/// A kind and a name written as a reader says them, such as
+/// "Deployment web".  When the name only repeats the kind, as a
+/// `Catalog` named `catalog` does, the result is the kind alone.
 pub fn kind_and_name(kind: &str, name: &str) -> String {
     if name.eq_ignore_ascii_case(kind) {
         kind.to_string()
@@ -207,18 +208,17 @@ pub struct Edge {
     pub kind: Kind,
     pub from: Endpoint,
     pub to: Endpoint,
-    /// Whether the edge is inferred rather than read from the API, so a
-    /// view can draw it as less certain.  A guess is its own flag, apart
-    /// from `provenance`, because the API and a custom kind's fields can
-    /// both give one.
+    /// Whether the edge is a guess, so a view can draw it as less
+    /// certain.  It is separate from `provenance`, because an edge from
+    /// any source can be a guess, such as a controller chosen from
+    /// several candidates.
     pub guessed: bool,
-    /// Which layer of `transect`'s knowledge the edge came from.
+    /// Where `transect` read the edge from.
     pub provenance: Provenance,
 }
 
-/// The edges, shared by every view that asks about them, and the kinds
-/// this view turns on.  A view's graph is a copy of the pointer with its
-/// own kinds, so one graph built per change serves every view.
+/// The edges of one build of the graph, and the kinds that one view
+/// shows.  `only` makes a view's copy without copying the edges.
 #[derive(Clone, Debug, Default)]
 pub struct Graph {
     edges: Arc<Edges>,
@@ -228,14 +228,14 @@ pub struct Graph {
 #[derive(Clone, Debug, Default)]
 struct Edges {
     list: Vec<Edge>,
-    /// The edges by the end they leave.
+    /// The edges indexed by their `from` end.
     from: Index,
-    /// The edges by the end they reach.
+    /// The edges indexed by their `to` end.
     to: Index,
 }
 
 impl Graph {
-    /// The graph of every edge each source gives.
+    /// The graph of the edges from every source.
     pub fn new(sources: impl IntoIterator<Item = Vec<Edge>>) -> Self {
         let mut graph = Self::default();
         for edges in sources {
@@ -244,10 +244,10 @@ impl Graph {
         graph
     }
 
-    /// Adds the edges of a source that reads the graph built so far, such
-    /// as depends-on, which follows a `Service`'s selects edges to the
-    /// workload behind it.  Only a graph no view shares yet is added to,
-    /// so this copies nothing.
+    /// Adds the edges of a source that reads the graph built so far,
+    /// such as the depends-on source, which follows a `Service`'s
+    /// `Selects` edges to the workload behind it.  Call it before any
+    /// view clones the graph, or `Arc::make_mut` copies every edge.
     pub fn add(&mut self, edges: Vec<Edge>) {
         let all = Arc::make_mut(&mut self.edges);
         for edge in edges {
@@ -259,7 +259,7 @@ impl Graph {
     }
 
     /// The edges of the kinds this view shows, in the order the sources
-    /// gave them.
+    /// returned them.
     fn iter(&self) -> impl Iterator<Item = &Edge> {
         let shown = &self.shown;
         self.edges.list.iter().filter(|edge| shown.is_on(edge.kind))
@@ -272,8 +272,7 @@ impl Graph {
         })
     }
 
-    /// The same edges with only the kinds `shown` turns on, so each view
-    /// queries only the edges of the kinds that its reader turned on.
+    /// The same edges, with only the kinds that `shown` turns on.
     pub fn only(&self, shown: &Shown) -> Self {
         Self {
             edges: self.edges.clone(),
@@ -281,28 +280,27 @@ impl Graph {
         }
     }
 
-    /// Every `kind` edge, in the order the sources gave them, for a
-    /// view that reads whether each is a guess.
+    /// Every `kind` edge, in the order the sources returned them.
     pub fn of_kind(&self, kind: Kind) -> impl Iterator<Item = &Edge> {
         self.iter().filter(move |edge| edge.kind == kind)
     }
 
-    /// The far ends of the `kind` edges that arrive at `to`, each once,
-    /// in the order the sources gave them.
+    /// The `from` ends of the `kind` edges that arrive at `to`, without
+    /// duplicates, in the order the sources returned them.
     pub fn reaching<'a>(&'a self, kind: Kind, to: &Endpoint) -> Vec<&'a Endpoint> {
         let edges = self.at(&self.edges.to, kind, to);
         once_each(edges.filter(|edge| &edge.to == to).map(|edge| &edge.from))
     }
 
-    /// The far ends of the `kind` edges that leave `from`, each once, in
-    /// the order the sources gave them.
+    /// The `to` ends of the `kind` edges that leave `from`, without
+    /// duplicates, in the order the sources returned them.
     pub fn leaving<'a>(&'a self, kind: Kind, from: &Endpoint) -> Vec<&'a Endpoint> {
         let edges = self.at(&self.edges.from, kind, from);
         once_each(edges.filter(|edge| &edge.from == from).map(|edge| &edge.to))
     }
 
     /// The `kind` edges that leave `from`, in the order the sources
-    /// gave them, for a view that reads where each came from.
+    /// returned them.
     pub fn edges_leaving<'a>(
         &'a self,
         kind: Kind,
@@ -313,7 +311,7 @@ impl Graph {
     }
 
     /// The `kind` edges that arrive at `to`, in the order the sources
-    /// gave them.
+    /// returned them.
     pub fn edges_reaching<'a>(
         &'a self,
         kind: Kind,
@@ -324,14 +322,14 @@ impl Graph {
     }
 
     /// The edges of every kind this view shows that arrive at `to`, in
-    /// the order the sources gave them, for a view of everything that
-    /// reaches one end.
+    /// the order the sources returned them.
     pub fn every_edge_reaching<'a>(&'a self, to: &'a Endpoint) -> impl Iterator<Item = &'a Edge> {
         self.iter().filter(move |edge| &edge.to == to)
     }
 
-    /// The `kind` edges `index` may hold at `end`, none when the view
-    /// turns `kind` off.
+    /// The edges of `kind` that `index` lists for `end`, or none when
+    /// this view does not show `kind`.  The index is keyed by a hash of
+    /// the end, so the caller must still check each edge's end.
     fn at<'a>(
         &'a self,
         index: &'a Index,
@@ -347,8 +345,9 @@ impl Graph {
     }
 }
 
-/// Each of `ends` once, in order.  A machine has an edge from each pod
-/// on it, so the check uses a set, not a search of the ends found so far.
+/// `ends` without duplicates, in order.  It tracks the ends seen in a
+/// set, because a machine has an edge from every pod on it, and a search
+/// of the ends found so far would be quadratic in that count.
 fn once_each<'a>(ends: impl Iterator<Item = &'a Endpoint>) -> Vec<&'a Endpoint> {
     let mut seen = HashSet::new();
     ends.filter(|end| seen.insert(*end)).collect()
@@ -364,8 +363,8 @@ mod tests {
     #[rstest]
     #[case::different("Deployment", "web", "Deployment web")]
     #[case::the_name_repeats_the_kind("Catalog", "catalog", "Catalog")]
-    fn says_a_kind_and_name(#[case] kind: &str, #[case] name: &str, #[case] said: &str) {
-        assert_eq!(kind_and_name(kind, name), said);
+    fn joins_a_kind_and_name(#[case] kind: &str, #[case] name: &str, #[case] joined: &str) {
+        assert_eq!(kind_and_name(kind, name), joined);
     }
 
     fn pair(from: Endpoint, to: Endpoint) -> Edge {
@@ -456,7 +455,7 @@ mod tests {
     #[rstest]
     #[case::on(None, 1)]
     #[case::off(Some(""), 0)]
-    fn a_kind_turned_off_answers_nothing(#[case] edges: Option<&str>, #[case] count: usize) {
+    fn a_kind_turned_off_returns_no_edges(#[case] edges: Option<&str>, #[case] count: usize) {
         let all = Graph::new([vec![edge(
             Kind::DependsOn,
             object("Deployment", "web"),

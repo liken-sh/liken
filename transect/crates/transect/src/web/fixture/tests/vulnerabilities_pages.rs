@@ -1,5 +1,3 @@
-//! The vulnerabilities pages drawn from the fixture cluster.
-
 use rstest::rstest;
 
 use crate::web::fixture;
@@ -83,7 +81,7 @@ fn titles_each_id_from_its_findings() {
 #[case::held("CVE-2026-0001", Some(2))]
 #[case::only_in_a_stale_report("CVE-2025-0009", None)]
 #[case::unknown("CVE-1999-0000", None)]
-fn opens_an_id_a_current_report_holds(#[case] id: &str, #[case] rows: Option<usize>) {
+fn opens_an_id_only_from_a_current_report(#[case] id: &str, #[case] rows: Option<usize>) {
     let model = fixture::model();
     let now = fixture::NOW.parse().unwrap();
     let page = IdPage::build(&model.vulnerabilities, &model.snapshot.plurals, id, now);
@@ -123,7 +121,7 @@ fn shows_the_highest_score_and_most_severe_severity_of_an_id() {
 }
 
 #[rstest]
-fn gives_an_id_one_row_per_workload_and_container_with_its_packages() {
+fn id_page_has_one_row_per_workload_and_container() {
     let model = fixture::model();
     let now = fixture::NOW.parse().unwrap();
     let page = IdPage::build(

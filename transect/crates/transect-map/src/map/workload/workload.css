@@ -1,9 +1,9 @@
 /*
- * The workload elevation draws a row of the namespace's workloads, a row
- * of columns from the entry through the pod tiles to the volumes, and
- * a row of guards, beside the workload's card.  The bars reuse the
- * machine strips' meters from machines.css, so a pod's usage looks the
- * same as a machine's.
+ * The workload page draws a row of the namespace's workloads, a row of
+ * columns from the entry point through the pod tiles to the volumes,
+ * and a row of guards, beside the workload's card.  The usage bars
+ * reuse the meters of `machines.css`, so a pod's usage looks the same
+ * as a machine's.
  */
 
 .workload-map {
@@ -26,8 +26,8 @@
   border-radius: 10px;
 }
 
-/* A switcher's chips look the same on every page, whatever font the
-   page's column sets. */
+/* The switcher sets its own font, so its chips look the same on every
+   page. */
 .switcher {
   font-family: var(--mono);
   font-size: 12px;
@@ -42,8 +42,8 @@
   gap: 6px;
 }
 
-/* The namespace starts the row, in the band labels' small capitals, and
-   links to the namespace's page. */
+/* The row starts with the namespace, in small uppercase like a band
+   label, linked to the namespace's page. */
 .switcher-namespace,
 .row-label {
   width: 96px;
@@ -70,8 +70,8 @@
 
 .switch:hover { color: var(--ink); }
 
-/* The workload shown gets a ring of the selection color, as a
-   selected parcel does, so a warning's --warm outline still shows. */
+/* The current workload gets an outline in the selection color, outside
+   the box, so a warning's inset `--warm` outline still shows. */
 .switch-current {
   outline: 2px solid var(--link);
   outline-offset: 1px;
@@ -96,9 +96,8 @@
   min-width: 0;
 }
 
-/* The pods column takes the width the fixed columns leave, so the tiles
-   keep the widest column however many Services and volumes are beside
-   them. */
+/* The entry, Service, and volume columns have fixed widths, and the
+   pods column takes the rest. */
 .flow-door { width: 170px; flex: none; }
 .flow-service { width: 150px; flex: none; }
 .flow-pods { flex: 1; }
@@ -110,9 +109,8 @@
   color: var(--ink-faint);
 }
 
-/* When the row is too narrow for its columns side by side, the columns
-   stack in the order a request travels, each at the full width, and the
-   arrows turn down. */
+/* When the row is too narrow, the columns stack at full width in the
+   order a request travels, and the arrows point down. */
 @container (max-width: 960px) {
   .workload-flow { flex-direction: column; }
   .flow-door,
@@ -135,8 +133,8 @@
   background: var(--panel);
 }
 
-/* A Service with an endpoint not ready, or none, gets --warm, as a
-   pod tile that is not ready does. */
+/* A Service with no endpoints, or with an endpoint that is not ready,
+   gets a `--warm` outline, like a pod that is not ready. */
 .flow-short {
   border-color: var(--warm);
   box-shadow: inset 0 0 0 1px var(--warm);
@@ -149,7 +147,8 @@
 
 .flow-faint { color: var(--ink-faint); }
 
-/* The controller that serves an Ingress opens its own page. */
+/* A link in a faint line, such as to the controller that serves an
+   Ingress. */
 .flow-faint a { color: var(--ink-muted); text-decoration: none; }
 
 .flow-faint a:hover { text-decoration: underline; }
@@ -164,8 +163,9 @@
   background: var(--panel);
 }
 
-/* The backend is outside the workload, so it is drawn as the ground
-   boxes are: dashed, under the claims that store their data there. */
+/* A storage backend is outside the workload, so it is dashed like the
+   boxes of systems outside the cluster.  It is drawn under the claims
+   whose data it stores. */
 .flow-backend {
   padding: 10px 12px;
   border: 1px dashed var(--ink-faint);
@@ -202,11 +202,11 @@
   text-decoration: none;
 }
 
-/* A tile opens its pod's page. */
+/* A tile links to its pod's page. */
 .tile:hover { border-color: var(--link); }
 
-/* A pod that is not ready gets --warm, as a warning parcel does.  A
-   finished one, such as a CronJob's last run, is dashed and faint. */
+/* A pod that is not ready gets a `--warm` outline, like a warning box.
+   A finished pod, such as a CronJob's last run, is dashed and faint. */
 .tile-not-ready {
   border-color: var(--warm);
   box-shadow: inset 0 0 0 1px var(--warm);
@@ -234,13 +234,12 @@
 
 .tile-line { color: var(--ink-muted); }
 
-/* A bar's figures in place of its bar wrap under the label, not past
-   the tile's edge. */
+/* When figures replace a bar, they wrap under the label instead of
+   past the tile's edge. */
 .meter-figures { min-width: 0; }
 
-/* A pod that uses more than its request, with no limit above it, fills
-   its bar.  The track's --warm outline shows that its use goes past the
-   bar's end. */
+/* A pod that uses more than its request, and has no limit, fills its
+   bar, and a `--warm` outline on the track shows that it uses more. */
 .meter-over { box-shadow: 0 0 0 1px var(--warm); }
 
 .meter-figures {
@@ -266,9 +265,9 @@
 
 .guard-check { color: var(--clear); }
 
-/* A guard that a workload lacks but does not need stays faint.  A guard
-   that it needs is outlined, as its finding on the card is set apart.
-   The finding is worth knowing and is no fault, so the outline is gray. */
+/* A guard that the workload lacks and does not need is faint.  A guard
+   that it lacks and needs is outlined in gray, because the card reports
+   it as a finding and not as a fault. */
 .guard-open { color: var(--ink-faint); }
 
 .guard-warn {
@@ -277,9 +276,9 @@
   color: var(--ink);
 }
 
-/* An address that reaches something in the cluster is outlined in
-   --link, as a link is colored, and links to what it reaches.  The
-   Secrets count is not a link, so it is on --panel like a guard. */
+/* An address that reaches something in the cluster links to it and is
+   outlined in `--link`.  The Secrets count is not a link, so it has a
+   `--panel` background like a guard. */
 .need {
   padding: 5px 10px;
   border-radius: 5px;

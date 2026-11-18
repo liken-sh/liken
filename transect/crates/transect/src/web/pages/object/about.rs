@@ -1,5 +1,5 @@
-//! What an object is: the owner that controls it and the workload whose
-//! controller reconciles it.
+//! The "Belongs to" section of an object's page: its controller owner
+//! reference, and the controllers that reconcile it.
 
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 
@@ -32,8 +32,8 @@ pub fn about(snapshot: &Snapshot, object: &Object, meta: &ObjectMeta, graph: &Gr
     let controllers = controllers
         .into_iter()
         .map(|end| refer(snapshot, end, here));
-    // The page names the object's namespace in its crumb and its
-    // switcher row, so no fact repeats it.
+    // The namespace is left out because the breadcrumb and the
+    // namespace switcher already show it.
     Section::new("Belongs to", Side::BelongsTo)
         .fact("owned by", owner.collect())
         .fact("controlled by", controllers.collect())

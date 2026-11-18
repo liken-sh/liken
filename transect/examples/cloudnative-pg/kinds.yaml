@@ -1,6 +1,4 @@
-# Kind knowledge for CloudNativePG, as CloudNativePG would ship it.  A
-# Cluster's operator keeps a budget on the primary that lets none go,
-# and switches the primary to a replica before a drain reaches it.
+# Kind knowledge for CloudNativePG, as CloudNativePG would ship it.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:
@@ -13,16 +11,18 @@ spec:
     - {path: status.writeService, kind: Service, label: writes through}
     - {path: status.readService, kind: Service, label: reads through}
   controller: {image: cloudnative-pg/cloudnative-pg}
+  # CloudNativePG keeps a PodDisruptionBudget on the primary that allows
+  # no eviction, and switches the primary to a replica before a drain
+  # evicts it. `operator` tells transect to expect that budget.
   disruptions: operator
-  # This field names the pod that takes writes.  Losing it stops writes
-  # until the operator promotes a replica; losing a replica leaves it
-  # short.
+  # The primary takes the writes. When it is lost, writes stop until the
+  # operator promotes a replica.
   primary: status.currentPrimary
   docs: https://cloudnative-pg.io/documentation/current/
 ---
-# Its other kinds name only the controller's image, so a workload's
-# Manages box finds the objects the operator reconciles, which run no
-# pods of their own.
+# These kinds run no pods, so the controller's image is how transect
+# finds their controller and counts their objects in the Controls
+# section of the operator's card.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:

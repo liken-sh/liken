@@ -1,13 +1,11 @@
-//! Address resolution.  This module indexes the cluster's addresses,
-//! and resolves each address that a workload is configured with
-//! against the index, so an environment variable that names a
-//! database's `Service` becomes a depends-on edge from the workload to
-//! the database.
+//! This module indexes the cluster's addresses and resolves each
+//! address that a workload is configured with against the index.  So an
+//! environment variable that names a database's `Service` becomes a
+//! depends-on edge from the workload to the database.
 //!
-//! Only whole names match.  A value that only contains a `Service`'s
-//! name, such as a word in a sentence or part of a longer host, is no
-//! evidence of what the workload calls, and a false edge on the map
-//! costs a reader more than a missing one.
+//! Only whole names match.  A `Service`'s name inside a sentence or
+//! inside a longer host does not show that the workload calls it, and
+//! a wrong edge on the map misleads a reader more than a missing one.
 
 mod card;
 mod depends;
@@ -30,11 +28,10 @@ pub use stated::{Readers, Reading as StatedReading, Stated, Unread, attaches, re
 
 use transect_graph::edges::{Endpoint, Graph, Kind};
 
-/// The cluster's DNS domain when a flag names no other.
+/// The cluster's DNS domain when no flag sets another.
 pub const DEFAULT_DOMAIN: &str = "cluster.local";
 
-/// What a namespace's workloads depend on outside it, and what depends
-/// on them from outside, by namespace and machine.
+/// The depends-on edges that cross a namespace's boundary.
 #[derive(Debug, Default, PartialEq)]
 pub struct Across {
     /// The other namespaces its workloads depend on.
@@ -46,9 +43,8 @@ pub struct Across {
 }
 
 impl Across {
-    /// Reads `namespace`'s depends-on edges in `graph`.  An edge between
-    /// two of its own workloads does not leave the namespace, so the
-    /// function omits it.
+    /// Reads the depends-on edges in `graph` that touch `namespace`, and
+    /// skips each edge between two of its own workloads.
     pub fn of(graph: &Graph, namespace: &str) -> Self {
         let mut across = Self::default();
         let edges = graph.touching_namespace(namespace);

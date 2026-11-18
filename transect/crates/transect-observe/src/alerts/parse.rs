@@ -1,7 +1,7 @@
-//! Parsing Alertmanager's response to `GET /api/v2/alerts`.  Anyone who
+//! Parses Alertmanager's response to `GET /api/v2/alerts`.  Anyone who
 //! can write an alerting rule sets an alert's labels and annotations, so
-//! this module cuts each value to the length that a card shows and
-//! removes its control characters before any other code reads it.
+//! this module removes the control characters from each value and cuts
+//! it to the length that a card shows, before any other code reads it.
 
 use std::collections::BTreeMap;
 
@@ -38,11 +38,12 @@ struct Status {
     state: String,
 }
 
-/// The alerts in `body` that are firing and need attention, parsed with
-/// the conventions of `source`.  The query already leaves out silenced
-/// and inhibited alerts.  This function also leaves out an alert whose
-/// state is still `suppressed`, so that a change to the query cannot
-/// bring a silenced alert back onto the map.
+/// The alerts in `body` that need attention, parsed with the
+/// conventions of `source`.  It leaves out an alert whose severity
+/// `source` ignores.  The query in `client.rs` already leaves out
+/// silenced and inhibited alerts, and this function also leaves out an
+/// alert in the state `suppressed`, so a change to the query cannot
+/// bring one back onto the map.
 pub fn alerts(body: &str, source: &Source) -> anyhow::Result<Vec<Alert>> {
     let gettable: Vec<Gettable> = serde_json::from_str(body).context("reading the alerts")?;
     let read = gettable.into_iter().filter_map(|one| alert(one, source));
@@ -64,8 +65,8 @@ fn alert(gettable: Gettable, source: &Source) -> Option<Alert> {
     let annotation = |key: Option<&String>, chars| capped(gettable.annotations.get(key?)?, chars);
     let names = &source.annotations;
     Some(Alert {
-        // Prometheus itself sets the `alertname` label to the rule's
-        // name, whatever conventions the rules follow for other labels.
+        // Prometheus sets `alertname` to the rule's name, whatever
+        // conventions the rules follow for other labels.
         name: labels
             .get("alertname")
             .and_then(|name| capped(name, NAME_CHARS))

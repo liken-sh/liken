@@ -8,9 +8,9 @@
 //! limit for that resource, because that container may use all that the
 //! machine has.  Ordinary init containers run one at a time before the
 //! others start.  This module leaves them out because a bar of what a
-//! running pod uses shows the containers that run now.  Limits set on
-//! the pod as a whole, in `spec.resources`, replace the containers'
-//! total.
+//! running pod uses shows the containers that run now.  A limit set on
+//! the pod as a whole, in `spec.resources`, replaces the containers'
+//! total for that resource.
 
 use k8s_openapi::api::core::v1::{Container, PodSpec};
 

@@ -1,6 +1,6 @@
-//! What the workload page writes on and around its pod tiles and its
-//! volumes column: each tile's line, its bars' titles and figures, and
-//! the pages its tiles and claims open.
+//! The text of the workload page around its pod tiles and its volumes
+//! column: each tile's line, the titles and figures of its bars, and the
+//! pages that its tiles and claims link to.
 
 use std::collections::{HashMap, HashSet};
 
@@ -32,30 +32,31 @@ impl WorkloadPage {
         bar::cpu_unscaled(&tile.cpu)
     }
 
-    /// Where a tile leads: its pod's page.
+    /// The pod's page.
     pub fn tile_href(&self, tile: &PodTile) -> String {
         format!("/namespaces/{}/pods/{}", self.namespace, tile.name)
     }
 
-    /// Where a mounted claim's name leads: its page, when the cluster
-    /// has it.
+    /// The link of a mounted claim's name: its page, or `None` when the
+    /// claim has no page.
     pub fn claim_href(&self, claim: &str) -> Option<String> {
         self.claim_pages.get(claim).cloned()
     }
 }
 
-/// The page of each claim in `mounts` that `held` contains, by its name.
+/// The link to the page of each claim in `mounts`, keyed by claim name.
+/// A claim that is not in `with_pages` has no page and is left out.
 pub fn claim_pages(
     mounts: &Mounts,
     namespace: &str,
-    held: &HashSet<Object>,
+    with_pages: &HashSet<Object>,
     plurals: &Plurals,
 ) -> HashMap<String, String> {
     let claims = mounts.groups.iter().flat_map(|group| &group.mounts);
     claims
         .filter_map(|mount| {
             let object = Object::new("", "PersistentVolumeClaim", Some(namespace), &mount.claim);
-            let page = held
+            let page = with_pages
                 .contains(&object)
                 .then(|| transect_graph::links::page(&object, plurals));
             Some((mount.claim.clone(), page.flatten()?))

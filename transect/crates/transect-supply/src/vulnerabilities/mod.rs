@@ -1,10 +1,9 @@
-//! What a vulnerability scanner reports about the images that the
-//! cluster runs, read from the scanner's report objects through the
-//! `findings` field of kind knowledge.  transect shows what the scanner
-//! reported and when, and makes no judgment of its own, so the severity
-//! and the score come from the scanner.  The only rule that transect
-//! applies decides which reports are current: a report is current when
-//! a pod of the workload runs the report's image digest.
+//! The findings that a vulnerability scanner reports about the images
+//! that the cluster runs.  transect reads the scanner's report objects
+//! through the `findings` field of the scanner's kind knowledge, and
+//! shows the severity, the score, and the scan time as the scanner wrote
+//! them.  transect decides only which reports are current: a report is
+//! current when a pod of the workload runs the report's image digest.
 
 mod grouped;
 pub mod page;
@@ -32,8 +31,8 @@ pub struct Vulnerabilities {
     /// The scanners' severities, most severe first, in the order their
     /// knowledge's `summary` lists them.
     pub severities: Vec<Arc<str>>,
-    /// Each finding id in a current report, with the position of each
-    /// report and finding that contains the id.
+    /// For each finding id in a current report, the index in `reports`
+    /// and in that report's `findings` of each finding with the id.
     by_id: BTreeMap<Arc<str>, Vec<(usize, usize)>>,
 }
 
@@ -41,7 +40,7 @@ pub struct Vulnerabilities {
 #[derive(Debug)]
 pub struct Report {
     pub object: Object,
-    /// The scanner, named by its knowledge.
+    /// The scanner's name, from its kind knowledge.
     pub scanner: Arc<str>,
     /// The workload that the report scanned: the report's owner,
     /// followed to its top owner.
@@ -69,7 +68,7 @@ pub struct Finding {
     /// The scanner's link for the finding, when the link is a plain web
     /// address.
     pub link: Option<Arc<str>>,
-    /// The scanner's one-line title for the finding.
+    /// The scanner's one-line title.
     pub title: Option<Arc<str>>,
 }
 
@@ -81,31 +80,30 @@ impl Finding {
 }
 
 impl Vulnerabilities {
-    /// The current reports.
     pub fn current(&self) -> impl Iterator<Item = &Report> {
         self.reports.iter().filter(|report| report.current)
     }
 
-    /// Every report of `workload`, current or not, by container.
+    /// Every report of `workload`, current or not, sorted by container.
     pub fn of_workload<'a>(&'a self, workload: &'a Object) -> impl Iterator<Item = &'a Report> {
         let reports = self.reports.iter();
         reports.filter(move |report| report.workload == *workload)
     }
 
-    /// Whether a report names `workload`.  A workload that a report
-    /// names gets a vulnerabilities tab.
+    /// Whether any report, current or not, is about `workload`.  A
+    /// workload with a report has a vulnerabilities tab.
     pub fn names(&self, workload: &Object) -> bool {
         self.of_workload(workload).next().is_some()
     }
 
-    /// Each finding id in a current report, in order.
+    /// Each finding id in a current report, in sorted order.
     pub fn ids(&self) -> impl Iterator<Item = &Arc<str>> {
         self.by_id.keys()
     }
 
     /// The current reports that contain `id`, each with its finding of
     /// that id.
-    pub fn holding<'a>(&'a self, id: &str) -> impl Iterator<Item = (&'a Report, &'a Finding)> {
+    pub fn reports_with<'a>(&'a self, id: &str) -> impl Iterator<Item = (&'a Report, &'a Finding)> {
         let found = self.by_id.get(id).into_iter().flatten();
         found.map(|(report, finding)| {
             let report = &self.reports[*report];
@@ -153,7 +151,7 @@ impl Vulnerabilities {
     }
 }
 
-/// How many findings of each severity there are, most severe first.
+/// How many finding ids of each severity there are, most severe first.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Counts(pub Vec<(Arc<str>, usize)>);
 
@@ -189,8 +187,8 @@ impl std::fmt::Display for Counts {
     }
 }
 
-/// The class that colors a severity's word: red for critical, the
-/// brand's warm orange for high, and gray for every other.
+/// The CSS class that colors a severity's word: red for critical,
+/// orange for high, and gray for any other severity.
 pub fn tone(severity: &str) -> &'static str {
     match severity {
         "CRITICAL" => "vn-critical",
@@ -230,7 +228,7 @@ impl Shown {
     }
 }
 
-/// The page of id `id`.
+/// The path of the page for the finding id `id`.
 pub fn link(id: &str) -> String {
     format!("/vulnerabilities/{}", transect_graph::links::segment(id))
 }

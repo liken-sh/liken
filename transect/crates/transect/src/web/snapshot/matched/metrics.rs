@@ -1,6 +1,6 @@
-//! The conditions of a `MetricsSource` whose Services are not in the
-//! cluster, or whose queries answer with series that name no `Node`, no
-//! pod, or no claim by the labels it declares they have.
+//! Marks the `MetricsSource` as unmatched when a `Service` it names
+//! does not exist, or when its queries return series whose labels
+//! identify no `Node`, pod, or claim.
 
 use super::super::Snapshot;
 use transect_graph::edges::Claim;

@@ -1,7 +1,7 @@
-//! A resource's conditions, in the shape a CRD's `status.conditions`
-//! takes, so that when these resources become CRDs, `transect` can
-//! write the same conditions to the cluster that the `/resources` page
-//! lists.
+//! The conditions that the `/resources` page shows for each document
+//! `transect` reads. They have the fields of a Kubernetes condition, so
+//! that `transect` could write them to `status.conditions` if its
+//! resources were served as CRDs.
 
 use std::fmt;
 
@@ -13,16 +13,17 @@ pub enum Status {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Condition {
-    /// The condition's type, such as `Loaded`.
+    /// The condition's type, for example `Loaded`.
     pub kind: &'static str,
     pub status: Status,
-    /// One CamelCase word a program can match, such as `Invalid`.
+    /// A CamelCase word that a program can match on, for example
+    /// `Invalid`.
     pub reason: &'static str,
     pub message: String,
 }
 
 impl Condition {
-    /// The document was read and is in use.
+    /// The document was read and `transect` uses it.
     pub fn loaded() -> Self {
         Self {
             kind: "Loaded",
@@ -32,7 +33,7 @@ impl Condition {
         }
     }
 
-    /// The document was left out, for `reason`.
+    /// `transect` ignored the document because of `reason`.
     pub fn left_out(reason: &'static str, message: impl Into<String>) -> Self {
         Self {
             kind: "Loaded",
@@ -42,8 +43,8 @@ impl Condition {
         }
     }
 
-    /// The document names something the cluster does not hold, such as
-    /// a selector that matches nothing.
+    /// The document refers to something that is not in the cluster, for
+    /// example a selector that matches nothing.
     pub fn unmatched(message: impl Into<String>) -> Self {
         Self {
             kind: "Matched",
@@ -53,8 +54,8 @@ impl Condition {
         }
     }
 
-    /// A reference by value found more than one object that holds the
-    /// value, so it draws none of them.
+    /// A reference by value matched more than one object, so
+    /// `transect` draws no edge to any of them.
     pub fn ambiguous(message: impl Into<String>) -> Self {
         Self {
             kind: "Matched",
@@ -64,7 +65,7 @@ impl Condition {
         }
     }
 
-    /// The document names a kind the cluster does not serve.
+    /// The document refers to a kind that the cluster does not serve.
     pub fn not_served(message: impl Into<String>) -> Self {
         Self {
             kind: "Served",
@@ -74,8 +75,8 @@ impl Condition {
         }
     }
 
-    /// The document writes something on an object it draws nothing
-    /// from, such as a list of dependencies on a `Service`.
+    /// The document sets a field on a kind that `transect` does not read
+    /// the field from, for example dependencies on a `Service`.
     pub fn unattached(message: impl Into<String>) -> Self {
         Self {
             kind: "Attached",
@@ -85,8 +86,8 @@ impl Condition {
         }
     }
 
-    /// The document names a layer the cluster's `Layers` does not
-    /// declare, so that part of it is ignored.
+    /// The document refers to a layer that the cluster's `Layers` does
+    /// not declare, so `transect` ignores that part of the document.
     pub fn unknown_layer(message: impl Into<String>) -> Self {
         Self {
             kind: "LayerDeclared",
@@ -96,8 +97,8 @@ impl Condition {
         }
     }
 
-    /// Two documents set the same thing, and the message states which one
-    /// is shown.
+    /// Two documents set the same value. The message says which
+    /// document `transect` uses.
     pub fn conflict(message: impl Into<String>) -> Self {
         Self {
             kind: "Conflict",
@@ -107,7 +108,8 @@ impl Condition {
         }
     }
 
-    /// The log store refused or missed the resource's last search.
+    /// The log store rejected the resource's last search, or the search
+    /// failed.
     pub fn search_failed(message: impl Into<String>) -> Self {
         Self {
             kind: "Searched",
@@ -117,7 +119,9 @@ impl Condition {
         }
     }
 
-    /// Whether the condition is one a reader should act on.
+    /// Whether the condition reports a problem for a person to fix.
+    /// `Conflict` is a problem when it is `True`, and every other type
+    /// when it is `False`.
     pub fn trouble(&self) -> bool {
         match (self.kind, self.reason) {
             ("Loaded" | "Matched" | "Served" | "LayerDeclared" | "Attached" | "Searched", _) => {
@@ -127,18 +131,18 @@ impl Condition {
         }
     }
 
-    /// The condition in words, then its message: "loaded", "not
-    /// loaded: no spec".  The type, status, and reason stay in the
-    /// line's title for a reader matching them by program.
+    /// The condition in words, followed by its message, as in "loaded"
+    /// or "not loaded: no spec". `title` returns the type, status, and
+    /// reason for a reader that matches on them.
     pub fn text(&self) -> String {
         let said = match (self.kind, self.status) {
             ("Loaded", Status::True) => "loaded",
             ("Loaded", Status::False) => "not loaded",
             ("Matched", Status::False) if self.reason == "Ambiguous" => "matches more than one",
             ("Matched", Status::False) => "matches nothing",
-            ("Served", Status::False) => "names a kind the cluster does not serve",
+            ("Served", Status::False) => "refers to a kind the cluster does not serve",
             ("Attached", Status::False) => "draws nothing",
-            ("LayerDeclared", Status::False) => "names a layer Layers does not declare",
+            ("LayerDeclared", Status::False) => "refers to a layer that Layers does not declare",
             ("Conflict", Status::True) => "set twice",
             ("Searched", Status::False) => "search failed",
             (_, Status::True) => "true",
@@ -150,8 +154,8 @@ impl Condition {
         }
     }
 
-    /// The condition as a CRD's status would list it: "Loaded False
-    /// Invalid".
+    /// The type, status, and reason, in the order a CRD's status lists
+    /// them, as in "Loaded False Invalid".
     pub fn title(&self) -> String {
         format!("{} {} {}", self.kind, self.status, self.reason)
     }

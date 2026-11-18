@@ -1,5 +1,5 @@
-//! The layer that holds one namespace's parcel on the map, read without
-//! building the map.
+//! Finds the layer of the map that a namespace is in, without building
+//! the map.
 
 use super::Snapshot;
 use transect_graph::edges::Object;
@@ -8,10 +8,11 @@ use transect_resources::knowledge::{self, Named};
 use transect_resources::layers::Layers;
 
 impl Snapshot {
-    /// The name of the band that holds `namespace`'s parcel on the map,
-    /// or none when the cluster holds no such namespace.  Only the custom
-    /// resources in `namespace` can name its layer, so only they are
-    /// read; the map reads every one.
+    /// The name of the layer, drawn as a band on the map, that
+    /// `namespace` is in. Returns `None` when the cluster has no such
+    /// namespace. Only the custom resources in `namespace` can change its
+    /// layer, so this reads only those, where building the map reads all
+    /// of them.
     pub fn layer_of(&self, namespace: &str, layers: &Layers) -> Option<String> {
         let meta = self.namespaces.iter().map(|found| &found.metadata);
         let meta = meta
@@ -59,12 +60,12 @@ mod tests {
                 (ours, maps)
             })
             .unzip();
-        assert_eq!(ours.len(), 4, "the fixture has namespaces");
+        assert_eq!(ours.len(), 4, "the fixture has 4 namespaces");
         assert_eq!(ours, maps);
     }
 
     #[rstest]
-    fn places_no_namespace_the_cluster_does_not_hold() {
+    fn has_no_layer_for_a_namespace_the_cluster_does_not_have() {
         let snapshot = fixture::snapshot();
         assert_eq!(
             snapshot.layer_of("nothing", &snapshot.resources.layers),

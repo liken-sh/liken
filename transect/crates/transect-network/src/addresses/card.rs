@@ -1,10 +1,10 @@
-//! A card's "depends on" and "depended on by" sections: what the
-//! configured addresses and the intent of the card's object reach, and
-//! what reaches that object, read from the graph's depends-on edges.
-//! The card also lists the entries of intent that name nothing
-//! transect can read.  The identity providers through which the object
-//! signs its users in, and the applications that sign in through it,
-//! are read the same way from the authenticates-through edges.
+//! A card's "depends on" and "depended on by" sections, read from the
+//! graph's depends-on edges: what the object's configured addresses and
+//! intent reach, and what reaches the object. The card also lists the
+//! intent entries that transect cannot resolve to anything. The
+//! authenticates-through edges give the identity providers that the
+//! object signs its users in through, and the applications that sign
+//! in through it.
 
 use std::collections::BTreeSet;
 
@@ -17,15 +17,16 @@ use transect_graph::links::{Named, Reference};
 pub struct Depends {
     pub on: Vec<End>,
     pub by: Vec<End>,
-    /// The identity providers it signs its users in through.
+    /// The identity providers the object signs its users in through.
     pub through: Vec<End>,
-    /// The applications that sign their users in through it.
+    /// The applications that sign their users in through the object.
     pub signs_in: Vec<End>,
-    /// The entries of its intent that name nothing transect can read.
+    /// The entries of the object's intent that resolve to nothing.
     pub unread: Vec<Unread>,
 }
 
-/// One end a card lists, marked when only intent states it.
+/// One end a card lists, with a mark when only intent or kind knowledge
+/// supplies it.
 #[derive(Debug, PartialEq)]
 pub struct End {
     pub reference: Reference,
@@ -37,12 +38,11 @@ fn marks(ends: &[End]) -> impl Iterator<Item = Option<&Provenance>> {
 }
 
 impl Depends {
-    /// The ends `workload`'s depends-on and authenticates-through edges
-    /// reach, and the workloads whose edges reach it, each sorted by what
-    /// the card shows, and `unread`, its intent's entries that reach
-    /// nothing.  An object links to its page only when `has_page`
-    /// returns true for it, because a custom resource that runs nothing
-    /// and has no kind knowledge has no page.
+    /// The ends that `workload`'s depends-on and authenticates-through
+    /// edges reach, and the ends whose edges reach it, each sorted by
+    /// displayed text, plus `unread`. An end links to its page only when
+    /// `has_page` returns true for it, because a custom resource that
+    /// runs nothing and has no kind knowledge has no page.
     pub fn of_workload(
         graph: &Graph,
         workload: &Object,
@@ -94,7 +94,7 @@ impl Depends {
         }
     }
 
-    /// The entries of its `kind` list that reach nothing.
+    /// The unread entries of the `kind` list.
     fn unread_of(&self, kind: Kind) -> Vec<&Unread> {
         self.unread
             .iter()
@@ -110,15 +110,16 @@ impl Depends {
         self.unread_of(Kind::AuthenticatesThrough)
     }
 
-    /// No entries, for a section that lists what reaches the thing,
-    /// which intent on the thing itself never names.
+    /// No entries, for a section that lists what reaches the object.
+    /// The object's own intent never names those.
     pub fn unread_none(&self) -> Vec<&Unread> {
         Vec::new()
     }
 
-    /// The mark each section's heading shows for its lines, when two
-    /// or more lines share one: "Depends on", "Depended on by",
-    /// "Authenticates through", and "Signs in users of".
+    /// The mark that a section's heading shows in place of each line's
+    /// mark, when two or more lines share it. The sections are "Depends
+    /// on", "Depended on by", "Authenticates through", and "Signs in
+    /// users of".
     pub fn shared_on(&self) -> Option<Provenance> {
         let unread = self.unread_on();
         let unread = unread.iter().map(|entry| Some(&entry.provenance));
@@ -139,8 +140,8 @@ impl Depends {
         transect_graph::edges::provenance::shared(marks(&self.signs_in))
     }
 
-    /// The mark each section's marked lines share when the section also
-    /// has unmarked lines, so the mark shows once over its group.
+    /// The mark that a section's marked lines share when the section
+    /// also has unmarked lines, so the mark shows once over the group.
     pub fn grouped_on(&self) -> Option<Provenance> {
         transect_graph::edges::provenance::grouped(marks(&self.on))
     }
@@ -157,7 +158,7 @@ impl Depends {
         transect_graph::edges::provenance::grouped(marks(&self.signs_in))
     }
 
-    /// Where every mark on the card's lists came from.
+    /// The provenance of every mark in the card's lists.
     pub fn provenances(&self) -> impl Iterator<Item = &Provenance> {
         let ends = self.on.iter().chain(&self.by);
         let ends = ends.chain(&self.through).chain(&self.signs_in);
@@ -165,8 +166,8 @@ impl Depends {
         marks.chain(self.unread.iter().map(|unread| &unread.provenance))
     }
 
-    /// The namespaces and machines a namespace's workloads depend on
-    /// from outside it, and the namespaces that depend on it.
+    /// The namespaces and machines that a namespace's workloads depend
+    /// on from outside it, and the namespaces that depend on it.
     pub fn of_namespace(across: &Across) -> Self {
         let namespaces = |names: &BTreeSet<String>| {
             names
@@ -200,13 +201,12 @@ impl Depends {
     }
 }
 
-/// The mark of an end that is joined only by edges from stored text,
-/// which is intent or kind knowledge.  The mark comes from the first
-/// of those edges.  An end that the API also gives is a fact of the
-/// cluster, so it has no mark.
+/// The mark of an end that only intent or kind knowledge supplies. The
+/// mark comes from the first of its edges. An end that the Kubernetes
+/// API also supplies is a fact of the cluster, so it has no mark.
 fn stated(edges: &[&Edge]) -> Option<Provenance> {
-    let stored = |edge: &&&Edge| edge.provenance.mark().is_some();
-    match edges.iter().all(|edge| stored(&edge)) {
+    let marked = |edge: &&&Edge| edge.provenance.mark().is_some();
+    match edges.iter().all(|edge| marked(&edge)) {
         true => edges.first().map(|edge| edge.provenance.clone()),
         false => None,
     }

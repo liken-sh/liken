@@ -1,18 +1,19 @@
-//! The six capabilities the access lens reads from RBAC, and whether a
-//! rule grants each.
+//! The capabilities that the access lens shows, and whether an RBAC
+//! rule grants each one.
 //!
-//! A rule names verbs, API groups, and resources, any of which may be
-//! `*`.  A resource may name a subresource as `pods/exec`.  The API
-//! server's authorizer (`ResourceMatches` in
-//! pkg/apis/rbac/v1/evaluation_helpers.go) matches only three forms:
-//! `*`, every resource and subresource; the exact `pods/exec`; and
-//! `*/exec`, the `exec` of every resource.  `pods/*` is not a wildcard
-//! and grants nothing on `pods/exec`.  A rule limited by
-//! `resourceNames` still grants the capability on the objects it names.
+//! A rule lists verbs, API groups, and resources, and any of them may
+//! be `*`.  A resource may include a subresource, as in `pods/exec`.
+//! The API server's authorizer (`ResourceMatches` in
+//! pkg/apis/rbac/v1/evaluation_helpers.go) matches a subresource in
+//! three forms only: `*` for every resource and subresource, the exact
+//! `pods/exec`, and `*/exec` for the `exec` subresource of every
+//! resource.  `pods/*` is not a wildcard and grants nothing on
+//! `pods/exec`.  A rule limited by `resourceNames` still grants the
+//! capability, on the named objects only.
 
 use k8s_openapi::api::rbac::v1::PolicyRule;
 
-/// What an account may do that the lens draws a column for.
+/// An action that the lens shows a column for on each account.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Capability {
     ReadSecrets,
@@ -20,9 +21,9 @@ pub enum Capability {
     RunPods,
     ChangeWorkloads,
     GrantRoles,
-    /// Change an object of a kind whose kind knowledge declares
-    /// `applies` or `repository`: what a GitOps tool applies, or the
-    /// source it fetches from.
+    /// Change an object of a kind whose `KindKnowledge` declares
+    /// `applies` or `repository`, which changes what a GitOps tool
+    /// applies or the source it fetches from.
     ChangeApplied,
 }
 
@@ -35,9 +36,9 @@ pub const ALL: [Capability; 6] = [
     Capability::ChangeApplied,
 ];
 
-/// The kind of binding that binds a rule, which decides what the rule
-/// may authorize.  A request on a cluster-scoped resource, such as a
-/// Node, has no namespace, so only a ClusterRoleBinding authorizes it.
+/// The kind of binding that grants a rule.  A request on a
+/// cluster-scoped resource, such as a Node, has no namespace, so only a
+/// rule granted by a ClusterRoleBinding authorizes it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scope {
     /// Through a RoleBinding, in its namespace.
@@ -46,11 +47,11 @@ pub enum Scope {
     Cluster,
 }
 
-/// Verbs on one resource of one API group, whether only a
-/// ClusterRoleBinding grants them, and a note on what they give access
-/// to when the resource's name does not make it clear.
+/// Verbs on one resource of one API group.  `cluster` is true when
+/// only a ClusterRoleBinding can grant them.  `note` says what the verbs
+/// allow when the resource's name does not make that clear.
 #[derive(Clone, Copy, Debug)]
-pub struct Asked {
+pub struct ResourceVerbs {
     pub group: &'static str,
     pub resource: &'static str,
     pub verbs: &'static [&'static str],
@@ -62,8 +63,8 @@ pub(super) const fn ns(
     group: &'static str,
     resource: &'static str,
     verbs: &'static [&'static str],
-) -> Asked {
-    Asked {
+) -> ResourceVerbs {
+    ResourceVerbs {
         group,
         resource,
         verbs,
@@ -72,7 +73,7 @@ pub(super) const fn ns(
     }
 }
 
-impl Asked {
+impl ResourceVerbs {
     pub(super) const fn noted(self, note: &'static str) -> Self {
         Self {
             note: Some(note),
@@ -88,27 +89,29 @@ impl Asked {
     }
 }
 
-const READ_SECRETS: &[Asked] = &[ns("", "secrets", &["get", "list", "watch"])];
+const READ_SECRETS: &[ResourceVerbs] = &[ns("", "secrets", &["get", "list", "watch"])];
 
-/// Every way the API gives to run a command in a running pod, or code
-/// as its ServiceAccount with its volumes.
+/// Every way the API lets an account run a command in a running pod,
+/// or run code as the pod's ServiceAccount with the pod's volumes.
 ///
-/// Exec and attach take `create`.  SPDY opens them with a POST, which
-/// the API server authorizes as `create`.  A websocket opens them with
-/// a GET, authorized as `get`, and from Kubernetes 1.35 the API server
-/// also checks `create` on that upgrade (the feature gate
-/// AuthorizePodWebsocketUpgradeCreatePermission, beta and on by default
-/// in 1.35, in the Kubernetes feature gates reference).  On an older
-/// server, or with the gate off, `get` alone opens a websocket exec.
-/// The lens reads neither the version nor the gates, and the card
-/// states this limit.
+/// The lens counts exec and attach only with `create`.  A client that
+/// uses SPDY opens them with a POST, which the API server authorizes as
+/// `create`.  A client that uses a websocket opens them with a GET,
+/// which the API server authorizes as `get`.  From Kubernetes 1.35 the
+/// API server also checks `create` on the websocket upgrade, under the
+/// feature gate AuthorizePodWebsocketUpgradeCreatePermission, which is
+/// beta and on by default in 1.35.  On an older server, or with the
+/// gate off, `get` alone allows a websocket exec.  The lens reads
+/// neither the server's version nor its gates, so the card states this
+/// limit.
 ///
-/// `nodes/proxy` is the kubelet's API, whose `exec` and `run` endpoints
-/// run commands in any pod on that machine.  The kubelet authorizes a
-/// POST as `create` and a GET, which a websocket exec is, as `get`, and
-/// checks no `create` on the upgrade, so either verb reaches exec.
-/// Kubernetes' RBAC good practices page names it as a route to exec.
-const EXEC: &[Asked] = &[
+/// `nodes/proxy` gives access to the kubelet's API, whose `exec` and
+/// `run` endpoints run commands in any pod on that machine.  The kubelet
+/// authorizes a POST as `create` and a GET as `get`, and it does not
+/// check `create` on a websocket upgrade, so either verb allows exec.
+/// The Kubernetes page "RBAC good practices" lists `nodes/proxy` as a
+/// way to exec.
+const EXEC: &[ResourceVerbs] = &[
     ns("", "pods/exec", &["create"]),
     ns("", "pods/attach", &["create"]).noted("attach reaches a container's main process"),
     ns("", "pods/ephemeralcontainers", &["patch", "update"])
@@ -119,12 +122,12 @@ const EXEC: &[Asked] = &[
         .noted("the kubelet's API runs commands in any pod on its machine")
         .in_cluster(),
 ];
-const RUN_PODS: &[Asked] = &[
+const RUN_PODS: &[ResourceVerbs] = &[
     ns("", "pods", &["create"]),
     ns("batch", "jobs", &["create"]),
     ns("batch", "cronjobs", &["create"]),
 ];
-const CHANGE_WORKLOADS: &[Asked] = &[
+const CHANGE_WORKLOADS: &[ResourceVerbs] = &[
     ns("apps", "deployments", &["create", "patch", "update"]),
     ns("apps", "statefulsets", &["create", "patch", "update"]),
     ns("apps", "daemonsets", &["create", "patch", "update"]),
@@ -133,7 +136,7 @@ const CHANGE_WORKLOADS: &[Asked] = &[
     ns("batch", "jobs", &["patch", "update"]),
     ns("batch", "cronjobs", &["patch", "update"]),
 ];
-const GRANT_ROLES: &[Asked] = &[
+const GRANT_ROLES: &[ResourceVerbs] = &[
     ns("rbac.authorization.k8s.io", "roles", &["bind", "escalate"]),
     ns(
         "rbac.authorization.k8s.io",
@@ -150,7 +153,8 @@ const CHANGES: &[&str] = &["create", "patch", "update"];
 pub type GitOpsKind = (String, String);
 
 impl Capability {
-    /// The capability in the words of its column.
+    /// The capability as a verb phrase, for its column heading and for
+    /// the sentences that start with "May".
     pub fn words(self) -> &'static str {
         match self {
             Self::ReadSecrets => "read Secrets",
@@ -162,7 +166,8 @@ impl Capability {
         }
     }
 
-    /// The verbs and resources that grant it, for its column's title.
+    /// The verbs and resources that grant it, for the tooltip of its
+    /// column heading.
     pub fn verbs(self, gitops: &[GitOpsKind]) -> String {
         match self {
             Self::ReadSecrets => "get, list, or watch on secrets".into(),
@@ -184,10 +189,10 @@ impl Capability {
     }
 }
 
-/// One verb set on one resource that grants a capability, as `asked`
-/// gives it.
+/// One resource and the verbs on it that grant a capability, as
+/// [`granting_verbs`] returns them.
 #[derive(Clone, Debug)]
-pub struct Ask {
+pub struct GrantingVerbs {
     pub group: String,
     pub resource: String,
     pub verbs: Vec<&'static str>,
@@ -195,17 +200,21 @@ pub struct Ask {
 }
 
 /// The verbs on each resource that grant `capability` through a
-/// binding of `scope`, where `gitops` is the kinds whose change is the
-/// sixth capability.
-pub fn asked(capability: Capability, gitops: &[GitOpsKind], scope: Scope) -> Vec<Ask> {
-    let fixed = |asked: &[Asked]| {
-        let reached = asked.iter().filter(|asked| reaches(asked, scope));
+/// binding of `scope`.  `gitops` lists the kinds that
+/// `Capability::ChangeApplied` covers.
+pub fn granting_verbs(
+    capability: Capability,
+    gitops: &[GitOpsKind],
+    scope: Scope,
+) -> Vec<GrantingVerbs> {
+    let fixed = |resources: &[ResourceVerbs]| {
+        let reached = resources.iter().filter(|resource| reaches(resource, scope));
         reached
-            .map(|asked| Ask {
-                group: asked.group.to_string(),
-                resource: asked.resource.to_string(),
-                verbs: asked.verbs.to_vec(),
-                note: asked.note,
+            .map(|resource| GrantingVerbs {
+                group: resource.group.to_string(),
+                resource: resource.resource.to_string(),
+                verbs: resource.verbs.to_vec(),
+                note: resource.note,
             })
             .collect()
     };
@@ -217,7 +226,7 @@ pub fn asked(capability: Capability, gitops: &[GitOpsKind], scope: Scope) -> Vec
         Capability::GrantRoles => fixed(GRANT_ROLES),
         Capability::ChangeApplied => gitops
             .iter()
-            .map(|(group, plural)| Ask {
+            .map(|(group, plural)| GrantingVerbs {
                 group: group.clone(),
                 resource: plural.clone(),
                 verbs: CHANGES.to_vec(),
@@ -227,23 +236,22 @@ pub fn asked(capability: Capability, gitops: &[GitOpsKind], scope: Scope) -> Vec
     }
 }
 
-/// Whether a binding of `scope` authorizes the requests that `asked`
-/// names.
-pub(super) fn reaches(asked: &Asked, scope: Scope) -> bool {
-    scope == Scope::Cluster || !asked.cluster
+/// Whether a binding of `scope` can grant `verbs`.
+pub(super) fn reaches(verbs: &ResourceVerbs, scope: Scope) -> bool {
+    scope == Scope::Cluster || !verbs.cluster
 }
 
-/// Whether `rule`, bound with `scope`, grants `capability`, with
-/// `gitops` the kinds whose change is the sixth.  `Some(names)` means
-/// that the rule grants it, only on the named objects when `names` is
-/// not empty.  `None` means that the rule does not grant it.
+/// Whether `rule`, bound with `scope`, grants `capability`.  `gitops`
+/// lists the kinds that `Capability::ChangeApplied` covers.
+/// `Some(names)` means the rule grants it, on only the named objects
+/// when `names` is not empty.  `None` means the rule does not grant it.
 pub fn grants(
     rule: &PolicyRule,
     capability: Capability,
     gitops: &[GitOpsKind],
     scope: Scope,
 ) -> Option<Vec<String>> {
-    let allowed = asked(capability, gitops, scope).iter().any(|ask| {
+    let allowed = granting_verbs(capability, gitops, scope).iter().any(|ask| {
         let verbs = ask.verbs.iter();
         verbs
             .clone()
@@ -358,7 +366,7 @@ mod tests {
     )]
     #[case::create_pods("{apiGroups: [''], resources: [pods], verbs: [create]}", Capability::RunPods, Some(vec![]))]
     #[case::create_jobs("{apiGroups: [batch], resources: [jobs], verbs: [create]}", Capability::RunPods, Some(vec![]))]
-    #[case::patch_pods_runs_none(
+    #[case::patch_pods_does_not_run_pods(
         "{apiGroups: [''], resources: [pods], verbs: [patch]}",
         Capability::RunPods,
         None
@@ -366,7 +374,7 @@ mod tests {
     #[case::patch_deployments("{apiGroups: [apps], resources: [deployments], verbs: [patch]}", Capability::ChangeWorkloads, Some(vec![]))]
     #[case::create_replicationcontrollers("{apiGroups: [''], resources: [replicationcontrollers], verbs: [create]}", Capability::ChangeWorkloads, Some(vec![]))]
     #[case::update_cronjobs("{apiGroups: [batch], resources: [cronjobs], verbs: [update]}", Capability::ChangeWorkloads, Some(vec![]))]
-    #[case::create_cronjobs_runs_them(
+    #[case::create_cronjobs_does_not_change_workloads(
         "{apiGroups: [batch], resources: [cronjobs], verbs: [create]}",
         Capability::ChangeWorkloads,
         None
@@ -377,7 +385,7 @@ mod tests {
         None
     )]
     #[case::bind("{apiGroups: [rbac.authorization.k8s.io], resources: [clusterroles], verbs: [bind]}", Capability::GrantRoles, Some(vec![]))]
-    #[case::impersonate_is_a_step_of_its_own(
+    #[case::impersonate_does_not_grant_roles(
         "{apiGroups: [''], resources: [serviceaccounts], verbs: [impersonate]}",
         Capability::GrantRoles,
         None
@@ -425,7 +433,7 @@ mod tests {
         Scope::Namespace,
         true
     )]
-    fn reads_a_rule_by_where_its_binding_holds(
+    fn reads_a_rule_by_the_scope_of_its_binding(
         #[case] text: &str,
         #[case] scope: Scope,
         #[case] expected: bool,

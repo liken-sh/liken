@@ -27,8 +27,8 @@ fn stranded_text(line: &Line) -> Option<String> {
     (!pieces.is_empty()).then(|| transect_graph::links::text(&pieces))
 }
 
-/// A line of the workloads that `stranded` names, each down for its
-/// reason.
+/// A line whose workloads are all down, each stranded for the reason
+/// that `stranded` gives.
 fn stranded_line(stranded: &[(&str, Stranded)]) -> Line {
     let down: Vec<(&str, State)> = stranded
         .iter()
@@ -88,7 +88,7 @@ fn says_why_a_workload_stays_down(
 }
 
 #[rstest]
-fn names_the_one_stranded_workload_of_a_line_of_several() {
+fn reports_only_the_stranded_workload_of_a_line_with_others() {
     let web = line(&[("web", State::Down { wanted: 1 })]).workloads;
     let mut several = stranded_line(&[("db", attached(Type::Iscsi))]);
     several.workloads.extend(web);
@@ -149,7 +149,7 @@ fn a_namespaces_line(#[case] workloads: &[(&str, State)], #[case] text: &str) {
     &["cache"],
     "web 1/2 · no office file conversion and order storage · can't reach cache"
 )]
-fn a_parcels_tag(
+fn tile_text(
     #[case] alone: bool,
     #[case] taken: &[(&str, State)],
     #[case] lacks: &[&str],
@@ -157,7 +157,7 @@ fn a_parcels_tag(
     #[case] text: &str,
 ) {
     let strings = |names: &[&str]| names.iter().map(|name| name.to_string()).collect();
-    let parcel = Parcel {
+    let tile = NamespaceTile {
         level: transect_observe::health::Level::Warning,
         taken: line(taken)
             .workloads
@@ -168,7 +168,7 @@ fn a_parcels_tag(
         lacks: strings(lacks),
         loses: strings(loses),
     };
-    assert_eq!(parcel.to_string(), text);
+    assert_eq!(tile.to_string(), text);
 }
 
 #[rstest]
@@ -219,7 +219,7 @@ fn sidebar(machines: &[&str], pods: usize, daemon_sets: usize, folded: usize) ->
     ["If alpha were lost", "0 pods run there.", "Down until it returns"],
     [None, None]
 )]
-fn the_sidebars_words(
+fn sidebar_text(
     #[case] sidebar: Sidebar,
     #[case] heads: [&str; 3],
     #[case] lines: [Option<&str>; 2],

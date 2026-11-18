@@ -1,84 +1,86 @@
-//! The loss as the cluster page's sidebar lists it: a head, then the
-//! namespaces that stay down until the machines return, the ones that
-//! stay down until their pods start on other machines, and the ones
-//! left short, one line each.
+//! The sidebar of the cluster page, built from a `Loss`. It lists, one
+//! line for each namespace, the workloads that stay down until the lost
+//! machines return, the ones that come back when their pods start on
+//! other machines, the ones without their primary, and the ones left
+//! short.
 
 use std::collections::BTreeMap;
 
 use super::cascade::{self, Hop};
-use super::{Gone, Loss, Lost, Majority, Next, State, Stranded, Vital};
+use super::{Loss, Lost, Majority, Next, NotReadyMachine, State, Stranded, Vital};
 use transect_graph::edges::Object;
 use transect_graph::links::{Linker, Part, Piece};
 
-/// How many lines "Running short" shows before it folds the namespaces
-/// that are only one replica short.
+/// The sidebar shows every "Running short" line that is more than one
+/// replica short.  It shows lines that are one replica short only until
+/// the list has `SHORT_LINES` lines, and counts the rest in `folded`.
 const SHORT_LINES: usize = 3;
 
 #[derive(Debug, PartialEq)]
 pub struct Sidebar {
     pub machines: Lost,
     pub pods: usize,
-    /// The workloads the cluster cannot do without that the loss stops,
-    /// in the order `Vital` lists them, then by namespace and name.
+    /// The vital workloads that the loss stops, ordered by `Vital`, then
+    /// by namespace and name.
     pub vital: Vec<Blind>,
-    /// The namespaces with a workload left down until the machines
-    /// return, by name.  Each line has the reason its workloads wait.
+    /// The namespaces with a workload that stays down until the lost
+    /// machines return, by name.  Each line gives the reason.
     pub stuck: Vec<Line>,
-    /// The namespaces with a workload left down until its pods start on
-    /// other machines, by name.
+    /// The namespaces with a workload that comes back when its pods
+    /// start on other machines, by name.
     pub back: Vec<Line>,
-    /// The namespaces with a workload whose primary the loss takes, by
-    /// name.  Such a workload accepts no writes until a replica is
-    /// promoted.
+    /// The namespaces with a workload that loses its primary, by name.
+    /// Such a workload accepts no writes until a replica is promoted.
     pub primary: Vec<Line>,
-    /// The namespaces with a workload left short, those more than one
+    /// The namespaces with a short workload, with those more than one
     /// replica short first, then by name.
     pub short: Vec<Line>,
-    /// How many namespaces one replica short `build` folded out of
-    /// `short`.
+    /// How many lines one replica short `build` left out of `short`.
     pub folded: usize,
     pub daemon_sets: usize,
-    /// What the dependents of the down workloads lose, one line per
-    /// namespace, by name, with the line of cluster-scoped dependents
-    /// last.  The custom resources that a down controller reconciles
-    /// are in `unreconciled`.
+    /// What the dependents of the down workloads lose, one line for
+    /// each namespace, by name, with the line of cluster-scoped
+    /// dependents last.  Custom resources that a down controller
+    /// reconciles are in `unreconciled` instead.
     pub cascade: Vec<Hops>,
-    /// The custom resources nothing reconciles until their controllers
-    /// return, one line per set of lost controllers, by name.
+    /// The custom resources that nothing reconciles until their
+    /// controllers return, one line for each set of lost controllers.
     pub unreconciled: Vec<Unreconciled>,
-    /// The plural of each custom kind, which a line uses to name a kind
-    /// whose objects it counts.
+    /// The plural of each custom kind, which a line uses when it counts
+    /// the objects of that kind.
     pub plurals: transect_graph::edges::Plurals,
     pub next: Next,
-    /// The machines of the set that are really lost, by name.  The other
-    /// machines are only supposed lost, because a reader asked what
-    /// their loss would take.
-    pub gone: Vec<Gone>,
-    /// What the loss leaves of the control plane, when it takes some.
+    /// The machines of the set that are really down, by name.  The other
+    /// machines of the set are a prediction: the reader asked what their
+    /// loss would do.
+    pub gone: Vec<NotReadyMachine>,
+    /// What the loss leaves of the control plane, when it takes some of
+    /// its machines.
     pub majority: Option<Majority>,
     /// The requested machines that the cluster does not have.
     pub unknown: Option<String>,
-    /// What transect itself stops reading, when the loss takes the
-    /// machines its signals come from.
+    /// What transect cannot read, when the loss takes the machines that
+    /// its signals come from.
     pub blind: Option<String>,
-    /// Why the alerting path is unknown, when no resource names it.  The
-    /// line keeps the reader from taking a loss with no alerting line
-    /// for a loss that leaves alerts working.
+    /// Why transect cannot tell whether alerts still work, when no
+    /// resource names the alerting path.  Without this line, the reader
+    /// would take a sidebar with no alerting line to mean that alerts
+    /// still work.
     pub alerting: Option<transect_resources::resources::OffLine>,
     /// The links to the pages of the objects that the lines name.
     pub linker: Linker,
 }
 
 /// The dependents in one namespace that a loss reaches one hop out, or
-/// those in no namespace.
+/// the cluster-scoped dependents when `namespace` is `None`.
 #[derive(Debug, PartialEq)]
 pub struct Hops {
     pub namespace: Option<String>,
     pub hops: Vec<Hop>,
 }
 
-/// An object as a line names it: by its name, or by its kind and name
-/// when another object in the line has the same name.  The order is by
+/// An object as a line shows it: by its name, or by its kind and name
+/// when another object in the line has the same name.  Ordered by
 /// `shown`.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Named {
@@ -92,16 +94,17 @@ impl Named {
     }
 }
 
-/// The custom resources that the same lost controllers reconcile.
+/// The custom resources that the same set of lost controllers
+/// reconciles.
 #[derive(Debug, PartialEq)]
 pub struct Unreconciled {
     pub controllers: Vec<Object>,
-    /// By kind, then by name.
+    /// By API group, then kind, then name.
     pub objects: Vec<Object>,
 }
 
-/// Splits `hops` into the objects that lost controllers reconcile, one
-/// line per set of lost controllers, and the other hops.
+/// Splits `hops` into the custom resources that lost controllers
+/// reconcile, grouped by the set of controllers, and the other hops.
 fn unreconciled(hops: Vec<Hop>) -> (Vec<Unreconciled>, Vec<Hop>) {
     let mut by: BTreeMap<Vec<Object>, Vec<Object>> = BTreeMap::new();
     let mut rest = Vec::new();
@@ -132,7 +135,7 @@ fn unreconciled(hops: Vec<Hop>) -> (Vec<Unreconciled>, Vec<Hop>) {
     (lines.collect(), rest)
 }
 
-/// One workload the cluster cannot do without that a loss stops.
+/// One vital workload that a loss stops.
 #[derive(Debug, PartialEq)]
 pub struct Blind {
     pub namespace: String,
@@ -140,13 +143,12 @@ pub struct Blind {
     pub vital: Vital,
 }
 
-/// One namespace's workloads in one of the lists, by name.
+/// One namespace's workloads in one list of the sidebar, by name.
 #[derive(Debug, PartialEq)]
 pub struct Line {
     pub namespace: String,
     pub workloads: Vec<(Named, State)>,
-    /// The reason that each of its stranded workloads stays down, by the
-    /// workload's name.
+    /// Why each stranded workload stays down, by workload name.
     pub stranded: Vec<(String, Stranded)>,
 }
 
@@ -210,7 +212,7 @@ impl Sidebar {
             line.stranded.sort_by(|a, b| a.0.cmp(&b.0));
         }
         let mut short = lines(short);
-        // A stable sort keeps the names in order within each group.
+        // The sort is stable, so each group keeps its name order.
         short.sort_by_key(Line::one_short);
         let shown = short.iter().enumerate();
         let kept = shown.take_while(|(index, line)| *index < SHORT_LINES || !line.one_short());
@@ -241,8 +243,8 @@ impl Sidebar {
         }
     }
 
-    /// The sidebar with a link on each object of `loss` that its lines
-    /// name, to the page that `href` returns for the object.
+    /// Links each object of `loss` that the sidebar's lines show to the
+    /// page that `href` returns for the object.
     pub fn linked(self, loss: &Loss, href: impl Fn(&Object) -> Option<String>) -> Self {
         let taken = loss.workloads.iter().map(|taken| &taken.object);
         let reached = self.cascade.iter().flat_map(|line| &line.hops);
@@ -261,8 +263,6 @@ impl Sidebar {
         }
     }
 
-    /// The sidebar with each custom kind's plural, which a line uses to
-    /// name a kind whose objects it counts.
     pub fn with_plurals(self, plurals: &transect_graph::edges::Plurals) -> Self {
         Self {
             plurals: plurals.clone(),
@@ -270,32 +270,32 @@ impl Sidebar {
         }
     }
 
-    /// `pieces`, a line of the sidebar, with the objects it names
-    /// linked.
+    /// The parts of `pieces`, one line of the sidebar, with a link on
+    /// each object that the line names.
     pub fn link(&self, pieces: &[Piece]) -> Vec<Part> {
         self.linker.link(pieces)
     }
 
-    /// The sidebar with a line that names the requested machines that
-    /// the cluster does not have.
+    /// Sets the line that lists the requested machines that the cluster
+    /// does not have.
     pub fn with_unknown(self, unknown: Option<String>) -> Self {
         Self { unknown, ..self }
     }
 
-    /// The sidebar with what transect itself stops reading.
+    /// Sets the line that says what `transect` cannot read.
     pub fn with_blind(self, blind: Option<String>) -> Self {
         Self { blind, ..self }
     }
 
-    /// The sidebar with the reason that transect cannot find the
-    /// alerting path.
+    /// Sets the reason that `transect` cannot tell whether alerts still
+    /// work.
     pub fn with_alerting(self, alerting: Option<transect_resources::resources::OffLine>) -> Self {
         Self { alerting, ..self }
     }
 
-    /// The sidebar with the machines of its set that are really lost.
+    /// Keeps the machines of `gone` that are in the sidebar's set.
     /// `gone` lists every machine of the cluster that is really lost.
-    pub fn with_gone(self, gone: &[Gone]) -> Self {
+    pub fn with_gone(self, gone: &[NotReadyMachine]) -> Self {
         let gone = gone.iter().filter(|g| self.machines.contains(&g.machine));
         let gone = gone.cloned().collect();
         Self { gone, ..self }
@@ -303,11 +303,11 @@ impl Sidebar {
 
     /// The sidebar with what the loss leaves of the control plane.  A
     /// control plane without a majority accepts no writes, so no pod is
-    /// evicted or scheduled again.  So every down workload stays down
-    /// until the machines return, and no workload starts again on
-    /// another machine.
+    /// evicted or rescheduled.  Every down workload then stays down
+    /// until the machines return, so `back` moves into `stuck` and
+    /// `next` is cleared.
     pub fn with_majority(self, majority: Option<Majority>) -> Self {
-        if !majority.is_some_and(|majority| !majority.kept()) {
+        if !majority.is_some_and(|majority| !majority.has_quorum()) {
             return Self { majority, ..self };
         }
         Self {
@@ -321,50 +321,53 @@ impl Sidebar {
 
     /// Whether the loss leaves the control plane without a majority.
     pub fn headless(&self) -> bool {
-        self.majority.is_some_and(|majority| !majority.kept())
+        self.majority.is_some_and(|majority| !majority.has_quorum())
     }
 
-    /// The machines of the set that are only supposed lost, by name.
+    /// The machines of the set that are only predicted lost, by name.
     pub fn supposed(&self) -> Vec<&str> {
         let gone = |name: &&str| self.gone.iter().any(|g| g.machine == *name);
         self.machines.names().filter(|name| !gone(name)).collect()
     }
 
-    /// Whether some machine of the set is really lost, so the page shows
-    /// "What to know now" below the loss.
+    /// Whether some machine of the set is really lost, which makes the
+    /// page show "What to know now" below the loss.
     pub fn real(&self) -> bool {
         !self.gone.is_empty()
     }
 
     /// Whether every machine of the set is really lost.  This is the
-    /// page that a reader gets at `/` without requesting a prediction.
+    /// case for the page at `/`, where the reader requested no
+    /// prediction.
     pub fn all_real(&self) -> bool {
         self.supposed().is_empty()
     }
 
-    /// The supposed machines in the form of a URL's `lose` parameter.
-    /// The function leaves out the really lost machines, so a link stops
-    /// naming a machine after it returns.
+    /// The value of a URL's `lose` parameter for the predicted
+    /// machines.  It leaves out the really lost machines, so a link
+    /// stops naming a machine after the machine returns.
     pub fn param(&self) -> String {
         self.supposed().join(",")
     }
 
-    /// The longest any machine of the set has been lost, in seconds.
+    /// How long the longest-lost machine of the set has been lost, in
+    /// seconds.
     pub fn longest(&self) -> Option<i64> {
         self.gone.iter().filter_map(|g| g.seconds).max()
     }
 
-    /// How long the set has been lost, in seconds, when every machine of
-    /// it is really lost.  The value counts from the most recent loss,
-    /// because the eviction of that machine's pods comes last.
+    /// How long the whole set has been lost, in seconds, when every
+    /// machine of it is really lost.  It counts from the most recent
+    /// loss, because the pods of the machine lost last are evicted last.
+    /// `None` when a machine of the set has no `Ready` condition.
     pub fn elapsed(&self) -> Option<i64> {
         let seconds = self.gone.iter().map(|g| g.seconds);
         self.all_real().then(|| seconds.min().flatten()).flatten()
     }
 }
 
-/// Groups `hops`, which arrive in namespace order, into one line per
-/// namespace, with the line of cluster-scoped hops last.
+/// Groups `hops`, which arrive in namespace order, into one line for
+/// each namespace, with the line of cluster-scoped hops last.
 fn by_namespace(hops: Vec<Hop>) -> Vec<Hops> {
     let mut lines: Vec<Hops> = Vec::new();
     for hop in hops {
@@ -380,8 +383,8 @@ fn by_namespace(hops: Vec<Hop>) -> Vec<Hops> {
     lines
 }
 
-/// The lines of `stuck` and `back` as one list, by name.  A namespace
-/// in both lists gets one line.
+/// The lines of `stuck` and `back` as one list, by namespace.  A
+/// namespace in both lists gets one merged line.
 fn merge(stuck: Vec<Line>, back: Vec<Line>) -> Vec<Line> {
     let mut by_namespace: BTreeMap<String, Line> = BTreeMap::new();
     for line in stuck.into_iter().chain(back) {

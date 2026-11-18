@@ -1,13 +1,12 @@
-//! What a URL requests.  A view is the key the event stream renders
-//! by, so two URLs that request the same view share one rendering.
+//! The view that a URL requests. The event stream renders once per
+//! view, so two URLs that request the same view share one rendering.
 
 use serde::Deserialize;
 
 use transect_graph::edges::Shown;
 use transect_supply::vulnerabilities::Shown as Severities;
 
-/// One page and the edge kinds it shows, which render differently, so
-/// the event stream keys its renderings by both.
+/// A page and the edge kinds it shows.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct View {
     pub page: Page,
@@ -18,8 +17,8 @@ pub struct View {
 pub enum Page {
     /// The cluster map, with one namespace selected or none.
     Cluster { select: Option<String> },
-    /// The cluster map if the machines named were lost, by name, with
-    /// one namespace selected in it or none.
+    /// The cluster map as it would look if the named machines were
+    /// lost, with one namespace selected or none.
     Loss {
         lose: Vec<String>,
         select: Option<String>,
@@ -40,8 +39,8 @@ pub enum Page {
     },
     /// One pod, by its namespace and name.
     Pod { namespace: String, name: String },
-    /// One object of a kind outside any namespace, by its kind's name in
-    /// the URL and its name.
+    /// One cluster-scoped object, by its kind's name in the URL and its
+    /// own name.
     ClusterObject { resource: String, name: String },
     /// `transect`'s own resources and their conditions.
     Resources,
@@ -53,23 +52,27 @@ pub enum Page {
     WaysIn,
     /// What each account may do, and where.
     Accounts,
-    /// Every id a current findings report holds, with the severities a
-    /// query narrows it to.
+    /// Every finding id in the current vulnerability reports, filtered
+    /// to the severities that the query names.
     Vulnerabilities { severities: Severities },
-    /// One finding id's page.
+    /// One finding id.
     Vulnerability { id: String },
-    /// A group's or a user's access, by `groups` or `users` and its
-    /// name.
+    /// The access of one group or one user, by `groups` or `users` and
+    /// its name.
     Subject { kinds: String, name: String },
     /// One custom kind's objects across namespaces, by `<plural>.<group>`.
     Kind { resource: String },
     /// One machine, by its `Node`'s name.
     Machine { name: String },
-    /// One ground box, by its `Outside`'s name or its backend's.
+    /// One system outside the cluster, from the outside-systems band of the
+    /// cluster map, by the name of its `Outside` or of its storage
+    /// backend.
     Ground { name: String },
     /// One `PersistentVolume`, by name.
     Volume { name: String },
-    /// One workload's section, by the same parts as its page.
+    /// The section view of one workload, which draws it from its
+    /// `Ingress`es and `Service`s down to its machines and storage, by
+    /// the same parts as its page.
     Section {
         namespace: String,
         resource: String,
@@ -82,15 +85,15 @@ pub enum Page {
         name: String,
     },
     /// One workload's vulnerabilities tab, by the same parts as its
-    /// page, with the severities a query narrows it to.
+    /// page, filtered to the severities that the query names.
     WorkloadVulnerabilities {
         namespace: String,
         resource: String,
         name: String,
         severities: Severities,
     },
-    /// The logs lens of a pod, whose resource is `pods`, or of a
-    /// workload, with the pod and the container a query names.
+    /// The logs of a pod, whose resource is `pods`, or of a workload,
+    /// limited to the pod and the container that the query names.
     Logs {
         namespace: String,
         resource: String,
@@ -112,16 +115,16 @@ pub struct Query {
 }
 
 impl Query {
-    /// The namespace to select.  An empty `select` selects nothing, as a
-    /// form with a blank field would send it.
+    /// The namespace to select. An empty `select` selects nothing,
+    /// because an HTML form with a blank field sends one.
     pub fn select(&self) -> Option<String> {
         self.select
             .clone()
             .filter(|namespace| !namespace.is_empty())
     }
 
-    /// The machines to lose, each once and sorted, so two URLs that
-    /// name one set in another order share a view.
+    /// The machines to lose, sorted and without duplicates, so that two
+    /// URLs that list the same machines in another order share a view.
     pub fn lose(&self) -> Vec<String> {
         let names = self.lose.iter().flat_map(|names| names.split(','));
         let mut names: Vec<String> = names
@@ -134,25 +137,25 @@ impl Query {
         names
     }
 
-    /// The pod a workload's logs lens requests, when one is named.
+    /// The pod that the query selects in a workload's logs, if any.
     pub fn pod(&self) -> Option<String> {
         self.pod.clone().filter(|pod| !pod.is_empty())
     }
 
-    /// The container a logs lens requests, when one is named.
+    /// The container that the query selects in the logs, if any.
     pub fn container(&self) -> Option<String> {
         self.container
             .clone()
             .filter(|container| !container.is_empty())
     }
 
-    /// The severities a vulnerabilities page narrows to, every one
+    /// The severities to show on a vulnerabilities page, all of them
     /// when the query names none.
     pub fn severities(&self) -> Severities {
         Severities::parse(self.severity.as_deref())
     }
 
-    /// The edge kinds to show.
+    /// The edge kinds to show, all of them when the query names none.
     pub fn shown(&self) -> Shown {
         Shown::parse(self.edges.as_deref())
     }
@@ -160,7 +163,7 @@ impl Query {
 
 impl View {
     /// The view at `path`, the URL path without its leading slash, or
-    /// `None` for a path no view serves.
+    /// `None` when no view serves the path.
     pub fn at(path: &str, query: Query) -> Option<Self> {
         let page = Page::at(path, &query)?;
         Some(Self {
@@ -171,10 +174,10 @@ impl View {
 }
 
 impl Page {
-    /// Whether the page is in the access lens, where a name opens its
-    /// object's access page: a page under `/access`, a namespace's or a
-    /// workload's access tab, or a `ServiceAccount`'s page, which is its
-    /// access drawing.
+    /// Whether the page belongs to the access section, where a name
+    /// links to its object's access page. These are the pages under
+    /// `/access`, a namespace's or a workload's access tab, and a
+    /// `ServiceAccount`'s page, which draws its access.
     pub fn in_access(&self) -> bool {
         match self {
             Self::WaysIn | Self::Accounts | Self::Subject { .. } => true,
@@ -184,9 +187,10 @@ impl Page {
         }
     }
 
-    /// The cluster map a query on `/` requests.  A selection in a loss
-    /// keeps the loss on the map and opens the namespace's card in the
-    /// sidebar, so a click on a parcel stays in the loss.
+    /// The cluster map that a query on `/` requests. When the query
+    /// both loses machines and selects a namespace, the page keeps the
+    /// loss on the map and opens the namespace's card in the sidebar, so
+    /// a click on a namespace stays in the loss.
     pub fn cluster(query: &Query) -> Self {
         match query.lose() {
             lose if lose.is_empty() => Self::Cluster {
@@ -210,14 +214,14 @@ impl Page {
             ["vulnerabilities"] => Some(Self::Vulnerabilities {
                 severities: query.severities(),
             }),
-            // A scanner's id may hold a slash, so the id is the whole
-            // rest of the path.
+            // A scanner's id can contain a slash, so the id is the rest of
+            // the path.
             ["vulnerabilities", ref id @ ..] if !id.concat().is_empty() => {
                 Some(Self::Vulnerability { id: id.join("/") })
             }
-            // A user's or a group's name may hold slashes, as an
-            // identity provider's names do, and the router decodes a
-            // `%2F` in the path to `/`, so the name is the whole rest.
+            // A user's or a group's name can contain slashes, as an
+            // identity provider's names do, and the router decodes `%2F`
+            // in the path to `/`, so the name is the rest of the path.
             [
                 "access",
                 "accounts",
@@ -251,8 +255,8 @@ impl Page {
                     resource: resource.into(),
                 })
             }
-            // `pods` is no workload's resource name, so a pod's path is
-            // read before a workload's.
+            // `pods` is not the resource name of any workload, so this
+            // arm must come before the workload arm below.
             ["namespaces", namespace, "pods", name]
                 if !namespace.is_empty() && !name.is_empty() =>
             {
@@ -376,7 +380,7 @@ mod tests {
     #[case::not_a_kind_of_subject("access/accounts/robots/r2", None, None)]
     #[case::one_kind("kinds/widgets.example.io", None, Some(Page::Kind { resource: "widgets.example.io".into() }))]
     #[case::a_machine("machines/alpha", None, Some(Page::Machine { name: "alpha".into() }))]
-    #[case::a_ground_box("ground/a-nas", None, Some(Page::Ground { name: "a-nas".into() }))]
+    #[case::an_outside_system("ground/a-nas", None, Some(Page::Ground { name: "a-nas".into() }))]
     #[case::no_machine_named("machines/", None, None)]
     #[case::a_cluster_scoped_object("cluster/clusterroles.rbac.authorization.k8s.io/view", None, Some(Page::ClusterObject { resource: "clusterroles.rbac.authorization.k8s.io".into(), name: "view".into() }))]
     #[case::an_unknown_path("nowhere", None, None)]
@@ -409,7 +413,7 @@ mod tests {
     #[rstest]
     #[case::a_pod_and_a_container(Some("web-2"), Some("proxy"), (Some("web-2".to_string()), Some("proxy".to_string())))]
     #[case::blank(Some(""), Some(""), (None, None))]
-    fn reads_the_pod_and_container_a_logs_lens_asks_for(
+    fn reads_the_pod_and_container_of_a_logs_lens(
         #[case] pod: Option<&str>,
         #[case] container: Option<&str>,
         #[case] expected: (Option<String>, Option<String>),
@@ -422,7 +426,7 @@ mod tests {
         let page = View::at("namespaces/shop/deployments/web/logs", query).map(|view| view.page);
         let found = match page {
             Some(Page::Logs { pod, container, .. }) => (pod, container),
-            other => panic!("not a logs lens: {other:?}"),
+            other => panic!("the page is {other:?}, want Page::Logs"),
         };
         assert_eq!(found, expected);
     }

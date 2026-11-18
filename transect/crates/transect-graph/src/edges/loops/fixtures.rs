@@ -15,9 +15,10 @@ pub fn edge(kind: Kind, from: Endpoint, to: Endpoint) -> Edge {
     }
 }
 
-/// A forge that serves the manifests a GitOps tool applies to the forge
-/// itself: the forge reconciles from its applier, which reconciles from
-/// a repository in `deploy`, whose URL resolves to the forge.
+/// A git forge that a GitOps tool applies from a repository the forge
+/// itself serves. The forge reconciles from its applier, the applier
+/// from a repository in `deploy`, and the repository depends on the
+/// forge because its URL points at the forge.
 pub fn forge_loop() -> Vec<Edge> {
     let forge = || object("Deployment", "forge", "forge");
     let applier = || object("Tree", "forge", "forge");

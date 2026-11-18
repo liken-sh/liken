@@ -2,10 +2,9 @@
  * An object's board: the object in a box in the middle, what it is part
  * of and what names it in boxes to its left, what it names in boxes to
  * its right, and each table across the page under them.  The boxes
- * take the look of a known kind's diagram: --panel, the rule's border,
- * and the band labels' small capitals.  The object's box takes the
- * heavier rule that the object's box takes in that diagram.
- * The board spans the main column, and in a narrow column it stacks
+ * look like a known kind's diagram: a `--panel` fill, a `--rule`
+ * border, small uppercase labels, and the heavier `--rule-strong`
+ * border on the object's box.  In a narrow column the boxes stack,
  * with the object first.
  */
 
@@ -19,8 +18,7 @@
   container-type: inline-size;
 }
 
-/* A board with no card beside it keeps the same gutter on its right as
-   on its left. */
+/* A board with no card beside it pads its right side like its left. */
 .board-page-alone { padding-right: 32px; }
 
 .board {
@@ -72,8 +70,8 @@
   .board-object { order: -1; }
 }
 
-/* With the object drawn elsewhere, as under a known kind's diagram, the
-   boxes fill one row as wide as the column. */
+/* When the object is drawn elsewhere, as under a known kind's diagram,
+   the boxes fill a grid as wide as the column. */
 .board-row {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
@@ -186,9 +184,9 @@
 
 .board-wide { gap: 6px; }
 
-/* A table under the board takes the page's width, and its first
-   column, such as a rule's verbs, stays on one line, so a long column
-   of resources beside it wraps rather than squeezing it. */
+/* A table under the board takes the page's width.  Its first column,
+   such as a rule's verbs, stays on one line, so a long list of
+   resources in the next column wraps instead of squeezing it. */
 .board-wide .board-table { width: 100%; }
 .board-wide .board-table td:first-child { white-space: nowrap; }
 
@@ -215,8 +213,8 @@
   overflow-wrap: anywhere;
 }
 
-/* A box's label with a link beside it, such as a namespace's list of a
-   kind and the same kind in every namespace. */
+/* A box's label with a link at its right, such as a link from one
+   namespace's objects of a kind to that kind in every namespace. */
 .board-head {
   display: flex;
   align-items: baseline;
@@ -236,20 +234,19 @@
 
 .board-table-text { font-family: "Source Sans 3", system-ui, sans-serif; font-size: 13px; color: var(--ink-muted); }
 
-/* A table of objects fits its column.  A name wraps after a hyphen,
-   and each printer column's value stays on one line, cut with an
-   ellipsis past 16em, its whole value on hover. */
+/* A table of objects fits its column.  A name wraps, and each printer
+   column's value stays on one line, cut with an ellipsis past 16em. */
 .board-objects td { white-space: nowrap; }
 .board-objects td.board-table-name { white-space: normal; min-width: 8em; }
 .board-objects td.board-table-value { max-width: 16em; overflow: hidden; text-overflow: ellipsis; }
 
-/* A table's rows past its first few hide until the count under it is
-   open. */
+/* Rows past a table's first few are hidden until the count under the
+   table is opened. */
 .board-box:not(:has(> .board-table-fold[open])) .board-folded,
 .manages-body:not(:has(> .board-table-fold[open])) .board-folded { display: none; }
 
-/* /kinds: a box per API group, packed in columns so a group of one
-   kind and a group of twenty are side by side without gaps. */
+/* /kinds: one box per API group, in CSS columns, so groups of very
+   different sizes pack without gaps. */
 .kinds-boxes {
   column-width: 300px;
   column-gap: 12px;
@@ -260,9 +257,8 @@
   margin-bottom: 12px;
 }
 
-/* The domain a run of groups is registered under, in faint ink, before
-   its first box.  The groups sort by domain, so the heading explains
-   the order. */
+/* The domain that the following groups share, before their first box.
+   The groups sort by domain, so this heading explains the order. */
 .kinds-domain {
   break-after: avoid;
   margin: 4px 0 6px;
@@ -322,8 +318,8 @@
   gap: 2px 12px;
 }
 
-/* A workload's Controls boxes are in the row with Runs and Guards, one
-   per kind, with the Runs box's label. */
+/* A workload's Controls boxes, one per kind, are in the same row as its
+   Runs and Guards boxes. */
 .manages-body {
   flex: 1;
   min-width: 0;
@@ -349,12 +345,12 @@
 
 .manages .board-table { width: 100%; }
 
-/* A run of Controls boxes looks like one group: only the first shows
-   the label, and the rest keep its width so their tables line up. */
+/* Only the first of several Controls boxes shows the label.  The others
+   keep its space, so their tables line up. */
 .manages + .manages .row-label { visibility: hidden; }
 
-/* An object and the machine it is on, as a pod that mounts a volume:
-   both names linked, with a gray "on" between. */
+/* An object and the machine it is on, such as a pod that mounts a
+   volume: both names linked, with "on" between them. */
 .board-placed { min-width: 0; }
 
 .board-on {
@@ -363,8 +359,9 @@
   color: var(--ink-faint);
 }
 
-/* What the object is part of frames its board, and its parts are boxes
-   inside its own box, each listing its own parts. */
+/* The object that this one is part of is drawn as a frame around the
+   board.  The object's parts are boxes inside its box, and each part
+   lists its own parts. */
 .board-frame {
   border: 1px solid var(--rule);
   border-radius: 8px;

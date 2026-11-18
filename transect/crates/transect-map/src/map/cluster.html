@@ -13,45 +13,45 @@
 {#- The map and the sidebar swap as one block, so the sidebar never names
     a namespace the map has already turned gray. -#}
 <div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
-{#- A click on a parcel swaps in the whole page for its selection and
+{#- A click on a tile swaps in the whole page for its selection and
     pushes its URL, so back, forward, and a pasted link all open the
     same view.  The body swaps, not the view, because the masthead's
     crumb and the page's event stream change with the selection.  A
-    click on the selected parcel deselects it, the card's name opens its
+    click on the selected tile deselects it, the card's name opens its
     namespace's page, and a click on a machine's name opens its loss.
     With a namespace selected or a loss shown, Escape or a click
-    anywhere in the map except on a parcel or a machine's name goes
+    anywhere in the map except on a tile or a machine's name goes
     back.  It goes to the loss from a namespace selected in it, and
     otherwise to the plain cluster.  Escape acts on keydown and only
     while no dialog is open, so the Escape that closes quick search
     leaves the selection alone, because the dialog closes on keydown
     and its keyup would reach the body after it had closed. -#}
 <main class="cluster" hx-target="body" hx-swap="innerHTML" hx-push-url="true"
-{%- if away() %} hx-get="{{ away_href() }}" hx-trigger="click[!target.closest('.parcel, .strip-name')], keydown[key=='Escape' && !document.querySelector('dialog[open]')] from:body"{% endif %}>
+{%- if away() %} hx-get="{{ away_href() }}" hx-trigger="click[!target.closest('.ns-tile, .strip-name')], keydown[key=='Escape' && !document.querySelector('dialog[open]')] from:body"{% endif %}>
 {% include "map/edge_row.html" %}
 <div class="bands">
 {%- for band in map.bands %}
 <section class="band" id="{{ band.name }}" aria-label="{{ band.name }}">
 <div class="band-label">
 <div class="band-name">{{ band.name }}</div>
-<div class="band-count">{{ band.parcels.len() }} namespace{% if band.parcels.len() != 1 %}s{% endif %}</div>
+<div class="band-count">{{ band.tiles.len() }} namespace{% if band.tiles.len() != 1 %}s{% endif %}</div>
 </div>
-<div class="parcels">
-{%- for parcel in band.parcels %}
-{%- let href = parcel.href(away_href().as_str()) %}
-<a class="parcel{% if !parcel.relations.is_empty() %} parcel-tagged{% endif %}{{ parcel.health_class() }}{% if parcel.selected %} parcel-selected{% endif %}" style="--weight: {{ parcel.weight() }}" href="{{ href }}" hx-get="{{ href }}"
-{%- if let Some(title) = parcel.health.title() %} title="{{ title }}"{% endif %}>
-<div class="parcel-name"><span class="parcel-namespace">{{ parcel.namespace }}</span>
-{%- if parcel.looped %}<span class="loop-mark" title="in a loop">⟲</span>{% endif -%}
+<div class="ns-tiles">
+{%- for tile in band.tiles %}
+{%- let href = tile.href(away_href().as_str()) %}
+<a class="ns-tile{% if !tile.relations.is_empty() %} ns-tile-tagged{% endif %}{{ tile.health_class() }}{% if tile.selected %} ns-tile-selected{% endif %}" style="--weight: {{ tile.weight() }}" href="{{ href }}" hx-get="{{ href }}"
+{%- if let Some(title) = tile.health.title() %} title="{{ title }}"{% endif %}>
+<div class="ns-tile-name"><span class="ns-tile-namespace">{{ tile.namespace }}</span>
+{%- if tile.looped %}<span class="loop-mark" title="in a loop">⟲</span>{% endif -%}
 </div>
-{#- Under a loss, the parcel's tag names what the loss takes from the
+{#- Under a loss, the tile's tag names what the loss takes from the
     namespace, in place of its count.  With a selection, the line shows
     how the selected namespace relates to this one.  The line is drawn
-    over the count, which stays hidden beneath it to keep the parcel's
+    over the count, which stays hidden beneath it to keep the tile's
     width. -#}
-<div class="parcel-count">{% if let Some(loss) = parcel.loss %}<span class="loss-tag">{{ loss }}</span>{% else %}<span class="parcel-workloads">{{ parcel.workloads }} workload{% if parcel.workloads != 1 %}s{% endif %}</span>
-{%- let relation = parcel.relation() %}
-{%- if !relation.is_empty() %}<span class="parcel-relation" title="{{ parcel.relation_title() }}">{{ relation }}</span>{% endif %}{% endif -%}
+<div class="ns-tile-count">{% if let Some(loss) = tile.loss %}<span class="loss-tag">{{ loss }}</span>{% else %}<span class="ns-tile-workloads">{{ tile.workloads }} workload{% if tile.workloads != 1 %}s{% endif %}</span>
+{%- let relation = tile.relation() %}
+{%- if !relation.is_empty() %}<span class="ns-tile-relation" title="{{ tile.relation_title() }}">{{ relation }}</span>{% endif %}{% endif -%}
 </div>
 </a>
 {%- endfor %}

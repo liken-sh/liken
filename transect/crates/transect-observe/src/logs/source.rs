@@ -2,11 +2,12 @@
 //! query language, the store's name for each field that transect reads,
 //! and the queries that transect fills in.
 //!
-//! A cluster declares at most one.  transect uses `url` before
-//! `service`, so one resource works from a workstation through a
-//! port-forward and from inside the cluster by the `Service`'s DNS
-//! name.  `--log-source-url` overrides both.  transect sends no
-//! credentials, because a port-forward needs none.
+//! A cluster declares at most one.  transect sends its queries to
+//! `--log-source-url` when it is set, then to `url`, then to the
+//! `Service`'s DNS name.  So a resource that declares only `service`
+//! works from inside the cluster, and a workstation reaches the store
+//! through a port-forward that the flag or `url` names.  transect sends
+//! no credentials, because a port-forward needs none.
 
 use serde::Deserialize;
 
@@ -32,16 +33,15 @@ pub struct LogSource {
     pub levels: Levels,
     pub tail: String,
     pub search: String,
-    /// The query for the newest lines that match a search's filter
-    /// across the cluster, which a finding shows as samples.  It is
-    /// `None` when the source does not declare it.
+    /// The query for the newest lines that match a search's filter,
+    /// which a finding shows as samples.
     pub lines: Option<String>,
 }
 
-/// The store's name for each field that transect reads.  The node and
-/// the level are optional.  For a store without a level field, transect
-/// guesses each line's level from its text.  A store with a level field
-/// declares in `levels` what the field's values mean.
+/// The store's name for each field that transect reads.  For a store
+/// without a level field, transect guesses each line's level from its
+/// text.  A store with a level field declares in `levels` what the
+/// field's values mean.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Fields {
@@ -57,14 +57,14 @@ pub struct Fields {
     pub machine: Option<MachineLog>,
 }
 
-/// The lines that are a machine's own log, such as its kubelet's or its
-/// kernel's, even though a pod ships them.  These are the lines whose
-/// `field` holds one of `values`, such as the name of the `DaemonSet`
-/// that reads each machine's journal.  The pod only ships these lines,
-/// so transect assigns them to the machine that their node field names.
-/// `unit` is the field that names which of the machine's logs a line
-/// belongs to, and the container field is used when `unit` is left out.
-/// A line with a node and no namespace is also a machine's own.
+/// The rule for lines that a machine writes itself, such as its
+/// kubelet's or its kernel's, which a pod ships to the store, such as a
+/// `DaemonSet` that reads each machine's journal.  A line is a machine's
+/// when its `field` has one of `values`, and transect counts it for the
+/// node in the node field, not for the pod.  `unit` is the field that
+/// says which of the machine's logs the line came from, and defaults to
+/// the container field.  A line with a node and no namespace also
+/// counts as a machine's.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MachineLog {
@@ -139,30 +139,33 @@ pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<LogSource, String> 
     let language = Language::named(&spec.language)?;
     let url = spec.url.as_deref().map(base_url).transpose()?;
     if url.is_none() && spec.service.is_none() {
-        return Err("a LogSource needs a url or a service".into());
+        return Err("the LogSource sets neither url nor service, and needs one of them".into());
     }
     if !spec.query.starts_with('/') {
         return Err(format!(
-            "query is the path of the store's query endpoint, starting with /, not {:?}",
+            "query must be a path that starts with /, and is {:?}",
             spec.query
         ));
     }
     if let Some(machine) = &spec.fields.machine {
         if spec.fields.node.is_none() {
-            return Err("fields.machine needs fields.node, the machine a line belongs to".into());
+            return Err("fields.machine is set and fields.node is not, so no field says which machine a line belongs to".into());
         }
         if machine.values.is_empty() {
-            return Err("fields.machine.values names no value".into());
+            return Err("fields.machine.values is empty".into());
         }
     }
     let levels = match (&spec.fields.level, spec.levels) {
         (Some(_), Some(levels)) => levels.checked()?,
         (None, None) => Levels::default(),
         (Some(_), None) => {
-            return Err("fields.level needs levels, which define what its values mean".into());
+            return Err("fields.level is set and levels is not, so the values of the level field have no meaning".into());
         }
         (None, Some(_)) => {
-            return Err("levels needs fields.level, the field whose values they name".into());
+            return Err(
+                "levels is set and fields.level is not, so no field has values to match them"
+                    .into(),
+            );
         }
     };
     query::check(Query::Tail, &spec.queries.tail, &spec.fields)?;
@@ -185,8 +188,7 @@ pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<LogSource, String> 
     })
 }
 
-/// A log source with the endpoint that transect sends its queries to
-/// from the place where transect runs.
+/// A log source with the query endpoint that transect uses.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Reached {
     pub source: LogSource,
@@ -194,8 +196,8 @@ pub struct Reached {
 }
 
 impl LogSource {
-    /// The query endpoint.  It uses the flag's URL first, then the
-    /// resource's URL, then the `Service`'s DNS name in `domain`.
+    /// The query endpoint at `flag`, then at `url`, then at the
+    /// `Service`'s DNS name in `domain`.
     pub fn reached(&self, flag: Option<&str>, domain: &str) -> Reached {
         let (url, service) = (self.url.as_deref(), self.service.as_ref());
         let base = upstream::base(flag, url, service, domain).unwrap_or_default();
@@ -255,23 +257,23 @@ mod tests {
     use super::*;
 
     fn with(from: &str, to: &str) -> Result<LogSource, String> {
-        assert!(SPEC.contains(from), "{from:?} is not in the spec");
+        assert!(SPEC.contains(from), "the spec has no {from:?} to replace");
         parse(DocId::default(), document(&SPEC.replacen(from, to, 1)))
     }
 
     #[rstest]
-    #[case::another_language("language: logsql", "language: logql", "LogsQL")]
+    #[case::another_language("language: logsql", "language: logql", "logsql")]
     #[case::neither_url_nor_service(
         "service: {namespace: logs, name: store, port: 9428}\nurl: http://localhost:9428\n",
         "",
-        "url or a service"
+        "neither url nor service"
     )]
     #[case::a_url_that_is_not_http(
         "url: http://localhost:9428",
         "url: localhost:9428",
         "http or https"
     )]
-    #[case::a_relative_query_path("query: /select", "query: select", "starting with /")]
+    #[case::a_relative_query_path("query: /select", "query: select", "starts with /")]
     #[case::an_unknown_placeholder(
         "limit {limit}'\n  search",
         "limit {lines}'\n  search",
@@ -287,20 +289,23 @@ mod tests {
     #[case::lines_with_no_window("lines: '_time:{window}", "lines: '_time:1h", "{window}")]
     #[case::an_unknown_field("  message: _msg\n", "  message: _msg\n  colour: hue\n", "colour")]
     #[case::a_machine_rule_with_no_node("  node: k8s.node.name\n", "", "fields.node")]
-    #[case::a_machine_rule_with_no_value("values: [journal]", "values: []", "no value")]
+    #[case::a_machine_rule_with_no_value("values: [journal]", "values: []", "is empty")]
     #[case::a_level_field_with_no_levels(
         "levels: {error: [err, fatal, panic, crit], warning: [warn], plain: [info, debug, trace, notice]}\n",
         "",
-        "fields.level needs levels"
+        "and levels is not"
     )]
-    #[case::levels_with_no_level_field("  level: severity_text\n", "", "levels needs fields.level")]
+    #[case::levels_with_no_level_field("  level: severity_text\n", "", "and fields.level is not")]
     fn says_why_a_source_does_not_validate(
         #[case] from: &str,
         #[case] to: &str,
         #[case] says: &str,
     ) {
         let error = with(from, to).unwrap_err();
-        assert!(error.contains(says), "{error:?} does not say {says:?}");
+        assert!(
+            error.contains(says),
+            "the error is {error:?}, want it to contain {says:?}"
+        );
     }
 
     #[rstest]
@@ -312,7 +317,10 @@ mod tests {
             1,
         );
         let error = parse(DocId::default(), document(&spec)).unwrap_err();
-        assert!(error.contains("{fields.node}"), "{error:?}");
+        assert!(
+            error.contains("{fields.node}"),
+            "the error is {error:?}, want it to contain {{fields.node}}"
+        );
     }
 
     #[rstest]

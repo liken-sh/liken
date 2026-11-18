@@ -1,19 +1,21 @@
-//! Reading a field path of kind knowledge, such as `status.screen.node`
-//! or `spec.remotes[].name`, out of an object.  Each `[]` reads every
-//! item of a list, so one path can name several objects.  A path that
-//! reaches a missing field, or a value of another shape, reads nothing
-//! there, because an operator writes its status over time, and a field
-//! not written yet names nothing.
+//! Reads a field path from kind knowledge, such as
+//! `status.screen.node` or `spec.remotes[].name`, out of an object.
+//! Each `[]` reads every item of a list, so one path can return several
+//! values. A path that reaches a missing field, or a value of another
+//! type, returns nothing rather than an error, because an operator
+//! writes its status over time, and a field it has not written yet is
+//! absent.
 
 use serde_json::Value;
 
 use transect_graph::edges::Object;
 
-/// Each text `path` reads from `object`, whose spec and status are
-/// `data`.  A watch keeps an object's metadata apart from the rest, so
-/// `metadata.name` and `metadata.namespace` read from `object`: a
-/// secrets operator often names the `Secret` it writes after its own
-/// resource, and no field of the spec holds that name.
+/// The strings that `path` reads from `object`. `data` holds the
+/// object's spec and status but not its metadata, so `metadata.name`
+/// and `metadata.namespace` are read from `object`. Kind knowledge needs
+/// `metadata.name` because an operator often gives the `Secret` it
+/// writes the name of its own resource, and no spec field holds that
+/// name.
 pub fn read_of(object: &Object, data: &Value, path: &str) -> Vec<String> {
     match path {
         "metadata.name" => vec![object.name.clone()],
@@ -22,26 +24,26 @@ pub fn read_of(object: &Object, data: &Value, path: &str) -> Vec<String> {
     }
 }
 
-/// Each text `path` reads from `value`, in order.  A number is read as
-/// its digits, because a name or a port can be written as one; any other
-/// shape at the end of the path reads nothing.
+/// The strings that `path` reads from `value`, in order. A number
+/// becomes its decimal text, because a name or a port can be a number.
+/// A value of any other type at the end of the path is skipped.
 pub fn read(value: &Value, path: &str) -> Vec<String> {
     walk(value, path).into_iter().filter_map(text).collect()
 }
 
-/// Whether `path` reaches any value in `value` but null, such as the
-/// object a reference to a source is.
+/// Whether `path` reaches any value in `value` that is not null. Use
+/// it for a field whose value is an object, such as a reference to a
+/// source, which `read` skips.
 pub fn holds(value: &Value, path: &str) -> bool {
     walk(value, path).into_iter().any(|value| !value.is_null())
 }
 
-/// Every value `path` reaches in `value`, in order, such as each item
-/// of a list that `report.items[]` names.
+/// Every value that `path` reaches in `value`, in order. For
+/// `report.items[]` these are the items of the list.
 pub fn values<'a>(value: &'a Value, path: &str) -> Vec<&'a Value> {
     walk(value, path)
 }
 
-/// Every value `path` reaches in `value`, in order.
 fn walk<'a>(value: &'a Value, path: &str) -> Vec<&'a Value> {
     let mut found = vec![value];
     for segment in path.split('.') {

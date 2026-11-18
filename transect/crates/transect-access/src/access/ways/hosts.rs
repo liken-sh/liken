@@ -1,6 +1,6 @@
-//! The hosts the Ingresses route.  Each host and port that the
-//! controller serves an Ingress on is one way in, and every Ingress
-//! that routes that host and port goes into that one row.
+//! The ways in that Ingresses open.  Each host and port on which an
+//! ingress controller serves an Ingress is one row, which lists every
+//! Ingress that routes that host and port.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -19,22 +19,20 @@ struct Route {
     /// The ingress controller that serves it.
     controller: Object,
     tls: bool,
-    /// The TLS port the ingress controller redirects this port to, and
-    /// the `IngressController` that declares it, when the route's TLS
-    /// names the host.
+    /// The TLS port that the ingress controller redirects this port to,
+    /// and the name of the `IngressController` that declares the
+    /// redirect.  `None` unless the Ingress's `tls` covers the host and
+    /// an `IngressController` declares the redirect.
     redirect: Option<(u16, String)>,
     sign_in: Vec<Object>,
-    /// The sentences that state that the workloads it reaches sign their
-    /// callers in themselves.
     declared: Declared,
     workloads: Vec<Object>,
     backends: Vec<super::Backend>,
 }
 
-/// What the people who run the cluster wrote about whether the
-/// workloads a route reaches sign their callers in themselves.  `All` is
-/// the route's own sentence or a sentence from each workload, and
-/// `Some` is a sentence from some of the workloads.
+/// Stored text that says the workloads a route reaches sign their
+/// callers in themselves.  `All` is text for the route itself or for
+/// every workload, and `Some` is text for only some of the workloads.
 #[derive(Clone, Debug)]
 enum Declared {
     All(Line),
@@ -75,21 +73,22 @@ pub fn read(sources: &Sources) -> Ways {
     let mut routes: BTreeMap<(String, u16), Vec<Route>> = BTreeMap::new();
     let mut entered: BTreeMap<Object, BTreeSet<String>> = BTreeMap::new();
     let mut callbacks: Vec<(Object, usize)> = Vec::new();
-    let signing = |ingress: &Ingress| {
+    let routes_only_to_sign_in = |ingress: &Ingress| {
         let routed = routed(ingress);
         let backends: Vec<&IngressBackend> =
             routed.iter().flat_map(|(_, b)| b.iter().copied()).collect();
         let workloads = workloads(ingress.namespace().as_deref(), &backends, sources);
         !workloads.is_empty() && workloads.iter().all(|w| sources.signs_in.contains(w))
     };
-    // An Ingress that routes only to workloads that routes sign in
-    // through, on hosts that other Ingresses also route, is the
-    // sign-in's own callback on those hosts.  An Ingress with a host of
-    // its own, such as the sign-in's own page, is a way in.
+    // An Ingress is a sign-in callback, not a way in, when it routes
+    // only to workloads that other routes sign in through, and every
+    // host it routes is also routed by an Ingress that routes to
+    // something else.  An Ingress with a host of its own, such as the
+    // sign-in's own page, is still a way in.
     let elsewhere: BTreeSet<String> = sources
         .ingresses
         .iter()
-        .filter(|ingress| !signing(ingress))
+        .filter(|ingress| !routes_only_to_sign_in(ingress))
         .flat_map(|ingress| routed(ingress).into_iter().map(|(host, _)| host))
         .collect();
     let mut unserved: Vec<Object> = Vec::new();
@@ -102,7 +101,7 @@ pub fn read(sources: &Sources) -> Ways {
         );
         let routed = routed(ingress);
         let hosts: Vec<String> = routed.iter().map(|(host, _)| host.clone()).collect();
-        if signing(ingress) && hosts.iter().all(|host| elsewhere.contains(host)) {
+        if routes_only_to_sign_in(ingress) && hosts.iter().all(|host| elsewhere.contains(host)) {
             callbacks.push((object, hosts.len()));
             continue;
         }
@@ -224,11 +223,11 @@ fn row(host: String, port: u16, routes: &[Route], sources: &Sources) -> Way {
     }
 }
 
-/// The TLS gate of a row whose routes put TLS on it in `state`.  When
-/// the controller redirects a route to a TLS port, and the route's TLS
-/// names the host, the route declares TLS.  The gate is declared and
-/// not on because the redirect is the controller's configuration, which
-/// an `IngressController` states and the Ingress does not.
+/// The TLS gate of a row.  `state` is whether all, some, or none of
+/// its routes have TLS.  When the ingress controller redirects every
+/// route without TLS to a TLS port, the gate is `Declared` and not
+/// `On`, because the redirect is in the `IngressController`'s
+/// configuration and the Ingress does not show it.
 fn tls(routes: &[Route], port: u16, state: State) -> Gate {
     let redirected = routes
         .iter()
@@ -238,7 +237,7 @@ fn tls(routes: &[Route], port: u16, state: State) -> Gate {
     match (state, redirected.as_deref()) {
         (State::On, _) => Gate::of(State::On, "TLS ends at the ingress controller."),
         (_, Some([(to, name), ..])) => Gate {
-            said: Some(Provenance::Intent(Stated::IngressController {
+            declared_at: Some(Provenance::Intent(Stated::IngressController {
                 field: "redirectsTo".into(),
                 name: name.clone(),
             })),
@@ -260,21 +259,26 @@ fn tls(routes: &[Route], port: u16, state: State) -> Gate {
     }
 }
 
-/// The sign-in gate of a row: on when every route signs in through an
-/// object, declared when each route that does not has a sentence that
-/// states the workload signs its callers in itself, and half when some
-/// routes have neither.  An object that puts sign-in on a route takes
-/// precedence over a sentence.
+/// The sign-in gate of a row.  It is `On` when every route signs in
+/// through an object, and `Declared` when each of the other routes has
+/// stored text that says every workload it reaches signs its callers in
+/// itself.  It is `Half` when some routes have neither, or when the text
+/// covers only some workloads, and `Off` when no route has either.  A
+/// route with a sign-in object counts as signed in even when it also has
+/// text.
 fn sign_in(routes: &[Route], named: String, names: Vec<Object>) -> Gate {
-    let filled = routes.iter().filter(|r| !r.sign_in.is_empty()).count();
-    let unfilled = routes.iter().filter(|r| r.sign_in.is_empty());
-    let unfilled: Vec<&Route> = unfilled.collect();
-    let declared: Vec<&Line> = unfilled.iter().filter_map(|r| r.declared.all()).collect();
-    let partly = unfilled.iter().find_map(|r| r.declared.some());
-    let missing = routes.len() - filled - declared.len();
-    let said = declared.first().copied().or(partly);
-    let said = said.map(|line| line.provenance.clone());
-    let (state, title) = match (filled, declared.first(), missing) {
+    let with_object = routes.iter().filter(|r| !r.sign_in.is_empty()).count();
+    let without_object = routes.iter().filter(|r| r.sign_in.is_empty());
+    let without_object: Vec<&Route> = without_object.collect();
+    let declared: Vec<&Line> = without_object
+        .iter()
+        .filter_map(|r| r.declared.all())
+        .collect();
+    let partly = without_object.iter().find_map(|r| r.declared.some());
+    let missing = routes.len() - with_object - declared.len();
+    let declaring = declared.first().copied().or(partly);
+    let declared_at = declaring.map(|line| line.provenance.clone());
+    let (state, title) = match (with_object, declared.first(), missing) {
         (_, None, 0) => (State::On, format!("Signs in through {named}.")),
         (0, Some(line), 0) => (State::Declared, line.text.clone()),
         (_, Some(line), 0) => (
@@ -319,12 +323,12 @@ fn sign_in(routes: &[Route], named: String, names: Vec<Object>) -> Gate {
         state,
         title,
         names,
-        said,
+        declared_at,
     }
 }
 
-/// Whether `ingress`'s TLS names `host`, or names no hosts, which
-/// covers every host it routes.
+/// Whether a `tls` entry of `ingress` lists `host`, or lists no hosts,
+/// which covers every host that the Ingress routes.
 fn tls_names(ingress: &Ingress, host: &str) -> bool {
     let spec = ingress.spec.as_ref();
     let tls = spec
@@ -406,7 +410,7 @@ mod tests {
         assert_eq!(tls(&routes, 80, state).state, expected);
     }
 
-    /// The sign-in's own page is a way in; its callback on the shop's
+    /// The sign-in's own page is a way in.  Its callback on the shop's
     /// host is not.
     #[test]
     fn leaves_out_only_the_sign_ins_callback() {

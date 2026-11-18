@@ -3,14 +3,16 @@
 
 use super::{Forges, safe, web};
 
-/// Where a commit link goes.
+/// What to show for a commit: a link when one can be built, otherwise
+/// plain text.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Commit {
-    /// The commit's page, and the repository's name and the short
-    /// revision to show, as "app@0a1b2c3".
+    /// The URL of the commit's page, and link text made of the
+    /// repository's name and the short revision, as "app@0a1b2c3".
     Link { href: String, text: String },
-    /// The source and revision as given, when no `Forge` matches the
-    /// source's host or the revision cannot go into a URL as it is.
+    /// The source and revision unchanged, for when the source is not a
+    /// web address, no `Forge` matches its host, or the revision is empty
+    /// or cannot go into a URL unescaped.
     Text { source: String, revision: String },
 }
 
@@ -18,7 +20,8 @@ pub enum Commit {
 /// one.
 const SHORT: usize = 7;
 
-/// The commit `revision` names in the repository at `source`.
+/// The link to `revision` in the repository at `source`, or the text of
+/// both when no link can be built.
 pub fn commit(source: &str, revision: &str, forges: &Forges) -> Commit {
     let link = || {
         let found = web(source)?;
@@ -61,7 +64,8 @@ mod tests {
         }
     }
 
-    /// A Gitea the cluster serves at `forge.example.com`.
+    /// Forges that include a Gitea at `forge.example.com`, which
+    /// `Forges::build` recognizes from the image that runs there.
     fn served() -> Forges {
         Forges::build(
             &super::super::fixtures::layouts(),
@@ -93,7 +97,7 @@ mod tests {
         "abc1234",
         link("https://codeberg.org/acme/app/commit/abc1234", "app@abc1234")
     )]
-    #[case::a_forge_the_cluster_serves(
+    #[case::a_forge_served_by_the_cluster(
         "https://forge.example.com/team/app",
         "abc1234",
         link("https://forge.example.com/team/app/commit/abc1234", "app@abc1234")
@@ -103,12 +107,12 @@ mod tests {
         "abc1234",
         text("https://code.example.com/team/app", "abc1234")
     )]
-    #[case::a_revision_a_url_would_escape(
+    #[case::a_revision_that_needs_url_escaping(
         "https://github.com/acme/app",
         "v1 \"x\"",
         text("https://github.com/acme/app", "v1 \"x\"")
     )]
-    #[case::a_revision_that_steps_up(
+    #[case::a_revision_with_a_path_separator(
         "https://github.com/acme/app",
         "../x",
         text("https://github.com/acme/app", "../x")
@@ -118,7 +122,7 @@ mod tests {
         "",
         text("https://github.com/acme/app", "")
     )]
-    fn links_a_commit_only_on_a_forge_it_knows(
+    fn links_a_commit_only_on_a_known_forge(
         #[case] source: &str,
         #[case] revision: &str,
         #[case] expected: Commit,

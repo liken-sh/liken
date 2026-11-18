@@ -1,19 +1,20 @@
-//! Reading the directory under `--resources`: every `.yaml` and `.yml`
-//! file in it, recursively, handed to `parse` to sort.
+//! Reads every `.yaml` and `.yml` file under the `--resources`
+//! directory, recursively, and passes them to `parse` to sort.
 
 use std::path::{Path, PathBuf};
 
 use super::Sorts;
 use super::parse::{Read, sort};
 
-/// Every resource under `dir`.  A directory that cannot be read loads
-/// as nothing, with its error logged, so a missing directory at start
-/// and one removed while `transect` runs load the same.
+/// Loads every resource under `dir`.  When the directory cannot be
+/// read, logs a warning and returns no resources, so a directory that is
+/// missing at start and one deleted while `transect` runs give the same
+/// result.
 pub fn load<S: Sorts>(dir: &Path) -> S {
     let files = match yaml_files(dir) {
         Ok(files) => files,
         Err(error) => {
-            tracing::warn!(dir = %dir.display(), %error, "reading the resources directory");
+            tracing::warn!(dir = %dir.display(), %error, "The resources directory cannot be read, so no resources are loaded");
             Vec::new()
         }
     };
@@ -46,9 +47,10 @@ pub fn load<S: Sorts>(dir: &Path) -> S {
     sorted
 }
 
-/// Every `.yaml` and `.yml` file under `dir`, sorted, so that the page
-/// lists the files in the same order, and the first of two `Layers` is
-/// the same one, on each load.
+/// Every `.yaml` and `.yml` file under `dir`, sorted by path.  The page
+/// then lists the files in the same order on each load, and when two
+/// documents declare the same resource, the same one is read first and
+/// used.
 fn yaml_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     let mut pending = vec![dir.to_path_buf()];

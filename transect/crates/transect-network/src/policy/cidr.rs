@@ -1,11 +1,11 @@
-//! Address blocks in CIDR notation, as a `NetworkPolicy`'s `ipBlock`
-//! names them, and whether a block contains an address.
+//! CIDR blocks, as in a `NetworkPolicy`'s `ipBlock`, and the test for
+//! whether a block contains an address.
 
 use std::net::IpAddr;
 
-/// A block of addresses: its network, as the top `bits` of `network`,
-/// in IPv4 or IPv6.  An IPv4 block never contains an IPv6 address, and
-/// an IPv6 block never contains an IPv4 address.
+/// A CIDR block: a network address and a prefix length of `bits`, in
+/// IPv4 or IPv6. An IPv4 block contains no IPv6 address, and an IPv6
+/// block contains no IPv4 address.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Block {
     network: u128,
@@ -14,9 +14,9 @@ pub struct Block {
 }
 
 impl Block {
-    /// Parses `10.0.0.0/8` or `fd00::/8`.  A bare address is a block of
-    /// one.  Text the API server would reject parses to `None`, which
-    /// matches nothing.
+    /// Parses `10.0.0.0/8` or `fd00::/8`. A bare address is a block
+    /// with a full-length prefix. Invalid text, which the API server
+    /// would reject, returns `None`.
     pub fn parse(text: &str) -> Option<Self> {
         let (address, bits) = match text.split_once('/') {
             Some((address, bits)) => (address, Some(bits.parse::<u32>().ok()?)),
@@ -34,6 +34,7 @@ impl Block {
         })
     }
 
+    /// Whether `address` is in this block.
     pub fn contains(&self, address: IpAddr) -> bool {
         let (value, width, v4) = match address {
             IpAddr::V4(v4) => (u128::from(u32::from(v4)), 32, true),
@@ -43,7 +44,8 @@ impl Block {
     }
 }
 
-/// `value` with all but its top `bits` of `width` cleared.
+/// Zeroes every bit of `value` below its top `bits` bits, where `value`
+/// is `width` bits wide.
 fn mask(value: u128, bits: u32, width: u32) -> u128 {
     if bits == 0 {
         return 0;
@@ -69,7 +71,7 @@ mod tests {
     #[case::v6_outside("fd00::/8", "fe80::1", false)]
     #[case::v4_block_and_v6_address("0.0.0.0/0", "::1", false)]
     #[case::v6_block_and_v4_address("::/0", "10.0.0.1", false)]
-    fn holds_an_address(#[case] block: &str, #[case] address: &str, #[case] expected: bool) {
+    fn contains_an_address(#[case] block: &str, #[case] address: &str, #[case] expected: bool) {
         let block = Block::parse(block).unwrap();
         assert_eq!(block.contains(address.parse().unwrap()), expected);
     }

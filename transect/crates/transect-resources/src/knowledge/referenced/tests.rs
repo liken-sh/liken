@@ -34,9 +34,9 @@ fn meta(annotation: &str) -> ObjectMeta {
     .unwrap()
 }
 
-/// The gates each `Ingress` in shop names, by the `Ingress`'s name and
-/// the gate's namespace and name, with `annotation` on web and nothing
-/// on blog.
+/// The gates that `referrals` finds for the `Ingress` web in shop, which
+/// has `annotation`, and blog in shop, which has none.  Each result is
+/// the `Ingress` name, the gate's namespace, and the gate's name.
 fn named(annotation: &str, targets: &[Object]) -> Vec<(String, String, String)> {
     let (web, blog) = (meta(annotation), ObjectMeta::default());
     let annotated = [(ingress("web"), &web), (ingress("blog"), &blog)];
@@ -79,9 +79,10 @@ fn matches_each_entry_against_each_gates_rendered_name(
 
 const ISSUERS: &str = "{referencedBy: [{kind: Ingress, group: networking.k8s.io, annotation: certs.example.com/issuer, name: '{name}', role: issues-tls}]}";
 
-/// The issuers the `Ingress` web in shop names with `annotation`, among
-/// issuers named internal in shop and in ops, and public in ops, each
-/// as its namespace and its name, with what it does for web.
+/// The issuers that `referrals` finds when the `Ingress` web in shop has
+/// `annotation`.  The issuers that exist are internal in shop, and
+/// internal and public in ops.  Each result is the issuer's namespace,
+/// its name, and its role.
 fn issued(annotation: &str) -> Vec<(String, String, Option<Role>)> {
     let plurals = Plurals::from([(
         ("certs.example.com".to_string(), "Issuer".to_string()),
@@ -147,9 +148,10 @@ fn relation(edge: Option<Kind>) -> Relation {
     }
 }
 
-/// The edges web's referral to the gate login draws, with `relations`
-/// on login and `behind` the applications behind web, each as its kind,
-/// its ends, and its provenance's title.
+/// The edges that `referred_edges` draws for the `Ingress` web's
+/// referral to the gate login, when login has `relations` and `behind`
+/// lists the applications behind web.  Each edge is returned as its
+/// kind, its two ends, and its provenance title.
 fn drawn(relations: Vec<Relation>, behind: Vec<Object>) -> Vec<(Kind, Endpoint, Endpoint, String)> {
     let referrals = [Referral {
         referrer: ingress("web"),

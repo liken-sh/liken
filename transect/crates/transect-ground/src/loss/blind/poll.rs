@@ -1,8 +1,8 @@
 //! Reads the host name of Prometheus at an interval, so the loss can
 //! show whether it includes the machine that Prometheus runs on.  When
-//! a read fails, the poll keeps the name from the read before it,
-//! because Prometheus rarely moves, and a loss requested while
-//! Prometheus is unreachable still needs the answer.
+//! a read fails, or no Prometheus is configured, the poll keeps the last
+//! name it read, because Prometheus rarely moves, and a loss requested
+//! while Prometheus is unreachable still needs the name.
 
 use std::time::Duration;
 
@@ -13,8 +13,7 @@ use transect_observe::metrics::Reaching;
 
 /// Reads the host name of the Prometheus that `reaching` returns, at
 /// once and then every `interval`, and sends on `changed` when the name
-/// differs from the one before.  When there is no Prometheus, the poll
-/// reads nothing.
+/// differs from the last one read.
 pub fn poll(
     reaching: Reaching,
     interval: Duration,

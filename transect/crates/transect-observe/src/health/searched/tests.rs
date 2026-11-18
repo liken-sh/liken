@@ -124,8 +124,6 @@ fn an_error_or_warning_pattern_is_a_reason_per_workload(
     assert_eq!(reasons, expected);
 }
 
-/// A match one span ago or older is not current, so `matched` returns
-/// no reason for it and the match does not change its parcel's color.
 #[rstest]
 #[case::inside_the_span("2026-01-01T11:11:00Z", vec!["shop: web: refused: 3 matching lines in the last 1h, the latest 59m ago"])]
 #[case::at_the_spans_edge("2026-01-01T11:10:00Z", vec![])]
@@ -230,8 +228,8 @@ fn a_failed_search_gives_no_reason() {
     assert_eq!(found, vec![]);
 }
 
-/// A `CronJob` whose last run succeeded logged its error on a run
-/// that then retried to success, so `matched` returns no reason for it.
+/// An error that an earlier run logged does not matter once a later run
+/// of the `CronJob` succeeded.
 #[rstest]
 #[case::its_last_run_succeeded(true, vec![])]
 #[case::its_last_run_did_not(false, vec!["shop: report: refused: 2 matching lines in the last 1h, the latest 5m ago"])]
@@ -259,10 +257,8 @@ fn a_settled_cron_job_gives_no_reason(#[case] settled: bool, #[case] expected: V
     assert_eq!(reasons, expected);
 }
 
-/// Each reason includes the counts and lines of its own pods, so the
-/// page shows where the lines came from and what they contain.
 #[rstest]
-fn a_reason_carries_its_pods_counts_and_lines() {
+fn a_reason_includes_its_pods_counts_and_lines() {
     let counts = vec![
         count("shop", Some("web-0"), 3, "2026-01-01T12:00:00Z"),
         count("shop", Some("web-1"), 2, "2026-01-01T12:05:00Z"),
@@ -275,7 +271,7 @@ fn a_reason_carries_its_pods_counts_and_lines() {
     };
     let mut searched = searched([(pattern("refused", "refused", Severity::Error), Ok(counts))]);
     let samples = vec![line("web-1", "dial: refused"), line("db-0", "not ours")];
-    searched.samples = vec![(Asked::Pattern("refused".into()), samples)];
+    searched.samples = vec![(SearchTarget::Pattern("refused".into()), samples)];
     let found = matched(
         &searched,
         &HashSet::new(),

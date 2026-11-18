@@ -1,7 +1,6 @@
-//! The examples under `examples/`, the knowledge public projects would
-//! ship, each loaded through the same loader `--resources` uses.  An
-//! example that does not load, or a field renamed in the code and not
-//! in the examples, fails here before a reader copies it.
+//! Loads `examples/` with the loader that `--resources` uses, so an
+//! example that fails to load or gets a trouble condition fails a test
+//! before a reader copies it.
 
 use std::path::PathBuf;
 
@@ -31,19 +30,22 @@ fn every_example_loads_with_no_condition() {
     }
     assert!(
         !loaded.directory.files.is_empty(),
-        "no examples under {}",
+        "the examples directory {} contains no files",
         examples().display()
     );
     assert!(trouble.is_empty(), "{}", trouble.join("\n"));
 }
 
 #[rstest]
-fn every_project_says_what_it_gives_transect() {
+fn every_example_project_has_a_readme() {
     let projects = std::fs::read_dir(examples()).unwrap();
     let projects = projects.map(|entry| entry.unwrap().path());
-    let unsaid: Vec<String> = projects
+    let missing: Vec<String> = projects
         .filter(|path| path.is_dir() && !path.join("README.md").is_file())
         .map(|path| path.display().to_string())
         .collect();
-    assert!(unsaid.is_empty(), "no README.md in {unsaid:?}");
+    assert!(
+        missing.is_empty(),
+        "these example projects have no README.md: {missing:?}"
+    );
 }

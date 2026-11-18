@@ -1,9 +1,10 @@
 //! The workload elevation shows how a request reaches one workload and
-//! where it stores its data, as a row of columns from its Ingresses to
-//! its Services to its pods to its volumes, then the guards that keep it
-//! available.  A row of the namespace's other workloads to switch between
-//! is above, and the workload's card is beside it.  Each pod is a tile
-//! with its machine, age, restarts, and usage bars.
+//! where the workload stores its data.  Its main row has a column each
+//! for the workload's Ingresses, its Services, its pods, and its
+//! volumes, followed by its guards against eviction.  Above the row are
+//! links to the namespace's other workloads, and the workload's card is
+//! beside it.  Each pod is a tile with its machine, age, restarts, and
+//! usage bars.
 
 mod needs;
 pub(super) mod sentence;
@@ -40,7 +41,7 @@ use transect_ground::loss::{self, IfDown};
 use transect_ground::storage::{self, Mounts, Storage};
 use transect_network::addresses::{self, Addresses};
 use transect_network::addresses::{Depends, Unread};
-use transect_network::entry::{Answers, Endpoints, Entry, Issuers, Serving};
+use transect_network::entry::{Endpoints, Entry, Issuers, Serving, TrafficResults};
 use transect_network::policy::Allowed;
 use transect_network::policy::Calls;
 use transect_observe::health::{Deciding, Health, Level};
@@ -52,58 +53,66 @@ use transect_supply::forge::Forges;
 use transect_supply::gitops::{CodeSection, GitOps};
 use transect_supply::images::{Known, Origins};
 
-/// The workload page.  Its `main` block renders alone as the fragment
-/// a pushed update replaces, as every elevation's does.
+/// The workload page.  The server renders its `main` block alone as the
+/// fragment that replaces the page's content on each pushed update.
 #[derive(Template)]
 #[template(path = "map/workload/workload.html", blocks = ["main"])]
 pub struct WorkloadPage {
-    /// The main column's row of edge kinds, which the page function sets.
+    /// The row of edge kinds in the main column.
     pub edge_row: super::EdgeRow,
     pub namespace: String,
-    /// The band that contains the namespace, which the crumb names.
+    /// The layer of the cluster map that contains the namespace, which
+    /// the breadcrumb shows.
     pub layer: String,
     pub name: String,
-    /// The page's own path, which its event stream's URL includes.
+    /// The page's path, which `events_url` appends to `/events`.
     pub path: String,
     pub switches: Vec<Switch>,
-    /// The Ingresses and Services that reach it, which start the row.
+    /// The Ingresses and Services that reach the workload, in the first
+    /// columns of the row.
     pub entry: Entry,
     pub pods_heading: String,
     pub tiles: Vec<PodTile>,
-    /// The legend under the tiles, which gives what a full bar measures.
+    /// The legend under the tiles, which says what a full usage bar
+    /// measures.
     pub legend: String,
     /// Why the bars show no usage, when they show none.
     pub usage_note: Option<transect_resources::resources::OffLine>,
-    /// The claims its pods mount, which end the row.
+    /// The claims that the pods mount, in the last columns of the row.
     pub mounts: Mounts,
-    /// The page of each mounted claim the cluster has, by its name.
+    /// The page of each mounted claim that has one, by claim name.
     pub claim_pages: HashMap<String, String>,
-    /// The addresses it is configured with that reach something in the
-    /// cluster, and how many Secrets it reads, under the row.
+    /// The addresses in the workload's configuration that point at
+    /// something in the cluster, and the number of Secrets that it reads.
+    /// Both are shown under the row.
     pub needs: Vec<Need>,
     pub secrets: usize,
     pub guards: Vec<GuardChip>,
     pub card: WorkloadCard,
-    /// The custom resources its controller reconciles, one table a kind.
+    /// The custom resources that the workload reconciles as a
+    /// controller, with one table for each kind.
     pub manages: Vec<crate::objects::Manages>,
-    /// Whether it serves a port, and so has an access tab.
+    /// Whether the workload serves a port, and so has an access tab.
     pub access: bool,
 }
 
-/// One workload in the row to switch between.
+/// A link to one of the namespace's workloads, in the row above the
+/// page's main row.
 #[derive(Debug, PartialEq)]
 pub struct Switch {
-    /// Its name, and "×3" after it when it asks for other than one pod.
+    /// The workload's name, followed by its replica count, as in
+    /// "web ×3", when the count is not one.
     pub label: String,
     pub href: String,
-    /// The workload this page shows.
+    /// Whether this is the workload that the page shows.
     pub current: bool,
     pub level: Level,
 }
 
 impl Switch {
-    /// The current workload gets the selection's ring, as a selected
-    /// parcel does, and one that needs attention gets --warm.
+    /// The CSS classes of the switch.  The current workload is outlined
+    /// in the selection color of the cluster map, and a workload at level
+    /// `Warning` or worse has a border in the warning color.
     pub fn class(&self) -> String {
         let mut class = String::from("switch");
         if self.current {
@@ -140,13 +149,15 @@ impl GuardChip {
 
 /// What the page reads besides the map.
 pub struct Contents<'a> {
-    /// Every object in a store that has a page.
-    pub held: &'a std::collections::HashSet<Object>,
+    /// The objects in the stores that have a page of their own.
+    pub with_pages: &'a std::collections::HashSet<Object>,
     pub workloads: &'a Workloads<'a>,
-    /// The namespace's top owners.
+    /// The top owners of the namespace's objects, which are the
+    /// workloads that the page can show and switch between.
     pub owners: Vec<&'a Object>,
-    /// The ownership index, which separates a workload's own Services
-    /// from another's among the Services its addresses reach.
+    /// The ownership index.  Among the Services that a workload's
+    /// addresses point at, it separates the workload's own Services from
+    /// another workload's.
     pub ownership: &'a Ownership,
     pub plurals: &'a Plurals,
     pub budgets: &'a [Arc<PodDisruptionBudget>],
@@ -165,34 +176,38 @@ pub struct Contents<'a> {
     pub by_workload: &'a HashMap<Object, Health>,
     pub usage: Option<&'a Usage>,
     pub usage_note: Option<transect_resources::resources::OffLine>,
-    /// The RBAC kinds transect may not list, which keep attribution from
-    /// finding some controllers.
+    /// The kinds that transect is not allowed to list.  The card then
+    /// says that controllers may be missing, because an owner of an
+    /// unlisted kind cannot be found.
     pub rbac_missing: &'a [&'static str],
-    /// Who the NetworkPolicies let call whom, which the card lists.
+    /// The callers that the NetworkPolicies allow for each workload.
     pub allowed: &'a Allowed,
-    /// The intent for each workload, which starts its card.
+    /// The intent declared for each workload.  Its `why` is the first
+    /// line of the card.
     pub intents: &'a Intents,
-    /// The entries of intent that name nothing readable, by workload.
+    /// The entries of each workload's intent that refer to an object
+    /// that transect cannot read.
     pub unread: &'a HashMap<Object, Vec<Unread>>,
-    /// Kind knowledge of the custom kinds, which shows when a budget that
-    /// allows no eviction is by design, and starts a custom kind's card.
+    /// The knowledge of each custom kind.  It says whether a budget that
+    /// allows no eviction is intended, and its summary opens the card of
+    /// a custom workload with no `why`.
     pub kinds: &'a Kinds,
-    /// What each custom resource of a known kind names, which its card
-    /// lists under its kind's knowledge.
+    /// For each custom resource of a kind with knowledge, the objects
+    /// that its fields refer to.
     pub relations: &'a HashMap<Object, Vec<Relation>>,
-    /// The description from each custom kind's CRD, which starts the card
-    /// of a custom workload that has no intent and no knowledge.
+    /// The description from each custom kind's CRD.  It opens the card
+    /// of a custom workload that has no `why` and no knowledge summary.
     pub definitions: &'a Definitions,
-    /// The custom kinds' objects, whose conditions a custom workload's
-    /// card shows when its kind has no knowledge.
+    /// The objects of each custom kind.  When the kind has no knowledge,
+    /// the card of such a workload shows its conditions.
     pub custom: &'a [(ApiResource, Vec<Arc<Custom>>)],
-    /// What finds the workload that runs each Ingress's controller.
+    /// The workload that runs each Ingress's controller.
     pub serving: &'a Serving,
-    /// How many ways in reach each workload that serves a port.
+    /// The number of ways in to each workload that serves a port.
     pub ways_in: &'a HashMap<Object, usize>,
     pub vulnerabilities: &'a transect_supply::vulnerabilities::Vulnerabilities,
-    /// What the ingress controllers' metrics report for each backend.
-    pub traffic: Answers<'a>,
+    /// The ingress controllers' metrics for each backend.
+    pub traffic: TrafficResults<'a>,
     pub now: Timestamp,
 }
 
@@ -201,14 +216,14 @@ impl WorkloadPage {
         Self { access, ..self }
     }
 
-    /// The page with the main column's row of edge kinds.
     pub fn with_edge_row(self, edge_row: super::EdgeRow) -> Self {
         Self { edge_row, ..self }
     }
 
-    /// The page for the workload named `name` whose kind `resource`
-    /// names, among `namespace`'s top owners, or `None` when it holds no
-    /// such workload or `map` no such namespace.
+    /// The page of the workload `name` among the top owners of
+    /// `namespace`, where `resource` is the URL name of its kind.  Returns
+    /// `None` when there is no such workload or the map has no such
+    /// namespace.
     pub fn build(
         map: &ClusterMap,
         namespace: &str,
@@ -262,7 +277,7 @@ impl WorkloadPage {
             name: name.into(),
             switches: switches(object, &contents),
             entry,
-            claim_pages: claim_pages(&mounts, namespace, contents.held, plurals),
+            claim_pages: claim_pages(&mounts, namespace, contents.with_pages, plurals),
             mounts,
             pods_heading: sentence::pods_heading(&tiles),
             legend: sentence::legend(tiles.iter()),
@@ -270,8 +285,8 @@ impl WorkloadPage {
             needs: needs(dependencies, &depends_on, object, plurals),
             secrets: secrets(&templates),
             guards: guard_chips(&guards),
-            // The card is on the workload's own page, so its title is not
-            // a link.  The section view's card keeps the link.
+            // The card's title would link to the page it is on, so it has
+            // no link here.  The section view's card keeps the link.
             card: card(object, &contents).with_href(None),
             manages: Vec::new(),
             tiles,
@@ -279,8 +294,8 @@ impl WorkloadPage {
         })
     }
 
-    /// The crumb: the cluster links home, the layer back to the cluster
-    /// map with this namespace selected, and the namespace to its page.
+    /// The breadcrumb.  The layer links to the cluster map with this
+    /// namespace selected.
     pub fn crumbs(&self) -> Vec<Crumb> {
         let select = format!("/?select={}", self.namespace);
         vec![
@@ -308,8 +323,9 @@ impl WorkloadPage {
     }
 }
 
-/// The card of the workload `object`, which its page and its section draw
-/// beside them.
+/// The card of the workload `object`, which the workload page and the
+/// section view each draw beside their main content.  Keep the order of
+/// the builder calls, because some read what an earlier call set.
 pub fn card(object: &Object, contents: &Contents) -> WorkloadCard {
     let plurals = contents.plurals;
     let workload = contents.workloads.get(object);
@@ -371,9 +387,9 @@ pub fn card(object: &Object, contents: &Contents) -> WorkloadCard {
         )
 }
 
-/// The conditions `object` reports, for a custom workload whose kind
-/// has no knowledge: a `Ready` condition decides its health then, so it
-/// comes first.  A kind with knowledge shows its conditions on its board.
+/// The conditions that the custom workload `object` reports, when its
+/// kind has no knowledge.  A kind with knowledge shows its conditions on
+/// its board, so this returns none for it.
 fn conditions(object: &Object, contents: &Contents) -> Vec<Chip> {
     if !ownership::custom(object) || contents.kinds.of_object(object).is_some() {
         return Vec::new();
@@ -392,8 +408,9 @@ fn conditions(object: &Object, contents: &Contents) -> Vec<Chip> {
         .unwrap_or_default()
 }
 
-/// What `object`'s kind's knowledge says about it, with what each of
-/// its fields names, or none when its kind has no knowledge.
+/// The knowledge of `object`'s kind, with the objects that its fields
+/// refer to and its controller, or `None` when the kind has no
+/// knowledge.
 pub fn known_through(object: &Object, contents: &Contents) -> Option<KnownThrough> {
     let knowledge = contents.kinds.of_object(object)?;
     let relations = contents.relations.get(object).into_iter().flatten();
@@ -410,7 +427,6 @@ pub fn known_through(object: &Object, contents: &Contents) -> Option<KnownThroug
     Some(KnownThrough::of(knowledge, controller).with_related(related.collect()))
 }
 
-/// Whether `object` has a page of its own, as `map::pages::Pages` decides.
 pub fn has_page(object: &Object, contents: &Contents) -> bool {
     contents.pages().has(object)
 }
@@ -418,7 +434,7 @@ pub fn has_page(object: &Object, contents: &Contents) -> bool {
 impl Contents<'_> {
     pub fn pages(&self) -> Pages<'_> {
         Pages {
-            held: self.held,
+            with_pages: self.with_pages,
             ownership: self.ownership,
             relations: self.relations,
             gitops: self.gitops,
@@ -427,8 +443,9 @@ impl Contents<'_> {
     }
 }
 
-/// The one workload that controls `object`, or none when attribution
-/// found none or found several and could not choose between them.
+/// The workload that controls the custom resource `object`, when the
+/// graph has exactly one `ControlledBy` edge from it.  Returns `None`
+/// when it has none or several.
 pub fn controller(graph: &Graph, object: &Object) -> Option<Object> {
     let from = Endpoint::Object(object.clone());
     let edges = graph
@@ -446,7 +463,8 @@ pub fn controller(graph: &Graph, object: &Object) -> Option<Object> {
     }
 }
 
-/// The workload of `owners` named `name` whose kind `resource` names.
+/// The workload in `owners` named `name` whose kind has the URL name
+/// `resource`.
 pub fn find<'a>(
     owners: &[&'a Object],
     plurals: &Plurals,
@@ -459,9 +477,9 @@ pub fn find<'a>(
     found.copied()
 }
 
-/// The namespace's workloads that have a page, built-in kinds first and
-/// each group by name, so a workload keeps its place in the row as the
-/// reader switches.
+/// A switch for each workload that has a page.  The built-in kinds come
+/// first and then the custom kinds, each sorted by name, so a workload
+/// keeps its place in the row as the reader moves between pages.
 fn switches(current: &Object, contents: &Contents) -> Vec<Switch> {
     let mut switches: Vec<(bool, &str, Switch)> = contents
         .owners

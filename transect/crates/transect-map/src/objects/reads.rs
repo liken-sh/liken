@@ -1,21 +1,16 @@
-//! Reading one object of a kind that no store contains, such as a
-//! Lease, once when its page loads.
+//! Reads one object of a kind that no store watches, such as a Lease,
+//! with a single GET, and caches the response.
 //!
-//! A page's event stream renders it on every settled change, so a read
-//! inside a render would run every second or two.  So a page load, and
-//! an event stream when it connects, read the object with one GET and
-//! keep the API server's answer in this module.  Every render draws
-//! that copy, and no connection stays open for it.  A copy read in the
-//! last `FRESH` serves the next load too, so a burst of loads makes one
-//! request: a load of an object already being read waits for that
-//! read's answer rather than asking again.  Reads of different objects
-//! run side by side, at most `AT_ONCE` of them, so one slow read delays
-//! only the loads of its own object.
+//! A page's event stream renders the page again after each change in
+//! the cluster, so a GET inside a render would repeat with every change.
+//! Instead, a page load and an event stream's connect each read the
+//! object once, and renders draw the cached response. Loads of an
+//! object that is already being read wait for that GET instead of
+//! sending another. Up to `AT_ONCE` reads of different objects run at
+//! once, so one slow read delays only the loads of its own object.
 //!
-//! The pages have no authentication yet, so a read asks only for a name
-//! that is valid in Kubernetes, and never for a Secret or a ConfigMap,
-//! either of which may contain a credential.  At most `MOST` copies are
-//! kept, and the oldest is removed first.
+//! The pages have no authentication, so `Key::of` refuses an invalid
+//! name and a core Secret or ConfigMap, which can contain credentials.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -28,23 +23,23 @@ use kube::{Api, Client};
 use tokio::sync::Semaphore;
 use tokio::time::Instant;
 
-/// How long a copy serves a new page load before it is read again.
+/// How long a cached response serves new page loads.
 pub const FRESH: Duration = Duration::from_secs(5);
 
-/// The most copies kept.
+/// The most responses cached. `keep` evicts the oldest first.
 pub const MOST: usize = 256;
 
-/// The most reads of different objects under way at once, which keeps
-/// a burst of page loads from becoming a burst at the API server.
+/// The most GETs in flight at once, so a burst of page loads does not
+/// become a burst of requests to the API server.
 const AT_ONCE: usize = 4;
 
 /// How long one read may take.
 const ATTEMPT: Duration = Duration::from_secs(5);
 
-/// The longest name Kubernetes allows, a DNS subdomain's.
+/// The longest DNS subdomain name, which Kubernetes allows for an
+/// object name.
 const NAME_CHARS: usize = 253;
 
-/// One object, by its kind's resource, its namespace, and its name.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Key {
     pub resource: ApiResource,
@@ -53,9 +48,8 @@ pub struct Key {
 }
 
 impl Key {
-    /// The key of `name` in `namespace`, or none for a name or a
-    /// namespace that is not valid in Kubernetes, or for a Secret or a
-    /// ConfigMap.
+    /// Returns none when `name` or `namespace` is not a valid
+    /// Kubernetes name, and for a core Secret or ConfigMap.
     pub fn of(resource: &ApiResource, namespace: Option<&str>, name: &str) -> Option<Self> {
         let credential =
             resource.group.is_empty() && matches!(resource.kind.as_str(), "Secret" | "ConfigMap");
@@ -68,10 +62,8 @@ impl Key {
     }
 }
 
-/// Whether `name` is valid as a Kubernetes object's name: a DNS
-/// subdomain, which is lowercase letters, digits, `-`, and `.`, starting
-/// and ending with a letter or a digit.  Anything else, such as a `,` or
-/// an `=`, is refused before it reaches the API server.
+/// Whether `name` is a DNS subdomain: lowercase letters, digits, `-`,
+/// and `.`, starting and ending with a letter or a digit.
 pub fn valid_name(name: &str) -> bool {
     let edge = |c: Option<char>| c.is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
     let inner = name
@@ -80,35 +72,30 @@ pub fn valid_name(name: &str) -> bool {
     name.len() <= NAME_CHARS && inner && edge(name.chars().next()) && edge(name.chars().last())
 }
 
-/// The API server's answer for one object.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Read {
     Found(Arc<DynamicObject>),
     /// The API server has no such object.
     Missing,
-    /// The API server refused the read with a 401 or a 403, with its
-    /// message.
+    /// The API server returned 401 or 403. Holds its message.
     Refused(String),
-    /// The read failed for another reason, with the error's message.
+    /// Any other failure, including a timeout. Holds the error message.
     Failed(String),
 }
 
-/// A read under way, which every load of its object shares.
+/// A GET in flight, shared by every load of its object.
 type Reading = Shared<BoxFuture<'static, Read>>;
 
-/// The copies read so far, shared by every clone.
+/// The cache of responses. Clones share it.
 #[derive(Clone)]
 pub struct Reads {
-    /// The connection to the API server, which a test leaves out, so
-    /// that nothing is read.
+    /// None in tests, so that no read reaches an API server.
     client: Option<Client>,
-    held: Arc<Mutex<HashMap<Key, (Instant, Read)>>>,
-    /// The reads under way, by the object each reads.
+    copies: Arc<Mutex<HashMap<Key, (Instant, Read)>>>,
     reading: Arc<Mutex<HashMap<Key, Reading>>>,
-    /// A permit for each read under way, up to `AT_ONCE`.
     permits: Arc<Semaphore>,
-    /// Whether every kept copy stays fresh forever, as the fixture's
-    /// copies do.
+    /// Set for the fixture cluster, whose cached responses never go
+    /// stale.
     fixed: bool,
 }
 
@@ -116,7 +103,7 @@ impl Default for Reads {
     fn default() -> Self {
         Self {
             client: None,
-            held: Arc::default(),
+            copies: Arc::default(),
             reading: Arc::default(),
             permits: Arc::new(Semaphore::new(AT_ONCE)),
             fixed: false,
@@ -132,16 +119,16 @@ impl Reads {
         }
     }
 
-    /// Reads that keep `read` for `key`, for a test of what a page draws.
+    /// A cache with `read` for `key`, for testing what a page draws.
     #[cfg(any(test, feature = "fixtures"))]
-    pub fn holding(key: Key, read: Read) -> Self {
+    pub fn with_read(key: Key, read: Read) -> Self {
         let reads = Self::default();
         reads.keep(key, read);
         reads
     }
 
-    /// Reads that keep `copies` forever and read nothing, for the
-    /// fixture cluster, which has no API server.
+    /// A cache that serves `copies` forever, for the fixture cluster,
+    /// which has no API server.
     #[cfg(any(test, debug_assertions))]
     pub fn fixed(copies: impl IntoIterator<Item = (Key, Read)>) -> Self {
         let reads = Self {
@@ -154,16 +141,17 @@ impl Reads {
         reads
     }
 
-    /// The API server's answer for `key`, from a copy read in the last
-    /// `FRESH`, or read now.
+    /// The response for `key`: the cached one if it is younger than
+    /// `FRESH`, otherwise the result of a new read.
     pub async fn read(&self, key: &Key) -> Read {
         let reading = {
-            // The check runs under the lock of the reads under way.  A
-            // read removes itself from them only after it keeps its
-            // copy, so a load never misses both the copy and the read
-            // and then asks again.
+            // Check the cache while holding the lock on `reading`. A
+            // finished read caches its response before it removes
+            // itself from `reading`, under the same lock, so a load
+            // finds either the response or the read in flight and never
+            // starts a second GET.
             let mut reading = self.reading.lock().unwrap();
-            if let Some((at, read)) = self.held.lock().unwrap().get(key)
+            if let Some((at, read)) = self.copies.lock().unwrap().get(key)
                 && (self.fixed || at.elapsed() < FRESH)
             {
                 return read.clone();
@@ -174,8 +162,8 @@ impl Reads {
         reading.await
     }
 
-    /// Reads `key` on a task of its own, so the read finishes and keeps
-    /// its copy whether or not the load that asked still waits.
+    /// Reads `key` on its own task, so the read finishes and caches its
+    /// response even when the load that started it is dropped.
     fn start(&self, key: Key) -> Reading {
         let reads = self.clone();
         let task = tokio::spawn(async move {
@@ -187,34 +175,33 @@ impl Reads {
                 None => Read::Failed("transect has no connection to the API server".into()),
             };
             let found = matches!(read, Read::Found(_));
-            tracing::debug!(kind = %key.resource.kind, name = %key.name, found, "read an object once");
+            tracing::debug!(kind = %key.resource.kind, name = %key.name, found, "Read an object from the API server");
             let mut reading = reads.reading.lock().unwrap();
             reads.keep(key.clone(), read.clone());
             reading.remove(&key);
             read
         });
-        let failed = |_| Read::Failed("the read stopped before it answered".into());
+        let failed = |_| Read::Failed("the read stopped before the API server responded".into());
         task.map(move |joined| joined.unwrap_or_else(failed))
             .boxed()
             .shared()
     }
 
-    /// The copy of `key` read last, however old, or none when none is
-    /// kept.
+    /// The cached response for `key` however old it is, or none.
     pub fn last(&self, key: &Key) -> Option<Read> {
-        let held = self.held.lock().unwrap();
-        held.get(key).map(|(_, read)| read.clone())
+        let copies = self.copies.lock().unwrap();
+        copies.get(key).map(|(_, read)| read.clone())
     }
 
     fn keep(&self, key: Key, read: Read) {
-        let mut held = self.held.lock().unwrap();
-        held.insert(key, (Instant::now(), read));
-        while held.len() > MOST {
-            let oldest = held.iter().min_by_key(|(_, (at, _))| *at);
+        let mut copies = self.copies.lock().unwrap();
+        copies.insert(key, (Instant::now(), read));
+        while copies.len() > MOST {
+            let oldest = copies.iter().min_by_key(|(_, (at, _))| *at);
             let Some(oldest) = oldest.map(|(key, _)| key.clone()) else {
                 break;
             };
-            held.remove(&oldest);
+            copies.remove(&oldest);
         }
     }
 }
@@ -235,10 +222,10 @@ async fn get(client: Client, key: &Key) -> Read {
             Read::Refused(status.message.clone())
         }
         Ok(Err(error)) => {
-            tracing::warn!(kind = %key.resource.kind, %error, "reading an object failed");
+            tracing::warn!(kind = %key.resource.kind, %error, "The API server returned an error for an object read");
             Read::Failed(error.to_string())
         }
-        Err(_) => Read::Failed(format!("no answer in {ATTEMPT:?}")),
+        Err(_) => Read::Failed(format!("the API server did not respond within {ATTEMPT:?}")),
     }
 }
 
@@ -321,13 +308,13 @@ mod tests {
         #[case] after: Duration,
         #[case] expected: Read,
     ) {
-        let reads = Reads::holding(key("web"), Read::Missing);
+        let reads = Reads::with_read(key("web"), Read::Missing);
         tokio::time::advance(after).await;
         assert_eq!(reads.read(&key("web")).await, expected);
     }
 
-    /// An API server that never answers a read of `slow`, answers 404
-    /// to any other, and counts the reads it was sent.
+    /// An API server that never responds to a read of `slow`, returns
+    /// 404 for any other, and counts the requests it receives.
     async fn server() -> (Reads, Arc<std::sync::atomic::AtomicUsize>) {
         use std::sync::atomic::Ordering;
 

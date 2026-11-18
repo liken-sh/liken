@@ -1,16 +1,11 @@
-//! Forges: which hosts serve a forge whose page layout a `Forge`
-//! resource declares, and the forge pages that transect links to.  A
-//! card links to two kinds of code, the directory that a GitOps tool
-//! applies an object from and the commit that an image was built from,
-//! and transect parses the repository's URL the same way for both.
+//! Links from a card to a repository's pages on its forge: the directory
+//! that a GitOps tool applies an object from, and the commit that an
+//! image was built from.  Both start from the repository's clone URL.
 //!
-//! Each forge lays out its pages differently, and nothing in a clone URL
-//! names the forge that serves it.  A wrong guess gives a link to a 404,
-//! which costs a reader more than no link, so transect links only when
-//! a `Forge` names the forge that serves the host.  A `Forge` matches the
-//! host itself, its first label, or the image of the workload behind the
-//! `Ingress` that the cluster serves the host through.  Any other
-//! repository shows as text.
+//! A clone URL does not say which forge serves it, and each forge lays
+//! out its pages differently.  A guessed link that opens a 404 is worse
+//! than no link, so transect links only when a `Forge` resource matches
+//! the host, and shows any other repository as text.
 
 mod commit;
 mod layout;
@@ -27,16 +22,15 @@ pub use layout::fixtures;
 #[derive(Debug, Default)]
 pub struct Forges {
     layouts: Vec<Forge>,
-    /// The hosts at which the cluster serves a forge, mapped to the
-    /// forge's index in `layouts`.
+    /// Lowercased `Ingress` hosts that route to a forge's image, mapped
+    /// to that forge's index in `layouts`.
     served: HashMap<String, usize>,
 }
 
 impl Forges {
-    /// The forges that `layouts` declares, with the forges that the
-    /// cluster serves.  Each entry of `hosts` is an `Ingress` host with
-    /// the images of the workloads it routes to, and the cluster serves a
-    /// forge at that host when a layout names one of those images.
+    /// Each entry of `hosts` is an `Ingress` host with the images of the
+    /// workloads it routes to.  The host serves the forge of the first of
+    /// those images that a layout lists.
     pub fn build(
         layouts: &[Forge],
         hosts: impl IntoIterator<Item = (String, Vec<String>)>,
@@ -54,8 +48,9 @@ impl Forges {
         }
     }
 
-    /// The forge that serves `host`: one that names it, then one that
-    /// names its first label, then one the cluster serves there.
+    /// The forge for `host`, trying in order a layout that lists the
+    /// host, a layout that lists the host's first label, and a forge
+    /// that the cluster runs at the host.
     pub fn of(&self, host: &str) -> Option<&Forge> {
         let host = host.to_ascii_lowercase();
         let named = self.layouts.iter().find(|f| f.hosts.contains(&host));
@@ -72,9 +67,9 @@ impl Forges {
 }
 
 /// The index in `layouts` of the forge that an image runs, matched by
-/// the last part of its repository, such as `gitea` in
-/// `gitea/gitea:1.22`.  A registry's port is in the first part, so it
-/// never appears in the last.
+/// the last path segment of its repository, such as `gitea` in
+/// `gitea/gitea:1.22`.  Cutting that segment at `:` removes only the
+/// tag, because a registry's port is in the first segment.
 fn of_image(layouts: &[Forge], image: &str) -> Option<usize> {
     let repository = image.split('@').next()?;
     let last = repository.rsplit('/').next()?.split(':').next()?;
@@ -83,23 +78,22 @@ fn of_image(layouts: &[Forge], image: &str) -> Option<usize> {
         .position(|forge| forge.images.iter().any(|name| name == last))
 }
 
-/// Whether `text` goes into a URL's path as it is: letters, digits,
-/// and `-._~/@`, so nothing in it needs escaping and nothing can end
-/// the URL.  A forge may put `~` or `@` before an owner, as in
-/// `/~owner/repo` or `/@owner/repo`.
+/// Whether `text` can go into a URL path unescaped: it has only
+/// letters, digits, and `-._~/@`.  A forge may put `~` or `@` before an
+/// owner, as in `/~owner/repo` or `/@owner/repo`.
 pub fn safe(text: &str) -> bool {
     let allowed = |c: char| c.is_ascii_alphanumeric() || "-._~/@".contains(c);
     text.chars().all(allowed)
 }
 
-/// Whether `text` steps up a directory, as `../` does, which would
-/// point a link outside the repository whose path it fills in.
+/// Whether `text` has a `..` path segment, which would make a link
+/// leave the repository whose path it is part of.
 pub fn steps_up(text: &str) -> bool {
     text.split('/').any(|part| part == "..")
 }
 
-/// A repository's web pages: the scheme, the host, and the repository's
-/// path on it.
+/// The location of a repository's web pages: scheme, host, and the
+/// repository's path on that host.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Web<'a> {
     pub scheme: &'static str,
@@ -113,7 +107,8 @@ impl Web<'_> {
         format!("{}://{}/{}", self.scheme, self.host, self.repository)
     }
 
-    /// The repository's last part, as a card names it.
+    /// The last segment of the repository path, which a card shows as
+    /// its name.
     pub fn name(&self) -> &str {
         self.repository
             .rsplit('/')
@@ -121,22 +116,23 @@ impl Web<'_> {
             .unwrap_or(self.repository)
     }
 
-    /// Whether `other` is the same repository, as hosts and forges
-    /// compare names: without regard to case.
+    /// Whether `other` is the same repository.  Host and repository
+    /// names compare without regard to case.
     pub fn same(&self, other: &Web) -> bool {
         self.host.eq_ignore_ascii_case(other.host)
             && self.repository.eq_ignore_ascii_case(other.repository)
     }
 }
 
-/// The web pages of a clone URL.  `https://host/owner/repo` keeps its
-/// host and any port, and `ssh://git@host:port/…` or
-/// `git@host:owner/repo` turns into HTTPS at the same host without the
-/// port, since a forge's SSH port is not its web port.  A user before
-/// the host is dropped; an `@` after it is part of the repository's
-/// path, as in `https://host/@owner/repo`.  A URL that names no owner
-/// and repository, or is not git's, such as an OCI registry's, has
-/// none.
+/// The web pages of a clone URL.  An `http` or `https` URL keeps its
+/// host and any port.  An `ssh://git@host:port/...` or
+/// `git@host:owner/repo` URL becomes an HTTPS URL at the same host
+/// without the port, because a forge's SSH port is not its web port.
+/// A user before the host is dropped.  An `@` after the host belongs to
+/// the repository path, as in `https://host/@owner/repo`.  It returns
+/// `None` for a URL without both an owner and a repository, for a
+/// scheme other than `http`, `https`, and `ssh`, such as `oci`, and for
+/// a host or path with characters outside the allowed set.
 pub fn web(url: &str) -> Option<Web<'_>> {
     let (scheme, rest, port) = match url.split_once("://") {
         Some(("https", rest)) => ("https", rest, true),

@@ -1,20 +1,20 @@
-//! Whether a watch event changes what a store holds.
+//! Decides whether a watch event changes a stored object, so that the
+//! model is rebuilt only for a change that a page can draw.
 //!
-//! A watch delivers an event on every `resourceVersion` bump, and a
-//! controller may write an object every few seconds without changing
-//! anything a page draws: a `Job`'s count of ready pods on a store that
-//! keeps only metadata, or a condition's heartbeat time that the trim
-//! drops.  Each store trims its objects before they reach this
-//! comparison, so a field the trim drops never counts as a change.
-//! Signalling every event would rebuild the model as often as the
-//! debounce lets it, for changes no page draws.
+//! A watch sends an event on every write, and a controller can write an
+//! object every few seconds without changing a field that `transect`
+//! keeps: the `Job` controller updates a `Job`'s status, which a
+//! metadata-only store does not keep, and a controller updates a
+//! condition's heartbeat time, which the trim drops. The comparison
+//! reads the trimmed objects and ignores `resourceVersion`, so neither
+//! write counts as a change.
 //!
-//! Kind knowledge can name labels and annotations a tool rewrites
-//! without changing anything, such as the ownership labels a GitOps
-//! tool writes on a `Namespace` that two of its appliers both apply.  The
-//! comparison leaves those keys out, and the store still keeps the
-//! object as the API gives it, so a page drawn for another reason
-//! reads the newest value.
+//! Kind knowledge can list labels and annotations that a tool rewrites
+//! without changing anything, such as the ownership labels that a GitOps
+//! tool writes on a `Namespace` that two of its appliers apply. The
+//! comparison ignores those keys, but the store keeps them as the API
+//! server returned them, so a page drawn for another reason reads the
+//! newest value.
 
 use std::hash::Hash;
 use std::sync::{Arc, RwLock};
@@ -29,9 +29,10 @@ use serde_json::Value;
 use transect_resources::knowledge::gitops::GroupKind;
 use transect_resources::knowledge::{IgnoreChange, MetaKey};
 
-/// The keys that kind knowledge names as ones a tool rewrites without
-/// changing anything, shared by every watch and replaced when the
-/// resources reload.
+/// The label and annotation keys that the comparison ignores, from kind
+/// knowledge. Every watch shares one `Ignored`, and
+/// `Cluster::ignore_changes_from` replaces its keys when kind knowledge
+/// reloads.
 #[derive(Clone, Default)]
 pub struct Ignored(Arc<RwLock<Vec<IgnoreChange>>>);
 
@@ -43,20 +44,19 @@ impl Ignored {
     /// The keys ignored on objects of `kind` in `group`.
     pub fn keys(&self, group: &str, kind: &str) -> Vec<MetaKey> {
         let ignored = self.0.read().unwrap_or_else(|e| e.into_inner());
-        let held = ignored
+        let applicable = ignored
             .iter()
             .filter(|ignore| ignore.holds_for(group, kind));
-        held.map(|ignore| ignore.key.clone()).collect()
+        applicable.map(|ignore| ignore.key.clone()).collect()
     }
 }
 
-/// Whether `event` changes what `store` holds, but for the keys in
-/// `ignored`: an object it lacks or holds in another form, a deletion,
-/// or the end of a relist that found something other than what the
-/// store holds.  The objects of a relist are applied together at its
-/// end, so they are collected in `relist` until then.  Every watch on
-/// one connection relists after that connection resets, and a relist
-/// that finds what the store already holds changes nothing a page draws.
+/// Whether `event` changes what `store` holds, ignoring the keys in
+/// `ignored`. The store applies a relist's objects together at
+/// `InitDone`, so `relist` collects them and they are compared then. A
+/// relist that returns what the store already holds is not a change.
+/// That matters because every watch on a connection relists after the
+/// connection resets.
 pub fn differs<K>(
     store: &Store<K>,
     dyntype: &K::DynamicType,
@@ -89,8 +89,7 @@ where
     }
 }
 
-/// Whether `store` holds an object that every page draws the same as
-/// `object`.
+/// Whether `store` holds an object that `same` finds equal to `object`.
 fn holds<K>(store: &Store<K>, dyntype: &K::DynamicType, object: &K, ignored: &[MetaKey]) -> bool
 where
     K: Resource + Clone + Serialize + 'static,
@@ -102,9 +101,9 @@ where
         .is_some_and(|held| same(held.as_ref(), object, ignored))
 }
 
-/// Whether every page draws two trimmed objects the same: equal in
-/// every field the trim kept but the `resourceVersion`, which every
-/// write bumps, and the keys in `ignored`.
+/// Whether two trimmed objects are equal in every field except
+/// `metadata.resourceVersion`, which every write changes, and the keys
+/// in `ignored`.
 pub fn same<K: Serialize>(held: &K, object: &K, ignored: &[MetaKey]) -> bool {
     unversioned(held, ignored) == unversioned(object, ignored)
 }
@@ -179,8 +178,8 @@ mod tests {
 
     const OWNER: &str = "tree/name";
 
-    /// A `Widget` whose label `tree/name` is `owner`, and whose annotation
-    /// `note` is `note`.
+    /// A `Widget` whose label `tree/name` is `owner` and whose
+    /// annotation `note` is `note`.
     fn owned(owner: &str, note: &str) -> DynamicObject {
         widget(
             &format!(
@@ -221,7 +220,7 @@ mod tests {
         assert_eq!(ignored.keys(group, kind), expected);
     }
 
-    /// A `Job` as its metadata store holds it, read from `yaml`.
+    /// A `Job` as a metadata-only store holds it, parsed from `yaml`.
     fn job(yaml: &str) -> PartialObjectMeta<Job> {
         let mut job: PartialObjectMeta<Job> = serde_yaml::from_str(yaml).unwrap();
         trim::meta(&mut job.metadata);
@@ -263,8 +262,8 @@ mod tests {
         }
     }
 
-    /// Whether a relist that finds `listed`, after a store that held
-    /// `a` and `b`, both ready, signals a change.
+    /// Whether a relist that returns `listed` signals a change, for a
+    /// store that holds `a` and `b`, both ready.
     fn relist_signals(listed: Vec<DynamicObject>) -> bool {
         let mut writer = reflector::store::Writer::new(resource());
         for object in [named("a", "1", "True"), named("b", "1", "True")] {

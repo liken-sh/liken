@@ -1,9 +1,9 @@
-//! Where a pod may run.  This module checks a pod's spec against a
-//! `Node`: its node selector, its required node affinity, and the taints
-//! it tolerates.  The DaemonSet controller makes these three checks
-//! before it places a pod, and they are the scheduler's checks that read
-//! only the pod and the machine.  The namespace matrix uses them to show
-//! why a `DaemonSet` runs no pod on a machine by design.
+//! Whether a pod may run on a machine, by the checks that read only the
+//! pod's spec and the `Node`: the node selector, the required node
+//! affinity, and the node's taints against the pod's tolerations.  The
+//! DaemonSet controller makes the same checks before it creates a pod,
+//! so `transect-map`'s namespace matrix uses `skip` to show why a
+//! `DaemonSet` runs no pod on a machine by design.
 
 mod eviction;
 
@@ -29,10 +29,10 @@ pub enum Skip {
     Taint(String),
 }
 
-/// The keys of the taints that the DaemonSet controller tolerates for
-/// every pod it makes, even when the template lists no toleration for
-/// them.  So a `DaemonSet`'s pod runs on a machine that is cordoned,
-/// under pressure, or not ready.
+/// The keys of the taints that the DaemonSet controller adds
+/// tolerations for on every pod it creates, even when the template
+/// lists none.  So a `DaemonSet`'s pod can run on a machine that is
+/// cordoned, under pressure, or not ready.
 const TOLERATED_BY_DAEMON_SETS: [&str; 7] = [
     "node.kubernetes.io/not-ready",
     "node.kubernetes.io/unreachable",
@@ -43,15 +43,16 @@ const TOLERATED_BY_DAEMON_SETS: [&str; 7] = [
     "node.kubernetes.io/network-unavailable",
 ];
 
-/// The reason that the DaemonSet controller does not place a pod of
-/// `template` on `node`, or `None` when the pod fits there.
+/// The reason that the DaemonSet controller does not create a pod of
+/// `template` for `node`, or `None` when the pod fits there.
 pub fn skip(template: &PodSpec, node: &Node) -> Option<Skip> {
     check(template, node, &TOLERATED_BY_DAEMON_SETS)
 }
 
-/// Whether the scheduler may place a pod of `spec` on `node`.  The
-/// scheduler adds no toleration for the pod, and it places a pod on a
-/// cordoned machine only when the pod tolerates the cordon's taint.
+/// Whether the scheduler can place a pod of `spec` on `node`.  Unlike
+/// the DaemonSet controller, the scheduler adds no tolerations to the
+/// pod, so a cordoned machine fits only a pod that tolerates the taint
+/// of a cordon.
 pub fn fits(spec: &PodSpec, node: &Node) -> bool {
     let cordoned = node.spec.as_ref().and_then(|s| s.unschedulable) == Some(true);
     let cordon = Taint {
@@ -66,9 +67,9 @@ pub fn fits(spec: &PodSpec, node: &Node) -> bool {
     check(spec, node, &[]).is_none()
 }
 
-/// Runs the three checks, and tolerates the taints in `exempt` whatever
-/// the template lists.  This function checks the node selector first,
-/// because it is the most common check and the simplest to read.
+/// Returns the first of the three checks that fails, in the order node
+/// selector, required node affinity, taints.  A taint whose key is in
+/// `exempt` is tolerated whatever the template lists.
 fn check(template: &PodSpec, node: &Node, exempt: &[&str]) -> Option<Skip> {
     let no_labels = BTreeMap::new();
     let labels = node.metadata.labels.as_ref().unwrap_or(&no_labels);
@@ -103,9 +104,10 @@ fn check(template: &PodSpec, node: &Node, exempt: &[&str]) -> Option<Skip> {
         .map(|taint| Skip::Taint(taint.key.clone()))
 }
 
-/// A term matches when every expression and every field requirement
-/// matches.
-/// The API treats an empty term as matching no node.
+/// A term matches when every label expression and every field
+/// requirement matches.  The API treats an empty term as matching no
+/// node.  The only field that a requirement can match is
+/// `metadata.name`.
 fn term_matches(term: &NodeSelectorTerm, labels: &BTreeMap<String, String>, name: &str) -> bool {
     let expressions = term.match_expressions.as_deref().unwrap_or_default();
     let fields = term.match_fields.as_deref().unwrap_or_default();
@@ -123,6 +125,10 @@ fn term_matches(term: &NodeSelectorTerm, labels: &BTreeMap<String, String>, name
     fields_hold && expressions_hold
 }
 
+/// Whether a node's label or field `value` satisfies `requirement`.
+/// `value` is `None` when the node has no such label.  `Gt` and `Lt`
+/// compare `value` with the requirement's first value as integers, and
+/// fail when either is not an integer.
 fn requirement_holds(requirement: &NodeSelectorRequirement, value: Option<&str>) -> bool {
     let values = requirement.values.as_deref().unwrap_or_default();
     let number = |text: &str| text.parse::<i64>().ok();
@@ -189,9 +195,9 @@ mod tests {
     }
 
     #[rstest]
-    #[case::nothing_asked("hostNetwork: false", "{}", "[]", None)]
-    #[case::selector_held("nodeSelector: {disk: ssd}", "{disk: ssd}", "[]", None)]
-    #[case::selector_missed(
+    #[case::no_requirements("hostNetwork: false", "{}", "[]", None)]
+    #[case::selector_matches("nodeSelector: {disk: ssd}", "{disk: ssd}", "[]", None)]
+    #[case::selector_does_not_match(
         "nodeSelector: {disk: ssd}",
         "{disk: hdd}",
         "[]",
@@ -258,13 +264,13 @@ mod tests {
         "[{key: dedicated, value: screen, effect: NoExecute}]",
         None
     )]
-    #[case::cordoned_machine(
+    #[case::cordoned_machine_is_tolerated_by_a_daemon_set(
         "hostNetwork: false",
         "{}",
         "[{key: node.kubernetes.io/unschedulable, effect: NoSchedule}]",
         None
     )]
-    fn a_template_fits_a_machine_or_says_why_not(
+    fn skip_returns_the_first_failed_check(
         #[case] spec: &str,
         #[case] labels: &str,
         #[case] taints: &str,
@@ -281,13 +287,13 @@ mod tests {
 
     #[rstest]
     #[case::anywhere("hostNetwork: false", node("{}", "[]"), true)]
-    #[case::selector_missed("nodeSelector: {disk: ssd}", node("{}", "[]"), false)]
+    #[case::selector_does_not_match("nodeSelector: {disk: ssd}", node("{}", "[]"), false)]
     #[case::untolerated_taint(
         "hostNetwork: false",
         node("{}", "[{key: dedicated, value: screen, effect: NoSchedule}]"),
         false
     )]
-    #[case::not_ready_machine(
+    #[case::not_ready_taint_with_a_toleration_of_another_effect(
         "tolerations: [{key: node.kubernetes.io/not-ready, operator: Exists, effect: NoExecute, tolerationSeconds: 300}]",
         node("{}", "[{key: node.kubernetes.io/not-ready, effect: NoSchedule}]"),
         false
@@ -298,7 +304,7 @@ mod tests {
         cordoned("[{key: node.kubernetes.io/unschedulable, effect: NoSchedule}]"),
         true
     )]
-    fn the_scheduler_tolerates_nothing_for_a_pod(
+    fn the_scheduler_adds_no_tolerations_to_a_pod(
         #[case] spec: &str,
         #[case] node: Node,
         #[case] fits_there: bool,

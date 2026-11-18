@@ -1,12 +1,13 @@
-//! The conditions kind knowledge gets when what it names matches
-//! nothing in this reading of the cluster: a field that no object of
-//! its kind holds, a `node` that names no `Node`, an applier's mark
-//! that no object has, and an `ignoreChanges` kind the cluster does not
-//! serve.  Knowledge with a typo in a path otherwise loads, and the
-//! section it would fill is empty with no reason given.
+//! Conditions on kind knowledge that matches nothing in this snapshot:
+//! a field path that no object of the kind has, a `node` field whose
+//! values are not the name of any `Node`, an applier mark (a label or
+//! annotation key) that no object has, and an `ignoreChanges` entry for
+//! a kind the cluster does not serve. Knowledge with a typo in a path
+//! still loads, and the section it fills is empty with no explanation,
+//! so these conditions give the explanation.
 //!
-//! A kind with no objects yet holds no field, so it gets none of these:
-//! the knowledge may be right for the objects to come.
+//! A kind that has no objects gets no condition, because its knowledge
+//! can be correct for objects that do not exist yet.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -18,15 +19,15 @@ use transect_resources::knowledge::gitops::MetaKey;
 use transect_resources::knowledge::{KindKnowledge, path};
 use transect_resources::resources::{Condition, DocId};
 
-/// Every label and annotation key some object has.
+/// The label and annotation keys that appear on at least one object.
 #[derive(Default)]
-struct Carried {
+struct MetadataKeys {
     labels: HashSet<String>,
     annotations: HashSet<String>,
 }
 
-impl Carried {
-    fn holds(&self, key: &MetaKey) -> bool {
+impl MetadataKeys {
+    fn contain(&self, key: &MetaKey) -> bool {
         match key {
             MetaKey::Label(key) => self.labels.contains(key),
             MetaKey::Annotation(key) => self.annotations.contains(key),
@@ -35,10 +36,11 @@ impl Carried {
 }
 
 impl Snapshot {
-    /// The conditions of kind knowledge whose paths, node, or marks
-    /// match nothing here.
+    /// A condition for each path, `node` field, or applier mark of kind
+    /// knowledge that matches nothing in this snapshot, and for each
+    /// `ignoreChanges` kind that the cluster does not serve.
     pub(super) fn unmatched_kinds(&self) -> Vec<(DocId, Condition)> {
-        let carried = self.carried();
+        let keys = self.metadata_keys();
         let nodes: HashSet<&str> = self
             .nodes
             .iter()
@@ -54,7 +56,7 @@ impl Snapshot {
                 continue;
             }
             let whole = self.paged.whole.contains(&(group.clone(), kind.clone()));
-            let of = Of {
+            let of = KindObjects {
                 group,
                 kind,
                 objects,
@@ -63,7 +65,7 @@ impl Snapshot {
                 self.fields(known, &of, whole),
                 of.node(known, &nodes).into_iter().collect(),
                 self.gitops_fields(known, &of),
-                of.marks(known, &carried),
+                of.marks(known, &keys),
             ];
             let messages = messages.into_iter().flatten();
             found.extend(messages.map(|message| (known.doc, Condition::unmatched(message))));
@@ -72,25 +74,25 @@ impl Snapshot {
         found
     }
 
-    /// Every label and annotation key on an object intent can be
-    /// written on, which is every object an applier's mark may be on.
-    fn carried(&self) -> Carried {
-        let mut carried = Carried::default();
+    /// The label and annotation keys on every object that intent can
+    /// describe, which covers every object an applier's mark can be on.
+    fn metadata_keys(&self) -> MetadataKeys {
+        let mut keys = MetadataKeys::default();
         for (_, meta) in self.described() {
             let labels = meta.labels.iter().flatten();
-            carried.labels.extend(labels.map(|(key, _)| key.clone()));
+            keys.labels.extend(labels.map(|(key, _)| key.clone()));
             let annotations = meta.annotations.iter().flatten();
-            carried
-                .annotations
+            keys.annotations
                 .extend(annotations.map(|(key, _)| key.clone()));
         }
-        carried
+        keys
     }
 
-    /// The fields of `known` no object of its kind holds: each
-    /// reference, the `Secret` it writes, and its primary.  A kind not
-    /// watched whole yet holds none of them, so it is not judged.
-    fn fields(&self, known: &KindKnowledge, of: &Of, whole: bool) -> Vec<String> {
+    /// A message for each of `known`'s `references`, `writesSecret`, and
+    /// `primary` paths that no object of the kind has. A kind that is
+    /// not watched whole has only metadata and conditions, so its paths
+    /// cannot be checked and it gets no message.
+    fn fields(&self, known: &KindKnowledge, of: &KindObjects, whole: bool) -> Vec<String> {
         if !whole {
             return Vec::new();
         }
@@ -108,14 +110,14 @@ impl Snapshot {
             .filter_map(|(field, path)| Some((field, path?)));
         references
             .chain(named)
-            .filter(|(_, path)| !of.any_holds(path))
+            .filter(|(_, path)| !of.any_has(path))
             .map(|(field, path)| format!("{field} reads {path}, which no {} has", of.kind))
             .collect()
     }
 
-    /// The GitOps fields of `known` that read nothing on any object of
-    /// its kind.
-    fn gitops_fields(&self, known: &KindKnowledge, of: &Of) -> Vec<String> {
+    /// A message for each GitOps field of `known` that reads nothing on
+    /// any object of the kind.
+    fn gitops_fields(&self, known: &KindKnowledge, of: &KindObjects) -> Vec<String> {
         let Some(fields) = &known.gitops else {
             return Vec::new();
         };
@@ -154,8 +156,8 @@ impl Snapshot {
         messages
     }
 
-    /// A condition for each kind an `ignoreChanges` entry names that
-    /// the cluster does not serve.
+    /// A condition for each kind in an `ignoreChanges` entry that the
+    /// cluster does not serve.
     fn unserved_ignores(&self) -> Vec<(DocId, Condition)> {
         let mut found = Vec::new();
         for (group, kind) in self.kinds.kinds() {
@@ -180,22 +182,22 @@ impl Snapshot {
     }
 }
 
-/// The objects of one kind.
-struct Of<'a> {
+/// The objects of one custom kind.
+struct KindObjects<'a> {
     group: &'a str,
     kind: &'a str,
     objects: &'a [Arc<Custom>],
 }
 
-impl Of<'_> {
+impl KindObjects<'_> {
     fn object(&self, found: &Custom) -> Option<Object> {
         let name = found.metadata.name.as_deref()?;
         let namespace = found.metadata.namespace.as_deref();
         Some(Object::new(self.group, self.kind, namespace, name))
     }
 
-    /// Whether any object holds `field`.
-    fn any_holds(&self, field: &str) -> bool {
+    /// Whether any object has a value at the path `field`.
+    fn any_has(&self, field: &str) -> bool {
         self.objects.iter().any(|found| match field {
             "metadata.name" | "metadata.namespace" => self
                 .object(found)
@@ -204,7 +206,8 @@ impl Of<'_> {
         })
     }
 
-    /// Why `known`'s `node` names no `Node`, when it names none.
+    /// A message when no value that `known`'s `node` field reads is the
+    /// name of a `Node`.
     fn node(&self, known: &KindKnowledge, nodes: &HashSet<&str>) -> Option<String> {
         let field = known.node.as_deref()?;
         let names = self.objects.iter().flat_map(|found| {
@@ -220,9 +223,9 @@ impl Of<'_> {
         })
     }
 
-    /// Why `known`'s applier marks name nothing, when no object has the
-    /// key that names an applier.
-    fn marks(&self, known: &KindKnowledge, carried: &Carried) -> Vec<String> {
+    /// A message for each applier mark of `known` whose label or
+    /// annotation key is on no object, so no object can name its applier.
+    fn marks(&self, known: &KindKnowledge, keys: &MetadataKeys) -> Vec<String> {
         let gitops = known.gitops.as_ref();
         let Some(applies) = gitops.and_then(|fields| fields.applies.as_ref()) else {
             return Vec::new();
@@ -233,7 +236,7 @@ impl Of<'_> {
             .chain([("applies.namespace", applies.namespace.as_ref())]);
         marks
             .filter_map(|(field, mark)| Some((field, mark?)))
-            .filter(|(_, mark)| !carried.holds(&mark.key))
+            .filter(|(_, mark)| !keys.contain(&mark.key))
             .map(|(field, mark)| {
                 let (what, key) = match &mark.key {
                     MetaKey::Label(key) => ("label", key),

@@ -1,8 +1,8 @@
-//! The index of the cluster's addresses: every name and address a
-//! client could be configured with to reach a `Service` or a machine.
-//! A client reaches a `Service` by its DNS names, its load balancer's
-//! addresses, and the hosts of each `Ingress` that routes to it, and
-//! reaches a machine by its name and its addresses.
+//! The index of every name and address that a client could be
+//! configured with to reach a `Service` or a machine. A client reaches
+//! a `Service` by its DNS names, its load balancer's addresses, and the
+//! hosts of each `Ingress` that routes to it. A client reaches a
+//! machine by its name and its addresses.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -14,34 +14,36 @@ use kube::ResourceExt;
 use super::parse::Address;
 use transect_graph::edges::{Endpoint, Object};
 
-/// The ports an `Ingress` host answers on.
+/// The ports an `Ingress` host accepts connections on.
 const INGRESS_PORTS: [u16; 2] = [80, 443];
 
 /// What one name reaches, and where it resolves.
 #[derive(Debug)]
 struct Name {
     to: Endpoint,
-    /// The namespace a short name resolves in, through the search path
-    /// of that namespace's pods only; none for a name that resolves from
-    /// anywhere.
+    /// The namespace whose pods resolve this name, for a short name
+    /// that only their DNS search path completes. `None` for a name
+    /// that resolves from any namespace.
     namespace: Option<String>,
-    /// The ports the target answers on; empty when any port reaches it,
+    /// The ports the target accepts connections on. Empty when any port reaches it,
     /// as on a machine.
     ports: Vec<u16>,
     /// Whether it is a headless `Service`'s name, under which each of
     /// its pods has a name of its own, such as `db-0.db`.
     headless: bool,
-    /// The path an `Ingress` rule routes on this host to `to`, its
-    /// `Service`; none for a name that is not an `Ingress` host.
+    /// The path that an `Ingress` rule routes on this host to `to`, its
+    /// `Service`. `None` for a name that is not an `Ingress` host.
     path: Option<String>,
 }
 
+/// Every name and address that reaches a `Service` or a machine, and
+/// the ports that each `Service` exposes.
 #[derive(Debug, Default)]
 pub struct Addresses {
     names: HashMap<String, Vec<Name>>,
     /// The ports each `Service` exposes: each of its ports, and the
     /// node port of each on a `NodePort` or `LoadBalancer` `Service`,
-    /// which every machine's address answers on.
+    /// which every machine's address accepts connections on.
     exposed: HashMap<Endpoint, Vec<u16>>,
     /// The namespaces that contain a `Service`, where a two-label name
     /// such as `db.shop` is a `Service`'s name.
@@ -51,10 +53,7 @@ pub struct Addresses {
 }
 
 impl Addresses {
-    /// Indexes each `Service`'s DNS names in every form, and its load
-    /// balancer's addresses; each `Ingress`'s hosts; and each machine's
-    /// name and addresses.  `domain` is the cluster's DNS domain, such
-    /// as `cluster.local`.
+    /// `domain` is the cluster's DNS domain, such as `cluster.local`.
     pub fn build(
         services: &[Arc<Service>],
         ingresses: &[Arc<Ingress>],
@@ -82,9 +81,11 @@ impl Addresses {
         self.names.entry(key).or_default().push(entry);
     }
 
-    /// The short name resolves only in the `Service`'s own namespace; the
-    /// longer forms resolve from any namespace, through the
-    /// `svc.<domain>` and `<domain>` entries of every pod's search path.
+    /// Indexes the DNS names and load balancer addresses of `service`.
+    /// The short name resolves only in the `Service`'s own namespace.
+    /// The longer forms resolve from any namespace, because the DNS
+    /// search path of a pod with the default `ClusterFirst` policy
+    /// includes `svc.<domain>` and `<domain>`.
     fn add_service(&mut self, service: &Service, domain: &str) {
         let Some(namespace) = service.namespace() else {
             return;
@@ -136,11 +137,11 @@ impl Addresses {
         }
     }
 
-    /// Each host of an `Ingress`'s rules reaches the `Service` each of
-    /// its paths routes to, so a URL's path selects the `Service` that
-    /// serves it, as the ingress controller would.  A host with a
-    /// wildcard names no one address, so the index omits it, and it
-    /// omits a backend that names a resource instead of a `Service`.
+    /// Indexes each host of an `Ingress`'s rules with the `Service` that
+    /// each of its paths routes to, so the path of a URL selects the
+    /// `Service` that serves it. A wildcard host is not one address, so
+    /// the index omits it. The index also omits a backend that names a
+    /// resource instead of a `Service`.
     fn add_ingress(&mut self, ingress: &Ingress) {
         let Some(namespace) = ingress.namespace() else {
             return;
@@ -186,11 +187,12 @@ impl Addresses {
         }
     }
 
-    /// What `address` reaches when a pod in `namespace` is configured
-    /// with it.  Only a whole name matches, never part of one.  A port,
-    /// when one is written, must be one the target answers on.  A name
-    /// that matches nothing may be one pod's name under a headless
-    /// `Service`, such as `db-0.db.shop`, which reaches that `Service`.
+    /// The ends that `address` reaches when a pod in `namespace` is
+    /// configured with it. Only a whole name matches, never part of
+    /// one. A port, when one is written, must be one that the target
+    /// accepts connections on. A name that matches nothing may be the name of one
+    /// pod under a headless `Service`, such as `db-0.db.shop`, and then
+    /// it reaches that `Service`.
     pub fn resolve(&self, address: &Address, namespace: Option<&str>) -> Vec<&Endpoint> {
         let reaches = |name: &&Name| {
             let here = name.namespace.is_none() || name.namespace.as_deref() == namespace;
@@ -218,13 +220,14 @@ impl Addresses {
         headless.map(|name| &name.to).collect()
     }
 
-    /// The `Service` that `host` names in a form only a `Service`'s DNS
-    /// name has, whether or not the cluster still has that `Service`:
-    /// `name.namespace.svc`, `name.namespace.svc.<domain>`, or
-    /// `name.namespace` where the namespace contains a `Service`,
-    /// because an outside host such as `example.com` has two labels
-    /// too.  Such a name never reaches outside the cluster: in a pod,
-    /// the search path resolves it before any public name.
+    /// The `Service` that `host` names when `host` has the form of a
+    /// `Service`'s DNS name, whether or not the cluster has that
+    /// `Service`: `name.namespace.svc`, `name.namespace.svc.<domain>`, or
+    /// `name.namespace` when some `Service` exists in `namespace`. The
+    /// two-label form needs that check because an outside host such as
+    /// `example.com` also has two labels. A pod's DNS search path tries
+    /// the cluster's names before the public name, so the name reaches
+    /// the `Service` whenever it exists.
     pub fn service_named(&self, host: &str) -> Option<Object> {
         let host = host.trim_end_matches('.').to_ascii_lowercase();
         let full = format!(".svc.{}", self.domain);
@@ -238,12 +241,12 @@ impl Addresses {
         (label(name) && label(namespace)).then(|| Object::new("", "Service", Some(namespace), name))
     }
 
-    /// Each `Service` that an `Ingress` routes `address` to when its
-    /// host is the `Ingress`'s and its port is one the `Ingress` does
-    /// not answer on, such as a forge's SSH port on the forge's web
-    /// host.  Another `Service` of the same workload most likely serves
-    /// that port.  Finding it needs the graph, so `reach` finds it from
-    /// these.
+    /// The `Service`s that an `Ingress` routes to when `address` has
+    /// the `Ingress`'s host and a port that the `Ingress` does not
+    /// answer on, such as the SSH port on a forge's web host. Another
+    /// `Service` of the same workload most likely serves that port, and
+    /// `reach` looks for it in the graph, starting from the `Service`s
+    /// returned here.
     pub fn off_ingress_port(&self, address: &Address) -> Vec<&Endpoint> {
         if address
             .port
@@ -265,10 +268,9 @@ impl Addresses {
     }
 }
 
-/// Each port of `service`, and on a `NodePort` or `LoadBalancer`
-/// `Service` the node port of each.  Kubernetes gives a `ClusterIP`
-/// `Service` no node ports, and a stale one in its spec answers
-/// nowhere.
+/// Each port of `service`, and the node port of each when `service` is
+/// a `NodePort` or `LoadBalancer` `Service`, because only those types
+/// open node ports on the machines.
 fn exposed(service: &Service) -> Vec<u16> {
     let Some(spec) = service.spec.as_ref() else {
         return Vec::new();
@@ -284,11 +286,12 @@ fn exposed(service: &Service) -> Vec<u16> {
     ports
 }
 
-/// Of `names`, the `Ingress` paths that route `path` and every name
-/// that is not an `Ingress` path.  The function keeps only the longest
-/// matching path, as an ingress controller selects it, so a host whose
-/// `/` goes to an application and whose `/outpost` goes to a sign-in
-/// proxy reaches only the application from a URL at its root.
+/// The ends that `names` reach for the URL path `path`, each once. A
+/// name that is not an `Ingress` host always counts. Of the `Ingress`
+/// paths that match `path`, only the longest counts, because the
+/// `Ingress` API gives the longest matching path precedence. So a host
+/// whose `/` goes to an application and whose `/outpost` goes to a
+/// sign-in proxy reaches only the application from a URL at its root.
 fn routed<'a>(names: Vec<&'a Name>, path: &str) -> Vec<&'a Endpoint> {
     let longest = names
         .iter()
@@ -309,8 +312,8 @@ fn routed<'a>(names: Vec<&'a Name>, path: &str) -> Vec<&'a Endpoint> {
     found
 }
 
-/// Whether an `Ingress` path routes `path`: it is `/`, the path itself,
-/// or a prefix of it that ends between two of its segments.
+/// Whether the `Ingress` path `prefix` routes `path`: it is `/`, the
+/// path itself, or a prefix of it that ends at a segment boundary.
 fn routes(prefix: &str, path: &str) -> bool {
     let prefix = prefix.trim_end_matches('/');
     prefix.is_empty()

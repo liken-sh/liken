@@ -1,6 +1,7 @@
-//! One kind's objects in one namespace: a table of names, each with its
-//! dot, the condition that gave it, and its printer columns, beside the
-//! kind's card.
+//! The page that lists one custom kind's objects in one namespace. It
+//! shows a table beside the kind's card. Each row has the object's
+//! name, a health dot, the condition that sets the dot, and the kind's
+//! printer columns.
 
 use askama::Template;
 
@@ -15,25 +16,24 @@ pub struct ListPage {
     pub layer: String,
     /// The kind's plural, "Certificates".
     pub label: String,
-    /// The page's own path, which its event stream's URL includes.
+    /// The page's path, which the URL of its event stream includes.
     pub path: String,
-    /// The kind's objects in every namespace.
+    /// The link to the kind's objects in every namespace.
     pub everywhere: String,
-    /// The namespace's custom kinds, this one among them.
-    pub strip: Vec<Entry>,
+    /// The namespace's custom kinds, this one included.
+    pub kind_links: Vec<Entry>,
     pub columns: Vec<String>,
     pub rows: Vec<KindObject>,
     pub card: KindCard,
 }
 
 impl ListPage {
-    /// Its table has the name, the condition, and each printer column.
+    /// The table has the name column, the condition column, and the
+    /// printer columns.
     pub fn wide(&self) -> bool {
         super::kind::wide_table(self.columns.len() + 2)
     }
 
-    /// The crumb: the cluster, the layer with this namespace selected,
-    /// the namespace, and the kind.
     pub fn crumbs(&self) -> Vec<Crumb> {
         let select = format!("/?select={}", self.namespace);
         vec![
@@ -51,7 +51,7 @@ impl ListPage {
         format!("/events{}", self.path)
     }
 
-    /// The line in the box when the namespace has none of them.
+    /// The text for when the namespace has no objects of this kind.
     pub fn none(&self) -> String {
         format!("No {} in {} now.", self.label, self.namespace)
     }

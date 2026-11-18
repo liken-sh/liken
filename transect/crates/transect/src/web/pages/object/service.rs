@@ -1,6 +1,7 @@
-//! A `Service`'s selector, type, ports, and endpoints; and an
-//! `Ingress`'s hosts, backends, class, and TLS.  The routes between them
-//! are edges, which every object page lists.
+//! The sections of an object page for a `Service` (its type and ports,
+//! selector, and endpoints) and for an `Ingress` (its hosts, backends,
+//! class, TLS, controller, and traffic). The routes between them are
+//! edges, which every object page lists.
 
 use kube::ResourceExt;
 
@@ -74,8 +75,8 @@ pub fn ingress(snapshot: &Snapshot, object: &Object) -> Vec<Section> {
     ]
 }
 
-/// The workload that runs the `Ingress`'s controller, as the entry box
-/// names it, ending in "?" when it is a guess.
+/// A link to the workload that runs the `Ingress`'s controller. Its text
+/// ends in "?" when the controller was guessed.
 fn served_by(shown: &IngressBox) -> Vec<transect_graph::links::Reference> {
     let Some(controller) = &shown.controller else {
         return Vec::new();
@@ -87,8 +88,9 @@ fn served_by(shown: &IngressBox) -> Vec<transect_graph::links::Reference> {
     vec![controller]
 }
 
-/// Each backend's traffic as a fact of its own: the backend, linked,
-/// over its figures.  With none, the line that states what would show it.
+/// The Traffic section: one "requests to" fact for each backend, with
+/// the backend's link and its figures. When there are no figures, the
+/// section shows the traffic's note, which says why.
 fn traffic(shown: &IngressBox) -> Section {
     let lines = shown.traffic.lines(&shown.namespace, true).into_iter();
     let section = lines.fold(Section::new("Traffic", Side::Out), |section, line| {

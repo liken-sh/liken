@@ -1,19 +1,22 @@
-# Who may do what: the accounts matrix's rows, one of each kind.
+# RBAC objects for the accounts matrix, with one example of each kind
+# of row:
 #
-# - gitops-controller is bound to every verb on every resource, and
-#   writes its appliers' status, so it is the appliers' controller;
-# - ops-console may change what the GitOps tool applies, so through
-#   the tool it may do what gitops-controller may do;
-# - the promoter may change the workloads of its own namespace;
-# - the storefront may read one `Secret`, by name;
-# - the ledger's accounts may read its Secrets, through their
-#   group;
-# - a user may run pods in the shop, through an aggregated role;
-# - a batch worker, whose binding Kubernetes ships, folds into the
-#   controllers' line;
-# - ledger-deployer is the account ledger-apps applies as, which may
-#   change the ledger's workloads;
-# - shop-greeter is named by no binding.
+# - gitops-controller is bound to every verb on every resource and can
+#   write the status of the appliers (`Kustomization`s), so the page
+#   treats it as the controller of the appliers.
+# - ops-console can change what the GitOps tool applies, so it can do,
+#   through the tool, whatever gitops-controller can do.
+# - promoter can change the workloads of its own namespace.
+# - storefront can read one `Secret`, named in its role.
+# - every account in the acme-ledger namespace can read its `Secret`s,
+#   through a binding to the group of those accounts.
+# - a user can run pods in acme-shop through an aggregated role.
+# - batch-worker has only a binding that Kubernetes ships (labeled
+#   bootstrapping: rbac-defaults), so it is listed with the built-in
+#   controllers.
+# - ledger-deployer is the account that ledger-apps applies as, and can
+#   change the ledger's workloads.
+# - shop-greeter has no binding.
 apiVersion: v1
 kind: ServiceAccount
 metadata: {namespace: acme-ops, name: gitops-controller}
@@ -112,8 +115,9 @@ metadata: {namespace: acme-ledger, name: ledger-accounts-read}
 roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: ledger-secret-reader}
 subjects: [{kind: Group, name: 'system:serviceaccounts:acme-ledger'}]
 ---
-# The controller manager writes the rules of the roles that
-# `aggregationRule` selects into `rules`.
+# Kubernetes' controller manager fills `rules` from every `ClusterRole`
+# that `aggregationRule` selects, so `rules` here is the filled-in
+# result.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata: {name: shop-editor}
@@ -150,8 +154,8 @@ metadata: {namespace: acme-ledger, name: ledger-deployer-deploys}
 roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: app-deployer}
 subjects: [{kind: ServiceAccount, namespace: acme-ops, name: ledger-deployer}]
 ---
-# A user whose name holds markup, which every page escapes, and one
-# whose name holds slashes, as an identity provider's user may.
+# One user whose name contains HTML markup, to check that pages escape
+# it, and one whose name is a URL, as an identity provider can issue.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata: {namespace: acme-shop, name: odd-name-edits}

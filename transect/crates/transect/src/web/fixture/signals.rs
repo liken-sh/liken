@@ -1,6 +1,5 @@
-//! The fixture's signals, from `signals.yaml`: the alerts Alertmanager
-//! answers and the series Prometheus answers each query with, read
-//! through the same parsers and lookups a live poll uses.
+//! The fixture's alerts and Prometheus series, read from `signals.yaml`
+//! through the same parsers and lookups that a live poll uses.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -14,12 +13,12 @@ use transect_observe::{alerts, metrics, usage};
 #[derive(Deserialize)]
 struct Signals {
     alerts: serde_json::Value,
-    prometheus: Vec<Answer>,
+    prometheus: Vec<QueryResponse>,
     #[cfg(test)]
     logs: Vec<Logged>,
 }
 
-/// The rows the log store answers one container's tail with.
+/// The rows that the log store returns for one container's tail.
 #[cfg(test)]
 #[derive(Deserialize)]
 struct Logged {
@@ -30,7 +29,7 @@ struct Logged {
 }
 
 #[derive(Deserialize)]
-struct Answer {
+struct QueryResponse {
     query: String,
     samples: Vec<Series>,
 }
@@ -42,15 +41,17 @@ struct Series {
 }
 
 fn signals() -> Signals {
-    serde_yaml::from_str(include_str!("signals.yaml")).expect("signals.yaml reads")
+    serde_yaml::from_str(include_str!("signals.yaml")).expect("parsing signals.yaml")
 }
 
-/// The series Prometheus answers `query` with, or none for a query the
-/// fixture does not answer.
-fn answer(query: &str) -> Vec<Sample> {
-    let answers = signals().prometheus.into_iter();
-    let found = answers.into_iter().find(|answer| answer.query == query);
-    let samples = found.map(|answer| answer.samples).unwrap_or_default();
+/// The series that Prometheus returns for `query`, or none for a query
+/// that the fixture has no series for.
+fn run_query(query: &str) -> Vec<Sample> {
+    let responses = signals().prometheus.into_iter();
+    let found = responses
+        .into_iter()
+        .find(|response| response.query == query);
+    let samples = found.map(|response| response.samples).unwrap_or_default();
     let sample = |series: Series| Sample {
         labels: series.labels,
         value: series.value,
@@ -58,42 +59,42 @@ fn answer(query: &str) -> Vec<Sample> {
     samples.into_iter().map(sample).collect()
 }
 
-/// The alerts Alertmanager reports as firing, read by the conventions of
-/// the fixture's `MetricsSource`.
+/// The alerts that Alertmanager reports as firing, parsed as the
+/// fixture's `MetricsSource` declares.
 pub fn alerts(resources: &Loaded) -> alerts::Reading {
     let source = resources.metrics_source.as_ref();
     let Some(source) = source.and_then(|source| source.alerts.as_ref()) else {
         return alerts::Reading::Undeclared;
     };
     let body = signals().alerts.to_string();
-    let firing = alerts::parse_answer(&body, source).expect("the fixture's alerts read");
+    let firing = alerts::parse_alerts(&body, source).expect("parsing the fixture's alerts");
     alerts::Reading::Read(Arc::new(firing))
 }
 
-/// What every machine, pod, and container uses, as the usage queries
-/// of the fixture's `MetricsSource` are answered.
+/// The usage of every machine, pod, and container, from the responses to
+/// the usage queries of the fixture's `MetricsSource`.
 pub fn usage(resources: &Loaded) -> usage::Reading {
     let source = resources.metrics_source.as_ref();
     let Some(queries) = source.map(|source| &source.usage) else {
         return usage::Reading::Undeclared;
     };
-    usage::Reading::Read(Arc::new(usage::Usage::from_answers(queries, answer)))
+    usage::Reading::Read(Arc::new(usage::Usage::from_query_fn(queries, run_query)))
 }
 
-/// The bytes on each claim's volume, as the `volumeUsed` query of the
-/// fixture's `MetricsSource` is answered.
+/// The bytes used on each claim's volume, from the response to the
+/// `volumeUsed` query of the fixture's `MetricsSource`.
 pub fn volumes_used(resources: &Loaded) -> metrics::Reading {
     let source = resources.metrics_source.as_ref();
     let Some(query) = source.and_then(|source| source.volume_used.as_ref()) else {
         return metrics::Reading::Undeclared;
     };
-    let used = metrics::poll::by_claim(&answer(&query.query), &query.labels);
+    let used = metrics::poll::by_claim(&run_query(&query.query), &query.labels);
     metrics::Reading::Read(Arc::new(used))
 }
 
-/// The tail of the pod `namespace/pod`, as the log store `resources`
-/// declare answers it, or none for a pod the fixture holds no lines of
-/// or a cluster that declares no log source.
+/// The tail of the pod `namespace/pod`, as the log store declared in
+/// `resources` returns it. Returns none when the fixture has no lines
+/// for the pod or the cluster declares no log source.
 #[cfg(test)]
 pub fn tails(
     resources: &Loaded,

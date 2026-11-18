@@ -1,20 +1,21 @@
-//! The elevation crumb in the masthead.  It lists each elevation from
-//! the cluster down to the one shown, and every crumb but the last is
-//! a link to its elevation.
+//! The breadcrumb trail in the page header. It runs from the cluster
+//! down to the page shown, and every crumb but the last links to its
+//! page.
 
 #[derive(Debug, PartialEq)]
 pub struct Crumb {
     pub text: String,
-    /// Where the crumb leads, or none for the elevation shown.
+    /// The link target, or `None` for the page shown.
     pub href: Option<String>,
-    /// Whether the crumb names an object, such as a namespace, which the
-    /// crumb draws in the map's monospace, as the object's parcel is.
+    /// Whether the crumb is an object's name, such as a namespace.
+    /// `crumbs.html` draws a current crumb with `name` set in monospace,
+    /// and ignores `name` on a link.
     pub name: bool,
 }
 
 impl Crumb {
-    /// The first crumb on every page: the cluster, a link to the map with
-    /// nothing selected, so every page has a link back to the whole map.
+    /// The first crumb of every page: "cluster", linking to the map with
+    /// nothing selected.
     pub fn home() -> Self {
         Self::link("cluster", "/".into())
     }
@@ -27,7 +28,8 @@ impl Crumb {
         }
     }
 
-    /// A link up to an object, such as the namespace above a workload.
+    /// A link to an object's page, such as the namespace above a
+    /// workload.
     pub fn link_name(text: &str, href: String) -> Self {
         Self {
             name: true,
@@ -56,7 +58,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn home_links_to_the_unselected_map() {
+    fn the_home_crumb_links_to_the_map_with_nothing_selected() {
         assert_eq!(Crumb::home().href.as_deref(), Some("/"));
     }
 }

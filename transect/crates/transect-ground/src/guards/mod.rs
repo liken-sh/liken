@@ -1,13 +1,13 @@
-//! Guards are the settings that keep a workload answering while its pods
-//! stop and start: its spread across machines, the `PodDisruptionBudget`
-//! that limits evictions, its update strategy, a readiness probe that
-//! keeps traffic away from a pod until the pod answers, and a CPU limit.
+//! Guards are the settings that keep a workload available while its pods
+//! stop and start: spreading its pods across machines, a
+//! `PodDisruptionBudget` that limits evictions, a rolling update
+//! strategy, a readiness probe, and a CPU limit.
 //!
 //! This module reads each guard from the workload's pod templates and
-//! from the budgets that select its pods.  The page's words for them are
-//! in `sentence.rs`.  The workload findings in `transect-supply`'s
-//! `findings/` report two of these guards when they are missing from a
-//! workload that runs more than one pod.
+//! from the budgets that select its pods.  `sentence.rs` writes the
+//! page's text for them.  The findings of `transect-supply` report a
+//! missing readiness probe and a missing budget, through
+//! `takes_traffic_unready` and `unbudgeted`.
 
 mod budget;
 mod sentence;
@@ -25,8 +25,8 @@ pub use spread::{Spread, spread};
 use crate::machines::pod_limits;
 use transect_cluster::workloads::Workload;
 
-/// The update strategy that replaces pods a few at a time.  It is the
-/// strategy that keeps a workload answering during a rollout.
+/// The update strategy that replaces pods a few at a time, so the
+/// workload keeps serving during a rollout.
 const ROLLING: &str = "RollingUpdate";
 
 #[derive(Clone, Debug, PartialEq)]
@@ -38,25 +38,23 @@ pub struct Guards {
     pub scheduled: bool,
     pub spread: Option<Spread>,
     pub budgets: Vec<Budget>,
-    /// Each update strategy that the workload's controllers use, listed
-    /// once.
+    /// The update strategies of the workload's controllers, without
+    /// duplicates.
     pub strategies: Vec<String>,
     /// Whether every pod template has a container with a readiness
     /// probe.  A pod whose containers have none is ready, and receives
-    /// its `Service`'s traffic, as soon as they start.
+    /// its `Service`'s traffic, as soon as the containers start.
     pub readiness_probe: bool,
-    /// Whether a pod template that a `Service` selects has no readiness
-    /// probe.  Only a `Service` sends a pod traffic before the pod is
-    /// ready, so pods that no `Service` selects, such as the members of
-    /// a store that find each other on their own, need no probe for
-    /// this reason.
+    /// Whether some pod template that a `Service` selects has no
+    /// readiness probe.  Without a `Service`, nothing sends the pod
+    /// traffic before it is ready, so a pod such as a database member
+    /// that its peers reach directly does not need a probe for traffic.
     pub served_unready: bool,
     /// Whether every pod template limits the CPU of every container.
     pub cpu_limit: bool,
     /// Whether the workload's operator moves its work, such as a
-    /// database's primary, off a pod before an eviction, as the kind
-    /// knowledge of its kind declares.  When it does, a budget that
-    /// allows no eviction of its pods is intentional.
+    /// database's primary, off a pod before an eviction.  The kind
+    /// knowledge of the workload's kind declares it.
     pub operator_moves: bool,
 }
 
@@ -68,8 +66,8 @@ pub enum Guard {
     /// separate machines.
     NotSpread,
     /// A budget that selects the workload's pods.  `named` is true when
-    /// the workload has more than one budget, so each chip shows which
-    /// budget it is.
+    /// the workload has more than one budget, so the page shows each
+    /// budget's name.
     Budget {
         budget: Budget,
         named: bool,
@@ -83,8 +81,11 @@ pub enum Guard {
     NoCpuLimit,
 }
 
-/// How the page draws a guard: in place, open when nothing is wrong with
-/// that, or open when the workload needs the guard.
+/// How the page draws a guard.  `Held` is a guard that is in place.
+/// `Open` is a guard that is missing, or a strategy other than rolling,
+/// where the workload does not need it.  `Warn` is a guard that is
+/// missing, or a budget that blocks every eviction, where the workload
+/// needs it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Hold {
     Held,
@@ -134,8 +135,8 @@ impl Guards {
         }
     }
 
-    /// The guards with `operator_moves`, which the workload's kind
-    /// knowledge gives.
+    /// Sets `operator_moves` from the `KindKnowledge` of the workload's
+    /// kind.
     pub fn with_operator_moves(self, operator_moves: bool) -> Self {
         Self {
             operator_moves,
@@ -143,22 +144,22 @@ impl Guards {
         }
     }
 
-    /// Whether a `Service` can send requests to one of its pods before
-    /// the pod answers, while other pods could have answered them.
+    /// Whether a `Service` can send requests to a pod that is not yet
+    /// ready while another pod of the workload could answer them.
     pub fn takes_traffic_unready(&self) -> bool {
         self.replicated && !self.scheduled && self.served_unready
     }
 
-    /// Whether nothing prevents evictions from removing all of the
-    /// workload's pods at once.
+    /// Whether the workload runs more than one pod and no budget limits
+    /// evictions, so a drain can remove all of its pods at once.
     pub fn unbudgeted(&self) -> bool {
         self.replicated && self.budgets.is_empty()
     }
 
     /// The guards in the order the page lists them: spread, budgets,
-    /// strategy, then the guards that are missing.  A single pod has
-    /// nothing to spread, so the list reports neither its spread nor a
-    /// missing budget for it.
+    /// strategies, then the guards that are missing.  A workload with
+    /// one pod has nothing to spread or to budget, so the list has
+    /// neither for it.
     pub fn list(&self) -> Vec<Guard> {
         let mut list = Vec::new();
         match (self.replicated, self.spread) {
@@ -188,21 +189,21 @@ impl Guards {
         list
     }
 
-    /// How the page draws `guard`, which is one of this workload's
-    /// guards.
+    /// How the page draws `guard` of this workload.
     pub fn hold(&self, guard: &Guard) -> Hold {
         match guard {
             Guard::Spread(_) => Hold::Held,
             Guard::Budget { budget, .. } if budget.allowed > 0 => Hold::Held,
-            // An operator that switches primaries before a drain sets a
-            // budget like this on purpose, and relaxes the budget after
-            // it has switched them.
+            // An operator that moves the primary before a drain sets a
+            // budget that allows no eviction on purpose, and relaxes it
+            // after the move.
             Guard::Budget {
                 operator_moves: true,
                 ..
             } => Hold::Held,
-            // A budget that lets no pod go blocks every drain until a
-            // person deletes it or the workload scales up.
+            // A budget that allows no eviction blocks every drain until
+            // a person deletes it or the workload scales up.  With no
+            // budget, a drain can evict every pod at once.
             Guard::Budget { .. } | Guard::NoBudget => Hold::Warn,
             Guard::Strategy(strategy) if strategy == ROLLING => Hold::Held,
             Guard::NoReadinessProbe if self.takes_traffic_unready() => Hold::Warn,

@@ -1,13 +1,13 @@
-//! The access lens shows what may reach each port, what each account
-//! may do, and where the account may do it.  It reads only the
-//! cluster's objects.
+//! The access lens shows what may reach each port that a workload
+//! serves, and what each account may do in which namespaces.
 //!
-//! The lens computes access from Roles, ClusterRoles, RoleBindings, and
-//! ClusterRoleBindings, the ServiceAccounts' metadata, and the pods'
-//! specs.  It makes no SubjectAccessReview and reads no Secret, so a
-//! Secret shows only by the name that a pod spec or a Role gives it.
-//! RBAC does not show a webhook authorizer, the node authorizer, or an
-//! admission webhook, and the pages state this limit.
+//! The lens computes access only from Roles, ClusterRoles,
+//! RoleBindings, ClusterRoleBindings, ServiceAccounts, and pod specs.
+//! It makes no SubjectAccessReview and reads no Secret, so a Secret
+//! shows only by the name that a pod spec or a Role gives it.  A
+//! webhook authorizer, the node authorizer, and admission webhooks can
+//! allow or refuse requests that RBAC does not, and the lens cannot see
+//! them, so the pages state this limit.
 
 pub mod account;
 pub mod accounts;
@@ -54,7 +54,6 @@ pub fn serves(workload: &transect_cluster::workloads::Workload, selected: bool) 
     selected || declared
 }
 
-/// The page a name on an access page links to, as `href` gives it.
 pub fn link(object: &Object, href: &dyn Fn(&Object) -> Option<String>) -> Option<String> {
     href(object)
 }
@@ -62,42 +61,42 @@ pub fn link(object: &Object, href: &dyn Fn(&Object) -> Option<String>) -> Option
 /// The objects that [`Access::build`] reads.
 pub struct Inputs<'a> {
     pub rbac: &'a RbacObjects,
-    /// Every ServiceAccount the store holds, by namespace and name.
+    /// Every ServiceAccount in the store, as (namespace, name).
     pub service_accounts: Vec<(String, String)>,
-    /// What each pod that has not finished runs as and mounts.
+    /// The ServiceAccount and mounts of each pod that has not finished.
     pub pods: Vec<Running>,
-    /// The kinds whose change is the sixth capability.
+    /// The kinds whose change is the `ChangeApplied` capability.
     pub gitops: Vec<GitOpsKind>,
-    /// Every object that applies, with the accounts it applies as.
+    /// Every object that applies other objects, with the accounts it
+    /// applies them as.
     pub appliers: Vec<Applier>,
 }
 
-/// An object that applies what it names, and the accounts it applies
-/// as.  When its kind's knowledge gives the field that names a
-/// ServiceAccount, the object applies as that ServiceAccount.
-/// Otherwise it applies as its controller's accounts, which are the
-/// accounts that may write its kind's status, as controller
-/// attribution finds them.
+/// An object that applies other objects, such as a Flux
+/// `Kustomization`, and the accounts it applies them as.  When its
+/// kind's `KindKnowledge` names the field that holds a ServiceAccount,
+/// the object applies as that ServiceAccount.  Otherwise it applies as
+/// its controller's accounts, which are the accounts that may write the
+/// status of its kind.
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Applier {
     pub object: Object,
-    /// Its kind's plural, by which a rule names the kind.
+    /// The plural of its kind, as an RBAC rule names it.
     pub plural: String,
-    /// The accounts it applies as now.
     pub accounts: Vec<Account>,
-    /// Whether the object names the account, rather than applying as
-    /// its controller's.
+    /// Whether the object names its account, instead of applying as its
+    /// controller's accounts.
     pub named: bool,
-    /// The field that names the account it applies as, when its kind's
-    /// knowledge gives one.  An account that may change the object may
-    /// set the field to any ServiceAccount in the object's namespace.
+    /// The field that names its ServiceAccount, when the `KindKnowledge`
+    /// gives one.  An account that may change the object can set this
+    /// field to any ServiceAccount in the object's namespace.
     pub field: Option<String>,
     /// What it applies as when the field names no account: the field's
     /// default, or else its controller's accounts.
     pub fallback: Vec<Account>,
-    /// The object it fetches through, and the plural of that object's
-    /// kind.  An account that changes the source changes what this
-    /// object applies, from any namespace.
+    /// The source object it fetches from, and the plural of the
+    /// source's kind.  An account that may change the source changes
+    /// what this object applies, even from another namespace.
     pub source: Option<(Object, String)>,
 }
 
@@ -105,12 +104,12 @@ pub struct Applier {
 #[derive(Debug, Default)]
 pub struct Access {
     pub accounts: BTreeMap<Account, Held>,
-    /// Who a binding lets change each kind, and where.
+    /// For each kind, the accounts that a binding lets change it, and
+    /// where.
     pub changers: Changers,
-    /// Each role's rules, by the role, for the drawing of an account
-    /// bound to it.
+    /// The rules of each role, for drawing an account bound to it.
     pub rules: HashMap<Object, Vec<PolicyRule>>,
-    /// The kinds the sixth capability reads.
+    /// The kinds that the `ChangeApplied` capability covers.
     pub gitops: Vec<GitOpsKind>,
 }
 
@@ -131,43 +130,45 @@ impl Access {
     }
 }
 
-/// What one account may do, and the bindings and roles that let it.
+/// What one account may do, and the bindings and roles that allow it.
 #[derive(Clone, Debug, Default)]
 pub struct Held {
     pub cells: BTreeMap<Capability, Cell>,
-    /// The bindings that name it directly, and not a group it is in.
+    /// The bindings that name the account itself, not a group it is in.
     pub bound: Vec<Bound>,
-    /// Where it is bound to a role with every verb on every resource,
-    /// and the role.
+    /// The roles bound to the account that allow every verb on every
+    /// resource, each with where its binding applies.
     pub everything: BTreeSet<(Where, Object)>,
-    /// Every role a binding binds it to, directly or through a group,
-    /// and where the binding applies.
+    /// Every role a binding gives the account, directly or through a
+    /// group, and where the binding applies.
     pub roles: BTreeSet<(Where, Object)>,
-    /// The rules that let it act as another account, where its binding
-    /// applies, with the names each is limited to, or none for every
-    /// object.
+    /// The routes by which it may act as another account, where each
+    /// applies, and the object names each is limited to.  An empty list
+    /// of names means every object.
     pub routes: BTreeMap<(routes::Route, Where), routes::Names>,
-    /// The GitOps kinds it may create, patch, or update, where, with
-    /// the names each is limited to.
+    /// The GitOps kinds it may create, patch, or update, where, and the
+    /// object names each is limited to.
     pub writes: BTreeMap<(GitOpsKind, Where), routes::Names>,
 }
 
 impl Held {
-    /// Where it may do `capability` to every object, granted or not.
+    /// Where it has `capability` on every object, from a binding or
+    /// from a `Follow`.
     pub fn unnamed(&self, capability: Capability) -> Vec<Where> {
         let cell = self.cells.get(&capability);
         cell.map(Cell::unnamed_places).unwrap_or_default()
     }
 
-    /// Whether it has any of the six capabilities anywhere.
+    /// Whether it has any capability anywhere.
     pub fn holds_any(&self) -> bool {
         self.cells.values().any(|cell| !cell.is_empty())
     }
 }
 
-/// One binding that names an account: the binding, its role, whether
-/// the binding is one Kubernetes ships, and whether its role grants any
-/// of the six.
+/// One binding that names an account.  `defaults` is true when the
+/// binding has the label `kubernetes.io/bootstrapping: rbac-defaults`,
+/// which Kubernetes puts on the bindings it creates.  `grants` is true
+/// when the role grants any capability.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Bound {
     pub binding: Object,
@@ -177,15 +178,17 @@ pub struct Bound {
 }
 
 /// One capability of one account: where a binding grants it, and where
-/// it follows from a grant.
+/// the account gets it by using another capability, which `follows`
+/// records.
 #[derive(Clone, Debug, Default)]
 pub struct Cell {
     pub granted: BTreeMap<Where, Vec<Via>>,
     pub follows: BTreeMap<Where, Follow>,
 }
 
-/// A capability that follows, its first hop, and the objects it is
-/// limited to, by name, or none for every object.
+/// A capability that an account gets with no binding that grants it:
+/// the first hop of the chain that leads to it, and the object names it
+/// is limited to.  An empty list of names means every object.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Follow {
     pub hop: Hop,
@@ -203,7 +206,7 @@ impl Cell {
         self.granted.iter().filter(every).map(|(at, _)| at)
     }
 
-    /// Where it applies to every object, by a grant or by a follow.
+    /// Where it covers every object, from a binding or a `Follow`.
     pub fn unnamed_places(&self) -> Vec<Where> {
         let followed = self.follows.iter().filter(|(_, f)| f.names.is_empty());
         let mut places: BTreeSet<Where> = self.granted_unnamed().cloned().collect();
@@ -211,8 +214,8 @@ impl Cell {
         places.into_iter().collect()
     }
 
-    /// Whether it already applies to every object at `place`, or to
-    /// every object everywhere.
+    /// Whether it already covers every object at `place`, or in every
+    /// namespace.
     fn holds(&self, place: &Where) -> bool {
         [place, &Where::Everywhere].into_iter().any(|at| {
             let granted = self.granted.get(at);
@@ -221,10 +224,10 @@ impl Cell {
         })
     }
 
-    /// Adds `follow` at `place` unless the cell already applies to
-    /// every object there, and returns whether it added it.  A follow
-    /// limited by name is added only where the cell has no entry at
-    /// `place`, and a follow for every object replaces one limited by
+    /// Adds `follow` at `place` and returns whether it added it.  It
+    /// adds nothing where the cell already covers every object.  A
+    /// follow limited by name is added only where the cell has no entry
+    /// at `place`, and a follow for every object replaces one limited by
     /// name.
     fn follow(&mut self, place: Where, follow: Follow) -> bool {
         if self.holds(&place) {

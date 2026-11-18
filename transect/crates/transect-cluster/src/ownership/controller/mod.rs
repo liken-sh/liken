@@ -1,16 +1,16 @@
-//! Controller attribution: which workload reconciles each custom
-//! resource that is a top owner.
+//! Finds the workload that reconciles each custom resource that is a
+//! top owner.
 //!
-//! The API does not record a resource's controller.  Two records
-//! indicate it: RBAC names the ServiceAccounts allowed to write the
-//! kind's status, and `managedFields` names the field manager that did
-//! write this object's status.  The pods that run as those
-//! ServiceAccounts lead, through their own top owners, to the
-//! controller's workload.  When more than one workload is left, the
-//! image the kind's knowledge names narrows them, and failing that each
-//! edge is a guess.  The objects this leaves without a controller,
-//! most of them resources that run no pods, are attributed by kind
-//! (`by_kind`).
+//! The API does not record an object's controller, so this infers it.
+//! The candidates are the top owners of the pods that run as a
+//! `ServiceAccount` that RBAC lets write the kind's status. When a
+//! candidate's name matches a field manager that wrote the object's
+//! status in `managedFields`, only the matching candidates are kept.
+//! When the kind's knowledge gives its controller's image and a
+//! candidate runs it, the candidates that run it are used instead. When
+//! more than one candidate is left, each edge is marked as a guess.
+//! `by_kind` attributes the objects that this leaves without a
+//! controller.
 
 mod by_kind;
 mod grants;
@@ -36,16 +36,15 @@ use transect_resources::knowledge::Kinds;
 /// from its `managedFields` entries for the `status` subresource.
 pub type StatusManagers = HashMap<Object, Vec<String>>;
 
-/// A controlled-by edge from each custom top owner in `ownership` to
-/// each workload left as its controller.  `pods` are every pod in the
-/// cluster, whose ServiceAccounts lead from RBAC to workloads.  A kind
-/// whose knowledge names its controller's image keeps the candidates
-/// that run it; when RBAC names none, as for an operator granted every
-/// kind, every workload that runs the image is a candidate.
-/// `cluster_scoped` are the custom resources outside any namespace,
-/// which run no pods of their own and so are no namespace's workload,
-/// but have a controller all the same, such as an operator's record of
-/// a device.
+/// Returns a controlled-by edge from each custom top owner in
+/// `ownership` to each candidate that is left as its controller.
+///
+/// `pods` is every pod in the cluster. When RBAC lets no account write
+/// the kind's status, the search by image looks at every workload that
+/// runs a pod. `cluster_scoped` adds the custom resources outside any
+/// namespace, because one that owns no namespaced object is not a
+/// workload, but it can still have a controller, such as an operator's
+/// record of a device.
 pub fn controlled_by(
     grants: &Grants,
     managers: &StatusManagers,
@@ -63,8 +62,8 @@ pub fn controlled_by(
     let resources: BTreeSet<&Object> = workloads.chain(outside).collect();
     let mut edges = Vec::new();
     for resource in resources {
-        // RBAC names a kind by its plural, so a kind discovery has not
-        // resolved matches no rule.
+        // RBAC rules name a kind by its plural, so a kind without a
+        // discovered plural cannot be matched to a rule.
         let Some(plural) = plurals.get(&(resource.group.clone(), resource.kind.clone())) else {
             continue;
         };
@@ -80,7 +79,7 @@ pub fn controlled_by(
                     .or_insert_with(|| candidate.clone());
             }
         }
-        let wrote = managers
+        let status_writers = managers
             .get(resource)
             .map(Vec::as_slice)
             .unwrap_or_default();
@@ -89,7 +88,7 @@ pub fn controlled_by(
         let image = knowledge.and_then(|k| Some((k, k.controller_image.as_deref()?)));
         let by_image = image.and_then(|(knowledge, image)| {
             let pool = match rbac.is_empty() {
-                true => everyone(&by_account, resource),
+                true => other_workloads(&by_account, resource),
                 false => rbac.clone(),
             };
             Some((
@@ -98,7 +97,7 @@ pub fn controlled_by(
             ))
         });
         let (left, provenance) =
-            by_image.unwrap_or_else(|| (narrow(rbac, wrote), Provenance::Kubernetes));
+            by_image.unwrap_or_else(|| (narrow(rbac, status_writers), Provenance::Kubernetes));
         let guessed = left.len() > 1;
         edges.extend(left.into_iter().map(|candidate| Edge {
             kind: Kind::ControlledBy,
@@ -112,7 +111,7 @@ pub fn controlled_by(
 }
 
 /// Every workload that runs a pod, except `resource` itself.
-fn everyone(
+fn other_workloads(
     by_account: &HashMap<ServiceAccount, BTreeMap<Object, Candidate>>,
     resource: &Object,
 ) -> Vec<Candidate> {
@@ -127,9 +126,9 @@ fn everyone(
     found.into_values().collect()
 }
 
-/// Each `ServiceAccount`'s workloads: the top owners of the pods that
-/// run as it, with the names each could write status under.  A pod that
-/// has finished runs no controller, so only pods that still run count.
+/// Groups the top owners of running pods by the `ServiceAccount` that
+/// the pods run as. A finished pod is skipped because it runs no
+/// controller.
 fn workloads_by_account<'a>(
     pods: &[&'a Pod],
     ownership: &'a Ownership,

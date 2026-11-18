@@ -1,12 +1,12 @@
-//! Each elevation's page, assembled from one reading of the cluster's
-//! stores.  Every page reads the same things the same way, so the
-//! cluster map and the namespace page agree on counts and health.
+//! Builds the data of each page from one `Model` of the cluster.  Every
+//! page reads the same values the same way, so the cluster map and the
+//! namespace page agree on counts and health.
 //!
-//! Every page shows only the edge kinds its view turns on.  The graph
-//! drops the other kinds before a page queries it, so the tags, card
-//! lines, and loops of a kind that is off all drop out together.  What a
-//! page reads apart from the graph, such as the policy summary and the
-//! ground's claim counts, each page leaves out in its own code.
+//! A view turns some edge kinds on and the rest off.  `model.graph(shown)`
+//! drops the kinds that are off, so the tags, card lines, and loops of
+//! an off kind disappear together.  Data that does not come from the
+//! graph, such as the policy summary and the ground's volume counts, is
+//! filtered by `shown` separately.
 
 use k8s_openapi::jiff::Timestamp;
 
@@ -31,20 +31,20 @@ use transect_supply::changed::Listed;
 use transect_supply::findings;
 use transect_supply::images::Origins;
 
-/// What the cluster page draws besides the map: a namespace selected,
-/// or the loss of a set of machines.
+/// What the cluster page shows in addition to the map: a selected
+/// namespace, or a set of lost machines.
 #[derive(Clone, Copy)]
 pub enum Focus<'a> {
     Select(Option<&'a str>),
-    /// The loss of the machines named, with a namespace selected in it
-    /// or none.
+    /// The machines to draw as lost, and the namespace to select, if
+    /// any.
     Lose(&'a [String], Option<&'a str>),
 }
 
-/// The cluster page, with `focus` selected when it names a namespace on
-/// the map, or with its loss when it names machines the cluster has.  A
-/// name the map does not hold, such as a namespace deleted since its link
-/// was copied, draws the plain cluster.
+/// The cluster page for `focus`.  A namespace that the map does not
+/// hold, such as one deleted after its link was copied, draws the plain
+/// cluster.  Machine names that the cluster does not have are reported
+/// as unknown and are not drawn as lost.
 pub fn cluster_page(
     model: &Model,
     layers: &Layers,
@@ -67,33 +67,39 @@ pub fn cluster_page(
     let graph = model.graph(shown);
     let edge_set = model.edge_set(shown);
     let selected = select.and_then(|namespace| map.select(namespace));
-    // When a machine is really lost, the page at `/` draws its loss
-    // without a `lose` parameter, and a loss the URL asks for adds to
-    // it.  When a namespace is selected, the page shows that namespace's
-    // card in place of the loss.
-    let gone = loss::not_ready(&snapshot.nodes, now);
+    // Machines that are not ready are drawn as lost, together with the
+    // machines named in `lose`.  While a namespace is selected, only the
+    // machines in `lose` are drawn as lost.
+    let not_ready = loss::not_ready(&snapshot.nodes, now);
     let real = if selected.is_some() {
         &[][..]
     } else {
-        &gone[..]
+        &not_ready[..]
     };
-    let asked = lose.iter().map(String::as_str);
-    let asked = asked.chain(real.iter().map(|gone| gone.machine.as_str()));
+    let lost_names = lose.iter().map(String::as_str);
+    let lost_names = lost_names.chain(real.iter().map(|gone| gone.machine.as_str()));
     let names = machines.iter().map(|machine| machine.name.as_str());
-    let lost = Lost::of(asked, names);
+    let lost = Lost::of(lost_names, names);
     let known: Vec<&str> = machines
         .iter()
         .map(|machine| machine.name.as_str())
         .collect();
     let unknown = loss::unknown_text(&loss::unknown(lose.iter().map(String::as_str), &known));
     let loss = (!lost.is_empty()).then(|| {
-        let asked = Asked {
+        let request = LossRequest {
             lost,
             real,
             unknown: unknown.clone(),
         };
         let workloads = snapshot.workloads();
-        loss_sidebar(snapshot, &graph, &workloads, asked, &mut map, &mut machines)
+        loss_sidebar(
+            snapshot,
+            &graph,
+            &workloads,
+            request,
+            &mut map,
+            &mut machines,
+        )
     });
     let loops = &edge_set.loops;
     map.mark_loops(loops);
@@ -106,8 +112,9 @@ pub fn cluster_page(
                 map.relate(&namespace, found);
             }
         }
-        // Only callers a policy names get a tag.  A rule that admits
-        // every namespace is one line on the card instead.
+        // Only a namespace that a policy names as a caller gets a tag.
+        // When a rule admits every namespace, the card shows one line
+        // for it instead.
         let everyone = allowed.admits_every_namespace_in(&selected.namespace);
         if let Some(NamespaceReach::Isolated(callers)) = allowed.of_namespace(&selected.namespace)
             && !everyone
@@ -117,8 +124,8 @@ pub fn cluster_page(
             }
         }
         let health = health_of(&selected.namespace);
-        let kept = (&edge_set.forges, &minute.logged[..]);
-        let found = snapshot.card(&selected.namespace, health, &graph, kept, allowed);
+        let card_inputs = (&edge_set.forges, &minute.logged[..]);
+        let found = snapshot.card(&selected.namespace, health, &graph, card_inputs, allowed);
         card = Some(found.with_loops(loops));
     }
     let found = model.workload_findings.iter().cloned();
@@ -137,8 +144,8 @@ pub fn cluster_page(
     let changes = edge_set.recorded.arranged(&minute.firing, now);
     sidebar.changed = Listed::sidebar(&changes, now);
     sidebar.unknown = unknown.filter(|_| loss.is_none());
-    // The ground's volume counts for the selection are its stores-on
-    // edges, read from the claims themselves.
+    // The volume counts of the selected namespace on each ground come
+    // from the `StoresOn` edges, which the graph builds from the claims.
     let ground = Ground::build(
         &snapshot.storage,
         &graph,
@@ -215,16 +222,16 @@ pub fn namespace_page(
         resources: snapshot.resources_in(namespace),
         now,
     };
-    let kept = (&edge_set.forges, &minute.logged[..]);
-    let card = snapshot.card(namespace, namespace_health, &graph, kept, allowed);
+    let card_inputs = (&edge_set.forges, &minute.logged[..]);
+    let card = snapshot.card(namespace, namespace_health, &graph, card_inputs, allowed);
     let card = card.with_loops(loops);
     let page = NamespacePage::build(&map, namespace, contents, &machines, card)?;
     let here = format!("/namespaces/{namespace}");
     Some(page.with_edge_row(EdgeRow::build(&snapshot.offered(), shown, &here)))
 }
 
-/// A workload a page is asked for: its namespace, the resource of its
-/// kind as the URL names it, and its name.
+/// Identifies the workload to draw: its namespace, the resource name
+/// that its URL uses for its kind, and its name.
 #[derive(Clone, Copy)]
 pub struct WorkloadAt<'a> {
     pub namespace: &'a str,
@@ -232,8 +239,8 @@ pub struct WorkloadAt<'a> {
     pub name: &'a str,
 }
 
-/// The page for the workload `namespace/name` of the kind `resource`
-/// names, or `None` when the namespace holds no such workload.
+/// The page for the workload `at`, or `None` when its namespace has no
+/// such workload.
 pub fn workload_page(
     model: &Model,
     layers: &Layers,
@@ -261,10 +268,10 @@ pub fn workload_page(
     Some(page.with_edge_row(row))
 }
 
-/// The page of the GitOps object `namespace/name` of the kind
-/// `resource` names, or `None` when there is no such object.  It shares
-/// the workload page's URL, since a GitOps object's kind is a custom
-/// one.
+/// The page of the GitOps object `name` in `namespace`, where `resource`
+/// is the plural resource name from the URL, or `None` when there is no
+/// such object.  A GitOps object is a custom resource, so its URL has
+/// the same form as a workload page's URL.
 pub fn gitops_page(
     model: &Model,
     layers: &Layers,
@@ -300,9 +307,8 @@ pub fn gitops_page(
     Some(page.with_edge_row(row))
 }
 
-/// Reads what a workload's page and its section draw from, and passes
-/// it to `build` with the map.  The two draw one workload's card, so
-/// they read it the same way.
+/// Collects the data that every page of one workload in `namespace`
+/// draws, and passes it with the map to `build`.
 fn read_workloads<T>(
     model: &Model,
     layers: &Layers,
@@ -326,7 +332,7 @@ fn read_workloads<T>(
     let serving = snapshot.serving();
     let ways_in = model.ways_in();
     let contents = WorkloadContents {
-        held: &snapshot.held,
+        with_pages: &snapshot.with_pages,
         workloads: &workloads,
         owners: snapshot.ownership.workloads(namespace).collect(),
         ownership: &snapshot.ownership,
@@ -406,8 +412,9 @@ pub fn pod_page(
     Some(page.with_edge_row(row))
 }
 
-/// `transect`'s own resources, each with the conditions that loading it
-/// returned and those this reading of the cluster returns.
+/// The resources page: `transect`'s own resources, each with the
+/// conditions from loading it and the conditions that this reading of
+/// the cluster adds.
 pub fn resources_page(model: &Model, usage: &usage::Reading) -> ResourcesPage {
     let snapshot = &model.snapshot;
     let mut conditions = snapshot.conditions();
@@ -442,7 +449,7 @@ pub use ground::{ground_link, ground_page};
 pub use kinds::{kind_page, kinds_page};
 pub use known::known_page;
 pub use logs::{Lens, logs_page, shown_pod};
-use loss_view::{Asked, loss_sidebar};
+use loss_view::{LossRequest, loss_sidebar};
 pub use machine::machine_page;
 pub use manages::{manages, workload_at};
 pub use object::{ObjectAt, VolumeAt, object_page, read_key, volume_page};

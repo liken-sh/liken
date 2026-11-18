@@ -1,17 +1,16 @@
-//! Ownership: each pod and workload walked up its owner references to
-//! its top owner, the object a reader thinks of as the workload.
+//! Ownership: follows each pod's and workload's owner references up to
+//! its top owner, which is the object a reader thinks of as the
+//! workload.
 //!
-//! A `Deployment` owns ReplicaSets that own pods, a `CronJob` owns
-//! Jobs that own pods, and an operator's custom resource, such as a
-//! database, owns the `StatefulSet` that owns its pods.  A reader
-//! counts each of those chains as one thing, named by the object at its
-//! top.  So a
-//! namespace's workloads are the top owners its pods and built-in
-//! workloads resolve to, and a database an operator runs counts once, as
-//! its custom kind.
+//! A `Deployment` owns ReplicaSets that own pods, a `CronJob` owns Jobs
+//! that own pods, and an operator's custom resource, such as a
+//! database, owns the `StatefulSet` that owns its pods. A reader counts
+//! each of those chains as one workload, named by the object at the
+//! top. So a database that an operator runs counts once, as its custom
+//! kind.
 //!
-//! The walk reads only `ownerReferences`, so every kind it passes
-//! through, built-in or custom, needs only its metadata in the index.
+//! The walk reads only `ownerReferences`, so the index needs only
+//! metadata for each kind on a chain, built-in or custom.
 
 mod card;
 mod controller;
@@ -32,16 +31,13 @@ pub use departed::{Before, Departed};
 pub use kinds::{custom, group_of, kinds_to_watch};
 use transect_graph::edges::{Edge, Endpoint, Kind, Object, Provenance};
 
-/// The longest owner chain the walk follows.  Real chains are three or
-/// four links long; the limit only ends a chain that loops, which the
-/// API server allows because it does not check owner references.
+/// The most owners the walk follows above an object.
 const MAX_DEPTH: usize = 16;
 
-/// The kinds whose top owners are workloads: pods, and the built-in
-/// kinds that run pods.  A `ReplicaSet` is left out because a
-/// `Deployment` owns it, and an old one with no pods would otherwise
-/// count as a workload of its own whenever its `Deployment`'s metadata
-/// is missing.
+/// The kinds whose top owners count as workloads: pods and the built-in
+/// kinds that run pods. `ReplicaSet` is left out, because a
+/// `ReplicaSet` that runs pods is counted through its pods, and an old
+/// one with no pods is not a workload.
 const WORKLOAD_KINDS: [(&str, &str); 6] = [
     ("", "Pod"),
     ("apps", "Deployment"),
@@ -51,8 +47,8 @@ const WORKLOAD_KINDS: [(&str, &str); 6] = [
     ("batch", "Job"),
 ];
 
-/// One object's metadata, as the index reads it, with the group and
-/// kind its store holds.
+/// One object's metadata, with the group and kind of the store it came
+/// from.
 #[derive(Clone, Copy)]
 pub struct Entry<'a> {
     pub group: &'a str,
@@ -62,25 +58,23 @@ pub struct Entry<'a> {
 
 #[derive(Debug, Default)]
 pub struct Ownership {
-    /// Each indexed object that has an owner, and its top owner.  Kinds
-    /// that run no pods, such as a `Service` an operator made, are here
-    /// too, so a workload's own `Service` has that workload as its top
-    /// owner.
+    /// The top owner of each indexed object that has an owner, including
+    /// objects that run no pods, such as a `Service` that an operator
+    /// created.
     top: HashMap<Object, Object>,
-    /// Each namespace's workloads: the top owners its pods and built-in
-    /// workloads resolve to, each once, in order.
+    /// Each namespace's workloads: the top owners of its pods and
+    /// built-in workloads.
     workloads: HashMap<String, BTreeSet<Object>>,
     /// Each indexed object's controlling owner, which `is_owned_by`
-    /// walks for an owner below the top, such as a `StatefulSet` that a
-    /// database's custom resource owns.
+    /// follows to find owners below the top.
     index: Index,
 }
 
 impl Ownership {
-    /// Walks every pod and workload in `entries` to its top owner.  The
-    /// owners it passes through are looked up in `entries` too; an owner
-    /// missing from them, such as a custom kind `transect` cannot list,
-    /// ends the walk and is the top owner itself.
+    /// Finds the top owner of every pod and workload in `entries`. Each
+    /// owner on a chain is looked up in `entries`. An owner that is not
+    /// there, such as a custom kind that `transect` cannot list, ends the
+    /// walk and is the top owner.
     pub fn build<'a>(entries: impl IntoIterator<Item = Entry<'a>>) -> Self {
         let mut objects = Vec::new();
         let mut parents: HashMap<Object, Option<Object>> = HashMap::new();
@@ -114,15 +108,16 @@ impl Ownership {
         self.top.get(object).unwrap_or(object).clone()
     }
 
-    /// Whether `owner` is on `object`'s chain of owner references, at
-    /// the top or anywhere below it.  An object is not its own owner.
+    /// Whether `owner` is anywhere on `object`'s chain of owner
+    /// references, at the top or below it. An object is not its own
+    /// owner.
     pub fn is_owned_by(&self, object: &Object, owner: &Object) -> bool {
         self.index.chain(object).skip(1).any(|link| &link == owner)
     }
 
-    /// `namespace`'s workloads, sorted by group, kind, and name.  A
-    /// cluster-scoped top owner, such as a catalog that owns a pod in one
-    /// namespace, is a workload of the namespace its pod runs in.
+    /// `namespace`'s workloads, sorted by group, kind, and name. A
+    /// cluster-scoped top owner of a pod is a workload of the namespace
+    /// that the pod runs in.
     pub fn workloads(&self, namespace: &str) -> impl Iterator<Item = &Object> {
         self.workloads.get(namespace).into_iter().flatten()
     }
@@ -132,7 +127,7 @@ impl Ownership {
         self.workloads.values().flatten()
     }
 
-    /// How many workloads each namespace that has any holds.
+    /// The number of workloads in each namespace that has any.
     pub fn workloads_per_namespace(&self) -> HashMap<String, usize> {
         self.workloads
             .iter()
@@ -155,8 +150,8 @@ impl Ownership {
     }
 }
 
-/// Each object the walk can pass through, and the owner that controls
-/// it, or none at the top of a chain.
+/// Each indexed object and its controlling owner, or none for an
+/// object at the top of a chain.
 #[derive(Debug, Default)]
 struct Index {
     parents: HashMap<Object, Option<Object>>,
@@ -167,8 +162,9 @@ impl Index {
         self.chain(object).last().unwrap_or_else(|| object.clone())
     }
 
-    /// `object`, then each owner above it up to the top.  A chain that
-    /// loops ends at the first owner it reaches again.
+    /// `object`, then each owner above it up to the top. The API server
+    /// does not check owner references for cycles, so a chain that loops
+    /// ends when it reaches an owner a second time.
     fn chain(&self, object: &Object) -> impl Iterator<Item = Object> {
         let mut seen = HashSet::new();
         let mut next = Some(object.clone());
@@ -182,8 +178,8 @@ impl Index {
         .take(MAX_DEPTH + 1)
     }
 
-    /// The owner of `object`.  An owner reference does not state whether
-    /// its owner is namespaced, so the owner is looked up in the
+    /// The owner of `object`. An owner reference does not say whether
+    /// the owner is namespaced, so the owner is looked up in the
     /// dependent's namespace first, then among cluster-scoped objects.
     /// An owner in neither is not in the index, and the walk ends there.
     fn parent(&self, object: &Object) -> Option<Object> {
@@ -204,7 +200,8 @@ impl Index {
 }
 
 impl Entry<'_> {
-    /// The object this entry is, or none for metadata without a name.
+    /// The object this entry describes, or none when the metadata has no
+    /// name.
     pub fn object(&self) -> Option<Object> {
         Some(Object::new(
             self.group,
@@ -215,10 +212,9 @@ impl Entry<'_> {
     }
 }
 
-/// The owner reference that controls `meta`, in its own namespace.  The
-/// API server allows one controller per object; an object whose owners
-/// all leave `controller` unset follows its first owner, as a dependent
-/// with only one owner usually does.
+/// The object that controls `meta`, taken from its owner references and
+/// placed in `meta`'s namespace. The API server allows one controller
+/// per object. When no owner sets `controller`, the first owner is used.
 fn controller(meta: &ObjectMeta) -> Option<Object> {
     let owners = meta.owner_references.as_deref().unwrap_or_default();
     let owner: &OwnerReference = owners
@@ -238,7 +234,7 @@ pub mod fixtures {
     use super::*;
 
     /// Metadata for `namespace/name`, owned by each of `owners`, given as
-    /// `apiVersion`, kind, and name, the first of them as its controller.
+    /// `apiVersion`, kind, and name. The first owner is the controller.
     pub fn meta(namespace: Option<&str>, name: &str, owners: &[(&str, &str, &str)]) -> ObjectMeta {
         let owner_references = owners
             .iter()
@@ -259,7 +255,7 @@ pub mod fixtures {
         }
     }
 
-    /// One object to index: its group, kind, namespace, name, and owners.
+    /// One object to index: group, kind, namespace, name, and owners.
     pub type Row = (
         &'static str,
         &'static str,
@@ -268,7 +264,7 @@ pub mod fixtures {
         Vec<(&'static str, &'static str, &'static str)>,
     );
 
-    /// The ownership index of `rows`.
+    /// The ownership index built from `rows`.
     pub fn build(rows: &[Row]) -> Ownership {
         let metas: Vec<ObjectMeta> = rows
             .iter()

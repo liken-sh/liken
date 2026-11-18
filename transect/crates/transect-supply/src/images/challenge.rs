@@ -1,8 +1,8 @@
-//! A registry's `WWW-Authenticate` challenge, which states how a client
-//! gets access: a bearer token from a realm, or a username and password
-//! sent with each request.
+//! Parses a registry's `WWW-Authenticate` challenge, which tells a client
+//! how to authenticate: with a bearer token from a realm, or with a
+//! username and password sent on each request.
 
-/// The authentication that a registry requires before it answers.
+/// The authentication that a registry requires.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Challenge {
     /// A token from `realm`, requested with `service` and `scope`.
@@ -14,10 +14,10 @@ pub enum Challenge {
     Basic,
 }
 
-/// The challenge in a `WWW-Authenticate` header.  It is `None` for a
-/// scheme that transect does not answer, and for a bearer challenge
-/// without an https realm.  transect may send a credential to the
-/// realm, so transect never requests a token over plain http.
+/// Parses a `WWW-Authenticate` header.  Returns `None` for a scheme
+/// other than Basic and Bearer, and for a Bearer challenge whose realm
+/// is not an `https://` URL.  transect may send a credential to the
+/// realm, so it never requests a token over plain http.
 pub fn parse(header: &str) -> Option<Challenge> {
     let header = header.trim();
     let (scheme, rest) = header.split_once(' ').unwrap_or((header, ""));
@@ -42,8 +42,8 @@ pub fn parse(header: &str) -> Option<Challenge> {
     })
 }
 
-/// The `key=value` pairs of a challenge, whose quoted values may hold
-/// commas, as a scope of several actions does.
+/// The `key=value` pairs of a challenge.  A quoted value may contain
+/// commas, as a scope with several actions does.
 fn params(text: &str) -> Vec<(String, String)> {
     let mut params = Vec::new();
     let mut chars = text.chars().peekable();
@@ -109,7 +109,7 @@ mod tests {
     )]
     #[case::basic(r#"Basic realm="Registry""#, Some(Challenge::Basic))]
     #[case::no_realm(r#"Bearer service="registry.example""#, None)]
-    #[case::a_realm_that_is_no_url(r#"Bearer realm="javascript:alert(1)""#, None)]
+    #[case::a_realm_that_is_not_a_url(r#"Bearer realm="javascript:alert(1)""#, None)]
     #[case::a_plain_http_realm(r#"Bearer realm="http://registry.example/token""#, None)]
     #[case::a_realm_with_no_scheme(r#"Bearer realm="registry.example/token""#, None)]
     #[case::another_scheme("Negotiate", None)]

@@ -1,6 +1,5 @@
-//! What the ownership walk reads from the cluster's stores: every
-//! object an owner chain can pass through, as the metadata the walk
-//! reads.
+//! Builds the ownership index from the metadata of every object in the
+//! stores that an owner chain can pass through.
 
 use std::sync::Arc;
 
@@ -14,9 +13,9 @@ use crate::ownership::{Entry, Ownership, StatusManagers};
 use transect_graph::edges::Object;
 
 impl Cluster {
-    /// Every pod and workload walked to its top owner, as of now, and
-    /// what `marks` reads of the same objects' labels and annotations,
-    /// given each object that has some, with the ownership.
+    /// Builds the ownership index, which follows each pod and workload
+    /// to its top owner. Also calls `marks` with the index and the
+    /// objects that have labels or annotations, and returns its result.
     pub fn ownership<R>(
         &self,
         marks: impl FnOnce(&mut dyn Iterator<Item = (Object, &ObjectMeta)>, &Ownership) -> R,
@@ -34,9 +33,10 @@ impl Cluster {
             entries("apps", "DaemonSet", &daemon_sets),
             entries("batch", "Job", &jobs),
             entries("batch", "CronJob", &cron_jobs),
-            // A `Service` runs no pods, but one an operator made is
-            // owned by the operator's resource, so `depends-on` treats
-            // an address that names it as the workload's own.
+            // A `Service` runs no pods, but an operator's resource can
+            // own the `Service`s that the operator creates. Then
+            // `depends-on` treats an address of such a `Service` as an
+            // address of the workload that owns it.
             entries("", "Service", &services),
         ];
         let custom = custom
@@ -52,8 +52,10 @@ impl Cluster {
         (ownership, read)
     }
 
-    /// The managers that write each custom owner's status, which the
-    /// custom kinds' watches keep from its managed fields.
+    /// The field managers that write each custom object's status. The
+    /// custom kinds' watches keep only the `managedFields` entries of
+    /// the `status` subresource, so every manager name here wrote the
+    /// status.
     pub fn status_managers(&self) -> StatusManagers {
         let mut managers = StatusManagers::new();
         for (resource, metas) in self.custom.snapshot() {
@@ -79,10 +81,10 @@ impl Cluster {
     }
 
     /// Every owner reference on the pods, the workloads, and the custom
-    /// kinds watched whole, which is where a new custom owner kind first
-    /// appears.  A trimmed kind's owners are left out, because an object
-    /// that owns only other custom objects owns no pod, so nothing reads
-    /// its fields.
+    /// kinds watched whole. `discover_custom_kinds` watches each kind
+    /// that these name whole, so every kind in a pod's owner chain is
+    /// watched whole. Objects of trimmed kinds are left out, because
+    /// they are in no pod's owner chain.
     pub(super) fn owner_references(&self) -> Vec<OwnerReference> {
         fn of<K: Resource>(objects: Vec<Arc<K>>) -> Vec<OwnerReference> {
             objects

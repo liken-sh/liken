@@ -1,12 +1,13 @@
-//! The cluster's objects, held in memory and kept current by watches on
-//! the Kubernetes API.  Pages read from these stores on each request, so
-//! they show the cluster as of that request.
+//! The cluster's objects, in memory stores that watches on the
+//! Kubernetes API keep current. Each page request reads the stores, so
+//! it shows the cluster as it is at that moment.
 //!
-//! Every watch event also marks the cluster changed, on a `watch` channel
-//! of `()`.  A `watch` keeps only whether something changed since a
-//! receiver last looked, so a burst of a thousand events wakes a reader
-//! once, and a slow reader never lags or drops events the way it would on
-//! a `broadcast` channel.  Readers that need the details read the stores.
+//! A watch event that changes a store also sends on a
+//! `tokio::sync::watch` channel of `()`, which records only that
+//! something changed since a receiver last looked. So a burst of events
+//! wakes a reader once, and a slow reader cannot lag or lose events as
+//! it can on a `broadcast` channel. A reader that needs the details
+//! reads the stores.
 
 mod attachments;
 mod change;
@@ -74,83 +75,80 @@ pub struct Cluster {
     daemon_sets: Store<DaemonSet>,
     cron_jobs: Store<CronJob>,
     ingresses: Store<Ingress>,
-    /// Services.  Their selectors separate a workload that serves
-    /// something from a small helper on the namespace page, and the
-    /// section view draws the Services that select a workload in its
-    /// entry band.
+    /// A `Service`'s selector gives the edges to the workloads it selects,
+    /// and the workload page shows each `Service` that selects the
+    /// workload.
     services: Store<Service>,
-    /// The slices that list each `Service`'s endpoints and whether each
-    /// is ready, which the entry counts.
+    /// The workload page counts each `Service`'s ready endpoints from
+    /// these.
     endpoint_slices: Store<EndpointSlice>,
-    /// Claims, the volumes bound to them, and the classes that made
-    /// them, which the storage walk follows to each backend.
+    /// Claims, the volumes bound to them, and their storage classes.
+    /// The storage walk follows them to each backend.
     claims: Store<PersistentVolumeClaim>,
     volumes: Store<PersistentVolume>,
     storage_classes: Store<StorageClass>,
-    /// The CSI drivers, whose `data-on` annotation states that a driver
-    /// keeps its volumes on the disks of the machines that mount them.
+    /// The CSI drivers. A driver's `data-on` annotation says that its
+    /// volumes are stored on the disks of the machines that mount them.
     csi_drivers: Store<CSIDriver>,
-    /// The machines CSI drivers attached volumes to, when the cluster
-    /// serves VolumeAttachments.
+    /// The machines that CSI drivers attached volumes to, when the
+    /// cluster serves VolumeAttachments.
     attachments: AttachmentStore,
-    /// The budgets that limit how many of a workload's pods an eviction
-    /// may take at once, which the workload page shows as a guard.
+    /// The workload page lists the budgets that select a workload's pods
+    /// among its guards.
     budgets: Store<PodDisruptionBudget>,
-    /// The policies that state which pods may call which, from which
-    /// the allowed-to-call edges are evaluated.
+    /// The allowed-to-call edges are computed from these.
     network_policies: Store<NetworkPolicy>,
-    /// ReplicaSets and Jobs are read only for their owner references,
-    /// so they are watched as metadata.  A `Deployment` keeps ten old
-    /// ReplicaSets by default, which makes them the most numerous kind
-    /// here after pods.
+    /// ReplicaSets and Jobs are watched as metadata, because `transect`
+    /// reads only their owner references and creation times. A
+    /// `Deployment` keeps ten old ReplicaSets by default, so after pods
+    /// they are the most numerous kind here.
     replica_sets: Store<PartialObjectMeta<ReplicaSet>>,
     jobs: Store<PartialObjectMeta<Job>>,
-    /// The revisions StatefulSets and DaemonSets keep of their pod
-    /// templates, read as metadata for when each was made, which is when
-    /// its workload last rolled.  A `Deployment`'s revisions are its
-    /// ReplicaSets.
+    /// The revisions that StatefulSets and DaemonSets keep of their pod
+    /// templates, as metadata. The newest revision's creation time is
+    /// when the workload last rolled out, as a `ReplicaSet`'s is for a
+    /// `Deployment`.
     controller_revisions: Store<PartialObjectMeta<ControllerRevision>>,
-    /// ConfigMaps, as metadata, for the intent annotations on them.
+    /// ConfigMaps, as metadata, for their intent annotations.
     config_maps: Store<PartialObjectMeta<ConfigMap>>,
-    /// ServiceAccounts, IngressClasses, and PriorityClasses, as
-    /// metadata, so that a name that refers to one links to its page
-    /// only when it exists.  Nothing waits for them, so until their
-    /// first list arrives, such a name shows as plain text.
+    /// ServiceAccounts, IngressClasses, and PriorityClasses. A name that
+    /// refers to one links to its page only when the object exists.
+    /// `synced` does not wait for these stores, so until their first
+    /// list arrives, such a name is plain text.
     service_accounts: Store<PartialObjectMeta<ServiceAccount>>,
     ingress_classes: Store<IngressClass>,
     priority_classes: Store<PartialObjectMeta<PriorityClass>>,
     /// Secrets, as metadata, only with `--secret-annotations`.
     secrets: SecretStore,
-    /// The custom kinds found in owner references or described by kind
-    /// knowledge, whole, and every other CRD's kind, trimmed to its
-    /// metadata and conditions.
+    /// Custom kinds, each stored whole or trimmed. The `custom` module
+    /// comment says which.
     custom: CustomOwners,
-    /// The CRDs, each cut to the parts that describe its kind, when
+    /// The CRDs, each trimmed to the fields that describe its kind, when
     /// `transect` may list them.
     definitions: DefinitionStore,
-    /// The plural of every kind the API served at the start.
+    /// The plural name of every kind that API discovery listed at startup.
     plurals: PluralStore,
-    /// Roles and bindings, which name who may write each custom kind's
+    /// Roles and bindings, which show who may write each custom kind's
     /// status, for each kind `transect` may list.
     rbac: RbacStores,
     /// ResourceClaims and ResourceSlices, when the cluster serves them.
     devices: DeviceStores,
-    /// The cluster's DNS domain, such as `cluster.local`.  The API does
+    /// The cluster's DNS domain, such as `cluster.local`. The API does
     /// not report it, so it comes from a flag.
     domain: Arc<str>,
-    /// The machines a development build pretends are not ready.
+    /// The machines that a development build shows as not ready.
     pretend: Pretend,
     changed: watch::Sender<()>,
-    /// The metadata keys that kind knowledge names as ones a tool
-    /// rewrites without changing anything, which every watch leaves out
-    /// when it decides whether an object changed.
+    /// Metadata keys that kind knowledge lists as rewritten by tools
+    /// without a real change. Every watch ignores them when it decides
+    /// whether an object changed.
     ignored: Ignored,
 }
 
 impl Cluster {
-    /// Starts a watch on each kind the map draws, and discovery of the
-    /// optional kinds in the background, each of which starts its own
-    /// watches once it finds that the cluster serves them.  Secrets are
+    /// Starts a watch on each built-in kind the map draws. Optional
+    /// kinds are discovered in the background, and each starts its own
+    /// watches once the cluster is found to serve it. Secrets are
     /// watched, as metadata, only when `secret_annotations` is true.
     pub fn watch(
         client: Client,
@@ -176,9 +174,9 @@ impl Cluster {
         Self {
             namespaces: reflect(Api::all(client.clone()), changes.clone()),
             nodes: reflect_cut(Api::all(client.clone()), changes.clone(), trim::node),
-            // Pods change far more often than anything else here.  A
-            // change the map does not draw renders to the same HTML,
-            // and the event stream sends a rendering only when it differs.
+            // Pods change far more often than any other kind here.
+            // `trim::pod` removes the fields that no page draws, so a
+            // change to only those fields sends no change signal.
             pods: reflect_cut(Api::all(client.clone()), changes.clone(), trim::pod),
             deployments: reflect_cut(Api::all(client.clone()), changes.clone(), trim::deployment),
             stateful_sets: reflect_cut(
@@ -218,13 +216,12 @@ impl Cluster {
         }
     }
 
-    /// Starts a watch on each custom kind: whole on each that owns a pod
-    /// or a workload or that the kind knowledge in `resources`
-    /// describes, and trimmed on every other CRD, now and whenever a new
-    /// one appears.  Call it once
-    /// `synced` has resolved, because a store's readiness wakes only one
-    /// waiting task, so a second task waiting on `synced` at the same time
-    /// would leave the first asleep until something else woke it.
+    /// Starts the watches on custom kinds, now and whenever a new one
+    /// appears. Call it after `synced` has resolved.
+    /// `Store::wait_until_ready` in kube-runtime keeps the waker of only
+    /// the last task that polled it, so a second task that waits on the
+    /// same stores leaves the first one waiting until something else
+    /// wakes it.
     pub fn watch_custom_kinds(
         &self,
         client: Client,
@@ -234,8 +231,8 @@ impl Cluster {
         custom::discover_custom_kinds(self.clone(), client, knowledge, device_kinds);
     }
 
-    /// Keeps the keys every watch ignores as `knowledge` names them,
-    /// now and after each reload.
+    /// Sets the metadata keys that watches ignore from `knowledge`, now
+    /// and after each reload.
     pub fn ignore_changes_from(&self, mut knowledge: Field<Vec<KindKnowledge>>) {
         let ignored = self.ignored.clone();
         tokio::spawn(async move {
@@ -250,7 +247,7 @@ impl Cluster {
         });
     }
 
-    /// The `Changes` a watch sends on when its store changes.
+    /// The `Changes` that a watch uses to signal a change to its store.
     fn changes(&self) -> Changes {
         Changes {
             sender: self.changed.clone(),
@@ -258,21 +255,21 @@ impl Cluster {
         }
     }
 
-    /// The signal that any store changed.  A source outside the API whose
-    /// readings the map also draws, such as usage from Prometheus, sends
-    /// on it too, and each view's render task subscribes to it.
+    /// The channel that signals that any store changed. Each view's
+    /// render task subscribes to it, and a source outside the Kubernetes
+    /// API, such as usage from Prometheus, sends on it too.
     pub fn change_signal(&self) -> watch::Sender<()> {
         self.changed.clone()
     }
 
-    /// Resolves once every store holds its first full list.  Until then a
-    /// page would show namespaces with too few workloads, or none at all.
-    /// The custom kinds' stores are left out, because the walk names a
-    /// custom owner from the owner reference alone, and a kind that cannot
-    /// be listed would otherwise hold up every page.  Each optional kind
-    /// is waited for until its discovery first answers, which has a
-    /// timeout of its own.  One still retrying after that holds up
-    /// nothing.
+    /// Resolves when each store below has its first list, because before
+    /// that a page would show namespaces with too few workloads, or none.
+    /// It does not wait for the custom kinds, because the ownership walk
+    /// can name a custom owner from its owner reference alone, and a kind
+    /// that cannot be listed would delay every page. For each optional
+    /// kind, it waits until the kind is off, the kind is on and has its
+    /// first list, or the first probe has failed. It does not wait for
+    /// the retries after that.
     pub async fn synced(&self) -> anyhow::Result<()> {
         let stores = async {
             tokio::try_join!(

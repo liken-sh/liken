@@ -1,12 +1,11 @@
 #!/bin/sh
-# Collects transect and every library that the loader resolves for it
-# into one directory tree, so the image ships that tree and nothing
-# else. Run it in a builder that holds the binary at /transect, with the
-# output directory as the argument.
+# Copies transect and every shared library that the dynamic loader
+# resolves for it into one directory, which the image copies onto
+# scratch.  Run it in a builder that has the binary at /transect, with
+# the output directory as the argument.
 #
-# The functions come from vulkan/closure.sh, the closure library of
-# every image on a Debian builder. The Dockerfile copies it from the
-# build context named builder.
+# collect and notices come from vulkan/closure.sh, which the Dockerfile
+# copies in from the build context named builder.
 set -eu
 
 # shellcheck source=../vulkan/closure.sh
@@ -14,9 +13,11 @@ set -eu
 
 out=$1
 
-# transect opens no file by name at run time except the CA bundle,
-# which the trust image brings, so the binary is the one seed and the
-# closure has no data files.
+# At run time transect opens no file of this tree except its
+# libraries.  The CA bundle comes from the trust image, and the API
+# server's credentials from the ServiceAccount mount.  So the binary is
+# the only starting point of the library walk, and the closure has no
+# data files.
 collect "$out" /transect ""
 
 notices "$out" transect

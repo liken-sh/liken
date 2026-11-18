@@ -1,6 +1,6 @@
-//! A small GitOps tool for tests: a `Tree` that applies a directory, a
-//! `Release` that installs a chart and takes precedence over a tree,
-//! and a `Repo` that they fetch through, all in `apply.example.test`.
+//! A fake GitOps tool for tests, in the API group `apply.example.test`.
+//! A `Tree` applies a directory, a `Release` installs a chart and has
+//! higher `precedence` than a `Tree`, and both fetch from a `Repo`.
 
 use std::sync::Arc;
 
@@ -15,7 +15,7 @@ use transect_resources::knowledge::fixtures::knowledge;
 
 pub const GROUP: &str = "apply.example.test";
 
-/// The kinds' knowledge, each as its tool would ship it.
+/// Each kind of the tool, as (kind, plural, knowledge YAML).
 const KNOWLEDGE: [(&str, &str, &str); 3] = [
     (
         "Tree",
@@ -39,8 +39,7 @@ pub fn object(kind: &str, namespace: &str, name: &str) -> Object {
     Object::new(GROUP, kind, Some(namespace), name)
 }
 
-/// The tool's kinds, as kinds that the cluster serves, with their
-/// knowledge.
+/// The tool's kinds, resolved as if the cluster served them.
 pub fn kinds() -> Kinds {
     let plurals: Plurals = KNOWLEDGE
         .iter()
@@ -62,9 +61,9 @@ pub fn dynamic(kind: &str, namespace: &str, name: &str, labels: &str, body: &str
     .unwrap()
 }
 
-/// `objects`, each a kind, a namespace, a name, the YAML of its labels,
-/// and the YAML of its spec and status, read when the watch of every
-/// kind has listed.
+/// A `GitOps` reader over `objects`, each given as (kind, namespace,
+/// name, labels YAML, spec and status YAML), with the watch of every
+/// kind listed.
 pub fn gitops(objects: &[(&str, &str, &str, &str, &str)]) -> GitOps {
     let custom: Vec<(ApiResource, Vec<Arc<DynamicObject>>)> = KNOWLEDGE
         .iter()

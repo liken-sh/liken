@@ -1,10 +1,9 @@
 /*
- * A GitOps object's page: the row of its kind's objects in its namespace,
- * then what reconciles from it, one line per namespace and kind, in the
- * panels a workload's page draws, beside its card.  The page is gray
- * throughout, as a healthy workload's page is, and only the card's dot
+ * The page of a GitOps object, beside its card: the switcher from
+ * workload.css with the objects of its kind in its namespace, then the
+ * objects reconciled from it, one line for each namespace and kind.  The page is
+ * gray, like a healthy workload's page, and only the dot on the card
  * has a color.
- * The row reuses the workload page's switcher from workload.css.
  */
 
 .gitops-map {
@@ -32,8 +31,8 @@
   gap: 4px 12px;
 }
 
-/* The group's label is a column as wide as the switcher's, so the
-   members of every group start at one edge. */
+/* The group label has a fixed width, so the members of every group start
+   at the same left edge. */
 .gitops-group-label {
   width: 160px;
   flex: none;

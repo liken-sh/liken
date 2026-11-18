@@ -1,3 +1,4 @@
-//! The page frame every full page extends: the layout, the crumbs, the lens tabs, and the brand.
+//! The page layout of `transect`, with its breadcrumbs, tabs, and brand
+//! files.
 
 pub mod frame;

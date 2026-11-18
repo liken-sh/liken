@@ -1,8 +1,9 @@
-//! What intent states about each object: its `why`, `gotcha`,
-//! `provides`, `depends-on`, `authenticates-through`, `docs`, `data-on`,
-//! `console`, `signs-in`, and `host-access`, read from its annotations,
-//! from overlays that take the place of them, and from the `Intent`
-//! resources that select it, each with where it was written.
+//! The intent of each object: its `why`, `gotcha`, `provides`,
+//! `depends-on`, `authenticates-through`, `docs`, `data-on`, `console`,
+//! `signs-in`, and `host-access`. Each is read from the object's
+//! annotations, which an overlay can set, or from the `Intent`
+//! resources that select the object. Each value records where it was
+//! written.
 
 use std::collections::HashMap;
 
@@ -13,18 +14,18 @@ use crate::resources::{Condition, DocId, GROUP, Overlaid, annotation, field};
 use transect_graph::edges::{Object, Plurals, Provenance, Stated};
 use transect_graph::untrusted::{capped, link};
 
-/// The longest a line of intent runs on a card, in characters.
+/// The most characters of a line of intent that a card shows.
 const LINE_CHARS: usize = 300;
 
-/// One line of stored text, and where it was written.
+/// One line of intent text, and where it was written.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Line {
     pub text: String,
     pub provenance: Provenance,
 }
 
-/// Where to read more: a link when the value is plain `http` or
-/// `https`, and the value as text otherwise.
+/// Where to read more. `href` is set when the value is a plain `http`
+/// or `https` URL, and `text` is the value.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Docs {
     pub href: Option<String>,
@@ -32,55 +33,58 @@ pub struct Docs {
     pub provenance: Provenance,
 }
 
-/// The entries of a list field such as `depends-on`, each as written,
-/// and where the list was written.
+/// The entries of a list field such as `depends-on`, as written, and
+/// where the list was written.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Listed {
     pub entries: Vec<String>,
     pub provenance: Provenance,
 }
 
-/// What intent states about one object.
+/// The intent of one object.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Said {
+pub struct ObjectIntent {
     pub why: Option<Line>,
     pub gotcha: Option<Line>,
-    /// What the rest of the cluster loses when it goes, in a few words
-    /// such as "order storage", which the cascade shows in place of its
-    /// name.
+    /// What the rest of the cluster loses when this object is gone, in
+    /// a few words such as "order storage". The cascade shows it
+    /// instead of the object's name.
     pub provides: Option<Line>,
-    /// What it depends on that its configuration does not name.
+    /// What the object depends on that its configuration does not name.
     pub depends_on: Option<Listed>,
-    /// The identity providers it signs its users in through.
+    /// The identity providers that the object signs its users in
+    /// through.
     pub authenticates_through: Option<Listed>,
     pub docs: Option<Docs>,
     /// Where a CSI driver keeps its volumes' data, such as `machines`.
     pub data_on: Option<Line>,
-    /// A CSI driver's console, as a URL template filled from its
-    /// volumes' attributes and its StorageClasses' parameters.
+    /// A CSI driver's console, as a URL template that is filled from
+    /// the attributes of its volumes and the parameters of its
+    /// `StorageClass`es.
     pub console: Option<Line>,
-    /// How a workload signs its callers in itself, such as "OAuth, in
-    /// the app", on the workload or on one route to it.
+    /// How a workload signs in its own callers, such as "OAuth, in the
+    /// app". It can be set on the workload or on one route to it.
     pub signs_in: Option<Line>,
     /// Why a workload uses its machine's network, a host port, a host
     /// path, or a privileged container.
     pub host_access: Option<Line>,
 }
 
-/// What intent states about every object that has any, and the
-/// conflicts among Intents.
+/// The intent of every object that has any, and a condition for each
+/// conflict between `Intent` resources.
 #[derive(Debug, Default)]
 pub struct Intents {
-    said: HashMap<Object, Said>,
+    said: HashMap<Object, ObjectIntent>,
     pub conditions: Vec<(DocId, Condition)>,
 }
 
 impl Intents {
-    /// The intent on each of `objects`, from its annotations, which
-    /// `overlaid` reports an overlay may have set, and from `intents`.
-    /// An annotation wins over an `Intent` resource, and of two `Intent`
-    /// resources that set one field, the first by name is shown and
-    /// both get a condition.
+    /// Reads the intent of each of `objects` from its annotations and
+    /// from the `intents` that select it. An annotation wins over an
+    /// `Intent`, and when an overlay set the annotation, the provenance
+    /// is the overlay's file. When several `Intent` resources set the
+    /// same field, the first by namespace and name is used, and each of
+    /// them gets a condition.
     pub fn read(
         objects: &[(Object, &ObjectMeta)],
         intents: &[Intent],
@@ -122,8 +126,9 @@ impl Intents {
                 joined(&f.authenticates_through)
             });
             let docs = read("docs", |f| f.docs.clone());
-            // An `Intent` is namespaced, and a CSI driver is not, so only
-            // an annotation or an overlay states where a driver's data is.
+            // An `Intent` selects objects in its own namespace and a
+            // CSI driver is cluster-scoped, so only an annotation or an
+            // overlay can set `data-on` and `console`.
             let data_on = read("data-on", |_| None);
             let console = read("console", |_| None);
             let signs_in = read("signs-in", |f| f.signs_in.clone());
@@ -134,7 +139,7 @@ impl Intents {
                     provenance,
                 })
             };
-            let said = Said {
+            let said = ObjectIntent {
                 why: why.and_then(line),
                 gotcha: gotcha.and_then(line),
                 provides: provides.and_then(line),
@@ -153,35 +158,34 @@ impl Intents {
                 host_access: host_access.and_then(line),
             };
             found.conditions.extend(conditions);
-            if said != Said::default() {
+            if said != ObjectIntent::default() {
                 found.said.insert(object.clone(), said);
             }
         }
         found
     }
 
-    pub fn of(&self, object: &Object) -> Option<&Said> {
+    pub fn of(&self, object: &Object) -> Option<&ObjectIntent> {
         self.said.get(object)
     }
 
-    /// Every object intent states something about, with what it states.
-    pub fn iter(&self) -> impl Iterator<Item = (&Object, &Said)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&Object, &ObjectIntent)> {
         self.said.iter()
     }
 }
 
-/// One object being read.
 struct Reading<'a> {
     object: &'a Object,
     meta: &'a ObjectMeta,
-    /// The Intents that select it, by name.
+    /// Sorted by namespace and name.
     selecting: &'a [&'a Intent],
     overlaid: &'a Overlaid,
 }
 
 impl Reading<'_> {
-    /// The value of the field `name`, from the annotation or else from
-    /// the first `Intent` that sets it, with where it was written.
+    /// The value of the field `name` and where it was written, by the
+    /// rule that `Intents::read` gives. A conflict between `Intent`
+    /// resources adds a condition for each of them to `conditions`.
     fn field(
         &self,
         name: &str,
@@ -213,7 +217,7 @@ impl Reading<'_> {
         if setting.len() > 1 {
             let names: Vec<&str> = setting.iter().map(|intent| intent.name.as_str()).collect();
             let message = format!(
-                "{name} on {} {} is set by {}; the first by name, {}, is shown",
+                "{name} on {} {} is set by {}, and the value from {} is shown because it sorts first",
                 object.kind,
                 object.name,
                 names.join(" and "),
@@ -231,14 +235,15 @@ impl Reading<'_> {
     }
 }
 
-/// An `Intent`'s list as one value, as an annotation writes it, or none
-/// for an empty list.
+/// The entries of an `Intent` list as one newline-separated value, the
+/// form that an annotation has, or none when the list is empty.
 fn joined(entries: &[String]) -> Option<String> {
     (!entries.is_empty()).then(|| entries.join("\n"))
 }
 
-/// The entries of a list's value, split on commas and newlines, each on
-/// one line and cut to a card's length, or none when it names nothing.
+/// Splits a list value on commas and newlines into entries, each cut to
+/// one line of at most `LINE_CHARS` characters. It returns none when no
+/// entry has any text.
 fn listed((value, provenance): (String, Provenance)) -> Option<Listed> {
     let entries: Vec<String> = value
         .split([',', '\n'])
@@ -270,9 +275,9 @@ mod tests {
         serde_yaml::from_str(&text).unwrap()
     }
 
-    /// What intent states about `web`, annotated with `annotations`, given
-    /// `intents`.
-    fn read(annotations: &str, intents: &[Intent]) -> (Option<Said>, Vec<String>) {
+    /// The intent of `web` and the messages of the conditions, when
+    /// `web` has `annotations` and `intents` exist.
+    fn read(annotations: &str, intents: &[Intent]) -> (Option<ObjectIntent>, Vec<String>) {
         let meta = meta(annotations);
         let objects = [(web(), &meta)];
         let found = Intents::read(&objects, intents, &Overlaid::default(), &plurals());
@@ -307,13 +312,13 @@ mod tests {
     #[case::an_annotation(
         "transect.liken.sh/why: Sells things., transect.liken.sh/gotcha: Slow to start.",
         vec![],
-        Some(Said { why: Some(annotated("why", "Sells things.")), gotcha: Some(annotated("gotcha", "Slow to start.")), ..Said::default() })
+        Some(ObjectIntent { why: Some(annotated("why", "Sells things.")), gotcha: Some(annotated("gotcha", "Slow to start.")), ..ObjectIntent::default() })
     )]
     #[case::another_prefix("example.com/why: Not ours.", vec![], None)]
     #[case::an_intent(
         "",
         vec![intent("store", &format!("{{{SELECTS_WEB}, why: Sells things.}}"))],
-        Some(Said { why: Some(resourced("why", "store", "Sells things.")), ..Said::default() })
+        Some(ObjectIntent { why: Some(resourced("why", "store", "Sells things.")), ..ObjectIntent::default() })
     )]
     #[case::an_intent_selecting_something_else(
         "",
@@ -323,64 +328,63 @@ mod tests {
     #[case::the_annotation_wins(
         "transect.liken.sh/why: From the manifest.",
         vec![intent("store", &format!("{{{SELECTS_WEB}, why: From the Intent., gotcha: Slow.}}"))],
-        Some(Said { why: Some(annotated("why", "From the manifest.")), gotcha: Some(resourced("gotcha", "store", "Slow.")), ..Said::default() })
+        Some(ObjectIntent { why: Some(annotated("why", "From the manifest.")), gotcha: Some(resourced("gotcha", "store", "Slow.")), ..ObjectIntent::default() })
     )]
     #[case::provides(
         "transect.liken.sh/provides: order storage",
         vec![],
-        Some(Said { provides: Some(annotated("provides", "order storage")), ..Said::default() })
+        Some(ObjectIntent { provides: Some(annotated("provides", "order storage")), ..ObjectIntent::default() })
     )]
     #[case::provides_from_an_intent(
         "",
         vec![intent("store", &format!("{{{SELECTS_WEB}, provides: order storage}}"))],
-        Some(Said { provides: Some(resourced("provides", "store", "order storage")), ..Said::default() })
+        Some(ObjectIntent { provides: Some(resourced("provides", "store", "order storage")), ..ObjectIntent::default() })
     )]
     #[case::signs_in(
         "transect.liken.sh/signs-in: 'OAuth, in the app'",
         vec![],
-        Some(Said { signs_in: Some(annotated("signs-in", "OAuth, in the app")), ..Said::default() })
+        Some(ObjectIntent { signs_in: Some(annotated("signs-in", "OAuth, in the app")), ..ObjectIntent::default() })
     )]
     #[case::host_access(
         "transect.liken.sh/host-access: Finds devices by multicast.",
         vec![],
-        Some(Said { host_access: Some(annotated("host-access", "Finds devices by multicast.")), ..Said::default() })
+        Some(ObjectIntent { host_access: Some(annotated("host-access", "Finds devices by multicast.")), ..ObjectIntent::default() })
     )]
     #[case::signs_in_from_an_intent(
         "",
         vec![intent("store", &format!("{{{SELECTS_WEB}, signsIn: its own login page}}"))],
-        Some(Said { signs_in: Some(resourced("signs-in", "store", "its own login page")), ..Said::default() })
+        Some(ObjectIntent { signs_in: Some(resourced("signs-in", "store", "its own login page")), ..ObjectIntent::default() })
     )]
     #[case::data_on(
         "transect.liken.sh/data-on: machines",
         vec![],
-        Some(Said { data_on: Some(annotated("data-on", "machines")), ..Said::default() })
+        Some(ObjectIntent { data_on: Some(annotated("data-on", "machines")), ..ObjectIntent::default() })
     )]
     #[case::console(
         "transect.liken.sh/console: 'https://{dsm}:5001'",
         vec![],
-        Some(Said { console: Some(annotated("console", "https://{dsm}:5001")), ..Said::default() })
+        Some(ObjectIntent { console: Some(annotated("console", "https://{dsm}:5001")), ..ObjectIntent::default() })
     )]
     #[case::text_on_one_line(
         "transect.liken.sh/why: \"Sells\\nthings.\\u0007\"",
         vec![],
-        Some(Said { why: Some(annotated("why", "Sells things.")), ..Said::default() })
+        Some(ObjectIntent { why: Some(annotated("why", "Sells things.")), ..ObjectIntent::default() })
     )]
-    fn reads_why_gotcha_and_provides(
+    fn reads_each_field_from_annotations_and_intents(
         #[case] annotations: &str,
         #[case] intents: Vec<Intent>,
-        #[case] expected: Option<Said>,
+        #[case] expected: Option<ObjectIntent>,
     ) {
         assert_eq!(read(annotations, &intents), (expected, vec![]));
     }
 
     #[rstest]
-    fn of_two_intents_the_first_by_name_is_shown_and_both_are_told() {
+    fn uses_the_first_intent_by_name_and_gives_both_a_condition() {
         let intents = [
             intent("zeta", &format!("{{{SELECTS_WEB}, why: From zeta.}}")),
             intent("alpha", &format!("{{{SELECTS_WEB}, why: From alpha.}}")),
         ];
-        let message =
-            "why on Deployment web is set by alpha and zeta; the first by name, alpha, is shown";
+        let message = "why on Deployment web is set by alpha and zeta, and the value from alpha is shown because it sorts first";
         let (said, messages) = read("", &intents);
         assert_eq!(
             (said.unwrap().why, messages),
@@ -450,7 +454,7 @@ mod tests {
     }
 
     #[rstest]
-    fn an_overlay_names_its_file() {
+    fn records_the_overlay_file_as_the_source() {
         let overlay = Overlay {
             doc: DocId::default(),
             file: "overlays/web.yaml".into(),

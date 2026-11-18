@@ -1,14 +1,12 @@
-//! Kind knowledge: what the operator that owns a custom kind declares
-//! about it, in one small resource per custom resource definition.  It
-//! names the condition that means an object works, the layer its
-//! namespaces belong to, a one-line summary, the references in its spec
-//! and status, the image its controller runs, and whether a budget that
-//! lets no pod go is its operator's design.
+//! Kind knowledge is a `transect` resource that tells `transect` how to
+//! read the objects of one custom resource definition: which condition
+//! means an object works, which layer its namespaces belong to, which
+//! fields refer to other objects, which image its controller runs, and
+//! more. The project that owns the kind writes it.
 //!
-//! The resource is named for the definition, `<plural>.<group>`, so it
-//! is matched to a kind through the plurals discovery found.  A name
-//! the cluster does not serve, or a layer no `Layers` declares, gets a
-//! condition and is left out of the reading.
+//! A kind knowledge resource has the name of its definition,
+//! `<plural>.<group>`, so `Kinds::resolve` matches it to a kind through
+//! the plurals that discovery returned.
 
 mod age;
 mod card;
@@ -53,65 +51,68 @@ pub struct KindKnowledge {
     pub name: String,
     pub plural: String,
     pub group: String,
-    /// The opening line of a card for any object of the kind with no
+    /// The first line of a card for an object of this kind that has no
     /// `why` of its own.
     pub summary: Option<String>,
-    /// The layer of namespaces that hold objects of the kind, when the
-    /// cluster's `Layers` declares it.
+    /// The layer that the namespaces of its objects belong to. It is
+    /// kept only when the cluster's `Layers` declares it.
     pub layer: Option<String>,
-    /// The condition whose `True` means an object works.
+    /// The condition type whose status `True` means an object works.
     pub healthy: Option<String>,
-    /// The reasons on a `False` of `healthy` that mean the object is at
-    /// rest, such as `Idle`: it draws gray, not as a failure.
+    /// Reasons of a `False` `healthy` condition that mean the object is
+    /// idle, not failing, such as `Idle`. The page draws such an object
+    /// gray.
     pub calm: Vec<String>,
     pub references: Vec<Reference>,
-    /// The annotations on other kinds that name objects of this kind.
+    /// The annotations on objects of other kinds that name objects of
+    /// this kind.
     pub referenced_by: Vec<ReferencedBy>,
     /// The field that names the `Secret` an object writes.
     pub writes_secret: Option<String>,
-    /// The image repository its controller runs, without a registry
-    /// host.
+    /// The image repository that its controller runs, without a
+    /// registry host.
     pub controller_image: Option<String>,
     pub disruptions: Option<Disruptions>,
-    /// The field that names the pod which takes writes, for a kind that
-    /// runs one primary and replicas that follow it.  Losing that pod
-    /// stops writes until the operator promotes a replica; losing a
-    /// replica only leaves the kind short.
+    /// The field that names the primary pod, for a kind with one
+    /// primary that takes writes and replicas that follow it. Losing the
+    /// primary stops writes until the operator promotes a replica, and
+    /// losing a replica does not.
     pub primary: Option<String>,
     pub docs: Option<String>,
-    /// What a GitOps tool's kind declares about applying and fetching,
-    /// when it is one.
+    /// How the kind applies objects and fetches sources, when it is a
+    /// GitOps tool's kind.
     pub gitops: Option<GitOpsFields>,
-    /// The metadata keys a tool rewrites without changing anything,
-    /// which a watch ignores when it decides whether an object changed.
     pub ignore_changes: Vec<IgnoreChange>,
-    /// The field naming the `Node` an object of a cluster-scoped kind
-    /// describes, such as `metadata.name` for a resource named for the
-    /// machine under its `Node`.
+    /// The field that holds the name of the `Node` that an object of a
+    /// cluster-scoped kind describes, such as `metadata.name` when the
+    /// object is named for its `Node`.
     pub node: Option<String>,
-    /// How a report of a scanner's findings is read, when the kind is
-    /// one.
+    /// How to read the findings in an object, when the kind is a
+    /// vulnerability scanner's report.
     pub findings: Option<findings::Findings>,
 }
 
-/// One field of the kind's spec or status that names something.
+/// A field of the kind's spec or status that refers to another object,
+/// an address, or a value.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Reference {
     /// A field path, with `[]` for each item of a list.
     pub path: String,
     pub target: Target,
     pub edge: Kind,
-    /// The verb a card shows, such as "plays through".
+    /// The phrase that a card shows for the relation, such as "plays
+    /// through".
     pub label: Option<String>,
-    /// The field of the far object whose value equals this field's, for
-    /// a reference by value, such as an address, in place of by name.
+    /// The field of the referenced object whose value equals this
+    /// field's. It is set for a reference by value, such as an address,
+    /// instead of by name.
     pub matched: Option<String>,
-    /// Whether a match may join a far object in another namespace than
-    /// the referring object's.  A far kind that is not namespaced
-    /// always may.
+    /// Whether a match may select an object in another namespace than
+    /// the referring object's. An object of a cluster-scoped kind always
+    /// matches.
     pub across_namespaces: bool,
-    /// What the far object does for the `Secret` this object writes, when
-    /// a page reads it.
+    /// What the referenced object does for the `Secret` that this
+    /// object writes, when a page reads that role.
     pub role: Option<Role>,
 }
 
@@ -124,48 +125,49 @@ pub struct ReferencedBy {
     pub group: String,
     pub kind: String,
     pub annotation: String,
-    /// How the annotation writes one object's name, with `{namespace}`
-    /// and `{name}` for the object's own.  Without `{namespace}`, it
-    /// names an object of a namespaced kind in the annotated object's
-    /// own namespace.
+    /// The template of one object's name in the annotation's value,
+    /// with `{namespace}` and `{name}` as placeholders. A template
+    /// without `{namespace}` matches only an object in the annotated
+    /// object's namespace, or of a cluster-scoped kind.
     pub name: String,
     /// What the named object does for the annotated one, when a page
-    /// reads it.
+    /// reads that role.
     pub role: Option<Role>,
 }
 
-/// What an object named by another's annotation, or by a reference of
-/// an object that writes a `Secret`, does.
+/// What an object does for the object that names it in an annotation,
+/// or for an object that writes a `Secret` and refers to it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Role {
-    /// It issues the TLS certificate of the `Ingress` that names it, or
-    /// that serves the `Secret` the referring object writes, so the
-    /// entry reads "TLS from" it.
+    /// The object issues the TLS certificate of the `Ingress` that
+    /// names it, or of the `Ingress` that serves the `Secret` that the
+    /// referring object writes. The page labels the entry "TLS from".
     IssuesTls,
 }
 
-/// What a reference's field names.
+/// What the field of a reference refers to.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Target {
     /// An object, by kind, and by group when it is not the core group.
     Object { kind: String, group: Option<String> },
-    /// An address, which address resolution reads.
+    /// An address, which `transect` resolves to the object that has it.
     Address,
-    /// Something `transect` has no object for, such as a monitor, which a
-    /// card shows as the field's value.
+    /// A thing that `transect` has no object for, such as a monitor. A
+    /// card shows the field's value.
     Value,
 }
 
-/// Who handles evictions of the kind's pods.
+/// Who prepares the kind's pods for eviction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Disruptions {
-    /// Its operator moves work off a pod before eviction, so a budget
-    /// that lets none go is expected.
+    /// The kind's operator moves work off a pod before the pod is
+    /// evicted, so a `PodDisruptionBudget` that allows no eviction is
+    /// expected.
     Operator,
 }
 
-/// The kind knowledge in use for one reading of the cluster, by the
-/// group and kind it describes, and the conditions the matching wrote.
+/// The kind knowledge for one reading of the cluster, by group and
+/// kind, with the conditions that `resolve` created.
 #[derive(Debug, Default)]
 pub struct Kinds {
     by_kind: HashMap<(String, String), KindKnowledge>,
@@ -173,9 +175,11 @@ pub struct Kinds {
 }
 
 impl Kinds {
-    /// Each of `knowledge` matched to the kind `plurals` serves under
-    /// its name.  A layer that `layers` does not declare is dropped,
-    /// with a condition, and the rest of the knowledge stays in use.
+    /// Matches each entry of `knowledge` to the kind that `plurals`
+    /// serves under the entry's name. An entry whose kind is not served
+    /// is left out, with a condition. In an entry whose layer is not in
+    /// `layers`, the layer is cleared, with a condition, and the rest
+    /// of the entry stays in use.
     pub fn resolve(knowledge: &[KindKnowledge], plurals: &Plurals, layers: &[&str]) -> Self {
         let mut kinds = Self::default();
         for one in knowledge {
@@ -204,36 +208,32 @@ impl Kinds {
         kinds
     }
 
-    /// The knowledge for objects of `group` and `kind`.
     pub fn of(&self, group: &str, kind: &str) -> Option<&KindKnowledge> {
         self.by_kind.get(&(group.to_string(), kind.to_string()))
     }
 
-    /// The knowledge for `object`'s kind.
     pub fn of_object(&self, object: &Object) -> Option<&KindKnowledge> {
         self.of(&object.group, &object.kind)
     }
 
-    /// Every kind with knowledge, by group and kind.
     pub fn kinds(&self) -> impl Iterator<Item = &(String, String)> {
         self.by_kind.keys()
     }
 
-    /// Whether `object`'s operator moves its work before an eviction,
-    /// so a budget that lets none of its pods go is by design.
+    /// Whether `object`'s kind declares `disruptions: operator`.
     pub fn moves_before_eviction(&self, object: &Object) -> bool {
         let known = self.of_object(object);
         known.is_some_and(|k| k.disruptions == Some(Disruptions::Operator))
     }
 }
 
-/// A kind's plural as a card prints it: "Players" for a `Player` whose
-/// plural is `players`.  The plural is the API's, with the kind's own
-/// capitals over the letters the two share at the start, so
+/// The plural of a kind as a card prints it. The API plural is lower
+/// case, so the label keeps the kind's spelling for the prefix that the
+/// two share, ignoring case, and takes the rest from the plural:
 /// `BackendTLSPolicy` and `backendtlspolicies` print
-/// "BackendTLSPolicies", and `Person` and `people` print "People".  A
-/// plural that shares no letter with the kind, or none at all, leaves
-/// the kind's name alone.
+/// "BackendTLSPolicies", and `Person` and `people` print "People". With
+/// no plural, or one that does not start like the kind, the label is
+/// the kind.
 pub fn plural_label(kind: &str, plural: Option<&str>) -> String {
     let Some(plural) = plural else {
         return kind.to_string();
@@ -251,12 +251,11 @@ pub fn plural_label(kind: &str, plural: Option<&str>) -> String {
 }
 
 impl KindKnowledge {
-    /// Whether it reads fields of an object beyond the metadata, the
-    /// conditions, and the `observedGeneration` a trimmed watch keeps:
-    /// a reference, the `Secret` it writes, its primary, or a `Node`
-    /// named outside its metadata.  A summary, a layer, a
-    /// healthy condition, a controller image, a disruption rule, docs,
-    /// and the annotations of other kinds that name it read none.
+    /// Whether the knowledge reads fields that a trimmed watch drops. A
+    /// trimmed watch keeps only the metadata, the conditions, and
+    /// `observedGeneration`, so `references`, `writes_secret`,
+    /// `primary`, and a `node` path outside `metadata` need the whole
+    /// object.
     pub fn reads_fields(&self) -> bool {
         !self.references.is_empty()
             || self.writes_secret.is_some()
@@ -267,9 +266,9 @@ impl KindKnowledge {
                 .is_some_and(|path| !path.starts_with("metadata."))
     }
 
-    /// The fields a trimmed watch keeps for the kind beyond its
-    /// metadata and conditions: those its GitOps knowledge and its
-    /// findings knowledge read.
+    /// The field paths that a trimmed watch keeps for the kind beyond
+    /// the metadata and conditions: the ones that its `gitops` and
+    /// `findings` knowledge read.
     pub fn kept_paths(&self) -> Vec<String> {
         let gitops = self.gitops.iter().flat_map(GitOpsFields::paths);
         let findings = self.findings.iter().flat_map(findings::Findings::paths);
@@ -358,7 +357,10 @@ mod tests {
     #[case::a_primary("{primary: status.currentPrimary}", true)]
     #[case::a_node_by_its_name("{node: metadata.name}", false)]
     #[case::a_node_in_its_status("{node: status.nodeName}", true)]
-    fn says_whether_it_reads_fields_a_trimmed_watch_drops(#[case] spec: &str, #[case] reads: bool) {
+    fn reports_whether_it_reads_fields_a_trimmed_watch_drops(
+        #[case] spec: &str,
+        #[case] reads: bool,
+    ) {
         let known = fixtures::knowledge("widgets.widgets.example.com", spec);
         assert_eq!(known.reads_fields(), reads);
     }
@@ -371,14 +373,21 @@ mod tests {
     #[case::irregular("Person", Some("people"), "People")]
     #[case::not_from_the_kind("Widget", Some("gizmos"), "Widget")]
     #[case::no_plural("Widget", None, "Widget")]
-    fn reads_a_kinds_plural(#[case] kind: &str, #[case] plural: Option<&str>, #[case] label: &str) {
+    fn labels_a_kinds_plural(
+        #[case] kind: &str,
+        #[case] plural: Option<&str>,
+        #[case] label: &str,
+    ) {
         assert_eq!(plural_label(kind, plural), label);
     }
 
     #[rstest]
     #[case::operator("{disruptions: operator}", true)]
-    #[case::unsaid("{}", false)]
-    fn says_whether_its_operator_moves_work_first(#[case] spec: &str, #[case] moves: bool) {
+    #[case::not_declared("{}", false)]
+    fn reports_whether_the_operator_moves_work_before_eviction(
+        #[case] spec: &str,
+        #[case] moves: bool,
+    ) {
         let kinds = resolved("widgets.widgets.example.com", spec);
         let widget = Object::new("widgets.example.com", "Widget", Some("shop"), "a");
         assert_eq!(kinds.moves_before_eviction(&widget), moves);

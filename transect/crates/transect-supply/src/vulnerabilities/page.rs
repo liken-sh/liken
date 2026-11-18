@@ -1,6 +1,6 @@
-//! `/vulnerabilities` lists every finding id in a current report, with
-//! the workloads that run it, and `/vulnerabilities/{id}` is one id's
-//! page.
+//! The vulnerability pages.  `/vulnerabilities` lists each finding id in
+//! the current reports with the workloads that run it, and
+//! `/vulnerabilities/{id}` is the page of one id.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -13,10 +13,11 @@ use transect_frame::frame::crumbs::Crumb;
 use transect_graph::edges::{Object, Plurals};
 use transect_graph::links::Part;
 
-/// How many workloads a row names before it counts the rest.
+/// How many workloads a row links by name.  The row shows the rest as a
+/// count, with their names in the count's tooltip.
 const NAMED: usize = 6;
 
-/// One link of the severity row: every severity, or one alone.
+/// One link in the row of severity filters: all severities, or one.
 #[derive(Debug, PartialEq)]
 pub struct Choice {
     pub label: String,
@@ -24,20 +25,21 @@ pub struct Choice {
     pub current: bool,
 }
 
-/// The severities that a page can show, each at its own URL under
-/// `path`.
+/// The severity filters for the page at `path`: all severities, then one
+/// link for each severity in `present`, ordered by rank.  The link for a
+/// severity adds `?severity=` to `path`.
 pub fn choices(
     vulnerabilities: &Vulnerabilities,
     path: &str,
     shown: &Shown,
-    held: &[Arc<str>],
+    present: &[Arc<str>],
 ) -> Vec<Choice> {
     let mut choices = vec![Choice {
         label: "every severity".into(),
         href: path.into(),
         current: shown.only.is_empty(),
     }];
-    let mut severities: Vec<&Arc<str>> = held.iter().collect();
+    let mut severities: Vec<&Arc<str>> = present.iter().collect();
     severities.sort_by_key(|s| (vulnerabilities.rank(s), (*s).clone()));
     severities.dedup();
     choices.extend(severities.into_iter().map(|severity| Choice {
@@ -48,24 +50,22 @@ pub fn choices(
     choices
 }
 
-/// One id, with what the scanner reports about it and the workloads
-/// that run it.
+/// One finding id in the list: what the scanners report about it and the
+/// workloads that run it.
 #[derive(Debug, PartialEq)]
 pub struct IdRow {
     pub id: String,
     pub href: String,
-    /// The scanner's own link for the id, when the link is a web
-    /// address.
+    /// The scanner's link for the id, when the link is a web address.
     pub out: Option<String>,
     pub severity: String,
     pub tone: &'static str,
     pub score: String,
     pub title: Option<String>,
-    /// Each package once, with the versions that fix it.
+    /// Each affected package once, with the versions that fix it.
     pub packages: Vec<PackageRow>,
     pub workloads: Vec<Part>,
-    /// The count and the names of the workloads after the first
-    /// `NAMED`.
+    /// The count and the names of the workloads after the first `NAMED`.
     pub more: Option<(usize, String)>,
 }
 
@@ -74,10 +74,11 @@ pub struct IdRow {
 pub struct ListPage {
     pub scanners: String,
     pub choices: Vec<Choice>,
-    /// How many workloads run an image with a finding shown here.
+    /// How many workloads run an image with a finding listed here.
     pub workloads: usize,
     pub ids: Vec<IdRow>,
-    /// How many reports name an image no pod runs now.
+    /// How many reports are for a digest that no pod of the report's
+    /// workload runs now.
     pub stale: usize,
     pub described: bool,
     pub query: Option<String>,
@@ -86,7 +87,7 @@ pub struct ListPage {
 impl ListPage {
     pub fn build(vulnerabilities: &Vulnerabilities, plurals: &Plurals, shown: &Shown) -> Self {
         let current: Vec<&Report> = vulnerabilities.current().collect();
-        let held: Vec<Arc<str>> = current
+        let severities: Vec<Arc<str>> = current
             .iter()
             .flat_map(|report| report.findings.iter().map(|f| f.severity.clone()))
             .collect();
@@ -98,7 +99,7 @@ impl ListPage {
             .filter(|group| shown.shows(&group.severity))
             .map(|group| {
                 let mut runs: Vec<&Object> = vulnerabilities
-                    .holding(&group.id)
+                    .reports_with(&group.id)
                     .map(|(report, _)| &report.workload)
                     .collect();
                 runs.sort();
@@ -131,7 +132,7 @@ impl ListPage {
         let workloads = running.len();
         Self {
             scanners: scanners(vulnerabilities),
-            choices: choices(vulnerabilities, "/vulnerabilities", shown, &held),
+            choices: choices(vulnerabilities, "/vulnerabilities", shown, &severities),
             workloads,
             ids,
             stale: vulnerabilities
@@ -145,7 +146,7 @@ impl ListPage {
     }
 
     /// The sentence at the top of the page: which scanners report how
-    /// many finding ids, in the images of how many workloads.
+    /// many finding ids, in the images of how many running workloads.
     pub fn lead(&self) -> String {
         let ids = self.ids.len();
         let workloads = self.workloads;
@@ -173,9 +174,9 @@ impl ListPage {
     }
 }
 
-/// One workload's findings of the id in one container.
+/// The findings for one id in one container of one workload.
 #[derive(Debug, PartialEq)]
-pub struct HoldRow {
+pub struct ContainerRow {
     pub workload: Part,
     pub tab: Option<String>,
     pub container: String,
@@ -194,7 +195,7 @@ pub struct IdPage {
     pub title: Option<String>,
     pub score: String,
     pub scanners: String,
-    pub rows: Vec<HoldRow>,
+    pub rows: Vec<ContainerRow>,
 }
 
 impl IdPage {
@@ -205,32 +206,34 @@ impl IdPage {
         id: &str,
         now: Timestamp,
     ) -> Option<Self> {
-        let holding: Vec<(&Report, &Finding)> = vulnerabilities.holding(id).collect();
+        let reports: Vec<(&Report, &Finding)> = vulnerabilities.reports_with(id).collect();
         let group = vulnerabilities
-            .group(holding.iter().map(|(_, finding)| *finding))
+            .group(reports.iter().map(|(_, finding)| *finding))
             .into_iter()
             .next()?;
-        let mut held: Vec<(&Report, Vec<&Finding>)> = Vec::new();
-        for (report, finding) in &holding {
+        let mut by_container: Vec<(&Report, Vec<&Finding>)> = Vec::new();
+        for (report, finding) in &reports {
             let same = |(one, _): &&mut (&Report, Vec<&Finding>)| {
                 (&one.workload, &one.container) == (&report.workload, &report.container)
             };
-            match held.iter_mut().find(same) {
+            match by_container.iter_mut().find(same) {
                 Some((_, findings)) => findings.push(finding),
-                None => held.push((report, vec![finding])),
+                None => by_container.push((report, vec![finding])),
             }
         }
-        let rows = held.into_iter().map(|(report, findings)| HoldRow {
-            workload: named(&report.workload, plurals),
-            tab: tab(&report.workload, plurals),
-            container: report.container.clone().unwrap_or_else(|| "—".into()),
-            packages: vulnerabilities
-                .group(findings.into_iter())
-                .iter()
-                .flat_map(Group::package_rows)
-                .collect(),
-            scanned: scanned(report, now),
-        });
+        let rows = by_container
+            .into_iter()
+            .map(|(report, findings)| ContainerRow {
+                workload: named(&report.workload, plurals),
+                tab: tab(&report.workload, plurals),
+                container: report.container.clone().unwrap_or_else(|| "—".into()),
+                packages: vulnerabilities
+                    .group(findings.into_iter())
+                    .iter()
+                    .flat_map(Group::package_rows)
+                    .collect(),
+                scanned: scanned(report, now),
+            });
         Some(Self {
             id: group.id.to_string(),
             path: super::link(&group.id),
@@ -270,7 +273,8 @@ impl IdPage {
     }
 }
 
-/// When `report`'s scan ran, as an age such as "3h ago".
+/// How long ago `report`'s scan ran, such as "3h ago", or a dash when
+/// the report has no scan time.
 pub fn scanned(report: &Report, now: Timestamp) -> String {
     match report.scanned_at {
         Some(at) => {
@@ -281,7 +285,8 @@ pub fn scanned(report: &Report, now: Timestamp) -> String {
     }
 }
 
-/// The scanners that wrote the reports, by name, joined.
+/// The names of the scanners that wrote the reports, joined with "and",
+/// or "The scanner" when there are no reports.
 pub fn scanners(vulnerabilities: &Vulnerabilities) -> String {
     let names: BTreeSet<&str> = vulnerabilities
         .reports
@@ -294,7 +299,8 @@ pub fn scanners(vulnerabilities: &Vulnerabilities) -> String {
     }
 }
 
-/// "reports" after one scanner's name, "report" after two.
+/// The verb that agrees with `scanners`: "reports" after one scanner's
+/// name, and "report" after several joined by "and".
 fn reports(scanners: &str) -> &'static str {
     match scanners.contains(" and ") {
         true => "report",

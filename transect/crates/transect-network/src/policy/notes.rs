@@ -1,40 +1,32 @@
-//! The line a card shows in place of its callers: that nothing isolates
-//! its thing, that its thing is on its machine's network, or that
-//! policy admits no caller.  A namespace's line names the workloads it
-//! leaves open, each linked to its page.
+//! The sentence a card shows in place of a list of callers: when no
+//! `NetworkPolicy` selects the pods, when the pods use their machine's
+//! network, or when policy admits no caller.
 
 use transect_graph::edges::{Object, kind_and_name};
 use transect_graph::links::{Part, Piece};
 
-/// A card's line when no policy isolates its thing's pods.  The map
-/// tags nothing then, because every namespace may call it.
 pub fn open() -> Vec<Part> {
     plain("No NetworkPolicy selects its pods, so any pod may call them.")
 }
 
-/// A workload card's line when its pods are on their machine's
-/// network.  A policy that selects them by their labels has no effect
-/// there, so the card names none.
+/// For a workload whose pods use their machine's network.  A
+/// `NetworkPolicy` does not apply to those pods even when its selector
+/// matches their labels.
 pub fn on_machine_network() -> Vec<Part> {
     plain(
         "It is on its machine's network, where no NetworkPolicy applies, so any pod may call it at its machine's address.",
     )
 }
 
-/// A workload card's line when policy isolates it and its rules admit
-/// no caller.
 pub fn no_caller() -> Vec<Part> {
     plain("A NetworkPolicy selects its pods and admits no caller.")
 }
 
-/// A namespace card's line when policy isolates it and admits no other
-/// namespace.
 pub fn no_other_namespace() -> Vec<Part> {
     plain("A NetworkPolicy selects its pods and admits no other namespace.")
 }
 
-/// A namespace card's line when a rule admits every namespace but
-/// `but`.
+/// For a namespace that a rule opens to every namespace except `but`.
 pub fn any_namespace(but: &[String]) -> Vec<Part> {
     let named = transect_graph::links::Named::AnyNamespace { pods: false, but }.to_string();
     let mut chars = named.chars();
@@ -46,10 +38,10 @@ pub fn any_namespace(but: &[String]) -> Vec<Part> {
     ))
 }
 
-/// A namespace card's line when policy isolates some of its workloads
-/// but not `open`, which no policy selects, or `machine_network`, whose
-/// pods are on their machine's network.  Any pod may call each of
-/// them, so the map tags nothing.  `href` gives each workload's page.
+/// For a namespace where policy isolates some workloads but not the
+/// workloads in `open`, which no `NetworkPolicy` selects, or in
+/// `machine_network`, whose pods use their machine's network.  Each
+/// workload in the sentence links to the page that `href` returns.
 pub fn partly_open(
     open: &[Object],
     machine_network: &[Object],
@@ -83,7 +75,7 @@ fn name(object: &Object) -> Piece {
     Piece::Name(object.clone(), kind_and_name(&object.kind, &object.name))
 }
 
-/// `objects` named as a list joined by "or": "a or b", "a, b, or c".
+/// "a or b", "a, b, or c".
 fn either(objects: &[Object]) -> Vec<Piece> {
     let mut pieces = Vec::new();
     for (at, object) in objects.iter().enumerate() {

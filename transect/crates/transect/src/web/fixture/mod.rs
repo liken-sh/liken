@@ -1,24 +1,24 @@
-//! A small cluster written by hand, for tests that render every page
-//! and for `--fixture`, which serves it with no cluster at all.  Each
-//! file's comments state what its group of objects is for:
+//! A small hand-written cluster.  Tests render every page from it, and
+//! `--fixture` serves it with no real cluster.  The comments in each
+//! file say what its objects are for:
 //!
-//! - `cluster.yaml`: the namespaces, workloads, and machines;
-//! - `hardware.yaml`: the machines' devices;
-//! - `storage.yaml`: a CSI driver with a console template;
-//! - `parts.yaml`: a stock room's nested parts;
-//! - `flux.yaml`: a GitOps tool and what it applies from;
-//! - `entry.yaml`: the way in through an ingress controller;
-//! - `network.yaml`: NetworkPolicies, a workload on its
+//! - `cluster.yaml`: the namespaces, workloads, and machines.
+//! - `hardware.yaml`: the machines' devices.
+//! - `storage.yaml`: a CSI driver with a console template.
+//! - `parts.yaml`: a stock room's nested parts.
+//! - `flux.yaml`: a GitOps tool and what it applies from.
+//! - `entry.yaml`: the way in through an ingress controller.
+//! - `network.yaml`: `NetworkPolicy` objects, a workload on its
 //!   machine's network that no `NetworkPolicy` applies to, and a store
-//!   whose ports three policies admit callers to;
-//! - `access.yaml`: the accounts, roles, and bindings of the accounts
-//!   matrix;
-//! - `ways.yaml`: the ways in besides the storefront's `Ingress`;
+//!   whose ports three policies admit callers to.
+//! - `access.yaml`: the accounts, roles, and bindings that
+//!   `/access/accounts` draws.
+//! - `ways.yaml`: the ways in besides the storefront's `Ingress`.
 //! - `scans.yaml`: a vulnerability scanner's reports, current and
-//!   stale;
-//! - `resources.yaml`: `transect`'s own resources for the cluster;
-//! - `gitops.yaml`: the knowledge the GitOps tool ships;
-//! - `signals.yaml`: the alerts that fire and what Prometheus answers.
+//!   stale.
+//! - `resources.yaml`: `transect`'s own resources for the cluster.
+//! - `gitops.yaml`: the knowledge the GitOps tool ships.
+//! - `signals.yaml`: the firing alerts and the Prometheus responses.
 
 mod load;
 mod signals;
@@ -38,44 +38,45 @@ use transect_resources::knowledge::Kinds;
 use transect_resources::resources::Overlaid;
 use transect_supply::gitops::{Applied, GitOps};
 
-/// The time the fixture's objects and signals are read at, half a day
-/// after the start of 2026 that their times are written in, so the
-/// goldens draw the same ages on every run.
+/// The time at which tests read the fixture's objects and signals: 12
+/// hours after 2026-01-01T00:00:00Z, the date that the fixture's
+/// timestamps are written against.  A pinned time makes the goldens
+/// draw the same ages on every run.
 #[cfg(test)]
 pub const NOW: &str = "2026-01-01T12:00:00Z";
 
-/// The text of `transect`'s own resources for the fixture cluster, and
-/// the knowledge its GitOps tool ships.
+/// The YAML of `transect`'s own resources for the fixture cluster,
+/// followed by the knowledge objects of its GitOps tool.
 const RESOURCES: &str = concat!(
     include_str!("resources.yaml"),
     "---\n",
     include_str!("gitops.yaml")
 );
 
-/// `transect`'s own resources for the fixture cluster.
 fn resources() -> crate::web::loaded::Loaded {
     transect_resources::resources::from_text("resources.yaml", RESOURCES)
 }
 
-/// The tail of the pod `namespace/pod` that the fixture's log store
-/// answers, read through its `LogSource`.
+/// The log tail that the fixture's log store returns for the pod
+/// `namespace/pod`, read through the declared `LogSource`.
 #[cfg(test)]
 pub fn tails(namespace: &str, pod: &str) -> Option<Arc<transect_observe::logs::Tails>> {
     signals::tails(&resources(), namespace, pod)
 }
 
-/// What every machine, pod, and container in the fixture uses.
+/// The resource usage of every machine, pod, and container in the
+/// fixture.
 pub fn usage() -> transect_observe::usage::Reading {
     signals::usage(&resources())
 }
 
-/// The fixture cluster's snapshot.
 pub fn snapshot() -> Snapshot {
     snapshot_with(resources())
 }
 
-/// The fixture cluster's snapshot with its resources edited by `edit`,
-/// for a test of what a page shows for a resource that changed.
+/// The model and usage of the fixture cluster, built after `edit`
+/// rewrites the text of its resources.  A test uses it to see what a
+/// page shows when a resource is different.
 #[cfg(test)]
 pub fn edited(edit: impl Fn(&str) -> String) -> (Model, transect_observe::usage::Reading) {
     let loaded = transect_resources::resources::from_text("resources.yaml", &edit(RESOURCES));
@@ -118,7 +119,7 @@ fn snapshot_with(resources: crate::web::loaded::Loaded) -> Snapshot {
     (snapshot.ownership, snapshot.applied) = ownership(&snapshot);
     snapshot.volumes_used = signals::volumes_used(&snapshot.resources);
     snapshot.alerts = signals::alerts(&snapshot.resources);
-    // A round of searches that found nothing, from the declared store.
+    // Record that the declared log store was searched and found nothing.
     let source = snapshot.resources.log_source.as_ref();
     snapshot.logs.searched = Arc::new(transect_observe::logs::Searched {
         source: source.map(|source| source.name.clone()),
@@ -145,8 +146,8 @@ fn snapshot_with(resources: crate::web::loaded::Loaded) -> Snapshot {
     snapshot
 }
 
-/// The storefront's traffic, as the proxy's entry queries in
-/// `resources.yaml` would answer.
+/// The storefront's traffic figures, as the ingress controller's entry
+/// queries in `resources.yaml` would return them.
 fn traffic(snapshot: &Snapshot) -> transect_network::entry::poll::Reading {
     use transect_network::entry::traffic::{Figures, Measured};
     let controllers = snapshot.resources.ingress_controllers.iter();
@@ -169,8 +170,8 @@ pub fn model() -> Model {
     Model::build(snapshot())
 }
 
-/// The objects of kinds no store holds that the fixture serves as
-/// read once: a `Lease`, as a leader election writes it.
+/// The objects of kinds that no store holds, which the fixture serves
+/// as already read: a `Lease` as a leader election writes it.
 pub fn reads() -> transect_map::objects::reads::Reads {
     use transect_map::objects::reads::{Key, Read, Reads};
     let lease: kube::core::DynamicObject = serde_yaml::from_str(
@@ -249,8 +250,9 @@ pub fn objects() -> Vec<Object> {
     objects
 }
 
-/// Every pod and workload walked to its top owner, as the cluster's
-/// own walk does, and what applied each, by its tool's marks.
+/// Resolves every pod and workload to its top owner, as the live
+/// cluster does, and finds the GitOps applier of each from its labels
+/// and annotations.
 fn ownership(snapshot: &Snapshot) -> (Ownership, Applied) {
     let entry = |group, kind, meta| Entry { group, kind, meta };
     let pods = snapshot.pods.iter().map(|o| entry("", "Pod", &o.metadata));

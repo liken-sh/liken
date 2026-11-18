@@ -1,9 +1,8 @@
-//! Every object of every kind: a namespace's custom resources grouped
-//! by kind below its workloads, one kind's objects in one namespace at
-//! `/namespaces/{ns}/{resource}`, and the page of any one object, read
-//! from the stores, or for a kind no store holds, read once when its
-//! page loads.  Each name is an `object_link`, and each object that
-//! reports its condition has a dot.
+//! The pages of arbitrary objects: a namespace's custom resources
+//! grouped by kind below its workloads, the list of one kind's objects
+//! in one namespace at `/namespaces/{ns}/{resource}`, and the page of
+//! any single object. An object's page reads it from the stores, or,
+//! for a kind that no store holds, fetches it once when the page loads.
 
 mod board;
 mod card;
@@ -32,25 +31,25 @@ use transect_graph::edges::Object;
 use transect_observe::health::{Level, reported, resting};
 use transect_resources::knowledge::{Kinds, plural_label};
 
-/// The most names a kind's group shows on a namespace page.  The rest
-/// show as a count that opens the kind's list.
+/// The most objects a kind's group lists on a namespace page. Any
+/// further objects appear as a count that links to the kind's list.
 const MOST: usize = 12;
 
-/// One object in a list: its name, its page when it has one, and the
-/// level its own condition gives it, when it reports one.
+/// One object in a list: its name, the link to its page when it has
+/// one, and the health level of its own condition when it reports one.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item {
     pub name: String,
     pub href: Option<String>,
     pub level: Option<Level>,
-    /// Whether its condition reports it at rest.  An object at rest
-    /// draws gray.
+    /// Whether the object is at rest: its condition is `False` with a
+    /// reason that kind knowledge marks as calm. It is drawn gray.
     pub resting: bool,
 }
 
 impl Item {
-    /// The dot's class, as a search row's dot is, gray for an object at
-    /// rest, or none for an object that reports no condition.
+    /// The dot's CSS class: gray for an object at rest, and `None` for an
+    /// object that reports no condition.
     pub fn dot_class(&self) -> Option<&'static str> {
         let level = self.level?;
         Some(match self.resting {
@@ -60,9 +59,9 @@ impl Item {
     }
 }
 
-/// A condition's dot: the dot of `level`, or gray when it is none.  It
-/// is none for every condition except the one that decides health, and
-/// for that one when it is at rest.
+/// The dot's CSS class for a condition: the class for `level`, or gray
+/// when `level` is `None`. Only the condition that decides the object's
+/// health has a level, and it has none when the object is at rest.
 pub fn condition_dot(level: Option<Level>) -> &'static str {
     match level {
         Some(level) => dot_class(level),
@@ -70,7 +69,6 @@ pub fn condition_dot(level: Option<Level>) -> &'static str {
     }
 }
 
-/// A dot's class for `level`: clear when healthy, warm otherwise.
 pub fn dot_class(level: Level) -> &'static str {
     match level {
         Level::Healthy => "dot dot-clear",
@@ -80,8 +78,9 @@ pub fn dot_class(level: Level) -> &'static str {
     }
 }
 
-/// One kind's objects in a namespace: its plural, its list's URL, the
-/// first of its objects by name, and how many more there are.
+/// One kind's objects in a namespace: the kind's plural label, the URL
+/// of its list page, the first `MOST` objects by name, and how many more
+/// there are.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Group {
     pub label: String,
@@ -91,14 +90,12 @@ pub struct Group {
 }
 
 impl Group {
-    /// "+3 more", when the group has more objects than it shows.
+    /// "+3 more", when the group has more objects than it lists.
     pub fn more_text(&self) -> Option<String> {
         (self.more > 0).then(|| format!("+{} more", self.more))
     }
 }
 
-/// What the lists read: the custom kinds' objects, their knowledge,
-/// and the page of any object that has one.
 pub struct Sources<'a> {
     pub custom: &'a [(ApiResource, Vec<Arc<Custom>>)],
     pub kinds: &'a Kinds,
@@ -106,9 +103,10 @@ pub struct Sources<'a> {
 }
 
 impl Sources<'_> {
-    /// The custom resources in `namespace` that are not among
-    /// `workloads`, which draw boxes of their own, one group per kind,
-    /// sorted by API group in DNS order and then by label.
+    /// The custom resources in `namespace`, one group per kind, sorted by
+    /// API group in DNS order and then by label. Objects among
+    /// `workloads` are left out, because they are drawn as workload
+    /// boxes.
     pub fn groups(&self, namespace: &str, workloads: &BTreeSet<&Object>) -> Vec<Group> {
         let labels = labels(self.custom.iter().map(|(resource, _)| resource));
         let mut groups: BTreeMap<(Vec<String>, String), Group> = BTreeMap::new();
@@ -133,8 +131,6 @@ impl Sources<'_> {
         groups.into_values().collect()
     }
 
-    /// The objects of `resource`'s kind in `namespace`, by name, except
-    /// those among `workloads`.
     fn items(
         &self,
         resource: &ApiResource,
@@ -165,8 +161,9 @@ impl Sources<'_> {
     }
 }
 
-/// Each kind's label: its plural as a reader says it, "Certificates",
-/// with its group after it when two kinds would get the same label.
+/// The plural label of each kind, such as "Certificates", keyed by group
+/// and kind. When two kinds would get the same label, each label ends
+/// with the API group in parentheses.
 pub fn labels<'a>(
     resources: impl IntoIterator<Item = &'a ApiResource>,
 ) -> HashMap<(String, String), String> {

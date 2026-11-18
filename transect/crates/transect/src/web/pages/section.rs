@@ -1,6 +1,6 @@
-//! The section view of one workload: its workloads, Services,
-//! Ingresses, storage, and devices drawn in columns, with its card
-//! beside them.
+//! The section page of one workload: the workloads, `Service` objects,
+//! `Ingress` objects, storage, and devices around it, drawn in columns,
+//! with the workload's card beside them.
 
 use k8s_openapi::jiff::Timestamp;
 
@@ -11,9 +11,9 @@ use transect_map::map::{EdgeRow, SectionContents, SectionPage};
 use transect_observe::usage;
 use transect_resources::layers::Layers;
 
-/// The section view of the workload `namespace/name` of the kind `resource`
-/// names, with its card beside it, or `None` when the namespace holds
-/// no such workload.
+/// The section page of the workload `name` in `namespace` whose
+/// resource plural is `resource`, with its card. Returns `None` when
+/// the namespace has no such workload.
 pub fn section_page(
     model: &Model,
     layers: &Layers,

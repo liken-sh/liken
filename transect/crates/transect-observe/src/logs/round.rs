@@ -1,28 +1,28 @@
-//! One round of the searches across the cluster.  A round searches the
-//! error lines and each pattern.  It counts and samples each search in
-//! the pods' lines, and again in the machines' own lines when the
-//! source declares which lines those are.  All queries of a round run
-//! at the same time, and the timeout bounds each one.
+//! One round of log searches across the cluster. A round searches for
+//! error lines and for each pattern. Each search counts and samples the
+//! pods' lines, and also the machines' own lines when the log source
+//! declares which lines those are. A round runs all its queries at the
+//! same time, and each query has its own timeout.
 
 use std::time::Duration;
 
 use super::machines::{self, MachineCount};
 use super::patterns::LogPattern;
 use super::sample::{self, Sample};
-use super::search::{Asked, Count, ERRORS_WINDOW, Searched, counts, search_query};
+use super::search::{Count, ERRORS_WINDOW, SearchTarget, Searched, counts, search_query};
 use super::source::Reached;
 use super::store::Store;
 
-/// One search: the thing it looks for, its filter, and its window.
+/// One search: what it looks for, its filter, and its time window.
 struct Search {
-    asked: Asked,
+    target: SearchTarget,
     filter: String,
     window: String,
 }
 
-/// The results of one search: the pods' counts or the reason there are
-/// none, the machines' counts, and the samples of the pods' lines and
-/// of the machines' lines.
+/// The results of one search: the counts for the pods, or the error
+/// that prevented them, the counts for the machines, and the samples of
+/// the pods' lines and of the machines' lines.
 struct Found {
     pods: Result<Vec<Count>, String>,
     machines: Vec<MachineCount>,
@@ -40,7 +40,7 @@ pub async fn round(
     };
     let source = &reached.source;
     let errors = source.fields.level.as_ref().map(|level| Search {
-        asked: Asked::Errors,
+        target: SearchTarget::Errors,
         filter: source.language.at_least_error(level, &source.levels.error),
         window: ERRORS_WINDOW.into(),
     });
@@ -48,31 +48,31 @@ pub async fn round(
     let searches: Vec<Search> = errors
         .into_iter()
         .chain(patterns.iter().map(|pattern| Search {
-            asked: Asked::Pattern(pattern.name.clone()),
+            target: SearchTarget::Pattern(pattern.name.clone()),
             filter: pattern.matches.clone(),
             window: pattern.window.clone(),
         }))
         .collect();
-    let asks = searches
+    let runs = searches
         .iter()
         .map(|search| found(store, reached, search, timeout));
-    let found = futures::future::join_all(asks).await;
+    let found = futures::future::join_all(runs).await;
     let mut searched = Searched {
         source: Some(source.name.clone()),
         ..Searched::default()
     };
     for (search, found) in searches.into_iter().zip(found) {
-        let asked = search.asked;
-        searched.samples.push((asked.clone(), found.samples));
-        searched.machines.push((asked.clone(), found.machines));
+        let target = search.target;
+        searched.samples.push((target.clone(), found.samples));
+        searched.machines.push((target.clone(), found.machines));
         searched
             .machine_samples
-            .push((asked.clone(), found.machine_samples));
-        match asked {
-            Asked::Errors => searched.errors = Some(found.pods),
-            Asked::Pattern(name) => {
-                if let Err(why) = &found.pods {
-                    tracing::warn!(pattern = %name, %why, "a log pattern's search failed");
+            .push((target.clone(), found.machine_samples));
+        match target {
+            SearchTarget::Errors => searched.errors = Some(found.pods),
+            SearchTarget::Pattern(name) => {
+                if let Err(error) = &found.pods {
+                    tracing::warn!(pattern = %name, %error, "The search for a log pattern returned an error");
                 }
                 let pattern = patterns.iter().find(|pattern| pattern.name == name);
                 searched
@@ -85,25 +85,26 @@ pub async fn round(
 }
 
 /// The counts and samples of one search, for the pods and for the
-/// machines.  When the store refuses the search of the machines' own
-/// lines, the machines keep only the counts from the pods' rows.
+/// machines. When the store returns an error for the query of the
+/// machines' own lines, the machine counts come only from the pods'
+/// rows.
 async fn found(store: &Store, reached: &Reached, search: &Search, timeout: Duration) -> Found {
     let source = &reached.source;
     let (pods, own) = machines::split(&search.filter, source);
-    let ask = |filter: String| async move {
+    let count = |filter: String| async move {
         let query = search_query(reached, &filter, &search.window);
-        store.ask(reached, &query, timeout).await
+        store.run_query(reached, &query, timeout).await
     };
     let lines = |filter: String| async move {
         let Some(query) = sample::query(reached, &filter, &search.window) else {
             return Vec::new();
         };
-        let rows = store.ask(reached, &query, timeout).await;
+        let rows = store.run_query(reached, &query, timeout).await;
         rows.map_or_else(|_| Vec::new(), |rows| sample::read(&rows, &source.fields))
     };
     let own_counts = async {
         match &own {
-            Some(own) => ask(own.clone()).await.ok(),
+            Some(own) => count(own.clone()).await.ok(),
             None => None,
         }
     };
@@ -114,7 +115,7 @@ async fn found(store: &Store, reached: &Reached, search: &Search, timeout: Durat
         }
     };
     let (rows, samples, own_rows, machine_samples) = futures::join!(
-        ask(pods.clone()),
+        count(pods.clone()),
         lines(pods.clone()),
         own_counts,
         own_lines

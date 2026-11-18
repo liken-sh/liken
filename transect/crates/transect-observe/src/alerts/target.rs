@@ -22,7 +22,8 @@ use transect_graph::edges::Object;
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Target {
     /// A namespace, and the object in it that the labels name, if any.
-    /// The object is the subject of the alert's reason in health.
+    /// Health shows the object as the subject of the alert.  `container`
+    /// is set only when the object is a pod.
     Namespace {
         namespace: String,
         object: Option<Object>,
@@ -45,16 +46,15 @@ pub struct Known {
     pub source: Source,
 }
 
-/// What the alert with `labels` is about, among the things that `known`
-/// lists.
+/// What the alert with `labels` is about, among the things in `known`.
 ///
-/// A named object, such as a `Deployment` or a claim, takes precedence
-/// over a machine, and a machine takes precedence over a namespace and
-/// pod with no other object.  The reason is that a series that names a
-/// machine and only a pod most often comes from an agent or an exporter
-/// that reports about that machine, such as an exporter of the `Node`'s
-/// own conditions.  An instance label names a machine only when no
-/// other label does.
+/// An object other than a pod, such as a `Deployment` or a claim, or an
+/// exported namespace label, takes precedence over a machine.  A machine
+/// takes precedence over a namespace and a pod, because a series that
+/// names a machine and only a pod most often comes from an agent or an
+/// exporter that reports on that machine, such as an exporter of the
+/// `Node`'s conditions.  The instance label is read only when no known
+/// namespace and no known node matches.
 pub fn target(labels: &BTreeMap<String, String>, known: &Known) -> Target {
     let source = &known.source;
     let read = Labels::of(labels, source);
@@ -118,8 +118,9 @@ impl<'a> Labels<'a> {
         }
     }
 
-    /// Whether the labels name an object other than a pod.  The labels
-    /// of a node agent's own series never do.
+    /// Whether the labels name an object other than a pod, not counting
+    /// the labels that a scrape target adds, or include the exported
+    /// namespace label.
     fn names_beyond_a_pod(&self) -> bool {
         let objects = self.source.objects.iter();
         self.exported
@@ -164,9 +165,9 @@ impl Known {
         self.nodes.iter().any(|(node, _)| node == name)
     }
 
-    /// The machine an `instance` label names: a Node's name or one of
-    /// its addresses, with or without a port, or a host name whose first
-    /// label is a Node's name.
+    /// The machine an `instance` label names: a `Node`'s name or one of
+    /// its addresses, with or without a port, or a host name whose part
+    /// before the first dot is a `Node`'s name.
     fn machine_at(&self, instance: &str) -> Option<String> {
         let host = host_of(instance);
         let first = host.split('.').next().unwrap_or(host);

@@ -1,7 +1,8 @@
-//! The section view: one workload drawn from its entry down to the ground,
-//! in the map's bands, at positions the server computes.  The boxes are
-//! HTML, absolutely positioned from `layout`, so their text and links
-//! work as on every other page.
+//! The section view draws one workload from its Ingresses and Services
+//! down to its machines and the outside systems it stores data on, in
+//! the map's bands.  The server computes each box's position with
+//! `layout`, and the boxes are HTML elements with absolute positions,
+//! so their text and links work as on every other page.
 
 mod gather;
 mod layout;
@@ -11,7 +12,7 @@ mod sides;
 mod spine;
 
 /// The section view's types that the access lens's drawings also use:
-/// a box, a box's rectangle, and the path of a line.
+/// a box, its rectangle, and the path of a line.
 pub mod drawing {
     pub use super::layout::Rect;
     pub use super::lines::{Line, Point, Style, rounded};
@@ -36,11 +37,11 @@ use transect_frame::frame::tabs::{Lens, Tabs};
 use transect_graph::edges::{Endpoint, Graph, Kind, Object, Plurals, Shown};
 use transect_ground::machines::Machine;
 use transect_ground::storage::Storage;
-use transect_network::entry::{Answers, Endpoints, Entry, Issuers};
+use transect_network::entry::{Endpoints, Entry, Issuers, TrafficResults};
 use transect_resources::intent::Intents;
 
-/// The section view's page.  Its `main` block renders alone as the fragment a
-/// pushed update replaces, as every elevation's does.
+/// The section view's page.  Its `main` block renders alone as the
+/// fragment that a pushed update swaps in, as on every elevation.
 #[derive(Template)]
 #[template(path = "map/section/section.html", blocks = ["main"])]
 pub struct SectionPage {
@@ -48,21 +49,22 @@ pub struct SectionPage {
     pub namespace: String,
     pub layer: String,
     pub name: String,
-    /// The workload's page, which the crumb and its box link to.
+    /// The workload's page, which the crumb and the workload's box link
+    /// to.
     pub workload_path: String,
-    /// The section view's own path, which ends its event stream's URL.
+    /// The section view's own path, which the events URL ends with.
     pub path: String,
     pub width: i32,
     pub height: i32,
     pub rows: Vec<DrawnRow>,
-    /// The spine's lines, drawn under the boxes.
+    /// The lines between boxes, drawn under the boxes.
     pub lines: Vec<Line>,
     pub labels: Vec<Label>,
     /// The workload's card, drawn as on the workload's page, beside the
     /// workload's row.
     pub card: WorkloadCard,
-    /// Whether the workload serves a port, so that the page shows an
-    /// access tab.
+    /// Whether the page shows the access tab, which the workload has when
+    /// it serves a port.
     pub access: bool,
 }
 
@@ -90,22 +92,23 @@ pub struct Contents<'a> {
     pub storage: &'a Storage,
     pub machines: &'a [Machine],
     pub shown: &'a Shown,
-    /// The intent recorded for the objects beside the spine.
+    /// The recorded intent of the objects in the side columns.
     pub intents: &'a Intents,
-    /// Whether an object beside the spine has a page to link.
+    /// Whether an object in the side columns has a page to link to.
     pub has_page: &'a dyn Fn(&Object) -> bool,
-    /// The traffic numbers that the ingress controllers' metrics give for
-    /// each backend.
-    pub traffic: Answers<'a>,
-    /// Returns a device's title from the knowledge for its driver.
+    /// The traffic numbers that the ingress controllers' metrics report
+    /// for each backend.
+    pub traffic: TrafficResults<'a>,
+    /// Returns the title of a device's box.
     pub device_title: &'a dyn Fn(&transect_graph::edges::Device) -> String,
 }
 
 impl SectionPage {
-    /// The page with each ground box's title, page link, and console link
-    /// set to what `pages` returns for the box's title.  When a pod names
-    /// an NFS export by hand, the box's title is the server's address,
-    /// and `pages` returns the title of the Outside for that address.
+    /// Replaces the title, page link, and console link of each ground
+    /// box, the box of an outside system, with what `pages` returns for
+    /// its title.  For an NFS export that
+    /// a pod names inline, the title is the server's address, and
+    /// `pages` returns the title of the `Outside` for that address.
     pub fn with_ground_pages(
         mut self,
         pages: impl Fn(&str) -> (String, String, Option<String>),
@@ -124,14 +127,13 @@ impl SectionPage {
         Self { access, ..self }
     }
 
-    /// The page with the main column's row of edge kinds.
     pub fn with_edge_row(self, edge_row: EdgeRow) -> Self {
         Self { edge_row, ..self }
     }
 
-    /// The section view of the workload named `name` whose kind `resource` names,
-    /// with the card `card` builds for it, or `None` when `namespace`
-    /// holds no such workload.
+    /// Builds the section view of the workload `name`, whose kind has
+    /// the resource name `resource`, with the card that `card` builds for
+    /// it.  Returns `None` when `namespace` has no such workload.
     pub fn build(
         map: &ClusterMap,
         namespace: &str,
@@ -188,8 +190,8 @@ impl SectionPage {
         })
     }
 
-    /// The workload's own crumbs, with the workload as a link and the
-    /// section view as the current place.
+    /// The crumbs of the workload's page, with the workload as a link
+    /// and the section view as the current place.
     pub fn crumbs(&self) -> Vec<Crumb> {
         let select = format!("/?select={}", self.namespace);
         vec![
@@ -236,7 +238,6 @@ impl SectionPage {
         SPINE_BAND
     }
 
-    /// A box's place and size, as the inline style that puts it there.
     pub fn place(&self, rect: &Rect) -> String {
         format!(
             "left: {}px; top: {}px; width: {}px; height: {}px",
@@ -261,12 +262,12 @@ impl DrawnRow {
     }
 }
 
-/// Reads from the cluster the parts that the spine draws.  When an edge
-/// kind is turned off, the rows that it draws are left out.  This
-/// function leaves out the claims and the ground when stores-on is off,
-/// and the machines when runs-on is off.  `Entry::build` finds the
-/// Ingresses and Services through the routes-to and selects edges of
-/// `contents.graph`, so a graph without those edges gives none.
+/// Collects the boxes of the spine.  When the stores-on edge kind is
+/// off, the section has no claim or outside-system boxes, and when runs-on is
+/// off, it has no machines.  `Entry::build` finds the Ingresses and
+/// Services through the routes-to and selects edges of
+/// `contents.graph`, so a graph without those edges gives no entry
+/// boxes.
 fn parts(object: &Object, layer: &str, href: &str, contents: &Contents) -> Parts {
     let entry = Entry::build(
         contents.graph,
@@ -323,8 +324,9 @@ fn parts(object: &Object, layer: &str, href: &str, contents: &Contents) -> Parts
     }
 }
 
-/// Which Service each Ingress routes to, read from the routes-to edges,
-/// as pairs of indexes into the entry's lists of Ingresses and Services.
+/// Returns which Service each Ingress routes to, from the routes-to
+/// edges, as pairs of indexes into the entry's lists of Ingresses and
+/// Services.
 fn routes(graph: &Graph, workload: &Object, entry: &Entry) -> Vec<(usize, usize)> {
     let namespace = workload.namespace.as_deref();
     let mut routes = Vec::new();

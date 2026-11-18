@@ -1,46 +1,49 @@
-//! The position of each box in the section view.  The section view has a
-//! fixed layout: its rows run from top to bottom, each row is a stack of
-//! tiers centered on the spine, and a row can have a column of side boxes
-//! at either edge.  Positions are computed only from the count of boxes
-//! and their lines of text, so the same section view always gets the same
-//! positions, and the lines can be computed from the same numbers that
-//! the boxes are drawn at.
+//! Computes the position of every box in the section view.  Rows run
+//! from top to bottom.  A row has one or more tiers of boxes, each
+//! centered on the spine, the vertical line down the middle of the
+//! view, and can have a column of side boxes at the left edge, the
+//! right edge, or both.  A position depends only on the number of boxes
+//! and the lines of text in each, so the lines between boxes are
+//! computed from the same numbers that place the boxes.
 
-/// The section view's width.  A narrower window scrolls sideways and
-/// does not wrap, because the lines are drawn to the computed positions
-/// and a wrapped box would move away from its lines.
+/// The section view's width in pixels.  The view never reflows, because
+/// the lines are drawn to the computed positions.  `section.css` zooms
+/// the drawing to fit its column, and a browser without that support
+/// scrolls it sideways.
 pub const WIDTH: i32 = 976;
-/// The spine's center, where a tier of one box is centered.
+/// The x position of the spine.
 pub const SPINE: i32 = 496;
 /// The width of the band drawn behind the spine.
 pub const SPINE_BAND: i32 = 112;
-/// A tier of one box draws it wide.  A tier of several boxes, a fan,
-/// draws each one narrower, so four machines fit across the section view.
+/// The width of a box alone in its tier.  A tier of several boxes, a
+/// fan, gives each box `FAN_WIDTH` at most, so four boxes fit across a
+/// row with no side column at full width.
 const SPINE_WIDTH: i32 = 240;
 const FAN_WIDTH: i32 = 192;
 const FAN_GAP: i32 = 24;
-/// The side columns are as wide as a box in a fan, and the left column is
-/// as far from the spine as the right column.
+/// A side box is as wide as a box in a fan.  `LEFT_X` and `RIGHT_X`
+/// place the two columns at equal distances from the spine.
 pub const SIDE_WIDTH: i32 = 192;
-/// The most characters of a mono title that fit on one line of a side
-/// box: its width less its padding and border, at 13px IBM Plex Mono's
-/// advance of 0.6em.
+/// The most characters of a title that fit on one line of a side box:
+/// the box's width less its padding and border, divided by the 0.6em
+/// advance of a 13px monospace font.
 pub const SIDE_TITLE_CHARS: usize = 21;
 pub const LEFT_X: i32 = 72;
 pub const RIGHT_X: i32 = 2 * SPINE - LEFT_X - SIDE_WIDTH;
-/// Room between two boxes stacked in a side column.
+/// The vertical gap between two boxes in a side column.
 const SIDE_GAP: i32 = 16;
-/// The least room between a fan and a side column that the fan keeps
-/// clear, so that the lines that run between them, and their labels, fit.
+/// The smallest horizontal gap between a tier and a side column, which
+/// leaves room for the lines between them and their labels.
 pub const CLEAR: i32 = 48;
-/// The least room at each side of a tier that is too wide for its boxes
-/// at full width.  Such a tier narrows its boxes to keep this room.
+/// The smallest gap between a tier and the view's edge on a side that has
+/// no side column.  A tier that would be wider narrows its boxes.
 const MARGIN: i32 = 16;
-/// The room above a row's first tier, for the row's label, and below its
-/// last tier, for the lines that leave the row.
+/// The space above a row's first tier, for the row's label, and below
+/// its last tier, for the lines that leave the row.
 const ROW_PAD: i32 = 43;
 const ROW_GAP: i32 = 10;
-/// Room between two tiers of one row for a line and its label.
+/// The vertical gap between two tiers of one row, for a line and its
+/// label.
 const TIER_GAP: i32 = 72;
 const MIN_HEIGHT: i32 = 64;
 const LINE_HEIGHT: i32 = 20;
@@ -71,7 +74,7 @@ impl Rect {
         self.y + self.height
     }
 
-    /// Whether the point at `x`, `y` lies on one of its edges.
+    /// Whether the point at `x`, `y` is on one of its edges.
     #[cfg(any(test, feature = "fixtures"))]
     pub fn on_edge(&self, x: i32, y: i32) -> bool {
         let across = (self.x..=self.right()).contains(&x);
@@ -91,14 +94,14 @@ impl Rect {
     }
 }
 
-/// Either side column.
+/// The left or the right side column of a row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Side {
     Left,
     Right,
 }
 
-/// Which sides of a row its tiers keep clear.
+/// Which side columns of a row the tiers must stay clear of.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Sides {
     pub left: bool,
@@ -114,17 +117,16 @@ impl Sides {
     }
 }
 
-/// One row as the layout reads it, with each box given as its count of
-/// lines of text: its tiers top to bottom, and its side columns top to
-/// bottom.
+/// One row as `layout` reads it, with each box given as its number of
+/// lines of text, from top to bottom.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Shape {
     pub tiers: Vec<Vec<usize>>,
     pub left: Vec<usize>,
     pub right: Vec<usize>,
-    /// The sides a line runs through the row on, between a side box and
-    /// a box in another row.  The tiers keep clear of those columns, as
-    /// they do of a column that holds a box.
+    /// The sides where a line from a side box to a box in another row
+    /// passes through this row.  The tiers stay clear of these columns,
+    /// as they do of a column that has boxes.
     pub crossed: Sides,
 }
 
@@ -145,15 +147,15 @@ impl Shape {
     }
 }
 
-/// A place in a row: one of its tiers, or a side column.
+/// A tier of a row, or one of its side columns.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Column {
     Tier(usize),
     Side(Side),
 }
 
-/// One box, by its row, its column in the row, and its index in the
-/// column.
+/// The address of one box: its row, its column in the row, and its index
+/// in that column.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct At {
     pub row: usize,
@@ -190,7 +192,6 @@ impl At {
 pub struct Placed {
     pub top: i32,
     pub height: i32,
-    /// Each tier's boxes, in the shape's order.
     pub boxes: Vec<Vec<Rect>>,
     pub left: Vec<Rect>,
     pub right: Vec<Rect>,
@@ -222,7 +223,7 @@ impl Layout {
         boxes.get(at.index).copied()
     }
 
-    /// Every box, for the checks that no two overlap.
+    /// Every box in every row, to check that no two overlap.
     #[cfg(test)]
     pub fn all(&self) -> Vec<Rect> {
         let row = |row: &Placed| -> Vec<Rect> {
@@ -233,11 +234,11 @@ impl Layout {
     }
 }
 
-/// The position of every box in `rows`.  A tier is as tall as its
-/// tallest box, so the boxes of a tier share a top and a bottom and the
-/// lines between two tiers run the same length.  The tiers and each
-/// side column are centered on the row's height, so a side box beside a
-/// lone workload is level with it.
+/// Returns the position of every box in `rows`.  A tier is as tall as
+/// its tallest box, so the boxes of a tier share a top and a bottom and
+/// the lines between two tiers have the same length.  The tiers and each
+/// side column are centered vertically in the row, so a side box beside
+/// a lone workload is level with it.
 pub fn layout(rows: &[Shape]) -> Layout {
     let mut top = 0;
     let mut placed = Vec::with_capacity(rows.len());
@@ -293,8 +294,8 @@ fn stack_height(boxes: &[usize]) -> i32 {
     (heights.sum::<i32>() - SIDE_GAP).max(0)
 }
 
-/// `boxes` one above another at `x`, centered on a row's `content`
-/// height that starts at `first`.
+/// Stacks `boxes` at `x`, centered vertically in a row whose content
+/// starts at `first` and is `content` tall.
 fn stack(boxes: &[usize], x: i32, first: i32, content: i32) -> Vec<Rect> {
     let mut y = first + (content - stack_height(boxes)) / 2;
     boxes
@@ -313,10 +314,10 @@ fn stack(boxes: &[usize], x: i32, first: i32, content: i32) -> Vec<Rect> {
         .collect()
 }
 
-/// `count` boxes side by side at `y`, centered on the spine.  A tier
-/// that keeps a side clear ends `CLEAR` short of that column.  It moves
-/// toward the other side first, and narrows its boxes only when it must,
-/// so four machines and a held device fit in the machines row.
+/// Places `count` boxes side by side at `y`, centered on the spine.  A
+/// tier that must stay clear of a side column ends `CLEAR` short of it.
+/// The tier moves away from that column first, and narrows its boxes
+/// only when moving is not enough.
 fn across(count: usize, y: i32, height: i32, clear: Sides) -> Vec<Rect> {
     let Ok(n) = i32::try_from(count) else {
         return Vec::new();

@@ -7,6 +7,7 @@ use super::route::across;
 use super::{Drawing, HEAD, LABEL, NONE, PLAIN, height};
 use transect_map::map::section_drawing::{Point, Rect, SectionBox, Style};
 
+// The left edge and width of each column.
 const RUNS: (i32, i32) = (20, 180);
 const ACCOUNT: (i32, i32) = (240, 230);
 const ROLES: (i32, i32) = (520, 250);
@@ -14,13 +15,15 @@ const GRANTS: (i32, i32) = (820, 210);
 const FOLLOWS: (i32, i32) = (1066, 204);
 const TOP: i32 = 28;
 const GAP: i32 = 20;
-/// The room a labelled line takes between two steps of a chain.
+/// The vertical distance between two steps of a chain, for the line and
+/// its label.
 const STEP: i32 = 30;
 
 /// The boxes that [`draw`] lays out.
 #[derive(Debug)]
 pub struct Scene {
-    /// The first column's heading: "runs as it", or "in it" for a group.
+    /// The first column's heading: "runs as it", or "in it" for a
+    /// group.
     pub runs_head: &'static str,
     pub runs: Vec<Placing>,
     pub account: SectionBox,
@@ -49,17 +52,18 @@ impl Placing {
     }
 }
 
-/// What a role grants, with the places in the scene's roles of the
-/// roles whose lines lead to it.
+/// A box for what roles grant, with the indexes in `Scene::roles` of
+/// the roles whose lines lead to it.
 #[derive(Debug)]
 pub struct Grant {
     pub boxed: SectionBox,
     pub roles: Vec<usize>,
 }
 
-/// Something that follows from a grant: its box, the grants whose lines
-/// lead to it, and, for a step of a chain, the label on the line from
-/// the box above it.
+/// A box for what follows from grants, with the indexes in
+/// `Scene::grants` of the grants whose lines lead to it.  A later step
+/// of a chain has `after` set to the label of the line from the box
+/// above it.
 #[derive(Debug)]
 pub struct Follow {
     pub placing: Placing,
@@ -161,7 +165,7 @@ fn column(drawing: &mut Drawing, grants: &[Grant], (x, width): (i32, i32)) -> Ve
 }
 
 /// Places each role level with the middle of the grants that its lines
-/// lead to, and below the role before it.
+/// lead to, but never above the bottom of the role before it.
 fn roles(
     drawing: &mut Drawing,
     roles: Vec<Placing>,
@@ -229,8 +233,9 @@ fn stack(
     rects
 }
 
-/// Places what follows.  Each box is level with the first grant whose
-/// line leads to it, or, for a step of a chain, directly below the step
+/// Places what follows.  Each box's top is level with the top of the
+/// first grant whose line leads to it, but never above the bottom of the
+/// box before it.  A later step of a chain goes `STEP` below the step
 /// before it, with a labelled line between them.
 fn follows(drawing: &mut Drawing, follows: Vec<Follow>, grants: &[Rect]) {
     let mut below = TOP;
@@ -337,11 +342,12 @@ mod tests {
     }
 
     #[test]
-    fn its_boxes_stand_apart() {
+    fn its_boxes_do_not_overlap() {
         assert!(draw(scene()).boxes_apart());
     }
 
-    /// Two roles, a grant that both lead to, and a chain of two steps.
+    /// The scene has a grant that two roles lead to, and a chain of
+    /// steps.
     #[test]
     fn no_two_of_its_lines_cross() {
         assert_eq!(draw(scene()).crossings(), vec![]);
@@ -353,7 +359,7 @@ mod tests {
     }
 
     #[test]
-    fn a_role_sits_level_with_what_it_grants() {
+    fn a_role_is_placed_below_the_role_before_it() {
         let drawing = draw(scene());
         let rect = |title: &str| {
             let placed = drawing.boxes.iter().find(|b| b.boxed.title == title);
@@ -365,7 +371,7 @@ mod tests {
     }
 
     #[test]
-    fn a_step_of_a_chain_sits_below_the_one_before_it() {
+    fn a_step_of_a_chain_is_placed_below_the_one_before_it() {
         let drawing = draw(scene());
         let rect = |title: &str| {
             let placed = drawing.boxes.iter().find(|b| b.boxed.title == title);

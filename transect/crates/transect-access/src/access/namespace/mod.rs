@@ -1,8 +1,8 @@
-//! A namespace's access, at its access tab: the ports its workloads
-//! serve, with each way in from outside the cluster and the gates on
-//! it, and the policies that limit their calls; then every account
-//! that may act in the namespace, a row each; and the namespace's Pod
-//! Security level in a line.
+//! A namespace's access tab: the ports that its workloads serve, each
+//! way in from outside the cluster with its gates, and the policies
+//! that limit calls to the workloads.  Below them are a row for each
+//! account that may act in the namespace and a line on its Pod Security
+//! level.
 
 use askama::Template;
 
@@ -13,22 +13,23 @@ use transect_frame::frame::tabs::{Lens, Tabs};
 use transect_graph::edges::Provenance;
 use transect_map::cards::NamespaceCard;
 
-/// A workload that serves a port, and each way in that reaches it.
+/// A workload that serves a port, with each way in that reaches it.
 #[derive(Debug)]
 pub struct Served {
     pub name: Named,
     /// "serves 8080 · 9090".
     pub serves: String,
-    /// A row per way in; none for a workload no way reaches.
+    /// One row for each way in.  Empty when no way in reaches the
+    /// workload.
     pub ways: Vec<Way>,
-    /// The policies that limit its calls in, each linked, or, in
-    /// `unlimited`, the words that state why none does.
+    /// The policies that limit calls in to the workload, each linked.
+    /// When there are none, `unlimited` says why.
     pub limited: Vec<Named>,
     pub unlimited: &'static str,
-    /// Whether a policy limits its calls out.
+    /// Whether a policy limits calls out from the workload.
     pub out: Dot,
-    /// For a workload that no way in reaches: whether a policy limits
-    /// its calls in, as a dot.
+    /// Whether a policy limits calls in, for a workload that no way in
+    /// reaches.
     pub policy: Dot,
 }
 
@@ -42,16 +43,17 @@ impl Served {
 /// One way in to a workload.
 #[derive(Debug)]
 pub struct Way {
-    /// The one machine whose address this way is, which links to the
-    /// machine's page.  `name` is the rest of the way's name.
+    /// The machine, when this way in is a machine's address, linked to
+    /// the machine's page.  `name` holds the rest of the way's name.
     pub machine: Option<Named>,
     pub name: String,
-    /// The sentence that states why a pod is on its machine's network.
-    pub said: Option<(String, Provenance)>,
+    /// The sentence that says why a pod is on its machine's network,
+    /// with where the fact comes from.
+    pub declared_at: Option<(String, Provenance)>,
     pub via: Vec<Named>,
     pub how: Option<&'static str>,
-    /// Each port.  The cell does not break a port across lines, and
-    /// wraps only between ports.
+    /// One string for each port, so that the table cell wraps between
+    /// ports and never inside one.
     pub ports: Vec<String>,
     pub gates: [Dot; 3],
 }
@@ -64,7 +66,8 @@ pub struct NamespaceAccessPage {
     pub served: Vec<Served>,
     pub columns: Vec<Column>,
     pub accounts: Vec<Row>,
-    /// Kubernetes' own components and controllers, folded.
+    /// The accounts of Kubernetes' own components and controllers,
+    /// which the page folds.
     pub controllers: Vec<Row>,
     /// What the namespace's Pod Security `enforce` label lets a pod do.
     pub pod_security: String,
@@ -117,19 +120,20 @@ impl NamespaceAccessPage {
         )
     }
 
-    /// Whether the card links to the namespace's access.  It does not on
-    /// this page, because this page is the namespace's access.
+    /// Whether the card links to the namespace's access tab.  It does
+    /// not, because this page is that tab.
     pub fn card_lens(&self) -> bool {
         false
     }
 
-    /// The card names the namespace with no link, because this page is
-    /// the namespace's own.
+    /// The card shows the namespace's name without a link, because this
+    /// page is the namespace's own page.
     pub fn card_link(&self) -> Option<String> {
         None
     }
 
-    /// The card lists no workloads, because the page's matrix names them.
+    /// The card lists no workloads, because the page's table lists
+    /// them.
     pub fn card_workloads(&self) -> bool {
         false
     }
@@ -139,17 +143,16 @@ impl NamespaceAccessPage {
     }
 }
 
-/// The sentence that states what a namespace's Pod Security `enforce`
-/// label, `level`, lets a pod there do.
+/// The sentence that says what a pod in `namespace` may do, from the
+/// namespace's Pod Security `enforce` label, `level`.
 pub fn pod_security(namespace: &str, level: Option<&str>) -> String {
     let may =
         "a pod here may be privileged, use its machine's network, and mount its machine's paths";
     let may_not =
         "a pod here may not be privileged, use its machine's network, or mount its machine's paths";
     match level {
-        // A cluster-wide default in the API server's
-        // AdmissionConfiguration is not in the API, so the sentence
-        // states that one may apply.
+        // The API does not show a default level that the API server's
+        // AdmissionConfiguration sets.
         None => format!(
             "Namespace {namespace} has no Pod Security enforce label, so {may}, unless the API server's admission configuration sets a default level."
         ),

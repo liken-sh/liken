@@ -1,9 +1,9 @@
-//! Depends on, from GitOps sources.  A source whose URL the cluster
-//! itself serves, such as a forge's `Ingress` host, depends on the
-//! workload behind that URL.  With that edge, the map shows a cycle
+//! Depends-on edges from GitOps sources.  When the cluster serves a
+//! source's URL, for example at a forge's `Ingress` host, the source
+//! depends on the workload behind that URL.  So the map shows a cycle
 //! when a forge serves the manifests that a GitOps tool applies to the
-//! forge itself.  A person must break that cycle by hand when the
-//! cluster starts cold.
+//! forge itself, which a person must break by hand when the cluster
+//! starts cold.
 
 use super::depends::edges_to;
 use super::index::Addresses;
@@ -11,8 +11,8 @@ use super::parse;
 use super::reach::reach;
 use transect_graph::edges::{Edge, Endpoint, Graph, Object};
 
-/// A depends-on edge from each source to each end its URL reaches, once
-/// per pair.  A short name in a URL resolves in the source's namespace,
+/// One depends-on edge from each source to each end that its URL
+/// reaches.  A short name in a URL resolves in the source's namespace,
 /// as `source-controller`'s own lookups of it would from there.
 pub fn sources_depend_on<'a>(
     addresses: &Addresses,

@@ -1,7 +1,7 @@
-//! The machine page, read from the snapshot: the `Node`, its strip's
-//! figures, the pods that run there, the devices its slices list, the
-//! volumes on it, and the custom resource that describes the same
-//! machine below the cluster.
+//! The machine page: the `Node`, the pods that run on it, the devices
+//! that its `ResourceSlice` objects list, its volumes, its logs, and the
+//! Underneath box, which shows the custom resource that describes the
+//! computer under the `Node`.
 
 use super::super::model::Model;
 use k8s_openapi::jiff::Timestamp;
@@ -16,8 +16,7 @@ use transect_observe::health::Deciding;
 use transect_observe::usage;
 use transect_resources::knowledge::{KnownThrough, Related};
 
-/// The page of the machine whose `Node` is named `name`, or `None` when
-/// the cluster has no such `Node`.
+/// `None` when the cluster has no `Node` called `name`.
 pub fn machine_page(
     model: &Model,
     usage: &usage::Reading,
@@ -85,13 +84,13 @@ pub fn machine_page(
         underneath_none: underneath_none(snapshot, name),
         path,
     };
-    // The page draws no edges, so it shows no edge kinds to turn off.
+    // The page shows no graph edges, so it has no edge kinds to toggle.
     Some(page)
 }
 
-/// The edge kinds device knowledge may draw, as kind knowledge's
-/// references name them.
-const NAMED: [Kind; 6] = [
+/// The kinds of the edges from a device that the page lists with the
+/// device.
+const DEVICE_EDGE_KINDS: [Kind; 6] = [
     Kind::RunsOn,
     Kind::StoresOn,
     Kind::Holds,
@@ -100,9 +99,9 @@ const NAMED: [Kind; 6] = [
     Kind::AuthenticatesThrough,
 ];
 
-/// The hardware the machine `name` publishes, by driver, each piece
-/// with what its attributes name, as the graph's edges from each device
-/// give it.
+/// The devices that the machine `name` publishes, grouped by driver.
+/// Each device lists the devices and objects that its attributes refer
+/// to, which device knowledge turns into graph edges.
 fn devices(model: &Model, name: &str, href: &dyn Fn(&Object) -> Option<String>) -> Vec<Driver> {
     let snapshot = &model.snapshot;
     let knowledge = &snapshot.resources.devices;
@@ -110,7 +109,7 @@ fn devices(model: &Model, name: &str, href: &dyn Fn(&Object) -> Option<String>) 
     let graph = model.graph(&Shown::default());
     let names = |device: &Device| -> Vec<(String, Reference)> {
         let from = Endpoint::Device(device.clone());
-        let edges = NAMED
+        let edges = DEVICE_EDGE_KINDS
             .iter()
             .flat_map(|kind| graph.edges_leaving(*kind, &from));
         edges
@@ -136,20 +135,22 @@ fn devices(model: &Model, name: &str, href: &dyn Fn(&Object) -> Option<String>) 
     let read = DevicesRead {
         attributes: &attributes,
         knowledge,
-        names: &names,
+        referenced: &names,
         href,
     };
     by_driver(snapshot.devices.published_on(name), &read)
 }
 
-/// Whether the log source names which lines are a machine's own.
+/// Whether the log source has a field that says which machine a log
+/// line came from.
 fn separated(model: &Model) -> bool {
     let source = model.snapshot.resources.log_source.as_ref();
     source.is_some_and(|source| source.fields.machine.is_some())
 }
 
-/// Why the Underneath box is empty, when a kind's knowledge declares
-/// that its objects describe Nodes and none describes `name`.
+/// The reason the Underneath box is empty. It is `None` when an object
+/// describes the machine, and when no kind's knowledge sets `node`,
+/// because then no kind is expected to describe the machine.
 fn underneath_none(snapshot: &crate::web::snapshot::Snapshot, name: &str) -> Option<String> {
     if snapshot.underneath(name).is_some() {
         return None;
@@ -166,8 +167,8 @@ fn underneath_none(snapshot: &crate::web::snapshot::Snapshot, name: &str) -> Opt
     }
 }
 
-/// The resource that describes the machine `name` below the cluster:
-/// its conditions, and the facts its kind's knowledge reads.
+/// The Underneath box: the object that describes the machine `name`,
+/// with its conditions and the fields that its kind's knowledge reads.
 fn underneath(model: &Model, name: &str) -> Option<Underneath> {
     let snapshot = &model.snapshot;
     let (object, found) = snapshot.underneath(name)?;

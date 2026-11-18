@@ -1,7 +1,8 @@
 [env]
-# The build of jemalloc compiles these options into it, so the binary
-# runs with them and its container needs no environment for them. A
-# background thread returns freed pages to the system about a second
-# after they go unused, where jemalloc's default of ten seconds for
-# each stage kept the garbage of each render resident for twenty.
+# The jemalloc build compiles these options in, so the binary uses them
+# without any environment variable in its container. jemalloc's default
+# decay is ten seconds for each of its two stages, so memory that a
+# render frees stays resident for up to twenty seconds. With one second
+# per stage, a background thread returns it to the operating system
+# within about two.
 JEMALLOC_SYS_WITH_MALLOC_CONF = "background_thread:true,dirty_decay_ms:1000,muzzy_decay_ms:1000"

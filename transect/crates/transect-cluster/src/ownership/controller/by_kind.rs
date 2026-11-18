@@ -1,15 +1,12 @@
-//! Attribution by kind: one controller for every object of a custom
-//! kind that attribution by object left without one.
+//! Attributes a controller to each object of a custom kind that the
+//! parent module left without one, such as a certificate or a scan
+//! report. Every object of the kind gets the same controller, from the
+//! first of these rules that finds a workload:
 //!
-//! Attribution by object follows a custom workload's own pods and RBAC.
-//! Most custom resources run no pods, such as a certificate or a scan
-//! report, so the kind is attributed whole, by the first of two rules
-//! that finds a workload:
-//!
-//! - the image the kind's knowledge gives for its controller, among the
-//!   workloads that run pods;
-//! - the `app.kubernetes.io/` labels its CRD shares with one workload
-//!   (`packaged`), which is drawn as a guess.
+//! - the workloads that run the controller image that the kind's
+//!   knowledge gives,
+//! - the workload that shares `app.kubernetes.io/` labels with the
+//!   kind's CRD (see `packaged`), which is drawn as a guess.
 
 use std::collections::HashSet;
 
@@ -17,25 +14,26 @@ use k8s_openapi::api::core::v1::Pod;
 
 use super::managers::running;
 use super::packaged::{Package, Packages, matched};
-use super::{everyone, workloads_by_account};
+use super::{other_workloads, workloads_by_account};
 use crate::ownership::Ownership;
 use transect_graph::edges::{Edge, Endpoint, Kind, Object, Provenance};
 use transect_resources::knowledge::Kinds;
 
-/// What attribution by kind reads.
+/// The cluster state that `controlled_by_kind` reads.
 pub struct Sources<'a> {
     /// Each custom kind, by group and kind, with its objects.
     pub custom: &'a [(String, String, Vec<Object>)],
     pub packages: &'a Packages,
-    /// Each workload with the package its labels and annotations name.
+    /// Each workload with the package keys of its labels and annotations.
     pub workloads: &'a [(Object, Package)],
     pub pods: &'a [&'a Pod],
     pub ownership: &'a Ownership,
     pub kinds: &'a Kinds,
 }
 
-/// A controlled-by edge from each object of `sources.custom` outside
-/// `attributed` to the workload its kind's rule finds.
+/// Returns a controlled-by edge from each object of `sources.custom`
+/// that is not in `attributed` to the workloads that its kind's rule
+/// finds.
 pub fn controlled_by_kind(sources: &Sources, attributed: &HashSet<&Object>) -> Vec<Edge> {
     let by_account = workloads_by_account(sources.pods, sources.ownership);
     let mut edges = Vec::new();
@@ -46,7 +44,7 @@ pub fn controlled_by_kind(sources: &Sources, attributed: &HashSet<&Object>) -> V
         };
         let by_image = sources.kinds.of(group, kind).and_then(|knowledge| {
             let image = knowledge.controller_image.as_deref()?;
-            let pool = everyone(&by_account, first);
+            let pool = other_workloads(&by_account, first);
             let pool: Vec<_> = pool
                 .into_iter()
                 .filter(|c| !(&c.workload.group == group && &c.workload.kind == kind))
@@ -68,8 +66,9 @@ pub fn controlled_by_kind(sources: &Sources, attributed: &HashSet<&Object>) -> V
         let Some((workloads, provenance)) = by_image.or_else(by_package) else {
             continue;
         };
-        // Several workloads that run the image are a guess, and so is
-        // any match by labels, which show only what was installed together.
+        // A match by labels only shows that the CRD and the workload were
+        // installed together, so it is always a guess. Several workloads
+        // that run the image are also a guess.
         let guessed = workloads.len() > 1 || matches!(provenance, Provenance::Package { .. });
         for object in left {
             edges.extend(workloads.iter().map(|workload| Edge {
@@ -119,9 +118,9 @@ mod tests {
 
     const INSTANCE: &str = "{app.kubernetes.io/instance: scanner}";
 
-    /// The edges attribution by kind draws for two Reports, the first
-    /// already attributed, as each end's name, the rule's provenance,
-    /// and whether the edge is a guess.
+    /// The edges drawn for two `Report`s, the first already attributed,
+    /// as the name at each end, the provenance, and whether the edge is
+    /// a guess.
     fn edges(
         image: Option<&str>,
         crd_annotations: &str,
@@ -203,12 +202,12 @@ mod tests {
     }
 
     #[rstest]
-    #[case::the_image_its_knowledge_names(Some("example/scanner"), "{}", Some((by_image(), false)))]
+    #[case::the_image_its_knowledge_gives(Some("example/scanner"), "{}", Some((by_image(), false)))]
     #[case::the_image_before_the_package(Some("example/scanner"), INSTANCE, Some((by_image(), false)))]
     #[case::the_package_its_crd_names_as_a_guess(None, INSTANCE, Some((by_package(), true)))]
     #[case::an_image_nothing_runs(Some("example/other"), INSTANCE, Some((by_package(), true)))]
     #[case::neither(None, "{}", None)]
-    fn attributes_each_object_left_by_its_kinds_rule(
+    fn attributes_each_unattributed_object_by_its_kinds_rule(
         #[case] image: Option<&str>,
         #[case] annotations: &str,
         #[case] expected: Option<(Provenance, bool)>,

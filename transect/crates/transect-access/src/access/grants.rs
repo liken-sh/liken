@@ -1,7 +1,7 @@
-//! What each binding grants.  This module reduces every role's rules
-//! to the six capabilities once.  Then it gives each binding's grant to
-//! the accounts that the binding's subjects name, and to the members of
-//! the groups that they name.
+//! What each binding grants to which accounts.  The module reduces the
+//! rules of every role to the capabilities in `capability::ALL`, then
+//! adds each binding's grant to the accounts that its subjects name and
+//! to the members of the groups that its subjects name.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -17,11 +17,12 @@ use transect_graph::edges::Object;
 
 const RBAC: &str = "rbac.authorization.k8s.io";
 
-/// The label Kubernetes puts on the roles and bindings it ships.
+/// The label that Kubernetes puts on the roles and bindings that it
+/// creates by default.
 const DEFAULTS: (&str, &str) = ("kubernetes.io/bootstrapping", "rbac-defaults");
 
-/// Each capability a role's rules grant, with the names a rule limits
-/// it to, or none for every object.
+/// Each capability that a role's rules grant, with the object names
+/// that a rule limits it to, or an empty list for every object.
 type Capabilities = BTreeMap<Capability, Vec<String>>;
 
 /// What one role's rules grant.
@@ -33,15 +34,16 @@ pub(super) struct RoleGrants {
     /// What it grants through a ClusterRoleBinding, which also
     /// authorizes cluster-scoped resources such as `nodes/proxy`.
     pub(super) in_cluster: Capabilities,
-    /// The routes to another account it grants through a RoleBinding,
-    /// and through a ClusterRoleBinding.
+    /// The routes to another account that it grants through a
+    /// RoleBinding, and through a ClusterRoleBinding.
     pub(super) routes_in_namespace: BTreeMap<Route, Names>,
     pub(super) routes_in_cluster: BTreeMap<Route, Names>,
+    /// Whether a rule allows every verb on every resource.
     pub(super) everything: bool,
-    /// The GitOps kinds its rules let a subject create, patch, or
-    /// update, with the names a rule limits each to.
+    /// The GitOps kinds that its rules let a subject create, patch, or
+    /// update, with the names that a rule limits each to.
     pub(super) writes: BTreeMap<GitOpsKind, Names>,
-    /// The kinds its rules let a subject change.
+    /// The kinds that its rules let a subject change.
     changes: Vec<Changed>,
 }
 
@@ -59,13 +61,14 @@ impl RoleGrants {
         }
     }
 
-    /// Whether it grants any of the six through a binding that applies
-    /// at `at`.
+    /// Whether it grants any capability or route, or everything,
+    /// through a binding that applies at `at`.
     fn grants_any(&self, at: &Where) -> bool {
         !self.at(at).is_empty() || !self.routes_at(at).is_empty() || self.everything
     }
 
-    /// The routes it grants through a binding that applies at `at`.
+    /// The routes that it grants through a binding that applies at
+    /// `at`.
     pub(super) fn routes_at(&self, at: &Where) -> &BTreeMap<Route, Names> {
         match at {
             Where::Everywhere => &self.routes_in_cluster,
@@ -73,7 +76,8 @@ impl RoleGrants {
         }
     }
 
-    /// What it grants through a binding that applies at `at`.
+    /// The capabilities that it grants through a binding that applies
+    /// at `at`.
     pub(super) fn at(&self, at: &Where) -> &Capabilities {
         match at {
             Where::Everywhere => &self.in_cluster,
@@ -82,8 +86,8 @@ impl RoleGrants {
     }
 }
 
-/// Each kind of `gitops` that `rules` let a subject change, by what
-/// it applies or the source it fetches from.
+/// Each kind in `gitops` that `rules` let a subject create, patch, or
+/// update, with the names that the rules limit it to.
 fn writes(rules: &[PolicyRule], gitops: &[GitOpsKind]) -> BTreeMap<GitOpsKind, Names> {
     let mut found = BTreeMap::new();
     for kind in gitops {
@@ -98,7 +102,7 @@ fn writes(rules: &[PolicyRule], gitops: &[GitOpsKind]) -> BTreeMap<GitOpsKind, N
     found
 }
 
-/// Each capability `rules` grant through a binding of `scope`.
+/// Each capability that `rules` grant through a binding of `scope`.
 fn capabilities(rules: &[PolicyRule], gitops: &[GitOpsKind], scope: Scope) -> Capabilities {
     let mut found = Capabilities::new();
     for capability in ALL {
@@ -124,21 +128,23 @@ fn capabilities(rules: &[PolicyRule], gitops: &[GitOpsKind], scope: Scope) -> Ca
     found
 }
 
-/// One binding, with the fields that [`granted`] reads.
+/// One RoleBinding or ClusterRoleBinding, reduced to the fields that
+/// [`granted`] reads.
 struct Binding<'a> {
     object: Object,
-    /// Whether Kubernetes ships it, as its own components' bindings
-    /// are.
+    /// Whether it is one of the bindings that Kubernetes creates by
+    /// default.
     defaults: bool,
     role: Object,
     at: Where,
-    /// The namespace of a subject that names no namespace.
+    /// The namespace to use for a subject that has none.
     namespace: Option<&'a str>,
     subjects: &'a [Subject],
 }
 
-/// Every account a binding names or that a store holds, with what the
-/// bindings grant it, and who a binding lets change each kind.
+/// Every ServiceAccount in the cluster and every account that a binding
+/// names, with what the bindings grant each, and the accounts that the
+/// bindings let change each kind.
 pub fn granted(inputs: &Inputs) -> (BTreeMap<Account, Held>, Changers) {
     let roles = roles(inputs);
     let mut changers = Changers::default();
@@ -193,8 +199,9 @@ pub fn granted(inputs: &Inputs) -> (BTreeMap<Account, Held>, Changers) {
     (held, changers)
 }
 
-/// Adds what `grants` gives through `binding` to `held`, as a member of
-/// `group` when the binding names the group.
+/// Adds to `held` what `grants` gives through `binding`.  `group` is
+/// the group that the account is a member of, when the binding names
+/// that group and not the account.
 fn give(held: &mut Held, binding: &Binding, grants: &RoleGrants, group: Option<&str>) {
     for (capability, names) in grants.at(&binding.at) {
         let via = Via {
@@ -231,7 +238,8 @@ fn give(held: &mut Held, binding: &Binding, grants: &RoleGrants, group: Option<&
         .insert((binding.at.clone(), binding.role.clone()));
 }
 
-/// Every role, by its object, with what its rules grant.
+/// Every Role and ClusterRole, by its object, with what its rules
+/// grant.
 pub(super) fn roles(inputs: &Inputs) -> HashMap<Object, RoleGrants> {
     let rbac = inputs.rbac;
     let cluster = rbac.cluster_roles.iter().filter_map(|role| {
@@ -258,7 +266,7 @@ pub(super) fn roles(inputs: &Inputs) -> HashMap<Object, RoleGrants> {
     cluster.chain(namespaced).collect()
 }
 
-/// Every role's rules, by the role.
+/// The rules of every Role and ClusterRole, by its object.
 pub fn rules(rbac: &transect_cluster::cluster::RbacObjects) -> HashMap<Object, Vec<PolicyRule>> {
     let cluster = rbac.cluster_roles.iter().filter_map(|role| {
         let name = role.metadata.name.as_deref()?;
@@ -275,7 +283,8 @@ pub fn rules(rbac: &transect_cluster::cluster::RbacObjects) -> HashMap<Object, V
 }
 
 /// Every binding, with the role it names and where it applies.  A
-/// ClusterRoleBinding may name only a ClusterRole.
+/// ClusterRoleBinding may name only a ClusterRole, so the function
+/// skips one that names a Role.
 fn bindings<'a>(inputs: &'a Inputs) -> Vec<Binding<'a>> {
     let rbac = inputs.rbac;
     let cluster = rbac.cluster_role_bindings.iter().filter_map(|binding| {
@@ -311,16 +320,18 @@ fn bindings<'a>(inputs: &'a Inputs) -> Vec<Binding<'a>> {
     cluster.chain(namespaced).collect()
 }
 
-/// Whether Kubernetes ships the object `meta` describes.
+/// Whether Kubernetes creates the object that `meta` describes by
+/// default.
 fn shipped(meta: &ObjectMeta) -> bool {
     let labels = meta.labels.as_ref();
     labels.and_then(|l| l.get(DEFAULTS.0)).map(String::as_str) == Some(DEFAULTS.1)
 }
 
-/// The account that `subject` names.  A RoleBinding's ServiceAccount
-/// subject with no namespace is in the binding's namespace.  A User
-/// with the name that a ServiceAccount signs in as,
-/// `system:serviceaccount:{namespace}:{name}`, is that ServiceAccount.
+/// The account that `subject` names.  A ServiceAccount subject with no
+/// namespace is in `namespace`, the namespace of its RoleBinding.  A
+/// User subject named `system:serviceaccount:{namespace}:{name}`, the
+/// username that a ServiceAccount authenticates as, is that
+/// ServiceAccount.
 pub fn account(subject: &Subject, namespace: Option<&str>) -> Option<Account> {
     match subject.kind.as_str() {
         "ServiceAccount" => {
@@ -339,14 +350,15 @@ pub fn account(subject: &Subject, namespace: Option<&str>) -> Option<Account> {
     }
 }
 
-/// The groups that Kubernetes puts accounts in by default:
-/// `system:authenticated` holds every authenticated account, and
-/// `system:serviceaccounts` holds every `ServiceAccount`, so a grant to
-/// one of them applies to every account it holds.
+/// The groups that every account of some kind belongs to:
+/// `system:authenticated` has every authenticated account, and
+/// `system:serviceaccounts` has every ServiceAccount.  A grant to one
+/// of them applies to all of its members.
 pub const EVERYONE: [&str; 2] = [AUTHENTICATED, SERVICE_ACCOUNTS];
 
-/// Merges another grant's `names` into `limit`, a grant's names.  The
-/// result is every object when either grant is for every object.
+/// Merges `names`, the object names of one grant, into `limit`, the
+/// names of another grant of the same capability.  An empty list means
+/// every object, so the result is empty when either list is.
 fn merge(limit: &mut Names, names: &Names) {
     if names.is_empty() {
         limit.clear();

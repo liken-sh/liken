@@ -1,8 +1,8 @@
-//! What one object's fields name, read through its kind's knowledge:
-//! one relation for each value each reference's path reads, and one
-//! for the `Secret` it writes.  Reading the fields needs nothing but
-//! the object, so this module is apart from resolving what each
-//! relation reaches, which needs the cluster's addresses and graph.
+//! Reads the references that a `KindKnowledge` declares from one
+//! object's fields: one relation for each value that each reference's
+//! path reads, and one for the `Secret` that the object writes. An
+//! address is only recorded here. Resolving it needs the cluster's
+//! addresses and graph, so another module does that.
 
 use serde_json::Value;
 
@@ -11,49 +11,55 @@ use transect_graph::edges::ClusterScoped;
 use transect_graph::edges::{Kind, Object, Provenance};
 use transect_graph::untrusted::capped;
 
-/// The longest a field's value runs on a card, in characters.
+/// A field value longer than this many characters is cut.
 const VALUE_CHARS: usize = 200;
 
-/// The verb a card shows for the `Secret` an object writes.
+/// The verb a card shows for the `Secret` that an object writes.
 const WRITES: &str = "writes";
 
-/// One value of one field, and what it names.
+/// One value of one field, and what it refers to.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Relation {
     /// The verb a card shows, such as "plays through".
     pub label: String,
     /// The field path as the knowledge writes it.
     pub path: String,
-    /// The kind of edge it draws, or none for one that draws no edge:
-    /// a value with no object, or the `Secret` the object writes.
+    /// The kind of edge it draws. It is none for a value that matches no
+    /// single object and for the `Secret` that the object writes.
     pub edge: Option<Kind>,
     pub value: String,
     pub names: Names,
     pub provenance: Provenance,
 }
 
-/// What a relation's value names.
+/// What a relation's value refers to.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Names {
-    /// An object, in the referring object's namespace unless its kind
-    /// is not namespaced.
     Object(Object),
-    /// An address, which address resolution reads.
+    /// An address, which another module resolves against the cluster.
     Address,
-    /// Something `transect` has no object for, such as a monitor.
+    /// A value with no object: the reference declares no kind, as for a
+    /// monitor, or no object matches the value.
     Value,
-    /// A value that more than one far object holds, by how many, which
-    /// draws nothing, since the reference names one thing.
+    /// The number of objects that match the value. No edge is drawn,
+    /// because a reference refers to one object.
     Ambiguous(usize),
 }
 
-/// Each relation `data`, the spec and status of `object`, has through
-/// `knowledge`, in the order its references are written, then the
-/// `Secret` it writes.  A reference by value names the one object of
-/// `matches` whose field holds the value, in the referring object's
-/// namespace unless the reference sets `acrossNamespaces` or the far
-/// kind has none.  With none, it names the value alone, and with more
-/// than one, how many, and neither draws an edge.
+/// The relations of `object`, whose spec and status are `data`, through
+/// `knowledge`: one for each value of each reference, in the order the
+/// knowledge lists the references, then the `Secret` that it writes.
+///
+/// A reference with a `match` field refers to the object in `matches`
+/// whose field equals the value. That object must be in the referring
+/// object's namespace, unless the reference sets `acrossNamespaces`,
+/// the referring object is cluster-scoped, or the target kind is. When
+/// no object matches, the relation is `Names::Value`, and when several
+/// match, it is `Names::Ambiguous`. Neither draws an edge.
+///
+/// A reference without `match` refers to the object named by the value,
+/// in the referring object's namespace unless its kind is
+/// cluster-scoped.
 pub fn relations(
     knowledge: &KindKnowledge,
     object: &Object,
@@ -68,36 +74,37 @@ pub fn relations(
             let Some(value) = capped(&value, VALUE_CHARS) else {
                 continue;
             };
-            let named: Vec<(Names, Option<Kind>)> = match &reference.target {
+            let targets: Vec<(Names, Option<Kind>)> = match &reference.target {
                 Target::Object { kind, group } => {
                     let group = group.as_deref().unwrap_or_default();
                     match &reference.matched {
                         Some(field) => {
-                            let far = matches.named(group, kind, field, &value);
+                            let matched = matches.named(group, kind, field, &value);
                             let here = object.namespace.as_deref();
-                            let near = |far: &&Object| {
+                            let namespace_allows = |target: &&Object| {
                                 reference.across_namespaces
                                     || here.is_none()
-                                    || far.namespace.is_none()
-                                    || far.namespace.as_deref() == here
+                                    || target.namespace.is_none()
+                                    || target.namespace.as_deref() == here
                             };
-                            let far: Vec<&Object> = far.iter().filter(near).collect();
-                            match far[..] {
+                            let found: Vec<&Object> =
+                                matched.iter().filter(namespace_allows).collect();
+                            match found[..] {
                                 [] => vec![(Names::Value, None)],
                                 [one] => vec![(Names::Object(one.clone()), Some(reference.edge))],
-                                _ => vec![(Names::Ambiguous(far.len()), None)],
+                                _ => vec![(Names::Ambiguous(found.len()), None)],
                             }
                         }
                         None => {
-                            let named = named(object, group, kind, &value, scoped);
-                            vec![(Names::Object(named), Some(reference.edge))]
+                            let target = referenced_object(object, group, kind, &value, scoped);
+                            vec![(Names::Object(target), Some(reference.edge))]
                         }
                     }
                 }
                 Target::Address => vec![(Names::Address, Some(reference.edge))],
                 Target::Value => vec![(Names::Value, None)],
             };
-            for (names, edge) in named {
+            for (names, edge) in targets {
                 found.push(Relation {
                     label: label.into(),
                     path: reference.path.clone(),
@@ -113,8 +120,9 @@ pub fn relations(
     found
 }
 
-/// The `Secret` `object` writes, in its own namespace, from the field
-/// `writesSecret` names.
+/// The relation for the `Secret` that `object` writes, in its own
+/// namespace, named by the value at the knowledge's `writesSecret`
+/// path.
 pub fn written_secret(
     knowledge: &KindKnowledge,
     object: &Object,
@@ -134,15 +142,20 @@ pub fn written_secret(
     })
 }
 
-/// The object of `group` and `kind` named `name` that `from` refers to.
-fn named(from: &Object, group: &str, kind: &str, name: &str, scoped: &ClusterScoped) -> Object {
+fn referenced_object(
+    from: &Object,
+    group: &str,
+    kind: &str,
+    name: &str,
+    scoped: &ClusterScoped,
+) -> Object {
     let cluster_wide = scoped.contains(&(group.to_string(), kind.to_string()));
     let namespace = from.namespace.as_deref().filter(|_| !cluster_wide);
     Object::new(group, kind, namespace, name)
 }
 
 impl Relation {
-    /// "from status.receiver.name".
+    /// Where the value was read, such as "from status.receiver.name".
     pub fn source(&self) -> String {
         format!("from {}", self.path)
     }
@@ -244,9 +257,9 @@ status:
         );
     }
 
-    /// The amps of amps.example.com, each by its name, its namespace or
-    /// none, and the address in its status, as a store of the kind keeps
-    /// them.
+    /// A `Matches` of `Receiver` objects of `amps.example.com`. Each
+    /// entry is a name, a namespace or none, and the address in the
+    /// object's status.
     fn amps(amps: &[(&str, Option<&str>, &str)]) -> Matches {
         let resource = kube::core::ApiResource {
             group: "amps.example.com".into(),
@@ -280,13 +293,13 @@ status:
     }
 
     #[rstest]
-    #[case::one_far_object(
+    #[case::one_match(
         BY_ADDRESS,
         &[("amp", None, BUS), ("spare", None, "elsewhere:1883")],
         vec![(Some(Kind::DependsOn), amp(None, "amp"))]
     )]
-    #[case::no_far_object(BY_ADDRESS, &[("spare", None, "elsewhere:1883")], vec![(None, Names::Value)])]
-    #[case::two_far_objects_draw_neither(
+    #[case::no_match(BY_ADDRESS, &[("spare", None, "elsewhere:1883")], vec![(None, Names::Value)])]
+    #[case::two_matches_draw_no_edge(
         BY_ADDRESS,
         &[("amp", Some("shop"), BUS), ("other", Some("shop"), BUS)],
         vec![(None, Names::Ambiguous(2))]
@@ -306,7 +319,7 @@ status:
         &[("other", Some("blog"), BUS)],
         vec![(Some(Kind::DependsOn), amp(Some("blog"), "other"))]
     )]
-    fn names_the_one_far_object_whose_field_holds_the_value(
+    fn refers_to_the_one_object_whose_field_matches_the_value(
         #[case] spec: &str,
         #[case] amps_held: &[(&str, Option<&str>, &str)],
         #[case] expected: Vec<(Option<Kind>, Names)>,
@@ -349,7 +362,7 @@ status:
     #[case::a_missing_field("{references: [{path: status.display.name, kind: Display}]}")]
     #[case::no_references("{}")]
     #[case::a_missing_secret_field("{writesSecret: spec.password}")]
-    fn reads_nothing_from_a_field_not_written(#[case] spec: &str) {
+    fn reads_nothing_when_the_field_is_missing(#[case] spec: &str) {
         assert_eq!(read(spec), vec![]);
     }
 }

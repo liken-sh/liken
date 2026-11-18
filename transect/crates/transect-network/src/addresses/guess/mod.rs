@@ -1,12 +1,16 @@
-//! What each clue names, and the guessed edges that follow.  An object
-//! that a clue names counts only when transect watches its kind and
-//! has exactly one object of that name, so a field that matches
-//! nothing, or matches several, draws no edge.  A `Secret` is the one
-//! kind matched without its object, because transect never lists
-//! Secrets and a `secretRef` or `secretName` names one by the
-//! API's own convention.  An address counts only when it reaches
-//! something in the cluster, so that text that contains a dot does not
-//! add a box outside the cluster.
+//! Draws guessed depends-on edges for objects whose kinds have no
+//! declared relations, from clues in their spec and status. A clue is
+//! a field named like `secretRef` or `claimName` whose value names an
+//! object, or a value that looks like an address.
+//!
+//! A named object counts only when transect watches it, so a name that
+//! matches no object draws no edge. When the cluster serves no single
+//! kind for the field name, the name counts only when exactly one
+//! watched object in the namespace has it. A clue that names a `Secret`
+//! counts without the object when transect watches no `Secret`s. An
+//! address counts only when it reaches something inside the cluster, so
+//! text that merely contains a dot does not add a box outside the
+//! cluster.
 
 use std::collections::HashSet;
 
@@ -18,18 +22,21 @@ use transect_graph::edges::{
 };
 use transect_resources::knowledge::{Clue, Hint, Kinds, clues};
 
-/// What clues resolve against.
+/// The cluster state that clues resolve against.
 pub struct Lookup<'a> {
     /// Every kind the cluster serves, by group and kind.
     pub plurals: &'a Plurals,
+    /// Which kinds are cluster-scoped.
     pub scoped: &'a ClusterScoped,
     /// Every object transect watches.
     pub watched: &'a HashSet<Object>,
+    /// Resolves an address or an object to the ends it reaches.
     pub reading: &'a StatedReading<'a>,
 }
 
-/// The guessed edges `data`, the spec and status of `from`, draws, or
-/// none when its kind has knowledge.
+/// The guessed edges for the clues in `data`, the spec and status of
+/// `from`. There are none when `kinds` declares relations for the kind
+/// of `from`.
 pub fn guesses(
     kinds: &Kinds,
     from: &Object,
@@ -43,9 +50,11 @@ pub fn guesses(
     guessed(from, &clues(data), lookup, graph)
 }
 
-/// The guessed depends-on edges `clues` of `from` draw.  A clue whose
-/// end `graph` already joins to `from` by any kind draws no edge,
-/// because the API already gives the relation between the two.
+/// The guessed depends-on edges that the `clues` of `from` draw. A clue
+/// draws no edge when `graph` already joins `from` to its end by a kind
+/// in `TOGGLED` or by `ManagedBy`, because the edge already shows that
+/// relation. It also draws none when an earlier clue drew an edge to the
+/// same end, or when the end is an object that `from` owns.
 pub fn guessed(from: &Object, clues: &[Clue], lookup: &Lookup, graph: &Graph) -> Vec<Edge> {
     let start = Endpoint::Object(from.clone());
     let watched_kinds: HashSet<(&str, &str)> = lookup
@@ -58,7 +67,7 @@ pub fn guessed(from: &Object, clues: &[Clue], lookup: &Lookup, graph: &Graph) ->
         let ends = match &clue.hint {
             Hint::Address => address(clue, from, lookup),
             hint => match object(clue, hint, from, lookup, &watched_kinds) {
-                Some(object) => lookup.reading.stands_for(&object),
+                Some(object) => lookup.reading.endpoints_of(&object),
                 None => Vec::new(),
             },
         };
@@ -85,7 +94,7 @@ pub fn guessed(from: &Object, clues: &[Clue], lookup: &Lookup, graph: &Graph) ->
     drawn
 }
 
-/// What an address clue reaches inside the cluster.
+/// The ends inside the cluster that an address clue reaches.
 fn address(clue: &Clue, from: &Object, lookup: &Lookup) -> Vec<Endpoint> {
     let found = lookup
         .reading
@@ -95,7 +104,8 @@ fn address(clue: &Clue, from: &Object, lookup: &Lookup) -> Vec<Endpoint> {
     ends.into_iter().filter(inside).collect()
 }
 
-/// The one object a `*Ref` or `*Name` clue of `from` names.
+/// The object that a `*Ref` or `*Name` clue of `from` names, or none
+/// when no watched object matches.
 fn object(
     clue: &Clue,
     hint: &Hint,
@@ -127,9 +137,10 @@ fn object(
     found.then_some(object)
 }
 
-/// The kind a field's prefix names: `Service` of `service`, and a
-/// claim, as a volume's `claimName` reads, is a
-/// `PersistentVolumeClaim`.
+/// The kind that a field name's prefix implies: `service` gives
+/// `Service`, and `claim`, as in a volume's `claimName`, gives
+/// `PersistentVolumeClaim`. Any other prefix gives its capitalized
+/// form.
 fn kind_of(prefix: &str) -> String {
     if prefix.eq_ignore_ascii_case("claim") {
         return "PersistentVolumeClaim".into();
@@ -139,10 +150,10 @@ fn kind_of(prefix: &str) -> String {
     first.into_iter().chain(chars).collect()
 }
 
-/// The group and kind the cluster serves as `kind`, in `group` when it
-/// is given.  Among several groups the function selects the core one,
-/// because `Service` means the core `Service` to anyone who writes a
-/// `serviceName`.
+/// The group and kind that the cluster serves for `kind`, limited to
+/// `group` when it is given. When several groups serve the kind, the
+/// result is the core group's, because a field such as `serviceName`
+/// refers to the core `Service`.
 fn served(plurals: &Plurals, group: Option<&str>, kind: &str) -> Option<(String, String)> {
     let mut found: Vec<&(String, String)> = plurals
         .keys()
@@ -156,7 +167,8 @@ fn served(plurals: &Plurals, group: Option<&str>, kind: &str) -> Option<(String,
     }
 }
 
-/// The one watched object named `name` in `namespace`, of any kind.
+/// The watched object named `name` in `namespace`, of any kind, when
+/// exactly one has that name.
 fn only_named(name: &str, namespace: Option<&str>, watched: &HashSet<Object>) -> Option<Object> {
     let mut found = watched
         .iter()

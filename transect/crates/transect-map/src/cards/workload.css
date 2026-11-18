@@ -1,7 +1,7 @@
 /*
- * The workload card, beside the workload's pods.  It shares the
- * sidebar's column and its cards' styles.  Its findings are worth
- * knowing but are not faults, so they stay gray, as on the cluster
+ * The workload card, shown beside the workload's pods.  It uses the
+ * sidebar's column and the other cards' styles.  Its findings are
+ * informational, not faults, so they are gray, as on the cluster
  * sidebar.
  */
 
@@ -20,8 +20,8 @@
   overflow-wrap: break-word;
 }
 
-/* The title opens the workload's page.  It keeps the title's ink and
-   underlines on hover, as a namespace card's name does. */
+/* The title links to the workload's page and keeps the title's color,
+   as a namespace card's name does. */
 .workload-card-name .object-link { color: inherit; }
 
 .workload-card-status {
@@ -45,8 +45,8 @@
   gap: 4px;
 }
 
-/* What it runs is monospace, as names are.  An image is often longer
-   than the card is wide, so it wraps anywhere. */
+/* Names are monospace. An image reference is often wider than the
+   card, so it may wrap at any character. */
 .workload-card-runs {
   display: flex;
   flex-direction: column;

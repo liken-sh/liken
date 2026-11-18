@@ -1,6 +1,6 @@
-//! Every word that the loss shows.  The rest of the text in these lines
-//! is the name of a machine, a namespace, a workload, or a pod, a
-//! count, or a time.
+//! The sentences of the loss sidebar and of the tags on the map.  Each
+//! sentence is built from the words in this module and from the names
+//! of machines, namespaces, workloads, and pods, counts, and times.
 
 mod cascade;
 mod next;
@@ -8,12 +8,13 @@ mod real;
 
 use std::fmt;
 
-/// What an application loses when its identity provider goes down, in
-/// the cascade's lines and in the application's parcel tag.
+/// The text for what an application loses when its identity provider
+/// goes down, in the cascade's lines and in the tag on the application's
+/// namespace on the map.
 pub const SIGN_IN: &str = "sign-in";
 
 use super::sidebar::{Blind, Line, Named, Sidebar};
-use super::{Lost, Parcel, State, Stranded, Vital};
+use super::{Lost, NamespaceTile, State, Stranded, Vital};
 use crate::placement::Eviction;
 use crate::storage::Type;
 use transect_graph::links::{Piece, listed};
@@ -26,8 +27,8 @@ impl fmt::Display for Lost {
 }
 
 impl Lost {
-    /// "it" for one machine and "they" for several, each with its verb,
-    /// so each sentence agrees with the set of machines that it names.
+    /// The pronoun and verb that refer to the lost machines: "it
+    /// returns" for one machine and "they return" for several.
     fn pronoun(&self) -> (&'static str, &'static str) {
         match self.0.len() {
             1 => ("it", "returns"),
@@ -37,9 +38,10 @@ impl Lost {
 }
 
 impl Sidebar {
-    /// "If alpha were lost", or for machines really lost, "alpha is
-    /// lost · 3 minutes", and for a prediction during a real loss,
-    /// "If alpha were lost too".
+    /// The title of the sidebar: "If alpha were lost" for a prediction,
+    /// "If alpha were lost too" for a prediction while other machines
+    /// are really lost, and "alpha is lost · 3 minutes" when every
+    /// machine is really lost.
     pub fn title(&self) -> String {
         let supposed = list(self.supposed());
         match (self.all_real(), self.real()) {
@@ -67,9 +69,9 @@ impl Sidebar {
     }
 
     /// The heading of the workloads whose pods start on other machines
-    /// after Kubernetes evicts them: "Down for about 5 minutes, then back
-    /// elsewhere", with the time when Kubernetes evicts most of the pods
-    /// on the lost machines.
+    /// after Kubernetes evicts them, such as "Down for about 5 minutes,
+    /// then back elsewhere".  The time is when Kubernetes evicts most of
+    /// the pods on the lost machines.
     pub fn back_heading(&self) -> String {
         match self.next.usual {
             Some(Eviction::After(seconds)) if seconds > 0 => {
@@ -92,8 +94,8 @@ impl Sidebar {
         "No writes until a replica is promoted"
     }
 
-    /// The text that the sidebar shows in place of the stuck, back,
-    /// primary, and short lists when all four are empty.
+    /// The text that the sidebar shows when the stuck, back, primary,
+    /// and short lists are all empty.
     pub fn nothing_text(&self) -> Option<&'static str> {
         let nothing = self.stuck.is_empty()
             && self.back.is_empty()
@@ -135,13 +137,12 @@ fn object(pronoun: &str) -> &str {
     }
 }
 
-impl fmt::Display for Parcel {
-    /// The parcel's tag: "db down · web 1/2", or "down" and "1/2" for a
-    /// namespace with one workload, because the parcel's name already
-    /// identifies it.  Then come the down workloads' `provides` texts
-    /// from intent, "no order storage", and then the workloads in other
-    /// namespaces that its workloads cannot reach: "can't reach db and
-    /// cache".
+impl fmt::Display for NamespaceTile {
+    /// The tag on the namespace's area of the map.  It starts with the
+    /// state of each workload in `taken`, such as "db down · web 1/2" or
+    /// "api no primary", without the name when `alone`.  Then come the
+    /// `lacks` texts, "no order storage", and the `loses` workloads,
+    /// "can't reach db and cache".
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut tags: Vec<String> = self
             .taken
@@ -181,7 +182,7 @@ impl fmt::Display for Blind {
 }
 
 impl Blind {
-    /// What follows the namespace's name.
+    /// The workload's name, then what the cluster loses without it.
     pub fn pieces(&self) -> Vec<Piece> {
         let what = match self.vital {
             Vital::Alerting => "no alert reaches anyone, so nothing below pages",
@@ -201,7 +202,9 @@ impl fmt::Display for Line {
 impl Line {
     /// What follows the namespace's name: "web, its only instance",
     /// "web and cache, one replica each", "queue, none of 3 left", or
-    /// "web and api 2 of 3".  Workloads with the same phrase share it.
+    /// "web and api 2 of 3".  Workloads that have the same phrase are
+    /// listed together before it, and the phrases are separated by
+    /// semicolons.
     pub fn pieces(&self) -> Vec<Piece> {
         let mut phrases: Vec<(Phrase, Vec<&Named>)> = Vec::new();
         for (named, state) in &self.workloads {
@@ -223,15 +226,14 @@ impl Line {
 }
 
 impl Line {
-    /// Why the line's stranded workloads stay down, one sentence per
-    /// reason: "Its volume is attached to alpha." when the line names
-    /// one workload, and "Their volumes are attached to alpha." when
-    /// every workload in the line has the same reason.  Otherwise the
-    /// sentence names each group: "db and web: their volumes are
-    /// attached to alpha. radio holds usb radio-1 on alpha."
-    ///
-    /// Each workload that it names is its own piece, so a page links
-    /// each name and never searches the words for one.
+    /// Why the line's stranded workloads stay down, one sentence for
+    /// each reason.  When every workload of the line is stranded for the
+    /// same reason, the sentence does not name them: "Its volume is
+    /// attached to alpha." or "Their volumes are attached to alpha."
+    /// Otherwise each sentence starts with the workloads it covers: "db
+    /// and web: their volumes are attached to alpha. radio holds usb
+    /// radio-1 on alpha."  Each workload name is its own piece, so the
+    /// page can link it.
     pub fn stranded_pieces(&self) -> Vec<Piece> {
         let mut groups: Vec<(&Stranded, Vec<&str>)> = Vec::new();
         for (name, reason) in &self.stranded {
@@ -278,13 +280,15 @@ impl Line {
     }
 }
 
-/// A marker for the position of a workload's name in a sentence about
-/// it.  `stranded_pieces` puts the workload's own piece in its place.
+/// The name that `stranded_pieces` passes to `Stranded::sentence`, so it
+/// can split the sentence there and put the workload's linked name in
+/// its place.
 const NAME: &str = "\u{0}";
 
 impl Stranded {
-    /// Why one workload stays down, about `name`, or about "it" when
-    /// the line names only the one workload.
+    /// Why one workload stays down, naming it with `name`, or saying
+    /// "it" when `name` is `None`, which is when the line has only that
+    /// workload.
     fn sentence(&self, name: Option<&str>) -> String {
         let (its, it, it_object) = match name {
             Some(name) => (format!("{name}'s"), name.to_string(), name.to_string()),
@@ -306,7 +310,7 @@ impl Stranded {
         }
     }
 
-    /// Why several workloads stay down for one reason, about "them".
+    /// Why several workloads stay down for the same reason.
     fn plural(&self) -> String {
         match self {
             Self::Disk { machine } => format!("Their volumes are on {machine}'s own disk."),
@@ -328,8 +332,8 @@ impl Stranded {
     }
 }
 
-/// The kind of volume, as the text before "volume": "iSCSI ", "fast ",
-/// or nothing when the kind gives the reader no useful information.
+/// The word that goes before "volume": "iSCSI " or the storage class,
+/// such as "fast ", and nothing for NFS, local, and unclassed volumes.
 fn kind_word(kind: &Type) -> String {
     match kind {
         Type::Iscsi => "iSCSI ".to_string(),
@@ -344,7 +348,7 @@ enum Phrase {
     Only,
     NoneLeft(i32),
     Of(i32, i32),
-    /// The primary lost, with this many replicas left to promote.
+    /// The primary is lost, and this many replicas are left to promote.
     Primary(i32),
 }
 
@@ -379,8 +383,8 @@ impl Phrase {
     }
 }
 
-/// A time, rounded as a reader would round it: "30 seconds", "1 minute",
-/// "5 minutes".  A time past two minutes rounds to whole minutes.
+/// A time in words: "30 seconds", "1 minute", "5 minutes".  A time of
+/// two minutes or more rounds to whole minutes.
 fn duration(seconds: i64) -> String {
     match seconds {
         1 => "1 second".into(),
@@ -390,7 +394,7 @@ fn duration(seconds: i64) -> String {
     }
 }
 
-/// "a", "a and b", "a, b, and c".
+/// Joins names as "a", "a and b", or "a, b, and c".
 fn list<'a>(names: impl IntoIterator<Item = &'a str>) -> String {
     let names: Vec<&str> = names.into_iter().collect();
     match names.as_slice() {

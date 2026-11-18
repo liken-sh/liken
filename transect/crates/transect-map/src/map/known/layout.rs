@@ -1,17 +1,16 @@
-//! The fixed layout of a known kind's diagram: the object in the middle
-//! of a three by three grid and one box per relation in the eight places
-//! around it, in the order its knowledge lists them, from the top left
-//! across and down.
-//! A relation past the eighth takes a row of its own below, with no
-//! line, since a line to it would cross the box beneath the object.
+//! The layout of a known kind's diagram: the object in the center of a
+//! three by three grid, and one box per relation in the eight cells
+//! around it. The relations fill the cells in the order the kind's
+//! knowledge lists them, from the top left across and down.
+//! A relation past the eighth goes in a row below the grid and has no
+//! line, because a line to it would cross the box under the object.
 //! Each line runs straight from the object's edge, or its corner for a
-//! diagonal, to the facing edge or corner of the relation's box, so
-//! the lines fan out like the arrows in the boxes' labels.  A row is as
-//! tall as its tallest box needs, so no box clips its text.
+//! diagonal cell, to the facing edge or corner of the relation's box.
 
 use crate::map::section::lines::{ARROW, Point};
 
-/// A box's width, height, and the gaps between boxes, in pixels.
+/// A box's width and least height, and the gaps between boxes, in
+/// pixels.
 const WIDTH: i32 = 290;
 const HEIGHT: i32 = 150;
 const GAP_X: i32 = 64;
@@ -48,11 +47,11 @@ pub struct Place {
     pub line: Option<String>,
 }
 
-/// The board's size, the object's box, and the places of the relations
-/// around it, given the height each relation's box needs and the
-/// object's box needs.  Every box in a row takes the row's height, the
-/// tallest any of them needs and never less than `HEIGHT`, so a box
-/// grows to fit its lines and the rows below move down to make room.
+/// Returns the board's width and height, the object's box, and a place
+/// for each relation.  `needs` holds the height that each relation's box
+/// needs, and `center_needs` the object's.  Each row is as tall as the
+/// tallest box in it needs, and at least `HEIGHT`, so no box clips its
+/// text and the rows below move down.
 pub fn places(needs: &[i32], center_needs: i32) -> (i32, i32, Rect, Vec<Place>) {
     let at: Vec<(i32, i32, &str)> = (0..needs.len())
         .map(|index| match AROUND.get(index) {
@@ -96,8 +95,8 @@ pub fn places(needs: &[i32], center_needs: i32) -> (i32, i32, Rect, Vec<Place>) 
     (3 * WIDTH + 2 * GAP_X, last.y + last.height, center, places)
 }
 
-/// The straight path from `from`'s side facing `dx` and `dy` to the
-/// facing side of `to`.
+/// The straight path from the side or corner of `from` toward `dx` and
+/// `dy`, each -1, 0, or 1, to the facing side or corner of `to`.
 fn line(from: Rect, to: Rect, dx: i32, dy: i32) -> String {
     let start = Point {
         x: from.x + from.width / 2 + dx * from.width / 2,

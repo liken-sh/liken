@@ -1,6 +1,6 @@
-//! The workload page's pod tiles: one per pod, with its machine, age,
-//! restarts, and a bar each for memory and CPU against the pod's
-//! requests and limits.
+//! The pod tiles on the workload page. Each tile shows the pod's
+//! machine, age, and restart count, and a memory bar and a CPU bar that
+//! compare the pod's usage with its requests and limits.
 
 use k8s_openapi::api::core::v1::Pod;
 use k8s_openapi::jiff::Timestamp;
@@ -13,20 +13,20 @@ use transect_ground::machines::{pod_limits, pod_requests};
 use transect_observe::health::minutes_between;
 use transect_observe::usage::{Usage, Used};
 
-/// The label a Deployment's ReplicaSet puts on each pod, whose value is
-/// the middle of the pod's name.
+/// The label that a Deployment's ReplicaSet sets on each pod. Its value
+/// is the middle part of the pod's name.
 const POD_TEMPLATE_HASH: &str = "pod-template-hash";
 
 #[derive(Debug, PartialEq)]
 pub struct PodTile {
     /// The pod's full name, for its tooltip.
     pub name: String,
-    /// The name with a Deployment's template hash elided, as
-    /// "web-…-4sf9j", so tiles in a narrow column keep the part that
-    /// makes each name different.
+    /// The name with the template hash replaced by "…", as in
+    /// "web-…-4sf9j". A narrow column then still shows the part of the
+    /// name that differs between pods.
     pub short_name: String,
     pub machine: Option<String>,
-    /// Minutes since the pod started, when it has.
+    /// Minutes since the pod started, or `None` if it has not started.
     pub age: Option<i64>,
     pub restarts: i32,
     pub state: State,
@@ -49,12 +49,12 @@ pub enum State {
     Ready,
     /// Running, or waiting to run, but not ready.
     NotReady,
-    /// Succeeded or failed, as a CronJob's pods finish.
+    /// The pod succeeded or failed, as the pods of a Job do.
     Finished,
 }
 
-/// A tile for each of `pods`, those still running first, each group by
-/// name.
+/// A tile for each of `pods`. Tiles of pods that have not finished come
+/// first, and each group is sorted by name.
 pub fn tiles(pods: &[&Pod], usage: Option<&Usage>, now: Timestamp) -> Vec<PodTile> {
     let mut tiles: Vec<PodTile> = pods.iter().map(|pod| tile(pod, usage, now)).collect();
     tiles.sort_by(|a, b| {

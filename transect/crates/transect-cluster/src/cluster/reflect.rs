@@ -1,7 +1,6 @@
-//! One reflector per kind: a watch on the API that keeps an in-memory
-//! store of every object of that kind current, trimmed to what `transect`
-//! reads, and marks the cluster changed when an event changes what the
-//! store holds.
+//! One watch per kind. Each watch fills an in-memory store with every
+//! object of the kind, trimmed to the fields `transect` reads, and
+//! signals when an event changes the store's contents.
 
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -22,18 +21,18 @@ use super::change::{Ignored, differs};
 use super::trim;
 use transect_resources::knowledge::Column;
 
-/// The sender on which a watch reports that its store's contents
-/// changed, and the keys it leaves out when it decides whether they did.
+/// The sender that a watch signals when its store's contents change,
+/// and the keys that it ignores when it compares them.
 #[derive(Clone)]
 pub struct Changes {
     pub sender: watch::Sender<()>,
     pub ignored: Ignored,
 }
 
-/// Starts watching every object `api` lists and returns the store the
-/// watch fills.  The watch restarts with backoff after an error, so a
-/// dropped connection to the API server leaves the store stale until it
-/// reconnects instead of ending the watch.
+/// Starts a watch on every object of `api` and returns the store that
+/// it fills, with each object trimmed by `trim::meta`. After an error
+/// the watch restarts with backoff, so when the connection to the API
+/// server drops, the store is stale until the watch reconnects.
 pub fn reflect<K>(api: Api<K>, changes: Changes) -> Store<K>
 where
     K: Resource + Clone + DeserializeOwned + Serialize + Debug + Send + Sync + 'static,
@@ -44,8 +43,8 @@ where
     })
 }
 
-/// `reflect` for a built-in kind whose objects `trim` cuts to the
-/// fields `transect` reads.
+/// Like `reflect`, but `trim` cuts each object down to the fields
+/// `transect` reads, in place of `trim::meta`.
 pub fn reflect_cut<K>(api: Api<K>, changes: Changes, trim: fn(&mut K)) -> Store<K>
 where
     K: Resource + Clone + DeserializeOwned + Serialize + Debug + Send + Sync + 'static,
@@ -54,37 +53,36 @@ where
     reflect_cut_with(api, K::DynamicType::default(), changes, trim)
 }
 
-/// What a custom kind's watch holds of each object.
+/// How much of each object the store of a custom kind keeps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Holding {
-    /// The whole object, for a kind whose fields `transect` reads.
+pub enum Stored {
+    /// Everything that `trim::whole_custom` keeps, for a kind whose
+    /// fields `transect` reads.
     Whole,
-    /// Its metadata, its conditions, and its printer columns' values,
-    /// for every other kind.
+    /// The metadata, the conditions, the values of the printer columns,
+    /// and the fields that kind knowledge reads, for every other kind.
     Trimmed,
 }
 
-/// A custom kind's watch: the store it fills, its task, which stops
-/// the watch when aborted, and whether its first list is in.
+/// The watch of a custom kind. Aborting `task` stops the watch, and
+/// `listed` is set when the first list is complete.
 pub struct CustomWatch {
     pub store: Store<DynamicObject>,
     pub task: AbortHandle,
     pub listed: Arc<AtomicBool>,
 }
 
-/// `reflect_cut_with` for a custom kind, whose objects keep the names of
-/// the managers that write their status, which controller attribution
-/// reads.  Everything else in their managed fields is dropped.  A
-/// trimmed kind's objects keep only their metadata, their conditions,
-/// the values of `kept`'s printer columns, and `kept`'s fields, the
-/// paths its kind knowledge reads.  The watch runs until its task is
-/// aborted, so the watch on a kind that nothing needs any more can be
-/// stopped.
+/// Starts a watch for the custom kind `resource`. Each object keeps the
+/// names of the field managers of its `status`, which controller
+/// attribution reads, and drops the rest of its managed fields. With
+/// `Stored::Trimmed`, `kept` gives the printer columns and the field
+/// paths to keep. The watch runs until its task is aborted, so the
+/// watch of a kind that no page needs any more can be stopped.
 pub fn reflect_custom(
     client: Client,
     resource: ApiResource,
     changes: Changes,
-    holding: Holding,
+    stored: Stored,
     kept: (Vec<Column>, Vec<String>),
 ) -> CustomWatch {
     let kind = (resource.group.clone(), resource.kind.clone());
@@ -93,12 +91,12 @@ pub fn reflect_custom(
     let api: Api<DynamicObject> = Api::all_with(client, &resource);
     let listed = Arc::new(AtomicBool::new(false));
     let events = watcher(api, watcher::Config::default()).default_backoff();
-    let task = match holding {
-        Holding::Whole => {
+    let task = match stored {
+        Stored::Whole => {
             let events = events.modify(trim::whole_custom);
             forward(kind, resource, writer, events, changes, listed.clone())
         }
-        Holding::Trimmed => {
+        Stored::Trimmed => {
             let (columns, fields) = kept;
             let events = events
                 .modify(move |object| trim::conditions_and_columns(object, &columns, &fields));
@@ -112,7 +110,6 @@ pub fn reflect_custom(
     }
 }
 
-/// `reflect_cut` for a kind whose type is `dyntype`.
 fn reflect_cut_with<K>(
     api: Api<K>,
     dyntype: K::DynamicType,
@@ -132,17 +129,18 @@ where
     let events = watcher(api, watcher::Config::default())
         .default_backoff()
         .modify(trim);
-    // A built-in kind's watch runs for as long as `transect` does.
+    // The handle is dropped without aborting, so the watch runs until
+    // `transect` exits.
     let listed = Arc::new(AtomicBool::new(false));
     let _running = forward(kind, dyntype, writer, events, changes, listed);
     store
 }
 
-/// Runs `events`, already trimmed, into `writer`, marks `changes` after
-/// an event that changes what the store holds but for the keys it
-/// ignores on `kind`, and sets `listed` once the first list is in.  The
-/// writer applies each event before the change is marked, so a reader
-/// woken by it finds the store already holding the change.
+/// Applies each trimmed event to the store of `writer`, and signals
+/// `changes.sender` when the event changes the store, apart from the
+/// keys that `changes.ignored` lists for `kind`. The event is applied
+/// before the signal is sent, so a reader that the signal wakes finds
+/// the change in the store.
 fn forward<K>(
     kind: (String, String),
     dyntype: K::DynamicType,
@@ -162,9 +160,9 @@ where
         while let Some(event) = events.next().await {
             match event {
                 Ok(event) => {
-                    // The first list always marks a change, because a
-                    // page draws a kind that has not listed yet
-                    // differently.
+                    // The first completed list signals even when the
+                    // store did not change, because a page draws a kind
+                    // that has not been listed yet differently.
                     let done = matches!(event, watcher::Event::InitDone);
                     let first = done && !listed.load(Ordering::Acquire);
                     let ignored = changes.ignored.keys(&kind.0, &kind.1);
@@ -173,17 +171,17 @@ where
                     writer.apply_watcher_event(&event);
                     if done {
                         listed.store(true, Ordering::Release);
-                        tracing::debug!(group = %kind.0, kind = %kind.1, objects = store.len(), "listed");
+                        tracing::debug!(group = %kind.0, kind = %kind.1, objects = store.len(), "Listed the objects of the kind");
                     }
-                    tracing::trace!(group = %kind.0, kind = %kind.1, signalled, "watch event");
-                    // send_replace, unlike send, succeeds while no one
-                    // is subscribed yet.
+                    tracing::trace!(group = %kind.0, kind = %kind.1, signalled, "Received a watch event");
+                    // `send_replace` stores the value when no receiver
+                    // exists yet, where `send` would fail.
                     if signalled {
                         changes.sender.send_replace(());
                     }
                 }
                 Err(error) => {
-                    tracing::warn!(group = %kind.0, kind = %kind.1, %error, "watch failed; retrying")
+                    tracing::warn!(group = %kind.0, kind = %kind.1, %error, "The watch of the kind returned an error and will be retried")
                 }
             }
         }

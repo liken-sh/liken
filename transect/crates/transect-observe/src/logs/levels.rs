@@ -1,10 +1,11 @@
-//! The meaning of the values of a log store's level field, which its
-//! `LogSource` declares in `levels`.  Each list holds the starts of the
-//! values that name an error, a warning, or a plain line, in any case.
-//! A store that keeps OpenTelemetry's `severity_text` writes `ERROR`,
-//! `Warn`, and `INFO`, and a store that keeps syslog's names writes
-//! `err` and `crit`.  When no list names a value, such as
-//! `Unspecified`, transect guesses the line's level from its text.
+//! How to read the values of a log store's level field. The
+//! `LogSource` declares them in `levels`: each list holds prefixes of
+//! the values that mean an error, a warning, or a plain line, matched
+//! without regard to case. A store that uses OpenTelemetry's
+//! `severity_text` writes values such as `ERROR`, `Warn`, and `INFO`,
+//! and a store that uses syslog severities writes `err` and `crit`.
+//! When no list matches a value, such as `Unspecified`, transect
+//! guesses the line's level from its text.
 
 use serde::Deserialize;
 
@@ -22,8 +23,8 @@ pub struct Levels {
 }
 
 impl Levels {
-    /// The levels, or the reason they do not validate.  An empty start
-    /// matches the start of every value, so it would name every line.
+    /// The levels, or the reason they are invalid. An empty prefix
+    /// matches every value, so it would match every line.
     pub fn checked(self) -> Result<Self, String> {
         let lists = [
             ("error", &self.error),
@@ -40,8 +41,8 @@ impl Levels {
         Ok(self)
     }
 
-    /// The level that `value` names, matched by the start of the value,
-    /// or `None` when no list names it.
+    /// The level whose list has a prefix of `value`, or `None` when no
+    /// list does.
     pub fn named(&self, value: &str) -> Option<Level> {
         let value = value.trim().to_lowercase();
         let starts = |starts: &[String]| {
@@ -80,21 +81,24 @@ mod tests {
     #[case::debug("debug", Some(Level::Plain))]
     #[case::unspecified("Unspecified", None)]
     #[case::empty("", None)]
-    fn a_value_names_a_level_or_none(#[case] value: &str, #[case] expected: Option<Level>) {
+    fn a_value_matches_a_level_or_none(#[case] value: &str, #[case] expected: Option<Level>) {
         assert_eq!(levels().named(value), expected);
     }
 
     #[rstest]
     #[case::an_empty_error("{error: ['']}", "levels.error[0] is empty")]
     #[case::a_blank_plain("{error: [err], plain: [info, ' ']}", "levels.plain[1] is empty")]
-    fn refuses_an_empty_start(#[case] levels: &str, #[case] says: &str) {
+    fn rejects_an_empty_prefix(#[case] levels: &str, #[case] message: &str) {
         let levels: Levels = serde_yaml::from_str(levels).unwrap();
         let error = levels.checked().unwrap_err();
-        assert!(error.contains(says), "{error:?} does not say {says:?}");
+        assert!(
+            error.contains(message),
+            "the error is {error:?}, want it to contain {message:?}"
+        );
     }
 
     #[rstest]
-    fn no_lists_name_nothing() {
+    fn empty_lists_match_nothing() {
         assert_eq!(Levels::default().named("ERROR"), None);
     }
 }

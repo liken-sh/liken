@@ -8,9 +8,9 @@ use kube::ResourceExt;
 
 use transect_cluster::workloads::Workload;
 
-/// The templates of `workload` whose labels a `Service` of `namespace`
-/// selects.  A `Service` with no selector does not choose its endpoints
-/// by label, so it selects none of the templates.
+/// The templates of `workload` whose labels a `Service` in `namespace`
+/// selects.  A `Service` with no selector, or an empty one, selects no
+/// template, because Kubernetes does not choose its endpoints by label.
 pub fn templates<'a>(
     workload: &Workload<'_, 'a>,
     services: &'a [Arc<Service>],

@@ -1,14 +1,14 @@
-//! Which workload runs the controller that serves an `Ingress`.
+//! Finds the workload that runs the controller of an `Ingress`.
 //!
-//! An `Ingress` names its class, and the class's `IngressClass` names
-//! its controller by an identifier.  An `IngressController` that
-//! declares that identifier names the image the controller runs, so
-//! the workload is the one whose pods run that image.  With no such
-//! resource, transect guesses the workload from the workloads that a
-//! `LoadBalancer` `Service` sends web traffic to, because an ingress
-//! controller receives its traffic that way.  The guess is the
-//! workload whose name contains the class's name, or the only such
-//! workload.  The page marks a guessed workload as a guess.
+//! An `Ingress` has a class, and its `IngressClass` has a controller
+//! identifier. An `IngressController` resource that declares the same
+//! identifier gives the image that the controller runs, so the workload
+//! is the one whose pods run that image.
+//!
+//! When no `IngressController` declares the identifier, transect guesses
+//! among the workloads that a `LoadBalancer` `Service` sends web traffic
+//! to, because an ingress controller usually receives its traffic that
+//! way. The page marks the result as a guess.
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
@@ -22,29 +22,30 @@ use transect_cluster::ownership::{Ownership, runs_image};
 use transect_graph::edges::Object;
 use transect_graph::pods::finished;
 
-/// The data that finds the workload that runs the controller of each
-/// `Ingress`'s class.
+/// The cluster state that `Serving::of` reads to find the workload
+/// that runs an `IngressClass`'s controller.
 #[derive(Debug, Default)]
 pub struct Serving {
-    /// Each `IngressClass`'s name, with the controller its spec names.
+    /// The controller identifier from each `IngressClass`'s spec, by
+    /// class name.
     classes: HashMap<String, String>,
-    /// Each declared controller's identifier, with the workloads that
-    /// run its image.
+    /// For each controller identifier that an `IngressController`
+    /// declares, the workloads with a running pod that uses its image.
     declared: HashMap<String, BTreeSet<Object>>,
-    /// The workloads a `LoadBalancer` `Service` sends web traffic to.
-    way_in: Vec<Object>,
+    /// The workloads that a `LoadBalancer` `Service` sends web traffic
+    /// to, which are the candidates when a controller is not declared.
+    load_balanced: Vec<Object>,
 }
 
-/// The workload that runs an `Ingress`'s controller, and how it was
-/// found.
+/// The workload that runs an `Ingress`'s controller, and how transect
+/// found it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Served {
-    /// It runs the image an `IngressController` declares for the
-    /// class's controller.
+    /// Its pods run the image that an `IngressController` declares for
+    /// the class's controller.
     Declared(Object),
-    /// It receives the cluster's web traffic, and its name contains
-    /// the class's name or it is the only workload that receives that
-    /// traffic.
+    /// Chosen by `guess` from the workloads that a `LoadBalancer`
+    /// `Service` sends web traffic to.
     Guessed(Object),
 }
 
@@ -54,7 +55,7 @@ impl Serving {
         controllers: &[IngressController],
         pods: &[Arc<Pod>],
         ownership: &Ownership,
-        way_in: Vec<Object>,
+        load_balanced: Vec<Object>,
     ) -> Self {
         let classes = classes
             .iter()
@@ -86,12 +87,14 @@ impl Serving {
         Self {
             classes,
             declared,
-            way_in,
+            load_balanced,
         }
     }
 
-    /// The workload that runs `class`'s controller, or none when no
-    /// one workload does.
+    /// The workload that runs `class`'s controller. When an
+    /// `IngressController` declares that controller, the result is the
+    /// one workload that runs its image, or none if zero or several do.
+    /// Otherwise the result is a guess, if there is one.
     pub fn of(&self, class: Option<&str>) -> Option<Served> {
         let controller = class.and_then(|class| self.classes.get(class));
         if let Some(workloads) = controller.and_then(|c| self.declared.get(c)) {
@@ -101,7 +104,7 @@ impl Serving {
                 _ => None,
             };
         }
-        guess(class, &self.way_in).map(|found| Served::Guessed(found.clone()))
+        guess(class, &self.load_balanced).map(|found| Served::Guessed(found.clone()))
     }
 }
 
@@ -114,20 +117,22 @@ pub fn runs(pod: &Pod, image: &str) -> bool {
         .any(|running| runs_image(running, image))
 }
 
-/// The workload of `way_in` that runs `class`'s controller: the one
-/// whose name contains the class's name, or the only one there is.
-fn guess<'a>(class: Option<&str>, way_in: &'a [Object]) -> Option<&'a Object> {
+/// Guesses which workload of `load_balanced` runs `class`'s controller.
+/// The guess is the only workload whose name contains the class's name.
+/// When no name contains it, the guess is the only workload in the list.
+/// Otherwise there is no guess.
+fn guess<'a>(class: Option<&str>, load_balanced: &'a [Object]) -> Option<&'a Object> {
     let named: Vec<&Object> = match class {
         Some(class) => {
             let class = class.to_lowercase();
-            let named = way_in
+            let named = load_balanced
                 .iter()
                 .filter(|w| w.name.to_lowercase().contains(&class));
             named.collect()
         }
         None => Vec::new(),
     };
-    match (named.as_slice(), way_in) {
+    match (named.as_slice(), load_balanced) {
         ([one], _) => Some(one),
         ([], [only]) => Some(only),
         _ => None,
@@ -147,17 +152,17 @@ mod tests {
 
     #[rstest]
     #[case::named_for_its_class(Some("web"), &["web-proxy", "mail"], Some("web-proxy"))]
-    #[case::the_only_way_in(Some("web"), &["gateway"], Some("gateway"))]
-    #[case::no_class_and_the_only_way_in(None, &["gateway"], Some("gateway"))]
-    #[case::several_none_named(Some("web"), &["gateway", "mail"], None)]
-    #[case::no_way_in(Some("web"), &[], None)]
+    #[case::the_only_load_balanced_workload(Some("web"), &["gateway"], Some("gateway"))]
+    #[case::no_class_and_one_load_balanced_workload(None, &["gateway"], Some("gateway"))]
+    #[case::several_and_none_named_for_the_class(Some("web"), &["gateway", "mail"], None)]
+    #[case::no_load_balanced_workload(Some("web"), &[], None)]
     fn guesses_the_workload_that_serves_it(
         #[case] class: Option<&str>,
-        #[case] way_in: &[&str],
+        #[case] load_balanced: &[&str],
         #[case] expected: Option<&str>,
     ) {
         let serving = Serving {
-            way_in: way_in.iter().map(|name| deployment(name)).collect(),
+            load_balanced: load_balanced.iter().map(|name| deployment(name)).collect(),
             ..Serving::default()
         };
         let expected = expected.map(|name| Served::Guessed(deployment(name)));
@@ -177,8 +182,10 @@ mod tests {
         Arc::new(serde_yaml::from_str(&text).unwrap())
     }
 
-    /// The fixture: the class `web` names `example.io/proxy`, and the
-    /// workloads `router` and `mail` receive web traffic.
+    /// A `Serving` where the class `web` has the controller
+    /// `example.io/proxy`, and `router` and `mail` are the workloads a
+    /// `LoadBalancer` `Service` sends web traffic to. `declared` sets
+    /// whether an `IngressController` declares the controller.
     fn serving(pods: &[Arc<Pod>], declared: bool) -> Serving {
         let ownership =
             Ownership::build(pods.iter().map(|pod| transect_cluster::ownership::Entry {
@@ -202,18 +209,18 @@ mod tests {
     }
 
     #[rstest]
-    #[case::the_one_that_runs_its_image(
+    #[case::one_workload_runs_its_image(
         &[("router", "ghcr.io/example/proxy:3"), ("mail", "example/mail:1")],
         true,
         Some(Served::Declared(deployment("router")))
     )]
-    #[case::two_that_run_it(
+    #[case::two_workloads_run_it(
         &[("router", "example/proxy:3"), ("mail", "example/proxy:3")],
         true,
         None
     )]
-    #[case::none_that_runs_it(&[("mail", "example/mail:1")], true, None)]
-    #[case::undeclared_and_unnamed(&[("router", "example/proxy:3")], false, None)]
+    #[case::no_workload_runs_it(&[("mail", "example/mail:1")], true, None)]
+    #[case::undeclared_and_not_named_for_the_class(&[("router", "example/proxy:3")], false, None)]
     fn finds_the_workload_that_runs_the_declared_image(
         #[case] pods: &[(&str, &str)],
         #[case] declared: bool,

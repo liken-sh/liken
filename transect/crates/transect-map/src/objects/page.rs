@@ -1,8 +1,9 @@
-//! The page of any object of any kind: its board, with its own
-//! conditions and facts in the middle and what it names and what names
-//! it around them, and its card.  The spec of a kind that transect has
-//! no knowledge of may contain a credential, and the page has no way to
-//! tell, so the page never renders a raw spec.
+//! The page for one object of any kind. Its board shows the object's
+//! conditions and facts in the middle, with the objects it references
+//! and the objects that reference it around them. The page never renders
+//! the object's spec, because the spec of a kind that transect has no
+//! knowledge of can hold a credential in a field that transect cannot
+//! recognize.
 
 use askama::Template;
 use serde_json::Value;
@@ -12,8 +13,7 @@ use transect_frame::frame::crumbs::Crumb;
 use transect_graph::untrusted::capped;
 use transect_observe::health::{Deciding, Level};
 
-/// The longest, in characters, that each text field of a condition runs
-/// on the page.
+/// Each text field of a condition is cut to this many characters.
 const MESSAGE_CHARS: usize = 300;
 
 #[derive(Template)]
@@ -21,14 +21,14 @@ const MESSAGE_CHARS: usize = 300;
 pub struct ObjectPage {
     pub kind: String,
     pub name: String,
-    /// Its namespace and the layer the namespace is in, for a namespaced
-    /// kind.
+    /// The object's namespace and the layer that the namespace is in.
+    /// `None` for a cluster-scoped kind.
     pub place: Option<(String, String)>,
-    /// The kind's plural, "Certificates", and its list in the namespace
-    /// when it has one.
+    /// The kind's plural, such as "Certificates".
     pub label: String,
+    /// The link to the kind's list page, when the kind has one.
     pub kind_href: Option<String>,
-    /// The page's own path, which its event stream's URL includes.
+    /// The page's path, which `events_url` appends to `/events`.
     pub path: String,
     pub board: ObjectBoard,
     pub card: ObjectCard,
@@ -41,13 +41,14 @@ pub struct Condition {
     pub status: String,
     pub reason: Option<String>,
     pub message: Option<String>,
-    /// The level its dot draws, or none for gray: only the condition
-    /// that decides the object's health takes a color.
+    /// The color of the condition's dot. Only the condition that decides
+    /// the object's health has a level, and `None` draws a gray dot.
     pub level: Option<Level>,
 }
 
-/// Every condition in `data`'s `status.conditions`, in the order the
-/// controller writes them, each with the level that `deciding` gives it.
+/// The conditions in `data`'s `status.conditions`, in their order in the
+/// object, each with the level that `deciding` returns for it. A
+/// condition with no `type` is skipped.
 pub fn conditions(data: &Value, deciding: &Deciding) -> Vec<Condition> {
     let found = data.pointer("/status/conditions").and_then(Value::as_array);
     found
@@ -73,8 +74,8 @@ pub fn conditions(data: &Value, deciding: &Deciding) -> Vec<Condition> {
 }
 
 impl ObjectPage {
-    /// The crumb: the cluster, then the layer and the namespace for a
-    /// namespaced object, then its kind and its name.
+    /// The breadcrumbs: the cluster, then the layer and the namespace
+    /// for a namespaced object, then the kind and the name.
     pub fn crumbs(&self) -> Vec<Crumb> {
         let mut crumbs = vec![Crumb::home()];
         if let Some((namespace, layer)) = &self.place {

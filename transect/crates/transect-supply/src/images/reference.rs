@@ -1,9 +1,11 @@
-//! The image a container runs, read from its status's `imageID`: the
-//! registry, the repository, and the digest the kubelet pulled.
+//! The image a container runs, read from the container status's
+//! `imageID`: the registry, the repository, and the digest that the
+//! kubelet pulled.
 //!
-//! The spec's `image` names a tag, which can move to other content.  The
-//! status's `imageID` names the content itself, so its labels never
-//! change and transect reads them once.
+//! The spec's `image` can name a tag, and a tag can later point to other
+//! content.  The `imageID` names a digest, which always names the same
+//! content, so an image's labels never change and transect reads them
+//! once.
 
 /// One image by digest.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -16,8 +18,8 @@ pub struct ImageRef {
     pub digest: String,
 }
 
-/// Docker Hub's name in image references.  Docker Hub does not serve its
-/// API at this host.
+/// Docker Hub's name in image references.  Its registry API is at a
+/// different host, which `ImageRef::api_host` returns.
 pub const DOCKER_HUB: &str = "docker.io";
 
 impl ImageRef {
@@ -30,8 +32,8 @@ impl ImageRef {
     }
 }
 
-/// The registry that a host or a credential key names, with each of
-/// Docker Hub's aliases replaced by `docker.io`.
+/// The registry name for a host or a credential key, lowercased, with
+/// each of Docker Hub's host names replaced by `docker.io`.
 pub fn registry_name(host: &str) -> String {
     let host = host.to_ascii_lowercase();
     match host.as_str() {
@@ -40,11 +42,11 @@ pub fn registry_name(host: &str) -> String {
     }
 }
 
-/// The image an `imageID` names, as the runtimes write it: with or
-/// without a scheme such as `docker-pullable://`, and with the registry
-/// left out for Docker Hub.  It returns `None` for an ID that is only a
-/// local image's ID, such as `sha256:…` alone, because no registry
-/// serves it.
+/// The image that an `imageID` refers to.  Runtimes write an `imageID`
+/// with or without a scheme such as `docker-pullable://`, and without a
+/// registry for Docker Hub.  It returns `None` for an ID that has no
+/// repository, such as `sha256:…` alone, because no registry serves that
+/// image.
 pub fn parse(image_id: &str) -> Option<ImageRef> {
     let id = image_id
         .split_once("://")
@@ -80,8 +82,8 @@ pub fn parse(image_id: &str) -> Option<ImageRef> {
     })
 }
 
-/// The name without a tag, which some runtimes leave on an `imageID`.
-/// A tag follows the last `/`, and a colon before that `/` is a
+/// The name without its tag, which some runtimes keep in an `imageID`.
+/// A tag is after the last `/`, and a colon before that `/` is a
 /// registry's port.
 fn strip_tag(name: &str) -> &str {
     let last = name.rfind('/').map_or(0, |slash| slash + 1);

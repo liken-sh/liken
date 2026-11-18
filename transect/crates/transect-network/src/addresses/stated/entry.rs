@@ -1,10 +1,9 @@
-//! One entry of a list that intent writes, such as `depends-on`, read
-//! as what it names: a URL, an object by its resource and name, or a
-//! host.
+//! Reads one entry of a list that a person writes, such as
+//! `depends-on`, as a URL, a host, or an object by its resource and
+//! name.
 
 use crate::addresses::parse::{self, Address};
 
-/// What one entry names.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Entry {
     /// A URL, a host, or a `host:port`.
@@ -21,12 +20,10 @@ pub enum Entry {
     Unread,
 }
 
-/// What `entry` names.  `served` returns whether the cluster serves a
-/// resource of that name, as `kubectl` names it.  An entry with a
-/// scheme is a URL.  An entry with a slash and no scheme is an object,
-/// because a host has no slash.  Any other entry is a host.  An entry
-/// that names more than one address, or none, is unread, because an
-/// entry names one thing.
+/// `served` returns whether the cluster serves a resource by its
+/// plural name, such as `deployments`.  An entry with a slash and no
+/// `://` is an object, because a host has no slash.  Any other entry
+/// must parse as exactly one address, or it is unread.
 pub fn read(entry: &str, served: impl Fn(&str) -> bool) -> Entry {
     if !entry.contains("://") && entry.contains('/') {
         return object(entry, served);

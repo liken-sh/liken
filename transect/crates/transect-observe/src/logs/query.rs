@@ -33,7 +33,7 @@ impl Language {
         match name {
             "logsql" => Ok(Self::LogsQl),
             other => Err(format!(
-                "this build of transect queries a log store only in LogsQL, which is language logsql, not {other:?}"
+                "the language {other:?} is not supported, want logsql (LogsQL)"
             )),
         }
     }
@@ -90,8 +90,7 @@ impl Language {
         }
     }
 
-    /// `query`, changed to return only `fields`, so a response contains
-    /// only the fields that transect reads.
+    /// `query`, changed to return only `fields`.
     pub fn keep(self, query: &str, fields: &[&str]) -> String {
         match self {
             Self::LogsQl => logsql::keep(query, fields),
@@ -140,9 +139,10 @@ impl Query {
     }
 }
 
-/// The values that `fill` writes into one query.  A placeholder with no
-/// value here is a bug in the caller, and `check` rules that out for
-/// every template that loads.
+/// The values that `fill` writes into one query.  `fill` writes an
+/// empty string for a placeholder whose value is `None`, so a caller
+/// sets each value that its kind of query uses.  `check` rejects a
+/// template with a placeholder that its kind of query does not use.
 #[derive(Clone, Debug, Default)]
 pub struct Values<'a> {
     pub namespace: Option<&'a str>,
@@ -196,10 +196,10 @@ fn is_name(name: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c == '.' || c == '_')
 }
 
-/// The reason `template` cannot be the `query`.  The function returns
-/// `Ok` when the query fills every placeholder in the template, the
-/// source maps every field that the template names, and the template
-/// contains every placeholder that the query needs.
+/// Checks that `template` is a valid template for `query`.  It returns
+/// the reason when the template has a placeholder that the query does
+/// not fill, names a `{fields.<name>}` that the source does not map, or
+/// lacks a placeholder that the query requires.
 pub fn check(query: Query, template: &str, fields: &Fields) -> Result<(), String> {
     let (allowed, required) = query.values();
     let mut seen = Vec::new();
@@ -211,14 +211,14 @@ pub fn check(query: Query, template: &str, fields: &Fields) -> Result<(), String
             Some(field) if fields.named(field).is_some() => {}
             Some(_) => {
                 return Err(format!(
-                    "the {} query names {{{name}}}, a field the source does not map",
+                    "the {} query uses {{{name}}}, and the source maps no such field",
                     query.name()
                 ));
             }
             None if allowed.contains(&name) => seen.push(name),
             None => {
                 return Err(format!(
-                    "the {} query has no placeholder {{{name}}}; it fills {}",
+                    "the {} query has no placeholder {{{name}}}, the placeholders are {}",
                     query.name(),
                     listed(allowed)
                 ));
@@ -233,7 +233,7 @@ pub fn check(query: Query, template: &str, fields: &Fields) -> Result<(), String
     match missing.as_slice() {
         [] => Ok(()),
         _ => Err(format!(
-            "the {} query needs {}",
+            "the {} query is missing {}",
             query.name(),
             listed(&missing)
         )),

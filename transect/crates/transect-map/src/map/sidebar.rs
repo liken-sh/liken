@@ -13,28 +13,27 @@ use transect_supply::findings::Finding;
 #[derive(Debug)]
 pub struct Sidebar {
     pub alerts: Vec<Firing>,
-    /// Why "Now" lists no alerts, when it lists none.
+    /// Why the sidebar's "Now" list has no alerts, when it has none.
     pub alert_note: Option<transect_resources::resources::OffLine>,
     pub concerns: Vec<Concern>,
     pub findings: Vec<Finding>,
     /// The newest changes of the last day.
     pub changed: Listed,
-    /// Why a requested loss draws nothing, which happens when it names no
-    /// machine the cluster has.
+    /// The note shown when the page was asked to draw machines as lost
+    /// and none of them is a machine of the cluster, so no loss is drawn.
     pub unknown: Option<String>,
 }
 
-/// A namespace that is warning or failing, with its reasons.
+/// A namespace whose health is a notice, a warning, or a failure, with
+/// its reasons.
 #[derive(Debug, PartialEq)]
 pub struct Concern {
     pub namespace: String,
     pub health: Health,
-    /// Each reason with the page of what it is about.
     pub lines: Vec<Line>,
 }
 
-/// One reason, with the page a link to it opens: its workload's or its
-/// pod's, or the namespace's when it is about neither.
+/// One reason, with the page that its link opens.
 #[derive(Debug, PartialEq)]
 pub struct Line {
     pub reason: Reason,
@@ -54,9 +53,9 @@ fn href(reason: &Reason, namespace: &str, ownership: &Ownership, plurals: &Plura
 }
 
 impl Concern {
-    /// Fills the dot for a failure and outlines it for a warning, as the
-    /// map does a parcel, and outlines a notice in gray, as the map
-    /// leaves a notice's parcel gray.
+    /// The CSS class of the concern's dot: filled for a failure, outlined
+    /// for a warning, and outlined in gray for a notice.  These match how
+    /// the map draws the namespace's rectangle.
     pub fn level_class(&self) -> &'static str {
         match self.health.level {
             Level::Failing => "concern-failing",
@@ -67,11 +66,11 @@ impl Concern {
 }
 
 impl Sidebar {
-    /// Reads the concerns from the map's parcels, so the sidebar names
-    /// the namespaces the map colors.  The worst come first, and those
-    /// at one level sort by name.  The sidebar lists the alerts above the
-    /// concerns, so a concern leaves its alerts out, and a namespace
-    /// colored by its alerts alone has no concern of its own.
+    /// Builds a concern for each namespace that the map colors, so the
+    /// sidebar and the map agree.  The worst come first, then by name.
+    /// The sidebar lists the alerts above the concerns, so a concern
+    /// leaves out its alert reasons, and its level comes from the reasons
+    /// left.  A namespace that only alerts make unhealthy has no concern.
     pub fn build(
         map: &ClusterMap,
         findings: Vec<Finding>,
@@ -82,13 +81,13 @@ impl Sidebar {
         let mut concerns: Vec<Concern> = map
             .bands
             .iter()
-            .flat_map(|band| &band.parcels)
-            .filter(|parcel| parcel.health.level > Level::Healthy)
-            .filter_map(|parcel| {
-                let reasons = parcel.health.reasons.iter();
+            .flat_map(|band| &band.tiles)
+            .filter(|tile| tile.health.level > Level::Healthy)
+            .filter_map(|tile| {
+                let reasons = tile.health.reasons.iter();
                 let reasons = reasons.filter(|reason| !matches!(reason, Reason::Alert { .. }));
                 let health = Health::from_reasons(reasons.cloned().collect());
-                let namespace = &parcel.namespace;
+                let namespace = &tile.namespace;
                 let lines = health.reasons.iter().map(|reason| Line {
                     href: href(reason, namespace, ownership, plurals),
                     reason: reason.clone(),
@@ -122,13 +121,13 @@ impl Sidebar {
 mod tests {
     use rstest::rstest;
 
-    use super::super::cluster::{Band, Parcel};
+    use super::super::cluster::{Band, NamespaceTile};
     use super::*;
     use transect_graph::edges::Object;
     use transect_observe::health::Origin;
 
-    fn parcel(namespace: &str, reasons: Vec<Reason>) -> Parcel {
-        Parcel {
+    fn tile(namespace: &str, reasons: Vec<Reason>) -> NamespaceTile {
+        NamespaceTile {
             namespace: namespace.into(),
             workloads: 1,
             health: Health::from_reasons(reasons),
@@ -139,10 +138,10 @@ mod tests {
         }
     }
 
-    fn band(parcels: Vec<Parcel>) -> Band {
+    fn band(tiles: Vec<NamespaceTile>) -> Band {
         Band {
             name: "apps".into(),
-            parcels,
+            tiles,
         }
     }
 
@@ -189,13 +188,10 @@ mod tests {
     fn lists_the_worst_namespaces_first_across_bands() {
         let map = ClusterMap {
             bands: vec![
+                band(vec![tile("shop", vec![pending()]), tile("blog", vec![])]),
                 band(vec![
-                    parcel("shop", vec![pending()]),
-                    parcel("blog", vec![]),
-                ]),
-                band(vec![
-                    parcel("dns", vec![pending()]),
-                    parcel("queue", vec![none_ready()]),
+                    tile("dns", vec![pending()]),
+                    tile("queue", vec![none_ready()]),
                 ]),
             ],
         };
@@ -218,19 +214,17 @@ mod tests {
     #[rstest]
     fn a_healthy_map_has_no_concerns() {
         let map = ClusterMap {
-            bands: vec![band(vec![parcel("blog", vec![])])],
+            bands: vec![band(vec![tile("blog", vec![])])],
         };
         assert_eq!(build(&map).concerns, Vec::new());
     }
 
-    /// The sidebar lists the alerts above the concerns, so a concern does
-    /// not repeat them, and its level is that of the reasons left.
     #[rstest]
     fn a_concern_leaves_its_alerts_to_the_list_above() {
         let map = ClusterMap {
             bands: vec![band(vec![
-                parcel("shop", vec![alert(Level::Failing), pending()]),
-                parcel("blog", vec![alert(Level::Failing)]),
+                tile("shop", vec![alert(Level::Failing), pending()]),
+                tile("blog", vec![alert(Level::Failing)]),
             ])],
         };
         let concerns: Vec<(String, Level, usize)> = build(&map)

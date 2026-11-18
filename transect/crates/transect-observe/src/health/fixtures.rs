@@ -1,6 +1,6 @@
 //! Builders for the objects that the health rules read.  Each builder
-//! sets only the fields that the rules read, as the API server fills
-//! them.
+//! sets only the fields that the rules read, the way the API server
+//! fills them.
 
 use std::collections::BTreeMap;
 
@@ -98,7 +98,7 @@ pub fn cron_job(
     }
 }
 
-/// A `Running` pod created a day ago, with no containers yet.
+/// A `Running` pod created a day ago, with no container statuses.
 pub fn pod(namespace: &str, name: &str) -> Pod {
     Pod {
         metadata: meta(namespace, name),
@@ -132,7 +132,8 @@ pub fn replica_set(namespace: &str, name: &str, deployment: &str) -> ObjectMeta 
     meta
 }
 
-/// A `ControllerRevision` or `ReplicaSet` `name` of the `kind` `owner`,
+/// The metadata of a `ReplicaSet` or `ControllerRevision` named `name`
+/// in the namespace `audio`, owned by the `kind` named `owner` and
 /// created at `created`.
 pub fn revision(name: &str, kind: &str, owner: &str, created: Timestamp) -> ObjectMeta {
     let mut meta = replica_set("audio", name, owner);
@@ -219,7 +220,7 @@ impl PodBuilder for Pod {
     }
 }
 
-/// A container that has run since its pod started, with no restarts.
+/// A ready container with no restarts.
 pub fn container(name: &str) -> ContainerStatus {
     ContainerStatus {
         name: name.into(),

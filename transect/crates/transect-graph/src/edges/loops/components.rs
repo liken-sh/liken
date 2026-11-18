@@ -1,15 +1,15 @@
-//! Strongly connected components, by Tarjan's algorithm: the sets of
-//! nodes in which every node reaches every other along the edges.  A
-//! component of more than one node holds a cycle, and every cycle lies
-//! inside one component, so the components give the loops without
-//! listing each cycle, which can number in the thousands where a
-//! component holds a dozen nodes.
+//! Strongly connected components, found with Tarjan's algorithm. Every
+//! cycle lies inside one component, and every component of more than one
+//! node contains a cycle. So the components give the loops without
+//! listing every cycle, of which a component of a dozen nodes can have
+//! thousands.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-/// The components of the graph whose edges leave each key for each node
-/// in its set, each component sorted, in the order Tarjan's algorithm
-/// closes them.  A node only reached, never a key, is its own component.
+/// The components of the graph in which each key has an edge to every
+/// node in its set. Each component is sorted, and the components come in
+/// the order Tarjan's algorithm finishes them. A node that only appears
+/// as a target, never as a key, is a component of its own.
 pub fn components<N: Ord + Clone>(edges: &BTreeMap<N, BTreeSet<N>>) -> Vec<Vec<N>> {
     let mut search = Search {
         edges,
@@ -31,8 +31,9 @@ struct Search<'a, N> {
     edges: &'a BTreeMap<N, BTreeSet<N>>,
     /// The order each node was first visited in.
     index: BTreeMap<&'a N, usize>,
-    /// The lowest index each node reaches through the nodes still on the
-    /// stack; a node whose own index it is roots a component.
+    /// The lowest index each node can reach through nodes still on the
+    /// stack. A node whose low index equals its own index is the root of
+    /// a component.
     low: BTreeMap<&'a N, usize>,
     stack: Vec<&'a N>,
     on_stack: BTreeSet<&'a N>,
@@ -40,8 +41,8 @@ struct Search<'a, N> {
 }
 
 impl<'a, N: Ord + Clone> Search<'a, N> {
-    /// Recursion is as deep as the longest path, which on a graph of a
-    /// cluster's namespaces is a few dozen at most.
+    /// Each call recurses into the nodes it reaches first, so the
+    /// recursion can be as deep as the number of nodes in the graph.
     fn visit(&mut self, node: &'a N) {
         let order = self.index.len();
         self.index.insert(node, order);
@@ -89,8 +90,8 @@ mod tests {
         graph
     }
 
-    /// The components of more than one node, sorted, so a case reads
-    /// as the loops it holds.
+    /// The components of more than one node, sorted, so each case lists
+    /// its loops.
     fn loops(edges: &[(&'static str, &'static str)]) -> Vec<Vec<&'static str>> {
         let mut found: Vec<Vec<&str>> = components(&graph(edges))
             .into_iter()
@@ -122,7 +123,7 @@ mod tests {
     }
 
     #[rstest]
-    fn a_node_only_reached_is_its_own_component() {
+    fn a_node_that_is_only_a_target_is_its_own_component() {
         let found = components(&graph(&[("a", "b")]));
         assert_eq!(found, vec![vec!["b"], vec!["a"]]);
     }

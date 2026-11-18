@@ -23,8 +23,9 @@ struct LayersSpec {
     layers: Vec<Layer>,
 }
 
-/// The layers a `Layers` document lists, top to bottom, or why the
-/// document does not validate.
+/// The layers listed in a `Layers` document, in document order from top
+/// to bottom, or an error message if the document is invalid.  A layer
+/// name used twice and an invalid namespace selector are invalid.
 pub fn parse(value: serde_yaml::Value) -> Result<Vec<Layer>, String> {
     let layers = serde_yaml::from_value::<LayersDocument>(value)
         .map_err(|error| error.to_string())?

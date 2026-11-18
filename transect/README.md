@@ -4,62 +4,62 @@
 people who run it.  It draws the cluster as nested layers, from the
 whole cluster down to one container, and the relationships between
 them: what runs on which machine, where each workload keeps its data,
-which pod holds which device, which source each object reconciles from,
+which pod has claimed which device, which source each object reconciles from,
 and what depends on what.  The map is gray where things are healthy,
-so only a problem has a color.
+so only a problem is colored.
 
 `transect` changes nothing in the cluster.  It reads the Kubernetes API
-and Prometheus, and a directory of its own resources for the facts that
-neither of those gives.  The design is in
-[plans/00-design.md](plans/00-design.md), and the plans in
-[plans/completed/](plans/completed/) record how each part was built.
+and Prometheus, and a directory of its own resources for facts that
+neither of those provides.  The design is in
+[plans/00-design.md](plans/00-design.md).
 
 ## What it shows
 
 - **The cluster map** at `/` has one band per layer, with each
-  namespace drawn as a parcel sized by its weight, the machines with
-  their usage from Prometheus, and a ground band for storage and other
-  things outside the cluster.  The sidebar lists what to know now.
+  namespace drawn as a tile as wide as its workload count, the machines with
+  their usage from Prometheus, and an outside-systems band for storage and other
+  things outside the cluster.  The "Now" sidebar lists the problems to look at.
 - **A page per namespace, workload, and pod**, under
-  `/namespaces/<namespace>`, each with a card: what the thing is, how
-  it is doing, what it depends on and what depends on it, and links to
-  the directory a GitOps tool such as Flux applies it from and the
-  commit its image was built from.  A namespace of DaemonSets draws as
+  `/namespaces/<namespace>`, each with a card that shows what the object is, its health, what it
+  depends on and what depends on it, and links to the directory that a
+  GitOps tool such as Flux applies it from and the commit that its
+  image was built from.  A namespace of DaemonSets draws as
   a matrix of DaemonSets by machine, and a GitOps object or a custom
   resource of a known kind gets a page of its own.
-- **Edges** of eight kinds, turned on and off from a row above each
-  picture that draws them:
+- **Edges**, which you turn on and off from a row above each picture:
   runs on, depends on, authenticates through, stores on, holds,
-  reconciles from, controlled by, and allowed to call, which
-  NetworkPolicies give.  Loops among them are a cold-start risk, and
-  the map lists them.
+  reconciles from, controlled by, and allowed to call (from
+  `NetworkPolicy` rules).  The map also lists loops, where objects in
+  different namespaces each need another to start.  After a full
+  shutdown, such as a power cut, no start order brings a loop up.
 - **Health** from readiness, restarts, error lines in pod logs, a custom
   resource's own conditions, and the alerts that Alertmanager reports as
-  firing, leaving out what its silences and inhibitions hide.  An alert
-  colors the namespace, object, or machine its labels name, and "Now"
-  lists every one, the worst first.
+  firing, except the ones that its silences and inhibitions hide.  An
+  alert colors the namespace, object, or machine that its labels name,
+  and "Now" lists every alert, the most severe first.
 - **A lost machine** at `/?lose=<machine>`: what goes down with it,
-  what moves elsewhere, what stays down until it returns, and what
-  their dependents lose.
+  what moves to other machines, what stays down until the machine
+  returns, and what the dependents of those workloads lose.
 - **A workload's section** at
   `/namespaces/<namespace>/<resource>/<name>/section`: one
-  workload drawn from its entry to its storage, with lines.
+  workload drawn from its entry point to its storage, with lines
+  between the objects.
 - **A pod's last log lines**, from the Kubernetes API or from a log
   store, tagged by the log patterns that match them.
-- **Stored text** that the cluster's people and operators write: why
-  a thing exists, what goes wrong with it, and what it provides, from
-  annotations, overlays, and `transect`'s own resources.  Each such line
-  is marked with where it was written.
-- **Access** at `/access`: every port that answers from outside the
+- **Descriptions** that the cluster's people and operators write: why
+  an object exists, what goes wrong with it, and what it provides.
+  They come from annotations, overlays, and `transect`'s own
+  resources, and each one is marked with its source.
+- **Access** at `/access`: every port that accepts connections from outside the
   cluster, with the TLS, sign-in, and `NetworkPolicy` on the way to it,
   and what each account may do and where, read from RBAC alone.  A
   namespace and a workload have an access tab, and a `ServiceAccount`'s
   page draws what it may do and why.
 - **`/resources`**: every resource and overlay `transect` loaded, with
-  the conditions that state what is wrong with one.
+  the conditions that say what is wrong with a resource.
 
-`transect` does not yet observe traffic between workloads (the `calls`
-edge).
+`transect` does not observe traffic between workloads, so the map has
+no edge for the calls that actually happen.
 
 ## Running it
 
@@ -81,9 +81,9 @@ bands, and overlays that add annotations to live objects without
 editing the cluster.  `transect`'s facts about particular projects come
 from those resources too: the Prometheus queries and alert conventions,
 the GitOps tool, the ingress controller, and the forges.  Without them,
-those parts are off: the usage, the alerts, and the traffic each name
-the resource that would show them, and a repository on a forge that no
-resource declares is shown as text.  [examples/](examples/) contains
+those parts are off: the usage, the alerts, and the traffic each show
+a message that names the resource that turns them on, and a repository
+on a forge that no resource declares is plain text.  [examples/](examples/) contains
 these resources for public projects, such as Flux, cert-manager,
 Traefik, and kube-prometheus, in one directory each.  Copy them into
 your directory and edit them.  The design describes each resource's
@@ -99,8 +99,8 @@ base in [deploy/](deploy/) as the OCI artifact
 takes the version of its tag, such as `2026.11.17-001`, and moves
 `:latest` on the image and on the artifact.  A push to `main` that
 changes `transect` publishes a development build, such as
-`2026.11.17-001-dev-017-abcdef01`, which is 17 commits past
-`2026.11.17-001`, at commit `abcdef01`.  A development build never
+`2026.11.17-001-dev-017-abcdef01`, which is the build of commit `abcdef01`,
+17 commits after `2026.11.17-001`.  A development build never
 moves `:latest`.  CI sets the tag of the image in the published base to
 the base's own version, so a cluster that follows the artifact moves
 the manifests and the image in one step.  A kustomization that takes
@@ -117,17 +117,17 @@ CI signs each image keyless with cosign, and attaches an SBOM and the
 build's provenance to it.  Before you deploy an image, `liken verify
 image` checks its signature and reads its SBOM and its provenance.
 
-The image holds the binary and the glibc libraries that it loads, on
-`scratch`, with a CA bundle and the license notices.  The base runs it
-as user 65534 on a read-only root filesystem.
+The image is built `FROM scratch`.  It contains the binary, the glibc
+libraries that the binary loads, a CA bundle, and the license notices.
+The base runs it as user 65534 on a read-only root filesystem.
 
-The base contains the `ServiceAccount`, read-only ClusterRoles and
+The base contains a `ServiceAccount`, read-only `ClusterRole`s and
 their bindings, one `Deployment`, a `Service` on port 80, and a
-`NetworkPolicy` that refuses every caller.  It names no namespace and
-ships no `Ingress`.  An overlay sets `namespace:`, adds an `Ingress`
-behind the cluster's sign-in and a rule admitting its ingress
-controller, and sets the addresses of Prometheus, Alertmanager, and the
-log store as env:
+`NetworkPolicy` that refuses every caller.  It sets no namespace and
+includes no `Ingress`.  An overlay sets `namespace:`, adds an `Ingress`
+behind the cluster's sign-in and a `NetworkPolicy` rule that admits
+its ingress controller, and sets the addresses of Prometheus,
+Alertmanager, and the log store in environment variables:
 
 ```yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -155,13 +155,15 @@ Every flag reads an environment variable, `TRANSECT_` and the flag's
 name in capitals, so `--alertmanager` is `TRANSECT_ALERTMANAGER`.
 Without `--kubeconfig`, `transect` uses its `ServiceAccount`.  The
 account may get, list, and watch the built-in kinds the map draws, and
-nothing on Secrets.  For custom kinds, add a `ClusterRole` labeled
-`transect.liken.sh/aggregate-to-reader: "true"` that lists the groups
-your CRDs serve; `/resources` names each kind it may not list.
-`transect-pod-logs` grants pod logs on its own, so an overlay can delete
-it and read logs from a `LogSource` instead.
+cannot read `Secret`s.  For custom kinds, add a `ClusterRole` with the
+label `transect.liken.sh/aggregate-to-reader: "true"` that grants access
+to the API groups that your CRDs serve.  `/resources` lists each kind
+that `transect` may not list.  The `transect-pod-logs` `ClusterRole`
+grants reading pod logs separately, so an overlay can delete it and
+read logs from a `LogSource` instead.
 
-`/livez` and `/readyz` answer once the first list of the cluster is
-done, and stay passing through an API server outage.  When the sign-in
-is down, reach `transect` with `kubectl port-forward svc/transect
+`transect` listens only after its first list of the cluster is done.
+From then on `/livez` and `/readyz` always return `ok`, including
+during an API server outage.  When the sign-in
+is down, connect to `transect` with `kubectl port-forward svc/transect
 8080:80` or with the workstation loop above.

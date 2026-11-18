@@ -1,21 +1,23 @@
-//! The lines between two boxes of the right column, such as a device a
-//! remote holds to the radio it pairs through.  Each runs out from its
-//! source's outer edge to a lane past the column, up or down the lane,
-//! and back into its target's outer edge, so it crosses no box and no
-//! line to the spine.  The section view is `OUTER` wider to make room for
-//! the lanes and their labels, and each label is beside its lane's
-//! vertical run.
+//! The lines between two boxes in the right column, such as the line
+//! from a device to the radio it pairs through.  Each line leaves the
+//! right edge of its source box, runs in a lane of its own to the right
+//! of the column, and enters the right edge of its target box.  The
+//! lines from the column to the spine leave from the boxes' left edges,
+//! so a line in a lane crosses no box and none of those lines.
 
 use super::{Anchor, Drawn, Label, Line, Link, Point};
 use crate::map::section::layout::{Layout, Side};
 
-/// How much wider the section view is drawn when it has such a line.
+/// How much wider the section view is drawn when it has such a line, to
+/// make room for the lanes and their labels.
 pub const OUTER: i32 = 136;
-/// From the column's outer edge to the first lane, and between lanes.
+/// The distance from the column's right edge to the first lane, and
+/// between two lanes.
 const LANE: i32 = 12;
-/// From a lane to its label.
 const LABEL_GAP: i32 = 6;
 
+/// Draws each link whose ends are both in the right column, and skips
+/// every other link.
 pub fn route(layout: &Layout, links: &[&Link]) -> Drawn {
     let mut drawn = Drawn::default();
     let placed = links.iter().filter_map(|link| {
@@ -71,8 +73,8 @@ mod tests {
     use crate::map::section::layout::{At, Shape, layout};
     use crate::map::section::lines::Style;
 
-    /// One row with two boxes in its right column, the first tied to
-    /// the second.
+    /// One row with two boxes in its right column and a link from the
+    /// first to the second.
     fn tied() -> (Layout, Link) {
         let shape = Shape {
             right: vec![1, 1],

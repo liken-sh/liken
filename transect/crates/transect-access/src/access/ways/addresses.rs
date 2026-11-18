@@ -1,7 +1,7 @@
-//! The ways in that answer without an Ingress: LoadBalancer and
-//! NodePort Services, with a LoadBalancer's node ports a row of their
-//! own, a Service's external IPs, host ports, and pods on their
-//! machine's network.
+//! The ways in from outside the cluster that do not go through an
+//! Ingress: LoadBalancer and NodePort Services, with a LoadBalancer's
+//! node ports in a row of their own, a Service's external IPs, host
+//! ports, and pods on their machine's network.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -15,9 +15,8 @@ use super::{
 };
 use transect_graph::edges::Object;
 
-/// Reads the rows of each Service, host port, and pod on its machine's
-/// network.  It also records the Service that each controller in
-/// `controllers` answers on, which is the hosts' way in and not a row.
+/// Adds a row to `ways` for each Service address, each pod host port,
+/// and each pod on its machine's network.
 pub fn read(sources: &Sources, controllers: &BTreeSet<Object>, ways: &mut Ways) {
     let listening = listeners(sources);
     let node_addresses: BTreeSet<String> = sources
@@ -42,14 +41,14 @@ pub fn read(sources: &Sources, controllers: &BTreeSet<Object>, ways: &mut Ways) 
             &service.name_any(),
         );
         let reaches = (sources.selected)(&object);
-        // Each address that the Service answers on, with its ports, and
-        // the address of the Service's type first.  A LoadBalancer
-        // Service also answers on its node ports, on every machine's
-        // address, unless `allocateLoadBalancerNodePorts: false` left
-        // them unset.  A Service of any type answers on its
-        // `externalIPs`.
+        // Each address where the Service can be reached, with its
+        // ports, and the address for the Service's own type first.  A
+        // LoadBalancer Service can also be reached on its node ports at
+        // every machine's address, unless
+        // `allocateLoadBalancerNodePorts: false` leaves them unset.  A
+        // Service of any type can be reached on its `externalIPs`.
         let node_ports = ports(service, |p| p.node_port);
-        let mut answers: Vec<(Through, Vec<String>, String)> = Vec::new();
+        let mut addresses: Vec<(Through, Vec<String>, String)> = Vec::new();
         let mut machine = None;
         match kind {
             "LoadBalancer" => {
@@ -60,36 +59,36 @@ pub fn read(sources: &Sources, controllers: &BTreeSet<Object>, ways: &mut Ways) 
                         machine = one;
                         name
                     }
-                    None => balanced(service, &node_addresses),
+                    None => load_balancer_address(service, &node_addresses),
                 };
                 let own = ports(service, |p| Some(p.port));
-                answers.push((Through::LoadBalancer, own, name));
+                addresses.push((Through::LoadBalancer, own, name));
                 if !node_ports.is_empty() {
-                    answers.push((Through::NodePort, node_ports, EVERY_MACHINE.into()));
+                    addresses.push((Through::NodePort, node_ports, EVERY_MACHINE.into()));
                 }
             }
-            "NodePort" => answers.push((Through::NodePort, node_ports, EVERY_MACHINE.into())),
+            "NodePort" => addresses.push((Through::NodePort, node_ports, EVERY_MACHINE.into())),
             _ => {}
         }
         let external = spec.and_then(|spec| spec.external_ips.clone());
         if let Some(external) = external.filter(|ips| !ips.is_empty()) {
             let own = ports(service, |p| Some(p.port));
-            answers.push((Through::ExternalIp, own, external.join(", ")));
+            addresses.push((Through::ExternalIp, own, external.join(", ")));
         }
         let controller = ways
             .entered
             .iter_mut()
             .find(|e| reaches.contains(&e.workload) && controllers.contains(&e.workload));
-        // The first address that an ingress controller's Service answers
-        // on is the hosts' way in.  The page names it in the line under
-        // the table, so it gets no row.
+        // The first address of an ingress controller's Service is the
+        // one that hosts use to reach the controller.  The page states
+        // it in the line under the table, so it gets no row.
         if let Some(entered) = controller
-            && !answers.is_empty()
+            && !addresses.is_empty()
         {
-            let (_, ports, name) = answers.remove(0);
+            let (_, ports, name) = addresses.remove(0);
             entered.service.get_or_insert((object.clone(), ports, name));
         }
-        for (through, ports, name) in answers {
+        for (through, ports, name) in addresses {
             let legs = legs(service, through);
             ways.rows.push(Way {
                 through,
@@ -105,13 +104,13 @@ pub fn read(sources: &Sources, controllers: &BTreeSet<Object>, ways: &mut Ways) 
             });
         }
     }
-    type Held = (
+    type PodWay = (
         BTreeSet<String>,
         BTreeSet<String>,
         BTreeSet<Backend>,
         BTreeSet<(String, Target)>,
     );
-    let mut held: BTreeMap<(Through, Object), Held> = BTreeMap::new();
+    let mut pod_ways: BTreeMap<(Through, Object), PodWay> = BTreeMap::new();
     for pod in sources
         .pods
         .iter()
@@ -135,7 +134,7 @@ pub fn read(sources: &Sources, controllers: &BTreeSet<Object>, ways: &mut Ways) 
         if through == Through::HostPort && ports.is_empty() {
             continue;
         }
-        let entry = held.entry((through, workload)).or_default();
+        let entry = pod_ways.entry((through, workload)).or_default();
         entry.0.extend(ports);
         entry.1.insert(node);
         entry
@@ -145,7 +144,7 @@ pub fn read(sources: &Sources, controllers: &BTreeSet<Object>, ways: &mut Ways) 
             entry.3.extend(host_legs(pod));
         }
     }
-    for ((through, workload), (ports, nodes, backends, pairs)) in held {
+    for ((through, workload), (ports, nodes, backends, pairs)) in pod_ways {
         let mut ports: Vec<u32> = ports.iter().filter_map(|p| p.parse().ok()).collect();
         ports.sort();
         let ports: Vec<String> = match ports.is_empty() {
@@ -179,18 +178,17 @@ pub fn read(sources: &Sources, controllers: &BTreeSet<Object>, ways: &mut Ways) 
     }
 }
 
-/// Where a node port answers.
+/// The address shown for a node port, which every machine opens.
 const EVERY_MACHINE: &str = "every machine's address";
 
-/// What a LoadBalancer Service answers on before it is given an
-/// address.
+/// The address shown for a LoadBalancer Service that has none yet.
 pub const UNADDRESSED: &str = "no address yet";
 
 fn nothing_tls() -> Gate {
     Gate::of(State::Off, "Nothing in the cluster puts TLS on this way.")
 }
 
-/// The machines each Service's listeners answer on, by the Service's
+/// The machines that run each Service's listeners, by the Service's
 /// namespace and name.
 fn listeners(sources: &Sources) -> BTreeMap<(String, String), BTreeSet<String>> {
     let mut found: BTreeMap<(String, String), BTreeSet<String>> = BTreeMap::new();
@@ -209,10 +207,10 @@ fn listeners(sources: &Sources) -> BTreeMap<(String, String), BTreeSet<String>> 
     found
 }
 
-/// A LoadBalancer Service's addresses in words: a count of machines
-/// when every address it was given is a machine's address, and the
+/// A LoadBalancer Service's addresses as text: a count of machines when
+/// every address in its status is a machine's address, and the
 /// addresses themselves otherwise.
-fn balanced(service: &Service, nodes: &BTreeSet<String>) -> String {
+fn load_balancer_address(service: &Service, nodes: &BTreeSet<String>) -> String {
     let status = service
         .status
         .as_ref()
@@ -231,7 +229,7 @@ fn balanced(service: &Service, nodes: &BTreeSet<String>) -> String {
     }
 }
 
-/// The ports `service` declares, as `port` reads each.
+/// The distinct port numbers of `service`, each read by `port`.
 fn ports(
     service: &Service,
     port: impl Fn(&k8s_openapi::api::core::v1::ServicePort) -> Option<i32>,
@@ -247,9 +245,9 @@ fn ports(
     found.iter().map(i32::to_string).collect()
 }
 
-/// Each port of `service` that a way of `through` answers on, with the
-/// port of the pods behind it.  A node port's way answers on the node
-/// port, and any other way answers on the Service's own port.
+/// Each port of `service` that a way of kind `through` is reached on,
+/// with the port of the pods behind it.  A node port's way uses the
+/// node port, and any other way uses the Service's own port.
 fn legs(service: &Service, through: Through) -> Vec<Leg> {
     let spec = service.spec.as_ref();
     let declared = spec
@@ -275,8 +273,8 @@ fn legs(service: &Service, through: Through) -> Vec<Leg> {
     legs
 }
 
-/// Each host port of `pod` that answers outside its machine, with the
-/// container port it forwards to.
+/// Each host port of `pod` that callers outside its machine can reach,
+/// with the container port it forwards to.
 fn host_legs(pod: &Pod) -> Vec<(String, Target)> {
     let spec = pod.spec.iter();
     let containers = spec.flat_map(|spec| spec.containers.iter());
@@ -289,8 +287,8 @@ fn host_legs(pod: &Pod) -> Vec<(String, Target)> {
         .collect()
 }
 
-/// The ports `pod`'s containers declare: their host ports when `host`
-/// is true, and their container ports otherwise.
+/// The ports that `pod`'s containers declare: their host ports when
+/// `host` is true, and their container ports otherwise.
 fn container_ports(pod: &Pod, host: bool) -> Vec<String> {
     let spec = pod.spec.iter();
     let containers = spec.flat_map(|spec| spec.containers.iter());

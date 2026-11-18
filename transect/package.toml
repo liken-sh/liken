@@ -4,19 +4,18 @@
 name = "transect"
 license = "MIT"
 
-# The binary embeds the brand's two fonts from brand/fonts, and a test
-# checks the copy of the brand's color tokens against brand/liken.css.
-# The image copies the license notices with the scripts of notices, the
-# CA bundle of trust, and cargo-auditable from toolchains, and its
-# closure installs from the Debian snapshot, with vulkan's snapshot.sh
-# and vulkan's version as the snapshot date. The Rust, Debian, and Go
-# images come from toolchains.
+# The binary embeds the fonts in brand/fonts, and a test compares the
+# crate's copy of the color tokens with brand/liken.css. The image build
+# reads notices for the license notices, trust for the CA bundle,
+# toolchains for cargo-auditable and the Rust, Debian, and Go images,
+# and vulkan for snapshot.sh and closure.sh. The image installs its
+# packages from the Debian snapshot whose date is vulkan's version.
 [depends]
 components = ["brand", "notices", "toolchains", "trust", "vulkan"]
 
-# The format check, clippy on the shipped code and then on the tests,
-# and one run of the tests under the coverage gate. The Makefile says
-# why clippy runs twice.
+# `make test` runs the format check, clippy on the shipped code, clippy
+# on the tests, and the tests under the coverage gate. The Makefile
+# says why clippy runs twice.
 [[jobs]]
 name = "rust"
 toolchain = "rust"
@@ -25,21 +24,16 @@ timeout = 30
 env = { CARGO_INCREMENTAL = "0" }
 coverage = ["coverage-transect.xml"]
 
-# The hooks in .pre-commit-config.yaml: the formatters, the linters,
-# and the hygiene checks. The jobs above run the tests and the
-# coverage gates.
+# Runs the hooks in .pre-commit-config.yaml.
 [[jobs]]
 name = "prek"
 toolchain = "prek"
-# The rust job runs the same check as this hook.
+# The rust job already runs the format check.
 skip = ["cargo-fmt"]
 
 [outputs]
 deploy = "deploy"
 
-# The image builds from this directory, with brand, notices,
-# toolchains, the vulkan directory as builder, and toolchains/manifest
-# as named build contexts. The Dockerfile says what each one brings.
 [[outputs.images]]
 name = "transect"
 description = "transect, which serves a live, read-only map of a Kubernetes cluster: its layers, the relationships between its parts, and their health."

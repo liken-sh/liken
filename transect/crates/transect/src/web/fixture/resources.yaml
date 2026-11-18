@@ -1,6 +1,5 @@
-# `transect`'s own resources for the fixture cluster: its bands, the
-# knowledge of the kinds it describes, the NAS outside it, and its
-# metrics and alerts.
+# The fixture cluster's objects of transect's own kinds, in the API
+# group transect.liken.sh.
 apiVersion: transect.liken.sh/v1alpha1
 kind: Layers
 metadata:
@@ -36,8 +35,9 @@ spec:
     - {path: spec.storefront.name, kind: Service, label: discounts}
   controller: {image: example.test/promoter-image}
 ---
-# A gate sends a check for each request to the address in
-# `spec.checkWith`, which answers whether to let the request through.
+# Before it forwards a request through a gate, the proxy sends a check
+# to the address in `spec.checkWith`, and the response allows or refuses
+# the request.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:
@@ -49,9 +49,10 @@ spec:
   references:
     - {path: spec.checkWith, address: true, edge: authenticates through, label: asks before each request}
 ---
-# The proxy in front of the shop: the controller its `IngressClass`
-# names, the image its `DaemonSet` in `entry.yaml` runs, and how to
-# read the traffic of each `Ingress` it serves.
+# The proxy in front of the shop: the controller that its
+# `IngressClass` names, the image that its `DaemonSet` in `entry.yaml`
+# runs, and the metrics queries for the traffic of each `Ingress` it
+# serves.
 apiVersion: transect.liken.sh/v1alpha1
 kind: IngressController
 metadata:
@@ -72,9 +73,9 @@ spec:
     errors: 'sum by (backend) (rate(proxy_requests_total{code=~"5.."}[5m]))'
     window: 5m
 ---
-# A handset names the radio it pairs through by the radio's address,
-# which only the radio's status holds, so the reference matches by
-# value.
+# A handset refers to its radio by the radio's address. Only the radio's
+# status has the address, so the reference matches on that field's value
+# instead of the radio's name.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:
@@ -84,9 +85,9 @@ spec:
   references:
     - {path: status.radio, kind: Radio, group: radios.example.test, match: status.address, label: pairs through}
 ---
-# A till holds a handset device and names the radio it pairs through by
-# the radio's address; the handset device's own attributes name the
-# same radio, so the till's section draws a line from the device to it.
+# A till holds a handset device and refers to its radio by the radio's
+# address. The handset device's attributes refer to the same radio, so
+# the till's section view draws a line from the device to the radio.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:
@@ -119,7 +120,7 @@ spec:
   references:
     - {attribute: card, driver: gpu.example.test, match: resource.kubernetes.io/pciBusID, label: speakers of}
 ---
-# The stock room's shelves and bins, each part of the one above it.
+# The stock room's shelves and bins. Each is part of the one above it.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:
@@ -146,7 +147,7 @@ spec:
     - {path: spec.shelf, kind: Shelf, group: stock.example.test, edge: part of}
     - {path: spec.overflow, kind: Shelf, group: stock.example.test, edge: part of}
 ---
-# The machine under a `Node`, named for it.
+# The machine behind a `Node`, which has the same name as the `Node`.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:
@@ -158,11 +159,11 @@ spec:
   references:
     - {path: status.phase, label: phase}
 ---
-# The certificate tool's kinds.  A `Certificate` writes the `Secret`
-# that an `Ingress` serves its TLS from, and names its issuer.  An
-# annotation on an `Ingress` may name the issuer too: a `ClusterIssuer`
-# by its name, and an `Issuer` by its name in the `Ingress`'s own
-# namespace.
+# The kinds of the certificate tool. A `Certificate` writes the `Secret`
+# that an `Ingress` serves TLS from, and refers to its issuer. An
+# annotation on an `Ingress` can refer to the issuer too: by name for a
+# `ClusterIssuer`, and by name in the `Ingress`'s own namespace for an
+# `Issuer`.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:
@@ -201,11 +202,11 @@ spec:
   why: Keeps the ledger's archive on NFS.
   url: https://nas.example.test:5001
 ---
-# The fixture's log store, whose tail of the storefront's first pod is
-# in `signals.yaml`.  Its `level` field holds OpenTelemetry's level
-# names, so `transect` reads each line's level from that field.  When
-# the field holds a value that no list in `levels` names, such as
-# Unspecified, `transect` guesses the line's level from its text.
+# The fixture's log store. Its log lines for the storefront's first pod
+# are in `signals.yaml`. Each list in `levels` holds prefixes of the
+# OpenTelemetry `severity_text` values for that level, matched without
+# regard to case. For a value that no prefix matches, such as
+# `Unspecified`, transect guesses the level from the line's text.
 apiVersion: transect.liken.sh/v1alpha1
 kind: LogSource
 metadata:
@@ -229,8 +230,8 @@ spec:
     tail: '{fields.namespace}:"{namespace}" {fields.pod}:"{pod}" | sort by ({fields.time}) desc | limit {limit}'
     search: '_time:{window} {pattern} | stats by ({fields.namespace}, {fields.pod}) count() matches, max({fields.time}) last | limit {limit}'
 ---
-# The fixture's Prometheus and Alertmanager, whose answers are in
-# `signals.yaml`.  The metric names are the fixture's own.
+# The fixture's Prometheus and Alertmanager. Their responses are in
+# `signals.yaml`. The metric names exist only in this fixture.
 apiVersion: transect.liken.sh/v1alpha1
 kind: MetricsSource
 metadata:
@@ -264,8 +265,8 @@ spec:
     exportedPrefix: exported_
     annotations: {summary: summary, description: description}
 ---
-# The forges that host the fixture's GitOps sources, with the URL
-# layouts that the code links use.
+# The git forges that host the fixture's GitOps sources, with the URL
+# patterns for linking to a tree and a commit.
 apiVersion: transect.liken.sh/v1alpha1
 kind: Forge
 metadata:
@@ -286,8 +287,8 @@ spec:
   tree: '{repository}/src/{refKind}/{ref}/{path}'
   commit: '{repository}/commit/{sha}'
 ---
-# The listeners that serve a `LoadBalancer` `Service` on each machine
-# name the `Service` in two labels.
+# The listener on each machine that serves a `LoadBalancer` `Service`
+# records the `Service`'s name and namespace in two labels.
 apiVersion: transect.liken.sh/v1alpha1
 kind: LoadBalancerController
 metadata:
@@ -297,8 +298,8 @@ spec:
     name: {label: lb.example.test/service-name}
     namespace: {label: lb.example.test/service-namespace}
 ---
-# The scanner's reports: each names its container by a label, the
-# digest it scanned, and its findings.
+# The scanner's reports. Each report names its container in a label, and
+# holds the image digest it scanned and its findings.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:

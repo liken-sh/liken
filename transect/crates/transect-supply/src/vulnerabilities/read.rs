@@ -1,7 +1,7 @@
-//! Reads the findings reports from the trimmed stores, once for each
-//! model, into the index that the pages render.  transect stores one
-//! copy of each string that many reports share, such as an id, a
-//! package, or a version.
+//! Reads the scanners' reports from the stores of custom resources into
+//! the index that the pages render.  Reports repeat the same ids,
+//! packages, and versions, so the index keeps one shared copy of each
+//! string.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -17,7 +17,8 @@ use transect_graph::edges::Object;
 use transect_resources::knowledge::findings::Findings;
 use transect_resources::knowledge::{KindKnowledge, Kinds, MetaKey, path};
 
-/// The maximum length of one field of a finding, in characters.
+/// The most characters kept of one field of a finding.  A longer field
+/// is cut and ends with an ellipsis.
 const FIELD_CHARS: usize = 200;
 
 /// The stores that the index is read from.
@@ -29,8 +30,9 @@ pub struct Stores<'a> {
     pub pods: &'a [Arc<Pod>],
 }
 
-/// The image digests that each workload's running pods run, by
-/// container name, read from the `imageID` of each container's status.
+/// The image digests that each workload's unfinished pods run, by
+/// container name, read from the `imageID` of each container status,
+/// init containers included.
 fn running_digests(
     pods: &[Arc<Pod>],
     ownership: &Ownership,
@@ -127,9 +129,8 @@ impl Vulnerabilities {
     }
 }
 
-/// The scanner's name for a report kind: the last part of the
-/// controller image that the kind's knowledge names, or the kind
-/// itself.
+/// The scanner's name for a report kind: the last path segment of the
+/// kind knowledge's `controller_image`, or the kind when it has none.
 fn scanner(known: &KindKnowledge, kind: &str) -> String {
     let image = known.controller_image.as_deref();
     let last = image.and_then(|image| image.rsplit('/').next());
@@ -147,7 +148,8 @@ struct Read<'a> {
 }
 
 impl Read<'_> {
-    /// `object` read as a report, or `None` when it names no owner.
+    /// `object` read as a report, or `None` when it has no name or no
+    /// owner reference.
     fn report(&self, object: &Custom, strings: &mut Strings) -> Option<Report> {
         let meta = &object.metadata;
         let namespace = meta.namespace.as_deref();
@@ -231,7 +233,7 @@ impl Read<'_> {
     }
 }
 
-/// The strings read so far, so that transect stores one copy of each.
+/// The strings read so far, so that equal strings share one allocation.
 #[derive(Default)]
 struct Strings(HashSet<Arc<str>>);
 

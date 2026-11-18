@@ -1,11 +1,11 @@
-//! The `CronJob` rule, which reports a schedule whose last run did not
+//! The `CronJob` rule: report a `CronJob` whose last run did not
 //! succeed.
 //!
-//! transect watches no `Job`, so the rule reads the `CronJob`'s own
-//! status.
-//! The controller sets `lastScheduleTime` when it starts a run and
-//! `lastSuccessfulTime` when a run completes, so with no run active, a
-//! last success older than the last schedule means the last run failed.
+//! transect does not watch `Job`s, so the rule reads the `CronJob`'s
+//! status. The controller sets `lastScheduleTime` when it starts a run
+//! and `lastSuccessfulTime` when a run succeeds. When no run is active,
+//! a `lastSuccessfulTime` that is missing or older than
+//! `lastScheduleTime` means the last run failed.
 
 use k8s_openapi::api::batch::v1::CronJob;
 use kube::ResourceExt;
@@ -13,8 +13,6 @@ use kube::ResourceExt;
 use super::{Kind, Reason, Workload};
 
 /// Whether the `CronJob`'s last run succeeded and no run is active.
-/// The last run succeeded when its last success is at or after its last
-/// schedule.
 pub fn settled(cron_job: &CronJob) -> bool {
     let Some(status) = cron_job.status.as_ref() else {
         return false;
@@ -62,7 +60,7 @@ mod tests {
     #[case::last_run_succeeded(Some(60), Some(58), 0, true)]
     #[case::last_run_failed(Some(60), Some(1500), 0, false)]
     #[case::running_now(Some(1), Some(58), 1, false)]
-    fn settled_after_a_last_run_that_succeeded(
+    fn is_settled_only_when_the_last_run_succeeded_and_none_is_active(
         #[case] scheduled_minutes_ago: Option<i64>,
         #[case] succeeded_minutes_ago: Option<i64>,
         #[case] active: usize,

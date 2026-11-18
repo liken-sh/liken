@@ -14,7 +14,7 @@ fn hop(dependent: Dependent, lost: &[(&str, &str)]) -> Hop {
         dependent,
         lost: lost.iter().map(|(ns, name)| deployment(ns, name)).collect(),
         provides: Default::default(),
-        stated: Vec::new(),
+        declared_in: Vec::new(),
     }
 }
 
@@ -50,7 +50,7 @@ fn player(namespace: Option<&str>, name: &str) -> Dependent {
     hop(player(None, "den"), &[("shop", "a"), ("shop", "b")]),
     "Nothing reconciles Player den until a and b return"
 )]
-fn names_what_a_down_workload_takes(#[case] hop: Hop, #[case] expected: &str) {
+fn writes_what_a_dependent_loses(#[case] hop: Hop, #[case] expected: &str) {
     assert_eq!(text(&hop.pieces(Some("shop"), false)), expected);
 }
 
@@ -85,7 +85,7 @@ fn providing(hop: Hop, text: &str) -> Hop {
     providing(hop(player(Some("shop"), "den"), &[("shop", "db")]), "order storage"),
     "Nothing reconciles Player den until db returns"
 )]
-fn says_what_a_lost_workload_provides(#[case] hop: Hop, #[case] expected: &str) {
+fn writes_the_provides_text_of_a_lost_workload(#[case] hop: Hop, #[case] expected: &str) {
     let marks = match hop.dependent {
         Dependent::Caller(_) => vec![provided("").provenance],
         _ => vec![],
@@ -156,7 +156,7 @@ fn links_names_and_never_words_in_what_intent_provides() {
 }
 
 #[rstest]
-fn one_application_in_two_lines_is_named_once() {
+fn one_application_in_two_lines_is_named_without_its_kind() {
     let wiki = || deployment("shop", "wiki");
     let hops = Hops {
         namespace: Some("shop".into()),
@@ -215,7 +215,7 @@ fn two_callers_of_one_name_are_named_by_kind() {
     vec![],
     Some("Nothing in the cluster depends on it.")
 )]
-fn a_cards_if_it_goes_down(
+fn writes_the_lines_of_the_if_down_card(
     #[case] hops: Vec<Hop>,
     #[case] lines: Vec<&str>,
     #[case] nothing: Option<&str>,
@@ -247,7 +247,7 @@ fn cluster(name: &str) -> Dependent {
 #[rstest]
 #[case::one_of_a_kind(&["main"], &["Nothing reconciles Cluster main until operator returns"])]
 #[case::several_of_a_kind(&["a", "b", "c"], &["Nothing reconciles 3 Clusters until operator returns"])]
-fn says_one_line_per_kind_it_controls(#[case] names: &[&str], #[case] expected: &[&str]) {
+fn writes_one_line_for_each_controlled_kind(#[case] names: &[&str], #[case] expected: &[&str]) {
     let hops = names
         .iter()
         .map(|name| hop(cluster(name), &[("shop", "operator")]));

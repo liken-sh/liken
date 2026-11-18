@@ -1,17 +1,17 @@
-//! The steps from changing what a GitOps tool applies: an account that
-//! may change an applier, or the source it fetches through, may do
-//! what the applier applies as.
+//! An account that may change a GitOps applier, or the source that the
+//! applier fetches from, may act as the account that the applier
+//! applies objects as.
 
 use super::super::account::{AppliesAs, Hop, Where};
 use super::super::capability::GitOpsKind;
 use super::super::routes::{Names, admits};
 use super::{Places, Steps};
 
-/// The accounts that an account may act as through each applier it may
-/// change.  `writes` lists the GitOps kinds the account may change, and
-/// where.  Each step's hop is `through` when the writes come through
-/// another step, such as a role it may bind, and the applier itself
-/// otherwise.
+/// Adds to `steps` each account that an account may act as through an
+/// applier it may change.  `writes` lists the GitOps kinds the account
+/// may change, and where.  Each step records the hop `through` when
+/// the account got those writes from an earlier step, such as a role
+/// it may bind, and `Hop::Applies` otherwise.
 pub(super) fn applies_through(
     writes: &[(GitOpsKind, Where, Names)],
     through: Option<&Hop>,

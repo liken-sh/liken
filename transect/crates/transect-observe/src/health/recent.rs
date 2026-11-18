@@ -1,27 +1,25 @@
-//! Whether an event that transect read in the past still counts as
-//! current.  "Now" and a parcel's color show only what is happening, so
-//! a restart or a pattern's match counts toward them only while it is
-//! recent.  The page shows older ones in gray, because they are still
-//! useful to know.
+//! Whether a past restart or pattern match still counts as current.
+//! "Now" and the color of a namespace's rectangle on the map show only
+//! what is happening, so a restart or a match counts toward them only
+//! while it is recent. Older ones are still listed, in gray.
 
 use crate::logs::patterns::seconds;
 
-/// How long a restart or a match stays recent.  A pattern that
+/// How many minutes a restart or a match stays recent. A pattern that
 /// searches a shorter window uses that window instead, so its matches
 /// leave "Now" when its search stops finding them.
 pub const RECENT_MINUTES: i64 = 60;
 
-/// The minutes a match of a pattern that searches `window` stays
-/// recent: `RECENT_MINUTES`, or the window when it is shorter, and at
+/// How many minutes a match of a pattern that searches `window` stays
+/// recent: `RECENT_MINUTES`, or the window when it is shorter, but at
 /// least one minute, so a window of seconds still has a recent match.
 pub fn span(window: &str) -> i64 {
     let window = seconds(window).map_or(RECENT_MINUTES, |seconds| seconds / 60);
     window.clamp(1, RECENT_MINUTES)
 }
 
-/// Whether a match `minutes_ago`, of a pattern that searches `window`,
-/// is recent.  A match exactly one span ago is not recent, the same as
-/// a restart exactly `RECENT_MINUTES` ago.
+/// Whether a match `minutes_ago` minutes old, of a pattern that searches
+/// `window`, is recent. A match exactly `span(window)` old is not.
 pub fn is_recent(minutes_ago: i64, window: &str) -> bool {
     minutes_ago < span(window)
 }

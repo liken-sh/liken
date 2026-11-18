@@ -1,6 +1,6 @@
-//! A part: one built-in controller under a top owner, such as the
-//! `StatefulSet` a cache's operator runs, read for what the workload page
-//! and its card show.
+//! A part is one built-in controller under a workload's top owner, such
+//! as the `StatefulSet` that a cache's operator creates, with the fields
+//! that the workload's page and card show.
 
 use std::collections::HashMap;
 
@@ -11,9 +11,8 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use k8s_openapi::jiff::Timestamp;
 use kube::ResourceExt;
 
-/// The update strategy the API server fills in when a workload leaves
-/// its own out, for Deployments, StatefulSets, and DaemonSets
-/// alike.
+/// The update strategy that the API server sets when a `Deployment`, a
+/// `StatefulSet`, or a `DaemonSet` has none.
 const DEFAULT_STRATEGY: &str = "RollingUpdate";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,29 +29,30 @@ pub struct Part<'a> {
     pub name: String,
     /// `spec.replicas`, for a `Deployment` or a `StatefulSet`.
     pub replicas: Option<i32>,
-    /// How many of its pods are ready, and how many it asks for, for
-    /// every controller except a `CronJob`, whose pods come and go.
+    /// How many of its pods are ready, and how many it should run. `None` for
+    /// a `CronJob`, whose pods come and go.
     pub ready: Option<(i32, i32)>,
     pub template: &'a PodTemplateSpec,
-    /// `RollingUpdate`, `Recreate`, or `OnDelete`; none for a `CronJob`.
+    /// `RollingUpdate`, `Recreate`, or `OnDelete`, and `None` for a `CronJob`.
     pub strategy: Option<String>,
-    /// When its newest revision was made: the newest `ReplicaSet` of a
-    /// `Deployment`, or the newest `ControllerRevision` of a
-    /// `StatefulSet` or a `DaemonSet`, which is when its pod template
-    /// last changed.
+    /// When its newest revision was created: the newest `ReplicaSet` of
+    /// a `Deployment`, or the newest `ControllerRevision` of a
+    /// `StatefulSet` or a `DaemonSet`. A new revision is created when
+    /// the pod template changes.
     pub rolled: Option<Timestamp>,
 }
 
-/// The newest revision each controller made, by namespace, the
-/// controller's kind, and its name.  A revision names its controller in
-/// its owner references.
+/// The creation time of the newest revision of each controller, by the
+/// controller's namespace, kind, and name. A revision's controller is
+/// its owner reference with `controller: true`.
 #[derive(Default)]
 pub struct Revisions {
     newest: HashMap<(String, String, String), Timestamp>,
 }
 
 impl Revisions {
-    /// Indexes the metadata of every `ReplicaSet` and `ControllerRevision`.
+    /// `revisions` is the metadata of every `ReplicaSet` and
+    /// `ControllerRevision`.
     pub fn build<'a>(revisions: impl IntoIterator<Item = &'a ObjectMeta>) -> Self {
         let mut newest: HashMap<(String, String, String), Timestamp> = HashMap::new();
         for meta in revisions {
@@ -74,8 +74,6 @@ impl Revisions {
         self.newest(meta.namespace.as_deref()?, kind, meta.name.as_deref()?)
     }
 
-    /// When the controller `kind` `name` in `namespace` made its newest
-    /// revision.
     pub fn newest(&self, namespace: &str, kind: &str, name: &str) -> Option<Timestamp> {
         let key = (namespace.to_owned(), kind.to_owned(), name.to_owned());
         self.newest.get(&key).copied()
@@ -134,8 +132,8 @@ impl<'a> Part<'a> {
         }
     }
 
-    /// A `CronJob`, or none when it has no job template, which the API
-    /// server never allows but the type does not rule out.
+    /// A `CronJob`, or `None` when its job template has no spec. The API
+    /// server rejects such a `CronJob`, but the type allows it.
     pub fn cron_job(cron_job: &'a CronJob) -> Option<Self> {
         let template = &cron_job.spec.job_template.spec.as_ref()?.template;
         Some(Self {
@@ -172,7 +170,7 @@ mod tests {
     }
 
     #[rstest]
-    fn a_controller_rolled_when_its_newest_revision_was_made() {
+    fn rolled_is_the_creation_of_the_newest_revision() {
         let metas = [
             revision("web-1", "Deployment", "web", "2026-01-01T00:00:00Z"),
             revision("web-2", "Deployment", "web", "2026-01-03T00:00:00Z"),

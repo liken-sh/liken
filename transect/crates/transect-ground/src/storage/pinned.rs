@@ -1,15 +1,15 @@
-//! The machines that a pod's claims tie it to.  A lost machine keeps
-//! those claims until it returns.
+//! The machines that a pod's claims tie it to.  A lost machine's claims
+//! stay tied to it until it returns.
 //!
-//! A volume on one machine's own disk exists on that machine and on no
-//! other.  A block volume that a CSI driver attached to a machine stays
-//! attached until the machine confirms that its pod is gone.  A lost
-//! machine never confirms this, so a replacement pod on another machine
-//! waits for the detach.  An in-tree iSCSI volume has no
-//! `VolumeAttachment`, so transect uses its claim's access mode instead:
-//! a claim that only one machine may mount is held by the machine that
-//! its pod runs on.  A claim that many machines may mount, such as an
-//! NFS share's claim, ties its pod to no machine.
+//! A volume on one machine's own disk exists on that machine only.  A
+//! block volume that a CSI driver attached to a machine stays attached
+//! until the machine confirms that its pod is gone.  A lost machine
+//! never confirms, so a replacement pod on another machine waits for the
+//! detach.  An in-tree iSCSI volume has no `VolumeAttachment`, so
+//! transect uses the claim's access mode instead: a claim that only one
+//! machine may mount is tied to the machine that its pod runs on.  A
+//! claim that many machines may mount, such as an NFS share's, ties its
+//! pod to no machine.
 
 use k8s_openapi::api::core::v1::Pod;
 use k8s_openapi::api::storage::v1::VolumeAttachment;
@@ -49,9 +49,9 @@ impl Pin {
 }
 
 impl Storage {
-    /// Records the machine that each attachment in `attachments`
-    /// attaches its volume to.  An attachment that names no
-    /// `PersistentVolume`, such as an inline volume's, ties no claim.
+    /// Records the machine of each attachment.  An attachment with no
+    /// `persistentVolumeName`, such as an inline volume's, is skipped,
+    /// because it belongs to no claim.
     pub fn with_attachments<'a>(
         mut self,
         attachments: impl IntoIterator<Item = &'a VolumeAttachment>,
@@ -67,8 +67,8 @@ impl Storage {
         self
     }
 
-    /// Every machine `pod`'s claims tie it to, in the order its volumes
-    /// list them.
+    /// One `Pin` for each machine that one of `pod`'s claims ties it to,
+    /// in the order that the pod's volumes list the claims.
     pub fn pins(&self, pod: &Pod) -> Vec<Pin> {
         let (Some(namespace), Some(name)) = (
             pod.metadata.namespace.as_deref(),
@@ -114,8 +114,9 @@ impl Storage {
     }
 
     /// Every claim whose volume is on `machine`'s own disk or attached
-    /// to it, sorted.  An attachment counts whatever the claim's access
-    /// mode, since the machine holds the volume while it is attached.
+    /// to it, sorted by claim.  An attached volume counts whatever the
+    /// claim's access mode, because it stays attached until the machine
+    /// detaches it.
     pub fn on_machine(&self, machine: &str) -> Vec<Pin> {
         let mut pins: Vec<Pin> = self
             .claims
@@ -140,11 +141,9 @@ impl Storage {
         pins
     }
 
-    /// Whether only one machine may mount `claim`, which is true when
-    /// every access mode that the claim requests allows only one
-    /// machine.  This function returns false for a claim that requests
-    /// no mode, because nothing states that only one machine may mount
-    /// it.
+    /// Whether every access mode that `claim` requests allows only one
+    /// machine.  A claim that requests no mode returns false, because
+    /// nothing then limits it to one machine.
     fn one_machine(&self, claim: &Claim) -> bool {
         let modes = self.modes.get(claim).map_or(&[][..], Vec::as_slice);
         !modes.is_empty() && modes.iter().all(|m| ONE_MACHINE.contains(&m.as_str()))
@@ -159,7 +158,8 @@ mod tests {
     use super::*;
     use crate::storage::fixtures::{csi, iscsi, local, nfs};
 
-    /// A claim in shop named for its volume, bound to it, that requests `mode`.
+    /// A claim in shop, named for its volume and bound to it, that
+    /// requests `mode`.
     fn claim(volume: &str, mode: &str) -> PersistentVolumeClaim {
         serde_yaml::from_str(&format!(
             "metadata: {{namespace: shop, name: {volume}}}\nspec: {{volumeName: {volume}, accessModes: [{mode}]}}"
@@ -174,9 +174,9 @@ mod tests {
         .unwrap()
     }
 
-    /// Storage with one volume of each kind, each bound to a claim of
-    /// the volume's name, and the block and shared volumes attached to
-    /// alpha.
+    /// Storage with a volume for each case below, each bound to a claim
+    /// of the volume's name.  The `block` and `shared` volumes are
+    /// attached to alpha.
     fn storage() -> Storage {
         let volumes = [
             csi("block", "csi.example.com", "fast"),

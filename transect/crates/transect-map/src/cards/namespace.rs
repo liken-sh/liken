@@ -15,58 +15,60 @@ use transect_ground::devices::Holds;
 use transect_network::addresses::Depends;
 use transect_network::policy::Calls;
 use transect_observe::health::{Health, Level, Reason};
-use transect_resources::intent::{Docs, Line, Said};
+use transect_resources::intent::{Docs, Line, ObjectIntent};
 use transect_resources::knowledge::Named;
 use transect_supply::gitops::CodeSection;
 
 #[derive(Debug, PartialEq)]
 pub struct NamespaceCard {
     pub name: String,
-    /// What the namespace is, what goes wrong with it, and where to
-    /// read more, from its own intent.
+    /// `why`, `gotcha`, `provides`, and `docs` come from the namespace's
+    /// declared intent.
     pub why: Option<Line>,
     pub gotcha: Option<Line>,
     pub provides: Option<Line>,
     pub docs: Option<Docs>,
-    /// The same health the namespace's parcel takes, so the card's
-    /// reasons are the sentences the "Now" section shows.
+    /// The same health as the namespace's rectangle on the cluster page,
+    /// so the card's reasons are the sentences that the "Now" section
+    /// shows.
     pub health: Health,
-    /// The page each of the health's reasons links to, in their order,
-    /// or none for a reason about the card's own object.
+    /// The page that each of the health's reasons links to, in the same
+    /// order, or none for a reason about the namespace itself.
     pub reason_pages: Vec<Option<String>>,
-    /// Every host the namespace's Ingresses route, in DNS order, each once.
+    /// Every host that the namespace's Ingresses route, each once, in
+    /// DNS order.
     pub hosts: Vec<String>,
     pub chips: Vec<Chip>,
-    /// How many claims the namespace has, bound or waiting.
+    /// How many PersistentVolumeClaims the namespace has.
     pub volumes: usize,
-    /// What its workloads depend on outside it, and what depends on
-    /// them from outside.
+    /// What the namespace's workloads depend on outside the namespace,
+    /// and what outside the namespace depends on them.
     pub depends: Depends,
-    /// Where it is declared, or the reason the card does not show it.
+    /// Where the namespace is declared in git, or why the card cannot
+    /// show it.
     pub code: CodeSection,
-    /// The controllers of its custom resources, and what it controls.
+    /// The controllers of its custom resources, and what the
+    /// namespace's own controllers manage.
     pub managed: Managed,
-    /// The loops it is in.
+    /// The loops that the namespace is in.
     pub loops: Vec<Loop>,
-    /// The other namespaces its policies let call it.
+    /// The other namespaces that its network policies allow to call
+    /// it.
     pub calls: Calls,
-    /// The devices its workloads hold.
+    /// The devices that its workloads hold.
     pub holds: Holds,
-    /// The layer that its kinds' knowledge names, when that layer is
-    /// what places the namespace.
     pub layer_named: Option<Named>,
-    /// The log patterns that matched in this namespace and are only
-    /// worth knowing, as the sentences of the "Worth knowing" lines.  An
-    /// error or warning pattern is among the health's reasons instead.
+    /// The sentences for log patterns that matched in this namespace
+    /// and are informational, for the "Worth knowing" lines. Patterns at
+    /// error or warning level are in the health's reasons instead.
     pub logged: Vec<Reason>,
 }
 
 impl NamespaceCard {
     /// The card for `namespace`, with a chip for each of `workloads`,
-    /// the namespace's top owners, colored by `by_workload`, their
-    /// health, each linked to the page `href` gives it.  The replica
-    /// counts come from `objects`.  `health` is the namespace's health
-    /// as the map assessed it, and `volumes` the number of its claims.
+    /// the namespace's top-level owners. A chip is colored by the
+    /// workload's health in `by_workload`, links to the page that `href`
+    /// returns, and shows the replica count from `objects`.
     #[allow(clippy::too_many_arguments)]
     pub fn build<'a>(
         namespace: &str,
@@ -130,8 +132,7 @@ impl NamespaceCard {
         }
     }
 
-    /// The card with each reason linked to the page that `page` returns
-    /// for the reason's subject.
+    /// Links each reason to the page that `page` returns for it.
     pub fn with_reason_pages(self, page: impl Fn(&Reason) -> Option<String>) -> Self {
         let reason_pages = self.health.reasons.iter().map(page).collect();
         Self {
@@ -140,7 +141,7 @@ impl NamespaceCard {
         }
     }
 
-    /// Each of the health's reasons with the page its line links to.
+    /// Each of the health's reasons with the page it links to, if any.
     pub fn reason_lines(&self) -> Vec<(&Reason, Option<&str>)> {
         let pages = self.reason_pages.iter().map(Option::as_deref);
         self.health
@@ -154,8 +155,9 @@ impl NamespaceCard {
         Self { logged, ..self }
     }
 
-    /// The card with the layer its kinds' knowledge names, which places
-    /// it when neither its annotation nor a selector does.
+    /// Sets the layer that the `KindKnowledge` of the namespace's kinds
+    /// names. The map uses it to place the namespace when neither an annotation
+    /// nor a selector does.
     pub fn with_layer_named(self, layer_named: Option<Named>) -> Self {
         Self {
             layer_named,
@@ -163,15 +165,19 @@ impl NamespaceCard {
         }
     }
 
-    /// The card with the namespace's intent, and each chip titled with
-    /// the `why` that `whys` gives for each of its workloads, by name.
-    pub fn with_intent(self, said: Option<&Said>, whys: &HashMap<String, String>) -> Self {
-        let said = said.cloned().unwrap_or_default();
+    /// Sets the namespace's intent, and titles each chip with the `why`
+    /// that `whys` has for its workload name.
+    pub fn with_intent(
+        self,
+        intent: Option<&ObjectIntent>,
+        whys: &HashMap<String, String>,
+    ) -> Self {
+        let intent = intent.cloned().unwrap_or_default();
         Self {
-            why: said.why,
-            gotcha: said.gotcha,
-            provides: said.provides,
-            docs: said.docs,
+            why: intent.why,
+            gotcha: intent.gotcha,
+            provides: intent.provides,
+            docs: intent.docs,
             chips: self
                 .chips
                 .into_iter()
@@ -181,7 +187,8 @@ impl NamespaceCard {
         }
     }
 
-    /// What the card's marked lines mean, when any line is marked.
+    /// The legend that explains the card's marked lines, when any line
+    /// is marked.
     pub fn legend(&self) -> Option<String> {
         let lines = [
             self.why.as_ref().map(|line| &line.provenance),
@@ -193,34 +200,30 @@ impl NamespaceCard {
         transect_graph::edges::provenance::legend(lines.into_iter().flatten())
     }
 
-    /// The card with `calls`, which the evaluated policies give.
     pub fn with_calls(self, calls: Calls) -> Self {
         Self { calls, ..self }
     }
 
-    /// The card with `holds`, which is read from the edge graph.
+    /// `depends`, `holds`, `managed`, and `code` come from the edge
+    /// graph, so a view that builds no edge graph leaves them at their
+    /// defaults.
     pub fn with_holds(self, holds: Holds) -> Self {
         Self { holds, ..self }
     }
 
-    /// The card with `depends`, which is read from the edge graph, so
-    /// only the views that build an edge graph give it.
     pub fn with_depends(self, depends: Depends) -> Self {
         Self { depends, ..self }
     }
 
-    /// The card with `managed`, which is also read from the edge graph.
     pub fn with_managed(self, managed: Managed) -> Self {
         Self { managed, ..self }
     }
 
-    /// The card with `code`, which is also read from the edge graph.
     pub fn with_code(self, code: CodeSection) -> Self {
         Self { code, ..self }
     }
 
-    /// The card with the loops of `loops` that contain its namespace,
-    /// which come from the whole graph.
+    /// Keeps the loops of `loops` that contain the card's namespace.
     pub fn with_loops(self, loops: &[Loop]) -> Self {
         let loops = loops.iter().filter(|found| found.holds(&self.name));
         Self {
@@ -229,8 +232,8 @@ impl NamespaceCard {
         }
     }
 
-    /// The health dot: clear when healthy, and filled for a failure and
-    /// outlined for a warning, as the "Now" section draws them.
+    /// The CSS class of the health dot, the same as the "Now" section
+    /// uses.
     pub fn dot_class(&self) -> &'static str {
         match self.health.level {
             Level::Healthy => "dot-clear",
@@ -240,8 +243,9 @@ impl NamespaceCard {
         }
     }
 
-    /// The class of the open namespace on the namespace page, so its
-    /// frame shows the health that its parcel shows on the cluster page.
+    /// The CSS class of the namespace's frame on the namespace page, so
+    /// the frame shows the same health as the namespace's rectangle on
+    /// the cluster page.
     pub fn frame_class(&self) -> &'static str {
         match self.health.level {
             Level::Healthy | Level::Notice => "opened",
@@ -251,8 +255,8 @@ impl NamespaceCard {
     }
 }
 
-/// The hosts of every rule in `ingresses`, in DNS order.  A rule with
-/// no host matches any host, so it names nothing to list.
+/// The hosts of every rule in `ingresses`, each once, in DNS order. A
+/// rule with no host matches any host, so it adds no host to the list.
 fn hosts<'a>(ingresses: impl IntoIterator<Item = &'a Ingress>) -> Vec<String> {
     let hosts: BTreeSet<String> = ingresses
         .into_iter()
@@ -395,7 +399,7 @@ mod tests {
     }
 
     #[rstest]
-    fn a_workload_in_another_namespace_lends_no_replicas() {
+    fn ignores_the_replicas_of_a_workload_in_another_namespace() {
         let deployments = [deployment("blog", "web", 2)];
         let objects = Objects {
             deployments: &deployments,

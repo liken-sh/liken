@@ -1,15 +1,10 @@
-//! The per-view registry: one render task for each view that has a
-//! browser connected, shared by every browser on that view.
-//!
-//! Each URL renders differently, so browsers share a rendering only
-//! when they share a view.  Each task renders its view once when its
-//! first browser connects, then again after each settled change, and
-//! publishes each rendering on a `watch` channel that its browsers
-//! read.  So the cost of a change is one render per open view however
-//! many browsers share it, and a browser that falls behind skips
-//! straight to the newest rendering instead of replaying the ones it
-//! missed.  A task ends when its last browser leaves, so a view nobody
-//! looks at costs nothing.
+//! One render task for each view, keyed by URL, that at least one
+//! browser has open.  The task renders when the first browser connects
+//! and again after each burst of changes settles, and publishes on a
+//! `watch` channel that every browser on the view reads.  So a change
+//! costs one render per open view, however many browsers have it open,
+//! and a browser that falls behind skips to the newest rendering.  The
+//! task ends when the last browser disconnects.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -49,10 +44,8 @@ impl<K> Clone for Views<K> {
 }
 
 impl<K: Clone + Eq + Hash + Send + Sync + 'static> Views<K> {
-    /// `changes` wakes every open view; `render` returns `None` when
-    /// rendering fails, and the last good rendering stays published.  A
-    /// view whose object is gone renders the page that reports it gone,
-    /// which is a rendering like any other.
+    /// A send on `changes` makes every open view render again.  When
+    /// `render` returns `None`, the view keeps its last rendering.
     pub fn new<F>(
         changes: watch::Sender<()>,
         quiet: Duration,
@@ -71,20 +64,20 @@ impl<K: Clone + Eq + Hash + Send + Sync + 'static> Views<K> {
         }
     }
 
-    /// The latest rendering of `view`, starting its task when no browser
-    /// has it open.  The first rendering happens outside the lock, so a
-    /// slow render holds up only the browsers of its own view; two
-    /// browsers arriving together may both render, and the second to
-    /// finish joins the first one's task instead of starting another.
+    /// Returns a receiver of `view`'s renderings, and starts the view's
+    /// task when no browser has it open.  The first render runs without
+    /// the lock, so a slow render delays only the browsers of that view.
+    /// When two browsers open the same view at once, both render, and
+    /// the one that finishes second uses the task of the first.
     pub async fn subscribe(&self, view: K) -> watch::Receiver<Arc<str>> {
         if let Some(published) = self.open.lock().unwrap().get(&view) {
             return published.subscribe();
         }
-        // Subscribing before the first render, not in the task, counts a
-        // change that lands before the task first runs.
+        // Subscribe before the first render, so a change that arrives
+        // while it runs makes the task render again.
         let changes = self.changes.subscribe();
-        // A first render that fails publishes an empty rendering, which
-        // the event stream does not send.
+        // When the first render fails, the view starts with an empty
+        // rendering, and the event stream sends no empty rendering.
         let first = (self.render)(view.clone()).await.unwrap_or_default();
         let mut open = self.open.lock().unwrap();
         if let Some(published) = open.get(&view) {
@@ -116,19 +109,18 @@ impl<K: Clone + Eq + Hash + Send + Sync + 'static> Views<K> {
                     if self.close(&view, &published) {
                         break;
                     }
-                    // The browser that kept the view open may have
-                    // cancelled a settle that had received a change, so
-                    // render now rather than wait for the next one.
+                    // A browser subscribed before `close` took
+                    // the lock.  The dropped `settle` future may have
+                    // received a change already, so render now.
                     self.publish(&view, &published).await;
                 }
             }
         }
     }
 
-    /// Publishes a rendering only when it differs from the last one.  A
-    /// change the view does not draw, such as a new `Deployment` revision
-    /// with the same count, renders to the same HTML and is sent to no
-    /// browser.
+    /// Publishes a rendering only when it differs from the last one, so
+    /// a change that the view does not show, such as a new `Deployment`
+    /// revision with the same replica count, sends nothing to browsers.
     async fn publish(&self, view: &K, published: &watch::Sender<Arc<str>>) {
         let Some(html) = (self.render)(view.clone()).await else {
             return;
@@ -142,10 +134,10 @@ impl<K: Clone + Eq + Hash + Send + Sync + 'static> Views<K> {
         });
     }
 
-    /// Removes the view once its last browser has left.  A browser can
-    /// subscribe between `closed()` resolving and this lock, so the count
-    /// is read again under the lock.  When a browser has subscribed, the
-    /// task keeps running.
+    /// Removes the view and returns true when no browser has it open.  A
+    /// browser can subscribe after `closed()` resolves and before this
+    /// takes the lock, so the receiver count is read again under the
+    /// lock, and the task keeps running when it is not zero.
     fn close(&self, view: &K, published: &Published) -> bool {
         let mut open = self.open.lock().unwrap();
         if published.receiver_count() > 0 {
@@ -170,8 +162,8 @@ mod tests {
     const QUIET: Duration = Duration::from_millis(500);
     const CAP: Duration = Duration::from_secs(2);
 
-    /// A stand-in for the cluster: each view renders to its name and the
-    /// cluster's current text, and every render is counted by view.
+    /// A fake cluster: each view renders to its name and the current
+    /// `text`, and `renders` counts the renders of each view.
     struct Cluster {
         text: Arc<Mutex<String>>,
         renders: Arc<Mutex<HashMap<String, usize>>>,

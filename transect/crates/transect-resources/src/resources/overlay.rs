@@ -1,9 +1,9 @@
-//! Overlays: plain objects of a kind `transect` watches that have only
-//! metadata, merged onto the live object of the same kind, namespace,
-//! and name as if the cluster's manifest had their annotations and
-//! labels.  An overlay is the patch a person would make to the real
-//! manifest, so intent can be tried against a cluster without editing
-//! it, and adopted by moving the same lines into its repository.
+//! An overlay is a YAML document with only the metadata of an object
+//! that `transect` watches. `transect` adds the overlay's labels and
+//! annotations to the live object with the same group, kind,
+//! namespace, and name. You write the same lines that you would add to
+//! the object's manifest, so you can try annotations without changing
+//! the cluster, and later copy them into the manifest.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -18,7 +18,8 @@ use transect_graph::edges::Object;
 #[derive(Clone, Debug, PartialEq)]
 pub struct Overlay {
     pub doc: DocId,
-    /// The file it came from, which every fact read from it names.
+    /// The file the overlay was read from. The provenance of each
+    /// annotation that the overlay added records this file.
     pub file: String,
     pub group: String,
     pub kind: String,
@@ -48,9 +49,9 @@ struct Metadata {
 }
 
 impl Overlay {
-    /// The overlay `value` declares, or why it is not one.  Anything
-    /// beyond metadata is refused rather than ignored, because a reader
-    /// who wrote a spec would expect `transect` to use it.
+    /// Any field other than `apiVersion`, `kind`, and the four
+    /// `metadata` fields is an error, because someone who writes a
+    /// `spec` in an overlay expects `transect` to use it.
     pub fn parse(doc: DocId, file: &str, value: serde_yaml::Value) -> Result<Self, String> {
         let document: Document = serde_yaml::from_value(value).map_err(|error| {
             format!(
@@ -73,8 +74,7 @@ impl Overlay {
         })
     }
 
-    /// Whether this overlay adds to `object`'s metadata.
-    pub fn names(&self, object: &Object) -> bool {
+    pub fn is_for(&self, object: &Object) -> bool {
         &self.object() == object
     }
 
@@ -88,20 +88,19 @@ impl Overlay {
     }
 }
 
-/// The overlays merged onto one reading of the cluster: which matched a
-/// live object, and which annotations each one filled in.
+/// Applies the overlays to one snapshot of the cluster, and records
+/// which overlays matched a live object and which annotations each
+/// overlay added.
 #[derive(Debug, Default)]
 pub struct Overlaid {
     overlays: Arc<Vec<Overlay>>,
-    /// The overlays naming each object, by their place in `overlays`.
     by_object: HashMap<Object, Vec<usize>>,
-    /// The group and kind of every overlay, so a kind that no overlay
-    /// names is skipped without a lookup per object.
+    /// `apply_as` returns early for a kind that no overlay is for.
     kinds: HashSet<(String, String)>,
     matched: HashSet<usize>,
-    /// The annotations an overlay set on each object, by key, with the
-    /// overlay that set it.
-    filled: HashMap<Object, BTreeMap<String, usize>>,
+    /// For each object, the index of the overlay that added each
+    /// annotation key.
+    added: HashMap<Object, BTreeMap<String, usize>>,
 }
 
 impl Overlaid {
@@ -120,8 +119,8 @@ impl Overlaid {
         }
     }
 
-    /// `objects` of a built-in kind with the overlays naming them merged
-    /// on.
+    /// `apply_as` for a built-in kind, whose group and kind come from
+    /// the type.
     pub fn apply<K>(&mut self, objects: Vec<Arc<K>>) -> Vec<Arc<K>>
     where
         K: Resource<DynamicType = ()> + Clone,
@@ -129,8 +128,8 @@ impl Overlaid {
         self.apply_as(&K::group(&()), &K::kind(&()), objects)
     }
 
-    /// `objects`, of the kind `group` and `kind` name, with the overlays
-    /// naming them merged on.  Only an object an overlay names is copied.
+    /// Merges the overlays into `objects` of `group` and `kind`. Only an
+    /// object that has an overlay is cloned.
     pub fn apply_as<K: Resource + Clone>(
         &mut self,
         group: &str,
@@ -152,9 +151,9 @@ impl Overlaid {
             let meta = Arc::make_mut(object).meta_mut();
             for at in overlays {
                 self.matched.insert(at);
-                let filled = merge(meta, &self.overlays[at]);
-                let into = self.filled.entry(key.clone()).or_default();
-                for annotation in filled {
+                let added = merge(meta, &self.overlays[at]);
+                let into = self.added.entry(key.clone()).or_default();
+                for annotation in added {
                     into.entry(annotation).or_insert(at);
                 }
             }
@@ -162,10 +161,11 @@ impl Overlaid {
         objects
     }
 
-    /// The file of the overlay that set `object`'s annotation `key`,
-    /// when an overlay set it and the live object did not.
+    /// The file of the overlay that added the annotation `key` to
+    /// `object`, or `None` when the live object already had it or no
+    /// overlay set it.
     pub fn file_of(&self, object: &Object, key: &str) -> Option<&str> {
-        let at = *self.filled.get(object)?.get(key)?;
+        let at = *self.added.get(object)?.get(key)?;
         Some(self.overlays[at].file.as_str())
     }
 
@@ -191,22 +191,23 @@ impl Overlaid {
     }
 }
 
-/// Merges `overlay`'s labels and annotations onto `meta`, leaving every
-/// key the live object already has, and returns the annotations it set.
+/// Adds `overlay`'s labels and annotations to `meta`, and returns the
+/// annotation keys it added. A key the live object already has keeps
+/// its live value.
 fn merge(meta: &mut ObjectMeta, overlay: &Overlay) -> Vec<String> {
     let labels = meta.labels.get_or_insert_default();
     for (key, value) in &overlay.labels {
         labels.entry(key.clone()).or_insert_with(|| value.clone());
     }
     let annotations = meta.annotations.get_or_insert_default();
-    let mut filled = Vec::new();
+    let mut added = Vec::new();
     for (key, value) in &overlay.annotations {
         if !annotations.contains_key(key) {
             annotations.insert(key.clone(), value.clone());
-            filled.push(key.clone());
+            added.push(key.clone());
         }
     }
-    filled
+    added
 }
 
 #[cfg(test)]

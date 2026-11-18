@@ -1,5 +1,5 @@
-//! The words that a card's code section shows.  Everything else in the
-//! section is a name, a URL, or the tool's own message.
+//! The text that a card's code section shows, apart from names, URLs,
+//! and the GitOps tool's own messages.
 
 use super::Off;
 use super::Ready;
@@ -12,13 +12,13 @@ impl Off {
     /// The reason that the card shows no code.
     pub fn note(&self) -> OffLine {
         match self {
-            Self::NoKnowledge => OffLine::said(
+            Self::NoKnowledge => OffLine::plain(
                 "reconciles from is off: no kind knowledge declares applies for a kind this cluster serves",
             ),
-            Self::Listing(kinds) => OffLine::said(format!(
+            Self::Listing(kinds) => OffLine::plain(format!(
                 "reconciles from is off for now: transect is still listing {kinds}"
             )),
-            Self::Refused(kinds) => OffLine::said(format!(
+            Self::Refused(kinds) => OffLine::plain(format!(
                 "reconciles from is off: transect may not list {kinds}"
             )),
             Self::Unloaded(name) => OffLine {
@@ -32,8 +32,8 @@ impl Off {
 }
 
 impl Place {
-    /// The address of the directory page, for a place that transect can
-    /// link.
+    /// The URL of the directory's page, when transect can link to the
+    /// directory.
     pub fn href(&self) -> Option<&str> {
         match self {
             Self::Link { href, .. } => Some(href),
@@ -51,8 +51,8 @@ impl Place {
 }
 
 impl Declared {
-    /// "Tree shop", or "Tree ops/shop" when its namespace is not
-    /// `here`, which the card links.
+    /// The applier's kind and name, as "Tree shop", or "Tree ops/shop"
+    /// when its namespace is not `here`.
     pub fn name_text(&self, here: Option<&str>) -> String {
         named(&self.applier, here)
     }
@@ -67,8 +67,8 @@ impl Declared {
         }
     }
 
-    /// What the card shows beside the directory when a running image was
-    /// built from the same repository.
+    /// What the card shows beside the directory when the source label of
+    /// a running image names the same repository.
     pub fn built_here_text(&self) -> &'static str {
         "a running image is built from this repository too"
     }
@@ -80,13 +80,14 @@ impl Declared {
 }
 
 impl Release {
-    /// "Release cache", naming its namespace when it is not `here`,
-    /// which the card links.
+    /// The release's kind and name, as "Release cache", with its
+    /// namespace when it is not `here`.
     pub fn name_text(&self, here: Option<&str>) -> String {
         named(&self.object, here)
     }
 
-    /// ", chart cache from https://charts.example.com", or less.
+    /// ", chart cache from https://charts.example.com", or only the
+    /// parts that the release sets.
     pub fn chart_text(&self) -> String {
         match (&self.chart, &self.repository) {
             (Some(chart), Some(repository)) => format!(", chart {chart} from {repository}"),

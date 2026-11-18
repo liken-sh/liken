@@ -1,5 +1,5 @@
 # trivy-operator
 
-Kind knowledge for trivy-operator's vulnerability, audit, SBOM, and assessment reports.
-With it, the operator's workload lists the reports it writes in its Manages box, and each report kind links to trivy-operator's documentation.
-Its vulnerability reports' findings fill `/vulnerabilities` and each workload's vulnerabilities tab.
+`KindKnowledge` resources for the vulnerability, audit, SBOM, and assessment reports of trivy-operator.
+With them, the page of the operator's workload has a box for each kind of report it creates, with a count. Each box links to the list of that kind, and the card of each report links to trivy-operator's documentation.
+The findings of the vulnerability reports fill `/vulnerabilities` and the vulnerabilities tab of each workload.

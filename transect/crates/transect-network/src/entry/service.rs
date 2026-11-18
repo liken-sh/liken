@@ -1,6 +1,5 @@
-//! A `Service` as the entry draws it: its type, its ports, and how
-//! many of its endpoints are ready, counted from its `EndpointSlice`
-//! objects.
+//! A `Service` as a workload page shows it: its type, its ports, and
+//! how many of its endpoints are ready.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -9,17 +8,15 @@ use k8s_openapi::api::core::v1::Service;
 use k8s_openapi::api::discovery::v1::EndpointSlice;
 use kube::ResourceExt;
 
-/// The label the `EndpointSlice` controller puts on each slice, naming
-/// the `Service` the slice belongs to.
+/// The label that holds the name of a slice's `Service`.
 const SERVICE_NAME: &str = "kubernetes.io/service-name";
 
-/// How many endpoints each `Service` has, by namespace and name.
+/// The endpoint count of each `Service`, by namespace and name.
 #[derive(Debug, Default)]
 pub struct Endpoints {
     counts: HashMap<(String, String), Count>,
 }
 
-/// A `Service`'s endpoints: how many are ready, of how many.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Count {
     pub ready: usize,
@@ -27,11 +24,11 @@ pub struct Count {
 }
 
 impl Endpoints {
-    /// Counts the endpoints of every `Service` in `slices`.  A `Service`
-    /// with dual-stack addresses lists each pod in an IPv4 and an IPv6
-    /// slice, so an endpoint is counted once per pod it targets, or per
-    /// address when it targets none.  An endpoint whose readiness is
-    /// unknown counts as ready, as the API documents for consumers.
+    /// A dual-stack `Service` lists each pod in an IPv4 slice and an
+    /// IPv6 slice, so each pod counts once, by its `targetRef`.  An
+    /// endpoint with no `targetRef` counts once, by its first address.  An
+    /// endpoint with no `ready` condition counts as ready, as the
+    /// `EndpointSlice` API tells consumers to do.
     pub fn build(slices: &[Arc<EndpointSlice>]) -> Self {
         let mut seen: HashMap<(String, String), HashSet<String>> = HashMap::new();
         let mut counts: HashMap<(String, String), Count> = HashMap::new();
@@ -72,7 +69,7 @@ pub struct ServiceBox {
     /// `ClusterIP`, `NodePort`, `LoadBalancer`, or `headless` for a
     /// `ClusterIP` `Service` with no address of its own.
     pub kind: String,
-    /// Each port it serves, with its protocol when that is not TCP.
+    /// Each port, such as `80` or `53/UDP`.  TCP ports have no suffix.
     pub ports: Vec<String>,
     pub endpoints: Count,
 }
@@ -113,7 +110,7 @@ mod tests {
     use super::*;
     use crate::entry::fixtures::service;
 
-    /// A slice of `service` in shop with `endpoints` as YAML.
+    /// An IPv4 slice of `service` in shop, with `endpoints` in YAML.
     fn slice(service: &str, endpoints: &str) -> Arc<EndpointSlice> {
         Arc::new(
             serde_yaml::from_str(&format!(

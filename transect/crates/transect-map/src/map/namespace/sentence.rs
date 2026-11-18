@@ -1,5 +1,5 @@
-//! The words the namespace page shows.  Everything else on it is a name
-//! or a number from the cluster.
+//! The text of the namespace page. The rest of the page is names and
+//! numbers from the cluster.
 
 use std::fmt;
 
@@ -8,7 +8,7 @@ use super::line::{JobState, LastRun, Line, Spread};
 use super::managed::ManagedBy;
 
 /// "controlled by cache-system", or "likely controlled by cache-system
-/// or other-system" when attribution could not choose between them.
+/// or other-system" when the graph could not tell which of them it is.
 impl fmt::Display for ManagedBy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.guessed {
@@ -57,8 +57,8 @@ impl fmt::Display for Line {
     }
 }
 
-/// The header beside the open namespace's name.  Most namespaces have no
-/// claims, so the header leaves volumes out for a namespace with none.
+/// The header beside the open namespace's name. It leaves out the volume
+/// count for a namespace with no volumes, because most have none.
 pub fn header(workloads: usize, pods: usize, volumes: usize) -> String {
     let mut header = format!("{} · {}", count(workloads, "workload"), count(pods, "pod"));
     if volumes > 0 {
@@ -67,15 +67,17 @@ pub fn header(workloads: usize, pods: usize, volumes: usize) -> String {
     header
 }
 
-/// The end of a folded band's line, after its first names.
+/// "4 more": the namespaces that a folded band leaves out after the names
+/// it shows.
 pub fn more(more: usize) -> String {
     format!("{more} more")
 }
 
-/// A folded band with no namespace to name.
+/// The text of a folded band that has no namespaces.
 pub const EMPTY_BAND: &str = "no namespaces";
 
-/// `number` and `noun`, with an "s" for any number but one.
+/// `number` and `noun`, with an "s" added to the noun unless the number
+/// is 1.
 fn count(number: impl fmt::Display, noun: &str) -> String {
     let number = number.to_string();
     format!("{number} {noun}{}", if number == "1" { "" } else { "s" })

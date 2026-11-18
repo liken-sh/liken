@@ -1,14 +1,14 @@
-# What transect's account may do: get, list, and watch, and nothing
-# else.  No rule names Secrets, and no rule has a wildcard, since a
-# wildcard on the core group would include Secrets.
+# transect's account can get, list, and watch, and nothing else.  No
+# rule names Secrets, and no rule has a wildcard, because a wildcard on
+# the core group would include Secrets.
 #
-# transect-reader is the role the account holds.  It aggregates every
-# ClusterRole that carries the label below: transect-reader-builtin, for
-# the built-in kinds the stores watch, and any role an operator or the
-# cluster's repository adds for a custom group.  transect watches every
-# CRD, so a cluster adds one such role listing the groups its CRDs
-# serve, or leaves a group out, and /resources shows each kind it may
-# not list.
+# The account is bound to transect-reader, which aggregates every
+# ClusterRole that has the label below.  Those are transect-reader-builtin,
+# for the built-in kinds that transect watches, and any role that an
+# operator or the cluster's own repository adds for a custom group.
+# transect watches every CRD, so a cluster adds one such role that
+# lists the groups its CRDs serve.  transect does not watch a kind in a
+# group that no role lists, and logs "not watching" for it.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -26,10 +26,10 @@ metadata:
   labels:
     transect.liken.sh/aggregate-to-reader: "true"
 rules:
-  # ConfigMaps are here because their names and their owners place a
-  # workload's configuration on the map.  A list returns their data,
-  # which can hold credentials, and Kubernetes has no grant for their
-  # metadata alone.
+  # ConfigMaps are here because their names and owners show which
+  # workload uses which configuration on the map.  A list returns their
+  # data, which can hold credentials, and Kubernetes cannot grant
+  # access to a ConfigMap's metadata alone.
   - apiGroups: [""]
     resources:
       - configmaps
@@ -85,9 +85,10 @@ subjects:
     name: transect
     namespace: default
 ---
-# A pod's log lines can hold credentials, so reading them is a role of
-# its own, which a cluster can delete with a patch.  Without it, a pod's
-# tail comes from a LogSource or is not shown.
+# A pod's log lines can hold credentials, so the permission to read them
+# is a separate role, which a cluster can remove with a patch.  Without
+# it, transect shows a pod's recent log lines from a LogSource, or not
+# at all.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

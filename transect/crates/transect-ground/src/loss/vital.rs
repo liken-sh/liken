@@ -1,23 +1,24 @@
-//! The workloads whose loss leaves the cluster blind or cut off: the
-//! Alertmanager that the cluster's alerts go through, the cluster's DNS,
-//! and the way in for web traffic from outside.  A loss that takes one
-//! of these shows it first, because every other line below assumes
-//! that someone is paged and can reach the cluster.
+//! The workloads that the cluster cannot do without: the Alertmanager
+//! that the cluster's alerts go through, the cluster's DNS, and the
+//! path for web traffic from outside.  When a loss takes one of these
+//! down, the loss shows it first, because the rest of the loss assumes
+//! that alerts still page someone and that people can reach the
+//! cluster.
 //!
-//! transect finds each one from what Kubernetes already records:
+//! transect finds each one from `Service` selectors:
 //!
 //! - alerting: the pods selected by the `Service` that the
 //!   `MetricsSource`'s `alerts.service` names, which is the Alertmanager
 //!   that transect reads.  When no `Service` is named, the alerting
 //!   path is unknown, and the loss shows that.
 //! - DNS: the pods that the `kube-dns` `Service` in `kube-system`
-//!   selects.  Every distribution gives the cluster's resolver that
-//!   name.
-//! - the way in: the pods that a `LoadBalancer` `Service` selects on
+//!   selects.  kubeadm and k3s give the resolver's `Service` that
+//!   name, and so do most other distributions.
+//! - web traffic: the pods that a `LoadBalancer` `Service` selects on
 //!   port 80 or 443, because an ingress controller receives the
-//!   cluster's web traffic that way.  A load balancer on any other port
-//!   serves one application's own protocol, such as SSH or MQTT, and its
-//!   loss is that application's loss.
+//!   cluster's web traffic through such a `Service`.  A load balancer
+//!   on any other port serves one application's own protocol, such as
+//!   SSH or MQTT, and its loss is that application's loss.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -38,12 +39,12 @@ pub enum Vital {
     WayIn,
 }
 
-/// The ports of web traffic, which an ingress controller's load
-/// balancer listens on.
+/// The ports that an ingress controller's load balancer listens on for
+/// web traffic.
 const WEB_PORTS: [i32; 2] = [80, 443];
 
 /// What each vital workload does, keyed by the workload's top owner.  A
-/// workload that does two of these gets the first in `Vital`'s order.
+/// workload that does more than one gets the first in `Vital`'s order.
 pub fn vital(
     pods: &[Arc<Pod>],
     services: &[Arc<Service>],
@@ -56,11 +57,11 @@ pub fn vital(
         .filter(|p| !finished(p))
         .collect();
     let mut found: HashMap<Object, Vital> = HashMap::new();
-    let mut mark = |pod: &Pod, vital: Vital| {
+    let mut record = |pod: &Pod, vital: Vital| {
         let object = Object::new("", "Pod", pod.namespace().as_deref(), &pod.name_any());
         let top = ownership.top_owner(&object);
-        let known = found.entry(top).or_insert(vital);
-        *known = (*known).min(vital);
+        let current = found.entry(top).or_insert(vital);
+        *current = (*current).min(vital);
     };
     for service in services {
         let Some(vital) = role(service, alerting) else {
@@ -73,15 +74,12 @@ pub fn vital(
         let namespace = service.namespace();
         let selected = running.iter().filter(|pod| pod.namespace() == namespace);
         for pod in selected.filter(|pod| selects(selector, pod)) {
-            mark(pod, vital);
+            record(pod, vital);
         }
     }
     found
 }
 
-/// What the pods that `service` selects do for the cluster, when
-/// `service` is the one that `alerting` names, the resolver, or a load
-/// balancer for web traffic.  Returns `None` for any other `Service`.
 fn role(service: &Service, alerting: Option<&transect_graph::upstream::Service>) -> Option<Vital> {
     let spec = service.spec.as_ref()?;
     let named = |declared: &transect_graph::upstream::Service| {
@@ -133,7 +131,8 @@ mod tests {
     }
 
     /// A cluster with an Alertmanager, a resolver, an ingress controller,
-    /// and two applications behind load balancers of their own.
+    /// one application behind a load balancer of its own, and one
+    /// application with a `Service` and no load balancer.
     fn cluster() -> (Vec<Arc<Pod>>, Vec<Arc<Service>>) {
         let pods = vec![
             pod("watch", "alertmanager-0", "alertmanager", "10.0.0.1"),
@@ -163,14 +162,14 @@ mod tests {
 
     #[rstest]
     #[case::alerting(Some(("watch", "alertmanager")), "alertmanager-0", Some(Vital::Alerting))]
-    #[case::alerting_unknown(None, "alertmanager-0", None)]
-    #[case::not_selected(Some(("watch", "alertmanager")), "silencer", None)]
+    #[case::no_alerting_service_named(None, "alertmanager-0", None)]
+    #[case::pod_not_selected(Some(("watch", "alertmanager")), "silencer", None)]
     #[case::dns(None, "resolver", Some(Vital::Dns))]
-    #[case::the_way_in(None, "router", Some(Vital::WayIn))]
-    #[case::a_load_balancer_for_one_protocol(None, "broker", None)]
-    #[case::a_service_inside(None, "web", None)]
+    #[case::web_traffic(None, "router", Some(Vital::WayIn))]
+    #[case::load_balancer_on_another_port(None, "broker", None)]
+    #[case::web_service_without_a_load_balancer(None, "web", None)]
     #[case::alerting_comes_first(Some(("edge", "router")), "router", Some(Vital::Alerting))]
-    fn finds_what_the_cluster_cannot_do_without(
+    fn finds_the_workloads_the_cluster_cannot_do_without(
         #[case] alerting: Option<(&str, &str)>,
         #[case] name: &str,
         #[case] expected: Option<Vital>,

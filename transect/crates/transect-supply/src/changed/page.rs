@@ -1,5 +1,5 @@
-//! The list as the pages show it: the few newest entries in the
-//! sidebar, and every entry of the last day on `/changed`.
+//! The list of changes as the pages show it: the newest few entries in
+//! the sidebar, and every entry of the last day on `/changed`.
 
 use askama::Template;
 use k8s_openapi::jiff::Timestamp;
@@ -7,18 +7,19 @@ use k8s_openapi::jiff::Timestamp;
 use super::{Change, WINDOW_HOURS, for_sidebar};
 use transect_observe::health::times;
 
-/// The entries to render, with the time of the render.  That time
-/// decides whether an entry is from today.
+/// The entries to render, and the time of the render, which decides
+/// whether an entry's time shows its weekday.
 #[derive(Debug, Default, PartialEq)]
 pub struct Listed {
     pub now: Timestamp,
     pub changes: Vec<Change>,
-    /// How many entries the whole list holds.
+    /// The number of entries in the whole list.  In the sidebar,
+    /// `changes` has only some of them.
     pub total: usize,
 }
 
 impl Listed {
-    /// The sidebar's entries of `all`.
+    /// The entries of `all` that the sidebar shows.
     pub fn sidebar(all: &[Change], now: Timestamp) -> Self {
         Self {
             now,

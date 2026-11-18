@@ -1,10 +1,8 @@
-//! The pod elevation shows what runs inside one pod and where it runs.
-//! It draws a row of its workload's other pods to switch between, then a
-//! block per container with its image and where the image came from,
-//! its command, ports, usage bars, restarts, and probes.  After them come
-//! a block of its mounts, a block of the Secrets and ConfigMaps it
-//! reads, by name only, and the machine it runs on with the devices it
-//! holds.
+//! The pod elevation: what runs inside one pod and where it runs.  A
+//! row at the top switches between the pods of the pod's workload.
+//! Below it is a block for each container, then the pod's mounts, the
+//! names of the Secrets and ConfigMaps it reads, and the machine it
+//! runs on with the devices it holds.
 
 mod containers;
 mod mounts;
@@ -43,65 +41,60 @@ use transect_observe::usage::Usage;
 use transect_resources::intent::SecretIntent;
 use transect_supply::images::Origins;
 
-/// How many log lines the pod page shows of each container, as a
-/// preview of its logs lens.
+/// How many log lines the page shows for each container, as a preview
+/// of the logs lens.
 const PREVIEW: usize = 5;
 
-/// The pod page.  Its `main` block renders alone as the fragment a
-/// pushed update replaces, as every elevation's does.
+/// The pod page.  Its `main` block renders alone as the fragment that a
+/// pushed update swaps in, as on every elevation.
 #[derive(Template)]
 #[template(path = "map/pod/pod.html", blocks = ["main"])]
 pub struct PodPage {
-    /// The main column's row of edge kinds, which the page function sets.
     pub edge_row: super::EdgeRow,
     pub namespace: String,
-    /// The band that contains the namespace, which the crumb names.
+    /// The map band that contains the namespace.
     pub layer: String,
     pub name: String,
-    /// The page's own path, which its event stream's URL includes.
+    /// The page's own path, which the events URL is built from.
     pub path: String,
-    /// The workload that runs the pod, or none for a pod run alone.
+    /// The pod's top owner, or `None` for a pod that has no owner.
     pub workload: Option<WorkloadLink>,
     pub switches: Vec<Switch>,
     pub containers: Vec<ContainerBlock>,
-    /// The pod's QoS class, which each running container's block shows.
+    /// The pod's QoS class, which the chips of each non-init container
+    /// show.
     pub qos: Option<String>,
     pub mounts: Vec<MountRow>,
     pub environment: Environment,
-    /// How the intent for each Secret it reads is read, by the Secret's
-    /// name, for its title.
+    /// The title of each `Secret` the pod reads, by name, which says
+    /// how transect reads that `Secret`'s intent.
     pub secret_titles: HashMap<String, String>,
     pub placement: Placement,
-    /// Why the bars show no usage, when they show none.
+    /// Why the usage bars are empty.  It is `None` for a finished pod.
     pub usage_note: Option<transect_resources::resources::OffLine>,
-    /// The last log lines a page load read, or none before the first.
+    /// The last log lines read for this page, or `None` before the first
+    /// read.
     pub logs: Option<Arc<Tails>>,
 }
 
-/// The workload a pod belongs to, which starts the row and comes before
-/// the pod in the crumb.
+/// The pod's top owner, which comes before the pod in the crumb.
 #[derive(Debug, PartialEq)]
 pub struct WorkloadLink {
     pub name: String,
-    /// Its page, or none for a kind with no workload page.
+    /// Its page, or `None` for a kind that has no workload page.
     pub href: Option<String>,
 }
 
-/// One of the workload's pods in the row to switch between.
 #[derive(Debug, PartialEq)]
 pub struct Switch {
     pub label: String,
     pub href: String,
-    /// The pod this page shows.
     pub current: bool,
-    /// Whether it runs, or waits to run, but is not ready.
+    /// Whether the pod is running or waiting to run, and is not ready.
     pub not_ready: bool,
 }
 
 impl Switch {
-    /// The current pod fills with the selection color, as the current
-    /// workload does in the workload page's row.  A pod that is not ready
-    /// gets --warm.
     pub fn class(&self) -> String {
         let mut class = String::from("switch");
         if self.current {
@@ -131,18 +124,16 @@ pub struct Contents<'a> {
 }
 
 impl PodPage {
-    /// The page with the main column's row of edge kinds.
     pub fn with_edge_row(self, edge_row: super::EdgeRow) -> Self {
         Self { edge_row, ..self }
     }
 
-    /// The page with the log tails the cache keeps for it.
     pub fn with_logs(self, logs: Option<Arc<Tails>>) -> Self {
         Self { logs, ..self }
     }
 
-    /// The page for the pod `namespace/name`, or `None` when the cluster
-    /// has no such pod or `map` no such namespace.
+    /// Builds the page for the pod `namespace/name`.  Returns `None`
+    /// when the cluster has no such pod or `map` has no such namespace.
     pub fn build(
         map: &ClusterMap,
         namespace: &str,
@@ -212,9 +203,8 @@ impl PodPage {
         })
     }
 
-    /// The crumb: the cluster links home, the layer back to the cluster
-    /// map with this namespace selected, and the namespace and the
-    /// workload to their pages.
+    /// The layer's crumb links to the cluster map with this namespace
+    /// selected.
     pub fn crumbs(&self) -> Vec<Crumb> {
         let select = format!("/?select={}", self.namespace);
         let mut crumbs = vec![
@@ -272,18 +262,14 @@ impl PodPage {
         sentence::cpu_figures(&block.cpu)
     }
 
-    /// The note beside the preview, which gives how many of the lines
-    /// that transect read the preview shows.
     pub fn preview_note(&self) -> String {
         format!("the last {PREVIEW} lines of each container")
     }
 
-    /// The last `PREVIEW` of `lines`.
     pub fn preview<'l>(&self, lines: &'l [logs::Line]) -> &'l [logs::Line] {
         &lines[lines.len().saturating_sub(PREVIEW)..]
     }
 
-    /// The pod's logs lens.
     pub fn logs_href(&self) -> String {
         format!("{}/logs", self.path)
     }
@@ -296,7 +282,7 @@ impl PodPage {
         logs::EMPTY
     }
 
-    /// How the intent for `source` is read, when it is a Secret.
+    /// The title of `source` when it is a `Secret`.
     pub fn source_title(&self, source: &Source) -> Option<&str> {
         match source.kind {
             SourceKind::Secret => self.secret_titles.get(&source.name).map(String::as_str),
@@ -316,21 +302,21 @@ impl PodPage {
         sentence::placement_line(&self.placement)
     }
 
-    /// What the pod holds, or none when it holds no device.
+    /// What the pod holds, or `None` when it holds no device.
     pub fn holds_line(&self) -> Option<String> {
         let runs_on = self.placement.machine.as_ref().map(|m| m.name.as_str());
         devices::pod_holds(&self.placement.held, runs_on)
     }
 
-    /// Every device it holds by its full name, for the line's title.
+    /// Every device the pod holds, by its full name, for the line's
+    /// title.
     pub fn holds_title(&self) -> String {
         devices::all(&self.placement.held)
     }
 }
 
-/// The workload's pods in the order of the tiles on its page, running
-/// first and each group by name, so a pod keeps its place in the row as
-/// the reader switches.
+/// Returns the row of pods in the order of the tiles on the workload's
+/// page, so every pod page of the workload shows the same order.
 fn switches(pods: &[&Pod], current: &str, now: Timestamp) -> Vec<Switch> {
     let namespace = pods.first().and_then(|pod| pod.namespace());
     tiles(pods, None, now)

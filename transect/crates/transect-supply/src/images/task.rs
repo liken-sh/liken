@@ -1,12 +1,14 @@
-//! The background task that reads labels when images appear.  On each
-//! change of the cluster, and once a minute for the failures whose wait
-//! is over, the task reads the images that no read has covered, a few at
-//! a time.
+//! The background task that reads the labels of the images that the
+//! cluster runs, from their registries.
 //!
-//! A completed read also wakes the task, and the task then publishes the
-//! labels and marks the cluster changed.  That mark is not a change of
-//! the cluster's pods, so the task does not walk the pods again for it.
-//! The task publishes reads that complete together once.
+//! The task wakes when the cluster changes, once a minute to retry
+//! failed reads whose wait has ended, and when a read completes.  On a
+//! cluster change or a tick, it lists the images that pods run and
+//! starts a read for each image whose read is due, at most `CONCURRENT`
+//! at a time.
+//!
+//! When a read completes, the task publishes the labels read so far and
+//! marks `changed`, so the pages render again with them.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -21,19 +23,20 @@ use super::{Known, Platform, Registries, Want, parse};
 use transect_cluster::cluster::Cluster;
 use transect_graph::pods::finished;
 
-/// How many reads run at once.  Each is a few small requests, and a
-/// registry that also serves the cluster's own pulls should not receive
-/// a burst of hundreds of requests when transect starts.
+/// The most reads that run at once.  A registry that also serves the
+/// cluster's image pulls should not receive hundreds of requests when
+/// transect starts.
 const CONCURRENT: usize = 4;
-/// How often the task looks for failed reads whose wait is over, when
-/// the cluster is quiet.
+/// How often the task wakes to retry failed reads whose wait has ended,
+/// when the cluster has not changed.
 const RETRY_EVERY: Duration = Duration::from_secs(60);
 /// How long the task waits after a read completes before it publishes,
-/// so the reads that complete around the same moment cost one publish.
+/// so that reads that complete at about the same time share a publish.
 const GATHER: Duration = Duration::from_millis(250);
 
-/// Reads the labels of every image `cluster` runs from `registries`, and
-/// marks `changed` after each read completes.
+/// Starts the task that reads the labels of every image that `cluster`
+/// runs, from `registries`.  It marks `changed` after reads complete,
+/// and returns the receiver of the labels read so far.
 pub fn watch(
     cluster: Cluster,
     registries: Registries,
@@ -44,7 +47,7 @@ pub fn watch(
         state: Arc::new(Mutex::new(State::default())),
         registries: Arc::new(registries),
         permits: Arc::new(Semaphore::new(CONCURRENT)),
-        landed: Arc::new(Notify::new()),
+        completed: Arc::new(Notify::new()),
     };
     let mut changes = changed.subscribe();
     tokio::spawn(async move {
@@ -55,14 +58,15 @@ pub fn watch(
             tokio::select! {
                 result = changes.changed() => if result.is_err() { return },
                 _ = ticks.tick() => {}
-                _ = reader.landed.notified() => {
+                _ = reader.completed.notified() => {
                     tokio::time::sleep(GATHER).await;
                     let known = lock(&reader.state).known();
                     let known = known.with_mirrors(reader.registries.mirrors());
                     publish.send_replace(Arc::new(known));
-                    // When the cluster changed during the wait, the task
-                    // leaves that change marked, so the next pass walks
-                    // the pods for it.
+                    // Marking `changed` also wakes this task's own
+                    // receiver.  Clear that mark, unless the cluster
+                    // changed during the wait, so that the task lists
+                    // the pods again only when the pods changed.
                     let pending = changes.has_changed().unwrap_or(false);
                     changed.send_replace(());
                     if !pending {
@@ -72,7 +76,8 @@ pub fn watch(
                 }
             }
             // A host whose mirror changed is read from another address,
-            // so its last failure does not predict the next read.
+            // so a failure recorded for the old address says nothing
+            // about the new one.
             let now = reader.registries.mirrors();
             if now != mirrors {
                 let mut state = lock(&reader.state);
@@ -96,18 +101,17 @@ pub fn watch(
     latest
 }
 
-/// What each read shares: the state, the client, the permits that bound
-/// how many run at once, and the task's signal that a read completed.
+/// The parts of the task that every read uses.
 #[derive(Clone)]
 struct Reader {
     state: Arc<Mutex<State>>,
     registries: Arc<Registries>,
     permits: Arc<Semaphore>,
-    landed: Arc<Notify>,
+    completed: Arc<Notify>,
 }
 
 impl Reader {
-    /// Reads `want` when a permit is free, records the result, and wakes
+    /// Reads `want` once a permit is free, records the result, and wakes
     /// the task to publish the labels.
     async fn read(self, want: Want) {
         let Ok(_permit) = self.permits.acquire().await else {
@@ -124,13 +128,13 @@ impl Reader {
                 registry,
                 source = read.source.is_some(),
                 revision = read.revision.is_some(),
-                "read an image's labels"
+                "Read the labels of an image"
             ),
             Err(failure) => tracing::debug!(
                 image,
                 registry,
                 reason = failure.note(),
-                "cannot read an image's labels"
+                "The registry returned no labels for an image"
             ),
         }
         let mut state = lock(&self.state);
@@ -138,22 +142,26 @@ impl Reader {
             tracing::warn!(
                 registry,
                 reason = failure.note(),
-                "cannot read image labels from a registry"
+                "The registry returned no image labels"
             );
         }
         drop(state);
-        self.landed.notify_one();
+        self.completed.notify_one();
     }
 }
 
+/// Locks `state` even when another thread panicked while holding it, so
+/// one failed read does not stop the others.
 fn lock(state: &Mutex<State>) -> std::sync::MutexGuard<'_, State> {
     state
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// Every image a pod that has not finished runs, by the digest its
-/// status names, with the platform of the machine it runs on.
+/// Every image that a pod that has not finished runs, by the digest in
+/// the pod's status, with the platform of the node it runs on.  A pod
+/// on a node that is not in `nodes`, or with no node, gets the fallback
+/// platform.
 pub fn wanted(pods: &[Arc<Pod>], nodes: &[Arc<Node>]) -> Vec<Want> {
     let platforms: HashMap<&str, Platform> = nodes
         .iter()

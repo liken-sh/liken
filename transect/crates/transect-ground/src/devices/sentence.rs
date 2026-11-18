@@ -1,27 +1,32 @@
-//! The fixed words of the text that the page shows for held devices.
-//! The rest of that text is names from a claim or a slice.
+//! The fixed words of the text that the page shows for the devices that
+//! pods hold. The rest of that text is names from a `ResourceClaim` or
+//! a `ResourceSlice`.
 
 use super::Off;
 use transect_graph::edges::Device;
 
-/// The most devices a short list names before it counts the rest.
+/// The most devices that `few` names before it counts the rest.
 pub const NAMED: usize = 2;
 
 impl Off {
-    /// Why no machine strip names a device.
+    /// Why the machine strips show no devices.
     pub fn note(self) -> &'static str {
         match self {
-            Self::NotServed => "holds is off: the cluster does not serve resource.k8s.io/v1",
-            Self::Forbidden => {
-                "holds is off: transect may not list ResourceClaims or ResourceSlices"
+            Self::NotServed => {
+                "The devices are not shown: the cluster does not serve resource.k8s.io/v1"
             }
-            Self::Retrying => "holds is off for now: retrying discovery of resource.k8s.io/v1",
+            Self::Forbidden => {
+                "The devices are not shown: transect is not allowed to list ResourceClaims or ResourceSlices"
+            }
+            Self::Retrying => {
+                "The devices are not shown yet: transect is retrying discovery of resource.k8s.io/v1"
+            }
         }
     }
 }
 
-/// The first `NAMED` devices by their short names, then a count of the
-/// rest: "gpu card-0, radio usb-1 +3".
+/// The first `NAMED` devices by short name, then the count of the rest,
+/// as in "gpu card-0, radio usb-1 +3".
 pub fn few(devices: &[Device]) -> String {
     let named: Vec<String> = devices.iter().take(NAMED).map(Device::short).collect();
     let named = named.join(", ");
@@ -31,15 +36,16 @@ pub fn few(devices: &[Device]) -> String {
     }
 }
 
-/// Every device by its full name, one per line, for a title.
+/// Every device by full name, one on each line, for a line's title.
 pub fn all(devices: &[Device]) -> String {
     let full: Vec<String> = devices.iter().map(Device::full).collect();
     full.join("\n")
 }
 
-/// The devices a pod holds, for its placement line.  The line names no
-/// machine when every device is on the machine the pod runs on, and
-/// names each device's own machine otherwise.
+/// The devices a pod holds, for its placement line.  When every device
+/// is on the machine that the pod runs on, the text names no machine.
+/// Otherwise it gives the machine of each device.  `None` when the pod
+/// holds no device.
 pub fn pod_holds(devices: &[Device], runs_on: Option<&str>) -> Option<String> {
     let on_its_machine = devices
         .iter()

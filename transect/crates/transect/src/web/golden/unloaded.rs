@@ -1,6 +1,6 @@
-//! What a page says when a resource that would fill one of its
-//! sections is there but did not load: it names the resource and sends
-//! the reader to `/resources`, and never says that one would show it.
+//! When a resource that fills a section of a page fails to load, the
+//! section names the resource and links to `/resources`, and does not
+//! describe what the resource would have shown.
 
 use rstest::rstest;
 
@@ -54,19 +54,22 @@ fn names_the_resource_that_did_not_load(
     #[case] from: &str,
     #[case] to: &str,
     #[case] url: &str,
-    #[case] says: &str,
+    #[case] expected: &str,
 ) {
     let (model, usage) = fixture::edited(|text| {
-        assert!(text.contains(from), "the fixture holds no {from:?}");
+        assert!(
+            text.contains(from),
+            "the fixture text does not contain {from:?}"
+        );
         text.replace(from, to)
     });
     let shown = text::visible(&render_from(&model, &usage, url));
     assert!(
-        shown.contains(says),
-        "{url} does not say {says:?}:\n{shown}"
+        shown.contains(expected),
+        "{url} does not contain {expected:?}:\n{shown}"
     );
     assert!(
         !shown.contains(" would "),
-        "{url} still says what would show it:\n{shown}"
+        "{url} contains the text \" would \", which describes a display that did not happen:\n{shown}"
     );
 }

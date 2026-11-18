@@ -1,5 +1,6 @@
-//! The access tabs and pages whose URLs have their own segments: a
-//! namespace's access, a group's or a user's, and a workload's.
+//! Routes for the access pages whose URLs carry path segments: a
+//! namespace's access tab, a group's or a user's page, and a
+//! workload's access tab.
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;

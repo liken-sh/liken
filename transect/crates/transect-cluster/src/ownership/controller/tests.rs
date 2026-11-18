@@ -12,19 +12,18 @@ fn yaml<K: DeserializeOwned>(text: &str) -> K {
     serde_yaml::from_str(text).unwrap()
 }
 
-/// A cluster of one custom resource, a `Cache` in `shop` that owns a
-/// `StatefulSet`, and the workloads in `cache-system` that may run its
-/// controller.
+/// A cluster with one `Cache` in `shop` that owns a `StatefulSet`, and
+/// the workloads in `cache-system` that may be its controller.
 struct World {
     pods: Vec<Pod>,
-    /// The workloads' metadata, by group and kind, for the ownership walk.
+    /// The workloads' metadata, by group and kind, that ownership reads.
     owners: Vec<(&'static str, &'static str, ObjectMeta)>,
-    /// The ServiceAccounts granted the right to write caches' status.
+    /// The `ServiceAccount`s that RBAC lets write caches' status.
     accounts: Vec<(String, String)>,
     managers: Vec<String>,
-    /// The image the kind's knowledge gives for its controller.
+    /// The controller image that the kind's knowledge gives.
     image: Option<String>,
-    /// Caches outside any namespace, which run no pods.
+    /// Cluster-scoped caches, which run no pods.
     cluster_scoped: Vec<Object>,
 }
 
@@ -64,8 +63,8 @@ impl World {
         )
     }
 
-    /// Adds a pod in `namespace` owned by the `kind` `owner`, running
-    /// as `account` with one container.
+    /// Adds a pod in `namespace` that `owner`, of kind `kind`, owns. The
+    /// pod runs as `account` with one container.
     #[allow(clippy::too_many_arguments)]
     fn pod(
         mut self,
@@ -99,19 +98,19 @@ impl World {
         )
     }
 
-    /// Grants `<namespace>/<account>` the right to write caches' status.
+    /// Lets `<namespace>/<account>` write caches' status through RBAC.
     fn grant(mut self, namespace: &str, account: &str) -> Self {
         self.accounts.push((namespace.into(), account.into()));
         self
     }
 
-    /// Gives the kind knowledge that names `image` as its controller's.
+    /// Sets the kind's knowledge to name `image` as its controller image.
     fn knowing(mut self, image: &str) -> Self {
         self.image = Some(image.into());
         self
     }
 
-    /// Adds a `Cache` outside any namespace that runs no pods.
+    /// Adds a cluster-scoped `Cache`, which runs no pods.
     fn cluster_scoped(mut self, name: &str) -> Self {
         let cache = Object::new("cache.example.io", "Cache", None, name);
         self.cluster_scoped.push(cache);
@@ -123,8 +122,8 @@ impl World {
         self
     }
 
-    /// The controlled-by edges, as each end's name, whether it is a
-    /// guess, and whether kind knowledge gave it.
+    /// The controlled-by edges, as the name at each end, whether the
+    /// edge is a guess, and whether it came from the kind's knowledge.
     fn edges(&self) -> Vec<(String, String, bool, bool)> {
         let role: ClusterRole = yaml(
             "{metadata: {name: cache-operator}, rules: [{apiGroups: [cache.example.io], resources: [caches/status], verbs: [update]}]}",
@@ -190,12 +189,12 @@ fn edge(to: &str, guessed: bool) -> (String, String, bool, bool) {
     ("sessions".into(), to.into(), guessed, false)
 }
 
-/// An edge kind knowledge gave, which is never a guess.
+/// An edge that came from the kind's knowledge, which is never a guess.
 fn known(to: &str) -> (String, String, bool, bool) {
     ("sessions".into(), to.into(), false, true)
 }
 
-/// An edge from a resource other than the namespaced `Cache`.
+/// An edge from a resource other than the namespaced `Cache` `sessions`.
 fn edge_from(from: &str, to: &str) -> (String, String, bool, bool) {
     (from.into(), to.into(), false, false)
 }
@@ -236,7 +235,7 @@ fn edge_from(from: &str, to: &str) -> (String, String, bool, bool) {
         .grant("cache-system", "backup"),
     vec![edge("backup", true), edge("operator", true)],
 )]
-#[case::named_by_its_image(
+#[case::narrowed_by_the_controller_image(
     World::new()
         .deployment("operator", "operator", "manager")
         .deployment("webhook", "operator", "webhook")
@@ -279,6 +278,9 @@ fn edge_from(from: &str, to: &str) -> (String, String, bool, bool) {
         .grant("shop", "writer"),
     vec![],
 )]
-fn finds_the_controller(#[case] world: World, #[case] expected: Vec<(String, String, bool, bool)>) {
+fn draws_controlled_by_edges_to_the_controller(
+    #[case] world: World,
+    #[case] expected: Vec<(String, String, bool, bool)>,
+) {
     assert_eq!(world.edges(), expected);
 }

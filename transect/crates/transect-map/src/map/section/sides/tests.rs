@@ -34,9 +34,10 @@ fn gpu() -> Endpoint {
     })
 }
 
-/// A web application that a worker in another layer calls, which calls
-/// a database, reconciles from an applier, is controlled by an
-/// operator transect guessed, and holds a GPU on alpha.
+/// The graph around `web`.  A worker in another layer depends on web.
+/// Web depends on a database and on machine beta, reconciles from a
+/// `Tree`, has a controlled-by edge to an operator that transect
+/// guessed, and holds the same GPU on alpha through two edges.
 fn graph() -> Graph {
     Graph::new([vec![
         edge(
@@ -86,7 +87,8 @@ fn layer(name: &str) -> Band {
     Band::Layer(name.into())
 }
 
-/// What a side box reads, with `has_page` and no workload's ready line.
+/// The lookups that `sides` uses, with `has_page` and no ready line for
+/// any workload.
 fn objects<'a>(has_page: &'a dyn Fn(&Object) -> bool) -> Objects<'a> {
     static PLURALS: std::sync::LazyLock<Plurals> = std::sync::LazyLock::new(Plurals::default);
     static INTENTS: std::sync::LazyLock<Intents> = std::sync::LazyLock::new(Intents::default);
@@ -287,8 +289,8 @@ fn a_device_box_wraps_a_long_name(#[case] name: &str, #[case] title_lines: usize
     );
 }
 
-/// The intents read from `annotations` on the database and on the
-/// worker that calls web.
+/// The intents that the annotations `database` and `worker` declare on
+/// the database and on the worker that depends on web.
 fn said(database: &str, worker: &str) -> Intents {
     let meta = |name: &str,
                 annotations: &str|
@@ -337,7 +339,7 @@ fn a_side_box_says_what_intent_says_it_provides_or_is(
 }
 
 #[rstest]
-fn an_address_outside_the_cluster_sits_in_the_ground_marked_as_intent() {
+fn an_address_outside_the_cluster_goes_in_the_ground_row_marked_as_intent() {
     let provenance = Provenance::Intent(transect_graph::edges::Stated::Annotation {
         field: "depends-on".into(),
         on: "Deployment web".into(),
@@ -398,9 +400,10 @@ fn a_workloads_box_says_how_many_of_its_pods_are_ready(
     );
 }
 
-/// Web holds a radio device and depends on the base station, and the
-/// device's attributes name that station, as device knowledge reads
-/// them.
+/// Web holds a radio handset whose `station` attribute names a base
+/// station, which gives the handset a depends-on edge to the station.
+/// With `station_in_view`, web also depends on the station, so the view
+/// draws the station's box.
 fn paired(station_in_view: bool) -> Graph {
     let radio = Endpoint::Device(Device {
         driver: "radio.example.com".into(),

@@ -1,23 +1,23 @@
-//! The "managed by" text on a custom resource's box names where its
-//! controller runs.  `managed_by` reads it from the graph's
+//! The "managed by" text on the box of a custom resource, which names
+//! where its controller runs. `managed_by` reads it from the graph's
 //! controlled-by edges.
 
 use std::collections::{BTreeSet, HashMap};
 
 use transect_graph::edges::{Endpoint, Graph, Kind, Object};
 
-/// The controllers of one custom resource, named by their namespace,
-/// or by their workload's name when it runs in the resource's own
-/// namespace.
+/// The controllers of one custom resource. Each is named by its
+/// namespace, or by its workload's name when the workload runs in the
+/// resource's own namespace.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ManagedBy {
     pub names: Vec<String>,
-    /// More than one candidate remains and the candidates name different
-    /// places, so the box cannot show which one is the controller.
+    /// True when a controlled-by edge was guessed and `names` has more
+    /// than one entry, so the box cannot say which one is the controller.
     pub guessed: bool,
 }
 
-/// The controllers of each custom resource in `namespace`.
+/// The controllers of each custom resource in `namespace`, by object.
 pub fn managed_by(graph: &Graph, namespace: &str) -> HashMap<Object, ManagedBy> {
     let mut found: HashMap<Object, (BTreeSet<String>, bool)> = HashMap::new();
     for edge in graph.of_kind(Kind::ControlledBy) {
@@ -79,7 +79,7 @@ mod tests {
         vec!["cache-system", "other-system"],
         true
     )]
-    fn names_where_the_controller_runs(
+    fn names_where_each_controller_runs(
         #[case] edges: Vec<Edge>,
         #[case] names: Vec<&str>,
         #[case] guessed: bool,

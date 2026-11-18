@@ -1,13 +1,13 @@
-//! The page for a URL whose object is not in the cluster: a namespace,
-//! a workload, a pod, or a machine deleted since its link was copied, or
-//! one that never existed.  The page names what the URL named and links
-//! to the nearest places above it that still exist.  transect keeps no
-//! history, so the page says an object "no longer exists" only for a pod
-//! that transect saw leave since it started.  For anything else the page
-//! says the object was not found, which is true of a misspelled link and
-//! of a deleted object.  The page keeps the view's event stream, so an
-//! object that comes back under the same name, as a StatefulSet's pod
-//! does, replaces this page with its own.
+//! The page for a URL whose object is not in the cluster, because it
+//! was deleted after someone copied the link or because it never
+//! existed.  The page says what the URL named and links to the nearest
+//! places above it that still exist.  transect keeps no history of
+//! deleted objects.  It records the owner of each pod with an owner
+//! that it watched being deleted, so only such a pod "no longer exists".  Every
+//! other object "was not found", which is true of a misspelled link and
+//! of a deleted object.  The page subscribes to the event stream of the
+//! object's own path, so when an object comes back under the same name,
+//! as a StatefulSet's pod does, the object's page replaces this one.
 
 use askama::Template;
 
@@ -19,8 +19,8 @@ use transect_graph::links::page;
 #[derive(Debug, PartialEq)]
 pub enum Named {
     Namespace(String),
-    /// A workload by its namespace, its kind's resource name in the
-    /// URL, and its name.
+    /// A workload, by its namespace, the resource name of its kind as
+    /// it appears in the URL, and its name.
     Workload {
         namespace: String,
         resource: String,
@@ -30,39 +30,42 @@ pub enum Named {
         namespace: String,
         name: String,
     },
-    /// One kind's list in a namespace, by the kind's resource name.
+    /// The list of a kind's objects in a namespace, by the kind's
+    /// resource name.
     Kind {
         namespace: String,
         resource: String,
     },
-    /// A machine, by its Node's name.
+    /// A machine, by the name of its `Node`.
     Machine(String),
-    /// A ground box, by the name in its URL.
+    /// An outside system's box, by the name in the URL.
     Ground(String),
-    /// An object outside any namespace, by its kind's name in the URL.
+    /// An object that is not in a namespace, by the name of its kind in
+    /// the URL and its name.
     ClusterObject {
         resource: String,
         name: String,
     },
-    /// Every object of a custom kind, by `<plural>.<group>`.
+    /// The page of a custom kind, by `<plural>.<group>`.
     AllOfKind(String),
-    /// A group or a user no binding names, by `groups` or `users` and
-    /// its name.
+    /// A group or user that no binding names, by `groups` or `users`
+    /// and its name.
     Subject {
         kinds: String,
         name: String,
     },
-    /// A finding id that no current report includes.
+    /// A vulnerability id that no current report lists.
     Vulnerability(String),
 }
 
-/// The places above the gone object, as they are in the cluster now.
+/// The places above the missing object, as they are in the cluster.
 pub struct Above<'a> {
-    /// Whether the namespace the URL names is still in the cluster.
+    /// Whether the namespace in the URL is in the cluster.
     pub namespace: bool,
-    /// The workload that ran a gone pod, when one did and still exists.
+    /// The recorded top owner of a missing pod, when that owner still
+    /// exists.
     pub workload: Option<&'a Object>,
-    /// Whether transect saw the object leave.
+    /// Whether transect saw the object leave the cluster.
     pub seen: bool,
     pub plurals: &'a Plurals,
 }
@@ -70,16 +73,16 @@ pub struct Above<'a> {
 #[derive(Template)]
 #[template(path = "map/gone.html", blocks = ["main"])]
 pub struct GonePage {
-    /// What it was, as "Pod web-5d8f-x2x7q in shop".
+    /// What the object was, such as "Pod shop/web-5d8f-x2x7q".
     pub what: String,
-    /// The name the crumb ends with.
+    /// The name that ends the crumb.
     pub name: String,
-    /// The places above it that still exist, nearest first, ending with
-    /// the cluster.
+    /// The places above the object that are in the cluster, nearest
+    /// first, ending with the cluster.
     pub up: Vec<Up>,
-    /// The page's own path, which its event stream's URL includes.
+    /// The page's own path, which the events URL is built from.
     pub path: String,
-    /// Whether transect saw the object leave.
+    /// Whether transect saw the object leave the cluster.
     pub seen: bool,
 }
 
@@ -87,7 +90,8 @@ pub struct GonePage {
 pub struct Up {
     pub text: String,
     pub href: String,
-    /// Whether it names an object, which the crumb draws in monospace.
+    /// Whether the text is an object's name, which the crumb sets in
+    /// monospace.
     pub name: bool,
 }
 
@@ -173,8 +177,8 @@ impl GonePage {
             ),
             Named::Subject { kinds, name } => (
                 match kinds.as_str() {
-                    "groups" => format!("A Group named {name} that a binding names"),
-                    _ => format!("A User named {name} that a binding names"),
+                    "groups" => format!("A Group named {name} that a binding refers to"),
+                    _ => format!("A User named {name} that a binding refers to"),
                 },
                 name.clone(),
                 format!(
@@ -227,8 +231,8 @@ impl GonePage {
         }
     }
 
-    /// The crumb: each place above that still exists, from the cluster
-    /// down, then the gone object's name.
+    /// The crumb: each place above the object, from the cluster down,
+    /// then the missing object's name.
     pub fn crumbs(&self) -> Vec<Crumb> {
         let above = self.up.iter().rev().map(|up| match up.name {
             true => Crumb::link_name(&up.text, up.href.clone()),

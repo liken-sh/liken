@@ -1,5 +1,4 @@
-//! The logs lens, read from the snapshot: the pod or workload it is of,
-//! the pods a workload runs, and the containers of the pod it shows.
+//! Builds the logs lens of a pod or a workload from the snapshot.
 
 use std::sync::Arc;
 
@@ -10,16 +9,16 @@ use kube::ResourceExt;
 use super::super::model::Model;
 use super::super::snapshot::Snapshot;
 use transect_graph::edges::Object;
-use transect_map::lenses::logs::{Asked, Container, LogsPage, Subject};
+use transect_map::lenses::logs::{Container, LogsPage, LogsRequest, Subject};
 use transect_observe::health::{self, Health, Level};
 use transect_observe::logs::Tails;
 use transect_resources::layers::Layers;
 
-/// A pod the lens may show, with its health.
+/// A pod the lens can show, with its health level.
 type Rated = (Arc<Pod>, Level);
 
-/// What a logs lens asks for: the namespace, the resource (`pods` for
-/// a pod), the name, and the pod and container its query names.
+/// The request for a logs lens. `resource` is `pods` for a pod's lens,
+/// and `pod` and `container` come from the query.
 pub struct Lens<'a> {
     pub namespace: &'a str,
     pub resource: &'a str,
@@ -28,12 +27,11 @@ pub struct Lens<'a> {
     pub container: Option<&'a str>,
 }
 
-/// The pods the lens may show: the pod a pod's lens is of, or a
-/// workload's pods, the least healthy first, then the newest, then by
-/// name, each with its health at `now`.  A reader opens a workload's
-/// logs for the pod that is failing or the run that just happened, and
-/// the lens opens on the first.  It returns `None` when the cluster
-/// holds no such pod or workload.
+/// The subject of the lens and the pods it can show, each with its
+/// health at `now`, or `None` when the cluster has no such pod or
+/// workload. A workload's pods sort least healthy first, then newest,
+/// then by name, and the lens opens on the first, because a reader
+/// opens a workload's logs for a failing pod or for the latest run.
 fn pods_of(snapshot: &Snapshot, lens: &Lens, now: Timestamp) -> Option<(Subject, Vec<Rated>)> {
     let level = |pod: &Pod| Health::from_reasons(health::pod_reasons(pod, now)).level;
     let in_namespace = snapshot
@@ -84,8 +82,8 @@ fn pods_of(snapshot: &Snapshot, lens: &Lens, now: Timestamp) -> Option<(Subject,
     Some((subject, pods))
 }
 
-/// The pod whose lines the lens shows: the one its query names, or the
-/// first, or none for a workload that runs no pod.
+/// The pod whose logs the lens shows: the pod in the query, otherwise
+/// the first pod, or `None` for a workload with no pods.
 pub fn shown_pod(model: &Model, lens: &Lens, now: Timestamp) -> Option<Arc<Pod>> {
     let (_, pods) = pods_of(&model.snapshot, lens, now)?;
     let pods: Vec<&Arc<Pod>> = pods.iter().map(|(pod, _)| pod).collect();
@@ -95,8 +93,8 @@ pub fn shown_pod(model: &Model, lens: &Lens, now: Timestamp) -> Option<Arc<Pod>>
     asked.or(pods.first()).map(|pod| (*pod).clone())
 }
 
-/// The containers of `pod` whose logs the lens can show, as the tails
-/// read them: its app containers, then its started init containers.
+/// The containers of `pod` whose logs the lens can show, in the order
+/// that `transect_observe::logs::containers` returns them.
 fn containers(pod: &Pod) -> Vec<Container> {
     let spec = pod.spec.as_ref();
     let inits = spec.and_then(|spec| spec.init_containers.as_ref());
@@ -109,8 +107,8 @@ fn containers(pod: &Pod) -> Vec<Container> {
     .collect()
 }
 
-/// The logs lens `lens` asks for, with the tails `logs` gives for the
-/// pod the lens shows, or `None` when the cluster holds no such pod or
+/// Builds the logs page for `lens`, with the tails that `logs` returns
+/// for the shown pod, or `None` when the cluster has no such pod or
 /// workload.
 pub fn logs_page(
     model: &Model,
@@ -127,7 +125,7 @@ pub fn logs_page(
     let tails = shown_pod
         .as_ref()
         .and_then(|pod| logs(lens.namespace, &pod.name_any()));
-    let asked = Asked {
+    let request = LogsRequest {
         namespace: lens.namespace,
         layer,
         subject,
@@ -139,7 +137,7 @@ pub fn logs_page(
         containers,
         container: lens.container,
     };
-    let mut page = LogsPage::build(asked, tails);
+    let mut page = LogsPage::build(request, tails);
     if lens.resource != "pods" && super::has_access(model, lens.namespace, lens.resource, lens.name)
     {
         let path = page.tabs.tabs[0].href.clone();
@@ -162,8 +160,8 @@ mod tests {
     use super::*;
     use crate::web::fixture;
 
-    /// A pod of the fixture's storefront, created at `created`, whose
-    /// one container is in `CrashLoopBackOff` when `crashing`.
+    /// A pod of the fixture's storefront whose container is in
+    /// `CrashLoopBackOff` when `crashing`.
     fn storefront_pod(name: &str, created: &str, crashing: bool) -> Arc<Pod> {
         let state = match crashing {
             true => "{waiting: {reason: CrashLoopBackOff}}",
@@ -187,8 +185,6 @@ status:
         )
     }
 
-    /// The pod the storefront's logs lens opens on, when its two pods
-    /// are `one` and `two`.
     #[rstest]
     #[case::the_one_crash_looping(
         storefront_pod("storefront-rs-one", "2026-01-01T00:00:00Z", false),
@@ -205,7 +201,7 @@ status:
         storefront_pod("storefront-rs-two", "2026-01-01T00:00:00Z", false),
         "storefront-rs-one"
     )]
-    fn a_workloads_lens_opens_on_the_pod_a_reader_came_for(
+    fn a_workloads_lens_opens_on_its_least_healthy_then_newest_pod(
         #[case] one: Arc<Pod>,
         #[case] two: Arc<Pod>,
         #[case] expected: &str,
@@ -228,7 +224,8 @@ status:
         assert_eq!(shown.map(|pod| pod.name_any()).as_deref(), Some(expected));
     }
 
-    /// The fixture's ledger pod with an init container that has run.
+    /// The fixture with an init container that has run in its ledger
+    /// pod.
     fn with_init() -> Model {
         let mut snapshot = fixture::snapshot();
         snapshot.pods[2] = Arc::new(

@@ -3,7 +3,8 @@
 
 use k8s_openapi::api::core::v1::PodSpec;
 
-/// The node label that spreads pods one to a machine.
+/// The node label whose value is unique to each machine, so a topology
+/// key of this label spreads pods across machines.
 const HOSTNAME: &str = "kubernetes.io/hostname";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -12,10 +13,10 @@ pub enum Spread {
     TopologySpread,
 }
 
-/// How `spec` spreads its pods across machines: by anti-affinity or a
-/// topology spread on the machine's hostname, required or preferred.  A
-/// spread across zones or racks does not put each pod on its own
-/// machine, so this function does not count it.
+/// How `spec` spreads its pods across machines: by required or preferred
+/// anti-affinity, or by a topology spread constraint, on the hostname
+/// label.  A spread across zones or racks can still put several pods on
+/// one machine, so it returns `None` for one.
 pub fn spread(spec: Option<&PodSpec>) -> Option<Spread> {
     let spec = spec?;
     let anti_affinity = spec

@@ -1,12 +1,13 @@
-//! Which ServiceAccounts RBAC lets write each custom kind's status.
+//! Which `ServiceAccount`s RBAC lets write the status of each custom
+//! kind.
 //!
-//! A controller reports what it did in its resources' status, and the
-//! API server serves status as a subresource with its own permission:
-//! `update` or `patch` on `<plural>/status`.  So a role that grants it
-//! names the kind's controller, or something that acts as one.
-//! Rules that grant every resource or every group (`*`), such as
-//! `cluster-admin`'s, are left out: they name every kind, so they
-//! name no controller in particular.
+//! A controller writes the status of the resources it reconciles, and
+//! the API server serves status as a subresource with its own
+//! permission, `update` or `patch` on `<plural>/status`. So a role that
+//! grants that permission points to the kind's controller, or to
+//! something that acts as one. A rule that grants every resource or
+//! every group with `*`, such as those of `cluster-admin`, is ignored,
+//! because it says nothing about the controller of any one kind.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -20,18 +21,20 @@ pub type ServiceAccount = (String, String);
 /// A custom kind by its API group and plural.
 type Resource = (String, String);
 
-/// Each kind's status writers, and the RBAC kinds `transect` could not
-/// read, which leave writers out.
+/// The `ServiceAccount`s that may write the status of each kind.
 #[derive(Debug, Default)]
 pub struct Grants {
-    /// Each kind's writers, with the one namespace a `RoleBinding` limits
-    /// the grant to, or none for a `ClusterRoleBinding`'s grant.
+    /// Each kind's writers, with the namespace that a `RoleBinding`
+    /// limits the grant to, or `None` when a `ClusterRoleBinding` grants
+    /// it in every namespace.
     writers: HashMap<Resource, Vec<(Option<String>, ServiceAccount)>>,
-    /// The RBAC kinds `transect` may not list, such as RoleBindings.
+    /// The RBAC kinds that `transect` may not list, such as
+    /// `RoleBinding`, whose grants are missing from `writers`.
     pub missing: Vec<&'static str>,
 }
 
-/// The four RBAC kinds as one render reads them.
+/// The RBAC objects that one render reads, and the RBAC kinds that
+/// `transect` may not list.
 pub struct Rbac<'a> {
     pub cluster_roles: Vec<&'a ClusterRole>,
     pub roles: Vec<&'a Role>,
@@ -98,15 +101,15 @@ impl Grants {
         }
     }
 
-    /// Every kind some `ServiceAccount` may write the status of, by group
-    /// and plural: the kinds that have a controller to find.
+    /// The group and plural of every kind whose status some
+    /// `ServiceAccount` may write.
     pub fn kinds(&self) -> impl Iterator<Item = &(String, String)> {
         self.writers.keys()
     }
 
-    /// The ServiceAccounts that may write the status of a `plural` in
-    /// `group` in `namespace`, or of a cluster-scoped one when
-    /// `namespace` is none, which only a `ClusterRoleBinding` grants.
+    /// The `ServiceAccount`s that may write the status of a `plural` of
+    /// `group` in `namespace`. For a cluster-scoped object, `namespace`
+    /// is `None`, and only a `ClusterRoleBinding` grants the permission.
     pub fn writers(
         &self,
         group: &str,
@@ -121,7 +124,7 @@ impl Grants {
             .collect()
     }
 
-    /// The ServiceAccounts that may write the status of a `plural` in
+    /// The `ServiceAccount`s that may write the status of a `plural` of
     /// `group` in any namespace.
     pub fn all_writers(&self, group: &str, plural: &str) -> BTreeSet<&ServiceAccount> {
         let key = (group.to_string(), plural.to_string());
@@ -130,9 +133,10 @@ impl Grants {
     }
 }
 
-/// The ServiceAccounts among `subjects`.  A `RoleBinding`'s subject
-/// with no namespace is in the binding's own.  Users and groups run no
-/// pods, so they lead to no controller.
+/// The `ServiceAccount`s among `subjects`. A subject of a `RoleBinding`
+/// that has no namespace is in the binding's namespace. Users and
+/// groups are left out because they run no pods, so neither can be a
+/// controller.
 fn accounts(subjects: Option<&[Subject]>, namespace: Option<&str>) -> Vec<ServiceAccount> {
     subjects
         .into_iter()
@@ -145,10 +149,10 @@ fn accounts(subjects: Option<&[Subject]>, namespace: Option<&str>) -> Vec<Servic
         .collect()
 }
 
-/// The kinds whose status `rules` let a subject write, by group and
-/// plural.  `<plural>/*` grants every subresource of one kind, status
-/// among them, so it counts.  A rule limited to named objects is left
-/// out, because a controller reconciles every object of its kind.
+/// The kinds whose status `rules` let a subject write, as group and
+/// plural. `<plural>/*` counts, because it grants every subresource of
+/// the kind, status included. A rule limited by `resourceNames` does not
+/// count, because a controller reconciles every object of its kind.
 fn statuses(rules: &Option<Vec<PolicyRule>>) -> BTreeSet<Resource> {
     let mut found = BTreeSet::new();
     for rule in rules.iter().flatten() {

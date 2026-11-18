@@ -1,7 +1,7 @@
-//! The pod page's mounts: each of the pod's mounts from `storage/`, with
-//! the other pods that share its claim named by their workloads, so a
-//! claim three replicas share shows "also mounted by web ×2" instead of
-//! three generated pod names.
+//! The mounts on the pod page, one row for each mount that `pod_mounts`
+//! returns. The other pods that mount the same claim are listed by the
+//! name of their top owner, so the row of one of three `web` replicas
+//! shows "also mounted by web ×2" in place of two generated pod names.
 
 use k8s_openapi::api::core::v1::Pod;
 
@@ -13,13 +13,15 @@ use transect_ground::storage::{MountSource, PodMount, Storage, pod_mounts};
 #[derive(Debug, PartialEq)]
 pub struct MountRow {
     pub mount: PodMount,
-    /// A claim's name, linked to its page, when the mount is a claim.
+    /// The claim's name with a link to its page, when the mount is a
+    /// claim.
     pub claim: Option<Reference>,
-    /// "also mounted by web ×2, backup", when another pod mounts it.
+    /// Text such as "also mounted by web ×2, backup", when other pods
+    /// mount the same claim.
     pub shared: Option<String>,
 }
 
-/// A row for each of `pod`'s mounts.  `pods` are the namespace's running
+/// A row for each of `pod`'s mounts. `pods` are the namespace's running
 /// pods.
 pub fn rows(
     storage: &Storage,
@@ -55,8 +57,8 @@ pub fn rows(
         .collect()
 }
 
-/// Each name with how many times it occurs, in the order of each name's
-/// first occurrence.
+/// Each distinct name with the number of times it occurs, in the order
+/// of first occurrence.
 fn counted(names: impl Iterator<Item = String>) -> Vec<(String, usize)> {
     let mut counts: Vec<(String, usize)> = Vec::new();
     for name in names {

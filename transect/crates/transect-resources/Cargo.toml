@@ -5,7 +5,7 @@ edition.workspace = true
 
 [dependencies]
 transect-graph.workspace = true
-# Only the test builders behind `fixtures` read anyhow.
+# Used only by the test builders in the `fixtures` feature.
 anyhow = { workspace = true, optional = true }
 askama.workspace = true
 k8s-openapi.workspace = true
@@ -18,7 +18,7 @@ tokio.workspace = true
 tracing.workspace = true
 
 [features]
-# The test builders other crates' tests read.
+# Test builders for the tests of other crates.
 fixtures = ["dep:anyhow"]
 
 [dev-dependencies]
@@ -27,5 +27,5 @@ rstest.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 
 [lib]
-# The doc comments show YAML and paths, not examples to run.
+# The doc comments show YAML and paths that are not runnable examples.
 doctest = false

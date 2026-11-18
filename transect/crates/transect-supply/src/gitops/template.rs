@@ -1,15 +1,17 @@
-//! Matches a value against a template from kind knowledge, such as a
-//! revision's `{ref}@sha1:{commit}` or an applier's mark `{name}:*`.
-//! A `{placeholder}` matches the fewest characters that it can, and at
-//! least one, and `*` matches the most.  So `{name}:*` captures the text
-//! before the first `:`, and `{ref}@sha256:*` splits `a@b@sha256:ff`
-//! before `@sha256:`.
+//! Matches text against a template from kind knowledge, such as a
+//! revision's `{ref}@sha1:{commit}` or an applier's mark `{name}:*`, and
+//! returns what each `{placeholder}` matched.  A `{placeholder}` matches
+//! as few characters as it can, and at least one.  `*` matches as many
+//! as it can, and may match none.  So `{name}:*` captures the text
+//! before the first `:`, and `{ref}@sha256:*` captures `a@b` from
+//! `a@b@sha256:ff`, because `sha256:` must follow the `@`.
 
 use std::collections::HashMap;
 
 enum Token<'a> {
     Text(&'a str),
-    Hole(Option<&'a str>),
+    /// A `{name}` placeholder, or `*`, which has no name.
+    Placeholder(Option<&'a str>),
 }
 
 /// The text that each placeholder of `template` matches in `text`, or
@@ -31,13 +33,13 @@ fn tokens(template: &str) -> Vec<Token<'_>> {
             continue;
         }
         if let Some(after) = rest.strip_prefix('*') {
-            tokens.push(Token::Hole(None));
+            tokens.push(Token::Placeholder(None));
             rest = after;
             continue;
         }
         match rest[1..].split_once('}') {
             Some((name, after)) => {
-                tokens.push(Token::Hole(Some(name)));
+                tokens.push(Token::Placeholder(Some(name)));
                 rest = after;
             }
             None => {
@@ -57,7 +59,7 @@ fn matches<'a>(tokens: &[Token], text: &'a str, found: &mut HashMap<String, &'a 
         Token::Text(literal) => text
             .strip_prefix(literal)
             .is_some_and(|after| matches(rest, after, found)),
-        Token::Hole(name) => {
+        Token::Placeholder(name) => {
             let ends = text.char_indices().map(|(at, _)| at).chain([text.len()]);
             let ends: Vec<usize> = match name {
                 Some(_) => ends.filter(|end| *end > 0).collect(),
@@ -83,13 +85,13 @@ mod tests {
     #[rstest]
     #[case::a_ref_and_a_commit("{ref}@sha1:{commit}", "main@sha1:0a1b2c3", Some(vec![("commit", "0a1b2c3"), ("ref", "main")]))]
     #[case::a_bare_commit("sha1:{commit}", "sha1:0a1b2c3", Some(vec![("commit", "0a1b2c3")]))]
-    #[case::the_first_at("{ref}@*", "a@b@sha256:ff", Some(vec![("ref", "a")]))]
-    #[case::the_at_before_its_literal("{ref}@sha256:*", "a@b@sha256:ff", Some(vec![("ref", "a@b")]))]
-    #[case::an_empty_rest("{name}:*", "shop:", Some(vec![("name", "shop")]))]
+    #[case::a_star_after_the_first_at("{ref}@*", "a@b@sha256:ff", Some(vec![("ref", "a")]))]
+    #[case::the_at_before_the_literal_text("{ref}@sha256:*", "a@b@sha256:ff", Some(vec![("ref", "a@b")]))]
+    #[case::a_star_that_matches_nothing("{name}:*", "shop:", Some(vec![("name", "shop")]))]
     #[case::two_parts("{namespace}_{name}:*", "ops_shop:apps/Deployment:shop/web", Some(vec![("name", "shop"), ("namespace", "ops")]))]
     #[case::no_match("{ref}@sha1:{commit}", "1.4.0", None)]
-    #[case::an_empty_placeholder("sha1:{commit}", "sha1:", None)]
-    #[case::text_alone("main", "main", Some(vec![]))]
+    #[case::a_placeholder_that_matches_nothing("sha1:{commit}", "sha1:", None)]
+    #[case::text_without_placeholders("main", "main", Some(vec![]))]
     fn captures_each_placeholder(
         #[case] template: &str,
         #[case] text: &str,

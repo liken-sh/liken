@@ -1,13 +1,13 @@
-//! Workloads: each top owner as the built-in controllers under it and
-//! its pods describe it.
+//! Workloads: each top owner, described by the built-in controllers and
+//! pods under it.
 //!
-//! A `Deployment` is its own controller.  A cache an operator runs is
-//! described by the `StatefulSet` under it, because only its operator
-//! defines what the custom kind's spec means.  A custom kind that runs
-//! pods with no built-in controller between, as some database operators
-//! do, is described by its pods alone.  The workload page, its card,
-//! and the workload findings all read a workload through this one view,
-//! so they agree on its replicas and its pod template.
+//! A custom kind is described by the `StatefulSet` or other controller
+//! that its operator creates, because only the operator's code gives the
+//! custom kind's spec a meaning. A custom kind whose operator creates pods
+//! directly, as some database operators do, is described by its pods.
+//! The workload page, its card, and the workload findings all read a
+//! workload through this module, so they agree on its replicas and pod
+//! templates.
 
 mod last_run;
 mod part;
@@ -28,8 +28,7 @@ use crate::ownership::{self, Ownership};
 use transect_graph::edges::Object;
 use transect_graph::pods::finished;
 
-/// The workload objects and pods health is read from, as the cluster's
-/// stores hold them.
+/// The controllers and pods that workloads are built from.
 pub struct Objects<'a> {
     pub deployments: &'a [Arc<Deployment>],
     pub stateful_sets: &'a [Arc<StatefulSet>],
@@ -38,47 +37,49 @@ pub struct Objects<'a> {
     pub pods: &'a [Arc<Pod>],
 }
 
-/// Every top owner's controllers and pods.
+/// The controllers and pods under each top owner.
 #[derive(Default)]
 pub struct Workloads<'a> {
     parts: HashMap<Object, Vec<Part<'a>>>,
     pods: HashMap<Object, Vec<&'a Pod>>,
 }
 
-/// One top owner, read through its controllers and its pods.
+/// One top owner with the controllers and pods under it.
 #[derive(Debug)]
 pub struct Workload<'w, 'a> {
     pub object: &'w Object,
     pub parts: &'w [Part<'a>],
-    /// Every pod it owns, finished ones included.
+    /// Every pod under it, including finished ones.
     pub pods: &'w [&'a Pod],
 }
 
 impl<'a> Workloads<'a> {
-    /// Files each built-in controller and each pod in `objects` under
-    /// its top owner.  `revisions` dates each controller's last rollout.
+    /// Groups each built-in controller and each pod in `objects` by its
+    /// top owner. `revisions` gives the time of each controller's last
+    /// rollout.
     pub fn build(objects: &Objects<'a>, revisions: &Revisions, ownership: &Ownership) -> Self {
         let mut workloads = Self::default();
-        let mut file = |group: &str, kind: &str, meta: &kube::api::ObjectMeta, part: Part<'a>| {
-            let object = Object::new(group, kind, meta.namespace.as_deref(), &part.name);
-            let top = ownership.top_owner(&object);
-            workloads.parts.entry(top).or_default().push(part);
-        };
+        let mut add_part =
+            |group: &str, kind: &str, meta: &kube::api::ObjectMeta, part: Part<'a>| {
+                let object = Object::new(group, kind, meta.namespace.as_deref(), &part.name);
+                let top = ownership.top_owner(&object);
+                workloads.parts.entry(top).or_default().push(part);
+            };
         for deployment in objects.deployments {
             let part = Part::deployment(deployment, revisions);
-            file("apps", "Deployment", &deployment.metadata, part);
+            add_part("apps", "Deployment", &deployment.metadata, part);
         }
         for stateful_set in objects.stateful_sets {
             let part = Part::stateful_set(stateful_set, revisions);
-            file("apps", "StatefulSet", &stateful_set.metadata, part);
+            add_part("apps", "StatefulSet", &stateful_set.metadata, part);
         }
         for daemon_set in objects.daemon_sets {
             let part = Part::daemon_set(daemon_set, revisions);
-            file("apps", "DaemonSet", &daemon_set.metadata, part);
+            add_part("apps", "DaemonSet", &daemon_set.metadata, part);
         }
         for cron_job in objects.cron_jobs {
             if let Some(part) = Part::cron_job(cron_job) {
-                file("batch", "CronJob", &cron_job.metadata, part);
+                add_part("batch", "CronJob", &cron_job.metadata, part);
             }
         }
         for pod in objects.pods {
@@ -89,7 +90,7 @@ impl<'a> Workloads<'a> {
         workloads
     }
 
-    /// Every top owner with a controller or a pod.
+    /// Every top owner that has a controller or a pod.
     pub fn owners(&self) -> impl Iterator<Item = &Object> {
         let pods = self
             .pods
@@ -108,18 +109,16 @@ impl<'a> Workloads<'a> {
 }
 
 impl<'a> Workload<'_, 'a> {
-    /// The pods that still run or wait to, leaving out those that
-    /// finished, as a `CronJob`'s do.
+    /// The pods that have not finished.
     pub fn running(&self) -> Vec<&'a Pod> {
         let pods = self.pods.iter().copied();
         pods.filter(|pod| !finished(pod)).collect()
     }
 
-    /// How many pods it asks for, when that is a count it sets: the
-    /// replicas of its Deployments and StatefulSets, or, for a custom
-    /// kind with no controller under it, the pods it runs.  A `DaemonSet`
-    /// runs one pod per machine and a `CronJob` one per run, so neither
-    /// has replicas.
+    /// The number of pods it should run: the sum of the replicas of its
+    /// `Deployment`s and `StatefulSet`s, or, for a custom kind with no
+    /// controller under it, the number of its running pods. It is `None`
+    /// for a `DaemonSet` or a `CronJob`, which set no replica count.
     pub fn replicas(&self) -> Option<i32> {
         let counted: Vec<i32> = self.parts.iter().filter_map(|part| part.replicas).collect();
         if !counted.is_empty() {
@@ -129,15 +128,15 @@ impl<'a> Workload<'_, 'a> {
         runs_its_own_pods.then(|| self.running().len() as i32)
     }
 
-    /// Whether it runs more than one pod at once, which is what makes a
-    /// readiness probe and a disruption budget worth having.
+    /// Whether it should run more than one pod. Only then does a readiness
+    /// probe or a `PodDisruptionBudget` keep it available.
     pub fn replicated(&self) -> bool {
         self.replicas().is_some_and(|replicas| replicas > 1)
     }
 
-    /// How many of its pods are ready, of how many it asks for.  A
-    /// custom kind with no controller under it asks for the pods it
-    /// runs.  None for a `CronJob` or a `Job`, whose pods finish.
+    /// How many of its pods are ready, and how many it should run. With no
+    /// controller under it, it should run as many as it has running pods. It
+    /// is `None` for a `CronJob` or a `Job`, whose pods finish.
     pub fn ready(&self) -> Option<(i32, i32)> {
         let counted: Vec<(i32, i32)> = self.parts.iter().filter_map(|part| part.ready).collect();
         if !counted.is_empty() {
@@ -153,17 +152,18 @@ impl<'a> Workload<'_, 'a> {
         Some((ready as i32, running.len() as i32))
     }
 
-    /// How its newest pod ended, when it is described by its pods alone
-    /// and none of them runs, as for a custom kind that runs Jobs,
-    /// between runs.  The inner `None` is for one with no finished pod.
+    /// How its newest pod ended, for a custom kind with no controller
+    /// and no running pod, such as one that runs `Job`s, between runs.
+    /// The outer `None` means it is not such a workload, and the inner
+    /// `None` means it has no finished pod.
     pub fn idle(&self) -> Option<Option<LastRun>> {
         let by_its_pods = self.parts.is_empty() && ownership::custom(self.object);
         (by_its_pods && self.running().is_empty()).then(|| last_run::last_run(self.pods))
     }
 
-    /// The pod specs it runs: its controllers' templates, or, with no
-    /// controller, the specs of its running pods, or of every pod when
-    /// none runs.
+    /// Its controllers' pod templates. With no controller, it returns
+    /// the specs of its running pods, or of every pod when none is
+    /// running.
     pub fn templates(&self) -> Vec<&'a PodSpec> {
         if !self.parts.is_empty() {
             let templates = self.parts.iter().map(|part| part.template.spec.as_ref());
@@ -178,8 +178,7 @@ impl<'a> Workload<'_, 'a> {
         pods.iter().filter_map(|pod| pod.spec.as_ref()).collect()
     }
 
-    /// Each pod template with its labels: its controllers' templates, or,
-    /// for a kind that runs its own pods, the pods that `templates` reads.
+    /// The specs of `templates`, each with its labels.
     pub fn labelled_templates(&self) -> Vec<(&'a BTreeMap<String, String>, &'a PodSpec)> {
         static NONE: BTreeMap<String, String> = BTreeMap::new();
         if !self.parts.is_empty() {
@@ -204,8 +203,8 @@ impl<'a> Workload<'_, 'a> {
     }
 
     /// The labels of its running pods, or, with none running, of its
-    /// controllers' pod templates, which is what a selector such as a
-    /// `PodDisruptionBudget`'s is matched against.
+    /// controllers' pod templates, for matching a selector such as a
+    /// `PodDisruptionBudget`'s.
     pub fn pod_labels(&self) -> Vec<&'a BTreeMap<String, String>> {
         let running = self.running();
         let labels: Vec<_> = if running.is_empty() {
@@ -223,8 +222,8 @@ impl<'a> Workload<'_, 'a> {
         labels
     }
 
-    /// Every image its app containers run, each once, in the order its
-    /// templates list them.
+    /// The images of its app containers, without duplicates, in the order
+    /// `templates` lists them.
     pub fn images(&self) -> Vec<String> {
         let mut images: Vec<String> = Vec::new();
         let containers = self
@@ -239,15 +238,15 @@ impl<'a> Workload<'_, 'a> {
         images
     }
 
-    /// When any of its controllers last rolled.
+    /// The time of the latest rollout of any of its controllers.
     pub fn rolled(&self) -> Option<k8s_openapi::jiff::Timestamp> {
         self.parts.iter().filter_map(|part| part.rolled).max()
     }
 
     /// Whether its pods run to completion: it is a `CronJob` or a `Job`,
-    /// or a custom kind whose every part a `CronJob` runs.  A `Service`
-    /// sends no requests to such pods, so the guards list no rollout
-    /// strategy and no missing readiness probe for them.
+    /// or a custom kind whose controllers are all `CronJob`s. Such pods
+    /// serve no requests, so a readiness probe or a rollout strategy does
+    /// not apply to them.
     pub fn scheduled(&self) -> bool {
         if !ownership::custom(self.object) {
             return matches!(self.object.kind.as_str(), "CronJob" | "Job");
@@ -257,7 +256,7 @@ impl<'a> Workload<'_, 'a> {
     }
 }
 
-/// Whether the pod's `Ready` condition is true.
+/// Whether the pod's `Ready` condition is `True`.
 pub fn pod_ready(pod: &Pod) -> bool {
     let conditions = pod.status.as_ref().and_then(|s| s.conditions.as_ref());
     conditions

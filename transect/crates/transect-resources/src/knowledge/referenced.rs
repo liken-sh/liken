@@ -1,18 +1,20 @@
-//! Objects of a known kind that an annotation on another kind names,
-//! such as the middlewares an ingress controller's annotation lists on
-//! an `Ingress`, and the edges that this draws from the applications
-//! behind it.
+//! Finds the objects of a known kind that an annotation on an object of
+//! another kind refers to, and draws the edges that follow. For
+//! example, an ingress controller's annotation on an `Ingress` lists
+//! middlewares. The applications behind the `Ingress` get edges to what
+//! those middlewares reach.
 //!
-//! The annotation writes each name in its own form, such as
-//! `<namespace>-<name>@<provider>`, where a namespace and a name that
-//! both hold dashes do not show where one ends.  So `transect` renders
-//! the kind knowledge's template for each object of the kind and
-//! matches the annotation's entries against those, and never splits an
-//! entry to guess.  Two objects whose names render alike, as `a-b` in
-//! `c` and `a` in `b-c` can, are both left unnamed.  A template without
-//! `{namespace}` names an object of a namespaced kind in the annotated
-//! object's namespace, as an annotation that names an issuer by its
-//! name alone means the issuer in the same namespace.
+//! Each annotation writes names in its own format, such as
+//! `<namespace>-<name>@<provider>`. A name with dashes in it cannot be
+//! split back into a namespace and a name. So `transect` fills the
+//! knowledge's name template for each object of the kind and compares
+//! each entry of the annotation with the results. When two objects give
+//! the same string, neither matches: with `{namespace}-{name}`, the name
+//! `a-b` in the namespace `c` and the name `b` in the namespace `c-a`
+//! both give `c-a-b`. A template without `{namespace}` refers to an
+//! object in the annotated object's namespace, or to a cluster-scoped
+//! one, as an annotation that gives an issuer by name alone means the
+//! issuer in the same namespace.
 
 use std::collections::HashMap;
 
@@ -23,22 +25,24 @@ use super::references::Relation;
 use super::{Kinds, ReferencedBy, Role};
 use transect_graph::edges::{Edge, Endpoint, Graph, Object, Provenance};
 
-/// One object of a known kind that an annotation on another object
-/// names.
+/// An annotation on `referrer` that refers to `target`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Referral {
     /// The annotated object, such as an `Ingress`.
     pub referrer: Object,
-    /// The object its annotation names, such as a middleware.
+    /// The object that its annotation refers to, such as a middleware.
     pub target: Object,
     pub annotation: String,
     /// What the target does for the referrer, as the knowledge declares.
     pub role: Option<Role>,
 }
 
-/// Each object among `targets` that an annotation among `annotated`
-/// names, through the `referencedBy` of its kind's knowledge, in the
-/// order of `annotated` and then of the annotation's entries.
+/// The referrals between `annotated` and `targets`: each object in
+/// `targets` that an annotation on an object in `annotated` refers to,
+/// found through the `referencedBy` entries of the target kind's
+/// knowledge. Results are grouped by kind and `referencedBy` entry.
+/// Within a group they follow the order of `annotated`, then of the
+/// annotation's entries.
 pub fn referrals(
     kinds: &Kinds,
     targets: &[Object],
@@ -66,14 +70,14 @@ pub fn referrals(
                 let Some(value) = annotations.and_then(|a| a.get(&by.annotation)) else {
                     continue;
                 };
-                let beside = |target: &&&Object| {
+                let in_scope = |target: &&&Object| {
                     by.name.contains("{namespace}")
                         || target.namespace.is_none()
                         || target.namespace == referrer.namespace
                 };
                 for entry in value.split(',').map(str::trim) {
                     let candidates = named.get(entry).into_iter().flatten();
-                    let candidates: Vec<&&Object> = candidates.filter(beside).collect();
+                    let candidates: Vec<&&Object> = candidates.filter(in_scope).collect();
                     if let [target] = candidates.as_slice() {
                         found.push(Referral {
                             referrer: referrer.clone(),
@@ -101,12 +105,13 @@ fn render(template: &str, object: &Object) -> String {
         .replace("{name}", &object.name)
 }
 
-/// The edges each of `referrals` draws: from each application `behind`
-/// its referrer, an edge of each kind its target's `relations` draw, to
-/// each end `reached` returns for the relation.  An application gets no
-/// edge to itself, as `owns` reports, nor one `graph` already holds, and
-/// each edge's provenance names the field, the annotation, and the
-/// referrer.
+/// The edges that `referrals` imply. For each referral, each
+/// application `behind` the referrer gets an edge, of each kind that
+/// the target's `relations` draw, to each end that `reached` returns for
+/// the relation. An edge is skipped when `owns` reports that the
+/// application owns the end, when `graph` already has it, or when it
+/// repeats an edge drawn earlier. The edge's provenance records the
+/// field, the annotation, and the referrer.
 pub fn referred_edges(
     referrals: &[Referral],
     relations: &HashMap<Object, Vec<Relation>>,
@@ -126,7 +131,7 @@ pub fn referred_edges(
                 continue;
             };
             let found = reached(&referral.target, relation);
-            let provenance = through(&relation.provenance, referral);
+            let provenance = with_referral(&relation.provenance, referral);
             for application in &applications {
                 let from = Endpoint::Object(application.clone());
                 let known = graph.leaving(kind, &from);
@@ -151,9 +156,9 @@ pub fn referred_edges(
     drawn
 }
 
-/// `provenance`, a field of the target's kind knowledge, read through
-/// the annotation on the referrer that names the target.
-fn through(provenance: &Provenance, referral: &Referral) -> Provenance {
+/// `provenance`, a field of the target's kind knowledge, with the
+/// annotation and the referrer that led to the target added.
+fn with_referral(provenance: &Provenance, referral: &Referral) -> Provenance {
     match provenance {
         Provenance::Kinds { knowledge, field } => Provenance::Kinds {
             knowledge: knowledge.clone(),

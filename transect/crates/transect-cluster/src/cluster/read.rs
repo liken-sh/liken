@@ -1,6 +1,5 @@
-//! What the cluster's stores hold as of now, one reader per kind, each
-//! a copy of the store's state that a page reads without holding a
-//! lock.
+//! Accessors for the cluster's stores. Each returns a snapshot of the
+//! store, so a page holds no lock while it reads the objects.
 
 use std::sync::Arc;
 
@@ -69,7 +68,8 @@ impl Cluster {
         self.endpoint_slices.state()
     }
 
-    /// Every `VolumeAttachment`, when the cluster serves them.
+    /// Every `VolumeAttachment`, or none when the cluster does not serve
+    /// them.
     pub fn attachments(&self) -> Vec<Arc<VolumeAttachment>> {
         self.attachments.state()
     }
@@ -82,9 +82,9 @@ impl Cluster {
         self.volumes.state()
     }
 
-    /// The custom kinds watched whole, by group and kind; every other
-    /// custom kind is trimmed to metadata, conditions, and printer
-    /// columns.
+    /// The custom kinds that are watched whole, by group and kind. Every
+    /// other custom kind is trimmed to its metadata, conditions, and
+    /// printer columns.
     pub fn whole_kinds(&self) -> std::collections::HashSet<(String, String)> {
         self.custom.whole_kinds()
     }
@@ -93,12 +93,13 @@ impl Cluster {
         self.storage_classes.state()
     }
 
-    /// Every role and binding `transect` may list.
+    /// Every role and binding that `transect` is allowed to list.
     pub fn rbac_objects(&self) -> RbacObjects {
         self.rbac.objects()
     }
 
-    /// Every `ResourceClaim`, when the cluster serves them.
+    /// Every `ResourceClaim`, or none when the cluster does not serve
+    /// them.
     pub fn resource_claims(&self) -> Vec<Arc<ResourceClaim>> {
         self.devices.claims()
     }
@@ -119,19 +120,19 @@ impl Cluster {
         self.csi_drivers.state()
     }
 
-    /// How far the watch on each custom kind has come, by group and
-    /// kind.
+    /// The state of the watch on each custom kind, by group and kind.
     pub fn custom_watched(&self) -> std::collections::HashMap<(String, String), super::Watch> {
         self.custom.watched_kinds()
     }
 
-    /// Every `ResourceClaim` and `ResourceSlice`, or the state of discovery
-    /// of the two kinds.
+    /// Every `ResourceClaim` and `ResourceSlice`, or the state of
+    /// discovery for the two kinds.
     pub fn device_objects(&self) -> super::devices::Objects {
         self.devices.objects()
     }
 
-    /// Who RBAC lets write each custom kind's status, as of now.
+    /// The `ServiceAccount`s that RBAC lets write each custom kind's
+    /// status.
     pub fn grants(&self) -> crate::ownership::Grants {
         self.rbac.grants()
     }
@@ -144,7 +145,7 @@ impl Cluster {
         self.network_policies.state()
     }
 
-    /// Each custom kind watched, whole or trimmed, with its objects.
+    /// Each watched custom kind, whole or trimmed, with its objects.
     pub fn custom_kinds(&self) -> Vec<(ApiResource, Vec<Arc<Custom>>)> {
         self.custom.snapshot()
     }
@@ -155,7 +156,8 @@ impl Cluster {
         transect_resources::knowledge::Definitions::read(crds.iter().map(AsRef::as_ref))
     }
 
-    /// The package each custom kind's CRD names in its labels.
+    /// The package that each custom kind's CRD names in its labels and
+    /// annotations.
     pub fn packages(&self) -> crate::ownership::Packages {
         let crds = self.definitions.state();
         crate::ownership::Packages::read(crds.iter().map(AsRef::as_ref))
@@ -167,22 +169,22 @@ impl Cluster {
         transect_resources::knowledge::Columns::read(crds.iter().map(AsRef::as_ref))
     }
 
-    /// The plural of each kind discovery has resolved, by group and
-    /// kind, which names the kind in a page's URL: every kind served at
-    /// the start, and each custom owner kind found since.
+    /// The plural of each kind, by group and kind, which a page's URL
+    /// uses to name the kind. It covers every kind that discovery found
+    /// and every custom kind that is watched.
     pub fn plurals(&self) -> Plurals {
         let mut plurals = self.plurals.plurals();
         plurals.extend(self.custom.plurals());
         plurals
     }
 
-    /// The kinds discovery found that are not namespaced.
+    /// The cluster-scoped kinds that discovery found.
     pub fn cluster_scoped(&self) -> ClusterScoped {
         self.plurals.cluster_scoped()
     }
 
-    /// Each kind discovery found at the start, at its group's preferred
-    /// version.
+    /// Each kind that discovery found at startup, as a resource at its
+    /// group's preferred version.
     pub fn preferred(&self) -> super::plurals::Preferred {
         self.plurals.preferred()
     }
@@ -203,8 +205,8 @@ impl Cluster {
         self.config_maps.state()
     }
 
-    /// Every `Secret`'s metadata, or none when `transect` does not read
-    /// Secrets' annotations.
+    /// Every `Secret`'s metadata, or none when `transect` is not
+    /// configured to read `Secret` annotations.
     pub fn secrets(&self) -> Option<Vec<Arc<PartialObjectMeta<Secret>>>> {
         self.secrets.state()
     }

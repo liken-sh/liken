@@ -1,7 +1,7 @@
-//! Which callers one ingress rule admits to a workload, and whether
-//! the rule admits any caller at all.  A rule admits any caller when
-//! it lists no peers, or when it has an address block of every address
-//! with no exceptions.
+//! The callers that one ingress rule admits to a workload, and whether
+//! the rule admits every caller. A rule admits every caller when it
+//! lists no peers, or when it has an address block that contains every
+//! address and has no exceptions.
 
 use std::collections::BTreeSet;
 
@@ -19,23 +19,21 @@ pub enum Caller {
     /// Addresses in a block, which also admits callers from outside the
     /// cluster.
     Addresses { cidr: String, except: Vec<String> },
-    /// Anything at all: a rule that lists no peers.
+    /// Any caller: a rule that lists no peers.
     Anything,
 }
 
-/// One ingress rule that admits callers to a workload.  It records the
-/// policy that contains the rule, the ports the rule admits, and the
-/// callers: workloads, address blocks, or anything.  It also records
-/// the namespaces the rule admits whole, and whether the rule admits
-/// every namespace.  A caller's own egress rules may still stop a
-/// caller that is listed here, and `Reach::Isolated` lists what both
-/// ends admit.
+/// One ingress rule that admits callers to a workload, as the rule
+/// states it. A caller's own egress rules can still refuse the call, so
+/// `Reach::Isolated` lists only the callers that both ends admit.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Admission {
     pub policy: String,
     pub ports: Ports,
     pub callers: BTreeSet<Caller>,
+    /// The namespaces whose every pod the rule admits.
     pub whole: Vec<String>,
+    /// Whether the rule admits every pod of every namespace.
     pub everywhere: bool,
 }
 
@@ -43,7 +41,7 @@ pub struct Admission {
 const EVERY_ADDRESS: [&str; 2] = ["0.0.0.0/0", "::/0"];
 
 impl Caller {
-    /// Whether it is any caller at all.
+    /// Whether this caller matches every source.
     pub fn is_anyone(&self) -> bool {
         match self {
             Self::Anything => true,
@@ -56,14 +54,16 @@ impl Caller {
 }
 
 impl Admission {
-    /// Whether it admits any caller at all on `port`.  When `port` is
-    /// `None`, it must admit them on every port.
+    /// Whether the rule admits every caller on `port`. When `port` is
+    /// `None`, the rule must admit every caller on every port.
     pub fn admits_anyone_on(&self, port: Option<u16>) -> bool {
         self.callers.iter().any(Caller::is_anyone) && self.covers(port)
     }
 
-    /// Whether it admits the pods of `owner`, in `namespace`, on `port`:
-    /// by name, as every pod of their namespace, or as every namespace.
+    /// Whether the rule admits the pods of `owner`, in `namespace`, on
+    /// `port`: because it lists the workload, admits any caller, admits
+    /// every pod of `namespace`, or admits every namespace. When `port`
+    /// is `None`, the rule must admit them on every port.
     pub fn admits_workload(&self, owner: &Object, namespace: &str, port: Option<u16>) -> bool {
         let named = self.callers.iter().any(|caller| match caller {
             Caller::Workload {
@@ -84,7 +84,8 @@ impl Admission {
     }
 }
 
-/// What `rule` admits to a member of `owner` on `ports`.
+/// The `Admission` of `rule` for a member of `owner`, on `ports`. The
+/// callers leave out `owner`'s own pods.
 pub(super) fn admission(
     rule: &super::rules::Rule,
     members: &[Member],

@@ -1,10 +1,11 @@
-# A MetricsSource for a cluster that runs kube-prometheus, or the
-# kube-prometheus-stack chart, with its usual names: Prometheus and
-# Alertmanager in the monitoring namespace, the kubelet's cAdvisor and
-# volume metrics with a `node` label, kube-state-metrics, and alert
-# rules that label each alert's severity.  Change the Services' names
-# to match the release, and set `url` for a port-forward from a
-# workstation, which takes precedence over the Service.
+# A MetricsSource for a cluster that runs kube-prometheus or the
+# kube-prometheus-stack chart with their default names.  It expects
+# Prometheus and Alertmanager in the monitoring namespace, the kubelet's
+# cAdvisor and volume metrics with a `node` label, kube-state-metrics,
+# and alert rules that set a severity label on each alert.  Change the
+# Service names to match your release.  To reach Prometheus through a
+# port-forward from a workstation, set `url`, which is used in place of
+# the Service.
 apiVersion: transect.liken.sh/v1alpha1
 kind: MetricsSource
 metadata:
@@ -14,37 +15,40 @@ spec:
   # The kubelet's ServiceMonitor puts the Node's name in `node`.
   nodeLabels: [node]
   queries:
-    # The root cgroup, id="/": everything the machine runs, its system
-    # daemons and the kubelet included, which is what metrics-server
-    # reports and `kubectl top node` prints.  `max` keeps a kubelet
-    # scraped by two jobs from counting twice.
+    # The root cgroup, id="/", covers everything on the machine,
+    # including system daemons and the kubelet. It is the figure that
+    # metrics-server reports and `kubectl top node` prints.  `max`
+    # keeps a kubelet that two scrape jobs report from being counted
+    # twice.
     machineCpu:
       query: 'max by (node) (rate(container_cpu_usage_seconds_total{id="/"}[2m]))'
-    # The working set: what the kubelet counts toward eviction.
+    # The working set is the figure the kubelet compares against its
+    # eviction thresholds.
     machineMemory:
       query: 'max by (node) (container_memory_working_set_bytes{id="/"})'
-    # container!="" drops the pod's own cgroup, which already counts its
-    # containers, and container!="POD" the pause container.
+    # container!="" drops the pod's own cgroup, which already includes
+    # its containers, and container!="POD" drops the pause container.
     containerCpu:
       query: 'max by (namespace, pod, container) (rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[2m]))'
       labels: {namespace: namespace, pod: pod, container: container}
     containerMemory:
       query: 'max by (namespace, pod, container) (container_memory_working_set_bytes{container!="", container!="POD"})'
       labels: {namespace: namespace, pod: pod, container: container}
-    # The kubelet reports the bytes used on each claim's volume.
+    # The kubelet reports the bytes used on each PersistentVolumeClaim's
+    # volume.
     volumeUsed:
       query: 'max by (namespace, persistentvolumeclaim) (kubelet_volume_stats_used_bytes)'
       labels: {namespace: namespace, claim: persistentvolumeclaim}
   alerts:
-    # The pods behind this Service are the cluster's alerting path,
-    # which a loss of their machines leads with.
+    # The Alertmanager pods behind this Service deliver the cluster's
+    # alerts, so the page can show them when machines are lost.
     service: {namespace: monitoring, name: alertmanager-main, port: 9093}
-    # kube-prometheus's rules: `none` is the watchdog and the alerts
-    # that exist only to inhibit others.
+    # In kube-prometheus's rules, the severity `none` marks the
+    # Watchdog alert and the alerts that exist only to inhibit others.
     severity: {label: severity, failing: [critical], notice: [info], hidden: [none]}
     namespace: namespace
-    # Most specific first.  kube-state-metrics names a Job by job_name;
-    # `job` is the scrape job.
+    # Most specific first.  kube-state-metrics labels a Job's alerts
+    # with job_name, because the `job` label holds the scrape job.
     objects:
       - {label: pod, kind: Pod}
       - {label: deployment, group: apps, kind: Deployment}

@@ -1,9 +1,10 @@
-//! The finding for the machines' own error lines: what each machine's
-//! kubelet, container runtime, or kernel logged at the error level over
-//! the search's window.  These lines are routine on a busy machine, such as a
-//! kubelet's conflicts on a status update, so transect colors nothing
-//! for them.  The finding lists which machines logged the most, and each
-//! machine's page shows its lines.
+//! The finding about the machines' own logs: the lines that each
+//! machine's kubelet, container runtime, or kernel logged at the error
+//! level in the search's window.  A busy machine logs such lines as a
+//! matter of course, for example the kubelet's conflicts on a status
+//! update, so they do not color anything on the map.  The finding lists
+//! the machines that logged the most, and each machine's page shows its
+//! lines.
 
 use k8s_openapi::jiff::Timestamp;
 

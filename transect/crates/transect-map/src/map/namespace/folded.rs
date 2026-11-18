@@ -1,5 +1,6 @@
-//! Around the open namespace, the namespace page folds every band to one
-//! line of its first names, and folds the machines to one row of chips.
+//! The namespace page draws each band of the cluster map folded to one
+//! line, with the band's first few namespace names, and draws the
+//! machines as one row of chips.
 
 use std::collections::BTreeSet;
 
@@ -8,16 +9,16 @@ use super::sentence;
 use transect_ground::machines::Machine;
 
 /// How many of a folded band's namespaces it names before "N more".
-const NAMED: usize = 3;
+const FIRST_NAMES: usize = 3;
 
-/// One band, folded to a line.  The open namespace's band names its
-/// other namespaces on the same line, above the open box.
+/// One band folded to a line.  The open namespace's own band lists its
+/// other namespaces on that line, above the open box.
 #[derive(Debug, PartialEq)]
 pub struct Folded {
     pub name: String,
     pub open: bool,
-    /// The band's first namespaces by name, then each other namespace
-    /// in a loop with the open one, leaving out the open one.
+    /// The band's first namespaces by name, then any other namespace
+    /// that is in a loop with the open one.  Never the open namespace.
     pub names: Vec<Named>,
     pub more: usize,
 }
@@ -26,13 +27,14 @@ pub struct Folded {
 #[derive(Debug, PartialEq)]
 pub struct Named {
     pub name: String,
-    /// Whether it is in a loop with the open namespace, which tags it.
+    /// Whether it is in a loop with the open namespace, which the page
+    /// marks with a tag.
     pub looped: bool,
 }
 
 impl Folded {
-    /// The text after the band's names: "12 more", or what the band
-    /// contains when it names nothing.
+    /// The text after the band's names: "12 more", or a note that the
+    /// band is empty when it lists no names.
     pub fn tail(&self) -> Option<String> {
         match (self.names.is_empty(), self.more) {
             (true, 0) if !self.open => Some(sentence::EMPTY_BAND.into()),
@@ -42,21 +44,21 @@ impl Folded {
     }
 }
 
-/// Folds each band of `map`.  The map already sorts each band's parcels
-/// by name, so the names are the first parcels.  A namespace in
-/// `looped`, the loops the open namespace is in, is named at any
-/// position in its band, so the page shows every other end of the loop.
+/// Folds each band of `map`.  The map already sorts each band's
+/// namespaces by name.  `looped` holds the namespaces in a loop with the
+/// open one, and each of them is listed wherever it falls in its band,
+/// so the page shows every other member of the loop.
 pub fn fold(map: &ClusterMap, open: &str, looped: &BTreeSet<String>) -> Vec<Folded> {
     map.bands
         .iter()
         .map(|band| {
             let others: Vec<&str> = band
-                .parcels
+                .tiles
                 .iter()
-                .map(|parcel| parcel.namespace.as_str())
+                .map(|tile| tile.namespace.as_str())
                 .filter(|&namespace| namespace != open)
                 .collect();
-            let (first, rest) = others.split_at(others.len().min(NAMED));
+            let (first, rest) = others.split_at(others.len().min(FIRST_NAMES));
             let looped_rest = rest.iter().filter(|&&name| looped.contains(name));
             let names: Vec<Named> = first
                 .iter()
@@ -68,7 +70,7 @@ pub fn fold(map: &ClusterMap, open: &str, looped: &BTreeSet<String>) -> Vec<Fold
                 .collect();
             Folded {
                 name: band.name.clone(),
-                open: others.len() < band.parcels.len(),
+                open: others.len() < band.tiles.len(),
                 more: others.len() - names.len(),
                 names,
             }
@@ -85,9 +87,10 @@ pub struct MachineChip {
     pub control_plane: bool,
 }
 
-/// A chip for each machine, the ones running the namespace's pods first,
-/// each group in the machines band's order.  `machines` gives each
-/// machine's count of the namespace's pods.
+/// A chip for each machine.  The machines that run the namespace's
+/// pods come first.  Within each group, control-plane machines come
+/// first, then the rest by name.  `Machine::here` gives the count of the
+/// namespace's pods on each machine.
 pub fn machine_chips(machines: &[Machine]) -> Vec<MachineChip> {
     let mut chips: Vec<(bool, MachineChip)> = machines
         .iter()
@@ -113,7 +116,7 @@ pub fn machine_chips(machines: &[Machine]) -> Vec<MachineChip> {
 mod tests {
     use rstest::rstest;
 
-    use super::super::super::cluster::{Band, Parcel};
+    use super::super::super::cluster::{Band, NamespaceTile};
     use super::*;
     use transect_ground::machines::Resources;
     use transect_observe::health::Health;
@@ -122,9 +125,9 @@ mod tests {
     fn band(name: &str, namespaces: &[&str]) -> Band {
         Band {
             name: name.into(),
-            parcels: namespaces
+            tiles: namespaces
                 .iter()
-                .map(|&namespace| Parcel {
+                .map(|&namespace| NamespaceTile {
                     namespace: namespace.into(),
                     workloads: 1,
                     health: Health::default(),

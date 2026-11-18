@@ -1,6 +1,3 @@
-//! What the vulnerabilities reader reads of the fixture cluster's scanner
-//! reports.
-
 use rstest::rstest;
 
 use crate::web::fixture;
@@ -32,7 +29,7 @@ fn reads_each_report_and_whether_it_is_current(
 }
 
 #[rstest]
-fn keeps_only_the_fields_the_knowledge_names() {
+fn keeps_only_the_fields_that_kind_knowledge_lists() {
     let snapshot = fixture::snapshot();
     let (_, reports) = snapshot
         .custom
@@ -45,11 +42,11 @@ fn keeps_only_the_fields_the_knowledge_names() {
 }
 
 #[rstest]
-fn holds_one_copy_of_a_title_many_reports_share() {
+fn shares_one_copy_of_a_title_across_reports() {
     let model = fixture::model();
     let titles: Vec<_> = model
         .vulnerabilities
-        .holding("CVE-2026-0001")
+        .reports_with("CVE-2026-0001")
         .filter_map(|(_, finding)| finding.title.clone())
         .collect();
     assert!(titles.len() == 3 && titles.iter().all(|t| Arc::ptr_eq(t, &titles[0])));
@@ -60,12 +57,12 @@ fn indexes_each_current_id_by_the_workloads_that_run_it() {
     let model = fixture::model();
     let vulnerabilities = &model.vulnerabilities;
     let ids: Vec<&str> = vulnerabilities.ids().map(|id| &**id).collect();
-    let holding: Vec<String> = vulnerabilities
-        .holding("CVE-2026-0001")
+    let reports: Vec<String> = vulnerabilities
+        .reports_with("CVE-2026-0001")
         .map(|(report, finding)| format!("{} {:?}", report.workload.name, finding.installed))
         .collect();
     assert_eq!(
-        (ids, holding),
+        (ids, reports),
         (
             vec![
                 "CVE-2026-0001",

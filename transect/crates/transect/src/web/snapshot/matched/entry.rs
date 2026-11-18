@@ -1,7 +1,9 @@
-//! The conditions of an `IngressController` whose controller no
-//! `IngressClass` names, whose image no pod runs, or whose entry
-//! queries answer with no series that has its backend label, and of a
-//! `LoadBalancerController` whose listener keys no pod has.
+//! Marks an `IngressController` as unmatched when no `IngressClass`
+//! names its controller, no running pod runs its image, or its entry
+//! queries return no series with its backend label. Marks a
+//! `LoadBalancerController` as unmatched when no pod has both the key
+//! it reads a listener's `Service` name from and the key it reads the
+//! namespace from.
 
 use super::super::Snapshot;
 use transect_graph::pods::finished;
@@ -12,21 +14,21 @@ impl Snapshot {
     pub(super) fn unmatched_controllers(&self) -> Vec<(DocId, Condition)> {
         let mut found = Vec::new();
         for controller in &self.resources.ingress_controllers {
-            let mut say =
+            let mut unmatched =
                 |message: String| found.push((controller.doc, Condition::unmatched(message)));
             let classes = self.paged.ingress_classes.iter();
             let named = classes
                 .filter_map(|class| class.spec.as_ref()?.controller.as_deref())
                 .any(|named| named == controller.controller);
             if !named {
-                say(format!(
+                unmatched(format!(
                     "no IngressClass names the controller {}",
                     controller.controller
                 ));
             }
             let pods = self.pods.iter().filter(|pod| !finished(pod));
             if !pods.into_iter().any(|pod| runs(pod, &controller.image)) {
-                say(format!(
+                unmatched(format!(
                     "no running pod runs the image {}",
                     controller.image
                 ));
@@ -35,7 +37,7 @@ impl Snapshot {
             if let Some(measured) = measured
                 && measured.backends.is_empty()
             {
-                say(format!(
+                unmatched(format!(
                     "the entry queries return no series with the label {}",
                     measured.queries.label
                 ));

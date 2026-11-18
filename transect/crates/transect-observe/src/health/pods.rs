@@ -14,10 +14,10 @@ use transect_graph::pods::finished;
 /// the kubelet pulls its images, before it counts as stuck.
 const PENDING_MINUTES: i64 = 5;
 
-/// What is wrong with `pod` now, if anything.  The function returns
-/// nothing for a pod that is being deleted, because it will not restart
-/// again, or for a pod that is `Succeeded` or `Failed`, because its
-/// containers have stopped for good.
+/// What is wrong with `pod` now, if anything.  Returns nothing for a pod
+/// that is being deleted, because it will not restart again, or for a
+/// pod that is `Succeeded` or `Failed`, because its containers have
+/// stopped for good.
 pub fn reasons(pod: &Pod, now: Timestamp) -> Vec<Reason> {
     if pod.metadata.deletion_timestamp.is_some() {
         return Vec::new();
@@ -36,8 +36,8 @@ pub fn reasons(pod: &Pod, now: Timestamp) -> Vec<Reason> {
         .chain(main)
         .filter_map(|container| restarts(&name, container, now))
         .collect();
-    // A pod stays `Pending` while an init container crash loops, and the
-    // crash loop is the more specific finding.
+    // A pod stays `Pending` while an init container restarts, and the
+    // restart is the more specific finding.
     if restarting.is_empty() && phase == Some("Pending") {
         return pending(pod, now).into_iter().collect();
     }
@@ -53,8 +53,10 @@ fn pending(pod: &Pod, now: Timestamp) -> Option<Reason> {
     })
 }
 
-/// A container in `CrashLoopBackOff` gets only that reason, because the
-/// back-off tells the reader more than the time of its last restart.
+/// `CrashLooping` while `container` is in `CrashLoopBackOff`, because
+/// the back-off tells the reader more than the time of its last
+/// restart, and otherwise `Restarting` when it restarted in the last
+/// `RECENT_MINUTES`.
 fn restarts(pod: &str, container: &ContainerStatus, now: Timestamp) -> Option<Reason> {
     if crash_looping(container) {
         return Some(Reason::CrashLooping {
@@ -75,9 +77,8 @@ fn restarts(pod: &str, container: &ContainerStatus, now: Timestamp) -> Option<Re
 
 /// How many minutes before `now` `container` last restarted, and
 /// whether the run before it exited 0.  Kubernetes keeps a container's
-/// restart count for the life of the pod, so the time of the last run
-/// decides whether a restart still matters.  A count alone would flag a
-/// pod forever for one restart last month.
+/// restart count for the life of the pod, so callers use this time to
+/// decide whether a restart still matters.
 pub fn last_restart(container: &ContainerStatus, now: Timestamp) -> Option<(i64, bool)> {
     if container.restart_count == 0 {
         return None;

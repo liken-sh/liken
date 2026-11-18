@@ -9,7 +9,7 @@
 {% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
 
 {% block main %}
-{#- One ground box as a board: how it is reached on the left, the thing
+{#- One outside system as a board: how it is reached on the left, the thing
     itself in the middle with its link out and its Outside's lines,
     and what it keeps and what depends on it on the right. -#}
 <div class="view" id="view" sse-swap="view" hx-swap="outerHTML">

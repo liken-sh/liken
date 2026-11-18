@@ -1,6 +1,6 @@
-//! The cluster page with alerts firing, rendered whole from a reading
-//! built by hand: the parcel an alert colors, the machine it marks, and
-//! the lines of "Now".
+//! Tests of the cluster page with alerts firing, rendered to HTML from
+//! an alert reading built in the test: the tile that an alert colors,
+//! the machine that it marks, and the lines of "Now".
 
 use std::sync::Arc;
 
@@ -17,8 +17,8 @@ use transect_observe::alerts::{self, Alert};
 use transect_observe::usage;
 use transect_resources::layers::Layers;
 
-/// The cluster page's HTML for a cluster of the namespace shop and the
-/// machine alpha, with `alerts` as Alertmanager's reading.
+/// The cluster page's HTML for a cluster with the namespace `shop` and
+/// the machine `alpha`, where `alerts` is the reading of Alertmanager.
 fn page(alerts: alerts::Reading) -> String {
     let mut snapshot = Snapshot::empty();
     snapshot.namespaces = vec![Arc::new(
@@ -55,7 +55,7 @@ fn read(alerts: Vec<Alert>) -> alerts::Reading {
     alerts::Reading::Read(Arc::new(alerts))
 }
 
-fn hostile() -> Alert {
+fn alert_with_markup() -> Alert {
     let mut down = alert("WebDown", "critical", &[("namespace", "shop")]);
     down.summary = Some("<script>alert(1)</script>".into());
     down.link =
@@ -78,9 +78,9 @@ fn hostile() -> Alert {
     &["Alertmanager unreachable", "Nothing needs attention"]
 )]
 #[case::firing(
-    read(vec![hostile(), alert("DiskHot", "warning", &[("node", "alpha")])]),
+    read(vec![alert_with_markup(), alert("DiskHot", "warning", &[("node", "alpha")])]),
     &[
-        " parcel-failing",
+        " ns-tile-failing",
         "alert(1)",
         "shop, firing for",
         "machine alpha, firing for",
@@ -88,10 +88,7 @@ fn hostile() -> Alert {
         r#"href="http://alerts.example/#/alerts?filter=%7Balertname%3D%22WebDown%22%7D""#,
     ]
 )]
-fn the_page_shows_what_alertmanager_says(
-    #[case] alerts: alerts::Reading,
-    #[case] expected: &[&str],
-) {
+fn shows_each_alertmanager_reading(#[case] alerts: alerts::Reading, #[case] expected: &[&str]) {
     let html = page(alerts);
     let missing: Vec<&&str> = expected
         .iter()
@@ -101,8 +98,8 @@ fn the_page_shows_what_alertmanager_says(
 }
 
 #[rstest]
-fn a_firing_page_neither_says_all_clear_nor_runs_alert_text() {
-    let html = page(read(vec![hostile()]));
+fn a_firing_alert_hides_the_all_clear_and_escapes_its_summary() {
+    let html = page(read(vec![alert_with_markup()]));
     let found: Vec<&str> = ["Nothing needs attention", "No alerts firing", "<script>"]
         .into_iter()
         .filter(|text| html.contains(text))

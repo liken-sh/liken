@@ -1,20 +1,21 @@
-//! How a workload whose pods have all finished last ran: a custom kind
-//! with no controller under it, such as one that runs its work as
-//! Jobs.  Its pods report no readiness to count, so its card shows how
-//! its newest pod ended in place of a count of ready pods.
+//! Finds how a workload last ran, for a custom kind with no controller
+//! under it, such as one that runs its work as `Job`s. When none of its
+//! pods is running, there are no ready pods to count, so its card shows
+//! how its newest pod ended.
 
 use k8s_openapi::api::core::v1::Pod;
 use k8s_openapi::jiff::Timestamp;
 
+/// When the newest finished pod stopped, and whether it failed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LastRun {
     pub failed: bool,
     pub at: Timestamp,
 }
 
-/// The newest of `pods` to finish, by when its last container stopped,
-/// and whether it failed.  A pod with no stopped container counts as
-/// finished when it was made.
+/// Returns when the newest finished pod of `pods` stopped, and whether
+/// it failed. A pod stopped when its last container stopped, or, with
+/// no stopped container, when it was created.
 pub fn last_run(pods: &[&Pod]) -> Option<LastRun> {
     pods.iter()
         .filter_map(|pod| {

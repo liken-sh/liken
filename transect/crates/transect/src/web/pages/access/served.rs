@@ -1,5 +1,6 @@
-//! The ports a workload serves, by number or by the name a container
-//! gives one, as its drawing's port boxes.
+//! The port boxes of a workload's access drawing: the ports its
+//! containers declare, and the ports that a way in from outside the
+//! cluster or a `NetworkPolicy` rule refers to by number or by name.
 
 use transect_access::access::drawing::reach::Port;
 use transect_access::access::ways::Target;
@@ -7,8 +8,9 @@ use transect_graph::edges::Object;
 use transect_map::map::WorkloadContents;
 use transect_network::policy::Ports;
 
-/// The ports a workload's pods declare.  The list grows when a way in
-/// or a rule names a port that no container declares.
+/// The ports that the containers of a workload declare, sorted by
+/// number. A port that something refers to and no container declares is
+/// added after them.
 pub struct Served {
     ports: Vec<(i32, Option<String>, String)>,
 }
@@ -42,15 +44,15 @@ impl Served {
         Self { ports }
     }
 
-    /// The place of the port `target` names, added when no container
-    /// declares it.
+    /// The index of the port that `target` refers to. When no container
+    /// declares it, the port is added to the list.
     pub fn of(&mut self, target: &Target) -> usize {
         let found = self
             .ports
             .iter()
             .position(|(number, name, _)| match target {
-                Target::Number(asked) => number == asked,
-                Target::Name(asked) => name.as_deref() == Some(asked.as_str()),
+                Target::Number(wanted) => number == wanted,
+                Target::Name(wanted) => name.as_deref() == Some(wanted.as_str()),
             });
         found.unwrap_or_else(|| {
             let (number, name) = match target {
@@ -63,8 +65,9 @@ impl Served {
         })
     }
 
-    /// The places of the ports `ports` admit: each declared port in
-    /// them, or each span's first port when none is declared.
+    /// The sorted indexes of the listed ports that `ports` allows. For a
+    /// span that contains none of them, the span's first port is added to
+    /// the list. `Ports::Any` returns no indexes.
     pub fn admitted(&mut self, ports: &Ports) -> Vec<usize> {
         let Ports::Listed(spans) = ports else {
             return Vec::new();

@@ -1,14 +1,15 @@
-//! The applier of each workload, read from the marks that a GitOps tool
-//! writes on the objects that it applies.  The `applies` field of the
-//! tool's kind knowledge names those marks.
+//! Finds which GitOps applier applied each workload, from the labels
+//! and annotations that the tool writes on the objects it applies.  The
+//! `applies` field of the tool's kind knowledge says which labels or
+//! annotations those are, as a `Mark`.
 //!
-//! A tool marks the objects that it applies, and those are often not
-//! the objects that a reader counts as the workload.  The tool applies
-//! an operator's custom resource, but not the `StatefulSet` that the
-//! operator makes from it, and a chart may mark only some of the
-//! objects that it renders.  So transect counts each marked object for
-//! its top owner, and the top owner's own mark takes precedence over a
-//! mark found further down its chain of owners.
+//! The objects that a tool marks are often not the workloads that a
+//! reader looks at.  The tool applies an operator's custom resource but
+//! not the `StatefulSet` that the operator creates from it, and a chart
+//! may mark only some of the objects that it renders.  So transect
+//! attributes each marked object to its top owner.  When the top owner
+//! has a mark of its own, transect uses that mark and ignores the marks
+//! on the objects below it.
 
 use std::collections::HashMap;
 
@@ -19,9 +20,9 @@ use transect_cluster::ownership::Ownership;
 use transect_graph::edges::Object;
 use transect_resources::knowledge::gitops::{Applies, Mark, MetaKey};
 
-/// The marks of each applier kind, the most specific first, and the
-/// appliers of each kind by name.  The names resolve the marks that
-/// name no namespace.
+/// The marks of each applier kind, with the highest `precedence` first,
+/// and the applier objects indexed by group, kind, and name.  The index
+/// finds the namespace of an applier when its mark gives only a name.
 #[derive(Debug, Default)]
 pub struct Appliers {
     marks: Vec<(String, String, Applies)>,
@@ -29,8 +30,8 @@ pub struct Appliers {
 }
 
 impl Appliers {
-    /// The appliers of `kinds`, each with its `applies`, whose objects
-    /// are `objects`.
+    /// The lookup for the applier `kinds`, each with its `applies`, and
+    /// the applier `objects` that exist.
     pub fn new<'a>(
         kinds: impl IntoIterator<Item = (String, String, Applies)>,
         objects: impl IntoIterator<Item = &'a Object>,
@@ -52,8 +53,9 @@ impl Appliers {
         Self { marks, by_name }
     }
 
-    /// The applier that the marks in `meta` name, when a tool applied
-    /// the object.
+    /// The applier named by the first mark in `meta` that matches, in
+    /// order of precedence.  A mark that gives no namespace identifies an
+    /// applier only when exactly one applier object has that name.
     pub fn of(&self, meta: &ObjectMeta) -> Option<Object> {
         self.marks.iter().find_map(|(group, kind, applies)| {
             let named = read(meta, &applies.name, "name")?;
@@ -76,9 +78,10 @@ impl Appliers {
     }
 }
 
-/// The parts that `mark` reads from `meta`.  When the mark has no
-/// formats, the whole value is the one part, named `part`.  Otherwise
-/// the parts are what the first matching format captures in the value.
+/// The parts of the value that `mark` finds in `meta`.  When the mark
+/// has no formats, the whole value is one part, named `part`.
+/// Otherwise the parts are what the first format that matches the value
+/// captures.
 fn read(meta: &ObjectMeta, mark: &Mark, part: &str) -> Option<HashMap<String, String>> {
     let value = match &mark.key {
         MetaKey::Label(key) => meta.labels.as_ref()?.get(key)?,
@@ -94,16 +97,16 @@ fn read(meta: &ObjectMeta, mark: &Mark, part: &str) -> Option<HashMap<String, St
     Some(found.into_iter().map(|(k, v)| (k, v.to_string())).collect())
 }
 
-/// Each workload a tool applied, and the applier that applied it.
+/// The applier of each workload that a tool applied.
 #[derive(Debug, Default)]
 pub struct Applied {
     by: HashMap<Object, Object>,
 }
 
 impl Applied {
-    /// Reads the marks that `appliers` names on each of `objects`, which
-    /// come with their metadata, and counts each marked object for its
-    /// top owner in `ownership`.
+    /// Finds the applier of each of `objects`, which come with their
+    /// metadata, and records it for the object's top owner in
+    /// `ownership`.
     pub fn build<'a>(
         objects: impl IntoIterator<Item = (Object, &'a ObjectMeta)>,
         ownership: &Ownership,
@@ -151,9 +154,9 @@ mod tests {
         found.applies.unwrap()
     }
 
-    /// A tree applier marked by two labels, a release applier that
-    /// takes precedence over it, and an app applier marked by a
-    /// tracking annotation.
+    /// A tree applier that is named by two labels, a release applier
+    /// that has precedence over it, and an app applier that is named by
+    /// a tracking annotation.
     fn appliers(objects: &[Object]) -> Appliers {
         Appliers::new(
             [
@@ -209,7 +212,7 @@ mod tests {
     #[case::a_name_without_its_namespace(&[("tree/name", "shop")], &[], None)]
     #[case::an_annotation_by_its_format(&[], &[("app/tracking", "shop:apps/Deployment:shop/web")], Some(object("App", "deploy", "shop")))]
     #[case::an_app_in_another_namespace(&[], &[("app/tracking", "team_shop:apps/Deployment:shop/web")], Some(object("App", "team", "shop")))]
-    #[case::an_app_no_object_has(&[], &[("app/tracking", "blog:apps/Deployment:blog/web")], None)]
+    #[case::an_app_that_does_not_exist(&[], &[("app/tracking", "blog:apps/Deployment:blog/web")], None)]
     #[case::none(&[("app", "web")], &[], None)]
     fn reads_what_applied_an_object(
         #[case] labels: &[(&str, &str)],
@@ -220,9 +223,9 @@ mod tests {
         assert_eq!(appliers.of(&marked(labels, annotations)), expected);
     }
 
-    /// A `Cache` in `shop` that owns a `StatefulSet`.  The arguments set
-    /// the mark on each object, and each mark names a tree applier in
-    /// `ops`.
+    /// A `Cache` in `shop` that owns a `StatefulSet`.  Each argument is
+    /// the name of the tree applier in `ops` that an object's mark
+    /// names, or `None` for an object with no mark.
     fn cache(on_cache: Option<&str>, on_stateful_set: Option<&str>) -> Applied {
         let label = |name: Option<&str>| {
             name.map(|name| {
@@ -268,13 +271,13 @@ mod tests {
     #[rstest]
     #[case::on_the_top_owner(Some("shop"), None, Some(object("Tree", "ops", "shop")))]
     #[case::below_the_top_owner(None, Some("caches"), Some(object("Tree", "ops", "caches")))]
-    #[case::the_top_owners_own_wins(
+    #[case::the_top_owners_own_mark_wins(
         Some("shop"),
         Some("caches"),
         Some(object("Tree", "ops", "shop"))
     )]
     #[case::none(None, None, None)]
-    fn counts_a_mark_for_its_top_owner(
+    fn attributes_a_mark_to_the_top_owner(
         #[case] on_cache: Option<&str>,
         #[case] on_stateful_set: Option<&str>,
         #[case] expected: Option<Object>,

@@ -12,7 +12,7 @@ use transect_ground::loss::IfDown;
 use transect_network::addresses::Depends;
 use transect_network::policy::Calls;
 use transect_observe::health::{Health, Level, Reason, minutes_between};
-use transect_resources::intent::{Docs, Line, Said};
+use transect_resources::intent::{Docs, Line, ObjectIntent};
 use transect_resources::knowledge::KnownThrough;
 use transect_supply::findings::WorkloadFinding;
 use transect_supply::gitops::CodeSection;
@@ -26,34 +26,37 @@ pub struct WorkloadCard {
     /// The workload's page, which the card's title links to, or none on
     /// that page itself.
     pub href: Option<String>,
-    /// What it is: its top owner's `why`, or its first image's
-    /// description.
+    /// What the workload is, as the card's first line: the `why` of its
+    /// intent, else its kind's knowledge summary, else the description
+    /// from its CRD, else the description of its first image.
     pub why: Option<Line>,
-    /// What goes wrong with it.
+    /// What commonly goes wrong with it, from its intent.
     pub gotcha: Option<Line>,
-    /// What the cluster loses when it goes, from its intent's
-    /// `provides`, which its "If it goes down" lines name in place of
+    /// What the workload provides to the cluster, from the `provides`
+    /// of its intent.  The "If it goes down" lines name this in place of
     /// the workload.
     pub provides: Option<Line>,
     pub docs: Option<Docs>,
-    /// The same health its box takes on the namespace page.
+    /// The workload's health, the same as its box on the namespace page
+    /// shows.
     pub health: Health,
-    /// The page each of the health's reasons links to, in their order,
-    /// or none for a reason about the card's own object.
+    /// For each of the health's reasons in order, the page it links to,
+    /// or `None` for a reason about the workload itself.
     pub reason_pages: Vec<Option<String>>,
-    /// How many of its pods are ready, of how many are desired.
+    /// How many of its pods are ready, and how many it should run.
     pub ready: Option<(i32, i32)>,
-    /// Set for a workload described by its pods alone when none of
-    /// them runs.
+    /// Set for a custom workload with no controller under it, when none
+    /// of its pods is running.
     pub idle: Option<Idle>,
     pub images: Vec<String>,
-    /// Where each image its pods run came from, by the image its spec
-    /// names.
+    /// Where each image that the pods run came from, paired with the
+    /// image name in the pod spec.  An image has one entry for each
+    /// digest that its pods run.
     pub origins: Vec<(String, Origin)>,
-    /// Minutes since it last rolled.
+    /// Minutes since its latest rollout.
     pub rolled: Option<i64>,
     pub findings: Vec<WorkloadFinding>,
-    /// What its configured addresses reach, and what reaches it.
+    /// What its configured addresses point at, and what points at it.
     pub depends: Depends,
     /// Where it is declared, or the reason the card does not show it.
     pub code: CodeSection,
@@ -61,21 +64,22 @@ pub struct WorkloadCard {
     pub managed: Managed,
     /// Who its policies let call it, and on which ports.
     pub calls: Calls,
-    /// What its loss would take, one hop out.
+    /// What the workload's dependents lose if it goes down.
     pub if_down: IfDown,
-    /// What its kind's knowledge states, at the end of the card.
+    /// Its kind's knowledge, shown at the end of the card.
     pub known: Option<KnownThrough>,
-    /// The conditions a custom workload whose kind has no knowledge
-    /// reports, which its board would show if it had one.
+    /// The conditions reported by a custom workload whose kind has no
+    /// knowledge.  A kind with knowledge shows them on its board.
     pub conditions: Vec<Chip>,
-    /// Its access tab, for a workload that serves a port.
+    /// A link to its access tab, for a workload that serves a port.
     pub access: Option<CardAccess>,
-    /// Its current reports' count line and its vulnerabilities tab.
+    /// The count line of its current vulnerability reports, and the link
+    /// to its vulnerabilities tab.
     pub vulnerabilities: Option<(Option<Counts>, String)>,
 }
 
-/// A card's small link into the access lens: how many ways in reach the
-/// workload, and its access tab.
+/// A card's link to the access lens: the number of ways in to the
+/// workload, and the link to its access tab.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CardAccess {
     pub ways: usize,
@@ -83,7 +87,6 @@ pub struct CardAccess {
 }
 
 impl CardAccess {
-    /// "2 ways in", before the link to the tab.
     pub fn ways_in(&self) -> String {
         match self.ways {
             0 => "no way in".into(),
@@ -93,10 +96,11 @@ impl CardAccess {
     }
 }
 
-/// A workload with no running pod and no controller that counts its pods.
+/// How a custom workload with no controller and no running pod last
+/// ran, such as a workload that runs `Job`s, between runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Idle {
-    /// None of its pods has finished either.
+    /// No pod of the workload has finished.
     Unrun,
     /// Its newest pod finished or failed this many minutes ago.
     Ended { failed: bool, minutes: i64 },
@@ -144,8 +148,8 @@ impl WorkloadCard {
         }
     }
 
-    /// The card with each reason linked to the page that `page` returns
-    /// for the reason's subject.
+    /// Links each reason to the page that `page` returns for the reason's
+    /// subject.
     pub fn with_reason_pages(self, page: impl Fn(&Reason) -> Option<String>) -> Self {
         let reason_pages = self.health.reasons.iter().map(page).collect();
         Self {
@@ -164,19 +168,20 @@ impl WorkloadCard {
             .collect()
     }
 
-    /// The card with the conditions its custom resource reports.
     pub fn with_conditions(self, conditions: Vec<Chip>) -> Self {
         Self { conditions, ..self }
     }
 
-    /// The card with its kind's knowledge, whose summary opens the card
-    /// when intent gives no `why`, so it is called before `with_intent`.
+    /// Sets the `KindKnowledge` of the workload's kind. Its summary opens
+    /// the card when the intent has no `why`, so call this before
+    /// `with_intent`.
     pub fn with_known(self, known: Option<KnownThrough>) -> Self {
         Self { known, ..self }
     }
 
-    /// The card with its access tab, given how many ways in reach it,
-    /// for a workload that serves a port.
+    /// Sets the access tab from `ways`, the number of ways in to the
+    /// workload, which is `None` for a workload that serves no port.
+    /// The tab needs the card's `href`, so call it after `with_href`.
     pub fn with_access(self, ways: Option<usize>) -> Self {
         let access = ways.zip(self.href.clone()).map(|(ways, page)| CardAccess {
             ways,
@@ -185,7 +190,9 @@ impl WorkloadCard {
         Self { access, ..self }
     }
 
-    /// The card with its vulnerabilities tab and current count line.
+    /// Sets the vulnerabilities tab and the current count line.
+    /// The tab is set only when `named` is true and the card has an
+    /// `href`, so call it after `with_href`.
     pub fn with_vulnerabilities(self, named: bool, counts: Option<Counts>) -> Self {
         let tab = self.href.clone().filter(|_| named);
         let vulnerabilities = tab.map(|page| (counts, format!("{page}/vulnerabilities")));
@@ -199,24 +206,21 @@ impl WorkloadCard {
         Self { href, ..self }
     }
 
-    /// The card with `if_down`, which is read from the edge graph.
     pub fn with_if_down(self, if_down: IfDown) -> Self {
         Self { if_down, ..self }
     }
 
-    /// The card with `calls`, which the evaluated policies give.
     pub fn with_calls(self, calls: Calls) -> Self {
         Self { calls, ..self }
     }
 
-    /// The card with `managed`, which is also read from the edge graph.
     pub fn with_managed(self, managed: Managed) -> Self {
         Self { managed, ..self }
     }
 
-    /// The card with `code`, which is read from the edge graph, each
-    /// directory marked when the card's origins name its repository, so
-    /// it is called after `with_origins`.
+    /// Marks each directory of `code` whose repository is the source
+    /// label of one of the card's images, so call it after
+    /// `with_origins`.
     pub fn with_code(self, code: CodeSection) -> Self {
         let sources = self.origins.iter().filter_map(|(_, origin)| match origin {
             Origin::Read(built) => built.source.as_deref(),
@@ -226,20 +230,19 @@ impl WorkloadCard {
         Self { code, ..self }
     }
 
-    /// The card with `origins`, which come from the image labels read so far.
     pub fn with_origins(self, origins: Vec<(String, Origin)>) -> Self {
         Self { origins, ..self }
     }
 
-    /// The card with its workload's intent.  The card opens with its
-    /// `why`, or its kind knowledge's summary, or the kind's description
-    /// from its CRD, `defined`, or its first image's description, so it
-    /// is called after `with_known` and `with_origins`.  A summary that
-    /// opens the card is left out of the section that ends the card.
-    pub fn with_intent(self, said: Option<&Said>, defined: Option<Line>) -> Self {
-        let said = said.cloned().unwrap_or_default();
+    /// Sets the intent's lines, and sets `why` from the first source
+    /// that has one, in the order that `why` lists them.  `defined` is
+    /// the description from the kind's CRD.  Call it after `with_known`
+    /// and `with_origins`.  A knowledge summary that opens the card is
+    /// left out of the knowledge section at the end of the card.
+    pub fn with_intent(self, intent: Option<&ObjectIntent>, defined: Option<Line>) -> Self {
+        let intent = intent.cloned().unwrap_or_default();
         let summary = self.known.as_ref().and_then(KnownThrough::opening);
-        let (why, known) = match (said.why, summary) {
+        let (why, known) = match (intent.why, summary) {
             (Some(why), _) => (Some(why), self.known.clone()),
             (None, Some(summary)) => (
                 Some(summary),
@@ -253,14 +256,14 @@ impl WorkloadCard {
         Self {
             why,
             known,
-            gotcha: said.gotcha,
-            provides: said.provides,
-            docs: said.docs,
+            gotcha: intent.gotcha,
+            provides: intent.provides,
+            docs: intent.docs,
             ..self
         }
     }
 
-    /// The description of its first image, as the card's opening line.
+    /// The description of the first image, as the card's opening line.
     fn described_by_image(&self) -> Option<Line> {
         let image = self.images.first()?;
         let origins = self.origins_of(image).into_iter();
@@ -310,8 +313,8 @@ impl WorkloadCard {
         provenance::legend(&provenances)
     }
 
-    /// The health dot: clear when healthy, and filled for a failure and
-    /// outlined for a warning, as the namespace card draws it.
+    /// The CSS class of the health dot, the same class that the
+    /// namespace card uses.
     pub fn dot_class(&self) -> &'static str {
         match self.health.level {
             Level::Healthy => "dot-clear",
@@ -384,8 +387,8 @@ mod tests {
         }
     }
 
-    fn said(why: &str) -> Said {
-        Said {
+    fn intent_with_why(why: &str) -> ObjectIntent {
+        ObjectIntent {
             why: Some(Line {
                 text: why.into(),
                 provenance: Provenance::Intent(transect_graph::edges::Stated::Annotation {
@@ -393,17 +396,17 @@ mod tests {
                     on: "Deployment web".into(),
                 }),
             }),
-            ..Said::default()
+            ..ObjectIntent::default()
         }
     }
 
     #[rstest]
-    #[case::its_why(&["web:1", "proxy:2"], Some(said("Sells things.")), Some("Sells things."), true)]
+    #[case::its_why(&["web:1", "proxy:2"], Some(intent_with_why("Sells things.")), Some("Sells things."), true)]
     #[case::its_first_images_description(&["web:1", "proxy:2"], None, Some("web:1 does things"), false)]
     #[case::nothing(&[], None, None, true)]
     fn opens_with_its_why_or_its_first_images_description(
         #[case] images: &[&str],
-        #[case] intent: Option<Said>,
+        #[case] intent: Option<ObjectIntent>,
         #[case] opening: Option<&str>,
         #[case] first_image_describes: bool,
     ) {
@@ -425,13 +428,13 @@ mod tests {
 
     #[rstest]
     #[case::its_why_over_the_summary(
-        Some(said("Sells things.")),
+        Some(intent_with_why("Sells things.")),
         "Sells things.",
         Some("Turns things.")
     )]
     #[case::the_summary_over_the_image(None, "Turns things.", None)]
     fn opens_with_its_kinds_summary_when_it_has_no_why(
-        #[case] intent: Option<Said>,
+        #[case] intent: Option<ObjectIntent>,
         #[case] opening: &str,
         #[case] summary_at_the_end: Option<&str>,
     ) {
@@ -473,10 +476,13 @@ mod tests {
     #[rstest]
     #[case::an_image_only(None, "image: from an image's labels.")]
     #[case::intent_and_not_the_runs_boxs_image(
-        Some(said("Sells things.")),
+        Some(intent_with_why("Sells things.")),
         "intent: written by the people who run the cluster. Hover"
     )]
-    fn its_legend_names_the_marks_it_shows(#[case] intent: Option<Said>, #[case] meanings: &str) {
+    fn its_legend_names_the_marks_it_shows(
+        #[case] intent: Option<ObjectIntent>,
+        #[case] meanings: &str,
+    ) {
         let card = running(&["web:1"]).with_intent(intent.as_ref(), None);
         let legend = card.legend().unwrap();
         assert!(legend.contains(meanings), "{legend}");

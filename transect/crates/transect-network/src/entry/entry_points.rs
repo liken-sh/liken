@@ -1,5 +1,5 @@
-//! An `IngressController`'s `entryPoints`: the ports its controller
-//! serves an `Ingress` on, which an `Ingress` may name in an
+//! An `IngressController`'s `entryPoints`: the ports that its controller
+//! serves `Ingress`es on. An `Ingress` can choose among them with an
 //! annotation.
 //!
 //! ```yaml
@@ -11,24 +11,26 @@
 //!     - {name: websecure, port: 443, tls: true}
 //! ```
 //!
-//! Without them, an `Ingress` is served on port 80, and on 443 when it
-//! has `spec.tls`, as the `Ingress` API documents.
+//! When a controller declares none, `conventional` gives the ports.
 
 use k8s_openapi::api::networking::v1::Ingress;
 use serde::Deserialize;
 
-/// The ports a controller serves an `Ingress` on.
+/// The ports a controller serves `Ingress`es on.
 #[derive(Clone, Debug, PartialEq)]
 pub struct EntryPoints {
-    /// The `Ingress` annotation that names entry points, comma-separated.
+    /// The key of the `Ingress` annotation whose value lists entry point
+    /// names, separated by commas.
     pub annotation: Option<String>,
-    /// The entry points an `Ingress` without the annotation is served on.
+    /// The entry points that serve an `Ingress` that has no such
+    /// annotation.
     pub default: Vec<String>,
     pub ports: Vec<EntryPort>,
 }
 
-/// One entry point: its name, its port, whether it serves an
-/// `Ingress`'s TLS, and the entry point the controller redirects it to.
+/// One entry point: its name, its port, whether it terminates the
+/// `Ingress`'s TLS, and the name of the entry point that the controller
+/// redirects it to.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct EntryPort {
@@ -39,9 +41,10 @@ pub struct EntryPort {
     pub redirects_to: Option<String>,
 }
 
-/// One port an `Ingress` is served on, whether it serves the
-/// `Ingress`'s TLS there, and the TLS port the controller redirects it
-/// to, when it declares one.
+/// One port that serves an `Ingress`, whether it terminates the
+/// `Ingress`'s TLS there, and the port it redirects to. `redirect` is
+/// set only when the entry point's `redirectsTo` names an entry point
+/// that has `tls: true`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Served {
     pub port: u16,
@@ -49,6 +52,8 @@ pub struct Served {
     pub redirect: Option<u16>,
 }
 
+/// The `entryPoints` field as an `IngressController` writes it, before
+/// `read` validates it.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Written {
@@ -58,7 +63,7 @@ pub struct Written {
     ports: Vec<EntryPort>,
 }
 
-/// The entry points `written` declares, or why they do not validate.
+/// The entry points in `written`, or the reason they are invalid.
 pub fn read(written: Written) -> Result<EntryPoints, String> {
     if written.ports.is_empty() {
         return Err("entryPoints lists no ports".into());
@@ -67,7 +72,7 @@ pub fn read(written: Written) -> Result<EntryPoints, String> {
     let unknown = written.default.iter().find(|name| !named(name));
     if let Some(name) = unknown {
         return Err(format!(
-            "entryPoints' default names {name}, which is not the name of a port"
+            "the default of entryPoints lists {name:?}, and no port has that name"
         ));
     }
     let redirects = written
@@ -76,7 +81,7 @@ pub fn read(written: Written) -> Result<EntryPoints, String> {
         .filter_map(|port| port.redirects_to.as_deref());
     if let Some(name) = redirects.into_iter().find(|name| !named(name)) {
         return Err(format!(
-            "entryPoints redirects to {name}, which is not the name of a port"
+            "a port of entryPoints redirects to {name:?}, and no port has that name"
         ));
     }
     Ok(EntryPoints {
@@ -87,8 +92,8 @@ pub fn read(written: Written) -> Result<EntryPoints, String> {
 }
 
 impl EntryPoints {
-    /// The ports `ingress` is served on: those its annotation names, or
-    /// the default ones.
+    /// The ports that serve `ingress`: the entry points listed in its
+    /// annotation, or `default` when the annotation is absent.
     pub fn of(&self, ingress: &Ingress) -> Vec<Served> {
         let annotations = ingress.metadata.annotations.as_ref();
         let named = self
@@ -117,8 +122,9 @@ impl EntryPoints {
     }
 }
 
-/// The ports an `Ingress` is served on with no entry points declared:
-/// 80, and 443 for its TLS when it has any.
+/// The ports that transect shows for an `Ingress` when its controller
+/// declares no entry points: 80, and also 443 when `spec.tls` has an
+/// entry.
 pub fn conventional(ingress: &Ingress) -> Vec<Served> {
     let spec = ingress.spec.as_ref();
     let tls = spec
@@ -185,15 +191,18 @@ mod tests {
     #[case::no_ports("{ports: []}", "no ports")]
     #[case::an_unknown_default(
         "{default: [web], ports: [{name: websecure, port: 443}]}",
-        "default names web"
+        "default of entryPoints lists"
     )]
     #[case::an_unknown_redirect(
         "{ports: [{name: web, port: 80, redirectsTo: secure}]}",
-        "redirects to secure"
+        "redirects to"
     )]
-    fn says_why_entry_points_do_not_validate(#[case] text: &str, #[case] says: &str) {
+    fn rejects_invalid_entry_points_with_the_reason(#[case] text: &str, #[case] says: &str) {
         let written: Written = serde_yaml::from_str(text).unwrap();
         let error = read(written).unwrap_err();
-        assert!(error.contains(says), "{error:?}");
+        assert!(
+            error.contains(says),
+            "the error is {error:?}, want it to contain {says:?}"
+        );
     }
 }

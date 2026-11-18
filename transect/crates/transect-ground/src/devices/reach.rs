@@ -1,43 +1,41 @@
-//! The edges that device knowledge declares.  One kind of edge goes from
-//! a device to another device whose attribute has the same value as one
-//! of the first device's attributes, such as from an HDMI sound output
-//! to the screen whose speakers it is.  The other kind goes from a
-//! device to the object whose field has that value.  When a matching
-//! device is on the same machine, the edge goes only to it and not to a
-//! match on another machine, because two machines that drive the same
-//! monitor model report the same monitor identifier.  An edge to an
-//! object goes to the endpoints that the map draws for that object, as
-//! every reference to an object does.
+//! The edges that device knowledge declares.  A reference in device
+//! knowledge draws an edge from a device to each device whose attribute,
+//! or each object whose field, has the same value as one of the first
+//! device's attributes, such as from an HDMI sound output to the screen
+//! whose speakers it is.  When a matching device is on the same
+//! machine, the edge goes only to it, because two machines connected to
+//! the same monitor model report the same monitor identifier.
 
 use std::collections::{BTreeSet, HashMap};
 
 use super::Devices;
-use super::knowledge::{DeviceKnowledge, Far};
+use super::knowledge::{DeviceKnowledge, ReferenceTarget};
 use transect_graph::edges::{Device, Edge, Endpoint, Object, Provenance};
 use transect_resources::knowledge::{Key, Matches};
 
-/// The group, kind, and field of the far object of each reference to an
-/// object, which a match index uses as its keys.
+/// The group, kind, and field of the target object of each reference
+/// to an object.  These are the keys of the index that `Matches` builds.
 pub fn matched(knowledge: &[DeviceKnowledge]) -> impl Iterator<Item = Key> + '_ {
     let references = knowledge.iter().flat_map(|known| &known.references);
     references.filter_map(|reference| match &reference.target {
-        Far::Object {
+        ReferenceTarget::Object {
             group,
             kind,
             matched,
         } => Some((group.clone(), kind.clone(), matched.clone())),
-        Far::Device { .. } => None,
+        ReferenceTarget::Device { .. } => None,
     })
 }
 
 /// Every edge that `knowledge` declares between the devices that
 /// `devices` lists, and from those devices to the objects of `matches`.
-/// Each far object becomes the endpoints that `stands_for` returns.
+/// Each target object ends at the endpoints that `endpoints_of`
+/// returns for it.
 pub fn edges(
     devices: &Devices,
     knowledge: &[DeviceKnowledge],
     matches: &Matches,
-    stands_for: impl Fn(&Object) -> Vec<Endpoint>,
+    endpoints_of: impl Fn(&Object) -> Vec<Endpoint>,
 ) -> Vec<Edge> {
     let by_value = index(devices, knowledge);
     let mut edges = Vec::new();
@@ -52,7 +50,7 @@ pub fn edges(
                 .find(|(name, _)| *name == reference.attribute);
             let Some((_, value)) = value else { continue };
             let ends: Vec<Endpoint> = match &reference.target {
-                Far::Device { driver, matched } => {
+                ReferenceTarget::Device { driver, matched } => {
                     let key = (driver.clone(), matched.clone(), value.clone());
                     let far = by_value.get(&key).map(Vec::as_slice).unwrap_or_default();
                     nearest(device, far)
@@ -60,13 +58,13 @@ pub fn edges(
                         .map(|far| Endpoint::Device(far.clone()))
                         .collect()
                 }
-                Far::Object {
+                ReferenceTarget::Object {
                     group,
                     kind,
                     matched,
                 } => {
                     let far = matches.named(group, kind, matched, value).iter();
-                    let ends = far.flat_map(&stands_for).collect::<BTreeSet<_>>();
+                    let ends = far.flat_map(&endpoints_of).collect::<BTreeSet<_>>();
                     ends.into_iter().collect()
                 }
             };
@@ -89,8 +87,8 @@ pub fn edges(
     edges
 }
 
-/// The devices of each driver a reference names, by the matched
-/// attribute and its value.
+/// The devices of each driver that a reference targets, by driver,
+/// attribute name, and attribute value.
 type ByValue<'a> = HashMap<(String, String, String), Vec<&'a Device>>;
 
 fn index<'a>(devices: &'a Devices, knowledge: &[DeviceKnowledge]) -> ByValue<'a> {
@@ -98,8 +96,10 @@ fn index<'a>(devices: &'a Devices, knowledge: &[DeviceKnowledge]) -> ByValue<'a>
         .iter()
         .flat_map(|known| &known.references)
         .filter_map(|reference| match &reference.target {
-            Far::Device { driver, matched } => Some((driver.as_str(), matched.as_str())),
-            Far::Object { .. } => None,
+            ReferenceTarget::Device { driver, matched } => {
+                Some((driver.as_str(), matched.as_str()))
+            }
+            ReferenceTarget::Object { .. } => None,
         })
         .collect();
     let mut found: ByValue = HashMap::new();
@@ -114,8 +114,8 @@ fn index<'a>(devices: &'a Devices, knowledge: &[DeviceKnowledge]) -> ByValue<'a>
     found
 }
 
-/// The far devices on `device`'s machine, when there are any, and
-/// otherwise every far device.
+/// The devices of `far` that are on `device`'s machine, or all of
+/// `far` when none is.
 fn nearest<'a>(device: &Device, far: &[&'a Device]) -> Vec<&'a Device> {
     let here: Vec<&Device> = far
         .iter()
@@ -236,8 +236,8 @@ mod tests {
     ) {
         let known = [knowledge(driver, spec)];
         let matches = pairings(&[("remote", "AA:BB")]);
-        let stands_for = |object: &Object| vec![Endpoint::Object(object.clone())];
-        let found = edges(&devices(), &known, &matches, stands_for);
+        let endpoints_of = |object: &Object| vec![Endpoint::Object(object.clone())];
+        let found = edges(&devices(), &known, &matches, endpoints_of);
         assert_eq!(read(&found), expected);
     }
 }

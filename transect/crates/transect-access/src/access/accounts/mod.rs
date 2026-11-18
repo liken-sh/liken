@@ -1,10 +1,13 @@
-//! `/access/accounts` has a row for every account that a binding grants
-//! one of the six capabilities.  The rows are in three runs: the
-//! accounts bound to a role with every verb on every resource, the
-//! accounts from which that follows, by the account they go through,
-//! and every other account.  Kubernetes' own controllers are folded
-//! into one line, and two gray lines count the accounts that have none
-//! of the six.
+//! The `/access/accounts` page: a row for each account that has any of
+//! the six capabilities, from a binding or by following from another
+//! grant.  The rows are in runs, each under a heading.  The first run
+//! is the accounts bound to a role with every verb on every resource.
+//! Next is a run for each first hop by which accounts get the same
+//! power through another account, and last a run of every other
+//! account.  Accounts whose bindings are all ones that Kubernetes ships
+//! are in a collapsed table below the runs.  Gray lines count the
+//! accounts bound only to roles that grant none of the six, and the
+//! ServiceAccounts that no binding names.
 
 mod cells;
 mod here;
@@ -30,7 +33,7 @@ pub struct Column {
     pub verbs: String,
 }
 
-/// Rows that share the value that their heading names.
+/// Rows under one heading, which says what the rows have in common.
 #[derive(Debug, PartialEq)]
 pub struct Run {
     pub heading: Vec<Part>,
@@ -49,14 +52,15 @@ pub struct Counted {
 pub struct AccountsPage {
     pub columns: Vec<Column>,
     pub runs: Vec<Run>,
-    /// The accounts whose every binding names a role Kubernetes ships.
+    /// The accounts whose every binding is one that Kubernetes ships.
     pub controllers: Vec<Row>,
-    /// The line that states whether the groups that every account is in
-    /// have any of the six.
+    /// The line that says whether the groups that every account belongs
+    /// to have any of the six.
     pub everyone: String,
     pub none: Option<Counted>,
     pub unbound: Option<Counted>,
-    /// Whether no kind knowledge fills the sixth column.
+    /// Whether `Access::gitops` is empty, so the sixth column has no
+    /// kinds to show.
     pub no_gitops: bool,
 }
 
@@ -81,10 +85,8 @@ impl AccountsPage {
                 rows: rows(&runs.everything, None),
             });
         }
-        // A run through an admin's account contains the accounts from
-        // which the first five capabilities follow in every namespace,
-        // by the step that the run's heading names.  So a row names a
-        // step only where its own step differs.
+        // A row in one of these runs shows its own hop only when the hop
+        // differs from the one in the run's heading.
         for (hop, accounts) in &runs.through {
             built.push(Run {
                 heading: heading(hop, access, look),
@@ -125,7 +127,7 @@ impl AccountsPage {
         }
     }
 
-    /// How many rows the three runs contain.
+    /// The number of rows in all the runs.  It leaves out `controllers`.
     pub fn count(&self) -> usize {
         self.runs.iter().map(|run| run.rows.len()).sum()
     }
@@ -143,12 +145,14 @@ impl AccountsPage {
     }
 }
 
-/// The accounts of each run, and the role the first run is bound to.
+/// The accounts of each run, and the roles that the first run is bound
+/// to.
 struct Runs<'a> {
     everything: Vec<&'a Account>,
     roles: BTreeSet<transect_graph::edges::Object>,
-    /// The accounts from which every verb on every resource follows, by
-    /// the first hop toward an account bound to it.
+    /// The accounts that can do the first five capabilities in every
+    /// namespace by a follow, keyed by the first hop toward an account
+    /// bound to everything.
     through: BTreeMap<Hop, Vec<&'a Account>>,
     other: Vec<&'a Account>,
     controllers: Vec<&'a Account>,
@@ -207,13 +211,17 @@ impl<'a> Runs<'a> {
     }
 }
 
-/// The hop by which `held` may do the first five capabilities of `ALL`
-/// in every namespace, or `None` when it may not do all five there.
-/// When a binding grants it to run pods or change workloads in the
-/// namespace of an account of `top`, the hop is running as that
-/// account.  Otherwise it is the hop of a follow for one of the five
-/// that no binding grants everywhere: the first that leads to an
-/// account of `top`, or else the last.
+/// The hop that a run's heading names for `held`, or `None` unless
+/// `held` has each of the first five capabilities of `ALL` in every
+/// namespace.  When a binding lets it run pods or change workloads in
+/// the namespace of a ServiceAccount in `top`, the hop is running as
+/// that account.  Otherwise it is the hop of one of the five that no
+/// binding grants everywhere: the first such hop that leads to an
+/// account in `top`, or else the last one.
+///
+/// Every `Hop::RunsAs` it returns has the basis `RunPods`, so the
+/// accounts that run pods and the accounts that change workloads in one
+/// namespace share one run, whose heading names both.
 fn toward(held: &Held, top: &BTreeSet<&Account>) -> Option<Hop> {
     let five = &ALL[..5];
     let everywhere =
@@ -221,9 +229,8 @@ fn toward(held: &Held, top: &BTreeSet<&Account>) -> Option<Hop> {
     if !five.iter().all(everywhere) {
         return None;
     }
-    // Only a basis that a binding grants is a first hop, because a
-    // basis that follows has a first hop of its own, which the code
-    // below finds.
+    // Only a grant from a binding counts here.  A capability that
+    // follows from another hop is handled after this loop.
     for basis in [Capability::RunPods, Capability::ChangeWorkloads] {
         let granted = held.cells.get(&basis).into_iter();
         for at in granted.flat_map(|cell| cell.granted_unnamed()) {
@@ -366,8 +373,6 @@ fn listed(parts: Vec<Part>) -> Vec<Part> {
     joined
 }
 
-/// The line that states whether the groups that every account is in
-/// have any of the six.
 fn everyone(access: &Access) -> String {
     let holding: Vec<String> = EVERYONE
         .iter()
@@ -383,8 +388,9 @@ fn everyone(access: &Access) -> String {
     }
 }
 
-/// "3 accounts are bound to roles that grant none of the six", with
-/// their names on hover, or none when there are none.
+/// The gray line that counts `accounts`, such as "3 accounts are bound
+/// to roles that grant none of the six", with their names on hover.
+/// Returns `None` when `accounts` is empty.
 fn counted(accounts: &[&Account], one: &str, many: &str, rest: &str) -> Option<Counted> {
     let verb = match accounts.len() {
         0 => return None,

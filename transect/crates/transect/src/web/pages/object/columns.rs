@@ -1,5 +1,5 @@
-//! The printer columns of a custom resource, as `kubectl get` prints
-//! them, for its page.
+//! The "Status" section of a custom resource's page, built from the
+//! printer columns that `kubectl get` prints for it.
 
 use k8s_openapi::jiff::Timestamp;
 
@@ -9,9 +9,10 @@ use transect_graph::edges::Object;
 use transect_map::objects::{Section, Side};
 use transect_resources::knowledge::{ColumnRead, columns};
 
-/// The columns its CRD declares for the version `found` was read at,
-/// with a line naming each column whose path `transect` does not read,
-/// or none for a kind that declares none.
+/// The printer columns that the CRD declares for the version `found`
+/// was read at. A "left out" line lists each column whose path uses a
+/// JSONPath feature `transect` does not support. Returns none when the
+/// kind declares no columns.
 pub fn columns(
     snapshot: &Snapshot,
     object: &Object,

@@ -67,7 +67,7 @@ fn ends_a_dependency_on_any_of_its_addresses_at_the_box() {
 }
 
 #[rstest]
-fn the_first_by_name_draws_a_backend_two_list() {
+fn the_first_outside_by_name_owns_a_backend_that_two_list() {
     let found = Outsides::new(&[
         outside("zeta", "{title: Zeta, drivers: [csi.example.com]}"),
         outside("alpha", "{title: Alpha, drivers: [csi.example.com]}"),
@@ -77,7 +77,7 @@ fn the_first_by_name_draws_a_backend_two_list() {
         .iter()
         .map(|(_, c)| c.message.as_str())
         .collect();
-    let message = "csi.example.com is listed by alpha and zeta; the first by name, alpha, draws it";
+    let message = "csi.example.com is listed by alpha and zeta, and alpha draws it because its name sorts first";
     assert_eq!(
         (found.box_of("csi.example.com"), messages),
         ("Alpha", vec![message, message])
@@ -85,7 +85,7 @@ fn the_first_by_name_draws_a_backend_two_list() {
 }
 
 #[rstest]
-fn marks_its_intent_as_its_own() {
+fn marks_an_outsides_text_as_its_stated_intent() {
     let lines = outsides().of("nas.example.com").unwrap().lines();
     let provenance = Provenance::Intent(Stated::Outside {
         field: "why".into(),
@@ -154,8 +154,9 @@ fn lists_the_claims_a_box_keeps_by_type() {
     );
 }
 
-/// The NAS from `outsides`, with `url` when one is given, and with one
-/// console URL from its driver's template for each of `consoles`.
+/// The outside system "The NAS", which uses the driver `csi.example.com`,
+/// with `url` when one is given, and with each of `consoles` as a console
+/// URL filled from that driver's template.
 fn with_consoles(url: Option<&str>, consoles: &[&str]) -> Outsides {
     let url = url.map(|url| format!(", url: '{url}'")).unwrap_or_default();
     let nas = outside(

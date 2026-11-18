@@ -1,11 +1,12 @@
 //! The "who may change it" drawing.  The accounts that may change the
-//! workload are on the left, the GitOps objects that apply it are in
-//! the middle, and the workload is on the right.  Each line has a label
-//! with what the account may do.  Lines into the workload enter its
-//! left edge at points spread along it, in the order of the boxes that
-//! they leave, so they nest.  The accounts that may patch an applier
-//! are grouped at the top, level with the applier, so a line up or down
-//! to an applier crosses no line that continues to the workload.
+//! workload are on the left, the GitOps objects that apply it
+//! (appliers) are in the middle, and the workload is on the right.
+//! Each line has a label that says what the account may do.  Lines into
+//! the workload enter its left edge at points spread along it, in the
+//! order of the boxes that they leave, so the lines do not cross.  The
+//! accounts that may patch an applier are grouped together and level
+//! with the applier, so a line up or down to an applier crosses no line
+//! that continues to the workload.
 
 use super::route::{across, lanes, spread};
 use super::{Drawing, LABEL, PLAIN, height};
@@ -19,10 +20,12 @@ const WORKLOAD_X: i32 = 930;
 const WORKLOAD_W: i32 = 240;
 const TOP: i32 = 20;
 const GAP: i32 = 12;
-/// Room between two lines that leave one account's box.
+/// The vertical distance between two lines that leave one account's
+/// box.
 const LINE_GAP: i32 = 52;
 
-/// The boxes that [`draw`] lays out.
+/// The boxes that [`draw`] lays out: the accounts that may change the
+/// workload, the appliers, and the workload.
 #[derive(Debug)]
 pub struct Change {
     pub changers: Vec<Changer>,
@@ -30,8 +33,9 @@ pub struct Change {
     pub workload: SectionBox,
 }
 
-/// An account, or several in one box, with the class it is drawn with
-/// and each line that leaves it.
+/// A box for one account, or for several that share the same lines,
+/// with its style class and each line that leaves it, as a target and a
+/// label.
 #[derive(Debug)]
 pub struct Changer {
     pub boxed: SectionBox,
@@ -50,8 +54,9 @@ pub fn draw(mut change: Change) -> Drawing {
     let mut drawing = Drawing::new();
     in_applier_order(&mut change.changers);
     let mut y = TOP;
-    // Lines into the workload, by the height they leave at, and lines
-    // into an applier.
+    // `into` collects the lines that end at the workload, as the point
+    // where each starts and its label. `to_appliers` collects the lines
+    // from an account to an applier, with the applier's index.
     let mut into: Vec<(Point, String)> = Vec::new();
     let mut to_appliers: Vec<(Point, usize, String)> = Vec::new();
     for changer in change.changers {
@@ -81,15 +86,16 @@ pub fn draw(mut change: Change) -> Drawing {
         y += h + GAP;
     }
     // An applier is level with the first account that may patch it.  An
-    // applier that no account may patch goes below the accounts, clear
-    // of the lines that run past it to the workload.
+    // applier that no account may patch goes below the accounts, so the
+    // lines that pass it on the way to the workload do not cross it.
     let mut applier_bottom = TOP;
     let below = y;
     for (index, boxed) in change.appliers.into_iter().enumerate() {
         let wanted = to_appliers.iter().find(|(_, at, _)| *at == index);
         let h = height(&boxed, APPLIER_W);
         // A line to the workload that leaves above the first line into
-        // the applier runs over the applier's box, clear of it.
+        // the applier passes above the applier's box, so the applier
+        // starts below that line.
         let over = wanted.and_then(|(first, _, _)| {
             let above = into.iter().map(|(from, _)| from.y).filter(|y| *y < first.y);
             above.max().map(|y| y + 14)
@@ -157,16 +163,16 @@ pub fn draw(mut change: Change) -> Drawing {
 }
 
 /// Sorts `changers` so that the accounts that may patch an applier come
-/// first, in one run for each applier, in the appliers' order.  In a
-/// run, an account that also has lines to the workload comes first or
-/// last.  The first such account leaves for the workload above its line
-/// into the applier, so its line runs over the applier.  The others
-/// leave below their lines into the applier, after every account that
-/// only patches the applier, so their lines run under it.  When a run
-/// has more than two such accounts, the one in the middle has its line
-/// to the workload enclosed between two lines into the applier, and
-/// that line crosses one of them.  Accounts that sort equally keep the
-/// order they came in.
+/// first, in one run for each applier, in the appliers' order, and the
+/// accounts that patch no applier come last.  In a run, the first
+/// account that also has a line to the workload moves to the top and
+/// draws that line above its line into the applier, so the line passes
+/// over the applier.  Every other such account comes after the accounts
+/// that only patch the applier and draws its line below, so the line
+/// passes under the applier.  When a run has more than two such
+/// accounts, the line to the workload of each one between the first and
+/// the last crosses a line into the applier.  The sorts are stable, so
+/// accounts that compare equal keep their order.
 fn in_applier_order(changers: &mut Vec<Changer>) {
     for changer in changers.iter_mut() {
         changer.lines.sort_by_key(|(target, _)| match target {

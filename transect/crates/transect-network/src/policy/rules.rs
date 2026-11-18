@@ -1,10 +1,10 @@
-//! Each `NetworkPolicy` compiled against the members: for each rule,
-//! the members its peers match, and for each member, the rules that
+//! Compiles each `NetworkPolicy` against the members: for each rule,
+//! which members its peers match, and for each member, which rules
 //! apply to it in each direction.
 //!
-//! A rule's peers are matched once, when it is compiled, and a policy
-//! that selects ten pods shares its rules among them, so the work grows
-//! with the number of rules times members, not with pairs of pods.
+//! A rule's peers are matched once, when the rule is compiled, and every
+//! member that the policy selects uses the result. So the work grows
+//! with rules times members, not with pairs of pods.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -22,22 +22,22 @@ use transect_graph::selector;
 pub struct Rule<'a> {
     /// The name of the policy the rule is in.
     pub policy: &'a str,
-    /// The members the rule's peers match, sorted, or `None` for a rule
-    /// that lists no peers, which admits every source or destination.
+    /// The members the rule's peers match, sorted. `None` for a rule
+    /// with no peers, which admits every source or destination.
     pub peers: Option<Vec<usize>>,
-    /// The rule's address blocks, which an ingress rule admits from
-    /// outside the cluster too.
+    /// The rule's `ipBlock` peers, which can match addresses outside the
+    /// cluster.
     pub blocks: Vec<&'a IPBlock>,
-    /// The namespaces a peer admits whole, with no pod selector or an
-    /// empty one, so a card can show "every pod in" only when the rule
-    /// admits the whole namespace, not when a selector matches every
+    /// The namespaces that a peer admits every pod of, because the peer
+    /// has no pod selector or an empty one. A card shows "every pod in"
+    /// only for these, not for a selector that happens to match every
     /// pod today.
     pub whole: Vec<String>,
-    /// Whether the rule admits every namespace whole: it lists no peers,
-    /// or a peer with an empty namespace selector and no pod selector
-    /// or an empty one.  Only then may a card show "any namespace",
-    /// because a label that every namespace has today admits no
-    /// namespace that is added later without the label.
+    /// Whether the rule admits every pod of every namespace: it has no
+    /// peers, or it has a peer with an empty namespace selector and no
+    /// pod selector or an empty one. A card shows "any namespace" only
+    /// then, because a label selector that every namespace matches today
+    /// does not match a namespace that is added later without the label.
     pub everywhere: bool,
     pub ports: &'a [NetworkPolicyPort],
 }
@@ -50,11 +50,10 @@ impl Rule<'_> {
     }
 }
 
-/// The rules that apply to each member in one direction: `None` for a
-/// member no policy of that type selects, which is open in that
-/// direction, and the indexes of the rules otherwise.  A member that
-/// policy selects with an empty rule list has an empty list: it admits
-/// nothing.
+/// For each member, the indexes of the rules that apply to it in one
+/// direction. `None` means no policy isolates the member in that
+/// direction, so it is open. `Some` with an empty list means a policy
+/// isolates it and has no rules, so it admits nothing.
 pub type Applied = Vec<Option<Vec<usize>>>;
 
 #[derive(Debug, Default)]
@@ -62,16 +61,16 @@ pub struct Compiled<'a> {
     pub rules: Vec<Rule<'a>>,
     pub ingress: Applied,
     pub egress: Applied,
-    /// The names of the policies that limit each member's calls in,
-    /// which a policy with no ingress rules does too.
+    /// For each member, the policies that isolate it for ingress. This
+    /// includes a policy with no ingress rules, which admits nothing.
     pub limits_in: Vec<Vec<&'a str>>,
-    /// The names of the policies that limit each member's calls out,
-    /// which a policy with no egress rules does too.
+    /// For each member, the policies that isolate it for egress. This
+    /// includes a policy with no egress rules, which admits nothing.
     pub limits_out: Vec<Vec<&'a str>>,
 }
 
-/// Compiles `policies` against `members`.  `namespaces` gives each
-/// namespace's labels, which a namespace selector reads.
+/// Compiles `policies` against `members`. `namespaces` supplies the
+/// labels that namespace selectors match.
 pub fn compile<'a>(
     policies: impl IntoIterator<Item = &'a NetworkPolicy>,
     members: &[Member],
@@ -103,7 +102,7 @@ pub fn compile<'a>(
         };
         let name = policy.metadata.name.as_deref().unwrap_or_default();
         let here = by_namespace.get(namespace).into_iter().flatten().copied();
-        // No policy selects a pod on its machine's network.
+        // A `NetworkPolicy` does not apply to pods on the host network.
         let selected: Vec<usize> = here
             .filter(|&index| !members[index].host_network)
             .filter(|&index| {
@@ -144,11 +143,10 @@ pub fn compile<'a>(
     compiled
 }
 
-/// Which directions a policy isolates.  The API server fills in
-/// `policyTypes` when a policy is written without it.  A policy read
-/// from a file may lack it, and then the policy isolates ingress, and
-/// egress too when it lists egress rules, as the API server would fill
-/// it in.
+/// Whether a policy isolates ingress and egress. A policy read from a
+/// file can lack `policyTypes`, which the API server defaults on write.
+/// This applies the same default: ingress, plus egress when the policy
+/// has egress rules.
 fn types(policy: &NetworkPolicy) -> (bool, bool) {
     let spec = policy.spec.as_ref();
     match spec.and_then(|spec| spec.policy_types.as_ref()) {
@@ -170,9 +168,9 @@ fn apply(applied: &mut Applied, selected: &[usize], rules: &[usize]) {
     }
 }
 
-/// What a peer is matched in: the policy's namespace, every member, the
-/// labels of every namespace, and the members in each, so a selector
-/// reads only the namespaces it can match.
+/// What a peer is matched against. `by_namespace` indexes the members
+/// by namespace, so a namespace selector visits only the members of the
+/// namespaces it matches.
 struct Scope<'s> {
     namespace: &'s str,
     members: &'s [Member],
@@ -182,7 +180,7 @@ struct Scope<'s> {
 
 impl<'a> Compiled<'a> {
     /// Adds each of `rules`, given as its peers and ports, and returns
-    /// their indexes.
+    /// their indexes in `self.rules`.
     fn add(
         &mut self,
         policy: &'a str,
@@ -215,7 +213,7 @@ impl<'a> Compiled<'a> {
     }
 }
 
-/// The members any of `peers` matches, sorted.
+/// The members that any of `peers` matches, sorted.
 fn matching(peers: &[NetworkPolicyPeer], scope: &Scope) -> Vec<usize> {
     let mut found: HashSet<usize> = HashSet::new();
     for peer in peers {
@@ -226,7 +224,7 @@ fn matching(peers: &[NetworkPolicyPeer], scope: &Scope) -> Vec<usize> {
     found
 }
 
-/// The namespaces `peers` admit every pod of, sorted.
+/// The namespaces that `peers` admit every pod of, sorted.
 fn whole(peers: &[NetworkPolicyPeer], scope: &Scope) -> Vec<String> {
     let mut found: Vec<String> = peers
         .iter()
@@ -262,8 +260,8 @@ fn selects_everything(selector: &LabelSelector) -> bool {
             .is_none_or(Vec::is_empty)
 }
 
-/// The namespaces a peer's namespace selector matches: the policy's own
-/// when it has none.
+/// The namespaces a peer's namespace selector matches, or the policy's
+/// own namespace when the peer has no namespace selector.
 fn namespaces<'s>(peer: &NetworkPolicyPeer, scope: &Scope<'s>) -> Vec<&'s str> {
     match &peer.namespace_selector {
         None => vec![scope.namespace],
@@ -275,15 +273,16 @@ fn namespaces<'s>(peer: &NetworkPolicyPeer, scope: &Scope<'s>) -> Vec<&'s str> {
     }
 }
 
-/// The members one peer matches.  A pod selector alone matches pods in
-/// the policy's own namespace, a namespace selector alone matches every
-/// pod of the namespaces it matches, and the two together match the
-/// pods that the pod selector matches in those namespaces.  An address
-/// block matches a member by its pods' addresses, because a connection
-/// identifies a pod to the network only by its address.  A selector
-/// matches no pod on its machine's network, whose calls come from its
-/// machine's address, so only a block that contains the address admits
-/// it.
+/// The members one peer matches. A pod selector alone matches pods in
+/// the policy's namespace, a namespace selector alone matches every pod
+/// of the namespaces it matches, and both together match the pods that
+/// the pod selector matches in those namespaces.
+///
+/// An `ipBlock` matches a member when the block contains any of its
+/// pods' addresses, because a connection arrives from an address and
+/// not from a pod. A pod on the host network has its node's address and
+/// no selector matches it, so only an `ipBlock` that contains the node's
+/// address admits it.
 fn peer_matches(peer: &NetworkPolicyPeer, scope: &Scope) -> Vec<usize> {
     if let Some(block) = &peer.ip_block {
         let Some(cidr) = Block::parse(&block.cidr) else {

@@ -1,14 +1,17 @@
-# The ways in besides the storefront's `Ingress` in `cluster.yaml`:
+# Other ways to reach workloads, besides the storefront's `Ingress` in
+# `cluster.yaml`:
 #
-# - a second `Ingress` for the shop's host that signs in through a gate;
-# - a `LoadBalancer` `Service` for the ledger, whose listeners on both
-#   machines name it in their labels, as `node-balancer` declares;
-# - a `LoadBalancer` `Service` for the promoter, whose listener's
-#   `DaemonSet` has an owner reference to it, on an address of its own;
+# - a second `Ingress` for the shop's host, with a sign-in gate;
+# - a `LoadBalancer` `Service` for the ledger.  Listener pods on both
+#   machines refer to it in their labels, as the `node-balancer`
+#   document in `resources.yaml` declares;
+# - a `LoadBalancer` `Service` for the promoter, on its own address.
+#   The `DaemonSet` of its listener has an owner reference to the
+#   `Service`;
 # - a `NodePort` `Service` for the storefront;
-# - a relay that holds six host ports;
-# - a help desk behind its own `Ingress` with TLS, which signs its
-#   callers in itself, as its `signs-in` annotation states;
+# - a relay that uses six host ports;
+# - a help desk behind its own `Ingress` with TLS.  The help desk does
+#   its own sign-in, as its `signs-in` annotation says;
 # - a catalog behind its own `Ingress` with TLS and no sign-in.
 apiVersion: networking.k8s.io/v1
 kind: Ingress

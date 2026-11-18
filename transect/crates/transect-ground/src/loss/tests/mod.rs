@@ -229,7 +229,8 @@ impl Shop {
         assess(lost, &reading)
     }
 
-    /// The loss of `machines`, as each workload's name and state.
+    /// The loss of `machines`, as the number of pods lost, each
+    /// workload's name and state, and the number of `DaemonSet`s.
     fn lose(&self, machines: &[&str]) -> (usize, Vec<(String, State)>, usize) {
         let loss = self.loss(machines);
         let taken = loss.workloads.into_iter();

@@ -1,6 +1,6 @@
-//! An account's page.  A ServiceAccount's page is its access drawing,
-//! with its card beside it.  A group's or a user's page, which has no
-//! object, is under the accounts matrix.
+//! An account's page.  A ServiceAccount's page shows its access drawing
+//! with its object card beside it.  A group or a user has no Kubernetes
+//! object, so its page is under the accounts matrix.
 
 use askama::Template;
 
@@ -9,10 +9,11 @@ use transect_frame::frame::crumbs::Crumb;
 use transect_graph::links::Part;
 use transect_map::objects::ObjectCard;
 
-/// Where an account's page belongs, as its crumbs show.
+/// Where an account's page belongs, which sets its breadcrumbs.
 #[derive(Debug)]
 pub enum Place {
-    /// A ServiceAccount, in its namespace and the namespace's band.
+    /// A ServiceAccount, under its namespace and the map layer that
+    /// shows the namespace.
     Namespace { namespace: String, layer: String },
     /// A group or a user, under the accounts matrix.
     Accounts,
@@ -30,8 +31,8 @@ pub struct AccountPage {
     pub drawing: Drawing,
     /// "Who may run as it", for a ServiceAccount.
     pub run_as: Option<Vec<Part>>,
-    /// A ServiceAccount's card.  A group or a user gets the lens's
-    /// card.
+    /// A ServiceAccount's object card.  A group or a user has no object,
+    /// so the page shows the access lens's own card.
     pub card: Option<ObjectCard>,
     pub no_gitops: bool,
 }

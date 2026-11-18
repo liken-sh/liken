@@ -1,8 +1,9 @@
-//! The kinds a snapshot holds only for their own pages:
-//! ServiceAccounts, IngressClasses, PriorityClasses,
-//! StorageClasses, roles and bindings, ResourceClaims, and the
-//! volumes and their claims as the API gives them; which custom kinds
-//! are watched whole; and the set of every object that has a page.
+//! The objects that a snapshot stores mainly for their own pages:
+//! `ServiceAccount`, `IngressClass`, `PriorityClass`, `StorageClass`,
+//! roles and bindings, `ResourceClaim`, `PersistentVolume`, and
+//! `PersistentVolumeClaim`, and what the pages of custom kinds read
+//! besides the objects. `objects_with_pages` lists every object that has a
+//! page.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -22,8 +23,6 @@ use transect_cluster::ownership::Packages;
 use transect_graph::edges::Object;
 use transect_resources::knowledge::Columns;
 
-/// The stores read for the pages of their own objects, and what those
-/// pages read of the custom kinds besides their objects.
 #[derive(Default)]
 pub struct Paged {
     pub service_accounts: Vec<Arc<PartialObjectMeta<ServiceAccount>>>,
@@ -34,12 +33,15 @@ pub struct Paged {
     pub resource_claims: Vec<Arc<ResourceClaim>>,
     pub volumes: Vec<Arc<PersistentVolume>>,
     pub claims: Vec<Arc<PersistentVolumeClaim>>,
-    /// The custom kinds watched whole; the rest are trimmed.
+    /// The custom kinds whose objects are watched whole. The objects of
+    /// other custom kinds are trimmed to their metadata, conditions, and
+    /// printer columns.
     pub whole: HashSet<(String, String)>,
     /// The printer columns each custom kind's CRD declares.
     pub columns: Columns,
-    /// The package each custom kind's CRD names in its labels, which
-    /// leads to its controller and so to a workload's Controls table.
+    /// The `app.kubernetes.io/` labels of each custom kind's CRD. A
+    /// workload with the same labels is taken, as a guess, for the
+    /// kind's controller.
     pub packages: Packages,
 }
 
@@ -60,7 +62,7 @@ impl Paged {
         }
     }
 
-    /// Every object here, with its metadata.
+    /// Every object in these stores, with its metadata.
     pub fn objects(&self) -> Vec<(Object, &ObjectMeta)> {
         let rbac = &self.rbac;
         [
@@ -97,10 +99,10 @@ pub fn of<K: Resource<DynamicType = ()>>(objects: &[Arc<K>]) -> Vec<(Object, &Ob
 }
 
 impl Snapshot {
-    /// Every object that has a page: what intent can be written on,
-    /// except the Secrets, whose page is built from what names them,
-    /// and every object of the kinds held for their pages.
-    pub fn held_objects(&self) -> HashSet<Object> {
+    /// Every object that has a page: the objects that `described`
+    /// returns and every object in `paged`, except `Secret`s. A
+    /// `Secret`'s page is built from the objects that refer to it.
+    pub fn objects_with_pages(&self) -> HashSet<Object> {
         let described = self.described().into_iter();
         let paged = self.paged.objects().into_iter();
         described

@@ -1,8 +1,8 @@
-//! What the access lens reads from one reading of the cluster.  The
-//! inputs of the RBAC reduction come with a fingerprint of them, so a
-//! model reduces RBAC again only when a role, a binding, a
-//! `ServiceAccount`, or what a pod runs as or mounts changed.  The ways
-//! in read the controllers and the sign-ins of the Ingresses.
+//! What the access lens reads from one snapshot: the inputs of the RBAC
+//! reduction and their fingerprint, and for each `Ingress`, the
+//! controller that serves it and the objects that its routes sign in
+//! through. A new model repeats the reduction only when the fingerprint
+//! of its inputs changes.
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
@@ -23,7 +23,7 @@ use transect_network::entry::serving::Served;
 use transect_resources::knowledge;
 
 impl Snapshot {
-    /// What the access reduction reads, as of this reading.
+    /// The inputs of the RBAC reduction, from this snapshot.
     pub fn access_inputs(&self) -> Inputs<'_> {
         let mut gitops = Vec::new();
         let mut appliers = Vec::new();
@@ -44,10 +44,10 @@ impl Snapshot {
                     .into_iter()
                     .map(|(namespace, name)| Account::service_account(namespace, name))
                     .collect();
-                // A tool whose role grants every kind of its group lists
-                // no writer of the kind's status, so its controller is
-                // the account of each pod that runs the image its
-                // knowledge names, as controller attribution finds it.
+                // A rule with `*` in its resources makes no account a
+                // status writer of this kind. Then the controller is each
+                // account that runs the kind's `controller.image`, the
+                // same image that `ownership::controlled_by` matches.
                 if controller.is_empty()
                     && let Some(image) = &knowledge.controller_image
                 {
@@ -56,8 +56,8 @@ impl Snapshot {
                 let account = fields.applies.as_ref().and_then(|a| a.account.as_ref());
                 for found in self.gitops.found_of(group, kind) {
                     let namespace = found.object.namespace.as_deref().unwrap_or_default();
-                    // Without a name, the applier applies as the
-                    // field's default, or else as its controller.
+                    // What the object applies as when its account field is
+                    // empty: the field's default, or else the controller.
                     let unset = match account.and_then(|a| a.default.as_deref()) {
                         Some(name) => vec![Account::service_account(namespace, name)],
                         None => controller.clone(),
@@ -92,8 +92,8 @@ impl Snapshot {
         });
         let mut service_accounts: Vec<(String, String)> = service_accounts.collect();
         service_accounts.sort();
-        // The stores give their objects in no fixed order, so each list
-        // is sorted, and two readings of one cluster fingerprint alike.
+        // The stores return objects in no fixed order. Sorting each list
+        // gives two snapshots of one cluster the same fingerprint.
         let mut pods: Vec<Running> = self
             .pods
             .iter()
@@ -110,8 +110,8 @@ impl Snapshot {
     }
 }
 
-/// The ServiceAccounts of the pods that run `image` and have not
-/// finished, each once.
+/// The `ServiceAccount`s of the unfinished pods that run `image`, each
+/// listed once.
 fn running_image(pods: &[Arc<Pod>], image: &str) -> Vec<Account> {
     let running = pods
         .iter()
@@ -131,8 +131,9 @@ fn running_image(pods: &[Arc<Pod>], image: &str) -> Vec<Account> {
     found.into_iter().collect()
 }
 
-/// A fingerprint of `inputs`: each role's and binding's name and
-/// version, and everything else whole.
+/// A hash of `inputs`. It covers the namespace, name, UID, and
+/// resource version of each role and binding, and all of every other
+/// input.
 pub fn fingerprint(inputs: &Inputs) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     let rbac = inputs.rbac;
@@ -162,14 +163,14 @@ pub fn fingerprint(inputs: &Inputs) -> u64 {
     hasher.finish()
 }
 
-/// The annotation that marks the `IngressClass` that serves an
-/// `Ingress` that names no class.
+/// The annotation that marks the `IngressClass` that serves `Ingress`es
+/// that name no class.
 const DEFAULT_CLASS: &str = "ingressclass.kubernetes.io/is-default-class";
 
 impl Snapshot {
-    /// The objects each `Ingress`'s routes sign in through: each object
-    /// that an annotation on the `Ingress` names and whose kind
-    /// knowledge draws an `authenticates through` edge.
+    /// For each `Ingress`, the objects that its routes sign in through:
+    /// the objects that an annotation on the `Ingress` refers to and that
+    /// have an `AuthenticatesThrough` relation.
     pub fn route_sign_ins(&self) -> HashMap<Object, Vec<Object>> {
         let ingresses: Vec<(Object, &ObjectMeta)> = self
             .ingresses
@@ -201,9 +202,11 @@ impl Snapshot {
         found
     }
 
-    /// The controller that serves `ingress`, by its class, the class's
-    /// annotation, or the default class: the workload `serving` finds,
-    /// and the entry points its `IngressController` declares.
+    /// The controller that serves `ingress`: the workload that `serving`
+    /// finds for its class, and the entry points that the matching
+    /// `IngressController` declares. The class is `spec.ingressClassName`,
+    /// else the `kubernetes.io/ingress.class` annotation, else the
+    /// default `IngressClass`.
     pub fn ingress_controller(&self, serving: &Serving, ingress: &Ingress) -> Controller<'_> {
         let annotations = ingress.metadata.annotations.as_ref();
         let named = ingress
@@ -242,7 +245,8 @@ impl Snapshot {
     }
 
     /// The custom kinds whose names end in `Route` and that have
-    /// objects, which the lens does not read.
+    /// objects. The access lens does not read these routes, so the page
+    /// lists them as unread.
     pub fn unread_routes(&self) -> Vec<String> {
         let kinds = self
             .custom

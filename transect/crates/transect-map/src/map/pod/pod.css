@@ -1,9 +1,10 @@
 /*
  * The pod elevation draws a row of the workload's pods, a grid of blocks
- * for the pod's containers, and a row for the machine it runs on.  The
- * row of pods reuses the workload page's switcher from workload.css, and
- * the bars reuse the machine strips' meters from machines.css, so a
- * container's usage looks the same as its pod's and its machine's.
+ * for the pod's containers, and a row for the machine the pod runs on.
+ * The row of pods reuses the workload page's switcher from
+ * workload.css, and the bars reuse the meters of the machine strips from
+ * machines.css, so a container's usage looks the same as its pod's and
+ * its machine's.
  */
 
 .pod-map {
@@ -44,8 +45,8 @@
   overflow-wrap: break-word;
 }
 
-/* A shell script as a command can take many lines.  Three lines show
-   what it runs, and its tooltip shows the rest. */
+/* A command that is a shell script can run to many lines.  The block
+   shows three, and the title tooltip shows the whole command. */
 .pod-command {
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -84,8 +85,8 @@
 
 .pod-chip-faint { color: var(--ink-faint); }
 
-/* A chip that needs a look is outlined in --warm, as a guard that the
-   workload lacks is. */
+/* A chip that needs attention is outlined in --warm, like a missing
+   guard on the workload's page. */
 .pod-chip-warn {
   background: none;
   box-shadow: inset 0 0 0 1px var(--warm);
@@ -93,7 +94,7 @@
 }
 
 /* The mounts and the environment are lists of rows in the containers'
-   grid, each row a name on the left and what it is on the right. */
+   grid, each with a name on the left and its value on the right. */
 .pod-list {
   display: flex;
   flex-direction: column;
@@ -119,9 +120,8 @@
 .pod-item-name,
 .pod-item-faint { overflow-wrap: break-word; }
 
-/* The name keeps the width it needs, up to over half the row, so a
-   short path such as /data never wraps letter by letter.  What it is
-   takes the rest of the row, aligned to the right edge. */
+/* The name takes the width it needs, up to 60% of the row, so a short
+   path such as /data never wraps letter by letter. */
 .pod-item-line > .pod-item-name { flex: 0 0 auto; max-width: 60%; }
 .pod-item-line > .pod-item-faint { min-width: 0; text-align: right; }
 
@@ -129,8 +129,9 @@
 
 .pod-item-shared { color: var(--ink-muted); }
 
-/* A count of values the reader never sees is dashed, as a ground box
-   is, because the values exist but the page does not open them. */
+/* A row that counts environment values without listing them, such as
+   "21 plain values", has a dashed border, like a box in the band of
+   outside systems. */
 .pod-item-dashed {
   background: none;
   border: 1px dashed var(--rule-strong);
@@ -164,16 +165,16 @@
 
 .placement-line { color: var(--ink-faint); }
 
-/* The devices it holds are names, in the map's monospace, as a device
-   is named on its machine's strip. */
+/* The devices that the pod holds, in the monospace font that a
+   machine's strip uses for device names. */
 .placement-holds {
   font-family: var(--mono);
   color: var(--ink-muted);
 }
 
-/* The last few log lines, under the pod, as a preview of its logs
-   lens.  Each line wraps rather than scrolling.  The lens uses the same
-   line styles.  Only an error or a warning gets --warm. */
+/* The last few log lines, below the pod, as a preview of its logs lens,
+   which uses the same line styles.  Each line wraps instead of
+   scrolling, and only an error or a warning uses --warm. */
 .pod-logs {
   padding: 12px 14px;
   background: var(--row);
@@ -235,9 +236,8 @@
   font-weight: 600;
 }
 
-/* A pattern's tag follows the line it matched, and its title explains
-   what the match means.  Error and warning tags use the health colors,
-   as the line levels do, and a worth-knowing tag uses none. */
+/* A pattern's tag follows the line that it matched.  Error and warning
+   tags use --warm like the line levels, and any other tag stays gray. */
 .log-tag {
   display: inline-block;
   margin-left: 6px;

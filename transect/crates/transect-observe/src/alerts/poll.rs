@@ -1,11 +1,9 @@
-//! Reads the firing alerts from Alertmanager on an interval and stores
-//! the latest reading in a watch channel that each render reads, in the
-//! same way as the usage poller.  A reading that matches the one before
-//! wakes no receiver, and a reading that differs marks the cluster as
-//! changed.  The `alerts` section of the `MetricsSource` names the
-//! Alertmanager and the conventions for reading its alerts.  The poller
-//! reads that section again on each round and whenever the resources
-//! change.
+//! Reads the firing alerts from Alertmanager on an interval and keeps
+//! the latest reading in a watch channel that each render reads.  A
+//! reading equal to the one before wakes no receiver.  The `alerts`
+//! section of the `MetricsSource` gives the Alertmanager's address and
+//! the label conventions of its alerts, and the poller reads the
+//! section again before each request.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -50,9 +48,8 @@ impl Reading {
     }
 
     /// The line that "Now" shows in place of alerts, with the text of
-    /// `note`.  When no Alertmanager is declared because the
-    /// `MetricsSource` did not load, the line reports that it did not
-    /// load.
+    /// `note`.  When no Alertmanager is declared because a
+    /// `MetricsSource` failed to load, the line says that instead.
     pub fn off_line(
         &self,
         loaded: &transect_resources::resources::Directory,
@@ -60,14 +57,13 @@ impl Reading {
         let note = self.note()?;
         Some(match self {
             Self::Off | Self::Undeclared => loaded.off("MetricsSource", "", note),
-            _ => transect_resources::resources::OffLine::said(note),
+            _ => transect_resources::resources::OffLine::plain(note),
         })
     }
 
-    /// One short line under "Now" when it lists no alerts.  While the
-    /// first request is in progress, this function returns `None`, so
-    /// transect does not show a warning at start that clears a moment
-    /// later.
+    /// The text under "Now" when it lists no alerts.  It is `None`
+    /// while the first request runs, so the page does not show a
+    /// warning at start that clears a moment later.
     pub fn note(&self) -> Option<&'static str> {
         match self {
             Self::Off => Some(
@@ -78,7 +74,7 @@ impl Reading {
             }
             Self::Waiting => None,
             Self::Failed(Failure::Unreachable) => Some("Alertmanager unreachable"),
-            Self::Failed(Failure::Unreadable) => Some("Alertmanager's answer was unreadable"),
+            Self::Failed(Failure::Unreadable) => Some("Alertmanager's response was unreadable"),
             Self::Read(alerts) if alerts.is_empty() => Some("No alerts firing"),
             Self::Read(_) => None,
         }
@@ -101,10 +97,10 @@ pub struct Sourcing {
 }
 
 impl Sourcing {
-    /// The client for the Alertmanager that `source` names, or that the
-    /// flag names in its place.  The function keeps the client in
-    /// `built` and builds a new one only when the address changes.  It
-    /// returns `None` when neither `source` nor the flag names one.
+    /// The client for the Alertmanager at `--alertmanager`, or else at
+    /// the address in `source`, or `None` when neither gives one.  It
+    /// keeps the client in `built` and builds a new one only when the
+    /// address changes.
     fn client(
         &self,
         source: &super::Source,
@@ -119,7 +115,7 @@ impl Sourcing {
         {
             *built = Alertmanager::new(&url, &ui)
                 .inspect_err(
-                    |error| tracing::warn!(%url, %error, "cannot build a client for Alertmanager"),
+                    |error| tracing::warn!(%url, %error, "The Alertmanager client was not built"),
                 )
                 .ok();
         }
@@ -128,8 +124,8 @@ impl Sourcing {
 }
 
 /// Reads the Alertmanager that `sourcing` names at once, then every
-/// `interval` and whenever the resources change.  It marks `changed`
-/// after each reading that differs from the one before.
+/// `interval` and whenever the resources change.  It sends on
+/// `changed` after each reading that differs from the one before.
 pub fn poll(
     sourcing: Sourcing,
     interval: Duration,
@@ -192,8 +188,8 @@ impl From<Result<Vec<Alert>, FetchError>> for Reading {
 }
 
 /// Whether `next` starts or ends a failure, or is the first reading.  A
-/// failure is logged when it starts and when it ends, not every
-/// interval, so an Alertmanager that is down for an hour writes one
+/// failure is logged when it starts and when it ends, not on every
+/// request, so an Alertmanager that is down for an hour adds one
 /// warning to the log.
 fn is_transition(previous: &Reading, next: &Reading) -> bool {
     let failed = |reading: &Reading| match reading {
@@ -207,7 +203,7 @@ fn log(reading: &Reading, error: Option<&str>) {
     let note = reading.note().unwrap_or_default();
     match reading {
         Reading::Failed(_) => tracing::warn!(error = error.unwrap_or("none"), "{note}"),
-        Reading::Read(_) => tracing::info!("reading alerts from Alertmanager"),
+        Reading::Read(_) => tracing::info!("Read alerts from Alertmanager"),
         _ => tracing::info!("{note}"),
     }
 }
@@ -259,7 +255,7 @@ mod tests {
     )]
     #[case::waiting(Reading::Waiting, None)]
     #[case::unreachable(UNREACHABLE, Some("Alertmanager unreachable"))]
-    #[case::unreadable(UNREADABLE, Some("Alertmanager's answer was unreadable"))]
+    #[case::unreadable(UNREADABLE, Some("Alertmanager's response was unreadable"))]
     #[case::quiet(read(&[]), Some("No alerts firing"))]
     #[case::firing(read(&["WebDown"]), None)]
     fn notes(#[case] reading: Reading, #[case] expected: Option<&str>) {

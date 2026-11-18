@@ -33,8 +33,8 @@ fn right(calls: usize) -> Right {
     }
 }
 
-/// A workload behind the ingress controller and a NodePort Service,
-/// which any pod may call.
+/// A workload reached through the ingress controller and directly
+/// through the Service `web-debug`, and that any pod may call.
 fn behind_the_controller() -> Reach {
     let way = |path| WayBox {
         boxed: boxed("shop.example.test"),
@@ -74,8 +74,9 @@ fn behind_the_controller() -> Reach {
     }
 }
 
-/// A database nothing outside reaches, whose ports three rules admit
-/// callers to, and a port no rule names.
+/// A database that nothing outside the cluster reaches.  One rule
+/// admits callers on any port, one on its second port, and one on its
+/// first.  No rule names its third port.
 fn no_way_in() -> Reach {
     let group = |callers: usize, ports: Vec<usize>| Group {
         callers: (0..callers).map(|_| boxed("Deployment web")).collect(),
@@ -99,10 +100,8 @@ fn no_way_in() -> Reach {
     }
 }
 
-/// A database nothing outside reaches, as a Postgres operator runs one:
-/// three Services in front of its first port, a rule that admits any
-/// port to some pods, one that admits callers to its second port, and
-/// one that admits callers to its first.
+/// The database of `no_way_in` with three Services that forward to its
+/// first port, as a Postgres operator creates them.
 fn fronted_by_services() -> Reach {
     let service = |name: &str| ServiceBox {
         boxed: boxed(name),
@@ -217,7 +216,7 @@ fn both(title: &str) -> Changer {
     changer(title, lines, PLAIN)
 }
 
-/// Who may change a workload a GitOps tool applies, as a real page
+/// Who may change a workload that a GitOps tool applies, as a page
 /// draws it: some accounts may patch the applier, others change the
 /// workload directly, in an order that mixes the two, and two do both.
 fn through_an_applier() -> Change {
@@ -271,11 +270,10 @@ fn who_may_change_it_crosses_no_line() {
 }
 
 /// Three accounts that each patch the applier and change the workload
-/// cannot all be drawn without a crossing: the lines into the applier
-/// from the first and the last close off the region between them, and
-/// the middle account's line to the workload leaves inside it, so it
-/// crosses one line on its way out.  The drawing limits that to one
-/// crossing.
+/// cannot be drawn without a crossing.  The lines from the first and
+/// the last into the applier enclose a region, and the middle account's
+/// line to the workload starts inside it, so it must cross one of them.
+/// The drawing has only that one crossing.
 #[test]
 fn a_third_account_that_does_both_crosses_one_line() {
     let mut change = through_an_applier();
@@ -304,7 +302,10 @@ fn a_box_that_names_many_grows_to_hold_every_name() {
     };
     let one = super::height(&names(1), 340);
     let six = super::height(&names(6), 340);
-    assert!(six >= one + 18 * 5, "{one} then {six}");
+    assert!(
+        six >= one + 18 * 5,
+        "a box of 6 names is {six} high, want at least {one} + 90 (a box of 1 name is {one})"
+    );
 }
 
 #[test]
@@ -315,7 +316,10 @@ fn the_workload_keeps_its_height_when_any_pod_may_call_it() {
         found.map(|b| b.rect).unwrap()
     };
     let (workload, any) = (rect("Deployment web"), rect("any pod"));
-    assert!(workload.bottom() < any.middle(), "{workload:?} {any:?}");
+    assert!(
+        workload.bottom() < any.middle(),
+        "the workload box {workload:?} ends below the middle of the any-pod box {any:?}, want above"
+    );
 }
 
 #[test]

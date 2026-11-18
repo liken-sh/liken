@@ -1,10 +1,10 @@
-//! The gates and plain boxes a workload's drawing is built of.
+//! The gates and plain boxes of a workload's access drawing.
 
 use transect_access::access::drawing::Gate;
 use transect_access::access::ways::{self, State};
 use transect_map::map::section_drawing::{Look as BoxLook, SectionBox};
 
-/// A ways-in gate as a dot on a line.
+/// The drawing of `gate`, with a CSS class for its state.
 pub fn gate(gate: &ways::Gate) -> Gate {
     let class = match gate.state {
         State::On => "ax-gate ax-gate-on",

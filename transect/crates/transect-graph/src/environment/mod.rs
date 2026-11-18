@@ -1,13 +1,8 @@
-//! The environment a pod is configured with, as names only: each `Secret`
-//! and `ConfigMap` it reads, by environment variable or by volume, with
-//! how many of their keys, and a count of the plain values its spec
-//! sets.
-//!
-//! Everything comes from the pod spec.  `transect` reads no `Secret` and
-//! no `ConfigMap`, so an `envFrom` or a volume with no `items` is
-//! recorded as reading every key instead of a count of keys, because a
-//! count would mean reading the object.  No value is kept here, so no
-//! value can reach a page.
+//! Which `Secret`s and `ConfigMap`s a pod reads, through environment
+//! variables or volumes, and which of their keys. `transect` reads only
+//! the pod spec, never the `Secret` or `ConfigMap` itself, so an
+//! `envFrom` or a volume with no `items` is recorded as reading every
+//! key. No value is stored here, so no value can reach a page.
 
 mod sentence;
 
@@ -21,13 +16,14 @@ use k8s_openapi::api::core::v1::{
 
 #[derive(Debug, Default, PartialEq)]
 pub struct Environment {
-    /// Secrets first, then ConfigMaps, each by name.
+    /// `Secret`s first, then `ConfigMap`s, each sorted by name.
     pub sources: Vec<Source>,
-    /// Variables set to a value written in the spec.
+    /// Variables that have a literal `value` in the spec.
     pub plain: usize,
-    /// Variables set from the pod's own fields or resources.
+    /// Variables whose `valueFrom` reads neither a `Secret` nor a
+    /// `ConfigMap`, such as a `fieldRef` or a `resourceFieldRef`.
     pub fields: usize,
-    /// Every variable the spec names, across its containers.
+    /// Every environment variable in the spec, across all containers.
     pub variables: usize,
 }
 
@@ -49,7 +45,7 @@ pub struct Source {
 /// Which of an object's keys the pod reads.
 #[derive(Debug, PartialEq)]
 pub enum Keys {
-    /// The keys it names, which are names and never values.
+    /// Only these keys.
     Named(BTreeSet<String>),
     Every,
 }
@@ -65,8 +61,7 @@ impl Keys {
 }
 
 impl Environment {
-    /// What `spec`'s containers, init containers among them, and volumes
-    /// read.
+    /// What the containers, init containers, and volumes of `spec` read.
     pub fn read(spec: &PodSpec) -> Self {
         let mut environment = Self::default();
         let containers = spec
@@ -165,7 +160,8 @@ fn one(key: &str) -> Keys {
     Keys::Named(BTreeSet::from([key.to_owned()]))
 }
 
-/// The keys a volume's `items` name, or every key with none.
+/// The keys listed in a volume's `items`, or every key when there are
+/// none.
 fn items(items: Option<&[KeyToPath]>) -> Keys {
     match items {
         Some(items) if !items.is_empty() => {
@@ -181,7 +177,8 @@ pub mod fixtures {
 
     /// A pod spec that reads one `Secret` and one `ConfigMap` by key,
     /// reads another `Secret` whole and mounts it, and mounts two
-    /// ConfigMaps, with plain values whose text a test can look for.
+    /// `ConfigMap`s. Every plain value contains `plain-value`, so a test
+    /// can check that none of them reaches the output.
     pub fn spec() -> PodSpec {
         serde_yaml::from_str(
             r#"
@@ -259,7 +256,7 @@ mod tests {
     #[case::named_then_every(named(&["a"]), Keys::Every, Keys::Every)]
     #[case::every_then_named(Keys::Every, named(&["a"]), Keys::Every)]
     #[case::named_twice(named(&["a"]), named(&["a", "b"]), named(&["a", "b"]))]
-    fn reading_every_key_outweighs_naming_some(
+    fn merging_keys_reads_every_key_when_either_side_does(
         #[case] first: Keys,
         #[case] then: Keys,
         #[case] expected: Keys,
@@ -270,7 +267,7 @@ mod tests {
     }
 
     #[rstest]
-    fn keeps_no_value() {
+    fn debug_output_has_no_plain_value() {
         let text = format!("{:?}", Environment::read(&spec()));
         assert!(!text.contains("plain-value"));
     }

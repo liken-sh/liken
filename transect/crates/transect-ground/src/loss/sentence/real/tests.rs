@@ -1,14 +1,15 @@
 use rstest::rstest;
 
 use super::*;
-use crate::loss::{Counted, Gone, Lost, Majority, Next};
+use crate::loss::{Counted, Lost, Majority, Next, NotReadyMachine};
 
 /// The sidebar for the loss of `machines`, with `pods` pods.  The
-/// machines in `gone` are really lost, each for the seconds given.
+/// machines in `gone` are down in the cluster, not only selected, each
+/// for the number of seconds given.
 fn sidebar(machines: &[&str], gone: &[(&str, Option<i64>)], pods: usize) -> Sidebar {
-    let gone: Vec<Gone> = gone
+    let gone: Vec<NotReadyMachine> = gone
         .iter()
-        .map(|(machine, seconds)| Gone {
+        .map(|(machine, seconds)| NotReadyMachine {
             machine: (*machine).into(),
             seconds: *seconds,
         })

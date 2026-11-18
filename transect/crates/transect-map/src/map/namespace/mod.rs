@@ -1,8 +1,9 @@
-//! The namespace elevation shows one namespace opened in its band.  It
-//! draws a box per workload or, for a namespace of DaemonSets, a matrix
-//! of them by machine, and groups the namespace's other custom resources
-//! by kind below them.  It folds the other bands to one line each, and
-//! draws the machines as a row of chips that count the namespace's pods.
+//! The namespace page shows one namespace opened in its band of the
+//! cluster map. It draws a box for each workload, or a matrix of
+//! DaemonSets by machine for a namespace of DaemonSets, and groups the
+//! namespace's other custom resources by kind below them. The other
+//! bands fold to one line each, and the machines appear as a row of
+//! chips that count the namespace's pods.
 
 mod boxes;
 mod folded;
@@ -36,54 +37,58 @@ use transect_ground::machines::Machine;
 use transect_ground::storage::{self, Counts, Storage};
 use transect_observe::health::Health;
 
-/// The namespace page.  Its `main` block renders alone as the fragment
-/// a pushed update replaces, as the cluster page's does.
+/// The namespace page. Its `main` block also renders alone, as the
+/// fragment that a pushed update replaces.
 #[derive(Template)]
 #[template(path = "map/namespace/namespace.html", blocks = ["main"])]
 pub struct NamespacePage {
-    /// The main column's row of edge kinds, which the page function sets.
+    /// The main column's row of edge kinds, set by
+    /// `with_edge_row`.
     pub edge_row: super::EdgeRow,
     pub namespace: String,
-    /// The band that contains the namespace, which the crumb names.
+    /// The band that contains the namespace, shown in the crumb.
     pub layer: String,
     pub bands: Vec<Folded>,
-    /// "7 workloads · 16 pods", beside the open namespace's name.
+    /// The counts beside the namespace's name, such as "7 workloads · 16
+    /// pods".
     pub header: String,
     pub boxes: Vec<WorkloadBox>,
     /// The namespace's custom resources that are not workloads, one
-    /// group per kind, below the boxes.
+    /// group per kind, drawn below the boxes.
     pub resources: Vec<Group>,
-    /// The matrix a namespace of DaemonSets draws in place of its boxes,
-    /// which are then empty.
+    /// The matrix that a namespace of DaemonSets draws instead of its
+    /// boxes. `boxes` is empty when this is set.
     pub matrix: Option<Matrix>,
     pub machines: Vec<MachineChip>,
     /// Each backend outside the cluster that stores the namespace's
-    /// volumes, with its counts, for the ground band folded to one line.
+    /// volumes, with its counts, for the outside-systems band folded to one
+    /// line.
     pub ground: Vec<(String, Counts)>,
     pub card: NamespaceCard,
 }
 
-/// What the open namespace's boxes are read from.
+/// What `NamespacePage::build` reads to draw the page.
 pub struct Contents<'a> {
     /// The namespace's top owners.
     pub workloads: Vec<&'a Object>,
-    /// Every pod in the cluster.  The page reads the namespace's pods.
+    /// Every pod in the cluster. `build` selects the namespace's pods.
     pub pods: &'a [Arc<Pod>],
-    /// The graph, whose controlled-by edges show where each custom
-    /// resource's controller runs.
+    /// The graph. Its controlled-by edges give the controller of each
+    /// custom resource.
     pub graph: &'a Graph,
-    /// The ownership index, which gives each pod's top owner.
+    /// The ownership index, which maps a pod to its top owner.
     pub ownership: &'a Ownership,
     pub objects: &'a Objects<'a>,
     pub services: &'a [Arc<Service>],
     pub by_workload: &'a HashMap<Object, Health>,
     pub storage: &'a Storage,
-    /// The custom kinds' plurals, which name them in each box's link.
+    /// The plurals of the custom kinds, used in each box's link.
     pub plurals: &'a Plurals,
-    /// Every loop in the cluster.  The folded bands tag the other members
-    /// of each loop that the namespace is in.
+    /// Every loop in the cluster. The folded bands tag the other
+    /// namespaces of each loop that this namespace is in.
     pub loops: &'a [Loop],
-    /// Every Node, whose labels and taints show why a DaemonSet skips one.
+    /// Every Node. The matrix reads their labels and taints to show why
+    /// a DaemonSet has no pod on a node.
     pub nodes: &'a [Arc<Node>],
     /// The custom resources that are not workloads, one group per kind.
     pub resources: Vec<Group>,
@@ -91,14 +96,13 @@ pub struct Contents<'a> {
 }
 
 impl NamespacePage {
-    /// The page with the main column's row of edge kinds.
     pub fn with_edge_row(self, edge_row: super::EdgeRow) -> Self {
         Self { edge_row, ..self }
     }
 
-    /// The page for `namespace`, or `None` when no band of `map` holds
-    /// it.  `machines` gives each machine's count of the namespace's
-    /// pods.
+    /// The page for `namespace`, or `None` when no band of `map`
+    /// contains it. `machines` supplies the machine chips, each with
+    /// its count of the namespace's pods.
     pub fn build(
         map: &ClusterMap,
         namespace: &str,
@@ -158,9 +162,9 @@ impl NamespacePage {
         })
     }
 
-    /// The crumb: the cluster links home, and the layer back to the
-    /// cluster map with this namespace still selected, so a reader who
-    /// leaves the page by the layer returns to the map they came from.
+    /// The crumbs: home, the layer, and the namespace. The layer links
+    /// to the cluster map with this namespace still selected, so a
+    /// reader who leaves through the layer returns to the same map.
     pub fn crumbs(&self) -> Vec<Crumb> {
         let select = format!("/?select={}", self.namespace);
         vec![
@@ -174,18 +178,18 @@ impl NamespacePage {
         format!("/events/namespaces/{}", self.namespace)
     }
 
-    /// Whether the card leads to the access of the namespace.
+    /// Whether the card links to the namespace's access page.
     pub fn card_lens(&self) -> bool {
         true
     }
 
-    /// The namespace page shows its own card, so the card's name is not
-    /// a link.
+    /// Always `None`, because this page shows the card and its name
+    /// does not link to itself.
     pub fn card_link(&self) -> Option<String> {
         None
     }
 
-    /// The namespace's lenses: its overview, shown here, and its access.
+    /// The lens tabs: the overview, which is this page, and access.
     pub fn tabs(&self) -> transect_frame::frame::tabs::Tabs {
         transect_frame::frame::tabs::Tabs::namespace(
             &transect_graph::links::namespace(&self.namespace),
@@ -193,8 +197,8 @@ impl NamespacePage {
         )
     }
 
-    /// The main column draws every workload as a box, so the card does
-    /// not list them again.
+    /// Always false, because the main column already draws each
+    /// workload as a box.
     pub fn card_workloads(&self) -> bool {
         false
     }
@@ -211,14 +215,15 @@ impl NamespacePage {
         &matrix::LEGEND
     }
 
-    /// The ground line's text when the namespace stores nothing outside
-    /// the cluster.
+    /// The text of the ground line when the namespace stores nothing
+    /// outside the cluster.
     pub fn nothing_under(&self) -> &'static str {
         storage::NOTHING_UNDER
     }
 }
 
-/// The other namespaces in each of `loops` that `namespace` is in.
+/// The names of the other namespaces in each loop of `loops` that
+/// contains `namespace`.
 fn looped_with(loops: &[Loop], namespace: &str) -> BTreeSet<String> {
     let members = loops
         .iter()
@@ -230,8 +235,8 @@ fn looped_with(loops: &[Loop], namespace: &str) -> BTreeSet<String> {
         .collect()
 }
 
-/// Each workload's pods, by each pod's top owner.  A pod with no owner
-/// is a workload of its own.
+/// Groups the pods by their top owner. A pod with no owner is its own
+/// top owner.
 fn pods_by_owner<'a>(
     namespace: &str,
     pods: &[&'a Pod],

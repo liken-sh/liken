@@ -24,7 +24,7 @@ fn ring(kind: Kind) -> Vec<Edge> {
 }
 
 #[rstest]
-fn finds_the_forge_that_its_tool_applies_from() {
+fn finds_a_forge_that_is_applied_from_its_own_repository() {
     assert_eq!(
         found(forge_loop()),
         vec![Loop {
@@ -62,14 +62,14 @@ fn finds_the_forge_that_its_tool_applies_from() {
 #[case::routes_to(Kind::RoutesTo, 0)]
 #[case::allowed_to_call(Kind::AllowedToCall, 0)]
 #[case::part_of(Kind::PartOf, 0)]
-fn counts_only_the_kinds_that_need(#[case] kind: Kind, #[case] loops: usize) {
+fn only_counted_kinds_make_a_loop(#[case] kind: Kind, #[case] loops: usize) {
     assert_eq!(found(ring(kind)).len(), loops);
 }
 
-/// Namespace `a` holds a helper that depends on `b`'s workload, and the
-/// applier and source that `b`'s workload is applied from.  Paths join
-/// the namespaces both ways; the objects form a cycle only when
-/// something on the path needs the helper back.
+/// A helper in `a` depends on a workload in `b`, and the workload is
+/// applied from an applier and a repository in `a`. That is a path each
+/// way between the namespaces, and the objects form a cycle only when
+/// `closed` makes the repository depend on the helper.
 fn helper_and_applier(closed: bool) -> Vec<Edge> {
     let helper = || object("Deployment", "a", "helper");
     let workload = || object("Deployment", "b", "web");
@@ -158,7 +158,7 @@ fn joins_the_kinds_between_two_members() {
 }
 
 #[rstest]
-fn an_object_stands_for_its_top_owner() {
+fn an_owned_object_is_replaced_by_its_top_owner() {
     let edges = vec![
         edge(
             Kind::ManagedBy,
@@ -194,7 +194,7 @@ fn an_object_stands_for_its_top_owner() {
 }
 
 #[rstest]
-fn carries_a_loop_through_a_cluster_scoped_owner() {
+fn reports_a_loop_through_a_cluster_scoped_owner() {
     let owner = Endpoint::Object(Object::new("example.io", "Fleet", None, "all"));
     let edges = vec![
         edge(Kind::ManagedBy, object("Pod", "shop", "web"), owner.clone()),
@@ -221,7 +221,7 @@ fn carries_a_loop_through_a_cluster_scoped_owner() {
 }
 
 #[rstest]
-fn machines_and_outside_boxes_end_a_path() {
+fn a_path_ends_at_a_machine_or_an_outside_endpoint() {
     let edges = vec![
         edge(
             Kind::StoresOn,

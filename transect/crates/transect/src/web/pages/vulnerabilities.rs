@@ -10,8 +10,8 @@ use transect_observe::usage;
 use transect_resources::layers::Layers;
 use transect_supply::vulnerabilities::Shown as Severities;
 
-/// The vulnerabilities tab of the workload `at` names, or `None` when
-/// there is no such workload or no findings report names it.
+/// The vulnerabilities tab of the workload `at`, or `None` when the
+/// workload does not exist or no scanner report covers it.
 pub fn vulnerabilities_page(
     model: &Model,
     layers: &Layers,

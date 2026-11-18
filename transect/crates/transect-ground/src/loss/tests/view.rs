@@ -262,18 +262,18 @@ fn without_a_majority_nothing_comes_back_elsewhere(
 )]
 #[case::only_short(vec![taken("shop", "web", ONE_SHORT)], Some(Level::Warning))]
 #[case::another_namespace(vec![taken("blog", "web", State::Down { wanted: 1 })], None)]
-fn a_parcel_takes_the_level_of_its_worst_loss(
+fn a_tile_has_the_level_of_its_worst_loss(
     #[case] workloads: Vec<Taken>,
     #[case] level: Option<Level>,
 ) {
-    let parcel = loss(workloads).parcel("shop", 2);
-    assert_eq!(parcel.map(|parcel| parcel.level), level);
+    let tile = loss(workloads).tile("shop", 2);
+    assert_eq!(tile.map(|tile| tile.level), level);
 }
 
 #[rstest]
 #[case::a_caller_elsewhere("blog", Some((Level::Warning, vec!["db"])))]
 #[case::a_caller_beside_it("shop", Some((Level::Failing, vec![])))]
-fn a_parcel_whose_workloads_lose_another_namespaces_is_tagged(
+fn a_tile_whose_workloads_lose_another_namespaces_is_tagged(
     #[case] namespace: &str,
     #[case] expected: Option<(Level, Vec<&str>)>,
 ) {
@@ -287,17 +287,17 @@ fn a_parcel_whose_workloads_lose_another_namespaces_is_tagged(
             dependent: caller("blog", "feed"),
             lost: db.clone(),
             provides: None,
-            stated: None,
+            declared_in: None,
         },
         cascade::Loss {
             dependent: caller("shop", "web"),
             lost: db,
             provides: None,
-            stated: None,
+            declared_in: None,
         },
     ];
-    let parcel = loss.parcel(namespace, 2);
-    let found = parcel
+    let tile = loss.tile(namespace, 2);
+    let found = tile
         .as_ref()
         .map(|p| (p.level, p.loses.iter().map(String::as_str).collect()));
     assert_eq!(found, expected);
@@ -313,9 +313,9 @@ fn storage_line() -> transect_resources::intent::Line {
 /// `db` in shop provides order storage and is left down, and `feed` in
 /// blog calls it.
 #[rstest]
-#[case::its_own_parcel("shop", "no order storage")]
-#[case::a_callers_parcel("blog", "no order storage")]
-fn a_parcel_names_what_a_down_workload_provides(#[case] namespace: &str, #[case] tag: &str) {
+#[case::its_own_tile("shop", "no order storage")]
+#[case::a_callers_tile("blog", "no order storage")]
+fn a_tile_names_what_a_down_workload_provides(#[case] namespace: &str, #[case] tag: &str) {
     let db = Object::new("apps", "Deployment", Some("shop"), "db");
     let down = Taken {
         provides: Some(storage_line()),
@@ -331,17 +331,17 @@ fn a_parcel_names_what_a_down_workload_provides(#[case] namespace: &str, #[case]
         )),
         lost: db,
         provides: Some(storage_line()),
-        stated: None,
+        declared_in: None,
     }];
-    let parcel = loss.parcel(namespace, 2).unwrap();
-    assert_eq!(parcel.to_string(), tag);
+    let tile = loss.tile(namespace, 2).unwrap();
+    assert_eq!(tile.to_string(), tag);
 }
 
 /// `login` in auth is left down, and `wiki` in shop signs in through it.
 #[rstest]
-#[case::the_applications_parcel("shop", Some("no sign-in"))]
+#[case::the_applications_tile("shop", Some("no sign-in"))]
 #[case::the_providers_own("auth", Some("down"))]
-fn a_parcel_says_it_loses_sign_in(#[case] namespace: &str, #[case] tag: Option<&str>) {
+fn a_tile_shows_that_it_loses_sign_in(#[case] namespace: &str, #[case] tag: Option<&str>) {
     let mut loss = loss(vec![taken("auth", "login", State::Down { wanted: 1 })]);
     loss.cascade = vec![cascade::Loss {
         dependent: cascade::Dependent::SignsIn(Object::new(
@@ -352,8 +352,8 @@ fn a_parcel_says_it_loses_sign_in(#[case] namespace: &str, #[case] tag: Option<&
         )),
         lost: Object::new("apps", "Deployment", Some("auth"), "login"),
         provides: None,
-        stated: None,
+        declared_in: None,
     }];
-    let parcel = loss.parcel(namespace, 1);
-    assert_eq!(parcel.map(|parcel| parcel.to_string()).as_deref(), tag);
+    let tile = loss.tile(namespace, 1);
+    assert_eq!(tile.map(|tile| tile.to_string()).as_deref(), tag);
 }

@@ -1,6 +1,6 @@
 //! The machines band shows one strip for each `Node`.  A strip compares
 //! the CPU and memory that the node's pods request and use with what the
-//! node can allocate, and counts the pods that run on the node.
+//! node can allocate, and counts the node's pods.
 
 mod amount;
 mod facts;
@@ -29,8 +29,8 @@ use transect_observe::usage::{Usage, Used};
 
 const CONTROL_PLANE_LABEL: &str = "node-role.kubernetes.io/control-plane";
 
-/// The role label that a distribution such as k3s sets on the `Node` of
-/// each machine that runs an etcd member.
+/// The role label that a distribution such as k3s sets on a `Node` that
+/// runs an etcd member.
 pub const ETCD_LABEL: &str = "node-role.kubernetes.io/etcd";
 pub const BYTES_PER_GI: f64 = (1u64 << 30) as f64;
 pub const BYTES_PER_MI: f64 = (1u64 << 20) as f64;
@@ -47,31 +47,32 @@ pub struct Machine {
     pub requested: Resources,
     pub used: Used,
     pub pods: usize,
-    /// How many of the selected namespace's pods run here, or none when
-    /// nothing is selected.
+    /// How many of the selected namespace's pods run here, or `None`
+    /// when no namespace is selected.
     pub here: Option<usize>,
     /// Whether the loss that the page shows includes this machine.  When
     /// it does, the strip shows what runs there in place of its bars.
     pub lost: bool,
-    /// Whether the machine is really lost, not only supposed lost, and
-    /// how many minutes ago it was lost, when its `Node` gives the time.
+    /// Whether the machine is really lost, not only selected for the
+    /// loss that the page shows.
     pub really_lost: bool,
+    /// How many minutes ago the machine was lost, when its `Node`
+    /// records the time.
     pub lost_minutes: Option<i64>,
-    /// The devices that the selected namespace holds on this machine.
-    /// The `devices` module fills the list, and it is empty when nothing
-    /// is selected.
+    /// The devices that the selected namespace holds on this machine,
+    /// filled by the `devices` module.  Empty when no namespace is
+    /// selected.
     pub held: Vec<Device>,
     /// The memory that each pod on this machine uses, beside its request.
-    /// The list includes every pod, with or without a reading, so a
-    /// finding can count the pods that request no memory even when
-    /// Prometheus has no reading for some of them.
+    /// The list has every pod, including a pod that Prometheus has no
+    /// reading for, so a finding can count the pods that request no
+    /// memory.
     pub pod_memory: Vec<PodMemory>,
-    /// The alerts that are firing about this machine.  The page marks
-    /// the machine's strip with them.
+    /// The alerts firing about this machine, shown on its strip.
     pub alerted: Option<Alerted>,
 }
 
-/// The totals of the pods that are bound to one node.
+/// The totals for the unfinished pods that are bound to one node.
 #[derive(Default)]
 struct OnNode {
     requested: Resources,
@@ -79,8 +80,9 @@ struct OnNode {
     pod_memory: Vec<PodMemory>,
 }
 
-/// Every machine, sorted by name, with what it uses when `usage` has a
-/// reading for it.
+/// One `Machine` for each node, sorted by name, with its usage when
+/// `usage` has a reading for it.  Pods that have finished or have no
+/// node yet are not counted.
 pub fn machines<'a>(
     nodes: impl IntoIterator<Item = &'a Node>,
     pods: impl IntoIterator<Item = &'a Pod>,
@@ -178,8 +180,8 @@ impl Machine {
         )
     }
 
-    /// How much of the CPU bar the used bar fills, when there is a
-    /// reading.
+    /// The percentage of allocatable CPU that the node uses, when there
+    /// is a reading.
     pub fn cpu_used_percent(&self) -> Option<u32> {
         let used = self.used.cpu?;
         Some(percent(used, self.allocatable.cpu.units()))
@@ -190,7 +192,8 @@ impl Machine {
         Some(percent(used, self.allocatable.memory.units()))
     }
 
-    /// The CPU bar's title, such as "CPU 1.6 used · 5.0 requested of 8".
+    /// The title of the CPU bar, such as
+    /// "CPU 1.6 used · 5.0 requested of 8".
     pub fn cpu_title(&self) -> String {
         format!(
             "CPU {}{:.1} requested of {}",
@@ -200,7 +203,7 @@ impl Machine {
         )
     }
 
-    /// The memory bar's title, such as
+    /// The title of the memory bar, such as
     /// "mem 8.0 used · 10.7 requested of 15.5 Gi".
     pub fn memory_title(&self) -> String {
         format!(
@@ -219,9 +222,9 @@ fn used_text(used: Option<f64>) -> String {
         .unwrap_or_default()
 }
 
-/// The percentage of a bar that `part` fills, capped at a full bar.  The
-/// cap is necessary because a pod bound to its node by name skips the
-/// scheduler, so the requests on a node can exceed what it allocates.
+/// The percentage of `whole` that `part` is, capped at 100.  The cap is
+/// necessary because a pod that sets `nodeName` skips the scheduler, so
+/// the requests on a node can exceed what it can allocate.
 fn percent(part: f64, whole: f64) -> u32 {
     if whole <= 0.0 {
         return 0;
@@ -229,8 +232,8 @@ fn percent(part: f64, whole: f64) -> u32 {
     (part / whole * 100.0).round().clamp(0.0, 100.0) as u32
 }
 
-/// A number with one decimal place, or with none when it is whole, such
-/// as "8" or "7.5".
+/// A number with one decimal place, or with none when the decimal is
+/// zero: "8" or "7.5".
 pub fn trimmed(value: f64) -> String {
     let text = format!("{value:.1}");
     text.strip_suffix(".0").map(str::to_owned).unwrap_or(text)

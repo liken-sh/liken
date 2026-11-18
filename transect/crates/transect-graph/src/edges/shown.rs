@@ -1,17 +1,16 @@
-//! Which edge kinds a view shows.  A reader turns kinds off to see one
-//! relation alone, such as only where things store, and the kinds that
-//! are on are part of the view's URL, so that view is a link.
+//! Which edge kinds a view shows. A reader can turn kinds off to see one
+//! relation alone, and the `edges` URL parameter lists the kinds that
+//! are on, so a link opens the same view.
 //!
-//! Only the kinds a reader knows from the map can be turned off.  A
-//! `Service`'s selects and an `Ingress`'s routes-to draw the workload
-//! page's entry, and owner references decide what a workload is, so
-//! they stay on.
+//! Only the kinds in `TOGGLED` can be turned off. The workload page
+//! needs `Selects` and `RoutesTo` edges, and `ManagedBy` edges decide
+//! what a workload is, so those kinds and `PartOf` always show.
 
 use std::collections::BTreeSet;
 
 use super::Kind;
 
-/// The kinds a reader can turn off, in the order the row draws them.
+/// The kinds a reader can turn off, in the order the row shows them.
 pub const TOGGLED: [Kind; 8] = [
     Kind::RunsOn,
     Kind::DependsOn,
@@ -23,16 +22,16 @@ pub const TOGGLED: [Kind; 8] = [
     Kind::AllowedToCall,
 ];
 
-/// The edge kinds turned off in one view.  Every kind is on unless the
-/// URL turns it off, and a set is kept in one form, so two URLs that
-/// turn on the same kinds are the same view.
+/// The edge kinds turned off in one view. They are a set, so two URLs
+/// that list the same kinds in a different order give equal views.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Shown {
     off: BTreeSet<Kind>,
 }
 
 impl Kind {
-    /// The kind's name in a URL, or none for a kind that stays on.
+    /// The kind's name in the URL, or none for a kind that cannot be
+    /// turned off.
     pub fn slug(self) -> Option<&'static str> {
         Some(match self {
             Self::RunsOn => "runs-on",
@@ -49,9 +48,10 @@ impl Kind {
 }
 
 impl Shown {
-    /// The kinds `edges` names, comma-separated by slug, turned on and
-    /// every other off.  No `edges` turns every kind on, and an empty one
-    /// turns every kind off; a name that matches no slug is skipped.
+    /// The view for the `edges` URL value, a comma-separated list of
+    /// slugs. Listed kinds are on and every other toggled kind is off.
+    /// A missing value turns every kind on, an empty value turns every
+    /// kind off, and a name that is not a slug is ignored.
     pub fn parse(edges: Option<&str>) -> Self {
         let Some(edges) = edges else {
             return Self::default();
@@ -72,8 +72,8 @@ impl Shown {
         self.off.is_empty()
     }
 
-    /// The value of `edges` for this view, or none when every kind is on,
-    /// so the plain URL stays plain.
+    /// The `edges` URL value for this view, or none when every kind is
+    /// on, so the default view has a URL with no parameter.
     pub fn param(&self) -> Option<String> {
         if self.all_on() {
             return None;
@@ -86,11 +86,12 @@ impl Shown {
         Some(on.join(","))
     }
 
-    /// The view with `kind` flipped.  The kinds the row does not offer,
-    /// such as one whose source the cluster lacks, have no edges, so
-    /// they count as off once any kind is: a URL then names only kinds
-    /// the reader can see.  Turning on the last of `offered` that was off
-    /// turns every kind on, so the view returns to the plain URL.
+    /// The view with `kind` switched, where `offered` is the kinds the
+    /// row shows. A kind is not offered when it has no edges, such as
+    /// one whose source the cluster lacks. Turning off the first kind
+    /// also turns off every kind not offered, so the URL lists only kinds
+    /// the reader can see. When no offered kind is off any more, every
+    /// kind is turned on again and the URL has no parameter.
     pub fn toggled(&self, kind: Kind, offered: &[Kind]) -> Self {
         let mut off = self.off.clone();
         if self.all_on() {

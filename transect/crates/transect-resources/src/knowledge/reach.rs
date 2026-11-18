@@ -1,21 +1,21 @@
-//! What a relation reaches on the map, and the edges kind knowledge
-//! draws from it.  `addresses::relations::reached` resolves what each
-//! relation names, because resolving it reads addresses and devices.
+//! The edges that kind knowledge draws from an object's relations.  The
+//! caller resolves each relation to its ends, because that needs the
+//! addresses and devices that `transect-network` reads.
 
 use super::references::Relation;
 use transect_graph::edges::{Edge, Endpoint, Graph, Object};
 
-/// The ends one relation reaches, and whether they are a guess.
+/// The ends that one relation resolves to, and whether they are a guess.
 #[derive(Debug, Default, PartialEq)]
 pub struct Reached {
     pub ends: Vec<Endpoint>,
     pub guessed: bool,
 }
 
-/// An edge of its kind from `from` to each end each of `relations`
-/// reaches, with its field as its provenance.  An end that is `from`
-/// or one of its own objects draws nothing, nor does an edge `graph`
-/// already holds from the API, because the cluster already states it.
+/// An edge from `from` to each end of each relation that has an edge
+/// kind, with the relation as its provenance.  An end is skipped when
+/// `owns` reports that `from` owns it, when `graph` already has the
+/// edge, or when an earlier relation drew the same edge.
 pub fn edges(
     from: &Object,
     relations: &[Relation],

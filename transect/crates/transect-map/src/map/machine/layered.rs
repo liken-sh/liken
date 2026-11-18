@@ -1,10 +1,9 @@
-//! What runs on one machine, laid out as the cluster map lays out the
-//! cluster: a band per layer, top to bottom in the map's order, a
-//! namespace inside each, and a row per pod with its workload, its bars,
-//! its restarts, and its age.  A DaemonSet runs one pod on each machine
-//! it covers, so its pod here folds into one row that names the
-//! DaemonSet and links to the namespace, where the DaemonSets of every
-//! machine are drawn side by side.
+//! The pods on one machine, laid out like the cluster map: a band per
+//! layer in the map's order, a box per namespace inside each band, and
+//! a row per pod. A DaemonSet runs a pod on every machine it covers, so
+//! the row of a DaemonSet's pod names the DaemonSet and links to the
+//! namespace page, which shows the DaemonSet's pods on every machine
+//! side by side.
 
 use std::collections::BTreeMap;
 
@@ -32,9 +31,9 @@ pub struct Namespace {
     pub rows: Vec<PodRow>,
 }
 
-/// The most rows a namespace's box shows in one column.  Past that
-/// count, the box spans its band and its rows are laid out in columns of
-/// their own, so one long namespace does not leave the band's other
+/// The most rows that a namespace's box shows in one column. A box with
+/// more rows spans the width of its band and lays its rows out in
+/// several columns, so a long namespace does not leave the band's other
 /// columns empty.
 const ONE_COLUMN: usize = 6;
 
@@ -47,20 +46,22 @@ impl Namespace {
 /// One pod on the machine, or the DaemonSet whose pod it is.
 #[derive(Debug, PartialEq)]
 pub struct PodRow {
-    /// The pod by its short name, or "DaemonSet agent", with its page.
+    /// The pod's short name, or the DaemonSet's kind and name for a
+    /// DaemonSet's pod, with a link to its page.
     pub name: Reference,
-    /// The workload a pod belongs to, or for a DaemonSet's pod, the
-    /// namespace's page, where each DaemonSet's pods line up by machine.
+    /// The pod's top owner, if it has one. For a DaemonSet's pod, it is
+    /// the text "one per machine" with a link to the namespace page.
     pub workload: Option<Reference>,
-    /// The word between the name and the workload: "of" a pod's
-    /// workload, or none before a DaemonSet's "one per machine", which
-    /// the page draws as a tag after the name.
+    /// The word between the name and the workload. A DaemonSet's row has
+    /// none, and the page draws "one per machine" as a tag after the
+    /// name.
     pub joiner: Option<&'static str>,
     pub tile: PodTile,
 }
 
 impl PodRow {
-    /// A pod that is not ready takes the warm edge a tile takes.
+    /// A pod that is not ready gets the same `--warm` outline as a pod
+    /// tile that is not ready.
     pub fn class(&self) -> &'static str {
         match self.tile.state {
             State::NotReady => "machine-pod machine-pod-not-ready",
@@ -81,8 +82,8 @@ pub struct Reads<'a> {
     pub order: &'a [String],
 }
 
-/// The pods of `pods` running on `machine`, by band, then namespace,
-/// then workload and name.  A pod that finished runs nowhere.
+/// The pods in `pods` that run on `machine` and have not finished,
+/// grouped by band and then by namespace.
 pub fn runs_here<'a>(
     pods: impl IntoIterator<Item = &'a Pod>,
     machine: &str,
@@ -156,7 +157,7 @@ fn row(pod: &Pod, me: &Object, owner: &Object, reads: &Reads) -> PodRow {
 }
 
 /// Rows sort by workload, so a workload's pods are listed together, and
-/// then by name.  A bare pod sorts by its own name.
+/// then by name. A pod with no owner sorts by its own name.
 fn sort_key(row: &PodRow) -> (&str, &str) {
     let workload = row.workload.as_ref().map(|w| w.text.as_str());
     (workload.unwrap_or(&row.name.text), &row.name.text)

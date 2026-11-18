@@ -28,7 +28,7 @@ fn figures(requests: f64, p95: Option<f64>, errors: f64) -> Figures {
 }
 
 #[rstest]
-fn reads_each_backends_figures_from_the_answers() {
+fn reads_each_backends_figures_from_the_query_results() {
     let found = measure(
         "backend",
         &[sample("shop-web-80", 3.0), sample("shop-api-80", 1.0)],
@@ -68,8 +68,8 @@ fn shop() -> Measured {
     ]))
 }
 
-/// Each line: the backend it names, when there are several, and its
-/// figures.
+/// Each line's backend label and figures text. The label is `None`
+/// when the traffic has a single backend.
 fn lines(traffic: &Traffic) -> Vec<(Option<String>, String)> {
     let lines = traffic.lines("shop", false).into_iter();
     lines
@@ -89,7 +89,7 @@ fn lines(traffic: &Traffic) -> Vec<(Option<String>, String)> {
         (Some("api:http".to_string()), "1.0 requests/s · p95 2.4 s · no 5xx, over 5m".to_string()),
     ]
 )]
-#[case::a_backend_no_answer_names(
+#[case::a_backend_with_no_samples(
     &[("web", "80"), ("blog", "80")],
     vec![
         (Some("web:80".to_string()), "3.0 requests/s · p95 120 ms · 1.0% 5xx, over 5m".to_string()),
@@ -101,32 +101,32 @@ fn gives_each_backend_its_own_line(
     #[case] expected: Vec<(Option<String>, String)>,
 ) {
     let measured = [shop()];
-    let answers = Answers {
+    let results = TrafficResults {
         measured: &measured,
         declared: true,
         unloaded: None,
     };
-    assert_eq!(lines(&of("shop", &routes(backends), answers)), expected);
+    assert_eq!(lines(&of("shop", &routes(backends), results)), expected);
 }
 
 #[rstest]
 #[case::no_controller_declares_it(false, vec![shop()], &[("web", "80")], "An IngressController with entry")]
-#[case::no_answer_yet(true, vec![], &[("web", "80")], "have not answered")]
-#[case::no_answer_names_it(true, vec![shop()], &[("blog", "80")], "name none of its backends")]
-fn says_in_one_line_why_it_has_no_figures(
+#[case::no_results_yet(true, vec![], &[("web", "80")], "have not returned results")]
+#[case::no_result_names_it(true, vec![shop()], &[("blog", "80")], "name none of its backends")]
+fn explains_why_it_has_no_figures(
     #[case] declared: bool,
     #[case] measured: Vec<Measured>,
     #[case] backends: &[(&str, &str)],
     #[case] says: &str,
 ) {
-    let answers = Answers {
+    let results = TrafficResults {
         measured: &measured,
         declared,
         unloaded: None,
     };
-    let traffic = of("shop", &routes(backends), answers);
+    let traffic = of("shop", &routes(backends), results);
     let note = traffic.note().unwrap().text;
-    assert!(note.contains(says), "{note:?} does not say {says:?}");
+    assert!(note.contains(says), "{note:?} lacks {says:?}");
 }
 
 #[rstest]
@@ -140,18 +140,18 @@ fn says_in_one_line_why_it_has_no_figures(
     figures(2.0, Some(0.2), 0.5),
     "2.0 requests/s · p95 200 ms · 25% 5xx, over 5m"
 )]
-fn says_its_figures_in_one_line(#[case] figures: Figures, #[case] expected: &str) {
+fn formats_figures_on_one_line(#[case] figures: Figures, #[case] expected: &str) {
     assert_eq!(figures.line("5m"), expected);
 }
 
 #[rstest]
-fn says_when_the_ingress_controller_did_not_load() {
-    let answers = Answers {
+fn notes_an_ingress_controller_that_did_not_load() {
+    let results = TrafficResults {
         measured: &[],
         declared: false,
         unloaded: Some("proxy"),
     };
-    let note = of("shop", &routes(&[("web", "80")]), answers)
+    let note = of("shop", &routes(&[("web", "80")]), results)
         .note()
         .unwrap();
     assert_eq!(

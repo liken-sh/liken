@@ -2,7 +2,7 @@
 {#- The callers that each `NetworkPolicy` admits to the card's workload
     or namespace.  A workload's card has one row for each set of ports,
     and a namespace's card has one list of namespaces.  A caller that
-    has a page links to it, as a parcel does.  A row of more than six
+    has a page links to it, as a tile does.  A row of more than six
     callers folds to its count, and the count opens to show them. -#}
 {%- if !card.calls.note.is_empty() %}
 <div class="card-code-note">{% call links::sentence(card.calls.note.clone()) %}{% endcall %}</div>

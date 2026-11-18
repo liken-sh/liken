@@ -1,12 +1,12 @@
 //! The accounts that RBAC grants to, where a grant applies, and how an
 //! account gets a capability: from a binding that grants it, or by a
-//! step from such a grant.
+//! step that starts from such a grant.
 
 use transect_graph::edges::Object;
 
-/// A subject that a binding may name.  A group or a user has no object
-/// of its own.  A ServiceAccount has one, but a binding may name a
-/// ServiceAccount that does not exist.
+/// A subject that a binding may name.  A group or a user has no
+/// Kubernetes object.  A ServiceAccount has one, but a binding may name
+/// a ServiceAccount that does not exist.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Account {
     ServiceAccount { namespace: String, name: String },
@@ -22,7 +22,6 @@ impl Account {
         }
     }
 
-    /// The account's object, when the account has one.
     pub fn object(&self) -> Option<Object> {
         match self {
             Self::ServiceAccount { namespace, name } => {
@@ -32,8 +31,8 @@ impl Account {
         }
     }
 
-    /// The page of a group or a user, which has no object.  None for a
-    /// ServiceAccount, because its page is its object's page.
+    /// The page of a group or a user, which has no object.  `None` for
+    /// a ServiceAccount, because its page is its object's page.
     pub fn subject_page(&self) -> Option<String> {
         match self {
             Self::ServiceAccount { .. } => None,
@@ -42,8 +41,8 @@ impl Account {
         }
     }
 
-    /// Its kind and name as a page names it: `ServiceAccount shop/web`,
-    /// `Group system:masters`.
+    /// The kind and name as a page shows them: `ServiceAccount
+    /// shop/web`, `Group system:masters`.
     pub fn text(&self) -> String {
         match self {
             Self::ServiceAccount { namespace, name } => {
@@ -54,7 +53,7 @@ impl Account {
         }
     }
 
-    /// Its name alone, for a line that already states that it is an
+    /// The name without the kind, for a line that already says it is an
     /// account: `shop/web`.
     pub fn short(&self) -> String {
         match self {
@@ -63,10 +62,8 @@ impl Account {
         }
     }
 
-    /// The groups that the API server puts it in and that a binding may
-    /// name.  A ServiceAccount is in the group of every ServiceAccount
-    /// and in the group of its namespace's ServiceAccounts, and every
-    /// account that signs in is in the authenticated group.
+    /// The groups that the API server puts the account in when it
+    /// authenticates.  A group has none.
     pub fn groups(&self) -> Vec<String> {
         match self {
             Self::ServiceAccount { namespace, .. } => vec![
@@ -80,10 +77,10 @@ impl Account {
     }
 }
 
-/// The group of every ServiceAccount, and with `:{namespace}`, of
-/// every ServiceAccount in one namespace.
+/// The group of all ServiceAccounts.  With `:{namespace}` appended, the
+/// group of the ServiceAccounts of one namespace.
 pub const SERVICE_ACCOUNTS: &str = "system:serviceaccounts";
-/// The group of every request that signs in.
+/// The group of every account that authenticates.
 pub const AUTHENTICATED: &str = "system:authenticated";
 
 /// Where a grant applies.  A ClusterRoleBinding grants in every
@@ -112,10 +109,10 @@ impl Where {
     }
 }
 
-/// A binding that grants a capability: the binding, the role it binds,
-/// the objects the rule names when it is limited by name, and the
-/// group the account is in when the binding names the group and not
-/// the account.
+/// The grant of a capability by a binding: the binding, the role it
+/// binds, the object names that the role's rule limits the capability
+/// to (empty for every object), and the group the account is in when
+/// the binding names that group and not the account.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Via {
     pub binding: Object,
@@ -124,13 +121,13 @@ pub struct Via {
     pub group: Option<String>,
 }
 
-/// The step by which a capability follows from a grant, named by its
-/// first hop.
+/// The first hop of a chain of steps by which an account gets a
+/// capability that no binding grants it.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Hop {
-    /// It may run pods or change workloads in a namespace, through
-    /// `basis`, so it may run a pod as `account`, a ServiceAccount
-    /// there, and do what that account may.
+    /// It may run pods or change workloads in a namespace, as `basis`
+    /// says, so it can run a pod as `account`, a ServiceAccount there,
+    /// and do what that account may.
     RunsAs {
         account: Account,
         basis: super::Capability,
@@ -142,50 +139,51 @@ pub enum Hop {
     /// A pod it starts, through `basis`, may mount any Secret in its
     /// namespace.
     StartsPod { basis: super::Capability, at: Where },
-    /// It may exec into pods that mount Secrets, and read those, by
-    /// name.
+    /// It may exec into pods that mount Secrets, so it may read those
+    /// Secrets by name.
     ExecMounts { at: Where },
-    /// It may change `applier`, an object that applies what it names,
-    /// or its source, and the applier may apply as `account`, in the
-    /// way that `how` gives.
+    /// It may change `applier`, an object that applies other objects,
+    /// or its source.  The applier applies as `account`, in the way
+    /// that `how` says.
     Applies {
         account: Account,
         applier: Object,
         how: AppliesAs,
     },
-    /// It may bind `role` to itself at `at`: it may bind the role and
-    /// create a binding there.
+    /// It may bind `role` to itself at `at`, because it may bind the
+    /// role and create a binding there.
     Binds { role: Object, at: Where },
-    /// It may rewrite `role`, which a binding binds it to at `at`, to
-    /// grant anything: it may escalate and update the role.
+    /// A binding at `at` binds it to `role`, and it may escalate and
+    /// update the role, so it can rewrite the role to grant anything.
     Rewrites { role: Object, at: Where },
     /// It may create a token for `account`, a ServiceAccount in `at`,
-    /// and sign in as it.
+    /// and authenticate with it as that account.
     MintsToken { account: Account, at: Where },
     /// It may impersonate `account`.
     Impersonates { account: Account },
 }
 
-/// How an applier comes to apply as an account that a step reaches.
+/// Why an applier applies as an account that a step reaches.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum AppliesAs {
-    /// Its object names the account now.
+    /// The applier's spec names the account.
     Names,
-    /// It applies as its kind's controller's account.
+    /// The applier does not name the account, so it applies as the
+    /// account of its kind's controller.
     Controller,
-    /// It may name the account: an account that may change the object
-    /// may set `field` to any ServiceAccount in its namespace.
+    /// An account that may change the applier may set `field` to any
+    /// ServiceAccount in its namespace.
     MayName { field: String },
-    /// It applies as the account when `field` names no account, and an
-    /// account that may change the object may unset `field`.
+    /// The applier applies as the account when `field` is empty, and an
+    /// account that may change the applier may unset `field`.
     Unset { field: String },
-    /// It fetches through `source`, which the step may change, and it
-    /// applies as the account now.
+    /// The acting account may change `source`, which the applier
+    /// fetches from, and the applier already applies as the account.
     Through { source: Object },
 }
 
 impl Hop {
-    /// The account the step goes through, when it goes through one.
+    /// The account that the step acts as, when it acts as one.
     pub fn account(&self) -> Option<&Account> {
         match self {
             Self::RunsAs { account, .. }

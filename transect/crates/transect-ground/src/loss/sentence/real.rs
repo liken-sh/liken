@@ -1,5 +1,5 @@
-//! The words for machines that are really lost, and for the control
-//! plane a loss leaves.
+//! The sidebar and machine texts for machines that are really lost, and
+//! for the control plane that a loss leaves.
 
 use super::{duration, list};
 use crate::loss::Counted;
@@ -7,8 +7,9 @@ use crate::loss::sidebar::Sidebar;
 use crate::machines::Machine;
 
 impl Sidebar {
-    /// The crumb after the cluster's: "alpha is lost", or "if alpha were
-    /// lost" for a question.
+    /// The breadcrumb after the cluster's: "alpha is lost" when every
+    /// machine of the set is really lost, otherwise "if alpha were lost"
+    /// for the predicted machines, with "too" when some are really lost.
     pub fn crumb(&self) -> String {
         match (self.all_real(), self.real()) {
             (true, _) => self.lost_text_short(),
@@ -17,8 +18,8 @@ impl Sidebar {
         }
     }
 
-    /// "alpha is lost · 3 minutes", with the time of the machine that
-    /// has been lost the longest.
+    /// "alpha is lost · 3 minutes", timed from the machine that has been
+    /// lost the longest.
     pub fn lost_text(&self) -> String {
         match self.longest() {
             Some(seconds) => format!("{} · {}", self.lost_text_short(), since(seconds)),
@@ -35,8 +36,8 @@ impl Sidebar {
         }
     }
 
-    /// For a prediction requested during a real loss, the machines that
-    /// are already really lost: "beta is already lost · 3 minutes."
+    /// "beta is already lost · 3 minutes.", for a prediction made while
+    /// some machines are really lost.
     pub fn gone_text(&self) -> Option<String> {
         if self.all_real() || !self.real() {
             return None;
@@ -56,7 +57,7 @@ impl Sidebar {
         let majority = self.majority?;
         let (remain, of) = (majority.remain, majority.of);
         let verb = if remain == 1 { "remains" } else { "remain" };
-        let which = if majority.kept() {
+        let which = if majority.has_quorum() {
             "which keeps a majority"
         } else {
             "which loses the majority"
@@ -69,17 +70,15 @@ impl Sidebar {
         })
     }
 
-    /// Whether the majority line is a guess, so the page draws it
-    /// fainter.
+    /// Whether the majority line counts control-plane machines in place
+    /// of etcd members, so the page draws it fainter as a guess.
     pub fn majority_guessed(&self) -> bool {
         self.majority
             .is_some_and(|majority| majority.counted == Counted::ControlPlane)
     }
 
-    /// What a control plane without a majority means, which the sidebar
-    /// shows first: "With
-    /// no majority, the API accepts no writes, so nothing is evicted or
-    /// scheduled again. ..."
+    /// The sidebar card, above the lists of workloads, that explains a
+    /// control plane without a majority.
     pub fn headless_text(&self) -> Option<String> {
         if !self.headless() {
             return None;
@@ -93,7 +92,8 @@ impl Sidebar {
         ))
     }
 
-    /// How the majority line counts the members, for the line's title.
+    /// The majority line's `title` tooltip, which says how the line
+    /// counts the members.
     pub fn majority_title(&self) -> &'static str {
         match self.majority.map(|majority| majority.counted) {
             Some(Counted::Etcd) => {
@@ -107,8 +107,8 @@ impl Sidebar {
 }
 
 impl Machine {
-    /// The lost strip's tag, beside its name: "if lost", or for a machine
-    /// really lost, "Lost 3m".
+    /// The tag beside a lost machine's name on the machines band: "if
+    /// lost" for a predicted loss, or "Lost 3m" for a real one.
     pub fn lost_tag(&self) -> String {
         match (self.really_lost, self.lost_minutes) {
             (false, _) => "if lost".into(),
@@ -117,8 +117,8 @@ impl Machine {
         }
     }
 
-    /// The lost strip's line: "12 pods run here", or "12 pods were here"
-    /// for a machine really lost.
+    /// The pod count under a lost machine's name on the machines band:
+    /// "12 pods run here", or "12 pods were here" for a real loss.
     pub fn lost_text(&self) -> String {
         match (self.pods, self.really_lost) {
             (1, false) => "1 pod runs here".into(),

@@ -1,8 +1,9 @@
-//! The "what may reach it, and what it may reach" drawing.  The ways in
-//! from outside the cluster and the callers inside it are on the left.
-//! Each of their lines ends at the port it reaches on the workload's
-//! left edge, with the line's gates as dots on it.  On the right are
-//! what the workload runs as, holds, and may call.
+//! The drawing of what may reach a workload and what the workload may
+//! reach.  On the left are the ways in from outside the cluster and the
+//! callers inside it.  Each of their lines ends at a port on the
+//! workload's left edge, with a dot on the line for each gate.  The
+//! right side shows what the workload runs as, what it holds, and what
+//! it may call.
 
 use super::right::right;
 pub use super::right::{Out, Right};
@@ -19,7 +20,7 @@ const CONTROLLER_X: i32 = 376;
 const CONTROLLER_W: i32 = 130;
 const SERVICE_X: i32 = 532;
 const SERVICE_W: i32 = 160;
-/// Where the callers of one rule join into one line.
+/// The x at which the lines from the callers of one rule join.
 const JOIN_X: i32 = 600;
 const POLICY_X: i32 = 722;
 pub(super) const SOCKET_X: i32 = 776;
@@ -31,15 +32,14 @@ pub(super) const RIGHT_X: i32 = 1062;
 pub(super) const RIGHT_W: i32 = 208;
 pub(super) const TOP: i32 = 28;
 pub(super) const GAP: i32 = 8;
-/// The least room between two ports on the workload's edge.
+/// The smallest vertical distance between two ports on the workload's
+/// edge.
 pub(super) const SOCKET_GAP: i32 = 34;
 
-/// What the drawing reads: the ways in on the left, the workload and
-/// its ports, and its right side.
 #[derive(Debug)]
 pub struct Reach {
     /// The ways in, with those through the ingress controller first.
-    /// When there are none, the drawing shows a dashed "no way in".
+    /// When there are none, the drawing shows a dashed "no way in" box.
     pub ways: Vec<WayBox>,
     /// The ingress controller the hosts enter through.
     pub controller: Option<SectionBox>,
@@ -50,7 +50,6 @@ pub struct Reach {
     pub right: Right,
 }
 
-/// One way in, its gates, and where its line goes.
 #[derive(Debug)]
 pub struct WayBox {
     pub boxed: SectionBox,
@@ -66,9 +65,10 @@ pub enum Path {
     Controller,
     /// Into one of the drawing's Services.
     Service(usize),
-    /// Around the ingress controller, straight to the ports, with the
-    /// policy gate on the way, and a label.  With no ports, the line
-    /// ends at the workload's edge.
+    /// Straight to the workload's ports, with no ingress controller or
+    /// Service between, as for a host port.  The line has its own policy
+    /// dot and label.  With no ports, the line ends on the workload's
+    /// edge.
     Ports {
         ports: Vec<usize>,
         policy: Gate,
@@ -76,8 +76,7 @@ pub enum Path {
     },
 }
 
-/// A Service on a way's path, the ports its line ends at, and the
-/// policy gate on the line.  With no ports, the line ends at the
+/// A Service on a way's path.  With no ports, its line ends on the
 /// workload's edge.
 #[derive(Debug)]
 pub struct ServiceBox {
@@ -88,10 +87,11 @@ pub struct ServiceBox {
     pub from_controller: bool,
 }
 
-/// Who may call it from inside the cluster.
+/// Who may call the workload from inside the cluster.
 #[derive(Debug)]
 pub enum Inside {
-    /// One box for any pod, with the line's label and its gate.
+    /// One box with no ports: "any pod" when no NetworkPolicy limits
+    /// the callers, or "no pod" when a policy admits none.
     Any {
         boxed: Box<SectionBox>,
         label: String,
@@ -101,8 +101,8 @@ pub enum Inside {
     Admitted(Vec<Group>),
 }
 
-/// The callers one rule admits, its policy's name and gate, and the
-/// ports its line ends at, none for any port.
+/// The callers that one rule of a NetworkPolicy admits.  An empty
+/// `ports` means the rule admits any port.
 #[derive(Debug)]
 pub struct Group {
     pub callers: Vec<SectionBox>,
@@ -148,7 +148,7 @@ pub fn draw(reach: Reach) -> Drawing {
         drawing.text(TLS_X - 10, 12, "TLS", HEAD);
         drawing.text(SIGN_X - 14, 12, "sign-in", HEAD);
     }
-    let fronted = fronted(&reach);
+    let outside = outside_ports(&reach);
     let mut controlled: Vec<i32> = Vec::new();
     let mut to_services: Vec<(Point, usize)> = Vec::new();
     for way in reach.ways {
@@ -294,7 +294,7 @@ pub fn draw(reach: Reach) -> Drawing {
             arrive(&mut arrivals, from, &[], Style::Dashed);
         }
         Inside::Admitted(groups) => {
-            for group in in_port_order(groups, &fronted) {
+            for group in in_port_order(groups, &outside) {
                 let mut middles = Vec::new();
                 for caller in group.callers {
                     let h = height(&caller, LEFT_W);
@@ -349,9 +349,9 @@ pub fn draw(reach: Reach) -> Drawing {
     drawing
 }
 
-/// The ports the ways in and the Services reach, in the order their
-/// lines arrive, which puts them at the top of the workload's edge.
-fn fronted(reach: &Reach) -> Vec<usize> {
+/// The ports that lines from outside the cluster end at, in the order
+/// `draw` adds those lines, without repeats.
+fn outside_ports(reach: &Reach) -> Vec<usize> {
     let ways = reach.ways.iter().filter_map(|way| match &way.path {
         Path::Ports { ports, .. } => Some(ports.as_slice()),
         _ => None,
@@ -360,29 +360,32 @@ fn fronted(reach: &Reach) -> Vec<usize> {
         .services
         .iter()
         .map(|service| service.ports.as_slice());
-    let mut fronted: Vec<usize> = Vec::new();
+    let mut outside: Vec<usize> = Vec::new();
     for port in ways.chain(services).flatten() {
-        if !fronted.contains(port) {
-            fronted.push(*port);
+        if !outside.contains(port) {
+            outside.push(*port);
         }
     }
-    fronted
+    outside
 }
 
-/// Returns `groups` in the order of the ports that their lines reach,
-/// so each line runs to its port without crossing another.  First come
-/// the callers of a port that the ways in or the Services reach,
-/// nearest the lines from above that share their port.  Next come the
-/// callers of any port, whose lines end on the workload's edge at their
-/// own height.  Last come the callers of every other port, and each of
-/// those ports is placed at its callers' height.  Groups that sort
-/// equally keep the order they came in.
-fn in_port_order(mut groups: Vec<Group>, fronted: &[usize]) -> Vec<Group> {
+/// Orders `groups` so that their lines to the ports do not cross:
+///
+/// 1. Groups that call a port in `outside`, by the position of their
+///    first such port, so each line runs beside the lines from outside
+///    that end at the same port.
+/// 2. Groups that call any port.
+/// 3. Groups that call only ports that no line from outside ends at.
+///    `sockets::ports` places each such port at the height of the
+///    highest line to it.
+///
+/// Groups of the same rank keep their input order.
+fn in_port_order(mut groups: Vec<Group>, outside: &[usize]) -> Vec<Group> {
     groups.sort_by_key(|group| {
         let first = group
             .ports
             .iter()
-            .filter_map(|port| fronted.iter().position(|f| f == port))
+            .filter_map(|port| outside.iter().position(|f| f == port))
             .min();
         match (first, group.ports.is_empty()) {
             (Some(at), _) => (0, at),

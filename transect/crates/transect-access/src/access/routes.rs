@@ -1,41 +1,43 @@
-//! The rules that grant none of the six capabilities but let an account
-//! act as another account or grant itself a role.  These rules mint a
-//! ServiceAccount's token, impersonate an account, bind a role, rewrite
-//! a role, or create a binding.  A step in follows.rs uses each route,
-//! and the account's drawing shows the rule among its other rules.
+//! The rules that let an account act as another account or give itself
+//! a role: creating a ServiceAccount's token, impersonating an account,
+//! binding a role, rewriting a role, or creating a binding.  The steps
+//! in `follows` start from these routes.  The account's page lists the
+//! rule with the account's other rules.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use k8s_openapi::api::rbac::v1::PolicyRule;
 
-use super::capability::{Asked, Scope, allows, ns, reaches};
+use super::capability::{ResourceVerbs, Scope, allows, ns, reaches};
 
-/// A rule that lets an account act as another.
+/// A kind of rule that lets an account act as another account or give
+/// itself a role.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Route {
-    /// `create` on `serviceaccounts/token`: the API server mints a
-    /// token for a ServiceAccount in the namespace, and the token signs
-    /// in as that ServiceAccount.
+    /// `create` on `serviceaccounts/token`: the API server creates a
+    /// token for a ServiceAccount in the namespace, and a request with
+    /// the token authenticates as that ServiceAccount.
     MintsTokens,
     /// `impersonate` on `serviceaccounts`: a request may act as a
-    /// ServiceAccount in the namespace, with its groups.
+    /// ServiceAccount in the namespace, with that ServiceAccount's
+    /// groups.
     ImpersonatesServiceAccounts,
     /// `impersonate` on `users`, which is cluster-scoped.
     ImpersonatesUsers,
     /// `impersonate` on `groups`, which is cluster-scoped.  The API
-    /// server takes a group to impersonate only beside a user or a
-    /// ServiceAccount to impersonate.
+    /// server accepts a group to impersonate only together with a user
+    /// or a ServiceAccount to impersonate.
     ImpersonatesGroups,
     /// `bind` on `roles`: a binding that the account creates may name a
-    /// Role in the namespace even when the account does not have every
-    /// rule of that Role.
+    /// Role in the namespace even when the account lacks some of the
+    /// Role's rules.
     BindsRoles,
     /// `bind` on `clusterroles`: a RoleBinding in the namespace may
     /// name the ClusterRole.  When a ClusterRoleBinding grants the
     /// rule, a ClusterRoleBinding may also name the ClusterRole.
     BindsClusterRoles,
-    /// `escalate` on `roles`: an update may give a Role more than the
-    /// account has.
+    /// `escalate` on `roles`: the account may update a Role to grant
+    /// more than the account has.
     EscalatesRoles,
     /// `escalate` on `clusterroles`, which is cluster-scoped.
     EscalatesClusterRoles,
@@ -47,18 +49,21 @@ pub enum Route {
     CreatesRoleBindings,
     /// `create` on `clusterrolebindings`, which is cluster-scoped.
     CreatesClusterRoleBindings,
-    /// Exec into, attach to, or patch pods by their names.  The Exec
-    /// capability counts a rule on every pod, and this route reads the
-    /// rules that name pods.
+    /// `create` on `pods/exec` or `pods/attach`, or `patch` or `update`
+    /// on `pods` or `pods/ephemeralcontainers`.  The steps from the
+    /// `Exec` capability use only a grant on every pod, so a step reads
+    /// this route for a rule that names pods.
     ExecsPods,
-    /// `get` or `create` on `nodes/proxy` by the names of Nodes: exec
-    /// into the pods on those machines.
+    /// `get` or `create` on `nodes/proxy`, which is cluster-scoped: the
+    /// account may exec into the pods on the Nodes.  As with
+    /// `ExecsPods`, a step reads this route for a rule that names
+    /// Nodes.
     ProxiesNodes,
 }
 
 const RBAC: &str = "rbac.authorization.k8s.io";
 
-const ROUTES: &[(Route, Asked)] = &[
+const ROUTES: &[(Route, ResourceVerbs)] = &[
     (
         Route::MintsTokens,
         ns("", "serviceaccounts/token", &["create"]),
@@ -114,17 +119,17 @@ const ROUTES: &[(Route, Asked)] = &[
     ),
 ];
 
-/// The objects a route is limited to, by name, or none for every
-/// object.
+/// The object names that a route is limited to, or an empty list for
+/// every object.
 pub type Names = Vec<String>;
 
-/// Each route `rules` grant through a binding of `scope`, with the
-/// names a rule limits it to.
+/// Each route that `rules` grant through a binding of `scope`, with the
+/// names that a rule limits it to.
 pub fn read(rules: &[PolicyRule], scope: Scope) -> BTreeMap<Route, Names> {
     let mut found: BTreeMap<Route, Limit> = BTreeMap::new();
-    for (route, asked) in ROUTES {
-        if reaches(asked, scope) {
-            found.entry(*route).or_default().add(rules, asked);
+    for (route, verbs) in ROUTES {
+        if reaches(verbs, scope) {
+            found.entry(*route).or_default().add(rules, verbs);
         }
     }
     let found = found.into_iter();
@@ -133,8 +138,7 @@ pub fn read(rules: &[PolicyRule], scope: Scope) -> BTreeMap<Route, Names> {
         .collect()
 }
 
-/// The names that the rules allowing one route are limited to, which
-/// `add` collects as it reads each rule.
+/// The object names that a set of rules limits a request to.
 #[derive(Default)]
 pub struct Limit {
     every: bool,
@@ -142,18 +146,18 @@ pub struct Limit {
 }
 
 impl Limit {
-    /// Adds what `rules` allow of `asked`.
-    pub fn add(&mut self, rules: &[PolicyRule], asked: &Asked) {
-        self.add_kind(rules, asked.group, asked.resource, asked.verbs);
+    /// Adds what `rules` allow for `verbs`.
+    pub fn add(&mut self, rules: &[PolicyRule], verbs: &ResourceVerbs) {
+        self.add_kind(rules, verbs.group, verbs.resource, verbs.verbs);
     }
 
-    /// Adds what `rules` allow of `verbs` on `resource` in `group`.
+    /// Adds what `rules` allow for `verbs` on `resource` in `group`.
     pub fn add_kind(&mut self, rules: &[PolicyRule], group: &str, resource: &str, verbs: &[&str]) {
-        // A request to create an object gives the authorizer no name,
-        // so a rule that names objects grants no `create` of the kind
-        // itself.  A request on a subresource names its object, as
-        // `serviceaccounts/{name}/token` does, so a rule that names
-        // objects still grants `create` on a subresource.
+        // The API server authorizes a `create` with no object name, so
+        // a rule with `resourceNames` never allows `create` on the kind
+        // itself.  A request on a subresource has its parent's name in
+        // the path, as `serviceaccounts/{name}/token` does, so
+        // `resourceNames` does limit `create` there.
         let by_name = verbs != ["create"] || resource.contains('/');
         for rule in rules {
             if !verbs.iter().any(|verb| allows(rule, verb, group, resource)) {
@@ -167,8 +171,8 @@ impl Limit {
         }
     }
 
-    /// The names the route is limited to, an empty list for every
-    /// object, or `None` when no rule allows the route.
+    /// The names, an empty list for every object, or `None` when no
+    /// rule allows the request.
     pub fn names(self) -> Option<Names> {
         match (self.every, self.names.is_empty()) {
             (true, _) => Some(Vec::new()),
@@ -178,7 +182,7 @@ impl Limit {
     }
 }
 
-/// Whether `names`, a route's limit, lets the route act on `name`.
+/// Whether `names`, a limit from `Limit::names`, allows `name`.
 pub fn admits(names: &[String], name: &str) -> bool {
     names.is_empty() || names.iter().any(|named| named == name)
 }

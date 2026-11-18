@@ -1,27 +1,27 @@
-//! Intent: what the people and agents who run a cluster say about its
-//! parts, read from annotations on the objects themselves, from
-//! overlays that take the place of those annotations, and from
-//! Intents.
+//! Intent is what the people and agents who run a cluster declare about
+//! its parts.  `transect` reads it from annotations on the objects,
+//! from overlays that supply those annotations, and from `Intent`
+//! resources.
 
+mod object_intent;
 mod resource;
-mod said;
 mod secrets;
 mod unattached;
 
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 
+pub use object_intent::{Docs, Intents, Line, Listed, ObjectIntent};
 pub use resource::Intent;
 #[cfg(any(test, feature = "fixtures"))]
 pub use resource::fixtures;
-pub use said::{Docs, Intents, Line, Listed, Said};
 pub use secrets::SecretIntent;
 pub use unattached::{Written, unattached};
 
 use crate::resources::{Condition, DocId};
 use transect_graph::edges::{Object, Plurals};
 
-/// A condition for each term of an `Intent`'s `selects` that names no
-/// object among `objects`.
+/// A condition for each term of an `Intent`'s `selects` that matches no
+/// object of `objects` in the `Intent`'s namespace.
 pub fn unmatched(
     intents: &[Intent],
     objects: &[(Object, &ObjectMeta)],

@@ -1,23 +1,20 @@
-//! This module reads the last log lines that the pod page shows.  When
-//! the cluster declares a log source, transect reads them from it, and
-//! otherwise from the Kubernetes API's `pods/log`, which needs nothing
-//! but the API.  When the source returns no lines, because of an error
-//! or because it has none for the pod, the page shows the API's tail in
-//! their place and states why.
+//! Reads the last log lines that the pod page shows.  When the cluster
+//! declares a log source, transect reads them from it, and otherwise from
+//! the Kubernetes API's `pods/log`.  When the source returns no lines,
+//! because of an error or because it has none for the pod, the page
+//! shows the API's lines and says why.
 //!
-//! A page load reads the tails and keeps them in a cache for `FRESH`.
-//! A pushed render reads only the cache, because the pod page renders
-//! again on every change in the cluster, and a read for each push and
-//! each container would turn one open tab into a steady load on the API
-//! server or the store.
+//! A page load reads the tails and caches them.  A pushed render reads
+//! only the cache, because the pod page renders again on every change in
+//! the cluster, and a read on each push would put a steady load on the
+//! API server or the log store for as long as a tab stays open.
 //!
 //! Health counts error lines in one of two ways.  When the log source
 //! maps a level field, `search` counts them across every pod over the
-//! last hour while it searches each pattern.  When it maps none, or
-//! while that search fails, health counts the error lines in the reads
-//! that the cache holds, so the count covers only the pods whose pages
-//! were opened.  This module does not tail every pod through the API,
-//! because that would read every log in the cluster on every change.
+//! last hour.  When it maps none, or when that search fails, health
+//! counts the error lines in the cached reads, which cover only the pods
+//! whose pages were opened.  Tailing every pod through the API instead
+//! would read every log in the cluster on every change.
 
 mod api;
 pub mod evidence;
@@ -57,13 +54,13 @@ use transect_resources::resources::Field;
 #[cfg(any(test, feature = "fixtures"))]
 pub use {query::Row, tail::from_rows};
 
-/// How long the page loads and pushes after a read use that read
-/// instead of reading again.
+/// A page load within this long of the last read of the same pod uses
+/// the cached read instead of reading again.
 const FRESH: Duration = Duration::from_secs(30);
 
-/// How long a read stays in the cache at all.  Pushes to a page that
-/// stays open keep their lines, and the cache drops the reads of pods
-/// whose pages closed long ago.
+/// How long a read counts toward health.  The next read of any pod
+/// drops the reads older than this from the cache, so the cache does not
+/// grow with every pod page that was ever opened.
 const KEEP: Duration = Duration::from_secs(600);
 
 /// How long one container's read may take before the page renders
@@ -77,10 +74,9 @@ pub const FORBIDDEN: &str =
 /// The text the page shows for a container with no lines.
 pub const EMPTY: &str = "nothing logged yet";
 
-/// The note under the heading.  It states how many lines of `container`
-/// the page shows, or the most lines it shows of each container when
-/// `container` is `None`, where the lines came from, and when transect
-/// read them.
+/// The note under the heading: how many lines the page shows of
+/// `container`, or at most of each container when `container` is
+/// `None`, where the lines came from, and when transect read them.
 pub fn note(tails: &Tails, container: Option<&str>) -> String {
     let at = tails.read_at.strftime("%H:%M:%S");
     let from = match &tails.from {
@@ -120,8 +116,8 @@ pub fn fallback(tails: &Tails) -> Option<String> {
     }
 }
 
-/// The declared log source, and the settings transect uses to connect
-/// to it from the place where transect runs.
+/// The declared log source, and the settings that decide how transect
+/// connects to it.
 #[derive(Clone)]
 pub struct Sourcing {
     /// The `LogSource` that the resources declare.  There is at most
@@ -215,9 +211,8 @@ impl LogTails {
         })
     }
 
-    /// Tails that connect to no log store and no API server, for the
-    /// fixture cluster, whose DNS domain is `domain`.  Each read returns
-    /// that nothing could be read.
+    /// Tails for the fixture cluster, whose DNS domain is `domain`.  They
+    /// connect to no log store and no API server, so every request fails.
     #[cfg(any(test, debug_assertions))]
     pub fn offline(changed: watch::Sender<()>, domain: &str) -> anyhow::Result<Self> {
         let nothing = tower::service_fn(|_: http::Request<kube::client::Body>| async {
@@ -257,13 +252,12 @@ impl LogTails {
         read.get(&key).map(|(_, tails)| tails.clone())
     }
 
-    /// Reads `pod`'s tails unless a read in the last `FRESH` already
-    /// returned them.  A page load calls this before it renders, and
-    /// waits for the read no longer than `READ_TIMEOUT`.  The read
-    /// itself may take longer, because when the source returns no
-    /// tails, transect then requests the API's.  A read that takes
-    /// longer than the wait continues, and when it finishes, the change
-    /// it sends pushes its lines to the page.
+    /// Reads `pod`'s tails unless a read in the last `FRESH` returned
+    /// them, and waits at most `READ_TIMEOUT`.  A page load calls this
+    /// before it renders.  The read can take longer than the wait,
+    /// because a failed read from the log source is followed by a read
+    /// from the API.  A read that outlasts the wait still finishes, and
+    /// the change it sends pushes its lines to the page.
     pub async fn refresh(&self, pod: &Pod) {
         let (Some(namespace), Some(name)) = (&pod.metadata.namespace, &pod.metadata.name) else {
             return;
@@ -335,7 +329,7 @@ impl LogTails {
                 matching,
             },
             Err(why) => {
-                tracing::debug!(namespace, name, %why, "the log source gave no tail");
+                tracing::debug!(namespace, name, error = %why, "The LogSource returned no tail, so the API read the lines");
                 Tails {
                     from: Origin::Fallback { source, why },
                     ..api::read(&self.client, namespace, name, containers).await

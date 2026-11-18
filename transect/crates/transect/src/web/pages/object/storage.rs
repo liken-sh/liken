@@ -1,6 +1,7 @@
-//! A `StorageClass`'s provisioner and volumes, a CSI driver's classes
-//! and where its data is, and a `ResourceClaim`'s device, machine, and
-//! pod.
+//! The sections of an object page for a `StorageClass` (its provisioner,
+//! volumes, and where their data is), a CSI driver (its `StorageClass`
+//! objects and where it keeps its data), and a `ResourceClaim` (its
+//! devices, machines, and pods).
 
 use kube::ResourceExt;
 use serde_json::Value;
@@ -43,7 +44,7 @@ pub fn class(snapshot: &Snapshot, object: &Object) -> Vec<Section> {
     ]
 }
 
-/// Where a backend keeps its data, in words.
+/// Describes where a volume's backend stores its data.
 fn backend(backend: &Backend) -> String {
     match backend {
         Backend::Address(address) => address.clone(),
@@ -57,7 +58,7 @@ pub fn driver(snapshot: &Snapshot, object: &Object) -> Vec<Section> {
     let classes = snapshot.paged.storage_classes.iter();
     let classes = classes.filter(|class| class.provisioner == object.name);
     let mut names: Vec<String> = classes.map(|class| class.name_any()).collect();
-    // The store's order changes between two reads of it.
+    // The store returns the classes in no stable order.
     names.sort();
     let classes = names.iter().map(|name| {
         let class = Object::new("storage.k8s.io", "StorageClass", None, name);
@@ -66,11 +67,11 @@ pub fn driver(snapshot: &Snapshot, object: &Object) -> Vec<Section> {
     let data_on = snapshot
         .intents
         .of(object)
-        .and_then(|said| said.data_on.as_ref());
+        .and_then(|intent| intent.data_on.as_ref());
     let console = snapshot
         .intents
         .of(object)
-        .and_then(|said| said.console.as_ref());
+        .and_then(|intent| intent.console.as_ref());
     let urls = snapshot.consoles().remove(&object.name).unwrap_or_default();
     let ground = snapshot
         .outsides
@@ -82,7 +83,7 @@ pub fn driver(snapshot: &Snapshot, object: &Object) -> Vec<Section> {
             .external("console", urls)
             .template("console template", console.map(|line| line.text.clone()))
             .fact("StorageClasses", classes.collect())
-            .fact("ground box", ground.into_iter().collect()),
+            .fact("outside system", ground.into_iter().collect()),
     ]
 }
 
@@ -130,7 +131,7 @@ mod tests {
     }
 
     #[rstest]
-    fn lists_a_drivers_storage_classes_by_name() {
+    fn lists_a_drivers_storage_classes_sorted_by_name() {
         let mut snapshot = Snapshot::empty();
         snapshot.paged.storage_classes = vec![
             class("zeta", "csi.example.test"),

@@ -1,7 +1,8 @@
-//! The NetworkPolicy gate of a way in: on where a policy limits who may
-//! call the pods on the way's ports, open where none selects them or
-//! one admits any caller on those ports, and half where that is true
-//! for some ports or workloads and not others.
+//! Tests of the NetworkPolicy gate of a way in.  The gate is `On` when
+//! a policy limits who may call the pods on the way's ports, and `Off`
+//! when no policy selects the pods or a policy admits any caller on
+//! those ports.  It is `Half` when the callers are limited on some of
+//! the ports or workloads and not on others.
 
 use std::collections::BTreeSet;
 
@@ -74,7 +75,7 @@ fn gate(text: &str, workload: &str, admitted: Option<Vec<Admission>>) -> (State,
         None => cluster,
     };
     let ways = cluster.ways();
-    let way = ways.rows.first().expect("a way in");
+    let way = ways.rows.first().expect("the cluster has no way in");
     (way.policy.state, way.policy.title.clone())
 }
 
@@ -147,8 +148,8 @@ fn reads_whether_a_policy_limits_who_may_call(
     assert_eq!(gate(text, workload, admitted), (state, title.to_string()));
 }
 
-/// A workload's own gate, on any of its ports, as a namespace's and a
-/// workload's access pages draw it beside its callers.
+/// The gate of a workload on all of its ports, which the namespace and
+/// workload access pages draw beside its callers.
 #[rstest]
 #[case::open(Isolation::Open, vec![], State::Off, "No NetworkPolicy selects its pods, so any pod may call them.")]
 #[case::on_its_machines_network(Isolation::MachineNetwork, vec![], State::Off, "No NetworkPolicy applies to a pod on its machine's network.")]

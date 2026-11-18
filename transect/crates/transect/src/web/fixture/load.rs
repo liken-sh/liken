@@ -1,5 +1,5 @@
-//! Sorting the fixture's YAML documents into the stores a snapshot
-//! holds, as the cluster's watches would fill them.
+//! Sorts the fixture's YAML documents into the stores of a snapshot,
+//! the way the cluster's watches fill those stores.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -17,14 +17,17 @@ use transect_cluster::cluster::RbacObjects;
 use transect_cluster::ownership::Packages;
 use transect_resources::knowledge::{Column, Columns, Definitions};
 
-/// Every document in `yaml`, sorted into `snapshot`'s stores: the
-/// built-in kinds by kind, and every other kind as a custom one, whose
-/// CRD must come before its objects.  A custom kind that owns
-/// something, that a reference by value matches, or that kind knowledge
-/// describes is kept whole, except when that knowledge has `gitops` or
-/// `findings` and reads no field that a trim drops.  Every other is
-/// trimmed to its metadata, conditions, printer columns, and the fields
-/// its GitOps or findings knowledge reads, as its store would keep it.
+/// Sorts every document in `yaml` into the stores of `snapshot`, and
+/// returns the `ResourceSlice` objects. Any kind not listed here is
+/// custom, and it panics unless its CRD comes earlier in `yaml`.
+///
+/// A custom kind's objects are kept whole when other objects have owner
+/// references to the kind, when a kind or device reference matches the
+/// kind's objects by a field value, or when the kind has knowledge. A
+/// kind whose knowledge has `gitops` or `findings` is kept whole only
+/// when `reads_fields` is true. `trim_custom` trims the objects of every
+/// other custom kind, keeping the paths of `kept_paths`, as the watch
+/// does.
 pub fn sort(snapshot: &mut Snapshot, yaml: &str) -> Vec<ResourceSlice> {
     let documents: Vec<DynamicObject> = serde_yaml::Deserializer::from_str(yaml)
         .map(|document| DynamicObject::deserialize(document).unwrap())
@@ -109,7 +112,9 @@ pub fn sort(snapshot: &mut Snapshot, yaml: &str) -> Vec<ResourceSlice> {
                             .api_version
                             .starts_with(&format!("{}/", crd.spec.group))
                 });
-                let crd = crd.unwrap_or_else(|| panic!("no CRD before the {kind} in the fixture"));
+                let crd = crd.unwrap_or_else(|| {
+                    panic!("the fixture has no CRD for {kind} before its first {kind} object")
+                });
                 let resource = resource(crd);
                 let key = (resource.group.clone(), resource.kind.clone());
                 let name = format!("{}.{}", resource.plural, resource.group);
@@ -143,8 +148,8 @@ pub fn sort(snapshot: &mut Snapshot, yaml: &str) -> Vec<ResourceSlice> {
     snapshot.paged.columns = Columns::read(&crds);
     snapshot.paged.packages = Packages::read(&crds);
     snapshot.definitions = Definitions::read(&crds);
-    // Discovery finds Kubernetes's own kinds at the start, as it finds
-    // the CRDs' kinds.
+    // API discovery returns the built-in kinds as well as the CRDs'
+    // kinds, so the plural of each built-in kind is added too.
     for served in transect_map::objects::kinds::every_built_in() {
         let resource = served.resource;
         let key = (resource.group.clone(), resource.kind.clone());
@@ -161,18 +166,18 @@ pub fn sort(snapshot: &mut Snapshot, yaml: &str) -> Vec<ResourceSlice> {
     slices
 }
 
-/// `document` as the built-in kind it names.
 fn typed<K: DeserializeOwned>(document: DynamicObject) -> Arc<K> {
     Arc::new(serde_json::from_value(serde_json::to_value(document).unwrap()).unwrap())
 }
 
-/// `document`'s metadata alone, as a metadata store keeps it.
+/// `document` reduced to its metadata, as a metadata-only watch keeps
+/// it.
 fn meta<K>(document: DynamicObject) -> Arc<PartialObjectMeta<K>> {
     let meta: ObjectMeta = document.metadata;
     Arc::new(meta.into_response_partial())
 }
 
-/// The resource `crd` serves, at its first version.
+/// The resource that `crd` serves, at its first listed version.
 fn resource(crd: &CustomResourceDefinition) -> ApiResource {
     let (group, version) = (&crd.spec.group, &crd.spec.versions[0].name);
     ApiResource {
@@ -184,7 +189,6 @@ fn resource(crd: &CustomResourceDefinition) -> ApiResource {
     }
 }
 
-/// Adds `object` to the store of `resource`'s kind.
 fn custom(snapshot: &mut Snapshot, resource: ApiResource, object: DynamicObject) {
     let object = Arc::new(object);
     match snapshot

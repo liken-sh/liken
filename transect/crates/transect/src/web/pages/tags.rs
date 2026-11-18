@@ -1,5 +1,5 @@
-//! The tags the cluster map puts on parcels when a namespace is
-//! selected, from a cluster built by hand.
+//! Tests of the tags that the cluster map puts on tiles when a
+//! namespace is selected, using a cluster built in the test.
 
 use std::sync::Arc;
 
@@ -29,8 +29,9 @@ status: {{phase: Running, podIPs: [{{ip: '{ip}'}}]}}"
     ))
 }
 
-/// The tags on each parcel with `shop` selected, when `ingress` is the
-/// one rule of a policy that isolates every pod in `shop`.
+/// The tags on each tile with `shop` selected, where `ingress` is the
+/// only ingress rule of a `NetworkPolicy` that selects every pod in
+/// `shop`.
 fn tags(ingress: &str) -> Vec<(String, Vec<Relation>)> {
     let mut snapshot = Snapshot::empty();
     snapshot.namespaces = vec![
@@ -62,10 +63,10 @@ spec: {{podSelector: {{}}, policyTypes: [Ingress], ingress: [{ingress}]}}"
         &Shown::default(),
         k8s_openapi::jiff::Timestamp::now(),
     );
-    let parcels = page.map.bands.iter().flat_map(|band| &band.parcels);
-    let tagged = parcels.filter(|parcel| !parcel.relations.is_empty());
+    let tiles = page.map.bands.iter().flat_map(|band| &band.tiles);
+    let tagged = tiles.filter(|tile| !tile.relations.is_empty());
     tagged
-        .map(|parcel| (parcel.namespace.clone(), parcel.relations.clone()))
+        .map(|tile| (tile.namespace.clone(), tile.relations.clone()))
         .collect()
 }
 

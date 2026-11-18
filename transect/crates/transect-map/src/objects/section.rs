@@ -1,15 +1,13 @@
-//! What an object's board shows around the object: sections of facts,
-//! each a label and the objects or words it names, and a table where
-//! the facts have columns, as a Role's rules do.  Each section names
-//! the side of the board it is drawn on, and every section, whatever its
-//! kind, is drawn by one template from these.
+//! The sections of an object's board. A section is a titled list of
+//! facts, each a label with its values, and it can also have a table
+//! for facts that have columns, such as a Role's rules.
 
 use transect_graph::links::Reference;
 use transect_resources::resources::OffLine;
 
-/// The most names a fact lists before it folds to a count that opens
-/// to them.
-const MOST: usize = 6;
+/// The most values a fact lists. A fact with more shows a count, which
+/// the reader expands to see the values.
+const FOLD_AFTER: usize = 6;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Section {
@@ -17,18 +15,20 @@ pub struct Section {
     pub side: Side,
     pub facts: Vec<Fact>,
     pub table: Option<Table>,
-    /// The line the section shows when it has nothing else.
+    /// The line shown when the section has no facts or table rows.
     pub none: Option<OffLine>,
-    /// The summary the section shows folded, such as "128 workloads in
-    /// 40 namespaces", when its facts together run longer than a box
-    /// shows at a glance, though each alone is short.
+    /// A summary, such as "128 workloads in 40 namespaces", that the
+    /// section shows in place of its facts until the reader expands it.
+    /// It is for a section of many facts, each short enough not to
+    /// collapse on its own.
     pub folded: Option<String>,
 }
 
-/// Where a section is drawn on the board: what the object belongs to and
-/// what names it to its left, its own facts in its box, and what it
-/// names to its right.  A section with a table spans the page under
-/// the board, whatever its side.
+/// Where a section is drawn on the board. On the left, `BelongsTo` lists
+/// what the object belongs to, and `Into`, under it, lists what refers
+/// to the object. `Own` is in the object's box. `Out`, on the right,
+/// lists what the object refers to. A section with a table spans the
+/// page under the board, whatever its side.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Side {
     BelongsTo,
@@ -37,7 +37,6 @@ pub enum Side {
     Out,
 }
 
-/// One label and what it names: objects with their pages, or words.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Fact {
     pub label: String,
@@ -48,22 +47,21 @@ pub struct Fact {
 /// How a fact's values are drawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shape {
-    /// Names, each a link when it has a page.
+    /// Names, each a link when its object has a page.
     Names,
-    /// Literal text, such as a label selector, set in code.
+    /// Literal text, such as a label selector.
     Literal,
-    /// No value, such as a printer column whose field is not written
-    /// yet: a gray dash.
+    /// No value, such as a printer column whose field is not set, drawn
+    /// as a gray dash.
     Unset,
     /// Names in pairs, each a thing and the machine it is on, such as a
     /// pod that mounts a volume: "web-1 on alpha".
     Placed,
-    /// Addresses outside transect, each a link that opens in a new tab,
-    /// such as a storage console.
+    /// Addresses outside transect, such as a storage console, each a
+    /// link that opens in a new tab.
     External,
-    /// A template that other values are filled from, set in code and in
-    /// gray, because it shows how the values were found and is not one
-    /// of them.
+    /// A template that other values were generated from, drawn in gray
+    /// because it is not one of those values.
     Template,
 }
 
@@ -85,7 +83,6 @@ impl Section {
         }
     }
 
-    /// The section folded behind `summary`, which opens to its facts.
     pub fn folded(self, summary: String) -> Self {
         Self {
             folded: Some(summary),
@@ -93,13 +90,13 @@ impl Section {
         }
     }
 
-    /// The section with `label` naming `values`, left out when `values`
-    /// is empty.
+    /// Adds a fact named `label` that lists `values`. Adds nothing when
+    /// `values` is empty.
     pub fn fact(self, label: &str, values: Vec<Reference>) -> Self {
         self.shaped(label, values, Shape::Names)
     }
 
-    /// The section with `label` giving `values` as literal text.
+    /// Adds a fact named `label` that lists `values` as literal text.
     pub fn literals(self, label: &str, values: Vec<String>) -> Self {
         self.shaped(
             label,
@@ -108,8 +105,8 @@ impl Section {
         )
     }
 
-    /// The section with `label` linking each of `urls`, which open in
-    /// a new tab, left out when there are none.
+    /// Adds a fact named `label` that links each of `urls`, which open in
+    /// a new tab. Adds nothing when `urls` is empty.
     pub fn external(self, label: &str, urls: Vec<String>) -> Self {
         let values = urls.into_iter().map(|url| Reference {
             text: url.clone(),
@@ -118,8 +115,8 @@ impl Section {
         self.shaped(label, values.collect(), Shape::External)
     }
 
-    /// The section with `label` giving `template` in gray, when there
-    /// is one.
+    /// Adds a fact named `label` that shows `template` in gray.
+    /// Adds nothing when `template` is none.
     pub fn template(self, label: &str, template: Option<String>) -> Self {
         self.shaped(
             label,
@@ -128,20 +125,21 @@ impl Section {
         )
     }
 
-    /// The section with `label` showing `text`, when there is any.
+    /// Adds a fact named `label` that shows `text`. Adds nothing when
+    /// `text` is none.
     pub fn text(self, label: &str, text: Option<String>) -> Self {
         let values = text.into_iter().map(|text| Reference { text, href: None });
         self.fact(label, values.collect())
     }
 
-    /// The section with `label` naming each of `pairs` as a thing and
-    /// the place it is on, left out when `pairs` is empty.
+    /// Adds a fact named `label` that lists `pairs`, each a thing and the
+    /// place it is on. Adds nothing when `pairs` is empty.
     pub fn placed(self, label: &str, pairs: Vec<(Reference, Reference)>) -> Self {
         let values = pairs.into_iter().flat_map(|(what, on)| [what, on]);
         self.shaped(label, values.collect(), Shape::Placed)
     }
 
-    /// The section with `label` and no value, drawn as a gray dash.
+    /// Adds a fact named `label` with no value, drawn as a gray dash.
     pub fn unset(mut self, label: &str) -> Self {
         self.facts.push(Fact {
             label: label.into(),
@@ -169,13 +167,13 @@ impl Section {
         }
     }
 
-    /// The section with the line it shows when it has nothing else.
+    /// Sets `none` as the line shown when the section is empty.
     pub fn or(self, none: &str) -> Self {
-        self.or_off(OffLine::said(none))
+        self.or_off(OffLine::plain(none))
     }
 
-    /// The section with `none` as the line it shows when it has nothing
-    /// else, which may send the reader to `/resources`.
+    /// The same as `or`, with an `OffLine`, which can link to
+    /// `/resources`.
     pub fn or_off(self, none: OffLine) -> Self {
         Self {
             none: Some(none),
@@ -183,7 +181,8 @@ impl Section {
         }
     }
 
-    /// Whether the section has anything to show, its `none` line aside.
+    /// Whether the section has no facts and no table rows. Its `none`
+    /// line does not count.
     pub fn is_empty(&self) -> bool {
         self.facts.is_empty()
             && self
@@ -192,9 +191,9 @@ impl Section {
                 .is_none_or(|table| table.rows.is_empty())
     }
 
-    /// The section without the values that `shown` reports another part
-    /// of the page already draws, and without each fact that this leaves
-    /// empty.
+    /// Removes the values for which `shown` is true, and each fact that
+    /// this leaves with no values. A fact with
+    /// `Shape::Unset` has no values to begin with, so it stays.
     pub fn without(self, shown: impl Fn(&Reference) -> bool) -> Self {
         let facts = self.facts.into_iter().filter_map(|fact| {
             let unset = fact.shape == Shape::Unset;
@@ -207,28 +206,25 @@ impl Section {
         }
     }
 
-    /// Whether it has the object's own facts, which show as a grid of
-    /// labels beside values.
+    /// Whether this is the object's own section, which is drawn as a
+    /// grid of labels beside values.
     pub fn is_own(&self) -> bool {
         self.side == Side::Own
     }
 
-    /// Whether the page draws it: it has something to show, or a line
-    /// that tells the reader it has nothing.
+    /// Whether the page draws the section: it is not empty, or it has a
+    /// `none` line to say that it is.
     pub fn shown(&self) -> bool {
         !self.is_empty() || self.none.is_some()
     }
 }
 
 impl Fact {
-    /// Whether its values fold to a count, as a list longer than a
-    /// box can show at a glance does.
     pub fn folds(&self) -> bool {
-        self.count() > MOST
+        self.count() > FOLD_AFTER
     }
 
-    /// How many things it names, a pair of a thing and its place
-    /// counting once.
+    /// How many things the fact names. A `Placed` pair counts once.
     pub fn count(&self) -> usize {
         match self.shape {
             Shape::Placed => self.values.len() / 2,
@@ -236,14 +232,14 @@ impl Fact {
         }
     }
 
-    /// Its values in pairs, for a fact that places each thing.
+    /// The values as (thing, place) pairs, for a `Placed` fact.
     pub fn pairs(&self) -> Vec<(&Reference, &Reference)> {
         let (pairs, _) = self.values.as_chunks::<2>();
         pairs.iter().map(|[a, b]| (a, b)).collect()
     }
 }
 
-/// Words that open no page.
+/// A `Reference` to plain text with no link.
 pub fn words(text: impl Into<String>) -> Reference {
     Reference {
         text: text.into(),

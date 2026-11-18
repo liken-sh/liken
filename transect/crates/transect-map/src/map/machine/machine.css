@@ -1,8 +1,7 @@
 /*
- * The machine page as a board: a strip of the machine's figures, a box
- * per band of what runs there, boxes of its devices, volumes, logs, and
- * the resource below it, and on the right what its kubelet reports.
- * Colors are liken's tokens.
+ * The machine page: a strip with the machine's figures, a box for each
+ * band of what runs there, boxes for its devices, volumes, and logs,
+ * and the resource below them, with the kubelet's report on the right.
  */
 
 .machine-page {
@@ -32,9 +31,8 @@
 
 .machine-card { flex: 0 1 360px; }
 
-/* The strip: the machine's name, role, readiness, and pod count over
-   its CPU and memory bars, in the heavier rule the object's own box
-   takes on a board. */
+/* The machine's name, role, readiness, and pod count over its CPU and
+   memory bars. The 2px border marks it as the page's own object. */
 .machine-strip {
   display: flex;
   flex-direction: column;
@@ -66,8 +64,8 @@
 
 .machine-figure { color: var(--ink-faint); margin-left: 8px; white-space: nowrap; }
 
-/* A band: its name on the left, as the workload page labels its rows,
-   and its namespaces packed beside it. */
+/* A band's name is on the left, as on the workload page, with its
+   namespaces beside it. */
 .machine-band {
   display: flex;
   align-items: flex-start;
@@ -81,11 +79,10 @@
 .machine-band > .row-label { padding-top: 4px; }
 
 
-/* The namespaces are laid out in a grid of columns at least 300px wide,
-   which fills the band at any width.  A namespace of many pods spans
-   the band and lays out its own rows in the same columns, so it never
-   leaves the band's other columns empty beside it.  Dense packing fills
-   the holes that the short namespaces leave. */
+/* A namespace with many pods spans the band and lays out its own rows
+   in the same columns, so that it does not leave the other columns
+   empty beside it. Dense packing fills the holes that the short
+   namespaces leave. */
 .machine-namespaces {
   flex: 1;
   min-width: 0;
@@ -128,8 +125,6 @@
 
 .machine-namespace-head { font-weight: 600; }
 
-/* A pod: its name and workload on one line, then its bars and how it
-   is doing. */
 .machine-pod {
   display: flex;
   flex-direction: column;
@@ -159,8 +154,7 @@
 
 .machine-pod-of { color: var(--ink-faint); }
 
-/* A DaemonSet's "one per machine", a tag after its name that keeps its
-   words together. */
+/* The "one per machine" tag after a `DaemonSet`'s name. */
 .machine-pod-tag {
   padding: 0 5px;
   border: 1px solid var(--rule-strong);
@@ -194,8 +188,6 @@
 
 .machine-label { color: var(--ink-muted); overflow-wrap: anywhere; }
 
-/* The boxes under the bands are in a grid of columns, and the devices
-   box spans it. */
 .machine-boxes {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -205,9 +197,9 @@
 
 .machine-devices { grid-column: 1 / -1; }
 
-/* A box per driver, packed in columns at least 300px wide as a band
-   packs its namespaces.  A driver with more hardware than one column
-   shows spans the row and lays out its hardware in the same columns. */
+/* A box for each driver, packed as a band packs its namespaces. A
+   driver with many devices spans the row and lays them out in the same
+   columns. */
 .machine-drivers {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -253,8 +245,8 @@
 
 .machine-driver-fold[open] > summary { margin-bottom: 8px; }
 
-/* A piece of hardware, as a pod row is drawn: a rule above it, its
-   title, its holders, then gray lines of facts and references. */
+/* A device, drawn like a pod row: a rule above it, its title, the
+   claims that hold it, then gray lines of facts and references. */
 .machine-device {
   display: flex;
   flex-direction: column;
@@ -277,8 +269,8 @@
   font-size: 12px;
 }
 
-/* A holder is a generated name too long for a column, so it keeps to
-   one line and ends in an ellipsis.  The device's title attribute gives
+/* The name of a claim is often generated and too long for a column, so
+   it stays on one line and ends in an ellipsis. The line's title shows
    the whole name. */
 .machine-device-holder {
   display: flex;
@@ -296,8 +288,8 @@
 
 .machine-device-free { color: var(--ink-faint); }
 
-/* Held fills the mark and not held outlines it, in gray, because
-   holding a device is neither good nor bad. */
+/* Filled when a claim holds the device, outlined when it is free. Both
+   are gray, because a held device is neither good nor bad. */
 .machine-device-mark {
   flex: none;
   width: 7px;
@@ -316,9 +308,9 @@
   overflow-wrap: anywhere;
 }
 
-/* The device that a link from another page opens at, which links.js
-   marks, so the reader finds it on a page too short to scroll it to the
-   top. */
+/* links.js marks the device that a link from another page points to,
+   so that the reader can find it when the page is too short to scroll
+   it to the top. */
 .machine-device.link-target {
   margin: 0 -6px;
   padding: 8px 6px 6px;

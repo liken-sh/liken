@@ -1,9 +1,8 @@
-//! Reads each ingress controller's traffic from Prometheus on an
-//! interval, with the queries that its `IngressController` declares,
-//! and publishes the latest reading on a watch channel that each
-//! render reads.  When a reading differs from the last one, the task
-//! signals that the cluster changed, so open pages show the new
-//! figures.
+//! Polls Prometheus for each ingress controller's traffic, with the
+//! queries in its `IngressController`, and publishes the latest
+//! reading on a watch channel for the pages to read. When a reading
+//! differs from the previous one, the task also sends on `changed`, so
+//! open pages refresh.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,12 +16,15 @@ use transect_observe::metrics::Reaching;
 use transect_observe::prometheus::QueryError;
 use transect_resources::resources::Field;
 
-/// The results of every controller's queries in the last round.
+/// The measurements of the latest poll, one for each controller whose
+/// queries succeeded.
 pub type Reading = Arc<Vec<Measured>>;
 
-/// Queries the Prometheus that `reaching` returns, for each of
-/// `controllers` that declares `entry`, now and every `interval`.
-/// With no Prometheus, the reading is empty.
+/// Starts the polling task and returns the receiver of its readings.
+/// The task polls once at start and then every `interval`, and polls
+/// only the controllers that have `entry` queries. A controller whose
+/// query fails is left out of the reading. The reading is empty while
+/// `reaching` finds no Prometheus.
 pub fn poll(
     reaching: Reaching,
     controllers: Field<Vec<IngressController>>,
@@ -40,7 +42,7 @@ pub fn poll(
                 Some(_) => controllers.read(),
                 None => Vec::new(),
             };
-            let asks = controllers.iter().filter_map(|controller| {
+            let controller_queries = controllers.iter().filter_map(|controller| {
                 let queries = controller.entry.clone()?;
                 let prometheus = prometheus.as_ref()?;
                 Some(async move {
@@ -49,24 +51,24 @@ pub fn poll(
                         prometheus.query(&queries.latency),
                         prometheus.query(&queries.errors),
                     );
-                    let answered = (|| -> Result<_, QueryError> {
+                    let measurement = (|| -> Result<_, QueryError> {
                         Ok(measure(&queries.label, &requests?, &latency?, &errors?))
                     })();
-                    match answered {
+                    match measurement {
                         Ok(backends) => Some(Measured {
                             controller: controller.name.clone(),
                             queries,
                             backends,
                         }),
                         Err(error) => {
-                            tracing::warn!(controller = %controller.name, %error, "an entry query failed");
+                            tracing::warn!(controller = %controller.name, %error, "Prometheus returned an error for the traffic queries of an IngressController");
                             None
                         }
                     }
                 })
             });
-            let found = futures::future::join_all(asks).await;
-            let reading: Reading = Arc::new(found.into_iter().flatten().collect());
+            let measured = futures::future::join_all(controller_queries).await;
+            let reading: Reading = Arc::new(measured.into_iter().flatten().collect());
             let differs = readings.send_if_modified(|current| {
                 let differs = **current != *reading;
                 if differs {

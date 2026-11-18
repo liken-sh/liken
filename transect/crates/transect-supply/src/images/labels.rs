@@ -1,6 +1,6 @@
 //! Reads the labels in an image's config blob into the facts that a card
-//! shows: where the image was built from, its release, its description,
-//! and its documentation.
+//! shows: the repository and commit the image was built from, its
+//! version, its description, and its documentation.
 //!
 //! Anyone who builds an image can write its labels, so transect passes
 //! each label through `untrusted` before a card shows it.
@@ -21,10 +21,10 @@ pub const DOCUMENTATION: &str = "org.opencontainers.image.documentation";
 
 /// The most characters of a description that a card shows.
 const DESCRIPTION_CHARS: usize = 200;
-/// The longest a revision or a version may be, in characters.
+/// The most characters kept of a source, a revision, or a version.
 const SHORT_CHARS: usize = 300;
 
-/// The facts that an image's labels state about the image.
+/// The facts about an image that its labels record.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Provenance {
     /// The repository it was built from, as a clone URL.

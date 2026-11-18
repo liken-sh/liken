@@ -1,11 +1,11 @@
-//! A ground box's own page, `/ground/{name}`, which shows the thing
-//! outside the cluster as a board.  The box at the top gives its title,
-//! its link out to its own console, and the lines its Outside gives
-//! about it.  Boxes beside it list the addresses and drivers that reach
-//! it, the claims it keeps by type, the workloads whose volumes are on
-//! it, and every workload configured to reach it.  A backend that no
-//! Outside names, such as an NFS server's address, gets the same page
-//! by its own name, with only what the API reports.
+//! The page of one outside system, at `/ground/{name}`: a thing outside the
+//! cluster, such as a NAS. The top box shows its title, a link to its
+//! own console, and the lines from its `Outside`. The boxes beside it
+//! list the addresses and drivers that reach it, the volumes it keeps by
+//! type, the workloads whose volumes are on it, and every workload
+//! configured to reach it. A backend that no `Outside` describes, such
+//! as an NFS server's address, gets the same page under its own name,
+//! with only what the API reports.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -22,47 +22,52 @@ use transect_resources::intent::Line;
 #[derive(Template)]
 #[template(path = "map/ground/ground.html", blocks = ["main"])]
 pub struct GroundPage {
-    /// The name in its URL: its Outside's name, or the backend's.
+    /// The name in the page's URL: the `Outside`'s name, or the
+    /// backend's name.
     pub name: String,
-    /// What its box shows, such as "The NAS".
+    /// The title of its box, such as "The NAS".
     pub title: String,
-    /// Its own console, when its Outside gives a URL a browser may open,
-    /// or its drivers' console template fills one.
+    /// A link to its console: the `Outside`'s `url` when a browser can
+    /// open it, or else the console URL when its drivers' `console`
+    /// template gives exactly one.
     pub link: Option<String>,
-    /// Each console its drivers' template fills, when it fills more
-    /// than one.  The title then links to none of them.
+    /// The console URLs that its drivers' `console` template gives,
+    /// when there is more than one. The title links to none of them.
     pub consoles: Vec<String>,
-    /// Its Outside's `url` as text, when it is not one to open.
+    /// The `Outside`'s `url` as plain text, when a browser cannot open
+    /// it.
     pub url_text: Option<String>,
     pub about: Vec<Line>,
-    /// How it is reached, on the board's left.
+    /// How it is reached, drawn on the left of the board.
     pub reached: Section,
-    /// What it keeps and what uses it, on the board's right.
+    /// What it keeps and what uses it, drawn on the right of the
+    /// board.
     pub uses: Vec<Section>,
-    /// "2 volumes · 3 workloads use it".
+    /// The summary line, such as "2 volumes · 3 workloads use it".
     pub summary: String,
 }
 
-/// What a ground page reads.
+/// What a ground page is built from.
 pub struct Ground<'a> {
-    /// The box's title, as the ground band shows it.
+    /// The box's title, as the outside-systems band shows it.
     pub title: &'a str,
     pub outside: Option<&'a Outside>,
     pub claims: Vec<(&'a Claim, &'a Type)>,
-    /// The workloads whose volumes are on it: through a claim, or an
-    /// NFS volume a pod names by one of its addresses.
+    /// The workloads whose volumes are on it, through a claim or
+    /// through an NFS volume that a pod mounts by one of its
+    /// addresses.
     pub stores: Vec<&'a Object>,
-    /// The objects whose edges of any kind except stores-on reach it,
-    /// each configured with its address.
+    /// The objects that reach it through an edge of any kind except
+    /// stores-on, each configured with its address.
     pub dependents: Vec<&'a Object>,
-    /// The console URLs its drivers' `console` template fills, when its
-    /// Outside gives no `url`.
+    /// The console URLs that its drivers' `console` template gives.
+    /// The page uses them when its `Outside` has no `url` to open.
     pub consoles: Vec<String>,
 }
 
 impl GroundPage {
-    /// The page `ground` draws, under the name `name`, with `href` giving
-    /// each object's page.
+    /// The page for `ground` under the name `name`. `href` gives the
+    /// page of each object.
     pub fn build(name: &str, ground: Ground, href: impl Fn(&Object) -> Option<String>) -> Self {
         let outside = ground.outside;
         let reached = Section::new("Reached as", Side::BelongsTo)
@@ -157,13 +162,15 @@ impl GroundPage {
         format!("/events/ground/{}", self.name)
     }
 
-    /// What the marks on the page mean, when any line is marked.
+    /// The explanation of the marks on the page, when any line is
+    /// marked.
     pub fn legend(&self) -> Option<String> {
         transect_graph::edges::provenance::legend(self.about.iter().map(|line| &line.provenance))
     }
 }
 
-/// `objects` by namespace, each namespace once and in order.
+/// Groups `objects` by namespace, in namespace order. An object with no
+/// namespace goes under "cluster".
 fn by_namespace<'a>(objects: &[&'a Object]) -> BTreeMap<&'a str, Vec<&'a Object>> {
     let mut found: BTreeMap<&str, Vec<&Object>> = BTreeMap::new();
     for object in objects {
@@ -173,11 +180,12 @@ fn by_namespace<'a>(objects: &[&'a Object]) -> BTreeMap<&'a str, Vec<&'a Object>
     found
 }
 
-/// The most workloads a box of them lists before it folds.
+/// The most workloads that a box lists before it folds them to a
+/// summary.
 const UNFOLDED: usize = 12;
 
-/// "128 workloads in 40 namespaces", for a list of workloads too long
-/// to show unfolded, or none for a short one.
+/// A summary such as "128 workloads in 40 namespaces" when there are
+/// more than `UNFOLDED` workloads, or `None` otherwise.
 fn folded(workloads: usize, namespaces: usize) -> Option<String> {
     let plural = |n: usize| if n == 1 { "" } else { "s" };
     (workloads > UNFOLDED).then(|| {
@@ -189,15 +197,15 @@ fn folded(workloads: usize, namespaces: usize) -> Option<String> {
     })
 }
 
-/// How many workloads use it, each once whether it stores on it, is
-/// configured to reach it, or both.
+/// How many distinct workloads store on it or are configured to reach
+/// it. A workload that does both counts once.
 fn used(stores: &[&Object], dependents: &[&Object]) -> usize {
     let all: BTreeSet<&Object> = stores.iter().chain(dependents).copied().collect();
     all.len()
 }
 
-/// "2 volumes · 3 workloads use it", or "Nothing in the cluster uses
-/// it." when neither.
+/// The summary line, such as "2 volumes · 3 workloads use it", or
+/// "Nothing in the cluster uses it." when both counts are zero.
 fn summary(volumes: usize, workloads: usize) -> String {
     let volumes = match volumes {
         0 => None,
@@ -239,7 +247,11 @@ mod tests {
     #[case::volumes(2, 0, "2 volumes")]
     #[case::both(1, 3, "1 volume · 3 workloads use it")]
     #[case::one_workload(0, 1, "1 workload uses it")]
-    fn sums_up_what_uses_it(#[case] volumes: usize, #[case] workloads: usize, #[case] text: &str) {
+    fn summarizes_what_uses_it(
+        #[case] volumes: usize,
+        #[case] workloads: usize,
+        #[case] text: &str,
+    ) {
         assert_eq!(summary(volumes, workloads), text);
     }
 
@@ -283,7 +295,7 @@ mod tests {
     }
 
     #[rstest]
-    fn boxes_how_it_is_reached_what_it_keeps_and_who_needs_it() {
+    fn lists_how_it_is_reached_what_it_keeps_and_what_uses_it() {
         let page =
             page("{title: The NAS, addresses: [nas.example.com], drivers: [csi.example.com]}");
         let strings = |values: &[&str]| values.iter().map(|v| v.to_string()).collect::<Vec<_>>();

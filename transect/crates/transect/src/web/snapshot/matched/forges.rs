@@ -1,6 +1,7 @@
-//! The conditions of a `Forge` that serves no repository `transect`
-//! reads: no GitOps source fetches from a host it names, and no running
-//! image's source label is on one.
+//! Marks a `Forge` as unmatched when none of the repositories that
+//! `transect` reads is on one of its hosts. Those repositories are the
+//! URLs of the GitOps sources and the source labels of the running
+//! images.
 
 use std::collections::HashSet;
 
@@ -33,8 +34,8 @@ impl Snapshot {
             .collect()
     }
 
-    /// The source label of every running container's image whose
-    /// labels `transect` has read.
+    /// The source label of each running container's image, for the
+    /// images whose labels `transect` has read.
     fn image_sources(&self) -> Vec<String> {
         let statuses = self.pods.iter().filter_map(|pod| pod.status.as_ref());
         let statuses = statuses.flat_map(|status| {

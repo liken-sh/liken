@@ -10,7 +10,7 @@ use transect_cluster::ownership::Ownership;
 use transect_cluster::workloads::{Objects, Revisions, Workloads};
 use transect_graph::edges::Object;
 
-/// A workload's guards with every guard in place: three pods spread by
+/// A replicated workload with every guard in place: pods spread by
 /// anti-affinity, a budget that allows one eviction, a rolling update, a
 /// readiness probe, and a CPU limit.
 fn guarded() -> Guards {

@@ -14,10 +14,10 @@ pub enum State {
     Down { wanted: i32 },
     /// Some ready pods outside the lost set, but fewer than declared.
     Short { ready: i32, wanted: i32 },
-    /// At least one ready replica outside it, however many it declares,
-    /// but the pod that takes writes inside it, as its kind knowledge's
-    /// `primary` names: writes stop until the operator promotes one of
-    /// the replicas.
+    /// At least one ready pod outside the lost set, but the primary is
+    /// inside it.  The primary is the pod that accepts writes, and the
+    /// workload's kind knowledge names it in `primary`.  Writes stop
+    /// until the workload's operator promotes a replica.
     Primary { ready: i32, wanted: i32 },
 }
 
@@ -29,8 +29,8 @@ impl State {
         matches!(self, Self::Down { .. } | Self::Primary { .. })
     }
 
-    /// Whether the workload is exactly one replica short.  The sidebar
-    /// folds these lines away after its first lines.
+    /// Whether the workload is exactly one replica short.  After its
+    /// first few lines, the sidebar shows only a count of these.
     pub fn one_short(&self) -> bool {
         matches!(self, Self::Short { ready, wanted } if wanted - ready == 1)
     }
@@ -42,7 +42,8 @@ pub enum Role {
     /// A `DaemonSet` runs one pod per machine by design, so the loss of
     /// a machine never leaves it short.
     DaemonSet,
-    /// A `CronJob` or a `Job`, whose pod runs again on its next schedule.
+    /// A `CronJob` or a `Job`.  Its pods run to completion and are not
+    /// replicas, so the loss gives it no state.
     Scheduled,
     /// Any other workload, with the replicas it declares.  For a
     /// workload that sets no count, such as a pod with no owner, the
@@ -68,9 +69,9 @@ pub fn role(workload: &Workload) -> Role {
 /// The state of a workload that declares `wanted` replicas and runs the
 /// pods in `running`.  `lost` returns whether a pod is on the lost set,
 /// and `primary_lost` is whether the workload's primary is among those
-/// pods.  A workload scaled to zero declares no pods, so a loss takes
-/// nothing from it.  The loss of the primary stops writes however many
-/// replicas are left, so the function checks it before the count.
+/// pods.  A workload scaled to zero loses nothing.  The loss of the
+/// primary stops writes however many replicas are left, so the function
+/// checks it before the count.
 pub fn state(
     wanted: i32,
     running: &[&Pod],

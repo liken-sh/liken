@@ -1,22 +1,20 @@
-//! A usage bar: what a pod or a container uses of one resource, against
-//! what it requests and is limited to.  The workload page draws one per
-//! pod and the pod page one per container, so the two pages show usage the
-//! same way.
+//! A usage bar shows what a pod or a container uses of one resource,
+//! against its request and its limit. The workload page draws one bar
+//! per pod and the pod page one per container.
 //!
-//! A bar runs to the limit, with the request marked, or, with no limit,
-//! to the request.  A limit is the most a container can use, so a bar
-//! against it shows how close the container is to being throttled or
-//! killed.  When there is no limit, the request is the only size the
-//! scheduler has for the container.
+//! A bar's full width is the limit, with the request marked inside it,
+//! because a bar scaled to the limit shows how close the container is
+//! to being throttled for CPU or killed for memory. When there is no
+//! limit, the full width is the request.
 
 use transect_ground::machines::{Amount, BYTES_PER_MI};
 
-/// One resource: what it uses, requests, and is limited to, in cores or
-/// bytes.
+/// The use, request, and limit of one resource, in cores for CPU or in
+/// bytes for memory.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Bar {
     pub used: Option<f64>,
-    /// None when it requests none.
+    /// `None` when the request is zero.
     pub request: Option<f64>,
     pub limit: Option<f64>,
 }
@@ -30,8 +28,9 @@ impl Bar {
         }
     }
 
-    /// The amount that the bar's full width shows: the limit, or the
-    /// request when there is no limit.  With neither there is no bar.
+    /// The amount that the bar's full width represents: the limit, or the
+    /// request when there is no limit. `None` when there is neither, and
+    /// then no bar is drawn.
     pub fn scale(&self) -> Option<f64> {
         self.limit.or(self.request)
     }
@@ -40,14 +39,12 @@ impl Bar {
         Some(percent(self.used?, self.scale()?))
     }
 
-    /// Where the request ends: short of the end when the bar runs to a
-    /// limit, and the whole bar when it runs to the request.
     pub fn request_percent(&self) -> Option<u32> {
         Some(percent(self.request?, self.scale()?))
     }
 
-    /// Whether the use is more than the bar's scale.  Only a use past a
-    /// request with no limit above it can be more.
+    /// Whether the use is more than the bar's scale, as when a container
+    /// with no limit uses more than its request.
     pub fn over(&self) -> bool {
         matches!((self.used, self.scale()), (Some(used), Some(scale)) if used > scale)
     }
@@ -60,12 +57,12 @@ fn percent(part: f64, whole: f64) -> u32 {
     (part / whole * 100.0).round().clamp(0.0, 100.0) as u32
 }
 
-/// Bytes as the bars write them: "355Mi".
+/// Bytes in mebibytes, such as "355Mi".
 pub fn mebibytes(bytes: f64) -> String {
     format!("{:.0}Mi", bytes / BYTES_PER_MI)
 }
 
-/// Cores as the bars write them: "200m".
+/// Cores in millicores, such as "200m".
 pub fn millicores(cores: f64) -> String {
     format!("{:.0}m", cores * 1000.0)
 }
@@ -81,21 +78,21 @@ pub fn cpu_title(bar: &Bar) -> String {
     title("CPU", bar, millicores)
 }
 
-/// What a memory bar with nothing to run to shows in its place:
-/// "290Mi · no request · no limit".  None when the bar has a scale.
+/// The text shown in place of a memory bar that has no scale, such as
+/// "290Mi · no request · no limit". `None` when the bar has a scale.
 pub fn memory_unscaled(bar: &Bar) -> Option<String> {
     unscaled(bar, mebibytes)
 }
 
-/// "2m · no request · no limit", as `memory_unscaled` for CPU.
+/// The same text as `memory_unscaled`, for a CPU bar: "2m · no request
+/// · no limit".
 pub fn cpu_unscaled(bar: &Bar) -> Option<String> {
     unscaled(bar, millicores)
 }
 
-/// The gray line a machine's pod row writes under bars that have no
-/// request or limit to run to, in place of figures inside them.  It
-/// names the bar that lacks a scale when only one does, and it is none
-/// when both have one.
+/// The gray line under a pod row on the machine page, with the current
+/// use of each resource that has no request or limit, because no bar is
+/// drawn for it. `None` when both bars have a scale.
 pub fn unscaled_note(memory: &Bar, cpu: &Bar) -> Option<String> {
     let bars = [
         ("mem", memory, mebibytes as fn(f64) -> String),
@@ -164,7 +161,7 @@ mod tests {
         bar(Some(0.002), None, None),
         Some("cpu 2m · cpu has no request or limit")
     )]
-    fn notes_the_bars_with_nothing_to_run_to(
+    fn notes_the_bars_with_no_scale(
         #[case] memory: Bar,
         #[case] cpu: Bar,
         #[case] expected: Option<&str>,
@@ -204,7 +201,7 @@ mod tests {
     #[case::to_a_limit_with_no_request(bar(Some(100.0), None, Some(400.0)), Some(25), None, false)]
     #[case::neither(bar(Some(100.0), None, None), None, None, false)]
     #[case::no_reading(bar(None, Some(200.0), Some(400.0)), None, Some(50), false)]
-    fn a_bar_runs_to_the_limit_or_the_request(
+    fn a_bar_scales_to_the_limit_or_the_request(
         #[case] bar: Bar,
         #[case] used: Option<u32>,
         #[case] request: Option<u32>,

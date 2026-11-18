@@ -1,9 +1,10 @@
-//! References by value.  A reference with `match` names its far object
-//! not by name but by a value one of the far object's fields holds,
-//! such as a radio's address that a paired device's status writes.
-//! Reading one needs every object of the far kind, so the index here is
-//! built once per reading of the cluster from the stores.  The watch of
-//! such a kind keeps its objects whole instead of trimming them.
+//! References by value.  A reference with `match` finds its target by
+//! comparing a value to a field of the target, instead of by the
+//! target's name.  For example, a paired device's status holds a radio's
+//! address, and the target is the radio whose address field has that
+//! value.  `Matches` indexes every object of the target kind by that
+//! field.  `transect-cluster` watches such a kind whole, because a
+//! trimmed watch drops the field.
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
@@ -13,18 +14,18 @@ use kube::core::{ApiResource, DynamicObject};
 use super::{KindKnowledge, Target, path};
 use transect_graph::edges::Object;
 
-/// A far kind, by group and kind, and the field path whose value a
-/// reference matches.
+/// The group and kind of the target objects, and the path of the field
+/// that a reference matches.
 pub type Key = (String, String, String);
 
-/// The objects of each matched kind, by the value of each matched field.
+/// The target objects of each `Key`, grouped by the value of the field.
 #[derive(Debug, Default)]
 pub struct Matches {
     found: HashMap<Key, HashMap<String, Vec<Object>>>,
 }
 
 impl KindKnowledge {
-    /// The far kind and field of each reference by value.
+    /// The `Key` of each of this kind's references that matches by value.
     pub fn matched(&self) -> impl Iterator<Item = Key> + '_ {
         self.references.iter().filter_map(|reference| {
             let field = reference.matched.clone()?;
@@ -37,8 +38,8 @@ impl KindKnowledge {
 }
 
 impl Matches {
-    /// The index of every field in `wanted` over the objects of
-    /// `custom`, each list of objects by name.
+    /// Indexes the objects in `custom` by the field of each `Key` in
+    /// `wanted`.  Each list of objects is sorted.
     pub fn build(
         wanted: impl IntoIterator<Item = Key>,
         custom: &[(ApiResource, Vec<Arc<DynamicObject>>)],
@@ -70,7 +71,7 @@ impl Matches {
         Self { found }
     }
 
-    /// The objects of `group` and `kind` whose `field` holds `value`.
+    /// The objects of `group` and `kind` whose `field` has `value`.
     pub fn named(&self, group: &str, kind: &str, field: &str, value: &str) -> &[Object] {
         let key = (group.to_string(), kind.to_string(), field.to_string());
         let found = self

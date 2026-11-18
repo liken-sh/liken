@@ -1,10 +1,6 @@
-//! Usage: what each machine, pod, and container uses right now.
-//! transect reads it from Prometheus on the scrape interval with the
-//! queries that the cluster's `MetricsSource` declares.
-//!
-//! The machines band shows usage by node, the workload page by pod, and
-//! the pod page by container.  One poller runs every query in the same
-//! round, so all the views drawn from one reading show the same figures.
+//! The CPU and memory that each machine, pod, and container uses.
+//! transect reads them from Prometheus every `--usage-interval`, with
+//! the queries that the cluster's `MetricsSource` declares.
 
 mod node;
 mod pod;
@@ -18,9 +14,8 @@ use pod::{ContainerKey, PodKey, by_container, by_pod};
 pub use poll::{Reading, poll};
 pub use queries::{ContainerQuery, MachineQuery, Queries};
 
-/// Used CPU and memory for one machine, pod, or container.  Either can be
-/// missing on its own, when one query has a series for it and the other
-/// not.
+/// The CPU and memory that one machine, pod, or container uses. Either
+/// is `None` when its query returned no series for that object.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Used {
     /// Cores.
@@ -29,18 +24,18 @@ pub struct Used {
     pub memory: Option<f64>,
 }
 
-/// The samples that each usage query returned.  A query that the
-/// cluster does not declare has no samples.
+/// The samples that each usage query returned. A query that the
+/// cluster does not declare returns no samples.
 #[derive(Default)]
-pub struct Answers {
+pub struct UsageSamples {
     pub machine_cpu: Vec<Sample>,
     pub machine_memory: Vec<Sample>,
     pub container_cpu: Vec<Sample>,
     pub container_memory: Vec<Sample>,
 }
 
-/// Used CPU and memory, looked up by `Node` name, by a pod's namespace and
-/// name, and by a container's pod and name.
+/// The CPU and memory in use, looked up by `Node` name, by a pod's
+/// namespace and name, or by a container's pod and name.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Usage {
     cpu: HashMap<String, f64>,
@@ -52,8 +47,9 @@ pub struct Usage {
 }
 
 impl Usage {
-    /// The usage from samples of the machine queries, each stored under
-    /// the `Node` that one of `node_labels` names.
+    /// The usage of each machine, from the samples of the machine
+    /// queries. A sample belongs to the `Node` named by the first of
+    /// `node_labels` that it has.
     pub fn from_samples(cpu: Vec<Sample>, memory: Vec<Sample>, node_labels: &[String]) -> Self {
         Self {
             cpu: node::by_name(cpu, node_labels),
@@ -62,9 +58,10 @@ impl Usage {
         }
     }
 
-    /// This usage with each container's memory and CPU taken from
-    /// samples of container queries whose series `labels` name, and
-    /// each pod's usage as the sum of its containers' usage.
+    /// Adds the usage of each container and pod, read from the samples
+    /// of the container queries. `labels` names the labels that hold a
+    /// series' namespace, pod, and container. A pod's usage is the sum of
+    /// its containers'.
     #[cfg(any(test, feature = "fixtures"))]
     pub fn with_containers(
         self,
@@ -89,42 +86,44 @@ impl Usage {
         }
     }
 
-    /// The usage from `answers`, the samples that `queries` returned.
-    pub fn answered(queries: &Queries, answers: Answers) -> Self {
+    /// The usage from the samples that `queries` returned.
+    pub fn from_query_samples(queries: &Queries, samples_of: UsageSamples) -> Self {
         let usage = Self::from_samples(
-            answers.machine_cpu,
-            answers.machine_memory,
+            samples_of.machine_cpu,
+            samples_of.machine_memory,
             &queries.node_labels,
         );
         let containers = |query: Option<&ContainerQuery>, samples| {
             query.map_or_else(HashMap::new, |query| by_container(samples, &query.labels))
         };
         usage.with_container_figures(
-            containers(queries.container_memory.as_ref(), answers.container_memory),
-            containers(queries.container_cpu.as_ref(), answers.container_cpu),
+            containers(
+                queries.container_memory.as_ref(),
+                samples_of.container_memory,
+            ),
+            containers(queries.container_cpu.as_ref(), samples_of.container_cpu),
         )
     }
 
-    /// The usage from the samples that `answer` returns for each of
-    /// `queries`.  It is for a cluster whose query results are written
-    /// down in advance, such as the fixture.
+    /// The usage from running the text of each of `queries` through
+    /// `run_query` in place of Prometheus, for the fixture cluster.
     #[cfg(any(test, debug_assertions))]
-    pub fn from_answers(queries: &Queries, answer: impl Fn(&str) -> Vec<Sample>) -> Self {
-        let asked = |query: Option<&str>| query.map(&answer).unwrap_or_default();
-        let answers = Answers {
-            machine_cpu: asked(queries.machine_cpu.as_deref()),
-            machine_memory: asked(queries.machine_memory.as_deref()),
-            container_cpu: asked(queries.container_cpu.as_ref().map(|q| q.query.as_str())),
-            container_memory: asked(queries.container_memory.as_ref().map(|q| q.query.as_str())),
+    pub fn from_query_fn(queries: &Queries, run_query: impl Fn(&str) -> Vec<Sample>) -> Self {
+        let samples = |query: Option<&str>| query.map(&run_query).unwrap_or_default();
+        let samples_of = UsageSamples {
+            machine_cpu: samples(queries.machine_cpu.as_deref()),
+            machine_memory: samples(queries.machine_memory.as_deref()),
+            container_cpu: samples(queries.container_cpu.as_ref().map(|q| q.query.as_str())),
+            container_memory: samples(queries.container_memory.as_ref().map(|q| q.query.as_str())),
         };
-        Self::answered(queries, answers)
+        Self::from_query_samples(queries, samples_of)
     }
 
     pub fn is_empty(&self) -> bool {
         self.cpu.is_empty() && self.memory.is_empty()
     }
 
-    /// What the machine named `node` uses.
+    /// The usage of the machine named `node`.
     pub fn of(&self, node: &str) -> Used {
         Used {
             cpu: self.cpu.get(node).copied(),
@@ -132,7 +131,7 @@ impl Usage {
         }
     }
 
-    /// What the pod `namespace/name` uses.
+    /// The usage of the pod `namespace/name`.
     pub fn of_pod(&self, namespace: &str, name: &str) -> Used {
         let key = (namespace.to_owned(), name.to_owned());
         Used {
@@ -141,8 +140,7 @@ impl Usage {
         }
     }
 
-    /// What the container named `container` in the pod `namespace/pod`
-    /// uses.
+    /// The usage of `container` in the pod `namespace/pod`.
     pub fn of_container(&self, namespace: &str, pod: &str, container: &str) -> Used {
         let key = ((namespace.to_owned(), pod.to_owned()), container.to_owned());
         Used {
@@ -157,7 +155,7 @@ pub mod fixtures {
     use super::queries::ContainerLabels;
     use crate::prometheus::Sample;
 
-    /// The labels that name a container's series in the tests.
+    /// The labels that identify a container's series in tests.
     pub fn container_labels() -> ContainerLabels {
         ContainerLabels {
             namespace: "namespace".into(),
@@ -166,7 +164,7 @@ pub mod fixtures {
         }
     }
 
-    /// The labels that may name the `Node` of a machine's series in the
+    /// The labels that can hold the `Node` name of a machine's series in
     /// tests.
     pub fn node_labels() -> Vec<String> {
         vec!["node".into()]
@@ -208,7 +206,7 @@ mod tests {
     }
 
     #[rstest]
-    fn answers_by_pod_and_container_from_both_container_queries() {
+    fn reads_pod_and_container_usage_from_both_container_queries() {
         let app = [("namespace", "shop"), ("pod", "web"), ("container", "app")];
         let proxy = [
             ("namespace", "shop"),

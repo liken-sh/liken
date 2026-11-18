@@ -1,30 +1,32 @@
-//! The reader over the fixture cluster's GitOps objects, which hold
-//! every kind its tool has: two appliers that applied one object, git,
-//! OCI, Helm, and bucket sources, a commit pin, and a branch revision.
+//! Tests of the GitOps reader over the fixture's Flux objects:
+//! `Kustomization` and `HelmRelease` objects, and git, OCI, Helm, and
+//! bucket sources. One `GitRepository` is pinned to a commit, and one
+//! follows a branch. One `Deployment` has the labels of both a
+//! `Kustomization` and a `HelmRelease`.
 
 use rstest::rstest;
 
 use transect_graph::edges::{Endpoint, Object};
 use transect_supply::gitops::*;
 
-/// The fixture cluster's GitOps objects, read through the knowledge
-/// its tool ships.
+/// The fixture's GitOps objects, read with the Flux knowledge in
+/// `gitops.yaml`.
 fn gitops() -> GitOps {
     super::super::snapshot().gitops
 }
 
-const TREE: (&str, &str) = ("kustomize.toolkit.fluxcd.io", "Kustomization");
-const RELEASE: (&str, &str) = ("helm.toolkit.fluxcd.io", "HelmRelease");
+const KUSTOMIZATION: (&str, &str) = ("kustomize.toolkit.fluxcd.io", "Kustomization");
+const HELM_RELEASE: (&str, &str) = ("helm.toolkit.fluxcd.io", "HelmRelease");
 const SOURCES: &str = "source.toolkit.fluxcd.io";
 
-fn tree(name: &str) -> Object {
-    Object::new(TREE.0, TREE.1, Some("acme-ops"), name)
+fn kustomization(name: &str) -> Object {
+    Object::new(KUSTOMIZATION.0, KUSTOMIZATION.1, Some("acme-ops"), name)
 }
 
-fn release() -> Object {
+fn helm_release() -> Object {
     Object::new(
-        RELEASE.0,
-        RELEASE.1,
+        HELM_RELEASE.0,
+        HELM_RELEASE.1,
         Some("acme-shop"),
         "storefront-release",
     )
@@ -34,8 +36,8 @@ fn source(kind: &str, name: &str) -> Object {
     Object::new(SOURCES, kind, Some("acme-ops"), name)
 }
 
-/// `object`'s detail as its page reads it: its source, its URL, its
-/// directory, its chart, its revision, and whether it applies.
+/// The detail of `object` as its page reads it: source, URL, directory,
+/// chart, revision, and whether it applies.
 type Shown = (
     Option<Object>,
     Option<String>,
@@ -65,8 +67,8 @@ fn shown(
 }
 
 #[rstest]
-#[case::a_tree_on_a_branch(
-    tree("shop-apps"),
+#[case::a_kustomization_on_a_branch(
+    kustomization("shop-apps"),
     shown(
         Some(source("GitRepository", "shop-git")),
         Some("https://github.com/acme/shop"),
@@ -76,8 +78,8 @@ fn shown(
         true
     )
 )]
-#[case::a_tree_at_the_root(
-    tree("ops-apps"),
+#[case::a_kustomization_at_the_root(
+    kustomization("ops-apps"),
     shown(
         Some(source("OCIRepository", "ops-oci")),
         Some("oci://registry.example.test/acme/ops"),
@@ -87,8 +89,8 @@ fn shown(
         true
     )
 )]
-#[case::a_tree_from_a_bucket(
-    tree("backup-apps"),
+#[case::a_kustomization_from_a_bucket(
+    kustomization("backup-apps"),
     shown(
         Some(source("Bucket", "backup-bucket")),
         Some("storage.example.test/acme-backups"),
@@ -98,8 +100,8 @@ fn shown(
         true
     )
 )]
-#[case::a_release(
-    release(),
+#[case::a_helm_release(
+    helm_release(),
     shown(
         Some(source("HelmRepository", "charts-helm")),
         Some("https://charts.example.test"),
@@ -138,8 +140,8 @@ fn reads_what_each_objects_page_shows(#[case] object: Object, #[case] expected: 
 }
 
 #[rstest]
-#[case::ready(tree("shop-apps"), Ready::True)]
-#[case::failing(tree("backup-apps"), Ready::False("kustomize build failed: missing resource".into()))]
+#[case::ready(kustomization("shop-apps"), Ready::True)]
+#[case::failing(kustomization("backup-apps"), Ready::False("kustomize build failed: missing resource".into()))]
 fn reads_whether_each_is_ready(#[case] object: Object, #[case] expected: Ready) {
     assert_eq!(gitops().detail(&object).unwrap().ready, expected);
 }
@@ -181,22 +183,25 @@ fn draws_an_edge_from_each_applier_to_its_source_and_to_what_applied_it() {
     found.sort_by_key(|pair| format!("{pair:?}"));
     let end = Endpoint::Object;
     let mut expected = vec![
-        (end(release()), end(tree("shop-apps"))),
-        (end(release()), end(source("HelmRepository", "charts-helm"))),
+        (end(helm_release()), end(kustomization("shop-apps"))),
         (
-            end(tree("shop-apps")),
+            end(helm_release()),
+            end(source("HelmRepository", "charts-helm")),
+        ),
+        (
+            end(kustomization("shop-apps")),
             end(source("GitRepository", "shop-git")),
         ),
         (
-            end(tree("ledger-apps")),
+            end(kustomization("ledger-apps")),
             end(source("GitRepository", "ledger-git")),
         ),
         (
-            end(tree("ops-apps")),
+            end(kustomization("ops-apps")),
             end(source("OCIRepository", "ops-oci")),
         ),
         (
-            end(tree("backup-apps")),
+            end(kustomization("backup-apps")),
             end(source("Bucket", "backup-bucket")),
         ),
     ];
@@ -204,8 +209,9 @@ fn draws_an_edge_from_each_applier_to_its_source_and_to_what_applied_it() {
     assert_eq!(found, expected);
 }
 
-/// Each tree applied its source's revision, so each is dated by the
-/// source's fetch.
+/// Each `Kustomization` is dated by its source's
+/// `artifact.lastUpdateTime`, because it applied the revision that the
+/// source last fetched.
 #[rstest]
 fn dates_each_revision_by_its_sources_fetch() {
     let found: Vec<(String, String, Option<String>, String)> = gitops()
@@ -281,11 +287,12 @@ fn lists_each_source_with_its_url() {
     );
 }
 
-/// Each fixture workload's applier, by its marks.  The storefront has
-/// a tree's marks and a release's, and the release's marks win.
+/// The applier of each fixture workload, found from the labels that
+/// Flux sets. The storefront has the labels of a `Kustomization` and of
+/// a `HelmRelease`, and the `HelmRelease` is its applier.
 #[rstest]
-#[case::both_marks("storefront", Some(release()))]
-#[case::a_trees_marks("log-shipper", Some(tree("ops-apps")))]
+#[case::both_labels("storefront", Some(helm_release()))]
+#[case::a_kustomizations_labels("log-shipper", Some(kustomization("ops-apps")))]
 fn reads_each_workloads_applier(#[case] name: &str, #[case] expected: Option<Object>) {
     let snapshot = super::super::snapshot();
     let metas = snapshot.deployments.iter().map(|d| &d.metadata);

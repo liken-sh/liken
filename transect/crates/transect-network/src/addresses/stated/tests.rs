@@ -21,7 +21,8 @@ fn service(name: &str) -> Endpoint {
     Endpoint::Object(Object::new("", "Service", Some("shop"), name))
 }
 
-/// A custom resource that writes the `Secret` login, which cache reads.
+/// A custom resource that writes the `Secret` login, which cache
+/// reads.
 fn producer() -> Object {
     Object::new("logins.example.com", "Login", Some("shop"), "cache-login")
 }
@@ -34,8 +35,8 @@ fn yaml<K: serde::de::DeserializeOwned>(text: &str) -> K {
     serde_yaml::from_str(text).unwrap()
 }
 
-/// A shop whose web and cache read the `ConfigMap` settings, whose db
-/// is behind the `Service` db, and one machine, alpha.
+/// The namespace shop, where web and cache read the `ConfigMap`
+/// settings and db is behind the `Service` db, and the machine alpha.
 struct Shop {
     addresses: Addresses,
     graph: Graph,
@@ -108,8 +109,7 @@ fn written() -> Provenance {
 type Drawn = (Vec<(Endpoint, Endpoint)>, Vec<(String, String)>);
 
 impl Shop {
-    /// What `entries`, listed on `on`, draw: each edge's ends, and each
-    /// unread entry by the workload whose card shows it.
+    /// What `entries` draw when they are listed on `on`.
     fn stated(&self, on: Object, entries: &[&str]) -> Drawn {
         let reading = Reading {
             addresses: &self.addresses,
@@ -213,14 +213,15 @@ fn through(way: Way) -> Provenance {
     written().through(way)
 }
 
-/// The provenance of the edge an entry on `on` draws to db, and of the
-/// entry left unread, which a card shows with the same mark.
+/// The edge to db and the unread entry have the same provenance.  It
+/// records whether transect read the list from an annotation, from a
+/// `Secret`'s annotations, or through the object that writes a `Secret`.
 #[rstest]
 #[case::a_workloads_own(deployment("web"), written())]
 #[case::a_config_maps(settings(), written())]
 #[case::a_secrets_own(login(), through(Way::Annotations { secret: "login".into() }))]
 #[case::a_producers(producer(), through(Way::Producer { secret: "login".into() }))]
-fn says_which_way_a_list_was_read(shop: Shop, #[case] on: Object, #[case] expected: Provenance) {
+fn records_how_a_list_was_read(shop: Shop, #[case] on: Object, #[case] expected: Provenance) {
     let reading = Reading {
         addresses: &shop.addresses,
         graph: &shop.graph,

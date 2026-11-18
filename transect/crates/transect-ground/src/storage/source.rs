@@ -1,6 +1,6 @@
-//! Where one `PersistentVolume` stores its data.  This module reads the
-//! volume source that the volume's spec names.  For a CSI driver whose
-//! `data-on` is `machines`, it reads the node affinity of the volume.
+//! Where one `PersistentVolume` stores its data, read from the volume
+//! source in its spec.  For a CSI driver whose `data-on` is `machines`,
+//! the machine comes from the volume's node affinity.
 
 use std::collections::HashMap;
 
@@ -13,15 +13,16 @@ use transect_graph::edges::Provenance;
 /// machine.
 const HOSTNAME: &str = "kubernetes.io/hostname";
 
-/// Where a volume stores its data, its type, and the provenance of the
-/// intent that states where, when only intent states it.
+/// Where a volume stores its data, its type, and, when the location
+/// comes from declared intent and not from the volume, the provenance of
+/// that intent.
 pub type Placed = (Backend, Type, Option<Provenance>);
 
-/// The backend and type of `volume`, or `None` for a volume whose source
-/// transect does not read and that has no `StorageClass` to name it by.
-/// `provisioners` maps each `StorageClass` to its provisioner, and
-/// `on_machines` lists the CSI drivers that store their volumes on the
-/// machines that mount them.
+/// The backend and type of `volume`, or `None` when transect does not
+/// read its source and no `StorageClass` gives its provisioner.
+/// `provisioners` maps each `StorageClass` name to its provisioner, and
+/// `on_machines` lists the CSI drivers that store each volume on the
+/// machine that mounts it.
 pub fn source(
     volume: &PersistentVolume,
     provisioners: &HashMap<&str, &str>,
@@ -49,17 +50,18 @@ fn read(volume: &PersistentVolume, provisioners: &HashMap<&str, &str>) -> Option
         return Some((Backend::Address(host.into()), Type::Iscsi));
     }
     // Only the driver defines a CSI volume's attributes, so the API does
-    // not show which server the driver connects to, if any.  The driver
-    // names the box, and the volume's `StorageClass` gives its type.
+    // not show which server the driver connects to, if any.  The backend
+    // is the driver, and the type comes from the volume's
+    // `StorageClass`.
     if let Some(csi) = &spec.csi {
         return Some((Backend::Driver(csi.driver.clone()), of_class(class)));
     }
     if spec.local.is_some() || spec.host_path.is_some() {
         return Some((Backend::Machine(machine(spec)), Type::Local));
     }
-    // Any other source, such as a cloud provider's disk, is named by
-    // the provisioner of its class, because the provisioner is the
-    // closest equivalent of a driver.
+    // For any other source, such as a cloud provider's disk, the backend
+    // is the provisioner of the volume's `StorageClass`, which is the
+    // closest equivalent of a CSI driver.
     let provisioner = provisioners.get(class?)?;
     Some((Backend::Driver((*provisioner).into()), of_class(class)))
 }
@@ -68,9 +70,9 @@ fn of_class(class: Option<&str>) -> Type {
     class.map_or(Type::Unclassed, |class| Type::Class(class.into()))
 }
 
-/// The host of an iSCSI portal, `host`, `host:port`, or `[v6]:port`.
-/// This function drops the port so that an appliance that serves NFS
-/// and iSCSI from one address appears as one box.
+/// The host of an iSCSI portal, which is `host`, `host:port`, or
+/// `[v6]:port`.  The port is dropped so that a storage appliance that
+/// serves NFS and iSCSI from one address is one backend.
 fn host_of(portal: &str) -> &str {
     if let Some(rest) = portal.strip_prefix('[') {
         return rest.split(']').next().unwrap_or(rest);
@@ -81,10 +83,10 @@ fn host_of(portal: &str) -> &str {
     }
 }
 
-/// The machine that a local volume's node affinity restricts it to: the
-/// one hostname that its required terms name.  A `hostPath` volume often
-/// has no affinity, and then its data is on whichever machine its pod
-/// runs on.
+/// The machine that a volume's node affinity restricts it to, which is
+/// the one hostname in its required terms.  Returns `None` when there
+/// is no such single hostname.  A `hostPath` volume often has no
+/// affinity, and then its data is on whichever machine its pod runs on.
 fn machine(spec: &PersistentVolumeSpec) -> Option<String> {
     let VolumeNodeAffinity { required } = spec.node_affinity.as_ref()?;
     let mut hosts = required
@@ -163,8 +165,8 @@ mod tests {
     }
 
     /// A driver that stores its data on the machines that mount its
-    /// volumes stores a volume on the one machine that the volume's
-    /// affinity names, or on whichever machine runs its pod.
+    /// volumes stores a volume on the one machine in the volume's
+    /// affinity, or on whichever machine runs its pod.
     #[rstest]
     #[case::pinned_to_one_machine(
         "storageClassName: node, csi: {driver: disk.example.com, volumeHandle: a}, nodeAffinity: {required: {nodeSelectorTerms: [{matchExpressions: [{key: kubernetes.io/hostname, operator: In, values: [alpha]}]}]}}",

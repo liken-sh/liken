@@ -1,14 +1,14 @@
-//! The `IngressController` resource.  It declares an ingress
-//! controller by the identifier that its IngressClasses name
-//! in `spec.controller`, the image its workload runs, the queries that
-//! read the traffic it serves, and the ports it serves an `Ingress`
-//! on.
+//! The `IngressController` resource declares an ingress controller:
+//! the value that an `IngressClass` sets in `spec.controller` for it,
+//! the image its workload runs, the Prometheus queries for the traffic
+//! it serves, and the ports it serves an `Ingress` on.
 //!
-//! An `IngressClass` names its controller by an identifier, not by a
-//! workload, and a controller that ships no CRD of its own has no kind
-//! knowledge to describe it further.  So the controller is declared
-//! once, and the entry finds the workload that runs its image, as kind
-//! knowledge's `controller.image` finds an operator.
+//! An `IngressClass` gives only the controller's identifier, not its
+//! workload, and a controller with no CRD of its own has no kind
+//! knowledge.  So each controller is declared once as an
+//! `IngressController`, and transect finds the workload whose pods run
+//! its image, as it does for an operator from kind knowledge's
+//! `controller.image`.
 
 use serde::Deserialize;
 
@@ -21,14 +21,12 @@ use transect_resources::resources::DocId;
 pub struct IngressController {
     pub doc: DocId,
     pub name: String,
-    /// The identifier an `IngressClass`'s `spec.controller` gives it.
+    /// The value of `spec.controller` in its `IngressClass` objects.
     pub controller: String,
     /// The image repository its workload runs, without a registry host,
     /// so a mirror does not hide it.
     pub image: String,
-    /// How to read the traffic of the Ingresses it serves.
     pub entry: Option<EntryQueries>,
-    /// The ports it serves an `Ingress` on, when it declares them.
     pub entry_points: Option<EntryPoints>,
 }
 
@@ -52,16 +50,16 @@ struct Spec {
     entry_points: Option<entry_points::Written>,
 }
 
-/// The `IngressController` `value` declares, or why it does not
-/// validate.
+/// Returns the `IngressController` in `value`, or an error message
+/// that says which field is invalid.
 pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<IngressController, String> {
     let document: Document = serde_yaml::from_value(value).map_err(|error| error.to_string())?;
     let spec = document.spec;
     if spec.controller.trim().is_empty() {
-        return Err("controller names no IngressClass controller".into());
+        return Err("spec.controller is empty, and must name an IngressClass controller".into());
     }
     if spec.image.trim().is_empty() {
-        return Err("image names no image".into());
+        return Err("spec.image is empty, and must name a container image".into());
     }
     Ok(IngressController {
         doc,
@@ -106,10 +104,10 @@ mod tests {
 
     #[rstest]
     #[case::no_image("{controller: example.io/proxy}", "image")]
-    #[case::an_empty_controller("{controller: '', image: example/proxy}", "controller names no")]
-    #[case::an_unknown_field("{controller: a, image: b, frontDoor: {}}", "unknown field")]
-    fn says_why_it_does_not_validate(#[case] spec: &str, #[case] says: &str) {
+    #[case::an_empty_controller("{controller: '', image: example/proxy}", "spec.controller")]
+    #[case::an_unknown_field("{controller: a, image: b, extra: {}}", "unknown field")]
+    fn rejects_an_invalid_spec_with_the_reason(#[case] spec: &str, #[case] message: &str) {
         let error = read(spec).unwrap_err();
-        assert!(error.contains(says), "{error:?} does not say {says:?}");
+        assert!(error.contains(message), "{error:?} lacks {message:?}");
     }
 }

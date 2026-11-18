@@ -1,7 +1,6 @@
-//! An account's page: a `ServiceAccount`'s, at its own URL, and a
-//! group's or a user's, under the accounts matrix.  The drawing reads
-//! what runs as the account, its bindings and the rules of their
-//! roles, and what follows, from the access the model reduced.
+//! The page of a `ServiceAccount`, a group, or a user. Its drawing
+//! shows what runs as the account, the bindings that name it, the rules
+//! of their roles, and what the account can do as a result.
 
 use std::collections::HashMap;
 
@@ -20,13 +19,15 @@ use transect_graph::links::Part;
 use transect_map::map::section_drawing::{Look as BoxLook, SectionBox};
 use transect_resources::layers::Layers;
 
-/// A filled block, beside one of the six a binding grants.
+/// The classes of the filled block beside a capability that a binding
+/// grants.
 pub const GRANTED: &str = "ax-block ax-block-d ax-block-some";
-/// An outlined block, beside one of the six that follows.
+/// The classes of the outlined block beside a capability that follows
+/// from a grant.
 pub const FOLLOWS: &str = "ax-block ax-block-f ax-block-some";
 
-/// The page of `ServiceAccount` `namespace/name`, or none when the
-/// cluster holds no such `ServiceAccount`.
+/// The page of `ServiceAccount` `namespace/name`, or `None` when the
+/// cluster has no such `ServiceAccount`.
 pub fn service_account_page(
     model: &Model,
     layers: &Layers,
@@ -68,8 +69,8 @@ pub fn service_account_page(
     })
 }
 
-/// The page of a group or a user, by the kind in its URL, `groups` or
-/// `users`, or none when no binding names it.
+/// The page of a group or a user, chosen by the kind in its URL
+/// (`groups` or `users`), or `None` when no binding names it.
 pub fn subject_page(model: &Model, kinds: &str, name: &str) -> Option<AccountPage> {
     let account = match kinds {
         "groups" => Account::Group(name.into()),
@@ -93,8 +94,8 @@ pub fn subject_page(model: &Model, kinds: &str, name: &str) -> Option<AccountPag
     })
 }
 
-/// The workloads whose pods run as a `ServiceAccount`, as boxes and as a
-/// sentence names them, with how many pods each runs.
+/// The workloads whose pods run as a `ServiceAccount`, with the number
+/// of pods each runs, as drawing boxes and as the parts of a sentence.
 struct Runs {
     boxes: Vec<Placing>,
     named: Vec<(Part, usize)>,
@@ -161,9 +162,11 @@ fn runs(model: &Model, namespace: &str, name: &str, look: &Look) -> Runs {
     Runs { boxes, named }
 }
 
-/// Who is in a group, which the API server states only for the groups
-/// it puts every account in, and who signs in as a user, which it never
-/// states.
+/// The box of a group's members, or of who signs in as a user.
+/// Kubernetes defines the members of `system:authenticated`,
+/// `system:serviceaccounts`, and `system:serviceaccounts:<namespace>`.
+/// The authenticator decides the members of any other group and who
+/// signs in as a user, and the API server keeps no list of them.
 fn members(model: &Model, account: &Account, look: &Look) -> (&'static str, Vec<Placing>) {
     let accounts = model.access.accounts.keys();
     let service_accounts = accounts.filter(|a| matches!(a, Account::ServiceAccount { .. }));
@@ -214,8 +217,9 @@ fn members(model: &Model, account: &Account, look: &Look) -> (&'static str, Vec<
     }
 }
 
-/// "Deployment web runs as it, in 2 pods.  A pod names any
-/// ServiceAccount in its own namespace, so the 3 other accounts …"
+/// The sentence of a `ServiceAccount`'s page that says which workloads run
+/// as it, and how many other accounts may run a pod as it because they
+/// may run pods or change workloads in its namespace.
 fn run_as(model: &Model, account: &Account, runs: &Runs) -> Vec<Part> {
     let Account::ServiceAccount { namespace, .. } = account else {
         return Vec::new();
@@ -279,8 +283,8 @@ fn run_as(model: &Model, account: &Account, runs: &Runs) -> Vec<Part> {
     parts
 }
 
-/// One binding of the account: its binding, its role, where it holds,
-/// and the group it names when it names one.
+/// A binding that gives the account a role, with the group that the
+/// binding names when the account has the role through that group.
 struct Binding {
     binding: Object,
     role: Object,
@@ -288,8 +292,8 @@ struct Binding {
     group: Option<String>,
 }
 
-/// Every binding that names the account, or a group it is in that
-/// grants it one of the six.
+/// Every binding that names the account, and every binding that grants
+/// the account a capability through a group it is in.
 fn bindings(held: &Held) -> Vec<Binding> {
     let at = |binding: &Object| match &binding.namespace {
         Some(namespace) => Where::In(namespace.clone()),
@@ -330,7 +334,7 @@ fn bindings(held: &Held) -> Vec<Binding> {
     found
 }
 
-/// The drawing of `account`, with `runs` in its first column.
+/// The drawing of `account`, with `runs` as its first column.
 fn scene(model: &Model, account: &Account, runs: Vec<Placing>, look: &Look) -> Scene {
     let access = &model.access;
     let empty = Held::default();
@@ -348,8 +352,8 @@ fn scene(model: &Model, account: &Account, runs: Vec<Placing>, look: &Look) -> S
         lines.push(why.text);
         mark = Some(why.provenance);
     }
-    // On its own page an account is named without its namespace, which
-    // the page's crumb and switcher name.
+    // The page's breadcrumb and switcher already show the namespace, so
+    // the title leaves it out.
     let title = match account {
         Account::ServiceAccount { name, .. } => {
             transect_graph::edges::kind_and_name("ServiceAccount", name)
@@ -368,8 +372,8 @@ fn scene(model: &Model, account: &Account, runs: Vec<Placing>, look: &Look) -> S
     let mut roles: Vec<Placing> = Vec::new();
     let mut grants: Vec<Grant> = Vec::new();
     for (at, binding) in bindings(held).into_iter().enumerate() {
-        // A `Role` holds only in its own namespace, which its title
-        // names; a `ClusterRole` holds where its binding puts it.
+        // A `Role`'s title shows its namespace. A `ClusterRole` applies
+        // where its binding applies it, so its box says where.
         let mut lines = match binding.role.namespace {
             Some(_) => Vec::new(),
             None => vec![binding.at.words()],
@@ -442,7 +446,7 @@ fn scene(model: &Model, account: &Account, runs: Vec<Placing>, look: &Look) -> S
     }
 }
 
-/// Each kind's name, by its API group and plural.
+/// The kind of each resource, keyed by API group and plural name.
 fn kind_names(model: &Model) -> HashMap<(&str, &str), &str> {
     let plurals = model.snapshot.plurals.iter();
     plurals
@@ -450,7 +454,7 @@ fn kind_names(model: &Model) -> HashMap<(&str, &str), &str> {
         .collect()
 }
 
-/// `capabilities` in words, joined the way a sentence lists them.
+/// `capabilities` as words, joined as a sentence lists them.
 pub fn listed(capabilities: &[Capability]) -> String {
     let words: Vec<String> = capabilities.iter().map(|c| c.words().to_string()).collect();
     and(&words)

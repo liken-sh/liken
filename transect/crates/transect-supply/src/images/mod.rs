@@ -1,17 +1,16 @@
 //! Image provenance: the repository and commit each running image was
 //! built from, read from its OCI labels in the registry that serves it.
 //!
-//! An image's labels are stored in its config blob, not in the
-//! Kubernetes API, so transect reads each registry's API directly: the
-//! manifest for the digest a container runs, the manifest for its
-//! machine's platform when that is an index, then the config blob.  A
-//! digest names immutable content, so transect reads its labels once and
-//! keeps them for as long as transect runs.
+//! An image's labels are in its config blob, not in the Kubernetes API,
+//! so transect reads each registry's API directly: the manifest for the
+//! digest a container runs, the manifest for its machine's platform when
+//! that is an index, then the config blob.  A digest names immutable
+//! content, so transect reads its labels once and keeps them while a pod
+//! runs that digest.
 //!
 //! The reads run in a background task, a few at a time.  A render never
-//! waits for a read, so a page shows the labels that transect has read so
-//! far.  Each completed read marks the cluster changed, so open pages
-//! redraw.
+//! waits for a read, so a page shows the labels read so far.  Each
+//! completed read marks the cluster changed, so open pages redraw.
 
 mod api_server;
 mod auth;
@@ -48,11 +47,11 @@ pub use task::watch;
 /// Why transect could not read an image's labels.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Failure {
-    /// No connection, or no answer in time.
+    /// No connection, or no response in time.
     Unreachable,
-    /// The host answered, but not as a registry.
+    /// The host responded, but not as a registry.
     NotARegistry,
-    /// The registry answered 429.
+    /// The registry responded 429.
     RateLimited,
     /// The registry requires credentials that transect was not given.
     NeedsCredentials,
@@ -65,18 +64,20 @@ pub enum Failure {
     /// A manifest of a kind that holds no config blob, such as Docker's
     /// schema 1.
     Unsupported,
-    /// An answer that did not parse.
+    /// A response that did not parse.
     Malformed,
-    /// An answer larger than the most that transect reads.
+    /// A response larger than transect reads.
     TooLarge,
-    /// An answer whose content does not hash to the digest asked for.
+    /// A response whose content does not hash to the requested digest.
     Mismatch,
-    /// The registry's token service returned no token.  transect does
-    /// not show the token service's answer, because the registry's
-    /// challenge names the service, so anyone who can run an image can
-    /// point transect at any address.
+    /// The token service responded with a status other than 2xx, 401,
+    /// or 403, or with a body that has no token.  The failure keeps
+    /// neither the status nor the body, because the registry's challenge
+    /// sets the token service's URL.  Anyone who can run a pod from a
+    /// registry they control could point transect at an internal address
+    /// and read its response on a page.
     NoToken,
-    /// Any other status the registry answered with.
+    /// Any other status the registry responded with.
     Status(u16),
 }
 
@@ -96,7 +97,7 @@ impl Failure {
     pub fn note(&self) -> String {
         match self {
             Self::Unreachable => "the registry is unreachable".into(),
-            Self::NotARegistry => "the host does not answer as a registry".into(),
+            Self::NotARegistry => "the host does not respond as a registry".into(),
             Self::RateLimited => "the registry is limiting how often transect reads it".into(),
             Self::NeedsCredentials => {
                 "the registry requires credentials that transect does not have".into()
@@ -109,7 +110,7 @@ impl Failure {
             Self::TooLarge => "the registry's answer is larger than transect reads".into(),
             Self::Mismatch => "the registry's answer does not match its digest".into(),
             Self::NoToken => "the registry's token service gave transect no token".into(),
-            Self::Status(code) => format!("the registry answered {code}"),
+            Self::Status(code) => format!("the registry returned {code}"),
         }
     }
 }
@@ -117,13 +118,13 @@ impl Failure {
 /// The state of transect's read of one image's labels.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Lookup {
-    /// Not read yet.
+    /// Not read yet, or being read.
     Reading,
     Read(Arc<Provenance>),
     Failed(Failure),
 }
 
-/// The labels read so far, as one render reads them.
+/// The labels read so far, as a snapshot for one page render.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Known {
     digests: HashMap<String, Lookup>,
@@ -147,8 +148,6 @@ impl Known {
         }
     }
 
-    /// These labels, with `mirrors` naming the mirror each host was read
-    /// from.
     pub fn with_mirrors(self, mirrors: mirror::Mirrors) -> Self {
         Self { mirrors, ..self }
     }

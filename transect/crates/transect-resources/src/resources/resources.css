@@ -1,7 +1,8 @@
 /*
- * The `/resources` page: one table, a row per document, grouped by file,
- * in the same panel the other elevations draw their rows in.  Gray
- * where a document loaded; only a condition to act on takes `--warm`.
+ * The `/resources` page: one table with a row per document, grouped by
+ * file, in the same panel that the other pages use for their rows.
+ * A document that loaded is gray. Only a condition that needs action
+ * uses `--warm`.
  */
 
 .resources {
@@ -17,8 +18,8 @@
   color: var(--ink-muted);
 }
 
-/* The panel scrolls with the page, its header row held at the top of
-   the window.  A long path or name wraps, so the table fits its column. */
+/* The panel scrolls with the page, and its header row stays at the top
+   of the window. A long path or name wraps so the table fits its column. */
 .resources-panel {
   padding: 4px 14px;
   background: var(--row);
@@ -49,7 +50,7 @@
   color: var(--ink-faint);
 }
 
-/* A rule between files, none between a file's documents. */
+/* A line between files, and none between the documents of one file. */
 .resources-table tbody { border-top: 1px solid var(--rule); }
 
 .resources-path,

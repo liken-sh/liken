@@ -1,13 +1,11 @@
-//! Reads one object of a GitOps kind through its kind's knowledge into
-//! the fields that transect shows: whether it is ready, the revision
-//! that it last applied or fetched and when, the source that it fetches
-//! through, the URL that it fetches from, and the directory or chart
-//! that it applies.
+//! Reads one object of a GitOps kind, using its kind's knowledge to find
+//! the fields that transect shows: whether it is ready, the revision it
+//! last applied or fetched and when, the source it fetches through, the
+//! URL it fetches from, and the directory or chart it applies.
 //!
-//! When the object does not have a field that the knowledge names,
-//! transect reads the field as absent.  So when a newer or older
-//! release of a tool moves a field, the page shows less and never
-//! fails.
+//! A field that the knowledge names but the object lacks reads as
+//! absent. So when another release of the GitOps tool moves a field, the
+//! page shows less and does not fail.
 
 use k8s_openapi::jiff::Timestamp;
 use kube::core::DynamicObject;
@@ -43,7 +41,7 @@ pub struct GitRef {
     pub name: Option<String>,
 }
 
-/// One object read.
+/// The fields that transect shows for one GitOps object.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Found {
     pub object: Object,
@@ -54,11 +52,12 @@ pub struct Found {
     /// When the object applied or fetched `revision`, if its status
     /// records the time.
     pub revision_at: Option<Timestamp>,
-    /// The source that the object fetches through, as the reference
-    /// that its knowledge names.  transect reads the reference before it
-    /// checks whether the source's kind is one that it reads.
+    /// The source that the object fetches through, from the field that
+    /// its knowledge names.  This is the reference as written, before
+    /// transect checks that it can read the source's kind.
     pub source: Option<SourceRef>,
-    /// The repository it fetches from itself.
+    /// The repository URL: the first of the knowledge's `repository`
+    /// templates whose fields the object has.
     pub url: Option<String>,
     pub reference: GitRef,
     pub directory: Option<String>,
@@ -81,8 +80,8 @@ pub struct SourceRef {
     pub namespace: Option<String>,
 }
 
-/// Reads `found`, the object `object`, through `fields` and the
-/// condition that `healthy` names.
+/// Reads the fields that `fields` names from `found`, the API object of
+/// `object`.  `healthy` is the condition type that gives its readiness.
 pub fn read(object: Object, found: &DynamicObject, fields: &GitOpsFields, healthy: &str) -> Found {
     let data = &found.data;
     let first = |path: &str| path::read(data, path).into_iter().next();
@@ -130,7 +129,6 @@ pub fn read(object: Object, found: &DynamicObject, fields: &GitOpsFields, health
     }
 }
 
-/// The condition of type `kind` in `data`'s status.
 fn condition<'a>(data: &'a Value, kind: &str) -> Option<&'a Value> {
     let conditions = data.get("status")?.get("conditions")?.as_array()?;
     conditions
@@ -151,7 +149,8 @@ fn ready(condition: Option<&Value>) -> Ready {
     }
 }
 
-/// The reference at `path`, which names a kind and a name.
+/// The source reference at `path`, or `None` when it has no kind or no
+/// name.
 fn source_ref(data: &Value, path: &str, namespace: Option<&str>) -> Option<SourceRef> {
     let field = |name: &str| {
         path::read(data, &format!("{path}.{name}"))

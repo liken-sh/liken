@@ -1,6 +1,5 @@
 //! Kubernetes label selector matching, with the semantics the API server
-//! applies to `matchLabels` and `matchExpressions`.  Layers select
-//! namespaces with it, and PodDisruptionBudgets select pods.
+//! applies to `matchLabels` and `matchExpressions`.
 
 use std::collections::BTreeMap;
 
@@ -34,9 +33,9 @@ fn satisfies(requirement: &LabelSelectorRequirement, labels: &BTreeMap<String, S
     }
 }
 
-/// Rejects a selector the API server would reject, so that a typo in a
-/// resource file stops `transect` at start instead of silently matching
-/// nothing.
+/// Rejects a selector that the API server would reject. A `Layers`
+/// document with such a selector is then left out with the reason
+/// `Invalid`, so a typo is reported instead of matching no namespace.
 pub fn validate(selector: &LabelSelector) -> Result<(), String> {
     for requirement in selector.match_expressions.iter().flatten() {
         let has_values = requirement.values.as_ref().is_some_and(|v| !v.is_empty());
@@ -44,19 +43,19 @@ pub fn validate(selector: &LabelSelector) -> Result<(), String> {
             ("In" | "NotIn", true) | ("Exists" | "DoesNotExist", false) => {}
             ("In" | "NotIn", false) => {
                 return Err(format!(
-                    "{} {} needs at least one value",
+                    "the expression on label {} uses {}, which needs at least one value",
                     requirement.key, requirement.operator
                 ));
             }
             ("Exists" | "DoesNotExist", true) => {
                 return Err(format!(
-                    "{} {} takes no values",
+                    "the expression on label {} uses {}, which takes no values",
                     requirement.key, requirement.operator
                 ));
             }
             (operator, _) => {
                 return Err(format!(
-                    "{}: unknown operator {operator:?}; expected In, NotIn, Exists, or DoesNotExist",
+                    "the expression on label {} has the operator {operator:?}, which must be In, NotIn, Exists, or DoesNotExist",
                     requirement.key
                 ));
             }

@@ -1,11 +1,12 @@
-# Flux in the fixture: every kind `transect` reads, in `acme-ops`, and
-# the labels it writes on what it applies, which are on the objects in
-# `cluster.yaml`.
+# Flux in the fixture: one object of each kind that `transect` reads,
+# in `acme-ops`. Flux labels the objects it applies, and those labels
+# are on the objects in `cluster.yaml`.
 #
 # - shop-apps applies the storefront from shop-git, a branch;
-# - storefront-release applies the storefront too, from charts-helm,
-#   so the storefront has both appliers' labels and the release
-#   wins;
+# - storefront-release also applies the storefront, from charts-helm.
+#   The storefront has the labels of both, and transect attributes it
+#   to the release, because the `HelmRelease` kind knowledge in
+#   `gitops.yaml` sets a higher `precedence`;
 # - ledger-apps applies the ledger from ledger-git, pinned to a commit,
 #   as `ServiceAccount` ledger-deployer, which may change the ledger's
 #   workloads and nothing else;
@@ -163,8 +164,8 @@ status:
   conditions:
   - {type: Ready, status: 'False', message: 'kustomize build failed: missing resource', lastTransitionTime: '2026-01-01T07:05:00Z'}
 ---
-# Applied by shop-apps, as Flux labels a `HelmRelease` its
-# `Kustomization` applies.
+# A `HelmRelease` applied by the shop-apps `Kustomization`, with the
+# labels that Flux puts on it.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:

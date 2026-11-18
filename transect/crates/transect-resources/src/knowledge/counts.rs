@@ -1,30 +1,28 @@
-//! The objects of known kinds that run nothing, such as remote
-//! controls or key maps.  They are not workloads, so the map draws no
-//! box for them; a namespace shows them as one count per kind, "Remotes
-//! ×3", so a kind that runs no pods still shows which namespaces hold
-//! its objects.  Each count links to the list of its kind's objects in
-//! the namespace.
+//! Counts the objects of each kind with kind knowledge that are not
+//! workloads, such as remotes or keymaps. The map draws no box for such
+//! an object, so the namespace shows one count for each kind, such as
+//! "Remotes ×3", that links to the list of those objects in the
+//! namespace.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{Kinds, plural_label};
 use transect_graph::edges::{Object, Plurals};
 
-/// One kind's objects in a namespace that run nothing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Count {
-    /// The kind's plural as the count prints it, "Remotes".
+    /// The kind's plural, as the count shows it, such as "Remotes".
     pub label: String,
     pub count: usize,
-    /// The kind knowledge's summary, for the chip's title.
+    /// The summary from the kind knowledge, shown as the chip's title.
     pub summary: Option<String>,
-    /// The list of the kind's objects in the namespace.
+    /// The link to the list of the kind's objects in the namespace.
     pub href: Option<String>,
 }
 
-/// One count for each known kind among `objects` in `namespace`, by its
-/// API group in DNS order and then its label, leaving out the objects
-/// among `workloads`, which the map draws as boxes.
+/// One count for each known kind among the `objects` in `namespace`,
+/// sorted by API group in DNS order and then by label. Objects in
+/// `workloads` are not counted, because the map draws them as boxes.
 pub fn counts<'a>(
     kinds: &Kinds,
     objects: impl IntoIterator<Item = &'a Object>,

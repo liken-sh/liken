@@ -1,5 +1,5 @@
-//! The cluster elevation: one band per layer, each holding a parcel per
-//! namespace.
+//! The cluster map: one band for each layer, and in each band one tile
+//! for each namespace.
 
 use std::collections::HashMap;
 
@@ -12,6 +12,7 @@ use transect_resources::layers::Layers;
 
 use super::relation::{self, Relation};
 
+/// The name of the band for namespaces that no layer places.
 pub const UNSORTED: &str = "unsorted";
 
 #[derive(Debug)]
@@ -22,24 +23,26 @@ pub struct ClusterMap {
 #[derive(Debug)]
 pub struct Band {
     pub name: String,
-    pub parcels: Vec<Parcel>,
+    pub tiles: Vec<NamespaceTile>,
 }
 
 #[derive(Debug, PartialEq)]
-pub struct Parcel {
+pub struct NamespaceTile {
     pub namespace: String,
     pub workloads: usize,
-    /// The namespace's health, with the reasons the sidebar repeats.
+    /// The namespace's health, with the reasons that the sidebar
+    /// repeats.
     pub health: Health,
     pub selected: bool,
-    /// How the selected namespace's edges relate it to this one.
+    /// How the edges of the selected namespace relate it to this one.
     pub relations: Vec<Relation>,
-    /// Whether the namespace is in a loop.  The parcel shows the loop mark
-    /// whatever is selected, apart from the tags, because a loop is a fact
-    /// about the cluster and not about the selection.
+    /// Whether the namespace is in a loop. The tile shows the loop
+    /// mark whichever namespace is selected, because a loop does not
+    /// depend on the selection.
     pub looped: bool,
-    /// What the loss the page shows takes from the namespace, if any.
-    pub loss: Option<loss::Parcel>,
+    /// What the namespace loses when the page shows machines as lost,
+    /// or `None` when it loses nothing.
+    pub loss: Option<loss::NamespaceTile>,
 }
 
 /// The selected namespace and the band that contains it, which the crumb
@@ -50,30 +53,30 @@ pub struct Selected {
     pub layer: String,
 }
 
-impl Parcel {
-    /// How much room the parcel takes in its band.  A namespace with no
-    /// workloads still gets the room of one, so its name stays readable.
+impl NamespaceTile {
+    /// How wide the tile is in its band. A namespace with no
+    /// workloads gets the width of one, so its name stays readable.
     pub fn weight(&self) -> usize {
         self.workloads.max(1)
     }
 
-    /// The class that colors the parcel: the worse of its health and
-    /// what the loss the page shows takes from it, so a namespace failing
-    /// today keeps its color under a loss.  A healthy parcel has none and
-    /// stays gray.
+    /// The CSS class that colors the tile, from the worse of its
+    /// health and its loss level, so a namespace that is already failing
+    /// keeps its color while a loss is shown. A healthy tile has no
+    /// class and stays gray.
     pub fn health_class(&self) -> &'static str {
         let lost = self.loss.as_ref().map(|loss| loss.level);
         match self.health.level.max(lost.unwrap_or_default()) {
             Level::Healthy | Level::Notice => "",
-            Level::Warning => " parcel-warning",
-            Level::Failing => " parcel-failing",
+            Level::Warning => " ns-tile-warning",
+            Level::Failing => " ns-tile-failing",
         }
     }
 
-    /// The line that replaces the workload count while the selected
-    /// namespace has a relation to the parcel, or nothing when it has
-    /// none.  The line names the most important relation and how many
-    /// more there are.
+    /// The text that replaces the workload count while the selected
+    /// namespace has a relation to this tile, or an empty string when
+    /// it has none. The text is the first relation in the order that
+    /// `relate` sorts them, then a count of the others.
     pub fn relation(&self) -> String {
         let Some(first) = self.relations.first() else {
             return String::new();
@@ -84,20 +87,20 @@ impl Parcel {
         }
     }
 
-    /// Every relation, for the parcel's title.
+    /// Every relation, joined into one line for the tile's title.
     pub fn relation_title(&self) -> String {
-        let said: Vec<String> = self
+        let long: Vec<String> = self
             .relations
             .iter()
             .map(|relation| relation.long())
             .collect();
-        said.join(" · ")
+        long.join(" · ")
     }
 
-    /// Where a click on the parcel goes: the map with it selected, or,
-    /// once it is selected, `away`, where the map goes with nothing
-    /// selected.  A second click undoes the first rather than leaving the
-    /// map, and the card's name opens the namespace's page.
+    /// Where a click on the tile goes. An unselected tile links to
+    /// the map with it selected. A selected tile links to `away`, the
+    /// map with nothing selected, so a second click undoes the first.
+    /// The card's name opens the namespace's page.
     pub fn href(&self, away: &str) -> String {
         match self.selected {
             true => away.into(),
@@ -107,71 +110,69 @@ impl Parcel {
 }
 
 impl ClusterMap {
-    /// Marks `namespace`'s parcel selected and returns its place, or
-    /// `None` when no band contains it.  Selection marks a parcel and moves
-    /// nothing, so the map keeps its layout whatever is selected.
+    /// Marks `namespace`'s tile as selected and returns where it is,
+    /// or `None` when no band contains it. Selection does not change the
+    /// layout.
     pub fn select(&mut self, namespace: &str) -> Option<Selected> {
         self.bands.iter_mut().find_map(|band| {
-            let parcel = band
-                .parcels
+            let tile = band
+                .tiles
                 .iter_mut()
-                .find(|parcel| parcel.namespace == namespace)?;
-            parcel.selected = true;
+                .find(|tile| tile.namespace == namespace)?;
+            tile.selected = true;
             Some(Selected {
-                namespace: parcel.namespace.clone(),
+                namespace: tile.namespace.clone(),
                 layer: band.name.clone(),
             })
         })
     }
 
-    /// Adds `relation` to `namespace`'s parcel, once for its kind and
-    /// direction, and keeps the parcel's relations in the order the parcel
-    /// shows them.
+    /// Adds `relation` to `namespace`'s tile, once for each kind and
+    /// direction, and sorts the tile's relations into display order.
     pub fn relate(&mut self, namespace: &str, relation: Relation) {
-        let parcels = self.bands.iter_mut().flat_map(|band| &mut band.parcels);
-        for parcel in parcels.filter(|parcel| parcel.namespace == namespace) {
-            relation::add(&mut parcel.relations, relation);
-            relation::arrange(&mut parcel.relations);
+        let tiles = self.bands.iter_mut().flat_map(|band| &mut band.tiles);
+        for tile in tiles.filter(|tile| tile.namespace == namespace) {
+            relation::add(&mut tile.relations, relation);
+            relation::arrange(&mut tile.relations);
         }
     }
 
-    /// Marks the parcel of each namespace in one of `loops`.
     pub fn mark_loops(&mut self, loops: &[Loop]) {
-        let parcels = self.bands.iter_mut().flat_map(|band| &mut band.parcels);
-        for parcel in parcels {
-            parcel.looped = loops.iter().any(|found| found.holds(&parcel.namespace));
+        let tiles = self.bands.iter_mut().flat_map(|band| &mut band.tiles);
+        for tile in tiles {
+            tile.looped = loops.iter().any(|found| found.holds(&tile.namespace));
         }
     }
 
-    /// Gives each parcel what `loss` takes from its namespace.
     pub fn mark_loss(&mut self, loss: &Loss) {
-        let parcels = self.bands.iter_mut().flat_map(|band| &mut band.parcels);
-        for parcel in parcels {
-            parcel.loss = loss.parcel(&parcel.namespace, parcel.workloads);
+        let tiles = self.bands.iter_mut().flat_map(|band| &mut band.tiles);
+        for tile in tiles {
+            tile.loss = loss.tile(&tile.namespace, tile.workloads);
         }
     }
 
-    /// The name of the band that contains `namespace`, which the crumb of
-    /// every elevation below the cluster names.
+    /// The name of the band that contains `namespace`, which the crumb
+    /// of each page below the cluster map shows.
     pub fn layer_of(&self, namespace: &str) -> Option<&str> {
-        let band = self.bands.iter().find(|band| {
-            band.parcels
-                .iter()
-                .any(|parcel| parcel.namespace == namespace)
-        })?;
+        let band = self
+            .bands
+            .iter()
+            .find(|band| band.tiles.iter().any(|tile| tile.namespace == namespace))?;
         Some(&band.name)
     }
 }
 
 impl ClusterMap {
-    /// Places each namespace in its layer's band, in layer order, with the
-    /// parcels by name, so a parcel keeps its place as its workloads
-    /// come and go and a reader finds a name in alphabetical order.  A
-    /// parcel's width still grows with its workloads.  The unsorted band
-    /// comes last, and only when some namespace was placed in it.  A
-    /// namespace missing from `health` is healthy.  `known` maps each
-    /// namespace to the layer that its kinds' knowledge names, which
-    /// places a namespace that nothing else places.
+    /// Places each namespace in the band of its layer, with the bands in
+    /// layer order. The tiles in a band are sorted by name, so a
+    /// tile keeps its position as its workload count changes and a
+    /// reader finds a name alphabetically. A tile's width still
+    /// follows its workload count. The unsorted band comes last and
+    /// exists only when some namespace was placed in it. A namespace
+    /// missing from `health` is healthy. `known` maps a namespace to the
+    /// layer that the kind knowledge gives for it. `Layers::place` uses
+    /// that layer only when neither the namespace's `layer` annotation
+    /// nor a layer's namespace selector places the namespace.
     pub fn build<'a>(
         layers: &Layers,
         namespaces: impl IntoIterator<Item = &'a ObjectMeta>,
@@ -185,7 +186,7 @@ impl ClusterMap {
             let Some(name) = namespace.name.clone() else {
                 continue;
             };
-            let parcel = Parcel {
+            let tile = NamespaceTile {
                 workloads: workloads.get(&name).copied().unwrap_or(0),
                 health: health.remove(&name).unwrap_or_default(),
                 selected: false,
@@ -194,23 +195,24 @@ impl ClusterMap {
                 loss: None,
                 namespace: name,
             };
-            match layers.place(namespace, known.get(&parcel.namespace).map(String::as_str)) {
-                Some(index) => bands[index].parcels.push(parcel),
-                None => unsorted.parcels.push(parcel),
+            match layers.place(namespace, known.get(&tile.namespace).map(String::as_str)) {
+                Some(index) => bands[index].tiles.push(tile),
+                None => unsorted.tiles.push(tile),
             }
         }
-        if !unsorted.parcels.is_empty() {
+        if !unsorted.tiles.is_empty() {
             bands.push(unsorted);
         }
         for band in &mut bands {
-            band.parcels
+            band.tiles
                 .sort_by(|a, b| by_name(&a.namespace, &b.namespace));
         }
         Self { bands }
     }
 }
 
-/// Two namespaces' names in alphabetical order, ignoring case.
+/// Compares two namespace names alphabetically, ignoring case, and by
+/// exact name when they differ only in case.
 fn by_name(a: &str, b: &str) -> std::cmp::Ordering {
     a.to_lowercase()
         .cmp(&b.to_lowercase())
@@ -221,7 +223,7 @@ impl Band {
     fn named(name: &str) -> Self {
         Self {
             name: name.into(),
-            parcels: Vec::new(),
+            tiles: Vec::new(),
         }
     }
 }

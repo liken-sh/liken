@@ -1,6 +1,5 @@
-//! A `PodDisruptionBudget` limits how many of a workload's pods the
-//! evictions of a drain, such as the drain before a machine reboots, may
-//! remove at once.
+//! A `PodDisruptionBudget` limits how many of a workload's pods a drain,
+//! such as the drain before a machine reboots, may evict at once.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -17,8 +16,8 @@ pub struct Budget {
     /// `minAvailable` or `maxUnavailable`, whichever the budget sets: a
     /// count or a percentage.
     pub limit: Limit,
-    /// How many pods may be evicted now, as the disruption controller
-    /// counts them in `status.disruptionsAllowed`.
+    /// How many pods may be evicted now, from the disruption controller's
+    /// `status.disruptionsAllowed`.
     pub allowed: i32,
 }
 
@@ -145,7 +144,7 @@ mod tests {
     #[case::min_count("{selector: {}, minAvailable: 1}", Limit::MinAvailable("1".into()))]
     #[case::max_percent("{selector: {}, maxUnavailable: 25%}", Limit::MaxUnavailable("25%".into()))]
     #[case::neither("{selector: {}}", Limit::None)]
-    fn reads_what_a_budget_keeps(#[case] spec: &str, #[case] limit: Limit) {
+    fn reads_the_limit_and_allowed_count_of_a_budget(#[case] spec: &str, #[case] limit: Limit) {
         let budgets = [budget("shop", "web", spec, 2)];
         let pod = labels(&[]);
         assert_eq!(

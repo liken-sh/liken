@@ -1,29 +1,32 @@
-//! The lines between a side box and the spine.  Each runs across from
-//! the side box's inner edge at its middle: straight into a box level
-//! with it, and otherwise across to a lane in the gap beside the spine,
-//! up or down the lane, and across into the box.  A box with another
-//! between it and the side column, as a machine in a fan is, takes its
-//! line from below instead, so the line never crosses a box.
+//! The lines between a side box and the spine boxes.  Each starts at
+//! the middle of the side box's inner edge. When the target box is level
+//! with it, the line runs straight across. Otherwise it runs across to
+//! a lane in the gap beside the spine, up or down the lane, and across
+//! into the target. When another box is between the target and the
+//! side column, as with a machine in a fan, the line enters the target
+//! from below so that it never crosses a box.
 //!
-//! Lines of one style and label into one edge of one box share a lane
-//! and an entry, as a fan shares a trunk.  Each other line has its own
-//! lane, and the one whose side box is farthest from its target takes
-//! the lane nearest the spine, so lines that share a gap nest without
-//! crossing.  The lines into one edge of one box enter at points spread
-//! along it, in the order of their side boxes.
+//! Lines with the same style and label into the same edge of the same
+//! box form a bundle. A bundle shares one lane and one entry point, as
+//! a fan shares a trunk. Each bundle has its own lane. The bundle whose
+//! side box is farthest above or below the point where it turns into
+//! its target gets the lane nearest the spine, so that bundles in one
+//! gap nest without crossing. The bundles
+//! into one edge of a box enter at points spread along that edge, in
+//! the order of their side boxes.
 
 use std::collections::BTreeMap;
 
 use super::{ARROW, Anchor, CORNER, Drawn, Label, Line, Link, Point};
 use crate::map::section::layout::{At, Column, Layout, Rect, Side};
 
-/// Room between two lanes in one gap.
+/// The distance between two lanes in one gap.
 const LANE: i32 = 8;
-/// How far below a box the lines that enter it from below turn.
+/// How far below its target a line turns when it enters from below.
 const UNDER: i32 = 14;
-/// How far above or below a side line its label is drawn, and how far
-/// from its side box.
+/// How far above or below its line a label is drawn.
 const RISE: i32 = 11;
+/// How far from the side box's edge a label is drawn.
 const LABEL_GAP: i32 = 8;
 
 /// One side line before its points are known.
@@ -35,10 +38,10 @@ struct Plan<'a> {
     target_at: At,
     /// Whether the line enters the target from below.
     under: bool,
-    /// The target's end of the line.
+    /// Where the line meets the target.
     entry: Point,
-    /// The gap between the side column and the spine boxes the line
-    /// passes, left edge first.
+    /// The x range of the gap between the side column and the spine
+    /// boxes that the line passes, as (left edge, right edge).
     gap: (i32, i32),
 }
 
@@ -148,8 +151,8 @@ fn plan<'a>(layout: &Layout, link: &'a Link) -> Option<Plan<'a>> {
     })
 }
 
-/// Where a line turns toward its target: at its entry, or for a line
-/// that enters from below, under the target.
+/// The y coordinate where a line turns toward its target: at the entry
+/// point, or below the target for a line that enters from below.
 fn turn(plan: &Plan) -> i32 {
     match plan.under {
         true => plan.target.bottom() + UNDER,
@@ -157,11 +160,11 @@ fn turn(plan: &Plan) -> i32 {
     }
 }
 
-/// The lines that draw their bundle's label, one line per bundle, as a
-/// fan draws one label: the topmost when its lane runs down from it, and
-/// otherwise the bottommost, whose lane runs up.  The lane runs past
-/// every other line of the bundle, through the place where that line's
-/// label would be.
+/// The index of the line in each bundle that draws the bundle's label.
+/// It is the line where the lane starts: the topmost line when the lane
+/// runs down, and otherwise the bottommost. The other lines get no
+/// label, because the lane passes their side boxes, where their labels
+/// would be drawn.
 fn labelled(plans: &[Plan]) -> Vec<usize> {
     let middle = |i: &&usize| plans[**i].source.middle();
     bundles(plans, |_| true)
@@ -176,8 +179,9 @@ fn labelled(plans: &[Plan]) -> Vec<usize> {
         .collect()
 }
 
-/// A line's label beside its side box, on the side of the line its lane
-/// does not turn toward, so the lane never runs through it.
+/// A line's label, beside its side box. It goes on the opposite side of
+/// the line from the way the lane turns, so the lane never runs through
+/// the text.
 fn label(plan: &Plan, start: Point) -> Label {
     let (x, anchor) = match plan.side {
         Side::Left => (start.x + LABEL_GAP, Anchor::Start),
@@ -210,10 +214,8 @@ fn inner_edge(side: Side, rect: &Rect) -> i32 {
     }
 }
 
-/// The lines that share a lane and an entry: those of one style and
-/// label into one edge of one box, as several callers of a workload
-/// are.  They join as a fan does, so ten callers draw one trunk rather
-/// than ten lanes.
+/// Groups the lines that `on` accepts into bundles, so that the callers
+/// of one workload draw one trunk instead of a lane each.
 fn bundles(plans: &[Plan], on: impl Fn(&Plan) -> bool) -> Vec<Vec<usize>> {
     let mut bundles: BTreeMap<(At, Side, bool, String, String), Vec<usize>> = BTreeMap::new();
     for (index, plan) in plans.iter().enumerate().filter(|(_, p)| on(p)) {
@@ -230,10 +232,10 @@ fn bundles(plans: &[Plan], on: impl Fn(&Plan) -> bool) -> Vec<Vec<usize>> {
     bundles.into_values().collect()
 }
 
-/// Spreads the bundles into each edge of each box along it, in the
-/// order of their side boxes top to bottom.  A lone line into a box
-/// level with its side box enters at the side box's middle, so it runs
-/// straight.
+/// Sets the entry point of each bundle, spreading the bundles into one
+/// edge of a box evenly along it, in the order of their side boxes from
+/// top to bottom. A single line into a box that is level with its side
+/// box enters at the side box's middle, so that it runs straight.
 fn spread_entries(plans: &mut [Plan]) {
     let mut edges: BTreeMap<(At, Side), Vec<Vec<usize>>> = BTreeMap::new();
     for bundle in bundles(plans, |p| !p.under) {
@@ -266,9 +268,7 @@ fn spread_entries(plans: &mut [Plan]) {
     }
 }
 
-/// Each line's lane, in the gap it passes, one lane per bundle.  The
-/// bundles on one side are ordered by how far their farthest side box
-/// is from where they turn, the farthest nearest the spine.
+/// The x coordinate of each line's lane in the gap it passes.
 fn lanes(plans: &[Plan]) -> Vec<i32> {
     let mut lanes = vec![0; plans.len()];
     let reach = |i: usize| (plans[i].source.middle() - turn(&plans[i])).abs();
@@ -294,9 +294,9 @@ fn lanes(plans: &[Plan]) -> Vec<i32> {
     lanes
 }
 
-/// A path through `points`, each turn rounded, that stops `ARROW` short
-/// of the last point so that the arrow's tip touches it.  Every segment
-/// is horizontal or vertical.
+/// An SVG path through `points` with rounded corners. It stops `ARROW`
+/// short of the last point so that the arrowhead's tip lands on it. Every
+/// segment must be horizontal or vertical.
 pub fn rounded(points: &[Point]) -> String {
     let mut points: Vec<Point> = points.to_vec();
     points.dedup();

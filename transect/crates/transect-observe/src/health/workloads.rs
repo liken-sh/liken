@@ -1,19 +1,19 @@
-//! The replica rules: a workload whose pods are not all ready.
+//! The replica rules, which report a workload whose pods are not all
+//! ready.
 //!
-//! A workload with no ready replicas is failing, because nothing that it
-//! serves answers.  One with some replicas not ready is a warning.  Both
-//! rules allow a grace period while the workload has a pod younger than
-//! `GRACE_MINUTES`.  A rollout, a scale up, and a pod rescheduled off a
-//! drained machine all start new pods that take a while to pass their
-//! readiness checks.  The pod's age covers all three cases the same way
-//! for every kind, but rollout status differs by kind, and only a
-//! `Deployment`'s rollout status includes a timestamp.
+//! A workload with no ready replicas is failing, and one with some
+//! replicas not ready is a warning. A rollout, a scale up, and a drain
+//! all start new pods that need time to pass their readiness checks. So
+//! while a workload has a pod created less than `GRACE_MINUTES` ago, the
+//! rules report no ready replicas as `Reason::Starting`, a warning, and
+//! report nothing for some replicas not ready. The rules read the age of
+//! the pods because that works the same for every workload kind, and
+//! rollout status differs by kind.
 //!
-//! The grace period lowers the level of a workload with none ready, but
-//! does not hide it.  A one-replica workload has none ready for a few
-//! seconds on every rollout, so it shows as a warning then instead of
-//! showing as failed for a moment.  It still shows, because it serves
-//! nothing during that time.
+//! `Reason::Starting` still shows the workload, because it serves
+//! nothing while no replica is ready. A one-replica workload is in that
+//! state for a few seconds on every rollout, and shows as a warning then
+//! instead of failing.
 
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
 use k8s_openapi::api::core::v1::Pod;
@@ -24,8 +24,8 @@ use super::{Kind, Reason, Workload, minutes_between};
 use transect_cluster::ownership::Ownership;
 use transect_graph::edges::Object;
 
-/// How long a new pod may take to become ready before its workload's
-/// missing replicas count as a warning.
+/// How long after a pod is created the rules treat its workload as
+/// starting.
 const GRACE_MINUTES: i64 = 5;
 
 /// The pods that the health rules read for a workload: a namespace's
@@ -41,27 +41,37 @@ pub fn deployment(deployment: &Deployment, pods: Pods, now: Timestamp) -> Option
     // The API server defaults `spec.replicas` to 1 when it is left out.
     let desired = deployment.spec.replicas.unwrap_or(1);
     let ready = deployment.status.as_ref()?.ready_replicas.unwrap_or(0);
-    let settling = || pods.has_new(&owner("apps", "Deployment", deployment), now);
-    replicas(workload(Kind::Deployment, &name), desired, ready, settling)
+    let has_new_pod = || pods.has_new(&owner("apps", "Deployment", deployment), now);
+    replicas(
+        workload(Kind::Deployment, &name),
+        desired,
+        ready,
+        has_new_pod,
+    )
 }
 
 pub fn stateful_set(stateful_set: &StatefulSet, pods: Pods, now: Timestamp) -> Option<Reason> {
     let name = stateful_set.name_any();
     let desired = stateful_set.spec.replicas.unwrap_or(1);
     let ready = stateful_set.status.as_ref()?.ready_replicas.unwrap_or(0);
-    let settling = || pods.has_new(&owner("apps", "StatefulSet", stateful_set), now);
-    replicas(workload(Kind::StatefulSet, &name), desired, ready, settling)
+    let has_new_pod = || pods.has_new(&owner("apps", "StatefulSet", stateful_set), now);
+    replicas(
+        workload(Kind::StatefulSet, &name),
+        desired,
+        ready,
+        has_new_pod,
+    )
 }
 
 pub fn daemon_set(daemon_set: &DaemonSet, pods: Pods, now: Timestamp) -> Option<Reason> {
     let name = daemon_set.name_any();
     let status = daemon_set.status.as_ref()?;
-    let settling = || pods.has_new(&owner("apps", "DaemonSet", daemon_set), now);
+    let has_new_pod = || pods.has_new(&owner("apps", "DaemonSet", daemon_set), now);
     replicas(
         workload(Kind::DaemonSet, &name),
         status.desired_number_scheduled,
         status.number_ready,
-        settling,
+        has_new_pod,
     )
 }
 
@@ -77,23 +87,21 @@ fn workload(kind: Kind, name: &str) -> Workload {
     }
 }
 
-/// Scaled to zero is healthy: nothing was asked for, and nothing is
-/// missing.
 fn replicas(
     workload: Workload,
     desired: i32,
     ready: i32,
-    settling: impl FnOnce() -> bool,
+    has_new_pod: impl FnOnce() -> bool,
 ) -> Option<Reason> {
     if desired <= 0 || ready >= desired {
         None
     } else if ready <= 0 {
-        if settling() {
+        if has_new_pod() {
             Some(Reason::Starting { workload, desired })
         } else {
             Some(Reason::NoReadyReplicas { workload, desired })
         }
-    } else if settling() {
+    } else if has_new_pod() {
         None
     } else {
         Some(Reason::NotReady {
@@ -105,10 +113,10 @@ fn replicas(
 }
 
 impl Pods<'_> {
-    /// Whether any pod that `owner` runs, through any number of owners
-    /// between them, started less than `GRACE_MINUTES` ago.  A
-    /// `Deployment`'s pods belong to its ReplicaSets, so the function
-    /// follows the owner references instead of matching by name.
+    /// Whether a pod that `owner` owns, directly or through a
+    /// `ReplicaSet`, was created less than `GRACE_MINUTES` ago. It
+    /// follows owner references, because a match on the pod name's
+    /// prefix would take the pods of `web-admin` as pods of `web`.
     fn has_new(&self, owner: &Object, now: Timestamp) -> bool {
         self.pods.iter().any(|pod| {
             let created = pod.metadata.creation_timestamp.as_ref();
@@ -132,9 +140,9 @@ mod tests {
 
     type Rule<T> = fn(&T, Pods, Timestamp) -> Option<Reason>;
 
-    /// `rule` applied to `workload` with `pods` in its namespace, whose
-    /// owner references are indexed with the ReplicaSets of the
-    /// Deployments that `deployment_pod` names.
+    /// Runs `rule` on `workload` with `pods`. The ownership includes the
+    /// `ReplicaSet`s of the `web` and `web-admin` `Deployment`s, so a
+    /// `deployment_pod` of either links to its `Deployment`.
     fn assessed<T>(rule: Rule<T>, workload: &T, pods: &[&Pod]) -> Option<Reason> {
         let replica_sets = [
             replica_set("shop", "web-5d8f7c6b9", "web"),
@@ -216,7 +224,10 @@ mod tests {
         deployment_pod("shop", "web-admin", minutes_before(2)),
         not_ready(Kind::Deployment, 1, 2)
     )]
-    fn a_deployment_with_a_new_pod_is_settling(#[case] pod: Pod, #[case] reason: Option<Reason>) {
+    fn a_deployment_with_some_ready_and_a_new_pod_waits_before_warning(
+        #[case] pod: Pod,
+        #[case] reason: Option<Reason>,
+    ) {
         let web = fixtures::deployment("shop", "web", 2, 1);
         assert_eq!(assessed(super::deployment, &web, &[&pod]), reason);
     }
@@ -284,7 +295,7 @@ mod tests {
     #[rstest]
     #[case::new(minutes_before(4), None)]
     #[case::old(minutes_before(5), not_ready(Kind::StatefulSet, 1, 2))]
-    fn a_stateful_set_with_a_new_pod_is_settling(
+    fn a_stateful_set_with_some_ready_and_a_new_pod_waits_before_warning(
         #[case] created: Timestamp,
         #[case] reason: Option<Reason>,
     ) {
@@ -299,7 +310,7 @@ mod tests {
     #[case::ours("DaemonSet", "web", None)]
     #[case::another_kind("StatefulSet", "web", not_ready(Kind::DaemonSet, 3, 4))]
     #[case::another_name("DaemonSet", "db", not_ready(Kind::DaemonSet, 3, 4))]
-    fn a_daemon_set_settles_on_its_own_new_pods(
+    fn a_daemon_set_waits_only_for_its_own_new_pods(
         #[case] kind: &str,
         #[case] name: &str,
         #[case] reason: Option<Reason>,

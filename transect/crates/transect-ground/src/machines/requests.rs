@@ -31,9 +31,9 @@ pub struct Resources {
 }
 
 impl Resources {
-    /// The `cpu` and `memory` entries of a resource list.  A quantity
-    /// that the API server accepted always parses, so this function
-    /// counts a quantity that does not parse as zero.
+    /// The `cpu` and `memory` entries of a resource list.  The API
+    /// server rejects a quantity that does not parse, so a quantity that
+    /// fails to parse here is counted as zero.
     pub fn from_list(list: Option<&BTreeMap<String, Quantity>>) -> Self {
         let amount = |name: &str| {
             list.and_then(|list| list.get(name))

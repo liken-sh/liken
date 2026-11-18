@@ -1,17 +1,17 @@
-//! The words that the ground band and the volume lists show.  All other
-//! text on them is an address, a driver, a class, a name, or a number
-//! from the cluster.
+//! The text of the outside-systems band and the volume lists.  The words are
+//! fixed here, and the addresses, drivers, classes, names, and numbers
+//! come from the cluster.
 
 use std::fmt;
 
-use super::ground::{Counts, Ground, GroundBox, Held};
+use super::ground::{Counts, Ground, GroundBox, Totals};
 use super::mounts::{Group, Mounts, Sharing};
 use super::pod_mounts::{PodMount, Source};
 use super::{Backend, Type, Volume};
 
 impl fmt::Display for Counts {
-    /// "6 NFS · 2 iSCSI".  A volume with no type to name is counted as
-    /// a volume, so a driver's box with no classes shows "6 volumes".
+    /// "6 NFS · 2 iSCSI".  Volumes with no `StorageClass` show as
+    /// "6 volumes".
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (index, (kind, count)) in self.0.iter().enumerate() {
             if index > 0 {
@@ -30,9 +30,9 @@ impl fmt::Display for Counts {
 }
 
 impl Type {
-    /// The type as the label that the page shows above its volumes:
-    /// "NFS", "iSCSI", "fast" for a `StorageClass`, "local", or "no
-    /// StorageClass".
+    /// The type's name as the page shows it above a list of volumes:
+    /// "NFS", "iSCSI", a `StorageClass` name such as "fast", "local", or
+    /// "no StorageClass".
     pub fn label(&self) -> String {
         match self {
             Type::Nfs => "NFS".into(),
@@ -44,7 +44,7 @@ impl Type {
     }
 }
 
-impl fmt::Display for Held {
+impl fmt::Display for Totals {
     /// "6 NFS · 2 iSCSI", "3 depend on it", or both: "6 NFS · 1
     /// depends on it".
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -61,12 +61,10 @@ impl fmt::Display for Held {
 }
 
 impl GroundBox {
-    /// The text that the page shows after the box's name.  When a
-    /// namespace is selected, the text counts that namespace's share of
-    /// the box, and when nothing is selected it counts the whole
-    /// cluster's.  The function returns `None` for a box that has none
-    /// of the selected namespace's volumes or dependents, so the page
-    /// shows only the box's name.
+    /// The counts that the page shows after the box's name: the whole
+    /// cluster's, or the selected namespace's after its name.  `None`
+    /// when the selected namespace has no volumes or dependents on the
+    /// box, so the page shows the name alone.
     pub fn text(&self, ground: &Ground) -> Option<String> {
         match (&self.here, &ground.selected) {
             (None, _) => Some(self.all.to_string()),
@@ -78,8 +76,8 @@ impl GroundBox {
 }
 
 impl GroundBox {
-    /// The box's title: the lines of intent about the system that the
-    /// box represents, joined in order, or `None` when there are none.
+    /// The box's intent lines joined with spaces, or `None` when it has
+    /// none.
     pub fn about_title(&self) -> Option<String> {
         let lines: Vec<&str> = self.about.iter().map(|line| line.text.as_str()).collect();
         (!lines.is_empty()).then(|| lines.join(" "))
@@ -87,9 +85,9 @@ impl GroundBox {
 }
 
 impl Ground {
-    /// The count that the page shows under the band's name: "12
-    /// volumes", followed by "· 3 dependencies" when an object depends
-    /// on an address outside the cluster.
+    /// The count under the band's name, such as "12 volumes · 3
+    /// dependencies", where a dependency is a box that at least one
+    /// object depends on.
     pub fn total_text(&self) -> String {
         match self.depended_on() {
             0 => volumes(self.total()),
@@ -113,7 +111,7 @@ pub fn volumes(count: usize) -> String {
 impl Mounts {
     /// The volumes column's heading: "Volumes · shared" when every pod
     /// mounts every claim, "Volumes · one per pod" when each claim
-    /// belongs to one pod, and "Volumes" otherwise.
+    /// belongs to one pod, and "Volumes" for one pod or a mix.
     pub fn heading(&self) -> &'static str {
         match self.sharing {
             Sharing::Shared => "Volumes · shared",
@@ -151,8 +149,9 @@ fn backend(volume: Option<&Volume>) -> String {
 }
 
 impl PodMount {
-    /// A claim's name and where its data lives, apart, so a page can
-    /// link the name.
+    /// The claim's name and the text for where its data is stored, as
+    /// separate values so that a page can link the name.  Returns `None`
+    /// when the mount is not a claim.
     pub fn claim(&self) -> Option<(&str, String)> {
         match &self.source {
             Source::Claim { name, volume, .. } => Some((name, backend(volume.as_ref()))),
@@ -160,7 +159,7 @@ impl PodMount {
         }
     }
 
-    /// What the path mounts.
+    /// What is mounted at the path, such as "Secret app-config".
     pub fn what(&self) -> String {
         match &self.source {
             Source::Claim { name, volume, .. } => format!("{name} · {}", backend(volume.as_ref())),
@@ -174,8 +173,9 @@ impl PodMount {
         }
     }
 
-    /// The faint line that the page shows under the mount, when there is
-    /// one: "8Gi · read-only · in app, proxy".
+    /// The line of detail that the page shows under the mount, when
+    /// there is one: the claim's size, "read-only", and the containers
+    /// that mount it, as in "8Gi · read-only · in app, proxy".
     pub fn details(&self) -> Option<String> {
         let size = match &self.source {
             Source::Claim { size, .. } => size.clone(),
@@ -206,7 +206,7 @@ mod tests {
             volume: Some(Volume {
                 backend,
                 kind,
-                stated: None,
+                declared_in: None,
             }),
             mounts: vec![],
         }
@@ -223,7 +223,7 @@ mod tests {
         "its pod's machine · local"
     )]
     #[case::waiting(Group { volume: None, mounts: vec![] }, "waiting for a volume")]
-    fn backend_text(#[case] group: Group, #[case] text: &str) {
+    fn a_group_names_its_backend(#[case] group: Group, #[case] text: &str) {
         assert_eq!(group.backend(), text);
     }
 
@@ -244,7 +244,7 @@ mod tests {
             volume: Some(Volume {
                 backend: Backend::Address("nas.example.com".into()),
                 kind: Type::Nfs,
-                stated: None,
+                declared_in: None,
             }),
             shared_with: vec![],
         }
@@ -271,7 +271,11 @@ mod tests {
         Some("read-only")
     )]
     #[case::other(mount(Source::Other("csi"), None, false), "csi data", None)]
-    fn a_pods_mount(#[case] mount: PodMount, #[case] what: &str, #[case] details: Option<&str>) {
+    fn a_pod_mount_names_what_it_mounts_and_its_details(
+        #[case] mount: PodMount,
+        #[case] what: &str,
+        #[case] details: Option<&str>,
+    ) {
         assert_eq!(
             (mount.what().as_str(), mount.details().as_deref()),
             (what, details)
@@ -282,7 +286,7 @@ mod tests {
     #[case::shared(Sharing::Shared, "Volumes · shared")]
     #[case::per_pod(Sharing::PerPod, "Volumes · one per pod")]
     #[case::neither(Sharing::Neither, "Volumes")]
-    fn mounts_heading(#[case] sharing: Sharing, #[case] heading: &str) {
+    fn the_heading_follows_how_pods_share_claims(#[case] sharing: Sharing, #[case] heading: &str) {
         let mounts = Mounts {
             groups: vec![],
             sharing,
@@ -296,18 +300,18 @@ mod tests {
     #[case::local(Counts(vec![(Type::Local, 1)]), "1 local")]
     #[case::unclassed(Counts(vec![(Type::Unclassed, 6)]), "6 volumes")]
     #[case::one_unclassed(Counts(vec![(Type::Unclassed, 1)]), "1 volume")]
-    fn counts_text(#[case] counts: Counts, #[case] text: &str) {
+    fn counts_list_each_type(#[case] counts: Counts, #[case] text: &str) {
         assert_eq!(counts.to_string(), text);
     }
 
-    fn held(counts: Counts, dependents: usize) -> Held {
-        Held { counts, dependents }
+    fn totals(counts: Counts, dependents: usize) -> Totals {
+        Totals { counts, dependents }
     }
 
-    fn ground(selected: Option<&str>, here: Option<Held>) -> (Ground, GroundBox) {
+    fn ground(selected: Option<&str>, here: Option<Totals>) -> (Ground, GroundBox) {
         let one = GroundBox {
             name: "nas.example.com".into(),
-            all: held(Counts(vec![(Type::Nfs, 27), (Type::Iscsi, 71)]), 0),
+            all: totals(Counts(vec![(Type::Nfs, 27), (Type::Iscsi, 71)]), 0),
             here,
             about: Vec::new(),
             page: String::new(),
@@ -322,25 +326,25 @@ mod tests {
 
     #[rstest]
     #[case::nothing_selected(None, None, Some("27 NFS · 71 iSCSI"))]
-    #[case::the_selections_counts(
+    #[case::the_selected_namespaces_counts(
         Some("shop"),
-        Some(held(Counts(vec![(Type::Nfs, 6), (Type::Iscsi, 2)]), 0)),
+        Some(totals(Counts(vec![(Type::Nfs, 6), (Type::Iscsi, 2)]), 0)),
         Some("shop: 6 NFS · 2 iSCSI")
     )]
-    #[case::the_selections_dependents(
+    #[case::the_selected_namespaces_dependents(
         Some("shop"),
-        Some(held(Counts::default(), 2)),
+        Some(totals(Counts::default(), 2)),
         Some("shop: 2 depend on it")
     )]
     #[case::volumes_and_a_dependent(
         Some("shop"),
-        Some(held(Counts(vec![(Type::Nfs, 6)]), 1)),
+        Some(totals(Counts(vec![(Type::Nfs, 6)]), 1)),
         Some("shop: 6 NFS · 1 depends on it")
     )]
-    #[case::none_of_the_selections(Some("shop"), Some(Held::default()), None)]
-    fn box_text(
+    #[case::none_of_the_selected_namespace(Some("shop"), Some(Totals::default()), None)]
+    fn a_box_counts_the_selected_namespace_or_the_cluster(
         #[case] selected: Option<&str>,
-        #[case] here: Option<Held>,
+        #[case] here: Option<Totals>,
         #[case] text: Option<&str>,
     ) {
         let (ground, one) = ground(selected, here);
@@ -355,12 +359,12 @@ mod tests {
     }
 
     #[rstest]
-    #[case::nothing_said(vec![], None)]
-    #[case::why_and_gotcha(
+    #[case::no_lines(vec![], None)]
+    #[case::joins_the_lines_with_spaces(
         vec![line("Holds the volumes."), line("Its updates restart iSCSI.")],
         Some("Holds the volumes. Its updates restart iSCSI.")
     )]
-    fn box_title(
+    fn a_box_title_joins_its_lines_of_intent(
         #[case] about: Vec<transect_resources::intent::Line>,
         #[case] title: Option<&str>,
     ) {
@@ -370,10 +374,10 @@ mod tests {
     }
 
     #[rstest]
-    #[case::volumes_only(vec![held(Counts(vec![(Type::Nfs, 2)]), 0)], "2 volumes")]
-    #[case::one_dependency(vec![held(Counts(vec![(Type::Nfs, 2)]), 0), held(Counts::default(), 4)], "2 volumes · 1 dependency")]
-    #[case::two_dependencies(vec![held(Counts::default(), 1), held(Counts::default(), 1)], "0 volumes · 2 dependencies")]
-    fn band_total_text(#[case] boxes: Vec<Held>, #[case] text: &str) {
+    #[case::volumes_only(vec![totals(Counts(vec![(Type::Nfs, 2)]), 0)], "2 volumes")]
+    #[case::one_dependency(vec![totals(Counts(vec![(Type::Nfs, 2)]), 0), totals(Counts::default(), 4)], "2 volumes · 1 dependency")]
+    #[case::two_dependencies(vec![totals(Counts::default(), 1), totals(Counts::default(), 1)], "0 volumes · 2 dependencies")]
+    fn the_band_counts_volumes_and_dependencies(#[case] boxes: Vec<Totals>, #[case] text: &str) {
         let boxes = boxes.into_iter().map(|all| GroundBox {
             name: "a.example.com".into(),
             all,
@@ -393,7 +397,7 @@ mod tests {
     #[case::none(0, "0 volumes")]
     #[case::one(1, "1 volume")]
     #[case::several(98, "98 volumes")]
-    fn volumes_text(#[case] count: usize, #[case] text: &str) {
+    fn pluralizes_volumes(#[case] count: usize, #[case] text: &str) {
         assert_eq!(volumes(count), text);
     }
 }

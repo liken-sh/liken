@@ -1,17 +1,17 @@
-//! How long one model build and one render of each page take on a large
-//! synthetic cluster: 50 namespaces, each with eight Deployments and
-//! two StatefulSets of ten pods, a `Service` per workload, an address
-//! from each workload to the next one's `Service`, and four
-//! NetworkPolicies.  That is 5,000 pods, 500 workloads, and 200
-//! policies.
+//! A timing test of one model build and one render of each page, on a
+//! large synthetic cluster. Each namespace has `DEPLOYMENTS`
+//! `Deployment`s and `STATEFUL_SETS` `StatefulSet`s of `REPLICAS` pods,
+//! a `Service` for each workload, four `NetworkPolicy`s, and an address
+//! in each workload that points at the `Service` of the same app in the
+//! next namespace.
 //!
-//! The bound is generous, because the machine that runs the test sets
-//! the time.  The test fails on a regression to work that grows with
-//! pairs of pods.  It is ignored by default because a debug build is
-//! far slower.  Run it with
+//! The bound is generous because the test runs on whatever machine
+//! it is given. It fails when a change makes the work grow with the
+//! number of pairs of pods. It is ignored by default because a debug
+//! build is much slower. Run it with
 //!
 //! ```text
-//! cargo test --release -- --ignored --nocapture renders_a_large_cluster
+//! cargo test --release -- --ignored --nocapture builds_and_renders_a_large_cluster
 //! ```
 
 use std::sync::Arc;
@@ -61,8 +61,8 @@ status: {{addresses: [{{type: InternalIP, address: 192.168.0.{index}}}]}}"
     ))
 }
 
-/// The containers of `app`'s pods: one that calls `upstream` and
-/// serves on a port named `http`.
+/// The `containers` of `app`'s pods: one container that has `upstream`
+/// in an environment variable and serves on a port named `http`.
 fn containers(app: &str, upstream: &str) -> String {
     format!(
         "containers: [{{name: main, image: example/{app},
@@ -110,8 +110,9 @@ fn replica_set(namespace: &str, app: &str) -> Arc<kube::api::PartialObjectMeta<R
     Arc::new(meta.into_response_partial())
 }
 
-/// A running pod of `app`, owned by `owner_ref`, with `labels` beside
-/// its app label.  `at` numbers it, for its address and machine.
+/// A running pod of `app`, owned by `owner_ref`, with `labels` besides
+/// its app label. `at` is the pod's index in the cluster, and sets its
+/// IP address and its machine.
 fn pod(
     namespace: &str,
     app: &str,
@@ -137,9 +138,10 @@ spec: {{selector: {{app: {app}}}, ports: [{{port: 80, targetPort: http}}], clust
     ))
 }
 
-/// A default deny, an allowance for the namespace's own pods, one for
-/// a team's namespaces to reach the first app, and an egress rule on
-/// the StatefulSets.
+/// The `NetworkPolicy`s of a namespace: a default deny of ingress, an
+/// allowance for the namespace's own pods, an allowance for the pods of
+/// team `t1`'s namespaces to reach `app-0`, and an egress rule for the
+/// `StatefulSet` pods.
 fn policies(namespace: &str) -> Vec<Arc<NetworkPolicy>> {
     let policy = |name: &str, spec: &str| -> Arc<NetworkPolicy> {
         parse(&format!(
@@ -165,7 +167,6 @@ fn policies(namespace: &str) -> Vec<Arc<NetworkPolicy>> {
     ]
 }
 
-/// The snapshot of the whole synthetic cluster.
 fn large_cluster() -> Snapshot {
     let mut snapshot = Snapshot::empty();
     snapshot.namespaces = (0..NAMESPACES).map(namespace).collect();
@@ -241,8 +242,8 @@ fn ownership(snapshot: &Snapshot) -> Ownership {
 }
 
 #[rstest]
-#[ignore = "a timing; run it in release mode"]
-fn renders_a_large_cluster() {
+#[ignore = "a timing test; run it in release mode"]
+fn builds_and_renders_a_large_cluster() {
     let (layers, usage, shown) = (Layers::default(), usage::Reading::Off, Shown::default());
     let snapshot = large_cluster();
     assert_eq!(snapshot.pods.len(), 5000);

@@ -1,13 +1,13 @@
-//! A content digest, in the form that an image reference and a manifest
-//! use: `sha256:` or `sha512:` followed by the hash in hex.
+//! A content digest, as an image reference and a manifest write it:
+//! `sha256:` or `sha512:` followed by the hash in hex.
 //!
-//! transect puts a digest into a request's path.  A digest that is
-//! anything else, such as `../` in a manifest a registry wrote, would
-//! make transect request another path on the same host with the same
-//! credentials.  transect also keeps labels by digest for as long as it
-//! runs, so it keeps a body only when the body hashes to the digest that
-//! transect requested.  A mirror that answers with other content then
-//! cannot attach that content's labels to an image.
+//! transect puts a digest into a request's path, so a digest with other
+//! content, such as `../` in a manifest from a registry, would send a
+//! request to another path on the same host with the same credentials.
+//! transect also keeps labels by digest until it exits, so it accepts a
+//! response body only when the body hashes to the requested digest.
+//! Otherwise a mirror that returns other content would attach that
+//! content's labels to the image.
 
 use ring::digest::{SHA256, SHA512, digest};
 

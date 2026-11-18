@@ -1,5 +1,5 @@
-//! Each way a document of `transect`'s resources can go wrong, and the
-//! condition it gets.
+//! The conditions that a document of `transect`'s resources gets when
+//! it loads, and when it fails to load in each way.
 
 use rstest::rstest;
 

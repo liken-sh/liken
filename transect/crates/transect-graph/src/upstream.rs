@@ -1,9 +1,9 @@
-//! How `transect` connects to a store it reads from: Prometheus, an
-//! Alertmanager, or a log store.  A resource that declares one gives
-//! its `url`, its `service`, or both, and a flag can name a URL in
-//! their place.  The flag takes precedence over `url`, and `url` over
-//! `service`, so one resource serves a workstation through a
-//! port-forward and the cluster through the `Service`'s DNS name.
+//! The address `transect` uses to reach a store it reads from:
+//! Prometheus, an Alertmanager, or a log store. A resource that declares
+//! a store gives a `url`, a `service`, or both, and a flag can give a
+//! URL instead. The flag overrides `url`, and `url` overrides `service`,
+//! so one resource works from a workstation through a port-forward URL
+//! and in the cluster through the `Service`'s DNS name.
 
 use serde::Deserialize;
 
@@ -16,10 +16,10 @@ pub struct Service {
     pub port: u16,
 }
 
-/// `value` as a base URL: plain `http` or `https`, with no trailing
-/// slash.
+/// `value` as a base URL, which must be `http` or `https`. The result has
+/// no trailing slash.
 pub fn base_url(value: &str) -> Result<String, String> {
-    http_base(value).ok_or_else(|| format!("a store's url is http or https, not {value:?}"))
+    http_base(value).ok_or_else(|| format!("a store URL must be http or https, not {value:?}"))
 }
 
 /// `value`, trimmed, as an `http` or `https` URL with a host and no
@@ -37,8 +37,9 @@ pub fn http_base(value: &str) -> Option<String> {
     Some(value.trim_end_matches('/').into())
 }
 
-/// The base URL to reach a store at: `flag`, then `url`, then
-/// `service`'s DNS name in the cluster's `domain`, or none of them.
+/// The base URL for a store: `flag` if set, else `url`, else the DNS
+/// name of `service` in the cluster's `domain`. It returns none when
+/// all three are missing.
 pub fn base(
     flag: Option<&str>,
     url: Option<&str>,
@@ -73,7 +74,7 @@ mod tests {
     }
 
     #[rstest]
-    #[case::the_flag_wins(
+    #[case::the_flag_overrides_the_url(
         Some("http://localhost:1"),
         Some("http://localhost:2"),
         Some("http://localhost:1")
@@ -84,7 +85,7 @@ mod tests {
         None,
         Some("http://prometheus.monitoring.svc.cluster.local:9090")
     )]
-    fn reaches_by_the_flag_then_the_url_then_the_service(
+    fn prefers_the_flag_then_the_url_then_the_service(
         #[case] flag: Option<&str>,
         #[case] url: Option<&str>,
         #[case] base_url: Option<&str>,
@@ -95,7 +96,7 @@ mod tests {
     }
 
     #[rstest]
-    fn reaches_nothing_with_nothing_declared() {
+    fn returns_none_when_nothing_is_declared() {
         assert_eq!(base(None, None, None, "cluster.local"), None);
     }
 

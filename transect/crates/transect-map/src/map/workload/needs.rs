@@ -1,8 +1,9 @@
-//! The "Also needs" row lists what the workload depends on that the
-//! front door and the volumes leave out, and how many Secrets it reads.
-//! It reads the same depends-on edges as the card and the section view:
-//! each address the workload is configured with, then each end that only
-//! intent or the producer of a Secret it reads names.
+//! The "Also needs" row of the workload page: what the workload depends
+//! on besides its entry and its volumes, which the row above draws, and
+//! how many Secrets it reads.  The row reads the same depends-on edges
+//! as the card and the section view.  It lists each address that the
+//! workload is configured with, then the target of each depends-on edge
+//! that no address resolves to, such as one that an annotation declares.
 
 use std::collections::BTreeSet;
 
@@ -13,22 +14,23 @@ use transect_graph::environment::{Environment, Kind};
 use transect_graph::links::Reference;
 use transect_network::addresses::Dependency;
 
-/// One row of what a workload needs: an address or an end it depends
-/// on, and the objects that it reaches.
+/// One item of the row: an address, or the target of an edge that no
+/// address resolves to, with the objects it resolves to.
 #[derive(Debug, PartialEq)]
 pub struct Need {
-    /// The host and port of an address, never the rest of the value it
-    /// came from, or the end itself when no address names it.
+    /// For an address, only its host and port, never the rest of the
+    /// configured value, which can hold credentials.  For an edge, the
+    /// target's name.
     pub text: String,
     pub ends: Vec<Reference>,
-    /// Where an end that no address names was written, which its mark
-    /// shows.
+    /// The edge's provenance, when it has a mark to show.  Always `None`
+    /// for an address.
     pub mark: Option<Provenance>,
 }
 
 impl Need {
-    /// The page the address leads to, when it reaches one end that has
-    /// one.
+    /// The page of the object, when the item resolves to exactly one
+    /// object and that object has a page.
     pub fn href(&self) -> Option<&str> {
         match self.ends.as_slice() {
             [end] => end.href.as_deref(),
@@ -43,9 +45,9 @@ impl Need {
     }
 }
 
-/// The row: the addresses, in the order the specs write them, then the
-/// end of each of `edges`, the workload's depends-on edges, that no
-/// address reaches, once each.
+/// The row's items: the addresses, in the order the specs write them,
+/// then the target of each of `edges` that no address resolves to, once
+/// each.  `edges` are the workload's depends-on edges.
 pub fn needs(
     dependencies: Vec<Dependency>,
     edges: &[&Edge],

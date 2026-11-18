@@ -1,14 +1,13 @@
-//! transect's own signals under a loss.  transect reads usage, traffic,
-//! and where alerts go from Prometheus, and the log findings from the
-//! log source.  When a lost machine runs either of them, the map that
-//! shows the loss loses those signals too, so the loss shows that
-//! first.
+//! transect reads usage, traffic, and alert routes from Prometheus, and
+//! log findings from a log store.  When a lost machine runs either of
+//! them, the map gets no data from it during the loss, so the loss page
+//! says so.
 //!
-//! transect finds the Prometheus pod by the host name that Prometheus
-//! reports, which in a pod is the pod's name.  transect cannot use the
-//! address, because it may reach Prometheus through a port-forward
-//! whose address identifies no pod.  transect finds the log source's
-//! pods by the `Service` that its resource names.
+//! transect finds the Prometheus pod by the `hostname` that Prometheus
+//! returns from `/api/v1/status/runtimeinfo`, which in a pod is the pod's
+//! name.  The address transect connects to does not identify the pod,
+//! because it can be a port-forward.  transect finds the log store's pods
+//! by the selector of the `Service` that the `LogSource` names.
 
 pub mod poll;
 
@@ -21,27 +20,26 @@ use kube::ResourceExt;
 use super::Lost;
 use transect_graph::pods::finished;
 
-/// One source transect reads that runs on a lost machine.
+/// A source of transect's data that runs on a lost machine.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Blind {
     /// "Prometheus", or "the log store of LogSource logs".
     pub source: String,
-    /// What the map loses with it.
+    /// The data that the map loses while the source is down.
     pub loses: &'static str,
     pub machine: String,
 }
 
-/// What transect reads its signals from.
+/// Where transect reads its data from.
 pub struct Sources<'a> {
-    /// The pod name that Prometheus reports, or `None` until a read
+    /// The host name that Prometheus returns, or `None` until a read
     /// succeeds.
     pub prometheus: Option<&'a str>,
-    /// The log source's name, and the namespace and name of its Service.
+    /// The `LogSource`'s name, and the namespace and name of its `Service`.
     pub log_source: Option<(&'a str, &'a str, &'a str)>,
 }
 
-/// The sources of `sources` whose running pods are on a machine of
-/// `lost`.
+/// The sources whose running pods are on a machine of `lost`.
 pub fn blinded(
     lost: &Lost,
     sources: &Sources,
@@ -146,7 +144,7 @@ mod tests {
     #[case::neither(&["alpha"], None)]
     #[case::prometheus(&["beta"], Some("transect loses data too: Prometheus runs on beta, so the map loses usage, traffic, and where alerts go."))]
     #[case::both(&["beta", "gamma"], Some("transect loses data too: Prometheus runs on beta, so the map loses usage, traffic, and where alerts go; the log store of LogSource logs runs on gamma, so the map loses the log findings."))]
-    fn says_when_a_loss_takes_transects_own_sources(
+    fn writes_when_a_loss_stops_transects_own_sources(
         #[case] names: &[&str],
         #[case] expected: Option<&str>,
     ) {

@@ -1,15 +1,15 @@
-//! The reconciles-from edge: the GitOps object that applied each
-//! object, found through the kind knowledge of the GitOps tool's kinds.
-//! An object reconciles from the applier whose marks are on it, and the
-//! applier reconciles from its source, the object that the tool fetches
-//! through.  The applier's directory and the URL that it fetches from
-//! give the directory where the object is declared, and each card links
-//! to that directory.
+//! The reconciles-from edge, from each object to the GitOps object that
+//! applied it.  The kind knowledge of a GitOps tool says which labels or
+//! annotations (the marks) an applier puts on the objects it applies,
+//! and which field names its source, the object that fetches the
+//! repository.  The source's URL and the applier's directory give the
+//! place in the repository where an object is declared, and the card
+//! links there.
 //!
-//! A GitOps tool is optional, and the code names no tool.  When no kind
-//! knowledge declares `applies` for a kind that the cluster serves, this
-//! edge kind is off, and each card shows the reason in place of its
-//! code entries.
+//! The code names no GitOps tool, and a cluster may have none.  When no
+//! kind knowledge declares `applies` for a kind that the cluster serves,
+//! the edge is off, and each card shows the reason in place of its code
+//! entries.
 
 mod applied;
 mod card;
@@ -36,9 +36,8 @@ use transect_cluster::cluster::Watch;
 use transect_graph::edges::{Edge, Endpoint, Kind, Object, Provenance};
 use transect_resources::knowledge::{GitOpsFields, Kinds, plural_label};
 
-/// The condition that shows whether an object is ready when its kind's
-/// knowledge names no condition.  Every kind's `Ready` dot uses the
-/// same default.
+/// The condition type read for readiness when the kind's knowledge sets
+/// no `healthy` condition.
 const READY: &str = "Ready";
 
 /// Why reconciles-from is off.
@@ -47,13 +46,13 @@ pub enum Off {
     /// No kind knowledge declares `applies` for a kind the cluster
     /// serves.
     NoKnowledge,
-    /// The watches of the kinds that apply are still listing.  The text
-    /// names those kinds by their plurals.
+    /// The watches of the kinds that apply have not finished their first
+    /// list.  The text is those kinds' plurals.
     Listing(String),
-    /// transect may list none of the kinds that apply.
+    /// transect may not list any of the kinds that apply.
     Refused(String),
     /// No kind knowledge that loaded declares `applies`, and the kind
-    /// knowledge named here did not load.
+    /// knowledge named here failed to load, so it may have declared it.
     Unloaded(String),
 }
 
@@ -72,21 +71,20 @@ pub struct Detail {
     pub path: Option<String>,
     /// The chart it installs.
     pub chart: Option<String>,
-    /// Whether it applies objects, rather than only fetching for the
-    /// objects that do.
+    /// False for a source, which only fetches a repository.
     pub applies: bool,
 }
 
-/// The objects of a GitOps tool's kinds as of one render, or why there
-/// are none.
+/// The objects of a GitOps tool's kinds as of one render, or the reason
+/// the edge is off.
 #[derive(Debug, Default)]
 pub struct GitOps {
     pub off: Option<Off>,
     found: HashMap<Object, Found>,
     /// The fields of each GitOps kind, by group and kind.
     fields: HashMap<(String, String), GitOpsFields>,
-    /// The applier of each GitOps object, found from the object's own
-    /// marks.  For example, a tree applier applies a release.
+    /// Each GitOps object paired with the applier that its own marks
+    /// identify.
     applied: Vec<(Object, Object)>,
 }
 
@@ -99,9 +97,9 @@ impl GitOps {
         }
     }
 
-    /// Reads every object in `custom` of a kind whose knowledge in
-    /// `kinds` declares GitOps fields.  `listing` returns the state of
-    /// each kind's watch, and that state decides whether the edge is on.
+    /// Reads every object in `custom` whose kind has GitOps fields in
+    /// `kinds`.  `listing` returns the state of each kind's watch, and
+    /// the edge is off unless some kind that applies has listed.
     pub fn build(
         kinds: &Kinds,
         custom: &[(ApiResource, Vec<Arc<DynamicObject>>)],
@@ -155,8 +153,8 @@ impl GitOps {
         gitops
     }
 
-    /// The reason that the edge is off when no kind that applies has
-    /// finished listing, or `None` when one kind has.
+    /// Why the edge is off, or `None` when at least one kind that
+    /// applies has finished listing.
     fn off_reason(&self, kinds: &Kinds, listing: &impl Fn(&str, &str) -> Watch) -> Option<Off> {
         let mut appliers: Vec<(&(String, String), Watch)> = self
             .fields
@@ -185,9 +183,9 @@ impl GitOps {
         }
     }
 
-    /// The tool with an off reason that names `unloaded`, when no kind
-    /// knowledge declares `applies`.  `unloaded` is kind knowledge that
-    /// did not load, and it may be the knowledge that turns the edge on.
+    /// Replaces the `NoKnowledge` reason with `Unloaded(unloaded)` when
+    /// kind knowledge failed to load, because the knowledge that failed
+    /// may be what would turn the edge on.  Other reasons stay.
     pub fn with_unloaded(mut self, unloaded: Option<&str>) -> Self {
         if let (Some(Off::NoKnowledge), Some(name)) = (&self.off, unloaded) {
             self.off = Some(Off::Unloaded(name.to_string()));
@@ -195,8 +193,8 @@ impl GitOps {
         self
     }
 
-    /// The marks of every kind that applies.  A mark on an object names
-    /// the applier of that object.
+    /// The marks of every kind that applies.  A mark on an object
+    /// identifies the applier of that object.
     pub fn appliers(&self) -> Appliers {
         let kinds = self.fields.iter().filter_map(|((group, kind), fields)| {
             Some((group.clone(), kind.clone(), fields.applies.clone()?))
@@ -220,10 +218,10 @@ impl GitOps {
         self.found.get(object)
     }
 
-    /// The source that `found` fetches through, when `found` names an
-    /// object of a GitOps kind that fetches from a URL.  When the
-    /// reference gives no group, it matches a kind of that name only
-    /// when exactly one such kind exists.
+    /// The source object that `found` references, when that is an
+    /// object of a GitOps kind that has a repository URL.  When the
+    /// reference has no group, it resolves only if exactly one such kind
+    /// has that name.
     pub fn source_of(&self, found: &Found) -> Option<Object> {
         let named = found.source.as_ref()?;
         let mut kinds = self.fields.iter().filter(|((group, kind), fields)| {
@@ -276,17 +274,15 @@ impl GitOps {
         found.filter(move |found| found.object.group == group && found.object.kind == kind)
     }
 
-    /// Each object that fetches from its own URL, with that URL.
-    /// Address resolution uses these to find a source that the cluster
-    /// serves.
+    /// Each object that has its own repository URL, with that URL.
     pub fn sources(&self) -> impl Iterator<Item = (&Object, &str)> {
         let found = self.found.values();
         found.filter_map(|found| Some((&found.object, found.url.as_deref()?)))
     }
 
-    /// A reconciles-from edge from each object in `applied` to what
-    /// applied it, from each GitOps object to what its own marks name,
-    /// and from each object that fetches through a source to that
+    /// Reconciles-from edges: from each object in `applied` to its
+    /// applier, from each GitOps object to the applier its own marks
+    /// identify, and from each object that references a source to that
     /// source.
     pub fn edges(&self, applied: &Applied) -> Vec<Edge> {
         let edge = |from: &Object, to: &Object| Edge {

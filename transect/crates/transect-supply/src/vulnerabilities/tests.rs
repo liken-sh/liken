@@ -16,7 +16,7 @@ fn finding(id: &str, score: Option<&str>, fixed: Option<&str>) -> Finding {
     }
 }
 
-fn leveled(id: &str, severity: &str) -> Finding {
+fn finding_of_severity(id: &str, severity: &str) -> Finding {
     Finding {
         severity: severity.into(),
         ..finding(id, None, None)
@@ -55,12 +55,12 @@ fn sorts_a_fix_first_then_by_score_then_by_id() {
 #[rstest]
 fn sorts_severity_first_in_the_scanners_order_with_unknown_last() {
     let findings = [
-        leveled("a", "UNKNOWN"),
-        leveled("b", "LOW"),
-        leveled("c", "HIGH"),
-        leveled("d", "CRITICAL"),
-        leveled("e", "MEDIUM"),
-        leveled("f", "ODD"),
+        finding_of_severity("a", "UNKNOWN"),
+        finding_of_severity("b", "LOW"),
+        finding_of_severity("c", "HIGH"),
+        finding_of_severity("d", "CRITICAL"),
+        finding_of_severity("e", "MEDIUM"),
+        finding_of_severity("f", "ODD"),
     ];
     let severities: Vec<String> = sorted(&findings).into_iter().map(|(_, s)| s).collect();
     assert_eq!(
@@ -118,7 +118,7 @@ fn colors_only_critical_and_high(#[case] severity: &str, #[case] class: &str) {
 #[case::every_one(None, vec![], true)]
 #[case::some(Some("HIGH,CRITICAL"), vec!["CRITICAL", "HIGH"], false)]
 #[case::blank(Some(" , "), vec![], true)]
-fn reads_the_severities_a_page_asks_for(
+fn reads_the_severities_in_a_page_query(
     #[case] query: Option<&str>,
     #[case] only: Vec<&str>,
     #[case] shows_unknown: bool,

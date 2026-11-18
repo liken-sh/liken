@@ -1,13 +1,13 @@
-//! An `Ingress`'s traffic in words: one gray line per backend, or one
-//! gray line that states what would show its traffic.
+//! An `Ingress`'s traffic as text: one line per backend, or a note that
+//! tells why there are no figures.
 
 use super::{Backend, Figures, Traffic};
 use transect_graph::edges::Object;
 use transect_graph::links::Reference;
 use transect_resources::resources::OffLine;
 
-/// One backend's line: the `Service` and port it names, when the
-/// `Ingress` routes to more than one, and its figures.
+/// One backend's line.  `backend` is the `Service` and port, which the
+/// line shows only when it is needed to tell the backends apart.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BackendLine {
     pub backend: Option<Reference>,
@@ -15,26 +15,27 @@ pub struct BackendLine {
 }
 
 impl Traffic {
-    /// The one line that the page shows in place of its figures when
-    /// it has none: what would show them, or why they are missing.
+    /// The note the page shows in place of the figures, when there are
+    /// none.
     pub fn note(&self) -> Option<OffLine> {
-        let said = |text: &str| Some(OffLine::said(text));
+        let plain = |text: &str| Some(OffLine::plain(text));
         match self {
-            Self::Undeclared => said(
+            Self::Undeclared => plain(
                 "An IngressController with entry queries for its controller would show traffic here.",
             ),
             Self::Unloaded(name) => Some(OffLine {
                 text: format!("No traffic: the IngressController {name} did not load"),
                 see_resources: true,
             }),
-            Self::Unread => said("No traffic yet: the entry queries have not answered."),
-            Self::Unnamed => said("Its controller's metrics name none of its backends."),
+            Self::Unread => plain("No traffic yet: the entry queries have not returned results."),
+            Self::Unnamed => plain("Its controller's metrics name none of its backends."),
             Self::Read { .. } => None,
         }
     }
 
-    /// One line per backend, each naming its `Service` in `namespace`
-    /// when there are several, or with `named`, always.
+    /// One line per backend.  Each line links its `Service` in
+    /// `namespace` when the `Ingress` has more than one backend or
+    /// `named` is true.
     pub fn lines(&self, namespace: &str, named: bool) -> Vec<BackendLine> {
         let Self::Read {
             backends, window, ..
@@ -55,7 +56,7 @@ impl Traffic {
             .collect()
     }
 
-    /// Where the figures came from, for each line's title.
+    /// The source of the figures, for the title attribute of each line.
     pub fn title(&self) -> Option<String> {
         let Self::Read { controller, .. } = self else {
             return None;
@@ -66,7 +67,6 @@ impl Traffic {
     }
 }
 
-/// The backend's `Service` and port, linked to the `Service`'s page.
 fn reference(namespace: &str, backend: &Backend) -> Reference {
     let service = Object::new("", "Service", Some(namespace), &backend.service);
     Reference {

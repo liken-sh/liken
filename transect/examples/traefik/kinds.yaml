@@ -1,6 +1,6 @@
 # Kind knowledge for Traefik's IngressRoute and Middleware, as Traefik
-# would ship it.  How to read the traffic of the Ingresses Traefik
-# serves is in ingress-controller.yaml, with the controller.
+# would ship it.  How transect reads the traffic of the Ingresses that
+# Traefik serves is in ingress-controller.yaml, beside the controller.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:
@@ -10,11 +10,10 @@ spec:
   controller: {image: traefik}
   docs: https://doc.traefik.io/traefik/routing/providers/kubernetes-crd/
 ---
-# An Ingress lists the middlewares its routes pass through in the
-# router.middlewares annotation, each as <namespace>-<name>@kubernetescrd,
-# and a middleware with forwardAuth asks its address whether to let each
-# request through, so the applications behind the Ingress sign their
-# users in through whatever serves that address.
+# An Ingress names its Traefik middlewares in the router.middlewares
+# annotation, each as <namespace>-<name>@kubernetescrd.  A middleware
+# with forwardAuth sends each request to its address first, and Traefik
+# passes the request on only when that service returns a 2xx status.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:

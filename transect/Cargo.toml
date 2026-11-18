@@ -1,7 +1,7 @@
-# transect's crates, one directory each under crates/, from the page
-# frame at the bottom to the binary at the top. A crate names only the
-# crates below it, and plans/completed/12-crates.md says why each sits
-# where it does.
+# transect's crates are one directory each under crates/, in layers
+# from the page frame at the bottom to the binary at the top.  A crate
+# depends only on crates below it.  plans/completed/12-crates.md gives
+# the reason for each crate's place.
 [workspace]
 resolver = "3"
 members = ["crates/*"]
@@ -54,13 +54,10 @@ tower = { version = "=0.5.3", features = ["retry", "util"] }
 tracing = "=0.1.44"
 tracing-subscriber = { version = "=0.3.23", features = ["env-filter"] }
 
-# transect's own crates compile at opt-level 1, and their dependencies
-# keep the release default of 3.  About half of transect's compile
-# time is type checking, borrow checking, and collecting generic
-# instances, which no opt-level changes.  Opt-level 1 removes most of
-# LLVM's optimization time, and the pages measured no slower than at 3.
-# Each crate is named, since `package."*"` would also raise the build
-# scripts and proc macros from build-override's opt-level 0 to 3.
+# transect's own crates compile at opt-level 1 to shorten the build, and
+# their dependencies keep the release default of 3.  Each crate is
+# listed by name because `package."*"` would also raise build scripts
+# and proc macros from build-override's opt-level 0 to 3.
 [profile.release.package.transect]
 opt-level = 1
 

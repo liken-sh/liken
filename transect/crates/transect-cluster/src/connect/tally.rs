@@ -1,13 +1,12 @@
-//! A count of the requests `transect` sends the API server, by what each
-//! asks for, so its load on the server can be read from its own log.
+//! Counts the requests that `transect` sends to the API server, by verb
+//! and resource, so that its log shows the load it puts on the server.
 //!
-//! Each request is counted where the client passes it to a connection,
-//! below the retry, so a request the server answered 429 and the retry
-//! after it count as two, as the server receives them.  The first
-//! minute's count is logged once, at info, because it includes the
-//! lists that `transect` sends at the start.  Every later minute's count
-//! is logged at debug, and on a quiet cluster it should include nothing
-//! but the watches that resume.
+//! The count wraps the connections, below the retry layer, so a request
+//! that gets a 429 and its retry count as two, as the server counts them.
+//! The count of the first minute is logged at info, because it includes
+//! the lists that `transect` sends at startup. Each later minute is
+//! logged at debug, and on a quiet cluster it should contain only
+//! watches that reconnect.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -17,35 +16,35 @@ use std::time::Duration;
 use futures::future::BoxFuture;
 use http::{Method, Request, Response};
 
-/// How often the count is logged, and emptied.
-const EVERY: Duration = Duration::from_secs(60);
+/// How often the count is logged and reset.
+const LOG_INTERVAL: Duration = Duration::from_secs(60);
 
-/// What one request asked for: its verb, as RBAC names it, with
-/// `watch` for a list that streams, and its resource, with the group
-/// after a dot as kubectl writes it, or `discovery` for a path that
-/// names no resource.
+/// The verb and resource of a request. The verb is the RBAC verb, so a
+/// list with the `watch` parameter set is `watch`. The resource is written as
+/// kubectl writes it, with the group after a dot. A discovery path is
+/// `discovery`, followed by the group when it has one.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Asked {
+pub struct Operation {
     pub verb: String,
     pub resource: String,
 }
 
-/// What the requests since the count was last emptied asked for, and
-/// how many the server answered 429.
+/// The requests since the count was last taken, by operation, and how
+/// many responses were 429.
 #[derive(Default)]
 struct Counts {
-    asked: BTreeMap<Asked, u64>,
-    busy: u64,
+    operations: BTreeMap<Operation, u64>,
+    throttled: u64,
 }
 
-/// The count, shared by every clone of the service.
+/// The count of requests, shared by every clone of the service.
 #[derive(Clone, Default)]
 pub struct Tally {
     counts: Arc<Mutex<Counts>>,
 }
 
 impl Tally {
-    /// `connections`, with each request it sends counted.
+    /// Wraps `connections` in a service that counts each request.
     pub fn around<S>(&self, connections: S) -> Counting<S> {
         Counting {
             inner: connections,
@@ -53,32 +52,33 @@ impl Tally {
         }
     }
 
-    /// Logs the count every minute, with `streams` giving how many
-    /// streams are open on each connection, when the client spreads its
-    /// requests over several.
+    /// Logs and resets the count every minute. `streams` returns how
+    /// many HTTP/2 streams are open on each connection, or `None` when
+    /// the client does not pool connections that way.
     pub fn log(self, streams: impl Fn() -> Option<Vec<usize>> + Send + 'static) {
         tokio::spawn(async move {
             let mut first = true;
-            let mut every = tokio::time::interval_at(tokio::time::Instant::now() + EVERY, EVERY);
+            let mut interval =
+                tokio::time::interval_at(tokio::time::Instant::now() + LOG_INTERVAL, LOG_INTERVAL);
             loop {
-                every.tick().await;
-                let (asked, busy) = self.take();
-                let total: u64 = asked.iter().map(|(_, count)| count).sum();
-                let asked = summary(&asked);
+                interval.tick().await;
+                let (operations, throttled) = self.take();
+                let total: u64 = operations.iter().map(|(_, count)| count).sum();
+                let line = summary(&operations);
                 let streams = streams();
                 if first {
                     tracing::info!(
                         total,
-                        busy,
-                        asked,
+                        busy = throttled,
+                        operations = line,
                         ?streams,
                         "requests to the API server in the first minute"
                     );
                 } else {
                     tracing::debug!(
                         total,
-                        busy,
-                        asked,
+                        busy = throttled,
+                        operations = line,
                         ?streams,
                         "requests to the API server in the last minute"
                     );
@@ -88,45 +88,45 @@ impl Tally {
         });
     }
 
-    fn count(&self, asked: Asked) {
+    fn count(&self, operation: Operation) {
         let mut counts = self.counts.lock().unwrap();
-        *counts.asked.entry(asked).or_default() += 1;
+        *counts.operations.entry(operation).or_default() += 1;
     }
 
-    fn busy(&self) {
-        self.counts.lock().unwrap().busy += 1;
+    fn throttled(&self) {
+        self.counts.lock().unwrap().throttled += 1;
     }
 
-    /// The count since it was last taken, the most asked first, and the
-    /// 429s.
-    fn take(&self) -> (Vec<(Asked, u64)>, u64) {
+    /// Returns and resets the counts and the number of 429 responses,
+    /// with the most frequent operation first.
+    fn take(&self) -> (Vec<(Operation, u64)>, u64) {
         let counts = std::mem::take(&mut *self.counts.lock().unwrap());
-        let mut asked: Vec<(Asked, u64)> = counts.asked.into_iter().collect();
-        asked.sort_by(|(a, one), (b, other)| other.cmp(one).then(a.cmp(b)));
-        (asked, counts.busy)
+        let mut operations: Vec<(Operation, u64)> = counts.operations.into_iter().collect();
+        operations.sort_by(|(a, one), (b, other)| other.cmp(one).then(a.cmp(b)));
+        (operations, counts.throttled)
     }
 }
 
-/// `asked` as one line: `watch pods=1, get pods/log=3`.
-fn summary(asked: &[(Asked, u64)]) -> String {
-    let each = asked.iter().map(|(asked, count)| {
-        let Asked { verb, resource } = asked;
+/// Formats the counts as one line, such as `watch pods=1, get pods/log=3`.
+fn summary(operations: &[(Operation, u64)]) -> String {
+    let each = operations.iter().map(|(operation, count)| {
+        let Operation { verb, resource } = operation;
         format!("{verb} {resource}={count}")
     });
     each.collect::<Vec<_>>().join(", ")
 }
 
-/// What a request with `method`, `path`, and `query` asks for.  A path
-/// outside the API, such as `/v2/`, which k3s's embedded registry
-/// answers on the API server's address, is named by its first segment.
-pub fn asked(method: &Method, path: &str, query: Option<&str>) -> Asked {
+/// The operation of a request. A path outside the Kubernetes API is
+/// counted under its first segment, such as `/v2` for the image registry
+/// that k3s serves on the API server's port.
+pub fn operation(method: &Method, path: &str, query: Option<&str>) -> Operation {
     let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
     let (group, rest) = match parts.as_slice() {
         ["api", _version, rest @ ..] => ("", rest),
         ["apis", group, _version, rest @ ..] => (*group, rest),
         ["api" | "apis", ..] => ("", &[][..]),
         [first, ..] => {
-            return Asked {
+            return Operation {
                 verb: method.as_str().to_lowercase(),
                 resource: format!("/{first}"),
             };
@@ -157,19 +157,18 @@ pub fn asked(method: &Method, path: &str, query: Option<&str>) -> Asked {
         Method::GET if rest.is_empty() || named => "get",
         Method::GET => "list",
         ref other => {
-            return Asked {
+            return Operation {
                 verb: other.as_str().to_lowercase(),
                 resource,
             };
         }
     };
-    Asked {
+    Operation {
         verb: verb.into(),
         resource,
     }
 }
 
-/// A service that counts each request before `inner` sends it.
 #[derive(Clone)]
 pub struct Counting<S> {
     inner: S,
@@ -192,13 +191,13 @@ where
     fn call(&mut self, request: Request<B>) -> Self::Future {
         let uri = request.uri();
         self.tally
-            .count(asked(request.method(), uri.path(), uri.query()));
+            .count(operation(request.method(), uri.path(), uri.query()));
         let tally = self.tally.clone();
-        let answered = self.inner.call(request);
+        let pending = self.inner.call(request);
         Box::pin(async move {
-            let response = answered.await?;
+            let response = pending.await?;
             if response.status() == http::StatusCode::TOO_MANY_REQUESTS {
-                tally.busy();
+                tally.throttled();
             }
             Ok(response)
         })
@@ -275,7 +274,7 @@ mod tests {
         "post",
         "selfsubjectrulesreviews.authorization.k8s.io"
     )]
-    fn names_what_a_request_asks_for(
+    fn finds_the_verb_and_resource_of_a_request(
         #[case] method: &str,
         #[case] path: &str,
         #[case] query: Option<&str>,
@@ -283,35 +282,35 @@ mod tests {
         #[case] resource: &str,
     ) {
         let method = Method::from_bytes(method.as_bytes()).unwrap();
-        let expected = Asked {
+        let expected = Operation {
             verb: verb.into(),
             resource: resource.into(),
         };
-        assert_eq!(asked(&method, path, query), expected);
+        assert_eq!(operation(&method, path, query), expected);
     }
 
     #[rstest]
-    fn takes_the_most_asked_first_and_empties_the_count() {
+    fn takes_the_most_frequent_first_and_empties_the_count() {
         let tally = Tally::default();
-        let list = asked(&Method::GET, "/api/v1/pods", None);
-        let watch = asked(&Method::GET, "/api/v1/pods", Some("watch=1"));
+        let list = operation(&Method::GET, "/api/v1/pods", None);
+        let watch = operation(&Method::GET, "/api/v1/pods", Some("watch=1"));
         tally.count(watch.clone());
         tally.count(list.clone());
         tally.count(list.clone());
-        tally.busy();
+        tally.throttled();
         assert_eq!(tally.take(), (vec![(list, 2), (watch, 1)], 1));
         assert_eq!(tally.take(), (vec![], 0));
     }
 
     #[rstest]
     fn writes_the_count_on_one_line() {
-        let asked = [
-            (asked(&Method::GET, "/api/v1/pods", Some("watch=1")), 2),
+        let operations = [
+            (operation(&Method::GET, "/api/v1/pods", Some("watch=1")), 2),
             (
-                asked(&Method::GET, "/api/v1/namespaces/a/pods/b/log", None),
+                operation(&Method::GET, "/api/v1/namespaces/a/pods/b/log", None),
                 1,
             ),
         ];
-        assert_eq!(summary(&asked), "watch pods=2, get pods/log=1");
+        assert_eq!(summary(&operations), "watch pods=2, get pods/log=1");
     }
 }

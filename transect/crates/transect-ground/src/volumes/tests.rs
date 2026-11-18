@@ -6,9 +6,10 @@ fn yaml<K: serde::de::DeserializeOwned>(text: &str) -> Arc<K> {
     Arc::new(serde_yaml::from_str(text).unwrap())
 }
 
-/// A pod in shop named `name` on alpha in `phase`, whose one container
-/// mounts the claim `data` with `mount` as its volumeMount's extra
-/// fields and `source` as its claim source's.
+/// A pod `name` in `shop` on node `alpha` in `phase`, with one container
+/// that mounts the claim `data`.  `mount` is YAML appended to the
+/// `volumeMounts` entry, and `source` is YAML appended to the
+/// `persistentVolumeClaim` source.
 fn pod(name: &str, phase: &str, source: &str, mount: &str) -> Arc<Pod> {
     yaml(&format!(
         "metadata: {{namespace: shop, name: {name}}}

@@ -1,5 +1,5 @@
-//! The HTTP server: one route per elevation, the event stream that keeps
-//! an open page current, and the static files.
+//! The HTTP server. It serves a page for each elevation, an event
+//! stream that pushes updates to an open page, and the static files.
 
 mod access_route;
 mod assets;
@@ -58,27 +58,30 @@ use views::Views;
 #[derive(Clone)]
 struct AppState {
     sources: Sources,
-    /// The `main` block of each view a browser has open.
+    /// Re-renders the `main` block of each view that a browser has
+    /// open.
     views: Views<View>,
 }
 
-/// What the pages read besides the cluster's stores.
+/// The sources the pages read in addition to the cluster's stores.
 pub struct Inputs {
     pub resources: watch::Receiver<Arc<Loaded>>,
     pub usage: watch::Receiver<usage::Reading>,
-    /// The alerts that Alertmanager last reported as firing.
+    /// The alerts that Alertmanager most recently reported as firing.
     pub alerts: watch::Receiver<alerts::Reading>,
     pub logs: LogTails,
-    /// The log source's last round of searches across the cluster.
+    /// The results of the latest round of log searches across the
+    /// cluster.
     pub searched: watch::Receiver<Arc<Searched>>,
     pub images: watch::Receiver<Arc<Known>>,
-    /// What the ingress controllers' metrics give for each backend.
+    /// Per-backend traffic figures from the ingress controllers'
+    /// metrics.
     pub entry: watch::Receiver<transect_network::entry::poll::Reading>,
-    /// The bytes each claim's volume holds, from the metrics source.
+    /// The bytes used on each claim's volume, from metrics.
     pub volumes_used: watch::Receiver<transect_observe::metrics::Reading>,
-    /// The pod name Prometheus runs under.
+    /// The name of the pod that runs Prometheus, once one is found.
     pub prometheus_pod: watch::Receiver<Option<String>>,
-    /// The objects of kinds no store holds, read once per page load.
+    /// Objects of kinds that no store watches, read once per page load.
     pub reads: Reads,
 }
 
@@ -124,23 +127,21 @@ pub async fn serve(listen: SocketAddr, cluster: Cluster, inputs: Inputs) -> anyh
     serve_sources(listen, &cluster.change_signal(), sources).await
 }
 
-/// Serves the fixture cluster the tests build, which never changes, and
-/// reads nothing from the network: no API server, no Prometheus, and
-/// no log store.  It is for work on templates, CSS, and layout without
-/// a cluster.
+/// Serves the fixture cluster that the tests build. It makes no network
+/// requests, so you can work on templates, CSS, and layout without a
+/// cluster.
 #[cfg(debug_assertions)]
 pub async fn serve_fixture(listen: SocketAddr) -> anyhow::Result<()> {
     let (changes, _) = watch::channel(());
     serve_sources(listen, &changes, fixture_sources(&changes)?).await
 }
 
-/// What the fixture's pages read: its one model, its usage, log tails
-/// that read nothing, and the objects it holds as read once.
 #[cfg(any(test, debug_assertions))]
 fn fixture_sources(changes: &watch::Sender<()>) -> anyhow::Result<Sources> {
-    // The log store's HTTP client is built though it sends nothing, and
-    // it needs a TLS provider, which a live start installs on its
-    // first connection to the API server.
+    // `LogTails::offline` builds a `reqwest` client, which fails without
+    // a process-wide rustls crypto provider. A live start installs one
+    // when it connects to the API server, and the fixture connects to
+    // none.
     let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
     Ok(Sources {
         models: Latest::new(changes, |_: Option<&Model>| fixture::model()),
@@ -150,8 +151,8 @@ fn fixture_sources(changes: &watch::Sender<()>) -> anyhow::Result<Sources> {
     })
 }
 
-/// Serves every page from `sources`, rendering each open view again
-/// when `changes` marks a change.
+/// Serves every page from `sources` until shutdown, and renders each
+/// open view again when `changes` fires.
 async fn serve_sources(
     listen: SocketAddr,
     changes: &watch::Sender<()>,
@@ -164,7 +165,6 @@ async fn serve_sources(
     Ok(())
 }
 
-/// Every route, drawn from `sources`.
 fn router(changes: &watch::Sender<()>, sources: Sources) -> Router {
     let views = Views::new(changes.clone(), debounce::QUIET, debounce::CAP, {
         let sources = sources.clone();
@@ -198,14 +198,15 @@ fn router(changes: &watch::Sender<()>, sources: Sources) -> Router {
         .route("/cluster/{resource}/{name}", get(cluster_object))
         .route("/namespaces/{namespace}", get(namespace_elevation))
         .route("/namespaces/{namespace}/{resource}", get(objects_list))
-        // A static segment outranks a parameter, so `access` reaches a
-        // namespace's access tab and never a list of a kind.
+        // axum matches a static segment before a `{parameter}`, so
+        // `/namespaces/{namespace}/access` is a namespace's access tab
+        // and not a list of a resource named `access`.
         .route(
             "/namespaces/{namespace}/access",
             get(access_route::namespace),
         )
-        // A static segment outranks a parameter, so `pods` reaches the
-        // pod page and never a workload's.
+        // For the same reason, `/namespaces/{namespace}/pods/{name}` is
+        // the pod page and not a workload's.
         .route("/namespaces/{namespace}/pods/{name}", get(pod_elevation))
         .route(
             "/namespaces/{namespace}/{resource}/{name}",
@@ -227,8 +228,8 @@ fn router(changes: &watch::Sender<()>, sources: Sources) -> Router {
             "/namespaces/{namespace}/{resource}/{name}/logs",
             get(logs_lens),
         )
-        // A page connects to `/events` followed by its own path and query,
-        // so the stream renders exactly the view the page shows.
+        // A page opens `/events` followed by its own path and query, so
+        // the stream renders the same view that the page shows.
         .route("/events/", get(view_events_at_root))
         .route("/events/{*path}", get(view_events))
         .route("/static/{*path}", get(assets::serve))
@@ -237,23 +238,21 @@ fn router(changes: &watch::Sender<()>, sources: Sources) -> Router {
 }
 
 impl AppState {
-    /// The page whole, with 404 when it reports its object gone.  A
-    /// page of an object no store holds reads it first.  It draws from
-    /// the last model built and never waits for a build, because the
-    /// cluster changes every few seconds, a build takes from a tenth of a
-    /// second to most of a second, and a click that waited would stall.
-    /// The page's event stream sends anything newer.  The one exception
-    /// is a page whose object the last model does not hold while a newer
-    /// model is due, such as a link to an object created a second ago:
-    /// it waits for that build before it answers 404.
+    /// Renders `page` whole, with status 404 when its object is gone.
+    /// It renders from the last model built and does not wait for a new
+    /// one, because the cluster changes often and waiting for a slow
+    /// build would delay each click. The page's event stream sends
+    /// anything newer. When the object is missing from the last model
+    /// and a newer model is due, as for a link to an object created a
+    /// second ago, it waits for that model before it responds 404.
     async fn whole(&self, page: Page, query: &view::Query) -> Response {
         self.sources.prepare(&page).await;
         let model = self.sources.models.last().await;
         self.whole_on(model, page, query).await
     }
 
-    /// The page whole, drawn from `model`, or when `model` does not hold
-    /// its object and a newer model is due, from that one.
+    /// Renders `page` whole from `model`, or from a newer model as
+    /// `whole` describes.
     async fn whole_on(
         &self,
         model: Option<Arc<Model>>,
@@ -370,8 +369,9 @@ async fn objects_list(
     state.whole(page, &query).await
 }
 
-/// An object outside any namespace.  A `Node` redirects to its
-/// machine's page, and a `Namespace` to its elevation.
+/// A page for a cluster-scoped object. A `Node`, a `PersistentVolume`,
+/// and a `Namespace` redirect permanently to their machine, volume, and
+/// namespace pages.
 async fn cluster_object(
     State(state): State<AppState>,
     Path((resource, name)): Path<(String, String)>,
@@ -425,7 +425,7 @@ async fn pod_elevation(
     Path((namespace, name)): Path<(String, String)>,
     Query(query): Query<view::Query>,
 ) -> Response {
-    // The tails are read here, on a page load, and never for a push.
+    // Log tails are read on a page load, never for a push.
     let last = state.sources.models.last().await;
     let pod = last
         .iter()
@@ -434,10 +434,10 @@ async fn pod_elevation(
             pod.metadata.namespace.as_deref() == Some(namespace.as_str())
                 && pod.metadata.name.as_deref() == Some(name.as_str())
         });
-    // The read marks the cluster changed.  The page draws from the last
-    // model built and takes its tails from the cache, so it shows them
-    // anyway, and the push that follows the change sends the health
-    // counts taken from them.
+    // The page renders from the last model but reads its tails from the
+    // cache, so it shows the new tails. When a read finishes, `refresh`
+    // signals a change, and the push that follows sends the health
+    // counts from the new tails.
     if let Some(pod) = pod {
         state.sources.logs.refresh(pod).await;
     }
@@ -460,8 +460,7 @@ async fn logs_lens(
         pod: pod.as_deref(),
         container: container.as_deref(),
     };
-    // The tails are read here, on a page load, as the pod page reads
-    // them, and the page draws them from the cache.
+    // As in `pod_elevation`, read the tails on a page load.
     if let Some(pod) = model
         .as_deref()
         .and_then(|model| pages::shown_pod(model, &lens, Timestamp::now()))
@@ -490,9 +489,9 @@ async fn view_events(
     let Some(view) = View::at(&path, query) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    // A stream that connects with no page load before it, or after
-    // `Reads` dropped the page's copy, reads the object as a page load
-    // would.
+    // An event stream can connect with no page load before it, or after
+    // `Reads` dropped its copy of the page's object, so read the object
+    // here as a page load would.
     state.sources.prepare(&view.page).await;
     events::stream(state.views.subscribe(view).await).into_response()
 }

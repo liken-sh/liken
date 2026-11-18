@@ -1,11 +1,12 @@
-//! An age in the fewest characters that still read at a glance: "12m",
-//! "5h", "4d".  A pod's age and a workload's last rollout both show
-//! this way, so one tile and one card read alike.
+//! Formats an age compactly, such as "12m", "5h", or "4d".  The same
+//! format shows a pod's age and a workload's last rollout.
 
-/// Minutes under an hour, hours under two days, days under two years,
-/// then years and days, as `kubectl get` prints them.  Two days, not
-/// one, so "30h" shows a pod started yesterday afternoon rather than
-/// rounding it down to "1d".
+/// Formats `minutes` as minutes under an hour, hours under two days,
+/// days under two years, years and days under eight years, and years
+/// after that.  These are the bounds that `kubectl get` uses for an age.
+/// Hours continue to two days so that a pod started yesterday afternoon
+/// shows as "30h" and not "1d".  A negative age, from a skewed clock,
+/// shows as "0m".
 pub fn age(minutes: i64) -> String {
     const DAY: i64 = 1440;
     const YEAR: i64 = 365 * DAY;

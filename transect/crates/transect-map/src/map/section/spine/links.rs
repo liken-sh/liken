@@ -1,15 +1,20 @@
-//! The spine's lines, by the boxes at their ends: the Ingresses to the
-//! Services they route to, the Services to the workload they select,
-//! the workload to each claims box it stores on, each claims box to the
-//! machines that mount its claims, and each machine to the backends that
-//! store its volumes' data.  When there is no machine to pass through, as
-//! for a workload with no pod running, a line runs from a claims box to
-//! its backend, and from the workload to a backend that it names only
-//! inline.  Each side box is joined to the workload, except that a
-//! device is joined to the machine it is on.  A device is also joined to
-//! each box in the right column that it ties to.  When the workload
-//! reaches a machine that the spine already draws, the line joins the
-//! workload to that machine's box on the spine.
+//! The lines between the boxes of the spine. The lines run from each
+//! `Ingress` to the `Service`s it routes to, from each `Service` to the
+//! workload it selects, from the workload to each claims box it stores
+//! on, from each claims box to the machines that mount its claims, and
+//! from each machine to the backends that store its volumes' data.
+//!
+//! Some lines skip a box. When a workload has no running pod, there is
+//! no machine, so a line runs from the claims box straight to its
+//! backend. A backend that the workload names only inline, with no
+//! claim, gets a line from the workload.
+//!
+//! A side box is joined to the workload, except that a device a pod
+//! holds is joined to the machine it is on. Two side boxes in the right
+//! column are joined when an edge links the endpoints they draw, such as
+//! a device and the radio it pairs through. When the workload reaches a
+//! machine that the spine already draws, the line joins the workload to
+//! that machine's box on the spine in place of a side box.
 
 use super::sides::{self, SideBox};
 use super::{Band, MOST_MACHINES, Parts, Row};
@@ -21,12 +26,12 @@ use transect_graph::edges::Endpoint;
 pub fn links(parts: &Parts, rows: &[Row]) -> Vec<Link> {
     let row = |band: &Band| rows.iter().position(|row| row.band == *band);
     let mut links = Vec::new();
-    let door = row(&Band::Entry);
+    let entry = row(&Band::Entry);
     let services_tier = usize::from(!parts.ingresses.is_empty());
-    if let Some(door) = door {
+    if let Some(entry) = entry {
         for &(ingress, service) in &parts.routes {
-            let from = At::new(door, 0, ingress);
-            let to = At::new(door, services_tier, service);
+            let from = At::new(entry, 0, ingress);
+            let to = At::new(entry, services_tier, service);
             links.push(link(from, to, "routes to"));
         }
     }
@@ -35,10 +40,10 @@ pub fn links(parts: &Parts, rows: &[Row]) -> Vec<Link> {
         return links;
     };
     let workload = At::new(workload, 0, 0);
-    if let Some(door) = door.filter(|_| !parts.services.is_empty()) {
+    if let Some(entry) = entry.filter(|_| !parts.services.is_empty()) {
         for service in 0..parts.services.len() {
             links.push(link(
-                At::new(door, services_tier, service),
+                At::new(entry, services_tier, service),
                 workload,
                 "selects",
             ));
@@ -92,8 +97,8 @@ pub fn links(parts: &Parts, rows: &[Row]) -> Vec<Link> {
             links.push(link(from, backend, &kinds));
         }
     }
-    let reached = parts.sides.iter().filter(|side| parts.on_spine(side));
-    for side_box in reached {
+    let on_spine = parts.sides.iter().filter(|side| parts.on_spine(side));
+    for side_box in on_spine {
         let name = side_box.names.as_ref();
         if let Some(host) = name.and_then(|name| host(parts, machines, name)) {
             let (from, to) = match side_box.inward {
@@ -158,15 +163,16 @@ pub fn links(parts: &Parts, rows: &[Row]) -> Vec<Link> {
     links
 }
 
-/// The box of the machine that a side box is joined to, or `None` when
-/// the side box is joined to the workload or its machine has no box.
+/// The box of the machine that a side box is joined to. `None` when the
+/// side box is joined to the workload instead, or when the machine has
+/// no box.
 fn machine(parts: &Parts, machines: Option<usize>, side_box: &SideBox) -> Option<At> {
     host(parts, machines, side_box.machine.as_ref()?)
 }
 
-/// The box of the machine named `name` in the machines row, or the box
-/// drawn in place of every machine when there are more than
-/// `MOST_MACHINES`.
+/// The box of the machine named `name` in the machines row. When there
+/// are more than `MOST_MACHINES` machines, one box represents all of them,
+/// and this returns that box.
 fn host(parts: &Parts, machines: Option<usize>, name: &str) -> Option<At> {
     let row = machines?;
     if parts.hosts.len() > MOST_MACHINES {

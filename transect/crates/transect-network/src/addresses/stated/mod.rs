@@ -1,19 +1,21 @@
-//! Edges from intent.  Each entry of a list such as `depends-on` is
-//! resolved the way a configured address is.  So a dependency that
-//! only a `Secret` or a `ConfigMap` names, and that no pod spec shows
-//! for that reason, still draws the edge.  An address that names
-//! nothing in the cluster becomes a box outside it, and an entry that
-//! names nothing transect can read stays on the card as text.
+//! Edges drawn from lists that a person writes, such as `depends-on`.
+//! Each entry resolves the way a configured address does. So a
+//! dependency that only a `Secret` or a `ConfigMap` names, which no pod
+//! spec shows, still draws an edge. An address that matches nothing in
+//! the cluster draws an edge to a box outside it, unless it has the
+//! form of a `Service`'s DNS name. An entry that names nothing transect
+//! can read stays on the card as text.
 //!
-//! A list on a workload applies to that workload.  A list on a
+//! A list on a workload applies to that workload. A list on a
 //! `ConfigMap` or a `Secret` applies to each workload that reads it,
-//! because that object contains the address, and so does a list on the
-//! object that writes a `Secret`.  A list on anything else draws no
-//! edge, because nothing calls out from a `Service` or a `Namespace`.
-//! A list read for a `Secret`'s readers records in its provenance
-//! which way transect read it, because transect never reads the
-//! `Secret`'s data and reads its annotations only when it is
-//! configured to.
+//! because that object contains the address. A list on the object that
+//! writes a `Secret` applies to that `Secret`'s readers in the same
+//! way. A list on any other object draws no edge, because nothing
+//! calls out from a `Service` or a `Namespace`. When transect reaches a
+//! list through a `Secret`, from the `Secret`'s annotations or from the
+//! object that writes it, the edge's provenance records that path,
+//! because transect never reads a `Secret`'s data and reads its
+//! annotations only when it is configured to.
 
 mod entry;
 
@@ -31,25 +33,20 @@ use transect_graph::environment::{self, Environment};
 use transect_resources::intent::Listed;
 
 /// The workloads that read each `ConfigMap` and each `Secret`, and the
-/// `Secret` each producer writes, so a list on a producer applies to
-/// the workloads that read what it writes, as a list on a `ConfigMap`
-/// does.
+/// `Secret` that each producer, an object that writes a `Secret`,
+/// writes.
 #[derive(Debug, Default)]
 pub struct Readers {
-    /// The workloads that read each `ConfigMap` or `Secret`.
     by_source: HashMap<Object, Vec<Object>>,
-    /// The `Secret` each producer writes, by the producer.
     written: HashMap<Object, Object>,
 }
 
 impl Readers {
-    /// These readers, with `written` naming the `Secret` each producer
-    /// writes.
+    /// Sets the `Secret` that each producer writes.
     pub fn with_written(self, written: HashMap<Object, Object>) -> Self {
         Self { written, ..self }
     }
 
-    /// The workloads that read `source`, a `ConfigMap` or a `Secret`.
     fn of(&self, source: &Object) -> Vec<Object> {
         self.by_source.get(source).cloned().unwrap_or_default()
     }
@@ -61,7 +58,7 @@ impl Readers {
     }
 }
 
-/// What the entries resolve against.
+/// The cluster state that the entries of a list resolve against.
 pub struct Reading<'a> {
     pub addresses: &'a Addresses,
     pub graph: &'a Graph,
@@ -92,17 +89,17 @@ pub struct Stated {
 }
 
 impl Stated {
-    /// These edges and unread entries with `other`'s added.
     pub fn extend(&mut self, other: Self) {
         self.edges.extend(other.edges);
         for (workload, unread) in other.unread {
             self.unread.entry(workload).or_default().extend(unread);
         }
     }
-    /// A `kind` edge from each workload a list applies to, to each end
-    /// its entries reach, once per pair, with the list's provenance.  A
-    /// workload's own objects are no dependency of it, as with an
-    /// address its spec names.
+
+    /// Draws a `kind` edge, with the list's provenance, from each
+    /// workload that a list applies to, to each end that the list's
+    /// entries reach. Each pair gets one edge. A workload gets no edge
+    /// to its own objects, the same as for an address in its pod spec.
     pub fn read<'a>(
         kind: Kind,
         reading: &Reading,
@@ -154,24 +151,25 @@ impl Stated {
     }
 }
 
-/// Whether a list on `object` can draw edges: it is a workload, or a
-/// `ConfigMap` or `Secret`, whose readers the list applies to.
+/// Whether a list on `object` draws edges because `object` is a
+/// workload, or a `ConfigMap` or `Secret` that workloads read. A list on
+/// an object that writes a `Secret` also draws edges, and this function
+/// does not check for that.
 pub fn attaches(object: &Object, ownership: &Ownership) -> bool {
     let namespace = object.namespace.as_deref().unwrap_or_default();
     read_by_workloads(object) || ownership.workloads(namespace).any(|w| w == object)
 }
 
-/// Whether `object` is a `ConfigMap` or a `Secret`, which workloads
-/// read.
 fn read_by_workloads(object: &Object) -> bool {
     object.group.is_empty() && matches!(object.kind.as_str(), "ConfigMap" | "Secret")
 }
 
 impl Reading<'_> {
-    /// The workloads a list on `object` applies to, each with the way
-    /// it was read when that was through a `Secret`: a `ConfigMap`'s or
-    /// a `Secret`'s readers, a workload itself, and the readers of the
-    /// `Secret` a producer writes.
+    /// The workloads that a list on `object` applies to: the readers of
+    /// a `ConfigMap` or a `Secret`, the workload itself, and the readers
+    /// of the `Secret` that a producer writes. Each workload comes with
+    /// the `Way` through a `Secret` that the edge's provenance records,
+    /// or `None` when no `Secret` is on the path.
     fn applies_to(&self, object: &Object) -> Vec<(Object, Option<Way>)> {
         if read_by_workloads(object) {
             let way = (object.kind == "Secret").then(|| Way::Annotations {
@@ -197,8 +195,9 @@ impl Reading<'_> {
         workloads
     }
 
-    /// What `entry`, written in `namespace`, reaches, and whether that
-    /// is a guess, or none when it names nothing transect can read.
+    /// The ends that `entry`, written in `namespace`, reaches and
+    /// whether that is a guess, or `None` when it names nothing
+    /// transect can read.
     fn resolve(&self, entry: &str, namespace: Option<&str>) -> Option<(Vec<Endpoint>, bool)> {
         match entry::read(entry, |resource| self.kinds(resource).next().is_some()) {
             Entry::Address(address) => Some(self.reach(address, namespace)),
@@ -215,9 +214,8 @@ impl Reading<'_> {
         }
     }
 
-    /// The group and kind of each resource the cluster serves as
-    /// `resource`, which names it by its plural, or by its plural and
-    /// group.
+    /// The group and kind of each served resource that `resource`
+    /// names, as `<plural>` or `<plural>.<group>`.
     fn kinds<'a>(&'a self, resource: &'a str) -> impl Iterator<Item = &'a (String, String)> {
         self.plurals.iter().filter_map(move |(kind, plural)| {
             let named = resource == plural || resource == format!("{plural}.{}", kind.0);
@@ -225,10 +223,8 @@ impl Reading<'_> {
         })
     }
 
-    /// What the one object transect watches as `resource/name` stands
-    /// for: a machine for a `Node`, the workloads a `Service` selects,
-    /// or any other object's top owner.  A name of no watched object,
-    /// or of several, names nothing.
+    /// `endpoints_of` of the watched object `resource/name`. Returns
+    /// `None` when no watched object has that name, or when several do.
     fn object(&self, resource: &str, namespace: Option<&str>, name: &str) -> Option<Vec<Endpoint>> {
         let found: Vec<Object> = self
             .kinds(resource)
@@ -243,14 +239,15 @@ impl Reading<'_> {
         let [object] = found.as_slice() else {
             return None;
         };
-        Some(self.stands_for(object))
+        Some(self.endpoints_of(object))
     }
 
-    /// What `address`, configured in `namespace`, reaches, and whether
-    /// that is a guess.  A `Service`'s DNS name of a `Service` the
-    /// cluster does not have reaches that `Service`, which has no page,
-    /// and is no box outside.  One box outside stands for its host whatever port
-    /// or path is written, as the ground's boxes do.
+    /// The ends that `address`, configured in `namespace`, reaches and
+    /// whether that is a guess. When nothing in the cluster matches, a
+    /// name in the form of a `Service`'s DNS name reaches that `Service`,
+    /// even when the cluster has no such `Service`. Any other host
+    /// becomes a box outside the cluster, one box for each host whatever
+    /// port or path is written with it.
     fn reach(&self, address: Address, namespace: Option<&str>) -> (Vec<Endpoint>, bool) {
         let found = reach(self.addresses, self.graph, &address, namespace);
         if !found.to.is_empty() {
@@ -263,8 +260,9 @@ impl Reading<'_> {
         (vec![end], false)
     }
 
-    /// What the one address `text`, written in `namespace`, reaches, and
-    /// whether that is a guess, or none when it is not one address.
+    /// The ends that the address `text`, written in `namespace`,
+    /// reaches and whether that is a guess, or `None` when `text` is
+    /// not exactly one address.
     pub fn address(&self, text: &str, namespace: Option<&str>) -> Option<(Vec<Endpoint>, bool)> {
         match parse::addresses(text).as_slice() {
             [address] => Some(self.reach(address.clone(), namespace)),
@@ -272,12 +270,13 @@ impl Reading<'_> {
         }
     }
 
-    /// What `object` stands for on the map: a machine for a `Node`, the
-    /// workloads a `Service` selects, a watched object's top owner, and
-    /// any other object itself, because a name an operator writes in
-    /// status names a real object even of a kind transect does not
-    /// watch.
-    pub fn stands_for(&self, object: &Object) -> Vec<Endpoint> {
+    /// The ends on the map that an edge to `object` goes to: the machine
+    /// for a `Node`, the workloads that a `Service` selects or the
+    /// `Service` itself when it selects none, the top owner of a watched
+    /// object, and any other object itself. An object that
+    /// transect does not watch still gets its own end, because a name
+    /// that an operator writes in status refers to a real object.
+    pub fn endpoints_of(&self, object: &Object) -> Vec<Endpoint> {
         let end = Endpoint::Object(object.clone());
         match (object.group.as_str(), object.kind.as_str()) {
             ("", "Node") => vec![Endpoint::Machine(object.name.clone())],

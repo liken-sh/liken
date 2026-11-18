@@ -1,22 +1,21 @@
 /*
- * The section view: one workload from its entry to the ground, in the map's
- * bands, at a fixed width.  Every row and box is placed by the server in
- * inline styles, so these rules only color and type them.
+ * The section view: one workload from its entry down to the machines
+ * and outside systems, in the map's bands, at a fixed width. The
+ * server places every row and box with inline styles, so these rules
+ * only set color and type.
  */
 
-/* The section view takes the row's free width, as every elevation's map does,
-   so the card is at the same x as the sidebar on every elevation.  In a
-   narrower window its rows scroll. */
+/* The same padding as the cluster map, so that the sidebar is in the
+   same place on every page. */
 .view > .section-map {
   padding: 16px 0 16px 32px;
 }
 
-/* The section view keeps its layout at any width, because its lines are
-   drawn to the boxes' positions at its own width.  It zooms to the width
-   of its column: out in a narrow window, where a sideways scroll would
-   put its right-hand column behind a scrollbar, and in, up to a third
-   larger, in a wide window, so it fills the column.  A browser that
-   cannot divide one length by another scrolls instead. */
+/* The server draws the lines to the boxes' positions at a fixed width,
+   so the drawing cannot reflow. It zooms to its column's width instead:
+   smaller in a narrow window, so that the right-hand column is not
+   behind a sideways scroll, and up to a third larger in a wide one. A
+   browser that cannot divide one length by another scrolls instead. */
 .section-scroll {
   overflow-x: auto;
   container-type: inline-size;
@@ -43,8 +42,8 @@
 .section-row:first-child { border-top-left-radius: 10px; border-top-right-radius: 10px; }
 .section-row-last { border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; }
 
-/* The bands below the layers take their colors from the cluster map, a
-   step darker toward the ground. */
+/* The rows below the layers have the backgrounds of the cluster map's
+   machines band and outside-systems band. */
 .section-row-machines { background: var(--page); }
 
 .section-row-ground { background: var(--ground); }
@@ -60,8 +59,8 @@
   color: var(--ink-muted);
 }
 
-/* The spine is tinted the selection color from the first row to the
-   last, so the eye follows the workload's own path down. */
+/* A tint in the selection color behind the main column, from the first
+   row to the last, so that the eye follows the workload's path down. */
 .section-spine {
   position: absolute;
   top: 0;
@@ -78,7 +77,7 @@
   pointer-events: none;
 }
 
-/* Solid lines are structure, as the section view's legend explains. */
+/* Solid lines show structure, as the section view's legend explains. */
 .section-path {
   fill: none;
   stroke: var(--ink-muted);
@@ -87,14 +86,16 @@
   stroke-linejoin: round;
 }
 
-/* Dashed lines are callers, and dotted ones are edges transect guessed,
-   such as a controller found among several candidates. */
+/* Dashed lines show callers. */
 .section-path-dashed { stroke-dasharray: 6 6; }
 
-/* A line from stored text or a guess shows its source on hover, so it
-   receives the pointer events that the other lines let through. */
+/* A line that comes from stored text or from a guess shows its source
+   on hover, so it receives the pointer events that the other lines
+   let through. */
 .section-lines path:has(title) { pointer-events: stroke; }
 
+/* Dotted lines show edges that transect guessed, such as a controller
+   chosen from several candidates. */
 .section-path-dotted {
   stroke: var(--ink-faint);
   stroke-dasharray: 2 6;
@@ -105,8 +106,8 @@
   stroke: none;
 }
 
-/* A label has a halo in the rows' color, so a line that crosses it on
-   its way to another box is drawn under the words, not through them. */
+/* A halo in the row color, so that a line that crosses a label does not
+   strike through the words. */
 .section-label {
   fill: var(--ink-muted);
   font-size: 13px;
@@ -117,10 +118,8 @@
   stroke-linejoin: round;
 }
 
-/* A label on the right side ends at the side box whose edge it names. */
 .section-label-end { text-anchor: end; }
 
-/* The heading keeps a margin from the tab row above it. */
 .section-subtitle {
   margin: 16px 0 4px;
   font-size: 15px;
@@ -169,14 +168,13 @@
 
 a.section-box:hover { border-color: var(--link); }
 
-/* A box that opens a page has its title in the link color, so a reader
-   tells it from a box that opens nothing before hovering. */
+/* So that a reader can tell a box that opens a page from one that
+   opens nothing, without hovering. */
 a.section-box .section-title { color: var(--link); }
 
-/* A title or a line too long for the box's width wraps to a second
-   line, at a hyphen or a space where it can, and only then is cut
-   short.  The layout gives the box the height for both lines, and the
-   whole text of each is in its title. */
+/* Text too long for the box wraps to a second line and is then cut
+   off. The server gives the box the height for two lines, and the
+   title attribute shows the whole text. */
 .section-title,
 .section-line {
   max-width: 100%;
@@ -197,8 +195,8 @@ a.section-box .section-title { color: var(--link); }
 
 .section-box-workload { border: 2px solid var(--link); }
 
-/* A box that counts names shows them on a click: the list is drawn over
-   the drawing below the box, in the box's own colors, until it closes. */
+/* A box that counts names lists them on a click, over the drawing
+   below the box, until it is closed. */
 .section-box-fold { overflow: visible; z-index: 2; }
 .section-fold > summary { cursor: pointer; list-style: none; color: var(--link); }
 .section-fold > summary::-webkit-details-marker { display: none; }
@@ -227,8 +225,8 @@ a.section-box-workload:hover { border-color: var(--ink); }
 
 .section-box-machine { border-color: var(--ink-muted); }
 
-/* Dashed, as the ground band's boxes are, because the cluster reaches
-   these and does not run them. */
+/* Dashed, as in the cluster map's outside-systems band, because the
+   cluster calls these systems and does not run them. */
 .section-box-ground {
   background: var(--page);
   border: 1px dashed var(--ink-faint);

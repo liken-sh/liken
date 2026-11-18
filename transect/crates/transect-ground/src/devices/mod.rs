@@ -1,14 +1,12 @@
 //! The devices that Dynamic Resource Allocation allocates to pods, and
-//! the holds edges from each workload to the devices that its pods hold.
+//! the `Holds` edges from each workload to the devices that its pods
+//! hold.
 //!
-//! A pod names its claims in `spec.resourceClaims`.  A claim made by
-//! hand appears there by its name, and a claim made from a template
-//! appears by the name in `status.resourceClaimStatuses`.  The claim's
-//! allocation names each device by driver, pool, and device, and the
-//! `ResourceSlice` that lists that device names the machine that has it.
-//! A driver can stop listing a device that a running pod still holds,
-//! so when no slice lists the device, this module uses the machine that
-//! the allocation's node selector pins the claim to.
+//! A claim's allocation names each device by driver, pool, and device
+//! name, and the `ResourceSlice` that lists the device names its
+//! machine.  A driver can stop listing a device that a running pod still
+//! holds, so when no slice lists the device, the machine comes from the
+//! node selector of the allocation.
 
 mod card;
 pub mod knowledge;
@@ -37,8 +35,8 @@ use transect_graph::pods::finished;
 pub enum Off {
     /// The cluster does not serve `resource.k8s.io/v1`.
     NotServed,
-    /// It does, but transect may not list ResourceClaims or
-    /// ResourceSlices.
+    /// The cluster serves it, but transect may not list
+    /// `ResourceClaim`s or `ResourceSlice`s.
     Forbidden,
     /// API discovery has not returned a result yet, and transect is
     /// trying again.
@@ -64,8 +62,8 @@ pub struct Devices {
 #[derive(Debug, PartialEq)]
 pub struct Published<'a> {
     pub device: &'a Device,
-    /// The ResourceClaims that hold the device, by namespace and name:
-    /// none, one, or several when the device is shared.
+    /// The `ResourceClaim`s that hold the device, by namespace and name.
+    /// A shared device has several.
     pub claims: Vec<Object>,
 }
 
@@ -82,10 +80,10 @@ impl Devices {
     }
 
     /// Follows each claim's allocation to the slice that lists each of
-    /// its devices.  A pool can span several slices.  While a driver
-    /// republishes a pool, a slice of the old generation can list a
-    /// device beside a slice of the new generation, so this function
-    /// uses the machine from the newest generation.
+    /// its devices.  While a driver republishes a pool, a slice of the
+    /// old pool generation can list a device beside a slice of the new
+    /// one, so a device's machine and attributes come from the slice
+    /// with the highest generation.
     pub fn build<'a>(
         claims: impl IntoIterator<Item = &'a ResourceClaim>,
         slices: impl IntoIterator<Item = &'a ResourceSlice>,
@@ -267,10 +265,10 @@ fn texts(device: &SliceDevice) -> Vec<(String, String)> {
     texts.collect()
 }
 
-/// The one node that `selector` admits, when the selector names that
-/// node by `metadata.name` alone.  The scheduler writes this form of
-/// selector when it pins an allocation to the machine of a node-local
-/// device.
+/// The node that `selector` admits, when its only term matches
+/// `metadata.name` In one node name and nothing else.  The scheduler
+/// writes this selector when it allocates a device that only one node
+/// has.
 fn one_node(selector: &NodeSelector) -> Option<&str> {
     let [term] = selector.node_selector_terms.as_slice() else {
         return None;
@@ -292,9 +290,10 @@ fn one_node(selector: &NodeSelector) -> Option<&str> {
     }
 }
 
-/// The names of the claims that `pod` uses.  The spec gives the name of
-/// a claim made by hand, and only the status gives the name of a claim
-/// made from a template.
+/// The names of the `ResourceClaim`s that `pod` uses.
+/// `spec.resourceClaims` has the name of a claim made by hand, and only
+/// `status.resourceClaimStatuses` has the name of a claim made from a
+/// template.
 fn claim_names(pod: &Pod) -> impl Iterator<Item = &str> {
     let named = pod
         .spec
@@ -309,10 +308,10 @@ fn claim_names(pod: &Pod) -> impl Iterator<Item = &str> {
     named.chain(made)
 }
 
-/// An edge from the top owner of each running pod to each device it
-/// holds.  When a workload's replicas share a claim, the function
-/// returns one edge for each device.  A pod that Succeeded or Failed
-/// holds nothing, because it runs nowhere.
+/// An edge from the top owner of each pod to each device it holds, with
+/// no repeats, so replicas that share a claim give one edge for each
+/// device.  A pod that Succeeded or Failed is left out, because it no
+/// longer runs.
 pub fn holds<'a>(
     devices: &Devices,
     pods: impl IntoIterator<Item = &'a Pod>,

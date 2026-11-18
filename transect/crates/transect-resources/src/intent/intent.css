@@ -1,12 +1,12 @@
 /*
- * Intent on a card: the opening line of what a thing is, the gotcha
- * under it, and the docs link, then the provenance mark that every line
- * of stored text has and the legend under a card that has one.  Marks
- * are faint, since a mark qualifies a line and should not pull the eye
- * from it.
+ * The intent text on a card: what the thing is (`why`), what goes wrong
+ * with it (`gotcha`), what it provides to the cluster (`provides`),
+ * and the docs link.  Each line can end in a provenance mark that says
+ * where the text came from, and a card with a mark has a legend below
+ * it.  Marks are faint, so they do not draw the eye from the line.
  */
 
-/* The opening line is set as prose, larger than the card's facts. */
+/* The `why` line is prose, in a larger size than the card's facts. */
 .card-why {
   font-size: 14px;
   line-height: 20px;
@@ -14,8 +14,8 @@
   overflow-wrap: break-word;
 }
 
-/* What goes wrong is guidance, not a problem now, so it stays gray and
-   is set off by a rule rather than by --warm. */
+/* The gotcha is guidance and not a current problem, so a gray border
+   sets it apart, not --warm. */
 .card-gotcha {
   padding-left: 8px;
   border-left: 2px solid var(--rule-strong);
@@ -25,8 +25,6 @@
   overflow-wrap: break-word;
 }
 
-/* What the cluster loses with it is set as a fact about the thing, in
-   the card's own size, with its label quieter than the words. */
 .card-provides {
   font-size: 13px;
   line-height: 19px;

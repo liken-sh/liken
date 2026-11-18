@@ -1,9 +1,10 @@
 # Kind knowledge for bluetooth-operator's Peripheral and Adapter, as
 # bluetooth-operator would ship it.  A Peripheral's status.adapter is
-# the radio's address, such as AA:BB:CC:DD:EE:FF, not the Adapter's
-# name, aa-bb-cc-dd-ee-ff, so the reference matches on the Adapter's
-# status.address.  A remote that sleeps between presses reports
-# Connected False with reason Asleep, which is rest, not a fault.
+# the radio's address, such as AA:BB:CC:DD:EE:FF, not the name of the
+# Adapter object, such as aa-bb-cc-dd-ee-ff, so the reference matches
+# on the Adapter's status.address.  A remote that sleeps between
+# presses reports Connected False with reason Asleep, which is normal,
+# so calm shows it gray instead of as a fault.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:

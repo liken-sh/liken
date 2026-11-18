@@ -1,6 +1,6 @@
-//! Reads the times of change from the cluster's objects in their
-//! current state.  Each reader is a pure function of the objects that
-//! it reads.
+//! Reads changes from the cluster's objects as they are now: rollouts,
+//! job runs, applied revisions, node conditions, alerts, and container
+//! restarts.  Each reader is a pure function of the objects it reads.
 
 use std::sync::Arc;
 
@@ -18,11 +18,11 @@ use transect_cluster::ownership::Ownership;
 use transect_graph::edges::{Object, Plurals};
 use transect_observe::alerts::Firing;
 
-/// The annotation where the `Deployment` controller writes the revision
-/// number of each of its ReplicaSets.
+/// The annotation in which the `Deployment` controller records the
+/// revision number of each of its `ReplicaSet`s.
 const REVISION: &str = "deployment.kubernetes.io/revision";
 
-/// The objects that the list is read from.
+/// The objects that `read` takes changes from.
 pub struct Inputs<'a> {
     pub replica_sets: &'a [Arc<PartialObjectMeta<ReplicaSet>>],
     pub controller_revisions: &'a [Arc<PartialObjectMeta<ControllerRevision>>],
@@ -30,17 +30,17 @@ pub struct Inputs<'a> {
     pub cron_jobs: &'a [Arc<CronJob>],
     pub pods: &'a [Arc<Pod>],
     pub nodes: &'a [Arc<Node>],
-    /// Each applier's last applied revision, and its time.
+    /// The revision that each applier last applied, and when.
     pub revisions: Vec<Revision>,
     pub ownership: &'a Ownership,
     pub plurals: &'a Plurals,
     pub forges: &'a Forges,
 }
 
-/// Every change that the objects record, before `arranged` applies the
-/// window and adds the alerts that are firing.  None of it depends on
-/// the time, so transect reads it once for each reading of the cluster
-/// and uses it for every render.
+/// The changes that the objects record, before `arranged` limits them
+/// to the window and adds the firing alerts.  They do not depend on the
+/// current time, so a model computes them once and reuses them for
+/// every render.
 #[derive(Debug, Default)]
 pub struct Recorded {
     changes: Vec<Change>,
@@ -48,7 +48,9 @@ pub struct Recorded {
 }
 
 impl Recorded {
-    /// The list as of `now`, with a line for each alert in `firing`.
+    /// The changes within the last `WINDOW_HOURS` before `now`, with an
+    /// entry for each alert in `firing`, and the restarts, put in order
+    /// by `arrange`.
     pub fn arranged(&self, firing: &[Firing], now: Timestamp) -> Vec<Change> {
         let since = now - SignedDuration::from_hours(WINDOW_HOURS);
         let changes = self.changes.iter().filter(|change| change.at >= since);
@@ -59,7 +61,7 @@ impl Recorded {
     }
 }
 
-/// Every change the objects in `inputs` still record.
+/// The changes that the objects in `inputs` record.
 pub fn read(inputs: &Inputs) -> Recorded {
     // A workload that a custom resource owns has no page of its own, so
     // the entry links to the page of its top owner, which shows it.
@@ -148,7 +150,9 @@ pub fn ran(
     })
 }
 
-/// A `CronJob`'s last scheduled run.
+/// A `CronJob`'s last scheduled run.  `succeeded` is `None` while a run
+/// is active, and otherwise whether the last successful run is at or
+/// after the last scheduled run.
 pub fn scheduled(cron_job: &CronJob, link: &impl Fn(&Object) -> Option<String>) -> Option<Change> {
     let status = cron_job.status.as_ref()?;
     let at = status.last_schedule_time.as_ref()?.0;
@@ -172,9 +176,11 @@ pub fn scheduled(cron_job: &CronJob, link: &impl Fn(&Object) -> Option<String>) 
     })
 }
 
-/// One entry for each source and revision that the appliers applied,
-/// at the latest of their times.  The entry has the commit when the
-/// revision names a git commit on a forge that a `Forge` declares.
+/// One entry for each source and revision that appliers applied, dated
+/// when the last applier applied it.  The entry links to the commit
+/// when the revision has a commit hash and a `Forge` matches the
+/// repository's host.  It links to the applier's page when only one
+/// applier applied it, and otherwise to the source's page.
 pub fn applied(
     revisions: &[Revision],
     forges: &Forges,
@@ -222,8 +228,8 @@ pub fn applied(
     changes
 }
 
-/// A `Node`'s conditions at their last transitions.  Conditions that
-/// changed within a minute of each other form one entry, at the time of
+/// A `Node`'s conditions, at their last transition times.  Conditions
+/// that changed within a minute of each other make one entry, dated at
 /// the latest of them.
 pub fn conditions(node: &Node) -> Vec<Change> {
     let Some(name) = node.metadata.name.as_deref() else {
@@ -274,8 +280,8 @@ pub fn conditions(node: &Node) -> Vec<Change> {
     changes
 }
 
-/// An entry for a line of firing alerts, at the time that the earliest
-/// of them started.
+/// An entry for `firing`, dated when the earliest of its alerts
+/// started.  It is `None` when none of its alerts has a start time.
 pub fn alert(firing: &Firing, now: Timestamp) -> Option<Change> {
     let at = now - SignedDuration::from_mins(firing.minutes?);
     Some(Change {
@@ -290,8 +296,8 @@ pub fn alert(firing: &Firing, now: Timestamp) -> Option<Change> {
     })
 }
 
-/// Each container of `pod` that terminated and restarted, with its
-/// workload and the pod's page.
+/// A restart for each container of `pod` whose last state is a
+/// termination, with the pod's top owner and the pod's page.
 pub fn restarts(
     pod: &Pod,
     ownership: &Ownership,

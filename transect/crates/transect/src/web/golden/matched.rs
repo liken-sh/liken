@@ -1,8 +1,6 @@
-//! What `/resources` says of a resource that loads but names something
-//! the cluster does not hold: a typo in a label, a path, a controller,
-//! a label of a query's series, a driver, or a forge's host.  Each
-//! gets a condition, so knowledge that matches nothing never reads as
-//! loaded and nothing more.
+//! A resource that loads but refers to something the cluster does not
+//! have, such as a misspelled label, path, or host, must show an
+//! unmatched condition on `/resources` instead of showing as loaded.
 
 use rstest::rstest;
 
@@ -50,18 +48,21 @@ use super::{render_from, text};
     "hosts: [github.example]",
     "matches nothing: no repository transect reads, from a GitOps source or an image's source label, is on a host it names or serves"
 )]
-fn says_what_a_resource_names_that_nothing_holds(
+fn shows_a_reference_that_matches_nothing(
     #[case] from: &str,
     #[case] to: &str,
-    #[case] says: &str,
+    #[case] expected: &str,
 ) {
     let (model, usage) = fixture::edited(|text| {
-        assert!(text.contains(from), "the fixture holds no {from:?}");
+        assert!(
+            text.contains(from),
+            "the fixture text does not contain {from:?}"
+        );
         text.replace(from, to)
     });
     let shown = text::visible(&render_from(&model, &usage, "/resources"));
     assert!(
-        shown.contains(says),
-        "/resources does not say {says:?}:\n{shown}"
+        shown.contains(expected),
+        "the /resources page does not contain {expected:?}:\n{shown}"
     );
 }

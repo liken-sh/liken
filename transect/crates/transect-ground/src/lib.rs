@@ -1,7 +1,6 @@
-//! The ground under the workloads.  This crate models the machines,
-//! devices, storage and volumes that workloads run on, the systems
-//! outside the cluster that they depend on, the loss of a machine,
-//! placement, and guards.
+//! Models the machines, devices, storage, and volumes that workloads run
+//! on, the systems outside the cluster that they depend on, the loss of a
+//! machine, placement, and the guards that keep a workload up.
 
 pub mod devices;
 pub mod guards;

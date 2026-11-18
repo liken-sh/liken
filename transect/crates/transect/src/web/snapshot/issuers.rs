@@ -1,11 +1,10 @@
-//! Who issues each `Ingress`'s TLS certificate, by either of the two
-//! ways that a certificate tool's knowledge declares: the object an
-//! annotation on the `Ingress` names through `referencedBy` with role
-//! `issues-tls`, or the object a certificate names through a reference
-//! with that role, when the certificate writes the `Secret` the
-//! `Ingress` serves its TLS from.  Most clusters issue through
-//! certificate objects, and the annotation takes precedence when an
-//! `Ingress` has both.
+//! The issuer of the TLS certificate of each `Ingress`, found in one of
+//! two ways that kind knowledge declares. An annotation on the `Ingress`
+//! can name an issuer, when the issuer kind's knowledge has a
+//! `referencedBy` entry with the role `issues-tls`. Or a certificate
+//! object can have an `issues-tls` reference to its issuer and write the
+//! `Secret` that the `Ingress` reads its TLS from. When an `Ingress` has
+//! both, the annotation is used.
 
 use std::collections::HashMap;
 
@@ -17,8 +16,8 @@ use transect_network::entry::Issuers;
 use transect_resources::knowledge::{self, Names, Role};
 
 impl Snapshot {
-    /// The issuer of each `Ingress` that names one, the first by kind,
-    /// namespace, and name when it names several.
+    /// The issuer of each `Ingress` that has one. When there are several,
+    /// the first by group, kind, namespace, and name is used.
     pub(super) fn tls_issuers(&self) -> Issuers {
         let mut issuers = self.annotated_issuers();
         let by_secret = self.issuers_by_secret();
@@ -48,9 +47,9 @@ impl Snapshot {
         issuers
     }
 
-    /// The issuer of each `Secret` a certificate writes, by the
-    /// `Secret`'s namespace and name: the object the certificate's
-    /// reference with role `issues-tls` names, when the cluster holds it.
+    /// The issuer of each `Secret` that a certificate writes, by the
+    /// `Secret`'s namespace and name. An issuer that is not in the
+    /// cluster is left out.
     fn issuers_by_secret(&self) -> HashMap<(Option<String>, String), Object> {
         let mut found: HashMap<(Option<String>, String), Object> = HashMap::new();
         for (object, relations) in &self.relations {
@@ -76,7 +75,7 @@ impl Snapshot {
                 .iter()
                 .filter(|relation| issuing(&relation.path))
                 .filter_map(|relation| match &relation.names {
-                    Names::Object(issuer) if self.held.contains(issuer) => Some(issuer),
+                    Names::Object(issuer) if self.with_pages.contains(issuer) => Some(issuer),
                     _ => None,
                 })
                 .min();
@@ -91,7 +90,7 @@ impl Snapshot {
         found
     }
 
-    /// The issuer each `Ingress`'s annotations name.
+    /// The issuer that each `Ingress`'s annotations name.
     fn annotated_issuers(&self) -> Issuers {
         let issues_tls = |group: &str, kind: &str| {
             let known = self.kinds.of(group, kind);
@@ -159,8 +158,9 @@ mod tests {
         )
     }
 
-    /// The fixture, with its `Ingress` annotated when `annotated` is
-    /// true, and its `Certificate` kept or dropped.
+    /// The issuer found for the fixture's `Ingress`, with an issuer
+    /// annotation when `annotated` is true, and without the
+    /// `Certificate` when `certificate` is false.
     fn issued(annotated: bool, certificate: bool) -> Option<Object> {
         let mut snapshot = fixture::snapshot();
         if !certificate {

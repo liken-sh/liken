@@ -1,6 +1,6 @@
-//! Finding one object in the store that holds it, read the way the
-//! table of Kubernetes's own kinds in `objects::kinds` gives for its
-//! kind.
+//! Finds one object in the snapshot store of its kind. The table of
+//! built-in kinds in `transect_map::objects::kinds` says how a page
+//! reads each kind.
 
 use std::sync::Arc;
 
@@ -14,9 +14,10 @@ use super::Found;
 use transect_graph::edges::Object;
 use transect_map::objects::kinds::{ReadFrom, built_in};
 
-/// `object`, from the store that holds it, or none for a kind no store
-/// holds.  A `ConfigMap` and the kinds held as metadata give their
-/// metadata alone, so no page can show what a `ConfigMap` holds.
+/// Returns `object` from the store that holds its kind, or `None` when
+/// no store holds the kind or the object. A `ConfigMap` and the other
+/// kinds stored as metadata return only their metadata, so no page can
+/// show what a `ConfigMap` contains.
 pub fn found(snapshot: &Snapshot, object: &Object) -> Option<Found> {
     let read = built_in(&object.group, &object.kind).and_then(|served| served.read);
     match read {
@@ -27,8 +28,9 @@ pub fn found(snapshot: &Snapshot, object: &Object) -> Option<Found> {
     }
 }
 
-/// `object`, with its status, from the store of its kind, or none for
-/// a kind with no such store.
+/// `object` with its status, from the store of its kind. The outer
+/// `None` means no store holds the kind. The inner `None` means the
+/// store has no such object.
 fn with_status(snapshot: &Snapshot, object: &Object) -> Option<Option<Found>> {
     let paged = &snapshot.paged;
     let rbac = &paged.rbac;
@@ -57,8 +59,9 @@ fn with_status(snapshot: &Snapshot, object: &Object) -> Option<Option<Found>> {
     })
 }
 
-/// `object`, by its metadata alone, from the store of its kind, or
-/// none for a kind with no such store.
+/// `object` with only its metadata, from the store of its kind. The
+/// outer `None` means no store holds the kind. The inner `None` means
+/// the store has no such object.
 fn with_metadata(snapshot: &Snapshot, object: &Object) -> Option<Option<Found>> {
     let paged = &snapshot.paged;
     Some(match (object.group.as_str(), object.kind.as_str()) {
@@ -71,7 +74,7 @@ fn with_metadata(snapshot: &Snapshot, object: &Object) -> Option<Option<Found>> 
     })
 }
 
-/// The custom resource `object`, as its watch holds it.
+/// The custom resource `object`, from the store of its watch.
 fn custom(snapshot: &Snapshot, object: &Object) -> Option<Found> {
     let (_, objects) = snapshot.custom_kind(&object.group, &object.kind)?;
     let found = objects
@@ -84,8 +87,8 @@ fn named(meta: &ObjectMeta, object: &Object) -> bool {
     meta.name.as_deref() == Some(&object.name) && meta.namespace == object.namespace
 }
 
-/// The object of `objects` `object` names, with its status alone of its
-/// fields, which is where its conditions are.
+/// Finds `object` in `objects` and returns it with only its `status`
+/// field, because its conditions are there.
 fn status<K: Resource + Serialize>(objects: &[Arc<K>], object: &Object) -> Option<Found> {
     let found = objects.iter().find(|found| named(found.meta(), object))?;
     let whole = serde_json::to_value(found.as_ref()).unwrap_or_default();
@@ -100,7 +103,7 @@ fn status<K: Resource + Serialize>(objects: &[Arc<K>], object: &Object) -> Optio
     })
 }
 
-/// The object of `objects` `object` names, by its metadata alone.
+/// Finds `object` in `objects` and returns it with only its metadata.
 fn metadata<K: Resource>(objects: &[Arc<K>], object: &Object) -> Option<Found> {
     let found = objects.iter().find(|found| named(found.meta(), object))?;
     Some(Found {

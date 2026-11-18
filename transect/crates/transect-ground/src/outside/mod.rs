@@ -1,14 +1,11 @@
-//! Outsides.  An `Outside` names one system outside the
-//! cluster, such as a storage appliance or an identity provider, once,
-//! with the addresses and CSI drivers that reach it.  The Kubernetes API
-//! names a backend only by an address or a driver, so one appliance that
-//! serves NFS through one address and block volumes through a driver
-//! appears as two backends.  An `Outside` groups them into one ground
-//! box, with its title and its intent.
-//!
-//! The box is named by the `Outside`'s title.  Every place that draws
-//! the backend shows that title: the ground band, a card's ends, and the
-//! section view.
+//! An `Outside` declares one system outside the cluster, such as a
+//! storage appliance or an identity provider, and the addresses and CSI
+//! drivers that reach it.  Kubernetes identifies a backend only by an
+//! address or a driver, so a NAS that serves NFS at one address and
+//! block volumes through a driver looks like two backends.  The map
+//! draws all the backends of an `Outside` as one box in its band of
+//! outside systems, under the `Outside`'s title, and the cards and the
+//! section view use the same title for each of those backends.
 
 mod parse;
 
@@ -25,27 +22,28 @@ use transect_resources::resources::{Condition, DocId};
 pub struct Outside {
     pub doc: DocId,
     pub name: String,
-    /// What the box shows, such as "The NAS".
+    /// The name that the map shows for the system, such as "The NAS".
     pub title: String,
-    /// The hosts that reach the system, written as a volume or a
-    /// dependency names them.
+    /// The host names or IP addresses of the system, written the way
+    /// volumes and dependencies write them, because a backend matches
+    /// only on that text.
     pub addresses: Vec<String>,
-    /// The CSI drivers whose volumes the system stores.
+    /// The CSI drivers whose volumes are stored on the system.
     pub drivers: Vec<String>,
     pub why: Option<String>,
     pub gotcha: Option<String>,
     /// The system's own console, such as a NAS's web interface.  The
-    /// page shows only a plain `http` or `https` URL as a link, and
-    /// shows any other value as text.
+    /// page links only a plain `http` or `https` URL and shows any other
+    /// value as text.
     pub url: Option<String>,
 }
 
-/// The Outsides in use, by each backend they gather.
+/// The `Outside`s, indexed by the backends they list.
 #[derive(Debug, Default)]
 pub struct Outsides {
-    /// The index of the `Outside` that each address or driver belongs
-    /// to, keyed by the backend's name.  An address key is in lower
-    /// case.
+    /// The index in `outsides` of the `Outside` that lists each backend.
+    /// Address keys are lower case, so an address matches without regard
+    /// to case.
     by_backend: HashMap<String, usize>,
     outsides: Vec<Outside>,
     /// Each CSI driver's console URLs, from the `console` template that
@@ -55,10 +53,9 @@ pub struct Outsides {
 }
 
 impl Outsides {
-    /// Indexes `outsides` by backend.  Each backend belongs to the first
-    /// `Outside`, sorted by name, that lists it.  When two of them list
-    /// the same backend, this function records a conflict condition on
-    /// both.
+    /// Indexes `outsides` by backend.  A backend belongs to the first
+    /// `Outside` in name order that lists it.  When two `Outside`s list
+    /// the same backend, it records a conflict condition on both.
     pub fn new(outsides: &[Outside]) -> Self {
         let mut sorted = outsides.to_vec();
         sorted.sort_by(|a, b| a.name.cmp(&b.name));
@@ -70,7 +67,7 @@ impl Outsides {
                     Some(&first) => {
                         let first = &sorted[first];
                         let message = format!(
-                            "{backend} is listed by {} and {}; the first by name, {}, draws it",
+                            "{backend} is listed by {} and {}, and {} draws it because its name sorts first",
                             first.name, outside.name, first.name
                         );
                         found
@@ -91,7 +88,7 @@ impl Outsides {
     }
 
     /// The `Outside` that lists the backend `name`, an address or a
-    /// driver.
+    /// driver.  An address matches without regard to case.
     pub fn of(&self, name: &str) -> Option<&Outside> {
         let at = self
             .by_backend
@@ -100,48 +97,44 @@ impl Outsides {
         self.outsides.get(*at)
     }
 
-    /// The `Outside` whose title is `title`, which is the name of its
-    /// ground box.
     pub fn titled(&self, title: &str) -> Option<&Outside> {
         self.outsides.iter().find(|outside| outside.title == title)
     }
 
-    /// Every Outside, by name.
+    /// Every `Outside`, in name order.
     pub fn iter(&self) -> impl Iterator<Item = &Outside> {
         self.outsides.iter()
     }
 
-    /// The Outside named `name` in its metadata.
+    /// The `Outside` whose `metadata.name` is `name`.
     pub fn named(&self, name: &str) -> Option<&Outside> {
         self.outsides.iter().find(|outside| outside.name == name)
     }
 
-    /// The `Outside` that `name` matches in any of the ways a page or a
-    /// link may name it: its box's title, its own name, or an address
-    /// or driver it lists.
+    /// The `Outside` that `name` matches by the title of its box, by its
+    /// own name, or by an address or driver it lists, in that order.
     pub fn resolve(&self, name: &str) -> Option<&Outside> {
         self.titled(name)
             .or_else(|| self.named(name))
             .or_else(|| self.of(name))
     }
 
-    /// The path of the page for the ground box `name`, a title or a
-    /// backend.  The path is `/ground/` and the `Outside`'s name, or the
-    /// backend's own name when no `Outside` lists the backend.
+    /// The path of the page for `name`, matched as `resolve` matches it:
+    /// `/ground/` followed by the `Outside`'s name, or by `name` itself
+    /// when no `Outside` matches.
     pub fn page_of(&self, name: &str) -> String {
         let name = self.resolve(name).map_or(name, |outside| &outside.name);
         format!("/ground/{}", transect_graph::links::segment(name))
     }
 
-    /// `self` with each CSI driver's console URLs.
     pub fn with_consoles(self, consoles: HashMap<String, Vec<String>>) -> Self {
         Self { consoles, ..self }
     }
 
-    /// The URL that the ground box `name` links to.  When the box's
-    /// `Outside` gives a `url`, the link is that URL if a browser may
-    /// open it, and none otherwise.  Without a `url`, the link is the
-    /// drivers' console when they give exactly one.
+    /// The URL that the box for `name` links to.  When the `Outside` has
+    /// a `url`, the link is that URL if `Outside::link` accepts it, and
+    /// there is no link otherwise.  Without a `url`, the link is the
+    /// drivers' console URL when there is exactly one.
     pub fn link_of(&self, name: &str) -> Option<String> {
         if let Some(outside) = self.resolve(name).filter(|o| o.url.is_some()) {
             return outside.link().map(str::to_string);
@@ -152,9 +145,10 @@ impl Outsides {
         }
     }
 
-    /// The console URLs of the drivers in the ground box `name`.  The
-    /// list is empty when the box's `Outside` gives a `url`, because
-    /// that URL overrides the consoles.
+    /// The console URLs of the drivers in the box for `name`, sorted and
+    /// without duplicates.  When no `Outside` matches, `name` is taken as
+    /// a driver.  The list is empty when the `Outside` has a `url`,
+    /// because that URL replaces the consoles.
     pub fn consoles_of(&self, name: &str) -> Vec<String> {
         let outside = self.resolve(name);
         if outside.is_some_and(|outside| outside.url.is_some()) {
@@ -175,8 +169,8 @@ impl Outsides {
         urls
     }
 
-    /// The name of the box that shows the backend `name`: its
-    /// `Outside`'s title, or the backend's own name.
+    /// The name of the box that shows the backend `name`: the title of
+    /// its `Outside`, or the backend's own name when none lists it.
     pub fn box_of<'a>(&'a self, name: &'a str) -> &'a str {
         self.of(name).map_or(name, |outside| outside.title.as_str())
     }
@@ -193,7 +187,6 @@ impl Outsides {
             .collect()
     }
 
-    /// `end`, renamed to its box when it is outside the cluster.
     pub fn fold_end(&self, end: Endpoint) -> Endpoint {
         match end {
             Endpoint::Outside(name) => Endpoint::Outside(self.box_of(&name).to_string()),
@@ -208,8 +201,8 @@ impl Outsides {
 }
 
 impl Outside {
-    /// Its `url`, when it is a plain `http` or `https` URL a browser
-    /// can open without running anything.
+    /// The `url` when it is an `http` or `https` URL with no whitespace
+    /// or quote, so a page can link it and opening it runs no script.
     pub fn link(&self) -> Option<&str> {
         let url = self.url.as_deref()?;
         let lower = url.to_ascii_lowercase();
@@ -218,7 +211,8 @@ impl Outside {
         (plain && !spaced).then_some(url)
     }
 
-    /// Its `why` and `gotcha`, each marked as written in this resource.
+    /// The `why` and `gotcha` lines, each cut to `LINE_CHARS` and
+    /// marked as intent that this `Outside` declares.
     pub fn lines(&self) -> Vec<Line> {
         let line = |field: &str, text: &Option<String>| {
             Some(Line {
@@ -236,14 +230,14 @@ impl Outside {
     }
 }
 
-/// The maximum length of a line of an `Outside`'s intent, in characters.
+/// The length in characters at which a `why` or `gotcha` line is cut.
 const LINE_CHARS: usize = 300;
 
 #[cfg(any(test, feature = "fixtures"))]
 pub mod fixtures {
     use super::*;
 
-    /// The Outside `spec` declares as `name`.
+    /// Parses an `Outside` named `name` with the YAML `spec`.
     pub fn outside(name: &str, spec: &str) -> Outside {
         let text = format!("metadata: {{name: {name}}}\nspec: {spec}\n");
         parse(DocId::default(), serde_yaml::from_str(&text).unwrap()).unwrap()

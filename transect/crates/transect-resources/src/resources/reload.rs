@@ -1,8 +1,7 @@
-//! Reloading the resources when a file under the directory changes, so
-//! the development loop is "change the YAML, reload the page" with no
-//! restart.  A reload marks the cluster changed, as a watch event does,
-//! so the next render reads the new resources and `transect` pushes
-//! every open page its new rendering.
+//! Reloads the resources when a file under the directory changes, so
+//! you can edit the YAML without restarting `transect`.  Each reload
+//! also sends on the `changed` channel, so the open pages render again
+//! with the new resources.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -15,15 +14,15 @@ use tokio::sync::watch;
 use super::Sorts;
 use super::load::{is_yaml, load};
 
-/// How long the directory must stay quiet before it is reread.  An
-/// editor's save is several events, a write and a rename or two, and a
-/// checkout of many files is a burst of them.
+/// How long the directory must see no events before it is read again.
+/// An editor's save produces several events (a write and one or two
+/// renames), and a checkout of many files produces a burst of them, so
+/// reading on the first event would read half-written files.
 const QUIET: Duration = Duration::from_millis(300);
 
-/// The resources under `dir` as loaded now, and again after each change
-/// to a file under it.  Each reload sends on `changed`.  When the
-/// directory cannot be watched, the first load stays in use, and a
-/// warning in the log gives the reason.
+/// Loads the resources under `dir`, and loads them again after each
+/// change to a file under it.  When the directory cannot be watched,
+/// logs a warning and the receiver keeps the first load.
 pub fn watch<S: Sorts + Send + Sync + 'static>(
     dir: PathBuf,
     changed: watch::Sender<()>,
@@ -35,21 +34,23 @@ pub fn watch<S: Sorts + Send + Sync + 'static>(
             touched.send_replace(());
         }
         Ok(_) => {}
-        Err(error) => tracing::warn!(%error, "watching the resources directory"),
+        Err(error) => {
+            tracing::warn!(%error, "The watcher of the resources directory reported an error")
+        }
     });
     let mut watcher = match watcher {
         Ok(watcher) => watcher,
         Err(error) => {
-            tracing::warn!(%error, "resources will not reload; restart transect after a change");
+            tracing::warn!(%error, "The resources directory is not watched, so resources reload only when transect restarts");
             return receiver;
         }
     };
     if let Err(error) = watcher.watch(&dir, RecursiveMode::Recursive) {
-        tracing::warn!(dir = %dir.display(), %error, "resources will not reload; restart transect after a change");
+        tracing::warn!(dir = %dir.display(), %error, "The resources directory is not watched, so resources reload only when transect restarts");
         return receiver;
     }
     tokio::spawn(async move {
-        // The watcher stops when dropped, so the task holds it.
+        // The watcher stops when dropped, so the task owns it.
         let _watcher = watcher;
         while touches.changed().await.is_ok() {
             quiet(&mut touches).await;
@@ -62,21 +63,23 @@ pub fn watch<S: Sorts + Send + Sync + 'static>(
                     loaded.send_replace(Arc::new(reloaded));
                     changed.send_replace(());
                 }
-                Err(error) => tracing::error!(%error, "reloading resources"),
+                Err(error) => {
+                    tracing::error!(%error, "The task that reloads the resources did not finish")
+                }
             }
         }
     });
     receiver
 }
 
-/// Waits until `QUIET` passes with no further change.
+/// Waits until `QUIET` passes with no event.
 async fn quiet(touches: &mut watch::Receiver<()>) {
     while let Ok(Ok(())) = tokio::time::timeout(QUIET, touches.changed()).await {}
 }
 
-/// Whether `event` can change what the directory holds.  Opening and
-/// reading a file is an event too, and the reload itself reads every
-/// file, so reads are ignored or each reload would start the next.
+/// Whether `event` can change the resources.  Reads are ignored
+/// because opening and reading a file also produces events, and a
+/// reload reads every file, so each reload would trigger the next.
 fn relevant(event: &Event) -> bool {
     let changes = match event.kind {
         EventKind::Access(AccessKind::Close(AccessMode::Write)) => true,
@@ -84,12 +87,13 @@ fn relevant(event: &Event) -> bool {
         EventKind::Other => false,
         _ => true,
     };
-    changes && event.paths.iter().any(|path| names_resources(path))
+    changes && event.paths.iter().any(|path| may_hold_yaml(path))
 }
 
-/// A YAML file, or what may be a directory of them: an editor's swap
-/// and backup files have extensions of their own and are left out.
-fn names_resources(path: &Path) -> bool {
+/// A path with no extension can be a new or renamed directory of YAML
+/// files.  An editor's swap and backup files have other extensions, so
+/// they do not cause a reload.
+fn may_hold_yaml(path: &Path) -> bool {
     is_yaml(path) || path.extension().is_none()
 }
 

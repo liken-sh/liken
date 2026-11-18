@@ -1,6 +1,7 @@
-//! Who may call a workload from inside the cluster, by the rules that
-//! admit them, and what it may call: the isolated workloads that admit
-//! it, and the policies that limit its calls out, or any address.
+//! The network part of a workload's access drawing: the callers that
+//! `NetworkPolicy` rules admit into the workload, the isolated
+//! workloads that it may call, and what limits its own outgoing calls
+//! or whether it may call any address.
 
 use super::dots::{off, on, plain};
 use super::look::Look;
@@ -14,18 +15,19 @@ use transect_graph::links::Part;
 use transect_map::map::section_drawing::SectionBox;
 use transect_network::policy::{Admission, Caller, Ports, Reach as Called};
 
-/// The most callers one rule's group draws one by one; past it, one box
-/// counts the rest.
+/// The most workload callers that one rule's group draws one by one.
+/// When more than one remains, a single box counts the rest.
 const MOST_CALLERS: usize = 5;
 
-/// The most workloads "may call" draws one by one; past it one box
-/// counts the rest and opens to them.
+/// The most workloads that "may call" draws one by one.  See `fold`.
 const MOST_CALLED: usize = 3;
 
-/// How near a rule of `target`'s comes to naming `me`, nearest first:
-/// a rule that selects its pods, then one that admits its namespace
-/// whole, then one that admits every pod.  The nearest are drawn first,
-/// since a rule for any pod admits it along with every other workload.
+/// Ranks how directly a target's rules admit `me`.  A rule that admits
+/// every pod ranks 2, even when it also lists `me`.  A rule that admits
+/// all of `namespace` ranks 1, and a rule that lists `me` among its
+/// callers ranks 0.  Returns the lowest rank, or 2 when no rule admits
+/// `me`.  Calls are drawn lowest rank first, because a rule for every
+/// pod says little about this workload.
 fn nearness(admissions: &[Admission], me: &Caller, namespace: &str) -> u8 {
     admissions
         .iter()
@@ -42,7 +44,7 @@ fn nearness(admissions: &[Admission], me: &Caller, namespace: &str) -> u8 {
         .unwrap_or(2)
 }
 
-/// The `NetworkPolicy` gate on a line into it from a `Service`.
+/// The `NetworkPolicy` gate on a line from a `Service` into `object`.
 pub fn isolation(model: &Model, object: &Object) -> Gate {
     let allowed = model.allowed(&Shown::default());
     let isolation = match allowed.reach(object) {
@@ -55,7 +57,7 @@ pub fn isolation(model: &Model, object: &Object) -> Gate {
     super::dots::gate(&gate)
 }
 
-/// Who may call it from inside the cluster.
+/// The callers that may reach `object` from inside the cluster.
 pub fn inside(model: &Model, object: &Object, ports: &mut Served, look: &Look) -> Inside {
     let allowed = model.allowed(&Shown::default());
     let any = |line: &str, label: &str, title: &str| Inside::Any {
@@ -75,11 +77,11 @@ pub fn inside(model: &Model, object: &Object, ports: &mut Served, look: &Look) -
                 .iter()
                 .filter_map(|admission| group(model, object, admission, callers, ports, look))
                 .collect::<Vec<Group>>();
-            // Groups in the order of the ports they reach, those on any
-            // port first, so their lines run to their ports without
-            // crossing; then by policy, since the policies come in no
-            // fixed order and each update pushed to the page would
-            // otherwise reorder them.
+            // Sort by the first port that a group admits, with groups
+            // for any port first, so that the lines from groups to ports
+            // do not cross.  Break ties by policy name, because the
+            // policies arrive in no fixed order and the page would
+            // otherwise reorder them on each pushed update.
             groups.sort_by(|a, b| {
                 let port = |group: &Group| group.ports.first().map_or(-1, |&port| port as i64);
                 (port(a), &a.policy).cmp(&(port(b), &b.policy))
@@ -105,11 +107,11 @@ pub fn inside(model: &Model, object: &Object, ports: &mut Served, look: &Look) -
     }
 }
 
-/// The callers one rule admits, as boxes: the namespaces it admits
-/// whole, each workload it admits apart from those, the machines'
+/// Draws the callers that one `Admission` admits: the namespaces it
+/// admits whole, each workload it admits apart from those, the machine
 /// addresses that workloads on their machine's network call from, and
-/// address blocks.  A caller that its own egress rules block is left
-/// out.
+/// address blocks.  Returns `None` when no box remains.  A workload
+/// whose own egress rules block the call is left out.
 fn group(
     model: &Model,
     object: &Object,
@@ -188,16 +190,18 @@ fn group(
             }
         }
         (names, _) => {
-            // Many workloads on their machines' networks would make a
-            // tall box of names, so it counts them and names one, from
-            // this namespace where one is, with every name on hover.
+            // Listing every workload on a machine's network would make a
+            // tall box.  The box shows the count and one name, preferring
+            // a name in this namespace, and puts every name in the hover
+            // hint.
             let (line, named) = match names {
                 [one] => (
                     "where this workload on its machine's network calls from:".to_string(),
                     one.clone(),
                 ),
                 many => {
-                    // A name in this namespace has no slash.
+                    // A name in this namespace has no namespace prefix,
+                    // so it has no slash.
                     let local = many.iter().find(|part| !part.text.contains('/'));
                     let first = local.unwrap_or(&many[0]).clone();
                     let line = format!(
@@ -239,9 +243,9 @@ fn group(
     })
 }
 
-/// The isolated workloads it may call, each with the ports it may call
-/// them on: those whose rules name it or its namespace first, and past
-/// three, one box that counts the rest and opens to them.
+/// The isolated workloads that `object` may call, each with the ports
+/// it may call it on.  Workloads whose rules name `object` or its
+/// namespace come first.  `fold` limits how many are drawn one by one.
 pub fn calls(model: &Model, object: &Object, look: &Look) -> Vec<SectionBox> {
     let allowed = model.allowed(&Shown::default());
     let graph = model.graph(&Shown::default());
@@ -271,16 +275,16 @@ pub fn calls(model: &Model, object: &Object, look: &Look) -> Vec<SectionBox> {
             ))
         })
         .collect();
-    // The edges come in the order the evaluation found them, which
-    // changes from one model to the next, so the boxes are sorted by
-    // name within their nearness and keep their places as the page
-    // updates.
+    // The edges arrive in an order that changes from one model to the
+    // next.  Sorting by title within each rank keeps the boxes in place
+    // when the page updates.
     boxes.sort_by(|a, b| (a.0, &a.1.title).cmp(&(b.0, &b.1.title)));
     fold(boxes.into_iter().map(|(_, boxed)| boxed).collect())
 }
 
-/// Past three boxes, one box that counts the rest and opens to them,
-/// each with the ports it may be called on.
+/// Keeps the first `MOST_CALLED` boxes when there are more than
+/// `MOST_CALLED + 1`, and replaces the rest with one box that counts
+/// them and expands to list each with the ports it may be called on.
 fn fold(mut boxes: Vec<SectionBox>) -> Vec<SectionBox> {
     if boxes.len() > MOST_CALLED + 1 {
         let rest = boxes.split_off(MOST_CALLED);
@@ -301,7 +305,8 @@ fn fold(mut boxes: Vec<SectionBox>) -> Vec<SectionBox> {
     boxes
 }
 
-/// What limits its calls out.
+/// What limits the outgoing calls of `object`: the `NetworkPolicy`
+/// objects that restrict its egress, or no limit.
 pub fn out(model: &Model, object: &Object) -> Out {
     let allowed = model.allowed(&Shown::default());
     let on_machine = allowed.reach(object) == Some(&Called::MachineNetwork);

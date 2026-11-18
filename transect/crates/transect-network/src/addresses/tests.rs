@@ -15,8 +15,7 @@ pub(super) fn object<K: DeserializeOwned>(yaml: &str) -> Arc<K> {
     Arc::new(serde_yaml::from_str(yaml).unwrap())
 }
 
-/// A `Service` in `namespace` on `port`, with `spec` as the rest of its
-/// spec in YAML.
+/// `spec` is the rest of the `Service`'s spec, in YAML.
 fn service(namespace: &str, name: &str, port: u16, spec: &str) -> Arc<Service> {
     object(&format!(
         "metadata: {{namespace: {namespace}, name: {name}}}\nspec: {{ports: [{{port: {port}}}], {spec}}}"
@@ -37,11 +36,11 @@ pub(super) fn workload(namespace: &str, name: &str) -> Endpoint {
     Endpoint::Object(deployment(namespace, name))
 }
 
-/// A shop with a web front end behind an `Ingress` and a load balancer,
-/// a sign-in proxy on one path of the same host, a database, a cache,
-/// and a headless queue; a blog with a database of its own; a `Service`
-/// named by hand; a `Service` the web front end made for its admin
-/// port, with its endpoints named by hand; and one machine.
+/// The namespaces shop and blog, and the machine alpha.  In shop, web
+/// is behind an `Ingress` and a `LoadBalancer`, sign-in serves one path
+/// of web's host, and db, cache, and the headless queue each have a
+/// `Service`.  payments is an `ExternalName` `Service`, and web-admin is
+/// a `Service` with no selector that web owns.  blog has its own db.
 struct Cluster {
     services: Vec<Arc<Service>>,
     ingresses: Vec<Arc<Ingress>>,
@@ -114,9 +113,9 @@ impl Cluster {
         Addresses::build(&self.services, &self.ingresses, &self.nodes, domain)
     }
 
-    /// What `from` depends on when it is configured with `env` as its
-    /// environment variables' values, each in a variable whose name
-    /// indicates a host, and `args` as its container's arguments.
+    /// What `from` depends on when its container has the values `env`,
+    /// each in a variable whose name ends in `_HOST`, and the arguments
+    /// `args`.
     fn dependencies(
         &self,
         domain: &str,

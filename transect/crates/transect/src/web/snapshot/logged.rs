@@ -1,6 +1,6 @@
-//! What the logs add to a reading: health's reasons, the findings for
-//! patterns only worth knowing, and the conditions of searches that
-//! failed.
+//! What the logs add to a snapshot: reasons for the health of
+//! workloads, findings from log patterns that are worth knowing but do
+//! not affect health, and conditions for log searches that failed.
 
 use std::collections::HashSet;
 
@@ -10,14 +10,16 @@ use super::Snapshot;
 use kube::ResourceExt;
 use transect_graph::edges::Object;
 use transect_observe::health::{self, Reason, Seen};
-use transect_observe::logs::search::{Asked, ERRORS_WINDOW};
+use transect_observe::logs::search::{ERRORS_WINDOW, SearchTarget};
 use transect_resources::resources::{Condition, DocId};
 use transect_supply::findings::{self, Finding, Restarted};
 
 impl Snapshot {
-    /// The error lines by workload, counted across every pod by the log
-    /// source when its search answered, and otherwise from the tails
-    /// read, then each error or warning pattern's matches.
+    /// The health reasons from logs, for each workload. Error lines are
+    /// counted by the log source's search across all pods when that
+    /// search succeeded, and from the log tails that were read when it
+    /// did not. The recent matches of each error and warning pattern
+    /// follow.
     pub(super) fn log_reasons(&self, now: Timestamp) -> Vec<(String, Reason)> {
         let searched = &self.logs.searched;
         let mut reasons = match (&searched.source, &searched.errors) {
@@ -26,7 +28,7 @@ impl Snapshot {
                     source: source.clone(),
                     window: ERRORS_WINDOW.into(),
                 };
-                let samples = searched.samples(&Asked::Errors);
+                let samples = searched.samples(&SearchTarget::Errors);
                 health::searched_errors(counts, &seen, samples, &self.pods, &self.ownership, now)
             }
             _ => health::logged_reasons(&self.logs.logged, &self.pods, &self.ownership, now),
@@ -41,15 +43,15 @@ impl Snapshot {
         reasons
     }
 
-    /// A finding for each pattern only worth knowing that matched, and
-    /// one for the machines' own error lines.
+    /// The findings from logs: the pattern matches that do not affect
+    /// health, and the error lines of the machines themselves.
     pub fn log_findings(&self, now: Timestamp) -> Vec<Finding> {
         let namespaces = self.namespaces.iter();
         let namespaces: HashSet<&str> = namespaces
             .filter_map(|namespace| namespace.metadata.name.as_deref())
             .collect();
         let searched = &self.logs.searched;
-        let machines = searched.machines(&Asked::Errors);
+        let machines = searched.machines(&SearchTarget::Errors);
         let machines = findings::machine_logs(machines, ERRORS_WINDOW, now);
         let mut found = findings::worth_knowing(
             &self.logs.searched,
@@ -64,8 +66,8 @@ impl Snapshot {
         found
     }
 
-    /// The containers of every workload that restarted too long ago to
-    /// count toward health, each linked to its workload's page.
+    /// The containers whose restarts are too old to count toward
+    /// health.
     pub fn earlier_restarts(&self, now: Timestamp) -> Vec<Restarted> {
         let found = health::earlier_restarts(&self.pods, &self.ownership, now);
         found
@@ -77,9 +79,10 @@ impl Snapshot {
             .collect()
     }
 
-    /// The CronJobs whose last run succeeded, with none running, so
-    /// the reader need not look at a pattern's match in an earlier
-    /// attempt of that run.
+    /// The `CronJob` objects whose last run succeeded and that have no
+    /// run in progress. Their pattern matches are findings and do not
+    /// affect health, because a run that logged an error and then
+    /// succeeded on a retry needs no attention.
     pub fn settled_cron_jobs(&self) -> HashSet<Object> {
         let settled = self
             .cron_jobs
@@ -93,8 +96,8 @@ impl Snapshot {
             .collect()
     }
 
-    /// A condition on each pattern, and on the source, whose last
-    /// search the store refused or missed.
+    /// A condition for each pattern whose last search failed, and one
+    /// for the `LogSource` when its error search failed.
     pub fn log_conditions(&self) -> Vec<(DocId, Condition)> {
         let searched = &self.logs.searched;
         let mut conditions: Vec<(DocId, Condition)> = searched
@@ -116,9 +119,8 @@ impl Snapshot {
     }
 }
 
-/// The patterns only worth knowing that matched in `namespace`, among
-/// the log findings `found`, as the reasons health would give them, for
-/// its card.
+/// The pattern findings in `found` for `namespace`, as health reasons
+/// for the namespace card.
 pub fn worth_knowing_in(found: &[Finding], namespace: &str) -> Vec<Reason> {
     let lines = found.iter().filter_map(|finding| {
         let Finding::Logged {

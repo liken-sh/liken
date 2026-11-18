@@ -1,12 +1,10 @@
-//! Storage, read from the current contents of the cluster's stores.
-
 use super::{OnMachines, Storage};
 use transect_cluster::cluster::Cluster;
 
 impl Storage {
-    /// Every claim in `cluster` followed to its volume and backend, as
-    /// of now, with the volumes of each driver that `on_machines` lists
-    /// placed on the disks of the machines that mount them.
+    /// Builds `Storage` from the claims, volumes, storage classes, and
+    /// attachments in `cluster`'s stores. A volume of a CSI driver that
+    /// `on_machines` lists is placed on the machines that mount it.
     pub fn read(cluster: &Cluster, on_machines: &OnMachines) -> Self {
         let (claims, volumes) = (cluster.claims(), cluster.volumes());
         let classes = cluster.storage_classes();

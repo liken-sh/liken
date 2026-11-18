@@ -1,9 +1,8 @@
-//! Reads a registry that the API server's address also serves, as k3s's
-//! embedded registry does, through transect's own client for the API.
-//! That registry answers only a client that authenticates to the cluster
-//! with the same credentials that the API accepts.  So transect sends the
-//! request on its API connection, with the certificate or token that
-//! transect was given.
+//! Reads a registry that is served at the API server's address, as k3s's
+//! embedded registry is.  That registry accepts only a client that
+//! authenticates with credentials that the API server also accepts, so
+//! transect sends the request through its Kubernetes client, with the
+//! client certificate or token that the client already has.
 
 use std::time::Duration;
 
@@ -11,15 +10,17 @@ use http::header::ACCEPT;
 
 use super::{Failure, ImageRef};
 
-/// The longest one request may take, the same limit as for a registry.
+/// The same limit as `TIMEOUT` in `client.rs`.
 const TIMEOUT: Duration = Duration::from_secs(15);
-/// The most bytes transect reads of one answer, the same limit as for a
-/// registry.
+/// The largest body that transect accepts, the same as `MAX_BODY` in
+/// `client.rs`.  The Kubernetes client reads the whole body before
+/// `get` checks its size, so this limit rejects a large body but does
+/// not stop transect from reading it.
 const MAX_BODY: usize = 4 << 20;
 
-/// Returns the body at `path` under `image`'s repository.  transect
-/// requests it from the API server with the image's host in the `ns`
-/// query parameter, as containerd does when it requests from a mirror.
+/// Returns the body at `path` under `image`'s repository.  The request
+/// sends the image's registry host in the `ns` query parameter, as
+/// containerd's requests to a mirror do.
 pub async fn get(
     client: &kube::Client,
     image: &ImageRef,
@@ -31,8 +32,8 @@ pub async fn get(
         .header(ACCEPT, accept)
         .body(Vec::new())
         .map_err(|_| Failure::Malformed)?;
-    let answer = tokio::time::timeout(TIMEOUT, client.request_text(request)).await;
-    match answer {
+    let response = tokio::time::timeout(TIMEOUT, client.request_text(request)).await;
+    match response {
         Err(_) => Err(Failure::Unreachable),
         Ok(Ok(text)) if text.len() > MAX_BODY => Err(Failure::TooLarge),
         Ok(Ok(text)) => Ok(text.into_bytes()),
@@ -41,7 +42,8 @@ pub async fn get(
     }
 }
 
-/// Why a request the API server answered with `code` failed.
+/// The `Failure` for a request that the API server rejected with HTTP
+/// status `code`.
 fn failure(code: u16) -> Failure {
     match code {
         401 => Failure::NeedsCredentials,
@@ -59,12 +61,12 @@ mod tests {
     use super::*;
 
     #[rstest]
-    #[case::unknown_to_the_cluster(401, Failure::NeedsCredentials)]
+    #[case::unauthorized(401, Failure::NeedsCredentials)]
     #[case::refused(403, Failure::Refused)]
-    #[case::not_held(404, Failure::NotFound)]
-    #[case::too_often(429, Failure::RateLimited)]
+    #[case::not_found(404, Failure::NotFound)]
+    #[case::rate_limited(429, Failure::RateLimited)]
     #[case::anything_else(502, Failure::Status(502))]
-    fn reads_why_the_api_server_refused(#[case] code: u16, #[case] expected: Failure) {
+    fn maps_an_api_server_status_to_a_failure(#[case] code: u16, #[case] expected: Failure) {
         assert_eq!(failure(code), expected);
     }
 }

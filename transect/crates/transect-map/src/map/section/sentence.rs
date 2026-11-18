@@ -1,5 +1,6 @@
-//! The words on the section view's boxes.  Everything else on them is a name, a
-//! host, an address, or a number from the cluster.
+//! The text that transect writes on the section view's boxes. The rest
+//! of the text on them is a name, a host, an address, or a number from
+//! the cluster.
 
 use transect_ground::machines::{Amount, trimmed};
 use transect_ground::storage::{Backend, Type};
@@ -7,16 +8,15 @@ use transect_network::entry::{IngressBox, ServiceBox};
 
 use super::spine::Backing;
 
-/// The legend above the section view that explains how its lines are
-/// drawn.
+/// The legend above the section view, which explains its line styles.
 pub const LEGEND: &str =
     "Solid lines are structure. Dashed lines are callers. Dotted lines are guesses.";
 
-/// The heading over the section view.  It starts from the workload's
+/// The heading over the section view. It starts from the workload's
 /// entry when it has one, and from the workload itself when nothing
-/// reaches it from outside, as in a Player's or a Remote's section.  It
-/// ends at the workload's storage when it has any, and at its machines
-/// when it has none.
+/// reaches it from outside, as in a Player's or a Remote's section. It
+/// ends at the workload's storage when it has any, and otherwise at its
+/// machines.
 pub fn subtitle(entry: bool, storage: bool, name: &str) -> String {
     let from = match entry {
         true => "entry",
@@ -60,13 +60,13 @@ fn pods(count: i32) -> String {
     }
 }
 
-/// The Ingress's hosts, which are the box's title.
+/// The title of an Ingress box: its hosts.
 pub fn ingress_title(ingress: &IngressBox) -> String {
     ingress.host_lines().join(", ")
 }
 
-/// The Ingress's traffic: a line per backend, then the traffic's note,
-/// when it has one.
+/// The traffic lines of an Ingress box: one per backend, then the
+/// traffic's note when it has one.
 pub fn traffic_lines(ingress: &IngressBox) -> Vec<String> {
     let traffic = &ingress.traffic;
     let lines = traffic.lines(&ingress.namespace, false).into_iter();
@@ -98,7 +98,7 @@ pub fn claims_title(count: usize) -> String {
 
 /// The line on a claims box: where its claims store their data, the
 /// kinds of volume, and the total size, as in "nas.example.com · NFS,
-/// iSCSI · 266Gi".  A box whose claims wait for a volume shows "waiting
+/// iSCSI · 266Gi". When the claims have no volume yet, it is "waiting
 /// for a volume".
 pub fn claims_line(backing: &Backing) -> String {
     let place = match &backing.backend {
@@ -120,11 +120,11 @@ pub fn claims_line(backing: &Backing) -> String {
     parts.join(" · ")
 }
 
-/// One line per kind of volume on a ground box, counted and summed so
-/// it fits the box: "iSCSI: 3 claims · 266Gi".  NFS volumes a pod names
-/// inline, with no claim, are named: "NFS: movies, series".  The claims
-/// box above names the backend, and these lines name what the workload
-/// stores on it.
+/// One line per kind of volume on an outside system's box, with the claims counted
+/// and their sizes summed so that it fits the box: "iSCSI: 3 claims ·
+/// 266Gi". NFS volumes that a pod declares inline, with no claim, are
+/// listed by name: "NFS: movies, series". The claims box above shows
+/// the backend, and these lines show what the workload stores on it.
 pub fn ground_lines(backing: &Backing) -> Vec<String> {
     let kinds = backing.kinds();
     kinds
@@ -148,8 +148,8 @@ pub fn ground_lines(backing: &Backing) -> Vec<String> {
         .collect()
 }
 
-/// The kinds named on the line down to a ground box: "NFS", "iSCSI and
-/// NFS".
+/// The label on the line down to an outside system's box, which lists the kinds of
+/// volume: "NFS", "iSCSI and NFS".
 pub fn kinds_label(backing: &Backing) -> String {
     let names: Vec<String> = backing.kinds().into_iter().map(type_name).collect();
     match names.as_slice() {
@@ -169,20 +169,21 @@ fn type_name(kind: &Type) -> String {
     }
 }
 
-/// The title of the box that a column draws in place of the side boxes
-/// beyond the most that it draws.
+/// The title of the box that stands for the side boxes of a column
+/// beyond the most that the column draws.
 pub fn more_title(count: usize) -> String {
     format!("+{count} more")
 }
 
-/// The title of the box drawn in place of every caller beyond the most
-/// that the section view draws one by one: "12 callers".
+/// The title of the box that stands for all the callers when there are
+/// more than the section view draws separately: "12 callers".
 pub fn callers_title(count: usize) -> String {
     format!("{count} callers")
 }
 
-/// The namespaces of the callers that the callers box is drawn in place
-/// of: "in media", "in media and shop", "in 4 namespaces".
+/// The line on the callers box, which gives the namespaces of the
+/// callers it stands for: "in media", "in media and shop", "in 4
+/// namespaces".
 pub fn callers_line(namespaces: &[&str]) -> String {
     match namespaces {
         [] => "cluster-wide".into(),
@@ -192,19 +193,21 @@ pub fn callers_line(namespaces: &[&str]) -> String {
     }
 }
 
-/// A side box's line for an address outside the cluster that the
-/// workload reaches.
+/// The line on a side box for an address outside the cluster that the
+/// workload is configured to reach.
 pub fn outside_side_line() -> String {
     "outside the cluster".into()
 }
 
-/// A side box's line for a machine the workload is configured to reach.
+/// The line on a side box for a machine that the workload is
+/// configured to reach.
 pub fn machine_side_line() -> String {
     "machine".into()
 }
 
-/// "runs the pod" when it is the workload's only one, "runs 2 pods",
-/// and "· control plane" after it on a control-plane machine.
+/// The line on a machine box: "runs the pod" when the workload has only
+/// that pod, "runs 1 pod" or "runs 2 pods" otherwise, with "· control
+/// plane" added on a control-plane machine.
 pub fn machine_line(pods: usize, of: usize, control_plane: bool) -> String {
     let runs = match (pods, of) {
         (1, 1) => "runs the pod".into(),
@@ -217,7 +220,7 @@ pub fn machine_line(pods: usize, of: usize, control_plane: bool) -> String {
     }
 }
 
-/// The title of the box drawn in place of every machine beyond the most
+/// The title of the box that stands for the machines beyond the most
 /// that the row draws.
 pub fn machines_title(count: usize) -> String {
     format!("on {count} machines")
@@ -230,8 +233,8 @@ pub fn machines_line(pods: usize) -> String {
     }
 }
 
-/// The sum of `sizes` in the largest binary unit that keeps it at one
-/// or more: "266Gi", "1.5Ti".  `None` when no size parses.
+/// The sum of `sizes` in the largest binary unit that keeps the value
+/// at 1 or more: "266Gi", "1.5Ti". `None` when no size parses.
 pub fn total<'a>(sizes: impl IntoIterator<Item = &'a str>) -> Option<String> {
     let amounts: Vec<Amount> = sizes.into_iter().filter_map(Amount::parse).collect();
     if amounts.is_empty() {

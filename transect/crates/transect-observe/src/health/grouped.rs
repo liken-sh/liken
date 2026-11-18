@@ -1,7 +1,8 @@
-//! One line for a container that restarted in several of a workload's
-//! pods.  A `DaemonSet`'s container that restarts on every machine at
-//! once would otherwise fill "Now" with one near-identical line per pod,
-//! and the count of pods is more useful than the list of their names.
+//! Combines the restarts of one container in several pods of a workload
+//! into one reason. A `DaemonSet` container that restarts on every
+//! machine at once would otherwise fill "Now" with a near-identical
+//! line for each pod, and the number of pods is more useful than their
+//! names.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -9,19 +10,19 @@ use super::Reason;
 use super::rolls::AfterRoll;
 use transect_graph::edges::Object;
 
-/// A `Reason::Restarting` about one pod, with the namespace the pod
-/// runs in and the top owner it counts toward.
+/// A `Reason::Restarting` for one pod, with the pod's namespace and the
+/// top owner that the restart counts toward.
 pub struct Restarted {
     pub namespace: String,
     pub owner: Object,
     pub reason: Reason,
 }
 
-/// Each restart, with its namespace.  A restart stays its own reason
-/// when its pod is the only pod of its owner whose container restarted.
-/// Otherwise the function combines the restarts into one
-/// `Reason::RestartedAcross` per owner and container.  `running` counts
-/// the pods that each top owner runs, and `after` names the rollout, if
+/// The reasons for `restarts`, each with its namespace. A restart stays
+/// its own reason when its pod is the only pod of its owner where that
+/// container restarted. Otherwise the restarts of an owner's container
+/// become one `Reason::RestartedAcross`. `running` is the number of
+/// pods that each top owner runs, and `after` holds the rollout, if
 /// any, that each owner's container restarted after.
 pub fn group(
     restarts: Vec<Restarted>,
@@ -114,7 +115,7 @@ mod tests {
         vec![restart("speaker", "speaker-a", "mixer", 3, false)],
         vec!["mixer in speaker-a restarted 3m ago, 1 restart in all"]
     )]
-    #[case::several_pods_fold_into_one_line(
+    #[case::several_pods_combine_into_one_line(
         vec![
             restart("speaker", "speaker-a", "mixer", 13, false),
             restart("speaker", "speaker-b", "mixer", 15, false),
@@ -142,7 +143,7 @@ mod tests {
             "session in speaker-b restarted 2m ago, 1 restart in all",
         ]
     )]
-    fn restarts_fold_by_owner_and_container(
+    fn restarts_combine_by_owner_and_container(
         #[case] restarts: Vec<Restarted>,
         #[case] expected: Vec<&str>,
     ) {
@@ -150,7 +151,7 @@ mod tests {
     }
 
     #[rstest]
-    fn a_folded_line_belongs_to_its_workload_and_warns() {
+    fn a_combined_line_belongs_to_its_workload_and_warns() {
         let restarts = vec![
             restart("speaker", "speaker-a", "mixer", 2, true),
             restart("speaker", "speaker-b", "mixer", 5, true),

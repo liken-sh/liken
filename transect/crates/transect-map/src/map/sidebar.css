@@ -1,16 +1,15 @@
 /*
- * The sidebar beside the cluster map: what needs attention now, then
- * what is worth knowing.  Cards are drawn on --panel like the parcels,
- * and only a problem uses --warm.
+ * The sidebar beside the cluster map: first what needs attention now,
+ * then what is worth knowing.  Cards use the --panel background, like
+ * the namespaces' rectangles, and only a problem uses --warm.
  */
 
-/* Mid sage, the one green the plan allows, marks the all-clear dot. */
+/* The all-clear dot is mid sage, the only green in the palette. */
 :root {
   --clear: #6e8352;
 }
 
-/* One width on every page, so the sidebar starts at the same x
-   whichever elevation the reader is on. */
+/* A fixed width keeps the sidebar at the same x position on every page. */
 .sidebar {
   width: 360px;
   flex: none;
@@ -84,16 +83,14 @@
 
 .dot-clear { background: var(--clear); }
 
-/* A condition that does not decide health, or an object at rest: gray,
-   since nothing about it is good or bad.  It takes the faint ink, not
-   a rule's gray, so it shows as a mark on the panel.  Its hue has no
-   green in it, which keeps it apart from a healthy dot of the same
-   weight. */
+/* A condition that does not decide health, or an object at rest, is
+   neither good nor bad, so its dot is gray.  It uses the faint ink,
+   because the rule gray does not show on the panel. */
 .dot-gray { background: var(--ink-faint); }
 
-/* A failure fills its dot and a warning outlines it, as the map fills
-   and outlines a parcel.  A notice outlines it in gray, since the map
-   leaves its parcel gray. */
+/* A failure fills its dot and a warning outlines it, as the map fills or
+   outlines a namespace's rectangle.  A notice outlines the dot in gray,
+   because the map leaves the rectangle gray. */
 .concern-failing { background: var(--warm); }
 .concern-warning { border: 2px solid var(--warm); }
 .concern-notice { border: 2px solid var(--rule-strong); }
@@ -113,16 +110,16 @@
   white-space: nowrap;
 }
 
-/* A finding worth knowing is not a fault, so its card stays in the
-   sidebar's grays.  Only "Now" uses --warm. */
+/* A finding that is worth knowing is not a fault, so its card stays
+   gray. */
 .finding-title {
   font-weight: 600;
   font-size: 14px;
   color: var(--ink);
 }
 
-/* A finding about several machines lists one line per machine above
-   its body, as compact as the body text. */
+/* A finding about several machines lists one line for each machine
+   above its body. */
 .finding-lines {
   margin: 0;
   padding: 0;
@@ -138,9 +135,9 @@
   color: var(--ink);
 }
 
-/* A reason, a namespace's name, and a finding's line are links, so a
-   reader can open what they name in a new tab.  They keep the card's
-   ink so the sidebar stays calm, and a hover shows where a click goes. */
+/* A reason, a namespace name, and a finding's line are links to what
+   they name.  They keep the card's text color so the sidebar stays
+   calm, and underline on hover. */
 a.concern-name,
 a.concern-line,
 a.finding-machine {
@@ -155,7 +152,7 @@ a.concern-line:hover,
 a.finding-machine:hover { text-decoration: underline; }
 
 /* Below this width the map needs the whole row, so the sidebar moves
-   under it and takes the full width. */
+   below the map and uses the full width. */
 @media (max-width: 1000px) {
   .sidebar {
     width: auto;
@@ -163,9 +160,8 @@ a.finding-machine:hover { text-decoration: underline; }
   }
 }
 
-/* A log finding's evidence: the places its matches came from, then a
-   few of its lines in the mono face, each cut to one row so five lines
-   stay five rows. */
+/* The evidence of a log finding: where its matches came from, then a
+   few of its lines, each cut to one row. */
 .evidence-parts {
   margin: 2px 0 0;
   padding-left: 10px;

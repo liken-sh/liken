@@ -1,16 +1,16 @@
-//! An `Ingress`'s traffic for each backend: each `Service` it routes
-//! to, with that backend's request rate, 95th-percentile latency, and
-//! share of 5xx responses.  transect reads the figures from the
-//! controller's metrics with the queries that the controller's
-//! `IngressController` declares.
+//! The traffic of each backend of an `Ingress`: for each `Service` it
+//! routes to, the request rate, the 95th-percentile latency, and the
+//! rate of 5xx responses. transect reads the figures from the ingress
+//! controller's metrics, with the queries that the controller's
+//! `IngressController` resource declares.
 //!
-//! Each query returns one series per backend, named in the label the
-//! resource gives, so one round of three queries covers every
-//! `Ingress` the controller serves.  The page draws the figures in
-//! gray: transect compares them to no threshold and raises no alert
-//! from them, because Alertmanager already does.  When nothing reads
-//! the figures, the `Ingress` shows one gray line that names what
-//! would read them.
+//! Each query returns one series per backend, identified by the label
+//! that the resource names, so three queries cover every `Ingress` the
+//! controller serves. The page draws the figures in gray and compares
+//! them to no threshold, because alerts on traffic are left to the
+//! cluster's Alertmanager. When no `IngressController` declares
+//! `entry`, the `Ingress` shows one gray line that says what would
+//! supply the figures.
 
 mod line;
 
@@ -33,8 +33,8 @@ pub struct Figures {
     pub errors: f64,
 }
 
-/// The results of one controller's queries, by the backend names in
-/// them.
+/// The results of one controller's queries, keyed by the backend name
+/// in each series.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Measured {
     /// The `IngressController` the queries came from.
@@ -43,34 +43,36 @@ pub struct Measured {
     pub backends: HashMap<String, Figures>,
 }
 
-/// The results of every controller's queries in the last round, and
-/// whether any `IngressController` declares `entry`, which is what
-/// makes transect read them.
+/// The results of the most recent run of every controller's queries,
+/// and whether any `IngressController` declares `entry`. transect runs
+/// the queries only when one does.
 #[derive(Clone, Copy, Debug)]
-pub struct Answers<'a> {
+pub struct TrafficResults<'a> {
     pub measured: &'a [Measured],
     pub declared: bool,
-    /// The name of an `IngressController` that exists but did not
-    /// load, when none declares `entry`.
+    /// The name of an `IngressController` that failed to load, set
+    /// when no loaded one declares `entry`.
     pub unloaded: Option<&'a str>,
 }
 
-/// One `Ingress`'s traffic, as its boxes show it.
+/// What an `Ingress`'s card shows for its traffic.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Traffic {
-    /// No `IngressController` declares `entry`, so nothing reads it.
+    /// No `IngressController` declares `entry`, so transect reads no
+    /// traffic.
     Undeclared,
-    /// No `IngressController` that loaded declares `entry`, and the one
-    /// named here did not load.
+    /// No loaded `IngressController` declares `entry`, and the one named
+    /// here failed to load.
     Unloaded(String),
-    /// Knowledge declares it, and no controller's queries have answered.
+    /// An `IngressController` declares `entry`, but no controller's
+    /// queries have returned yet.
     Unread,
-    /// The controllers' answers name none of its backends: another
-    /// controller serves it, or no request reached it since its
-    /// controller started.
+    /// No controller's results contain any of the `Ingress`'s backends.
+    /// Another controller serves it, or no request has reached it since
+    /// its controller started.
     Unnamed,
-    /// Each of its backends, from the first controller whose answers
-    /// name any of them.
+    /// Each of its backends, with the figures from the first controller
+    /// whose results contain any of them.
     Read {
         backends: Vec<Backend>,
         window: String,
@@ -79,7 +81,7 @@ pub enum Traffic {
 }
 
 /// One `Service` an `Ingress` routes to, by name and port as written,
-/// and its figures when its controller's answers name it.
+/// with its figures when the controller's results contain it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Backend {
     pub service: String,
@@ -87,12 +89,12 @@ pub struct Backend {
     pub figures: Option<Figures>,
 }
 
-/// The backends' figures from the three answers, by the value of
-/// `label`.  The function omits a series with no such label, or with a
-/// value that is not a number.  A latency that is not a number, as a
-/// quantile of no requests is, gives no latency.  For two series of
-/// one backend, the function adds their rates and keeps the slower
-/// latency, because quantiles do not add.
+/// The figures of each backend from the results of the three queries,
+/// keyed by the value of `label`. It skips a series that lacks `label`
+/// or whose value is not finite, so a latency quantile over no requests
+/// (NaN) leaves `p95` as `None`. When two series have the same backend,
+/// it adds the rates and keeps the larger latency, because quantiles
+/// cannot be added.
 pub fn measure(
     label: &str,
     requests: &[Sample],
@@ -121,8 +123,8 @@ pub fn measure(
     backends
 }
 
-/// Each backend an `Ingress` routes to, by `Service` and port as
-/// written: a port's number, or its name.
+/// Each `Service` and port an `Ingress` routes to, without duplicates.
+/// The port is a number or a name, as the `Ingress` writes it.
 pub fn backends(ingress: &Ingress) -> Vec<(String, String)> {
     let Some(spec) = ingress.spec.as_ref() else {
         return Vec::new();
@@ -153,18 +155,18 @@ fn service_port(backend: &IngressBackend) -> Option<(String, String)> {
 }
 
 /// The traffic of the `Ingress` in `namespace` with `backends`, from the
-/// first controller in `answers` whose answers name any of them.
-pub fn of(namespace: &str, backends: &[(String, String)], answers: Answers) -> Traffic {
-    if !answers.declared {
-        return match answers.unloaded {
+/// first controller in `results` whose results contain any of them.
+pub fn of(namespace: &str, backends: &[(String, String)], results: TrafficResults) -> Traffic {
+    if !results.declared {
+        return match results.unloaded {
             Some(name) => Traffic::Unloaded(name.to_string()),
             None => Traffic::Undeclared,
         };
     }
-    if answers.measured.is_empty() {
+    if results.measured.is_empty() {
         return Traffic::Unread;
     }
-    let read = answers.measured.iter().find_map(|one| {
+    let read = results.measured.iter().find_map(|one| {
         let each: Vec<Backend> = backends
             .iter()
             .map(|(service, port)| Backend {

@@ -1,7 +1,7 @@
-//! Error lines in the pod logs transect has read, as a reason on each
-//! workload whose pods logged them.  transect reads a pod's logs only
-//! when its page opens, so a reason covers only those pods, and records
-//! how many of the workload's pods those are.
+//! A reason for each workload whose pods logged error lines in the
+//! logs that transect has read. transect reads a pod's logs only when
+//! someone opens its page, so a reason covers only the pods that were
+//! read, and records how many of the workload's pods that is.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -15,7 +15,7 @@ use crate::logs::evidence::Evidence;
 use transect_cluster::ownership::Ownership;
 use transect_graph::edges::Object;
 
-/// The sums of the reads of one workload's pods.
+/// The totals over the log reads of one workload's pods.
 #[derive(Default)]
 struct Tally {
     errors: usize,
@@ -24,10 +24,9 @@ struct Tally {
     latest: Option<Timestamp>,
 }
 
-/// One reason, with its namespace, for each workload whose running
-/// pods have a cached read with an error line.  The function leaves out
-/// a read of a pod that is gone, because nothing links that pod to a
-/// workload after it is gone.
+/// A reason, with its namespace, for each workload whose pods in `pods`
+/// have a cached log read with an error line. Skips the read of a pod
+/// that is not in `pods`, because the pod no longer exists.
 pub fn reasons(
     logged: &[Logged],
     pods: &[Arc<Pod>],

@@ -71,7 +71,8 @@ fn walks_a_pod_to_its_top_owner(#[case] rows: Vec<Row>, #[case] top: Object) {
     assert_eq!(ownership.top_owner(&pod), top);
 }
 
-/// A pod of a `StatefulSet` that a database's custom resource owns.
+/// The pod `db-0` of the `StatefulSet` `db`, which the `Database`
+/// `orders` owns.
 fn database() -> Ownership {
     build(&[
         pod("db-0", vec![("apps/v1", "StatefulSet", "db")]),

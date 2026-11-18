@@ -36,9 +36,10 @@ fn plurals() -> Plurals {
     ])
 }
 
-/// What each relation reaches.  The broker's address reaches the
-/// Deployment behind it, the Node reaches its machine, any other named
-/// object reaches itself, and the rest reach nothing.
+/// A fake of what each relation resolves to. The broker's address
+/// resolves to the Deployment behind it, the value "alpha" to the
+/// machine of that name, any other named object to itself, and the
+/// rest to nothing.
 fn reach(relation: &Relation) -> Reached {
     let ends = match (&relation.names, relation.value.as_str()) {
         (Names::Address, _) => vec![Endpoint::Object(Object::new(
@@ -57,8 +58,8 @@ fn reach(relation: &Relation) -> Reached {
     }
 }
 
-/// The board of the Player above, whose Remotes and the broker's
-/// Deployment have pages.
+/// The page of the Player above. Remotes and the broker's Deployment
+/// have pages, and nothing else does.
 fn board(card: Option<WorkloadCard>) -> KnownPage {
     let known = knowledge("players.widgets.example.com", SPEC);
     let data = serde_yaml::from_str(PLAYER).unwrap();
@@ -197,12 +198,12 @@ fn links_each_object_an_end_reaches() {
 }
 
 #[rstest]
-#[case::a_workload_takes_its_card_and_its_section(
+#[case::a_workload_shows_its_workload_card_and_section_tab(
     true,
     Some("/namespaces/shop/players.widgets.example.com/front-room/section"),
     false
 )]
-#[case::anything_else_its_knowledge_alone(false, None, true)]
+#[case::an_object_with_no_pods_shows_its_object_card(false, None, true)]
 fn opens_its_card_by_whether_it_runs_pods(
     #[case] workload: bool,
     #[case] section: Option<&str>,

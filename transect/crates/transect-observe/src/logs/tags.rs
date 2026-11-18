@@ -1,8 +1,8 @@
-//! This module tags the lines of a pod's tail with the patterns they
-//! match.  For each pattern, transect sends the store the tail query
-//! with the pattern added.  When a line of the tail is in that
-//! response, with the same container, time, and text, the line gets the
-//! pattern's tag.
+//! Tags the lines of a pod's tail with the patterns they match. For
+//! each pattern, transect sends the log store the tail query with the
+//! pattern's filter added. A line of the tail gets the pattern's tag
+//! when the response contains a row with the same container, time, and
+//! text.
 
 use k8s_openapi::jiff::Timestamp;
 
@@ -12,9 +12,9 @@ use super::query::{Row, Values, fill};
 use super::source::Reached;
 use super::tail::{self, Line, Matching, Read, Tag, Tail};
 
-/// The tail query of `pod`, narrowed to the lines that `pattern`
-/// matches, across the pod's containers.  It requests only the fields
-/// that `tag` matches a line by.
+/// The tail query for the pod, narrowed to the lines that `pattern`
+/// matches, across all the pod's containers. It returns only the
+/// fields that `tag` compares: time, message, and container.
 pub fn query(
     reached: &Reached,
     (namespace, name, since): (&str, &str, Option<Timestamp>),
@@ -35,8 +35,9 @@ pub fn query(
     language.keep(&query, &[&fields.time, &fields.message, &fields.container])
 }
 
-/// The lines in `rows`, the response to `pattern`'s query, newest last,
-/// or `None` when `rows` contains no line.
+/// The lines in `rows`, the response to `pattern`'s query, as a
+/// `Matching` with the newest line last, or `None` when no row has
+/// text.
 pub fn matching(pattern: &LogPattern, rows: &[Row], reached: &Reached) -> Option<Matching> {
     let fields = &reached.source.fields;
     let mut lines: Vec<(String, Line)> = rows
@@ -73,8 +74,8 @@ fn tag_of(pattern: &LogPattern) -> Tag {
     }
 }
 
-/// Adds `pattern`'s tag to each line of `tails` that is in `rows`, the
-/// response to the pattern's query.
+/// Adds `pattern`'s tag to each line of `tails` that has a matching row
+/// in `rows`, the response to the pattern's query.
 pub fn tag(tails: &mut [Tail], pattern: &LogPattern, rows: &[Row], reached: &Reached) {
     let fields = &reached.source.fields;
     let matched: Vec<(&str, Timestamp, String)> = rows
@@ -162,7 +163,7 @@ mod tests {
     }
 
     #[rstest]
-    fn tags_the_lines_the_pattern_answer_holds_in_their_own_container() {
+    fn tags_only_the_lines_in_the_response_for_their_own_container() {
         let reached = source().reached(None, "cluster.local");
         let mut tails = tails(&reached);
         let refused = pattern("refused", r#"_msg:~"refused""#, Severity::Error);
@@ -212,7 +213,7 @@ mod tests {
     }
 
     #[rstest]
-    fn asks_for_the_tail_with_the_pattern_added() {
+    fn builds_the_tail_query_with_the_pattern_added() {
         let reached = source().reached(None, "cluster.local");
         let refused = pattern("refused", r#"_msg:~"refused""#, Severity::Error);
         let since = "2026-01-01T00:00:00Z".parse().ok();

@@ -1,11 +1,11 @@
-//! A CSI driver's console: the web page of the system that stores the
-//! driver's volumes, such as a NAS's interface.  The driver's publisher
-//! writes it as a `console` URL template on the driver's `CSIDriver`.
-//! Each placeholder names a volume attribute of the driver's
-//! PersistentVolumes or a parameter of its StorageClasses, such as
-//! `https://{dsm}:5001` for a driver whose StorageClasses name their
-//! NAS as `dsm`.  So transect reads the console's address from the
-//! cluster, and no one writes it by hand.
+//! A CSI driver's console is the web interface of the system that stores
+//! the driver's volumes, such as a NAS.  The driver's `CSIDriver` gives
+//! it as a URL template in its `console` intent, such as the
+//! `transect.liken.sh/console` annotation.  Each placeholder names a
+//! volume attribute of the driver's `PersistentVolume`s or a parameter of
+//! its `StorageClass`es: `https://{dsm}:5001` for a driver whose
+//! `StorageClass`es give the NAS's address as `dsm`.  So nobody has to
+//! write each NAS's address by hand.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
@@ -13,10 +13,10 @@ use std::sync::Arc;
 use k8s_openapi::api::core::v1::PersistentVolume;
 use k8s_openapi::api::storage::v1::StorageClass;
 
-/// Each driver's console URLs, keyed by the driver.  This function fills
-/// `templates` from the attributes of each of the driver's volumes and
-/// the parameters of each of its StorageClasses.  Every URL is a plain
-/// `http` or `https` URL, and each list is sorted.
+/// Each driver's console URLs, keyed by driver, from filling the
+/// driver's template in `templates` with the attributes of each of its
+/// volumes and the parameters of each of its `StorageClass`es.  Each
+/// list is sorted and has no duplicates.
 pub fn consoles(
     templates: &HashMap<String, String>,
     volumes: &[Arc<PersistentVolume>],
@@ -52,10 +52,10 @@ pub fn consoles(
         .collect()
 }
 
-/// `template` with each `{name}` replaced by `values`' value for it.
-/// The function returns `None` when a placeholder has no value, when a
-/// value contains a character that a host or a path would not, or when
-/// the result is not a URL that a page may link to.
+/// `template` with each `{name}` replaced by its value in `values`, or
+/// `None` when a placeholder has no value, when a value has a character
+/// other than a letter, a digit, or one of `-._:/`, or when the result
+/// is not an `http` or `https` URL that a page may link to.
 fn fill(template: &str, values: &BTreeMap<String, String>) -> Option<String> {
     let mut url = String::new();
     let mut rest = template;

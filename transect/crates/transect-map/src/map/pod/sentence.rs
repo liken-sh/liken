@@ -1,5 +1,4 @@
-//! The words the pod page shows.  Everything else on it is a name or a
-//! number from the cluster.
+//! The sentences and labels on the pod page.
 
 use k8s_openapi::jiff::Timestamp;
 
@@ -18,9 +17,8 @@ pub fn role(role: Role) -> &'static str {
     }
 }
 
-/// The command and its arguments as a shell would read them, with an
-/// argument that contains a space or is empty in double quotes:
-/// `sh -c "exec app"`.
+/// The command and its arguments on one line, with each argument that is
+/// empty or contains whitespace in double quotes: `sh -c "exec app"`.
 pub fn command(words: &[String]) -> String {
     let quoted = words.iter().map(|word| {
         if word.is_empty() || word.contains(char::is_whitespace) {
@@ -32,7 +30,8 @@ pub fn command(words: &[String]) -> String {
     quoted.collect::<Vec<_>>().join(" ")
 }
 
-/// "listens on :8000 http · :5353/UDP", or none with no port declared.
+/// The container's declared ports, such as "listens on :8000 http ·
+/// :5353/UDP". `None` when it declares no port.
 pub fn ports(ports: &[Port]) -> Option<String> {
     if ports.is_empty() {
         return None;
@@ -56,13 +55,15 @@ pub fn ports(ports: &[Port]) -> Option<String> {
     ))
 }
 
-/// The figures under a memory bar: what the container uses, then what it
-/// requests and is limited to.  ("368Mi", "req 750Mi · limit 1500Mi")
+/// The two figures under a memory bar: what the container uses, then
+/// its request and limit, such as ("368Mi", "req 750Mi · limit
+/// 1500Mi").
 pub fn memory_figures(bar: &Bar) -> (String, String) {
     figures(bar, mebibytes)
 }
 
-/// ("6m", "req 200m · no limit")
+/// The same two figures for a CPU bar, such as ("6m", "req 200m · no
+/// limit").
 pub fn cpu_figures(bar: &Bar) -> (String, String) {
     figures(bar, millicores)
 }
@@ -78,13 +79,13 @@ fn figures(bar: &Bar, amount: impl Fn(f64) -> String) -> (String, String) {
     (used, format!("{request} · {limit}"))
 }
 
-/// How a chip under a container is drawn.
+/// How a chip under a container is styled.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tone {
     Plain,
-    /// Something that is done or not yet known, which is drawn faint.
+    /// Something that is finished or not yet known. It is drawn faint.
     Faint,
-    /// Something that needs a look, in --warm.
+    /// Something that needs attention. It uses the `--warm` color.
     Warn,
 }
 
@@ -111,11 +112,10 @@ impl Chip {
     }
 }
 
-/// The chips under a container: its state when it is not running and
-/// ready, the pod's QoS class, its restarts and why it last stopped,
-/// and its probes.  An init container that runs to completion has no
-/// probes, and the QoS class's effect on a running pod does not apply to
-/// it, so it shows neither.
+/// The chips under a container: its state unless it is running and
+/// ready, the pod's QoS class, its restart count, the reason it last
+/// stopped when it has restarted, and its probes. An init container gets
+/// no QoS chip and no probe chips.
 pub fn chips(block: &ContainerBlock, qos: Option<&str>) -> Vec<Chip> {
     let mut chips: Vec<Chip> = state(&block.state, block.role).into_iter().collect();
     let runs = block.role != Role::Init;
@@ -165,8 +165,8 @@ fn restarts(count: i32) -> String {
     }
 }
 
-/// "readiness HTTP :8000/healthz", "liveness TCP :http", "startup
-/// exec".
+/// A probe as a chip, such as "readiness HTTP :8000/healthz", "liveness
+/// TCP :http", or "startup exec".
 fn probe(probe: &Probe) -> String {
     let kind = match probe.kind {
         ProbeKind::Startup => "startup",
@@ -182,7 +182,8 @@ fn probe(probe: &Probe) -> String {
     format!("{kind} {action}")
 }
 
-/// What follows the machine's name: "control plane · 4 cores".
+/// The text after the machine's name, such as "control plane · 4
+/// cores".
 pub fn machine_line(machine: &OnMachine) -> String {
     let role = if machine.control_plane {
         "control plane"
@@ -196,8 +197,9 @@ pub fn machine_line(machine: &OnMachine) -> String {
     }
 }
 
-/// The line after it: "46 pods here · started 2026-11-03 22:19 UTC, 4d
-/// ago".
+/// The line under the machine line: how many pods run on the machine
+/// and when this pod started, such as "46 pods here · started 2026-11-03
+/// 22:19 UTC, 4d ago".
 pub fn placement_line(placement: &Placement) -> String {
     let pods = placement.machine.as_ref().and_then(|machine| machine.pods);
     let pods = pods.map(|pods| match pods {
@@ -218,8 +220,8 @@ fn utc(time: Timestamp) -> String {
     time.strftime("%Y-%m-%d %H:%M UTC").to_string()
 }
 
-/// A pod in the row of its workload's pods: the part of its name after
-/// a Deployment's template hash, as "…4sf9j", and its machine.
+/// The label of a pod in the row of its workload's pods, and the machine
+/// it runs on. A shortened name such as "web-…-4sf9j" becomes "…4sf9j".
 pub fn switch_label(short_name: &str, machine: Option<&str>) -> String {
     let name = match short_name.rsplit_once("-…-") {
         Some((_, suffix)) => format!("…{suffix}"),

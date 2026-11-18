@@ -1,8 +1,8 @@
-//! The words a page names an object by.  A page writes a namespaced
-//! object as kubectl writes it, `namespace/name`, and drops its
-//! namespace on a page about that namespace or about an object in it,
-//! where the reader already knows it.  A cluster-scoped object has only
-//! its name.
+//! How a page writes the name of an object. A namespaced object is
+//! written as kubectl writes it, `namespace/name`. The namespace is
+//! dropped on a page about that namespace or about an object in it,
+//! because the reader already knows it. A cluster-scoped object is
+//! written as its name alone.
 
 use crate::edges::{Object, kind_and_name};
 
@@ -46,7 +46,7 @@ mod tests {
     }
 
     #[test]
-    fn says_a_name_that_repeats_its_kind_once_when_here() {
+    fn writes_the_kind_once_when_the_name_repeats_it() {
         let object = Object::new("example.io", "Catalog", Some("media"), "catalog");
         assert_eq!(
             (

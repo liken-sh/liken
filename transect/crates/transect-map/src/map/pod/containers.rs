@@ -1,12 +1,12 @@
-//! The pod page has one container block per container.  Each block shows
-//! what the container runs and where its image came from, what it
-//! listens on, a bar each for memory and CPU against its own request and
-//! limit, its restarts and state, and its probes.
+//! The pod page has one block per container. A block shows what the
+//! container runs and where its image came from, its ports, a memory
+//! bar and a CPU bar against the container's own request and limit, its
+//! restarts and state, and its probes.
 //!
-//! A reader asks about the containers in this order, so the blocks list
-//! the app containers first, then the sidecars, the init containers with
-//! `restartPolicy: Always` that run beside them, then the init
-//! containers that ran to completion before the rest started.
+//! App containers come first, then sidecars, then init containers. A
+//! sidecar is an init container with `restartPolicy: Always`, which
+//! keeps running beside the app containers. Any other init container
+//! runs to completion before the app containers start.
 
 use k8s_openapi::api::core::v1::{Container, ContainerStatus, Pod, Probe as ApiProbe};
 use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
@@ -21,23 +21,24 @@ pub struct ContainerBlock {
     pub name: String,
     pub role: Role,
     pub image: Option<String>,
-    /// Where the image it runs came from, once it has pulled one.
+    /// Where the container's image came from, once it has pulled one.
     pub origin: Option<Origin>,
-    /// The command and its arguments, when the spec sets either.
+    /// The command followed by its arguments, when the spec sets either.
     pub command: Option<Vec<String>>,
     pub ports: Vec<Port>,
     pub memory: Bar,
     pub cpu: Bar,
     pub restarts: i32,
     pub state: State,
-    /// Why it last stopped, when it has restarted: "OOMKilled", "Error".
+    /// Why its previous run stopped, when it has restarted, such as
+    /// "OOMKilled" or "Error".
     pub last_stop: Option<String>,
     pub probes: Vec<Probe>,
 }
 
 impl ContainerBlock {
-    /// Whether it ran to its end and uses nothing now, as an init
-    /// container that is done, so its bars would show nothing.
+    /// An init container that has terminated uses no resources, so its
+    /// bars would show nothing.
     pub fn finished(&self) -> bool {
         self.role == Role::Init && matches!(self.state, State::Terminated { .. })
     }
@@ -54,11 +55,11 @@ pub enum Role {
 pub struct Port {
     pub number: i32,
     pub name: Option<String>,
-    /// "UDP" or "SCTP".  TCP, the default, is left out.
+    /// "UDP" or "SCTP". It is `None` for TCP, the default.
     pub protocol: Option<String>,
 }
 
-/// What the kubelet last reported of a container.
+/// A container's state as the kubelet reports it.
 #[derive(Debug, PartialEq)]
 pub enum State {
     Running {
@@ -67,13 +68,14 @@ pub enum State {
     /// Not started, or between restarts, with the kubelet's reason, such
     /// as "CrashLoopBackOff".
     Waiting(Option<String>),
-    /// Stopped, with its reason and exit code, as an init container
-    /// stops when it is done.
+    /// Stopped, with its reason and exit code. An init container ends
+    /// here when it is done.
     Terminated {
         reason: Option<String>,
         code: i32,
     },
-    /// No status yet, as before the pod is scheduled.
+    /// The pod has no status for this container yet, as before the pod
+    /// is scheduled.
     Unknown,
 }
 
@@ -98,8 +100,6 @@ pub enum Action {
     Exec,
 }
 
-/// A block for each container in `pod`, with the usage that `usage`
-/// gives for it and the origin that `origins` finds for its image.
 pub fn blocks(pod: &Pod, usage: Option<&Usage>, origins: Origins) -> Vec<ContainerBlock> {
     let Some(spec) = &pod.spec else {
         return Vec::new();
@@ -277,8 +277,8 @@ mod tests {
     use transect_supply::forge::Forges;
     use transect_supply::images::Known;
 
-    /// Origins with no label read, because no block in these tests has
-    /// pulled an image.
+    /// No container in these tests has an image ID, so no origin is
+    /// looked up.
     fn none_read() -> Origins<'static> {
         static KNOWN: std::sync::LazyLock<Known> = std::sync::LazyLock::new(Known::default);
         static FORGES: std::sync::LazyLock<Forges> = std::sync::LazyLock::new(Forges::default);

@@ -1,14 +1,11 @@
-//! The page of a custom resource drawn through its kind's knowledge.  The
-//! object is drawn in the middle with its conditions as chips, and each
-//! of its knowledge's references is a box around it with its label, what
-//! the field names, and the field it was read from, so a reader sees
-//! every relation that the operator declares for the kind, and where each
-//! was read.  A reference whose field is not written yet keeps its box
-//! and states that, so the board keeps its shape while an operator fills
-//! in status.  The column on the left lists the kind's other objects in
-//! the namespace and the counts of its known kinds that run nothing.
-//! The card beside it is the workload's card when the object runs
-//! pods, and its knowledge alone when it does not.
+//! The page of a custom resource whose kind has a `KindKnowledge`, the
+//! resource that tells `transect` which fields of the kind refer to other
+//! objects and which condition reports its health. The object is drawn
+//! in the middle with its conditions as chips, and each reference that
+//! the `KindKnowledge` lists is a box around it. A reference
+//! whose field is empty still gets its box, so the diagram keeps its
+//! shape while an operator fills in status. The column on the left
+//! lists the kind's objects in the namespace.
 
 mod chips;
 mod fit;
@@ -36,17 +33,19 @@ pub struct KnownPage {
     pub layer: String,
     pub kind: String,
     pub name: String,
-    /// The page's own path, which its event stream's URL includes.
+    /// The page's path, which is part of its event stream URL.
     pub path: String,
     /// The kind's objects in the namespace, this one among them.
     pub column: Vec<Entry>,
     pub counts: Vec<Count>,
     pub chips: Vec<Chip>,
     pub level: Level,
-    /// Why it is at rest, when its condition says so, as a gray line
-    /// under its name.
+    /// The message or reason of the kind's health condition, when the
+    /// condition is `False` with a reason that the knowledge lists in
+    /// `healthy.calm`, such as `Idle`. Shown as a gray line under the
+    /// object's name.
     pub resting: Option<String>,
-    /// Its lenses, for an object that runs pods.
+    /// The lens tabs, for an object that runs pods.
     pub tabs: Option<Tabs>,
     pub width: i32,
     pub height: i32,
@@ -54,11 +53,10 @@ pub struct KnownPage {
     pub boxes: Vec<RelationBox>,
     /// The workload's card, for an object that runs pods.
     pub card: Option<WorkloadCard>,
-    /// Its object's card, for an object that runs no pods.
+    /// The object's card, for an object that runs no pods.
     pub known: Option<ObjectCard>,
-    /// The boxes every object page shows: under the diagram in a row,
-    /// or, for a kind whose knowledge names no references, around the
-    /// object in place of the diagram.
+    /// The boxes that every object page has. They are in a row under
+    /// the diagram, or around the object when there is no diagram.
     pub board: ObjectBoard,
 }
 
@@ -70,15 +68,17 @@ pub struct Entry {
     pub current: bool,
 }
 
-/// One reference's box: its label, each end its field names, and the
-/// field.
+/// The box for one reference: its label, the values in its field, and
+/// in `source`, the path of that field.
 #[derive(Debug, PartialEq)]
 pub struct RelationBox {
     pub rect: Rect,
     pub arrow: &'static str,
     pub line: Option<String>,
-    /// How its line is drawn: solid for structure, dashed for what the
-    /// object calls, and faint for a value that names no object.
+    /// How the line is drawn: dashed for `DependsOn` and
+    /// `AuthenticatesThrough` references, faint for a reference whose
+    /// target is a value and for the `Secret` that `writes_secret` names,
+    /// and solid for the rest.
     pub line_class: &'static str,
     pub label: String,
     pub ends: Vec<End>,
@@ -89,21 +89,22 @@ pub struct RelationBox {
 #[derive(Debug, PartialEq)]
 pub struct End {
     pub reference: Reference,
-    /// What it represents on the map when that is something other than
-    /// itself, such as the workload behind an address.
+    /// A note under the value: what it resolves to, such as the
+    /// workload behind an address, or why it resolves to nothing.
     pub under: Option<String>,
-    /// The objects it reaches, which `under` names, each linked to its
-    /// page.
+    /// What the value resolves to, as `under` lists it, each linked to
+    /// its page.
     pub reaches: Vec<Reference>,
 }
 
-/// What the board draws, read for one object.
+/// What `KnownPage::build` needs to draw the page of one object.
 pub struct Board<'a> {
     pub object: &'a Object,
     pub knowledge: &'a KindKnowledge,
     pub layer: String,
     pub path: String,
-    /// Each relation in the object's fields, with what it reaches.
+    /// Each relation read from the object's fields, with what it
+    /// resolves to.
     pub reached: Vec<(&'a Relation, Reached)>,
     pub column: Vec<Entry>,
     pub counts: Vec<Count>,
@@ -111,11 +112,12 @@ pub struct Board<'a> {
     pub level: Level,
     pub resting: Option<String>,
     pub plurals: &'a Plurals,
-    /// The page of any object that has one.
+    /// The page URL of an object, when it has a page.
     pub page: &'a dyn Fn(&Object) -> Option<String>,
-    /// The page of a ground box, by its title, when it has one.
+    /// The URL of the ground page of a system outside the cluster, by
+    /// the name of its `Endpoint::Outside`, when it has one.
     pub ground: &'a dyn Fn(&str) -> Option<String>,
-    /// A device as a line names it, by its title.
+    /// The text that names a device on a line.
     pub device: &'a dyn Fn(&transect_graph::edges::Device) -> String,
 }
 
@@ -164,8 +166,8 @@ impl KnownPage {
                 false => tabs,
             }
         });
-        // The board draws every relation its fields name, so the card
-        // leaves them out and keeps what the kind is and when it works.
+        // The diagram already draws every relation, so the cards drop the
+        // related objects from the kind's knowledge and keep the rest.
         let card = card.map(|card| WorkloadCard {
             known: card.known.map(KnownThrough::without_related),
             ..card
@@ -200,11 +202,9 @@ impl KnownPage {
         }
     }
 
-    /// The page with the boxes every object page shows.  When the only
-    /// references are those that say what the object is part of, which
-    /// nest, the object takes the middle of the boxes as `center`.
-    /// Otherwise the diagram draws the object, and the boxes leave out
-    /// what the diagram's boxes already name.
+    /// Adds the boxes that every object page has. Without a diagram, the
+    /// boxes draw the object in the middle as `center`. With one, they
+    /// leave out each value that a relation box already shows.
     pub fn with_board(self, center: Center, sections: Vec<Section>) -> Self {
         if self.boxes.is_empty() {
             let board = ObjectBoard::build(Some(center), sections);
@@ -226,25 +226,24 @@ impl KnownPage {
         Self { board, ..self }
     }
 
-    /// The page with its board nested in what its object is part of,
-    /// around its parts.
+    /// Nests the boxes inside what the object is part of, and around the
+    /// object's parts.
     pub fn with_nesting(self, nesting: crate::objects::Nesting) -> Self {
         let board = self.board.with_nesting(nesting);
         Self { board, ..self }
     }
 
-    /// Whether the diagram draws the object, with a box per reference.
     pub fn diagram(&self) -> bool {
         !self.boxes.is_empty()
     }
 
-    /// The page with the main column's row of edge kinds.
+    /// Adds the row of edge kinds above the main column.
     pub fn with_edge_row(self, edge_row: EdgeRow) -> Self {
         Self { edge_row, ..self }
     }
 
-    /// The crumb: the cluster leads home, the layer back to the cluster
-    /// map with this namespace selected, and the namespace to its page.
+    /// The breadcrumbs. The layer's breadcrumb links to the cluster map
+    /// with this namespace selected.
     pub fn crumbs(&self) -> Vec<Crumb> {
         let select = format!("/?select={}", self.namespace);
         vec![
@@ -265,8 +264,8 @@ impl KnownPage {
         CLOSING
     }
 
-    /// The object's box takes the failure fill or the warning outline,
-    /// as a box on the namespace page does.
+    /// The CSS class of the object's box: filled for a failing object
+    /// and outlined for a warning, as a box on the namespace page is.
     pub fn center_class(&self) -> &'static str {
         match self.level {
             Level::Failing => "known-object known-failing",
@@ -276,11 +275,9 @@ impl KnownPage {
     }
 }
 
-/// The line that closes the object's box.
 const CLOSING: &str = "Each relation names the field it was read from.";
 
 impl RelationBox {
-    /// The box moved to its place on the board.
     fn at(self, place: Place) -> Self {
         Self {
             rect: place.rect,
@@ -291,8 +288,8 @@ impl RelationBox {
     }
 }
 
-/// The box of the reference at `path`, with each value in its field,
-/// before the board places it.
+/// The box for the reference at `path`, with a value for each end,
+/// before `places` assigns its position.
 fn relation_box(board: &Board, path: &str, label: String, edge: Option<Kind>) -> RelationBox {
     let here = board.object.namespace.as_deref();
     let ends = board
@@ -317,9 +314,10 @@ fn relation_box(board: &Board, path: &str, label: String, edge: Option<Kind>) ->
     }
 }
 
-/// One value, linked when it names an object with a page or a Node,
-/// whose page is its machine's, and what it represents when that is
-/// something else.
+/// One value of a reference's field. It links to the page of the object
+/// it names when that object has one, and a Node links to its machine's
+/// page. `under` is the note under the value: what the value resolves
+/// to, or why it resolves to nothing.
 fn end(relation: &Relation, reached: &Reached, here: Option<&str>, board: &Board) -> End {
     let refer = |end: &Endpoint| {
         let mut reference = Reference::to_end(end, here, board.plurals);
@@ -358,8 +356,9 @@ fn end(relation: &Relation, reached: &Reached, here: Option<&str>, board: &Board
         .filter(|end| Some(*end) != itself.as_ref())
         .map(refer)
         .collect();
-    // An address that reaches one thing with a page links to it, since
-    // that thing is what a reader following the address wants to open.
+    // An address that resolves to exactly one endpoint links to that
+    // endpoint's page, because that is the page a reader who follows the
+    // address is looking for.
     let reference = match (&relation.names, &others[..]) {
         (Names::Address, [one]) => Reference {
             href: one.href.clone(),

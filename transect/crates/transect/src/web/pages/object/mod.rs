@@ -1,10 +1,10 @@
-//! The page of any object that has no page of its own: what its kind
-//! is, its conditions, its owner and controller, the sections its kind
-//! has, and the edges that leave it and reach it.
+//! The page of an object whose kind has no page of its own: its kind,
+//! conditions, owner and controller, the sections its kind adds, and
+//! the edges that leave and reach it.
 //!
-//! The object is read from the store that holds it.  A kind no store
-//! holds, such as a `Lease`, is read once when its page loads, and its
-//! page states that.
+//! The page reads the object from the store of its kind. When no store
+//! holds the kind, as with a `Lease`, the page reads the object from the
+//! API server when it loads, and shows `READ_ONCE` under the title.
 
 mod about;
 pub mod card;
@@ -32,10 +32,10 @@ use transect_map::objects::kinds::{Catalog, ReadFrom, Served};
 use transect_map::objects::reads::{Key, Read, Reads};
 use transect_map::objects::{self, ObjectBoard, ObjectPage, Section};
 use transect_resources::layers::Layers;
-pub use volume::{Asked as VolumeAt, volume_page};
+pub use volume::{VolumeAt, volume_page};
 
-/// What a URL names: a namespace for a namespaced kind, the kind's name
-/// in the URL, and the object's name.
+/// The parts of an object's URL: the namespace (for a namespaced
+/// kind), the kind's resource name, and the object's name.
 #[derive(Clone, Copy, Debug)]
 pub struct ObjectAt<'a> {
     pub namespace: Option<&'a str>,
@@ -43,20 +43,19 @@ pub struct ObjectAt<'a> {
     pub name: &'a str,
 }
 
-/// An object as the page reads it: its metadata and its fields, which
-/// for a kind of Kubernetes's own hold only its status, and for a
-/// custom kind watched trimmed, its status and its printer columns'
-/// values.
+/// An object as the page reads it: its metadata and `data`. For a
+/// built-in kind, `data` holds only the status. For a custom kind, the
+/// watch trims the object to its status and the values of its printer
+/// columns.
 pub struct Found {
     pub meta: ObjectMeta,
     pub data: Value,
-    /// The version it was read at, for a custom kind, which picks the
-    /// printer columns its CRD declares.
+    /// The API version the object was read at. For a custom kind it
+    /// selects which version's printer columns to use from the CRD.
     pub api_version: Option<String>,
 }
 
 impl Found {
-    /// `object`, whole or as its store keeps it.
     pub fn of(object: &DynamicObject) -> Self {
         Self {
             meta: object.metadata.clone(),
@@ -65,7 +64,8 @@ impl Found {
         }
     }
 
-    /// The object as a `DynamicObject`, which the column reader takes.
+    /// The object as a `DynamicObject`, which the printer column reader
+    /// takes.
     pub fn dynamic(&self) -> DynamicObject {
         DynamicObject {
             types: None,
@@ -75,33 +75,35 @@ impl Found {
     }
 }
 
-/// The kind `asked` names, when its scope matches the URL's.
-fn served(snapshot: &Snapshot, asked: ObjectAt) -> Option<Served> {
+/// The kind that `at.resource` names, when the kind's scope matches
+/// the URL: namespaced only if the URL has a namespace.
+fn served(snapshot: &Snapshot, at: ObjectAt) -> Option<Served> {
     let custom: Vec<_> = snapshot.custom.iter().map(|(api, _)| api.clone()).collect();
     let catalog = Catalog {
         custom: &custom,
         scoped: &snapshot.cluster_scoped,
     };
-    let served = catalog.resolve(asked.resource)?;
-    (served.namespaced == asked.namespace.is_some()).then_some(served)
+    let served = catalog.resolve(at.resource)?;
+    (served.namespaced == at.namespace.is_some()).then_some(served)
 }
 
-/// The read the page of `asked` makes when it loads, or none when a
-/// store holds its kind, or when its name is one Kubernetes could not
-/// hold, which no read is made for.
-pub fn read_key(model: &Model, asked: ObjectAt) -> Option<Key> {
-    let served = served(&model.snapshot, asked)?;
+/// The read that the page of `at` makes when it loads. It is `None`
+/// when a store holds the kind, when the name or the namespace is not a
+/// valid Kubernetes name, and for a `Secret` or a `ConfigMap`, which
+/// `Key::of` refuses to read.
+pub fn read_key(model: &Model, at: ObjectAt) -> Option<Key> {
+    let served = served(&model.snapshot, at)?;
     (served.read == Some(ReadFrom::Get))
-        .then(|| Key::of(&served.resource, asked.namespace, asked.name))?
+        .then(|| Key::of(&served.resource, at.namespace, at.name))?
 }
 
-/// The line under the title of a page read once.
+/// The line under the title of a page whose object was read once.
 pub const READ_ONCE: &str = "Read when the page loaded; reload for a newer copy.";
 
-/// The object `key` names, as `reads` last read it, with the line the
-/// page shows, or none when the API server holds no such object.  A
-/// read that was refused or failed, or that is no longer kept, draws
-/// the object's name and a line that gives the reason.
+/// The object of `key` as `reads` last read it, with the line to show
+/// under the title, or `None` when the API server has no such object.
+/// When the read was refused, failed, or has not happened, the page
+/// shows only the object's name and a line with the reason.
 fn read_once(reads: &Reads, key: &Key) -> Option<(Found, String)> {
     let named = || Found {
         meta: ObjectMeta {
@@ -112,23 +114,24 @@ fn read_once(reads: &Reads, key: &Key) -> Option<(Found, String)> {
         data: Value::Null,
         api_version: None,
     };
-    let capped = |said: &str| transect_graph::untrusted::capped(said, 200).unwrap_or_default();
+    let capped =
+        |message: &str| transect_graph::untrusted::capped(message, 200).unwrap_or_default();
     let kind = &key.resource.kind;
     Some(match reads.last(key) {
         Some(Read::Found(object)) => (Found::of(&object), READ_ONCE.into()),
         Some(Read::Missing) => return None,
-        Some(Read::Refused(said)) => (
+        Some(Read::Refused(message)) => (
             named(),
             format!(
                 "The API server refused transect's read of this {kind}. Its message: {}",
-                capped(&said)
+                capped(&message)
             ),
         ),
-        Some(Read::Failed(said)) => (
+        Some(Read::Failed(message)) => (
             named(),
             format!(
                 "Reading this {kind} failed; reload to try again. The error: {}",
-                capped(&said)
+                capped(&message)
             ),
         ),
         None => (
@@ -138,38 +141,38 @@ fn read_once(reads: &Reads, key: &Key) -> Option<(Found, String)> {
     })
 }
 
-/// The page of the object `asked` names, or none when the cluster
-/// holds no such object.
+/// The page of the object in `at`, or `None` when the cluster has no
+/// such object.
 pub fn object_page(
     model: &Model,
     layers: &Layers,
     reads: &Reads,
-    asked: ObjectAt,
+    at: ObjectAt,
     now: Timestamp,
 ) -> Option<ObjectPage> {
     let snapshot = &model.snapshot;
-    let served = served(snapshot, asked)?;
+    let served = served(snapshot, at)?;
     let resource = &served.resource;
     if let (Some(namespace), "", "PersistentVolumeClaim") = (
-        asked.namespace,
+        at.namespace,
         resource.group.as_str(),
         resource.kind.as_str(),
     ) {
-        return volume_page(model, layers, VolumeAt::Claim(namespace, asked.name), now);
+        return volume_page(model, layers, VolumeAt::Claim(namespace, at.name), now);
     }
-    let object = Object::new(&resource.group, &resource.kind, asked.namespace, asked.name);
+    let object = Object::new(&resource.group, &resource.kind, at.namespace, at.name);
     let (found, note) = match served.read {
         Some(ReadFrom::Get) => {
-            let key = Key::of(resource, asked.namespace, asked.name)?;
+            let key = Key::of(resource, at.namespace, at.name)?;
             let (found, note) = read_once(reads, &key)?;
             (
                 found,
-                Some(transect_resources::resources::OffLine::said(note)),
+                Some(transect_resources::resources::OffLine::plain(note)),
             )
         }
         _ => (find::found(snapshot, &object)?, None),
     };
-    let place = match asked.namespace {
+    let place = match at.namespace {
         Some(namespace) => Some((namespace.to_string(), snapshot.layer_of(namespace, layers)?)),
         None => None,
     };
@@ -181,7 +184,7 @@ pub fn object_page(
         .unwrap_or_else(|| {
             transect_resources::knowledge::plural_label(&resource.kind, Some(&resource.plural))
         });
-    let kind_href = match (custom, asked.namespace) {
+    let kind_href = match (custom, at.namespace) {
         (true, Some(namespace)) => Some(transect_graph::links::objects(namespace, &served.url())),
         _ => None,
     };
@@ -223,20 +226,21 @@ pub fn object_page(
     Some(page)
 }
 
-/// The message of each condition that takes a warm dot, so the board
-/// shows the reason without a hover.
+/// The message of each condition whose level is not healthy, so the
+/// board shows the reason without a hover.
 pub fn messages(conditions: &[objects::Condition]) -> Vec<String> {
-    let warm = conditions.iter().filter(|condition| {
+    let unhealthy = conditions.iter().filter(|condition| {
         condition
             .level
             .is_some_and(|level| level != transect_observe::health::Level::Healthy)
     });
-    warm.filter_map(|condition| condition.message.clone())
+    unhealthy
+        .filter_map(|condition| condition.message.clone())
         .collect()
 }
 
-/// Every section of `object`'s page: what it is, what its kind adds, and
-/// the edges at either end of it.
+/// Every section of `object`'s page: what it is, the printer columns,
+/// what its kind adds, and the edges that leave it and reach it.
 pub fn sections(
     model: &Model,
     object: &Object,
@@ -252,8 +256,8 @@ pub fn sections(
     sections
 }
 
-/// The sections `object`'s kind adds, when it is one of Kubernetes's
-/// own that has some.
+/// The sections that `object`'s kind adds, for the built-in kinds that
+/// have any.
 fn kind_sections(
     snapshot: &Snapshot,
     object: &Object,
@@ -278,7 +282,8 @@ fn kind_sections(
     }
 }
 
-/// How a section names `end`: its words, and its page when it has one.
+/// A reference to `end` for a section: its text, and its link when it
+/// has a page.
 pub fn refer(snapshot: &Snapshot, end: &Endpoint, here: Option<&str>) -> Reference {
     let mut reference = Reference::to_end(end, here, &snapshot.plurals);
     if let Endpoint::Device(device) = end {
@@ -293,7 +298,7 @@ pub fn refer(snapshot: &Snapshot, end: &Endpoint, here: Option<&str>) -> Referen
     reference
 }
 
-/// How a section names `object`.
+/// A reference to `object` for a section.
 pub fn refer_object(snapshot: &Snapshot, object: &Object, here: Option<&str>) -> Reference {
     refer(snapshot, &Endpoint::Object(object.clone()), here)
 }

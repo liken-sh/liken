@@ -1,6 +1,6 @@
-//! A `Lease`'s holder, when the holder last renewed it, and how long a
-//! renewal lasts: what a leader election or a machine's heartbeat
-//! writes on it, and what a reload of its page shows changing.
+//! The `Lease` section of an object's page: the holder, the time of the
+//! last renewal, the lease duration, and how many times the holder has
+//! changed.
 
 use k8s_openapi::jiff::Timestamp;
 use serde_json::Value;
@@ -10,8 +10,6 @@ use super::{Found, refer_object};
 use transect_graph::edges::Object;
 use transect_map::objects::{Section, Side, words};
 
-/// The Lease section of `object`'s page, as `found` holds it, with how
-/// long ago it was renewed as of `now`.
 pub fn lease(snapshot: &Snapshot, object: &Object, found: &Found, now: Timestamp) -> Vec<Section> {
     let spec = found.data.get("spec");
     let field = |name: &str| spec.and_then(|spec| spec.get(name));
@@ -33,9 +31,10 @@ pub fn lease(snapshot: &Snapshot, object: &Object, found: &Found, now: Timestamp
     vec![section.text("holder changes", transitions.map(|n| n.to_string()))]
 }
 
-/// The holder, linked to its page when it names a pod in the `Lease`'s
-/// namespace or a machine, as a leader election and a machine's
-/// heartbeat write it.
+/// The holder as a reference. A leader election often writes a pod's
+/// name as the holder, and a kubelet writes its node's name, so the
+/// reference links to the page of a pod in the `Lease`'s namespace or of
+/// a machine with that name, and is plain text otherwise.
 fn holder_of(
     snapshot: &Snapshot,
     object: &Object,
@@ -62,8 +61,9 @@ fn holder_of(
     }
 }
 
-/// How long before `now` `at` was, in seconds under two minutes, since
-/// a `Lease` renews every few seconds, and as an age after that.
+/// How long before `now` the time `at` was: in seconds under two
+/// minutes, because a `Lease` renews every few seconds, and as a
+/// coarser age after that.
 fn since(at: Timestamp, now: Timestamp) -> String {
     let seconds = (now.as_second() - at.as_second()).max(0);
     match seconds {

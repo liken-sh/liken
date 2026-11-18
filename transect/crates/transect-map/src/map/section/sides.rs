@@ -1,17 +1,15 @@
-//! What the section view draws beside the spine, read from the graph: the
-//! workloads configured to call this one on the left, and on the right
-//! what it is configured to call, the GitOps object it reconciles from,
-//! the controller that reconciles it, and the devices its pods hold.
-//! Each object is drawn in its own namespace's layer, a machine or a
-//! device in the machines row, and a box outside the cluster in the
-//! ground row.  An edge kind that is turned off has no edges, so its side
-//! boxes and their lines are not drawn.
+//! The boxes the section view draws beside the spine, read from the
+//! graph. On the left are the workloads configured to call this one. On
+//! the right are what it is configured to call, the GitOps object it
+//! reconciles from, the controller that reconciles it, and the devices
+//! its pods hold. Each object is drawn in its own namespace's layer, a
+//! machine or a device in the machines row, and an address outside the
+//! cluster in the ground row.
 //!
 //! A phrase such as "office file conversion" tells a reader more about
-//! why the line is there than "Deployment in docs" does.  So the line
-//! under an object's name gives what its intent states it provides, or
-//! its intent's `why` when it states nothing it provides, or else what
-//! the object is.
+//! why a box is there than "Deployment in docs" does. So the line under
+//! an object's name is what its intent says it provides, or else its
+//! intent's `why`, or else the object's kind.
 
 use super::layout::Side;
 use super::lines::Style;
@@ -20,10 +18,10 @@ use super::spine::{Band, Look, SectionBox, SideBox, Tie};
 use transect_graph::edges::{Device, Edge, Endpoint, Graph, Kind, Object, Plurals, Provenance};
 use transect_resources::intent::Intents;
 
-/// The most callers the section view draws one by one.  When there are
-/// more, one box in the workload's own row is drawn in place of them all,
-/// with one line, so a workload with many callers gets no long row of
-/// dashed lines.
+/// The most callers the section view draws as separate boxes. When there
+/// are more, one box in the workload's own layer stands for all of them,
+/// with one line, so a workload with many callers does not get a long
+/// row of dashed lines.
 pub const MOST_CALLERS: usize = 6;
 
 /// The kinds that put a box on the right, in the order they stack.
@@ -35,23 +33,24 @@ const RIGHT: [(Kind, &str); 5] = [
     (Kind::Holds, "holds"),
 ];
 
-/// What an object's side box reads besides the graph.
+/// What `sides` needs besides the graph to fill in an object's side box.
 pub struct Objects<'a> {
     pub plurals: &'a Plurals,
     pub intents: &'a Intents,
-    /// Whether an object has a page for its box to link.
+    /// Whether an object has a page that its box can link to.
     pub has_page: &'a dyn Fn(&Object) -> bool,
     /// A workload's ready line, in the same form as the spine's workload
-    /// box, and whether fewer of its pods are ready than it asks for.
-    /// `None` for an object that runs no pods.
+    /// box, and whether fewer pods are ready than it should run. `None` for
+    /// an object that runs no pods.
     pub ready: &'a dyn Fn(&Object) -> Option<(String, bool)>,
-    /// Returns a device's title from the knowledge for its driver.
+    /// Returns a device's title, from the device knowledge for its
+    /// driver.
     pub device_title: &'a dyn Fn(&Device) -> String,
 }
 
-/// The side boxes of `workload`'s section.  `layer_of` returns a
-/// namespace's layer, and an object that it returns no layer for is drawn
-/// in the workload's own `layer`.  An object's box links to its page only
+/// The side boxes of `workload`'s section. `layer_of` returns the layer
+/// of a namespace. An object that it returns no layer for is drawn in
+/// the workload's own `layer`. An object's box links to its page only
 /// when it has one, and a workload's box shows how many of its pods are
 /// ready, as the spine's boxes do.
 pub fn sides(
@@ -75,12 +74,12 @@ pub fn sides(
         Band::Layer(found.unwrap_or_else(|| layer.into()))
     };
     let object_box = |object: &Object| {
-        let said = intents.of(object);
-        let stated = said.and_then(|said| said.provides.as_ref().or(said.why.as_ref()));
+        let intent = intents.of(object);
+        let summary = intent.and_then(|intent| intent.provides.as_ref().or(intent.why.as_ref()));
         let title = transect_graph::links::name_in(object, here);
-        let boxed = match stated {
-            Some(stated) => SectionBox::new(title, vec![stated.text.clone()], Look::Plain)
-                .marked(stated.provenance.clone()),
+        let boxed = match summary {
+            Some(summary) => SectionBox::new(title, vec![summary.text.clone()], Look::Plain)
+                .marked(summary.provenance.clone()),
             None => SectionBox::new(title, vec![object.kind.clone()], Look::Plain),
         };
         let boxed = match ready(object) {
@@ -156,11 +155,11 @@ pub fn sides(
 }
 
 /// The lines from each device in the right column to the other boxes in
-/// that column that the device's attributes name, as device knowledge
-/// reads the attributes: the radio that a paired remote pairs through, or
-/// the screen whose speakers an HDMI sound output is.  Only a device's
-/// edges are tied, because otherwise a device box is joined only to its
-/// machine.
+/// that column that the device's attributes refer to, such as the radio
+/// that a remote pairs through, or the screen that an HDMI sound output
+/// plays through. A device's side line joins its machine, so without
+/// these lines the section would not show how the device relates to the
+/// other boxes. Only edges that leave a device become ties.
 pub fn ties(graph: &Graph, sides: &[SideBox]) -> Vec<Tie> {
     let right: Vec<&Endpoint> = sides
         .iter()
@@ -197,9 +196,9 @@ pub fn ties(graph: &Graph, sides: &[SideBox]) -> Vec<Tie> {
     found
 }
 
-/// The box for a held device.  Its title is `title`, because the line
-/// under it names the driver, and the title wraps to two lines when it is
-/// long.  On hover, the box shows every part that names the device.
+/// The box for a held device. The line under the title is the driver,
+/// so `title` is the device's own name, and it wraps to two lines when
+/// it is long. On hover, the box shows every part of the device's name.
 fn device_box(device: &Device, title: String) -> SectionBox {
     let boxed = SectionBox::new(title, vec![device.driver.clone()], Look::Plain);
     boxed
@@ -207,9 +206,9 @@ fn device_box(device: &Device, title: String) -> SectionBox {
         .with_href(transect_graph::links::device(device))
 }
 
-/// The one box for `callers`, in the workload's `layer`, naming each of
-/// them in its hint.  Its line is dashed unless every caller's edge is a
-/// guess.
+/// The box drawn in place of the callers when there are more than
+/// `MOST_CALLERS`. Its hover text lists every caller. Its line is
+/// dashed, or dotted when every caller's edge is a guess.
 fn callers_box(callers: &[(&Object, Style, &Provenance)], layer: &str) -> SideBox {
     let mut namespaces: Vec<&str> = callers
         .iter()
@@ -232,9 +231,9 @@ fn callers_box(callers: &[(&Object, Style, &Provenance)], layer: &str) -> SideBo
     SideBox::new(band, Side::Left, boxed, "depends on", style).inward()
 }
 
-/// The `kind` edges that `keep` accepts, each pair of ends once, sorted
-/// by the far end's name so that a column keeps its order from one push
-/// to the next.
+/// The `kind` edges that `keep` accepts, with one edge for each pair of
+/// ends. They are sorted by their ends, so a column keeps the same order
+/// from one pushed update to the next.
 fn edges(graph: &Graph, kind: Kind, keep: impl Fn(&Edge) -> bool) -> Vec<&Edge> {
     let mut found: Vec<&Edge> = graph.of_kind(kind).filter(|edge| keep(edge)).collect();
     found.sort_by(|a, b| (&a.from, &a.to).cmp(&(&b.from, &b.to)));
@@ -242,8 +241,9 @@ fn edges(graph: &Graph, kind: Kind, keep: impl Fn(&Edge) -> bool) -> Vec<&Edge> 
     found
 }
 
-/// Dashed for a caller, as the section view's legend explains, solid for
-/// structure, and dotted for an edge transect guessed.
+/// The line style for an edge, as the section view's legend explains:
+/// dotted for an edge that transect guessed, dashed for a caller, and
+/// solid for anything else.
 fn style(kind: Kind, edge: &Edge) -> Style {
     match (edge.guessed, kind) {
         (true, _) => Style::Dotted,

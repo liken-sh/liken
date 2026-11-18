@@ -1,6 +1,7 @@
-//! Waiting for a burst of changes to finish.  A rollout or a namespace
-//! deletion arrives as dozens of watch events within a second; rendering
-//! after each one would push dozens of nearly identical pages.
+//! Waits for a burst of changes to finish. A rollout or a namespace
+//! deletion arrives as dozens of watch events within a second, and
+//! rendering after each one would push dozens of nearly identical
+//! pages.
 
 use std::time::Duration;
 
@@ -10,14 +11,15 @@ use tokio::time::{Instant, timeout_at};
 /// How long the cluster must stay quiet before the map renders.
 pub const QUIET: Duration = Duration::from_millis(500);
 
-/// The longest a render waits after the first change of a burst.  Without
-/// it, a cluster that changes every few hundred milliseconds would never
-/// go quiet, and the open page would never update.
+/// The longest a render waits after the first change of a burst. Without
+/// this limit, a cluster that changes every few hundred milliseconds
+/// would never go quiet, and the open page would never update.
 pub const CAP: Duration = Duration::from_secs(2);
 
-/// Waits for a change, then for `quiet` to pass with no further change, or
-/// for `cap` to pass since that first change, whichever comes first.
-/// Errs when every sender is gone, since no change can come after that.
+/// Waits for a change, then returns when `quiet` has passed with no
+/// further change, or when `cap` has passed since that first change,
+/// whichever comes first. Returns an error when every sender has been
+/// dropped, because no further change can arrive.
 pub async fn settle(
     changes: &mut watch::Receiver<()>,
     quiet: Duration,
@@ -52,8 +54,8 @@ mod tests {
                 tokio::time::sleep_until(start + Duration::from_millis(offset)).await;
                 sender.send_replace(());
             }
-            // Keep the sender alive so that settle ends on time, not on a
-            // closed channel.
+            // Keep the sender alive, so that `settle` ends on its timers
+            // and not because the channel closed.
             std::future::pending::<()>().await;
         });
         settle(&mut receiver, QUIET, CAP).await.unwrap();

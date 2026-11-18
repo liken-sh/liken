@@ -1,4 +1,4 @@
-//! The machine page's sentences.
+//! The text on the machine page that is built from counts and states.
 
 use super::super::workload::tiles::{PodTile, State};
 use transect_ground::machines::Facts;
@@ -18,7 +18,8 @@ pub fn status(facts: &Facts, ready: bool) -> String {
     }
 }
 
-/// "12 pods in 4 namespaces", "1 pod in 1 namespace", "No pods".
+/// "12 pods in 4 namespaces run here.", "1 pod in 1 namespace runs
+/// here.", or "No pods run here.".
 pub fn pods(pods: usize, namespaces: usize) -> String {
     let plural = |count: usize, word: &str| match count {
         1 => format!("1 {word}"),
@@ -32,8 +33,8 @@ pub fn pods(pods: usize, namespaces: usize) -> String {
     }
 }
 
-/// A pod's row after its bars: "up 4d · 2 restarts", with "not ready"
-/// first when it is not.
+/// The text after a pod's usage bars, such as "up 4d · 2 restarts",
+/// with "not ready" first when the pod is not ready.
 pub fn row(tile: &PodTile) -> String {
     let mut parts = Vec::new();
     if tile.state == State::NotReady {
@@ -49,9 +50,9 @@ pub fn row(tile: &PodTile) -> String {
     parts.join(" · ")
 }
 
-/// How a volume is on the machine, after its claim's name: "on its own
-/// disk", or attached to it, "on fast" by its StorageClass or "over
-/// iSCSI" by its kind.
+/// Where a volume is stored, shown after its claim's name: "on its own
+/// disk" for a local disk. An attached volume is "on" its StorageClass,
+/// as in "on fast", or "over iSCSI", "over NFS", or else "attached".
 pub fn how(pin: &Pin) -> String {
     match pin {
         Pin::Disk { .. } => "on its own disk".into(),
@@ -85,7 +86,7 @@ mod tests {
         Pin::Attached { claim: Claim::new("shop", "data"), kind: Type::Class("fast".into()), machine: "alpha".into() },
         "on fast"
     )]
-    fn says_how_a_volume_is_there(#[case] pin: Pin, #[case] text: &str) {
+    fn says_where_a_volume_is_stored(#[case] pin: Pin, #[case] text: &str) {
         assert_eq!(how(&pin), text);
     }
 

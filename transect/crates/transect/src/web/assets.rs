@@ -1,15 +1,13 @@
-//! Static files: styles, fonts, and htmx.  Every one is embedded in the
-//! binary, so a page loads nothing from any other server.  Debug builds
-//! read each file from the source tree on every request instead, so a
-//! style edit shows on reload without a rebuild.
+//! The static files: styles, fonts, and htmx. Release builds embed
+//! every file in the binary, so a page loads nothing from another
+//! server. Debug builds read each file from the source tree on every
+//! request, so a style edit shows on reload without a rebuild.
 //!
-//! Every page links some thirty files, and a full load of a page
-//! requests each again.  So each response has an `ETag`, a hash of the
-//! file's bytes, and `Cache-Control: no-cache`, which makes the browser
-//! keep the file and ask whether it changed.  For a file that has not
-//! changed, `transect` answers 304 with no body.  The browser asks
-//! every time rather than trust a lifetime, so a new build, or a style
-//! edit under a debug build, shows on the next load.
+//! Each response has an `ETag`, a hash of the file's bytes, and
+//! `Cache-Control: no-cache`. So the browser revalidates its cached copy
+//! on every page load, and `transect` responds 304 with no body while
+//! the `ETag` matches. A new build, or a style edit in a debug build,
+//! shows on the next load.
 
 use std::hash::{DefaultHasher, Hash, Hasher};
 
@@ -20,15 +18,14 @@ use axum::response::{IntoResponse, Response};
 struct Asset {
     /// The path after `/static/`.
     url: &'static str,
-    /// The path relative to `crates/`.  For most files it is the crate's
-    /// directory, then the file's path under its `src/`, because each
-    /// module's styles are beside its templates in its own crate.  The
-    /// two fonts are the exception: their path leaves the workspace and
-    /// reads `brand/fonts/` at the top of the repository, so the binary
-    /// embeds the brand's own files and keeps no copy of them.
+    /// The path relative to `crates/`, usually under a crate's `src/`,
+    /// because each module keeps its styles beside its templates. The
+    /// fonts are read from `brand/fonts/` at the top of the repository,
+    /// so the binary embeds the brand's own files and the workspace
+    /// keeps no copy.
     source: &'static str,
     content_type: &'static str,
-    /// Served by release builds; debug builds read `source` instead.
+    /// What release builds serve. Debug builds read `source` instead.
     #[cfg_attr(debug_assertions, expect(dead_code))]
     embedded: &'static [u8],
 }
@@ -218,14 +215,13 @@ pub async fn serve(Path(url): Path<String>, headers: HeaderMap) -> Response {
             (typed, validators, bytes).into_response()
         }
         Err(error) => {
-            tracing::error!(source = asset.source, %error, "reading static file");
+            tracing::error!(source = asset.source, %error, "A static file is unreadable");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
 }
 
-/// The ETag of a file of `bytes`: a hash of them, quoted.  It changes
-/// with the bytes, so it needs no build number beside it.
+/// A quoted hash of `bytes`, which changes whenever the file does.
 fn etag(bytes: &[u8]) -> String {
     let mut hasher = DefaultHasher::new();
     bytes.hash(&mut hasher);
@@ -251,43 +247,43 @@ mod tests {
 
     use super::*;
 
-    /// What copy of a file the browser holds.
-    enum Held {
+    /// Which copy of a file the browser has cached.
+    enum Cached {
         Nothing,
         TheCurrentCopy,
         AnOlderCopy,
     }
 
-    /// The headers a browser holding `held` of `url` sends.
-    async fn sent(url: &str, held: Held) -> HeaderMap {
-        let tag = match held {
-            Held::Nothing => return HeaderMap::new(),
-            Held::TheCurrentCopy => {
+    /// The headers a browser sends for `url` when its cache has `cached`.
+    async fn sent(url: &str, cached: Cached) -> HeaderMap {
+        let tag = match cached {
+            Cached::Nothing => return HeaderMap::new(),
+            Cached::TheCurrentCopy => {
                 serve(Path(url.into()), HeaderMap::new()).await.headers()[header::ETAG].clone()
             }
-            Held::AnOlderCopy => "\"0\"".parse().unwrap(),
+            Cached::AnOlderCopy => "\"0\"".parse().unwrap(),
         };
         HeaderMap::from_iter([(header::IF_NONE_MATCH, tag)])
     }
 
     #[rstest]
-    #[case::a_first_request("web/layout.css", Held::Nothing, StatusCode::OK)]
-    #[case::the_current_copy("web/layout.css", Held::TheCurrentCopy, StatusCode::NOT_MODIFIED)]
-    #[case::an_older_copy("web/layout.css", Held::AnOlderCopy, StatusCode::OK)]
-    #[case::no_such_file("web/nowhere.css", Held::Nothing, StatusCode::NOT_FOUND)]
+    #[case::a_first_request("web/layout.css", Cached::Nothing, StatusCode::OK)]
+    #[case::the_current_copy("web/layout.css", Cached::TheCurrentCopy, StatusCode::NOT_MODIFIED)]
+    #[case::an_older_copy("web/layout.css", Cached::AnOlderCopy, StatusCode::OK)]
+    #[case::no_such_file("web/nowhere.css", Cached::Nothing, StatusCode::NOT_FOUND)]
     #[tokio::test]
-    async fn answers_the_copy_a_browser_holds_with_no_body(
+    async fn responds_not_modified_only_to_the_current_etag(
         #[case] url: &str,
-        #[case] held: Held,
+        #[case] cached: Cached,
         #[case] status: StatusCode,
     ) {
-        let headers = sent(url, held).await;
+        let headers = sent(url, cached).await;
         assert_eq!(serve(Path(url.into()), headers).await.status(), status);
     }
 
     #[rstest]
     #[tokio::test]
-    async fn asks_the_browser_to_check_its_copy_each_time() {
+    async fn tells_the_browser_to_revalidate_every_time() {
         let response = serve(Path("web/layout.css".into()), HeaderMap::new()).await;
         assert_eq!(response.headers()[header::CACHE_CONTROL], "no-cache");
     }

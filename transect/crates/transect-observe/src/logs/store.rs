@@ -1,6 +1,5 @@
-//! Queries to a log store.  This module sends the HTTP request, and
-//! reads the tail of a pod through the source's tail query, one
-//! container at a time.
+//! The HTTP client of a log store. It sends a source's queries, and
+//! reads a pod's tail with one tail query for each container.
 
 use std::time::Duration;
 
@@ -13,12 +12,13 @@ use super::tags;
 use super::tail::{self, Matching, Read, Tail};
 use transect_graph::untrusted::capped;
 
-/// The most bytes transect reads of one response.  A tail is 50 lines
-/// and a search returns a row for each pod, so a response far larger
-/// than that comes from a query that went wrong.
+/// The most bytes transect reads of one response. A tail is
+/// `tail::TAIL_LINES` lines and a search returns a row for each pod, so
+/// a larger response means the query is wrong.
 const MAX_BODY: usize = 1 << 20;
 
-/// How many characters of a refusal's body the reason quotes.
+/// The most characters of an error response's body that the error
+/// quotes.
 const REFUSAL_CHARS: usize = 200;
 
 #[derive(Clone)]
@@ -35,15 +35,15 @@ impl Store {
     }
 
     /// Sends `query` to the store at `reached` and returns the rows of
-    /// its response.  When there are no rows, the error is the reason,
-    /// as a phrase that follows the source's name.
-    pub async fn ask(
+    /// its response. On failure, the error is a phrase that completes a
+    /// sentence that starts with the source's name.
+    pub async fn run_query(
         &self,
         reached: &Reached,
         query: &str,
         timeout: Duration,
     ) -> Result<Vec<Row>, String> {
-        let asked = async {
+        let request = async {
             let response = self
                 .http
                 .get(&reached.endpoint)
@@ -54,34 +54,30 @@ impl Store {
             let status = response.status();
             let body = read(response).await?;
             if !status.is_success() {
-                let said = capped(&body, REFUSAL_CHARS).unwrap_or_default();
+                let excerpt = capped(&body, REFUSAL_CHARS).unwrap_or_default();
                 return Err(format!(
-                    "refused the query with {}: {said}",
+                    "returned status {} for the query: {excerpt}",
                     status.as_u16()
                 ));
             }
             reached.source.language.rows(&body)
         };
-        match tokio::time::timeout(timeout, asked).await {
+        match tokio::time::timeout(timeout, request).await {
             Ok(rows) => rows,
-            Err(_) => Err(format!("gave no answer in {}s", timeout.as_secs())),
+            Err(_) => Err(format!("did not respond within {}s", timeout.as_secs())),
         }
     }
 
-    /// Reads each container's tail of the pod `namespace/name` from
-    /// `since`, and tags each line with the `patterns` that match it.
-    /// The error is the reason the store returned no tails.  When the
-    /// store has no line of any container, this function returns an
-    /// error, so the page shows the API's tail instead of a pod that
-    /// looks silent.  A pattern that the store refuses tags nothing,
-    /// and the resources page shows the reason from that pattern's
-    /// search.  The same pattern queries also return each pattern's
-    /// lines in the pod, which come back with the tails.
+    /// Reads the tail of each container of the pod `namespace/name`
+    /// from `since`, tags each line with the `patterns` that match it,
+    /// and returns each pattern's matching lines in the pod beside the
+    /// tails. The tail queries and the pattern queries run concurrently.
     ///
-    /// This function sends the tail queries and the pattern queries at
-    /// the same time, so a read takes as long as its slowest query, not
-    /// the time of the tails plus the time of the patterns.  The cost is
-    /// that a pod with no lines discards the patterns' responses.
+    /// When a tail query fails, or no container has a line in the store,
+    /// this returns an error, and the caller reads the tail from the
+    /// Kubernetes API instead of showing a pod with no lines. A pattern
+    /// whose query fails tags no line. The resources page shows the
+    /// error from that pattern's cluster search.
     pub async fn tails(
         &self,
         reached: &Reached,
@@ -90,21 +86,21 @@ impl Store {
         patterns: &[LogPattern],
         timeout: Duration,
     ) -> Result<(Vec<Tail>, Vec<Matching>), String> {
-        let asks = containers.iter().map(|container| {
+        let tail_queries = containers.iter().map(|container| {
             let query = tail_query(reached, pod, container);
-            async move { self.ask(reached, &query, timeout).await }
+            async move { self.run_query(reached, &query, timeout).await }
         });
-        let tagged = patterns.iter().map(|pattern| {
+        let pattern_queries = patterns.iter().map(|pattern| {
             let query = tags::query(reached, pod, pattern);
-            async move { self.ask(reached, &query, timeout).await }
+            async move { self.run_query(reached, &query, timeout).await }
         });
-        let (answers, tagged) = futures::future::join(
-            futures::future::join_all(asks),
-            futures::future::join_all(tagged),
+        let (tail_rows, pattern_rows) = futures::future::join(
+            futures::future::join_all(tail_queries),
+            futures::future::join_all(pattern_queries),
         )
         .await;
         let mut tails = Vec::new();
-        for (container, rows) in containers.iter().zip(answers) {
+        for (container, rows) in containers.iter().zip(tail_rows) {
             tails.push(Tail {
                 container: container.clone(),
                 read: tail::from_rows(&rows?, &reached.source),
@@ -114,7 +110,7 @@ impl Store {
             return Err("has no lines for this pod".into());
         }
         let mut matching = Vec::new();
-        for (pattern, rows) in patterns.iter().zip(tagged) {
+        for (pattern, rows) in patterns.iter().zip(pattern_rows) {
             if let Ok(rows) = rows {
                 tags::tag(&mut tails, pattern, &rows, reached);
                 matching.extend(tags::matching(pattern, &rows, reached));
@@ -124,9 +120,9 @@ impl Store {
     }
 }
 
-/// The tail query for one container of `pod`.  This function fills the
-/// source's template, narrows the query to the container, and requests
-/// only the fields that the page shows for a line.
+/// The tail query for one container of a pod: the source's tail
+/// template, filtered to the container, with only the fields that the
+/// page shows for a line.
 pub fn tail_query(
     reached: &Reached,
     (namespace, name, since): (&str, &str, Option<Timestamp>),
@@ -156,8 +152,8 @@ pub fn tail_query(
     language.keep(&query, &shown)
 }
 
-/// The reason a request received no response.  The error leaves out
-/// the URL, because the page already names the source.
+/// The reason a request got no response. The text leaves out the URL,
+/// because the page already names the source.
 fn unreachable(error: reqwest::Error) -> String {
     match error.is_connect() {
         true => "is unreachable".into(),
@@ -171,14 +167,17 @@ async fn read(mut response: reqwest::Response) -> Result<String, String> {
     while let Some(chunk) = response
         .chunk()
         .await
-        .map_err(|error| format!("stopped answering: {}", error.without_url()))?
+        .map_err(|error| format!("stopped sending the response: {}", error.without_url()))?
     {
         body.extend_from_slice(&chunk);
         if body.len() > MAX_BODY {
-            return Err(format!("answered with more than {} MiB", MAX_BODY >> 20));
+            return Err(format!(
+                "returned a response of more than {} MiB",
+                MAX_BODY >> 20
+            ));
         }
     }
-    String::from_utf8(body).map_err(|_| "answered with text that is not UTF-8".into())
+    String::from_utf8(body).map_err(|_| "returned a response that is not UTF-8".into())
 }
 
 #[cfg(test)]
@@ -189,7 +188,7 @@ mod tests {
     use super::*;
 
     #[rstest]
-    fn a_container_tail_asks_for_its_container_and_the_fields_a_line_shows() {
+    fn a_container_tail_is_limited_to_its_container_and_the_fields_a_line_shows() {
         let reached = source().reached(None, "cluster.local");
         let since = "2026-01-01T00:00:00Z".parse().ok();
         assert_eq!(

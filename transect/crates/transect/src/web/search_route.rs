@@ -1,5 +1,5 @@
-//! `/search`, the quick search's rows for the dialog and its page of
-//! its own.
+//! The `/search` route. It serves the result rows of the search dialog,
+//! and a full search page when the URL is opened directly.
 
 use askama::Template;
 use axum::extract::{Query, State};
@@ -14,19 +14,20 @@ pub(super) struct Search {
     q: Option<String>,
 }
 
-/// `/search?q=`: the rows alone for the dialog, which htmx requests
-/// with its target in `HX-Target`, and a page of its own for anything
-/// else.  The response sets `Vary: HX-Target`, so a cache never serves
-/// the dialog's rows for a page loaded by its URL.
+/// Handles `/search?q=`. When `HX-Target` is the dialog's or the
+/// page's result list, the response is only the result rows, and any
+/// other request gets the full search page. The response sets
+/// `Vary: HX-Target` so that a cache does not serve the rows alone to
+/// a browser that opens the URL directly.
 pub(super) async fn search(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Query(asked): Query<Search>,
+    Query(params): Query<Search>,
 ) -> Response {
     let Some(model) = state.sources.models.last().await else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
-    let query = asked.q.as_deref().unwrap_or_default();
+    let query = params.q.as_deref().unwrap_or_default();
     let target = headers.get("hx-target").and_then(|t| t.to_str().ok());
     let fragment = [search::DIALOG_LIST, search::PAGE_LIST]
         .into_iter()
@@ -43,7 +44,7 @@ pub(super) async fn search(
     match html {
         Ok(html) => ([(header::VARY, "HX-Target")], Html(html)).into_response(),
         Err(error) => {
-            tracing::error!(%error, "rendering a search");
+            tracing::error!(%error, "The search page did not render");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }

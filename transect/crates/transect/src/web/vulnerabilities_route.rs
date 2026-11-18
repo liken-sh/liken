@@ -1,6 +1,6 @@
-//! The vulnerabilities pages: every id a current report holds, which
-//! a query narrows to some severities, one id's page, and a workload's
-//! tab.
+//! Routes for the vulnerabilities pages: the list of vulnerability ids
+//! in current scanner reports, filtered by the severities in the query,
+//! the page of one id, and a workload's tab.
 
 use axum::extract::{Path, Query, State};
 use axum::response::Response;

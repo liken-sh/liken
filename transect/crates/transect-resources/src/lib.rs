@@ -1,5 +1,6 @@
-//! `transect`'s own resources and what they declare: the loader, kind
-//! knowledge, intent, and the layers.
+//! The resources that `transect` reads from its `--resources`
+//! directory, and the domains that use them: the loader, kind
+//! knowledge, intent, and layers.
 
 pub mod intent;
 pub mod knowledge;

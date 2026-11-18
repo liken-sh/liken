@@ -15,8 +15,8 @@ fn device(driver: &str, name: &str) -> Device {
     }
 }
 
-/// A radio by its product name, and a GPU whose render and display
-/// nodes share one PCI bus ID.
+/// A radio with a product name, and a GPU whose render node and display
+/// node have the same PCI bus ID.
 fn attributes() -> HashMap<String, Vec<(String, String)>> {
     let pairs = |pairs: &[(&str, &str)]| -> Vec<(String, String)> {
         pairs
@@ -40,8 +40,8 @@ fn attributes() -> HashMap<String, Vec<(String, String)>> {
     ])
 }
 
-/// The drivers that `by_driver` builds from `listed`, with `known` as the
-/// knowledge.
+/// The drivers that `by_driver` builds from `listed`, using `known` as
+/// the knowledge.
 fn read(listed: &[(&str, &str, bool)], known: &[DeviceKnowledge]) -> Vec<Driver> {
     let devices: Vec<Device> = listed.iter().map(|(d, n, _)| device(d, n)).collect();
     let tuner = Object::new("resource.k8s.io", "ResourceClaim", Some("shop"), "tuner");
@@ -55,8 +55,8 @@ fn read(listed: &[(&str, &str, bool)], known: &[DeviceKnowledge]) -> Vec<Driver>
     read_published(published.collect(), known)
 }
 
-/// The drivers that `by_driver` builds from `published`, with `known` as
-/// the knowledge.
+/// The drivers that `by_driver` builds from `published`, using `known`
+/// as the knowledge.
 fn read_published(published: Vec<Published>, known: &[DeviceKnowledge]) -> Vec<Driver> {
     let attributes = attributes();
     let none: &[(String, String)] = &[];
@@ -68,16 +68,16 @@ fn read_published(published: Vec<Published>, known: &[DeviceKnowledge]) -> Vec<D
     let read = Read {
         attributes: &attributes,
         knowledge: known,
-        names: &names,
+        referenced: &names,
         href: &href,
     };
     by_driver(published, &read)
 }
 
-/// Two claims that share one device both show as its holders, in the
-/// order of their names, whichever order the claims came in.
+/// Two claims that share one device are both listed as its holders,
+/// sorted by name, in whatever order the claims were read.
 #[rstest]
-fn names_every_claim_that_holds_a_shared_device() {
+fn lists_every_claim_that_holds_a_shared_device() {
     let card = device("gpu.example.com", "card-0");
     let claim = |name: &str| Object::new("resource.k8s.io", "ResourceClaim", Some("shop"), name);
     let published = vec![Published {
@@ -93,7 +93,8 @@ fn names_every_claim_that_holds_a_shared_device() {
     assert_eq!(holders, vec!["shop/player", "shop/scaler"]);
 }
 
-/// Each piece of hardware's title, its other parts, and its facts.
+/// For each piece of hardware, its title, its other parts, and its
+/// facts.
 fn shown(drivers: &[Driver]) -> Vec<(String, Vec<String>, String)> {
     let hardware = drivers.iter().flat_map(|driver| &driver.devices);
     hardware
@@ -201,17 +202,17 @@ fn spans_the_box_with_more_hardware_shown_than_one_column_holds(
     assert_eq!(read(&listed, &[])[0].wide(), wide);
 }
 
-/// The references of one piece of hardware, each verb once with every
-/// thing it names, each title once, in the order the verbs first come.
+/// A piece of hardware's references are grouped by verb, in the order
+/// that the verbs first appear, and each target appears once.
 #[rstest]
-fn gathers_the_things_one_verb_names() {
+fn groups_references_by_verb_without_duplicates() {
     let mut drivers = read(&[("audio.example.com", "hdmi-1", false)], &[]);
     let named = |text: &str| Reference {
         text: text.into(),
         href: None,
     };
     let hardware = &mut drivers[0].devices[0];
-    hardware.names = vec![
+    hardware.referenced = vec![
         ("speakers of".into(), named("card-display")),
         ("pairs through".into(), named("radio")),
         ("speakers of".into(), named("card-render")),

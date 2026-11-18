@@ -1,9 +1,9 @@
 //! Small clusters for the ways-in tests.
 //!
-//! A Service selects the Deployment its `app` selector names, a pod is
-//! part of the Deployment its `app` label names, and an Ingress of the
-//! class `unserved` has no controller.  Every other Ingress enters
-//! through the Deployment `edge/controller`.
+//! A Service selects the Deployment named by its `app` selector, and a
+//! pod belongs to the Deployment named by its `app` label.  An Ingress
+//! of the class `unserved` has no controller, and the Deployment
+//! `edge/controller` serves every other Ingress.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -25,8 +25,8 @@ pub struct Cluster {
     services: Vec<Arc<Service>>,
     pods: Vec<Arc<Pod>>,
     nodes: Vec<Arc<Node>>,
-    /// The workloads, by name, that have a sentence that states they
-    /// sign their callers in themselves.
+    /// The workloads, by name, that declare that they sign in their
+    /// callers themselves.
     declared: BTreeSet<String>,
     /// Whether NetworkPolicy isolates each workload, by name.  A
     /// workload not in the map is open.
@@ -53,7 +53,7 @@ impl Cluster {
                 "Service" => cluster.services.push(typed(&value)),
                 "Pod" => cluster.pods.push(typed(&value)),
                 "Node" => cluster.nodes.push(typed(&value)),
-                other => panic!("no {other} in a ways cluster"),
+                other => panic!("a ways cluster has no {other:?} document"),
             }
         }
         cluster
@@ -64,8 +64,8 @@ impl Cluster {
         self
     }
 
-    /// The cluster with `workload` isolated for ingress, and `admitted`
-    /// the rules that admit callers to it.
+    /// Isolates `workload` for ingress by NetworkPolicy, with `admitted`
+    /// as the rules that admit callers to it.
     pub fn isolated(mut self, workload: &str, admitted: Vec<Admission>) -> Self {
         self.isolation.insert(workload.into(), Isolation::Isolated);
         self.admissions.insert(workload.into(), admitted);
@@ -140,8 +140,8 @@ impl Cluster {
     }
 }
 
-/// Each row in a line: its name, its ports, and the workloads it
-/// reaches.
+/// Each row as a line of text: its name, its ports, and the workloads
+/// it reaches.
 pub fn rows(ways: &Ways) -> Vec<String> {
     let mut rows = ways.rows.clone();
     rows.sort_by(|a, b| a.order(b));
@@ -158,7 +158,7 @@ pub fn rows(ways: &Ways) -> Vec<String> {
         .collect()
 }
 
-/// Each row's name with the state of one of its gates.
+/// Each row's name with the state of the gate that `gate` selects.
 pub fn gates(ways: &Ways, gate: fn(&Way) -> &Gate) -> Vec<(String, State)> {
     let mut rows = ways.rows.clone();
     rows.sort_by(|a, b| a.order(b));

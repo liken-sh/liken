@@ -1,11 +1,10 @@
 /* The access lens: its matrices, their marks, and the card beside them.
-   Each cell is drawn as a slot, like the cells of the DaemonSet matrix,
-   and the page frame's rule for every table keeps the header row in
-   view as the page scrolls. */
+   The sticky header rows come from the rule for every table in
+   `layout.css`. */
 
 .ax-page { padding-right: 24px; min-width: 0; }
 
-/* The page's question, and the one line that explains its marks. */
+/* The page's question, and the line that explains its marks. */
 .ax-title {
   margin: 16px 0 4px;
   font-family: "Source Sans 3", system-ui, sans-serif;
@@ -66,9 +65,9 @@
   background: linear-gradient(90deg, var(--ink-muted) 50%, transparent 50%);
 }
 
-/* A declared gate is a ring around a dot, because a sentence that the
-   people who run the cluster wrote declares the gate, and no object in
-   the API shows it.  The sentence's `intent` mark is beside the dot. */
+/* A declared gate is drawn as a ring around a dot, because only intent
+   that the cluster's operators wrote declares it, and no other object
+   in the API shows it. */
 .ax-dot-declared {
   border: 1.5px solid var(--ink-muted);
   background: radial-gradient(circle, var(--ink-muted) 0 2.2px, transparent 2.6px);
@@ -148,8 +147,8 @@ span.ax-name { color: var(--ink); }
 .ax-sub .object-link { font-size: 11.5px; color: var(--ink-faint); }
 .ax-sub .object-link:hover { color: var(--link); }
 
-/* A cell is a slot, as in the DaemonSet matrix, and its mark is
-   centered in the slot. */
+/* Each cell is a filled box (`.ax-slot`) with its mark centered inside,
+   like the cells of the DaemonSet matrix. */
 .ax-c { padding: 2px; text-align: center; }
 
 .ax-slot {
@@ -227,11 +226,11 @@ span.ax-name { color: var(--ink); }
 .ax-ways .ax-sign-col { width: 140px; }
 .ax-ways .ax-np-col { width: 96px; }
 
-/* An accounts matrix.  Each capability's slot is as wide as its mark or
-   its namespace, and the account's column takes the width that is left.
-   The role and the step that a grant goes through stay on one line, cut
-   with an ellipsis and shown whole on hover, so a row stays one slot
-   high. */
+/* An accounts matrix.  Each capability's cell is as wide as its mark or
+   its namespace, and the account's column takes the remaining width.
+   The role and the step that a grant goes through stay on one line,
+   cut with an ellipsis and shown whole on hover, so each row is one
+   cell high. */
 .ax-caps { table-layout: fixed; }
 .ax-caps th[scope="row"] { padding: 5px 12px 5px 0; }
 .ax-caps .ax-cap-col { width: 74px; }
@@ -269,8 +268,9 @@ span.ax-name { color: var(--ink); }
 .ax-ports .ax-sign-col { width: 110px; }
 .ax-way-name { color: var(--ink); }
 .ax-caps-ns .ax-cap-col { width: 96px; }
-/* The sixth column has the longest name, and this width keeps its head
-   two lines tall. */
+/* The sixth capability column, the seventh cell after the account's
+   name, has the longest heading.  This width keeps that heading to two
+   lines. */
 .ax-caps .ax-cap-col:nth-child(7) { width: 112px; }
 
 /* ---- The card beside an access page -------------------------------- */
@@ -319,8 +319,8 @@ span.ax-name { color: var(--ink); }
 .ax-drawing { margin-bottom: 8px; }
 .ax-drawing .section-box { padding: 8px 10px; }
 .ax-drawing .section-title { font-size: 12.5px; }
-/* A box is laid out tall enough for all of its words, so none is cut
-   short. */
+/* The layout makes each box tall enough for all of its words, so the
+   words wrap and are not clamped. */
 .ax-drawing .section-title,
 .ax-drawing .section-line { white-space: normal; display: block; -webkit-line-clamp: none; line-clamp: none; }
 .ax-drawing .section-box .mark { margin-right: 4px; }
@@ -385,7 +385,7 @@ span.ax-name { color: var(--ink); }
 .section-line.ax-blocks { display: flex; gap: 4px; justify-content: center; margin-top: 4px; }
 .section-title .ax-block { margin-right: 2px; vertical-align: -2px; }
 
-/* An answer of "none", stated where the boxes would be. */
+/* A box that says "none" in place of the boxes. */
 .section-box.ax-box-none {
   background: none;
   border: 1px dashed var(--rule-strong);

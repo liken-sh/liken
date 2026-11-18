@@ -1,33 +1,33 @@
-//! Reading a configured value as the addresses it names: a bare host, a
+//! Extracts host addresses from configuration values: a bare host, a
 //! `host:port`, or a URL with a scheme, userinfo, a path, and a query.
 
-/// The words that end the name of a variable or flag that contains a host,
-/// as in `DB_HOST`, `APP_DBHOST`, `CACHE_ADDR`, or `--db-host`.
+/// Endings of the last word of a variable or flag name that mark its
+/// value as a host, as in `DB_HOST`, `APP_DBHOST`, `CACHE_ADDR`, or
+/// `--db-host`.
 const HOST_WORDS: [&str; 10] = [
     "host", "hosts", "hostname", "addr", "address", "server", "servers", "endpoint", "broker",
     "brokers",
 ];
 
-/// A host, lowercased as DNS compares it, the port written after it,
-/// and the path of a URL.
+/// A host in lowercase, the port written after it, and the path of a
+/// URL.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Address {
     pub host: String,
     pub port: Option<u16>,
-    /// The URL's path, or `/` when none is written, which selects among
-    /// an `Ingress` host's paths.
+    /// The URL's path, or `/` when it has none. It selects among the
+    /// paths of an `Ingress` host.
     pub path: String,
-    /// Written as one short name and nothing else: no scheme, no port,
-    /// no dot.  The same text is often a name of another kind, such as
-    /// a database's name or a user's, so it counts only where the
-    /// variable's name indicates a host.
+    /// True when the value is one short name with no scheme, port, dot,
+    /// or path. The same text is often something other than a host, such
+    /// as a database name or a user name, so `variable` keeps it only
+    /// when the variable's name indicates a host.
     pub bare: bool,
 }
 
 impl Address {
-    /// The address as a page shows it: the host, and its port when one
-    /// was written.  Only the host and port are kept, so a password in a
-    /// URL's userinfo never reaches a page.
+    /// The host, with `:port` when the value had a port. This leaves out
+    /// the userinfo, so a password in a URL never reaches a page.
     pub fn text(&self) -> String {
         match self.port {
             Some(port) => format!("{}:{port}", self.host),
@@ -36,20 +36,22 @@ impl Address {
     }
 }
 
-/// The addresses in an environment variable named `name`.  A bare
-/// short name counts only when `name` indicates a host.
+/// The addresses in the value of the environment variable `name`. A
+/// bare short name counts only when `name` indicates a host.
 pub fn variable(name: &str, value: &str) -> Vec<Address> {
     let mut found = addresses(value);
-    if !holds_a_host(name) {
+    if !indicates_a_host(name) {
         found.retain(|address| !address.bare);
     }
     found
 }
 
-/// The addresses a container argument names.  A flag's value follows
-/// its `=`, as in `--upstream=http://api:8080`, and is read as a
-/// variable named for the flag.  A flag with no `=` names nothing, and a
-/// bare short name alone is more often a subcommand than a host.
+/// The addresses in one container argument. For a flag such as
+/// `--upstream=http://api:8080`, it reads the text after `=` as the
+/// value of a variable named for the flag. A flag with no `=` has no
+/// address. An argument that is not a flag is read with no variable
+/// name, so a bare short name in it is dropped, because it is more
+/// often a subcommand than a host.
 pub fn argument(argument: &str) -> Vec<Address> {
     match argument.strip_prefix('-') {
         Some(flag) => flag
@@ -59,18 +61,18 @@ pub fn argument(argument: &str) -> Vec<Address> {
     }
 }
 
-/// Whether the last word of `name` ends in a word for a host.
-fn holds_a_host(name: &str) -> bool {
+/// Whether the last word of `name` ends with one of `HOST_WORDS`.
+fn indicates_a_host(name: &str) -> bool {
     let name = name.to_ascii_lowercase();
     let last = name.rsplit(['_', '-', '.']).next().unwrap_or_default();
     HOST_WORDS.iter().any(|word| last.ends_with(word))
 }
 
-/// The addresses `value` names, one for each item of a comma-separated
-/// list, as a client given several brokers or replicas is configured.
-/// A value with whitespace in it names nothing: it is prose or a shell
-/// script, and one word of it matching a `Service`'s name is no
-/// evidence of what the workload calls.
+/// The addresses in `value`, one for each item of a comma-separated
+/// list, as a client with several brokers or replicas is configured.
+/// A value with whitespace has no address, because it is prose or a
+/// shell script, and one of its words that matches a `Service` name is
+/// no evidence that the workload calls that `Service`.
 pub fn addresses(value: &str) -> Vec<Address> {
     let value = value.trim();
     if value.is_empty() || value.contains(char::is_whitespace) {
@@ -79,12 +81,13 @@ pub fn addresses(value: &str) -> Vec<Address> {
     value.split(',').filter_map(address).collect()
 }
 
-/// The host, port, and path of one item.  The host is between the
-/// scheme's `://`, when there is one, and the first `/`, `?`, or `#`
-/// after it, past any userinfo up to the last `@`.  Without a scheme,
-/// an `@` is an email address, which names a mail domain and not a host
-/// the workload calls, unless a `:` follows the host, as in the
-/// `git@host:owner/repo` form of an SSH address.
+/// The host, port, and path of one item. The authority is the text
+/// after `://`, when there is one, up to the first `/`, `?`, or `#`.
+/// The host is what follows the last `@` in the authority, which skips
+/// userinfo. Without a scheme, `user@host` is an email address, whose
+/// domain is not a host the workload calls. It is read as an address
+/// only when a `:` follows the host, as in the `git@host:owner/repo`
+/// form of an SSH address, and then it has no port and the path `/`.
 fn address(item: &str) -> Option<Address> {
     let (scheme, rest) = match item.split_once("://") {
         Some((_, rest)) => (true, rest),
@@ -109,7 +112,8 @@ fn address(item: &str) -> Option<Address> {
 }
 
 fn named(host: &str, port: Option<u16>, path: &str, bare: bool) -> Option<Address> {
-    // A trailing dot marks a name as fully qualified; it is the same name.
+    // A trailing dot makes a DNS name fully qualified, and it is the same
+    // name without it. DNS compares names without regard to case.
     let host = host.trim_end_matches('.').to_ascii_lowercase();
     let host_characters = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | ':');
     if host.is_empty() || !host.chars().all(host_characters) {
@@ -123,9 +127,9 @@ fn named(host: &str, port: Option<u16>, path: &str, bare: bool) -> Option<Addres
     })
 }
 
-/// Splits a port from a host.  An IPv6 address is bracketed when a port
-/// follows it, and a bare one has colons of its own and no port.  A port
-/// that is not a number makes the item no address at all, as in
+/// Splits a port from a host. An IPv6 address has brackets when a port
+/// follows it. An unbracketed one has colons of its own and no port. A
+/// port that is not a number makes the item no address, as in
 /// `key:value`.
 fn split_port(host_port: &str) -> Option<(&str, Option<u16>)> {
     if let Some(bracketed) = host_port.strip_prefix('[') {
@@ -211,7 +215,7 @@ mod tests {
     #[case::a_user("USER", "db", vec![])]
     #[case::a_qualified_name_under_any_name("DB_NAME", "db.shop", vec![at("db.shop", None)])]
     #[case::a_port_under_any_name("UPSTREAM", "db:5432", vec![at("db", Some(5432))])]
-    fn a_bare_name_counts_where_the_variable_holds_a_host(
+    fn a_bare_name_counts_where_the_variable_indicates_a_host(
         #[case] name: &str,
         #[case] value: &str,
         #[case] expected: Vec<Address>,
@@ -221,8 +225,8 @@ mod tests {
 
     #[rstest]
     #[case::a_flags_url("--upstream=http://api:8080", vec![at("api", Some(8080))])]
-    #[case::a_flag_that_holds_a_host("--db-host=db", vec![bare("db")])]
-    #[case::a_flag_that_holds_a_name("--dns-names=db", vec![])]
+    #[case::a_flag_that_indicates_a_host("--db-host=db", vec![bare("db")])]
+    #[case::a_flag_that_lists_names("--dns-names=db", vec![])]
     #[case::a_flag_alone("--verbose", vec![])]
     #[case::a_value("cache:6379", vec![at("cache", Some(6379))])]
     #[case::a_subcommand("serve", vec![])]

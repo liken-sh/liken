@@ -1,6 +1,7 @@
-//! Tests of an `Ingress` host on a port the `Ingress` does not answer
-//! on: a forge whose web host is an `Ingress` and whose SSH port is a
-//! `NodePort` or `LoadBalancer` `Service` of the same workload.
+//! Tests of an address with an `Ingress` host and a port that is not the
+//! `Ingress`'s.  The example is a forge whose web UI is behind an
+//! `Ingress` and whose SSH is a `NodePort` or `LoadBalancer` `Service`
+//! of the same workload.
 
 use std::sync::Arc;
 
@@ -21,10 +22,11 @@ fn service(name: &str, app: &str, spec: &str) -> Arc<Service> {
     ))
 }
 
-/// A forge behind `forge.example.com`, with SSH on port 22 of a
-/// `NodePort` `Service` at node port 32222 and on port 2222 of a
-/// `LoadBalancer`; a wiki behind `wiki.example.com` with no `Service`
-/// but its `Ingress`'s.
+/// A forge behind `forge.example.com`, with SSH on port 22 and node
+/// port 32222 of a `NodePort` `Service`, and on port 2222 and node port
+/// 31022 of a `LoadBalancer`.  Its `ClusterIP` `Service` sets a node
+/// port that no node opens.  A wiki behind `wiki.example.com` has no
+/// `Service` except the one its `Ingress` routes to.
 struct Forges {
     addresses: Addresses,
     graph: Graph,

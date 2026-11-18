@@ -1,5 +1,5 @@
-//! The masthead links the vulnerabilities only when some kind knowledge
-//! loaded describes a scanner's reports.
+//! The masthead links to `/vulnerabilities` only when the loaded kind
+//! knowledge describes a scanner's reports.
 
 use rstest::rstest;
 

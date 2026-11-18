@@ -1,6 +1,5 @@
-//! Builds a link that a browser can open from a repository's URL and an
-//! applier's directory.  The link opens the directory on the forge that
-//! hosts the repository, at the ref that the source follows.
+//! Builds the link to an applier's directory on the forge that hosts the
+//! repository, at the ref that the applier's source follows.
 
 use super::GitRef;
 use crate::forge::{Forges, Ref, safe, steps_up, web};
@@ -8,16 +7,18 @@ use crate::forge::{Forges, Ref, safe, steps_up, web};
 /// Where a card's code link goes.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Place {
-    /// A directory page, and the repository's name and path to show.
+    /// The URL of the directory's page, and the repository name and path
+    /// to show as the link text.
     Link { href: String, text: String },
-    /// The repository's URL and the path, for a directory that transect
-    /// cannot link.
+    /// The repository's URL and the path, shown as text for a directory
+    /// that transect cannot link to.
     Text { repository: String, path: String },
 }
 
-/// The directory that `path` names in the repository at `url`.  It is a
-/// link when a `Forge` declares the repository's forge and `reference`
-/// names a ref that the forge's directory pages can open at.
+/// Where `path` in the repository at `url` is shown.  It is a `Link`
+/// when a `Forge` layout or a forge that the cluster runs matches the
+/// repository's host, `reference` gives a ref that is safe to put in a
+/// URL, and `path` is too.  Otherwise it is `Text`.
 pub fn place(url: &str, reference: &GitRef, path: &str, forges: &Forges) -> Place {
     let link = || {
         let found = web(url)?;
@@ -43,11 +44,12 @@ pub fn place(url: &str, reference: &GitRef, path: &str, forges: &Forges) -> Plac
     })
 }
 
-/// The ref that a directory page opens at.  A commit pins the source,
-/// so it takes precedence over a tag, a tag over a branch, and each of
-/// them over a ref that does not state which type it is.  A source that
-/// names no ref, such as one that follows a semver range, does not
-/// identify one directory page, so the function returns `None`.
+/// The ref to put in the directory's URL: the commit, else the tag, else
+/// the branch, else a ref of unknown type, because a commit fixes the
+/// exact content that the source applies.  It returns `None` when the
+/// chosen ref is not safe in a URL, and when the source has no ref, such
+/// as a source that follows a semver range, because no single directory
+/// page shows what that source applies.
 fn of(reference: &GitRef) -> Option<Ref> {
     let found = [
         reference.commit.clone().map(Ref::Commit),
@@ -59,9 +61,9 @@ fn of(reference: &GitRef) -> Option<Ref> {
     (safe(found.name()) && !steps_up(found.name())).then_some(found)
 }
 
-/// `path` without its leading `./` and its slashes at either end, or
-/// `None` when it contains a step up or a character that a URL would
-/// need to escape.
+/// `path` without a leading `./` and without slashes at either end, or
+/// `None` when it contains `..` or a character that a URL would need to
+/// escape.
 fn clean(path: &str) -> Option<String> {
     let path = path.trim_start_matches("./").trim_matches('/');
     let path = if path == "." { "" } else { path };
@@ -203,7 +205,7 @@ mod tests {
         "./deploy",
         link("https://github.com/acme/fleet/tree/v1.2.0/deploy", "fleet/deploy")
     )]
-    #[case::a_whole_commit_unsaid_on_gitea(
+    #[case::a_full_commit_of_unknown_type_on_gitea(
         named(
             "https://gitea.example.com/acme/fleet",
             "0a1b2c3d4e5f60718293a4b5c6d7e8f901234567"
@@ -214,7 +216,7 @@ mod tests {
             "fleet/shop"
         )
     )]
-    #[case::a_ref_unsaid_on_gitea(
+    #[case::a_branch_of_unknown_type_on_gitea(
         named("https://gitea.example.com/acme/fleet", "main"),
         "./shop",
         text("https://gitea.example.com/acme/fleet", "./shop")
@@ -268,8 +270,9 @@ mod tests {
         assert_eq!(place(&url, &reference, path, &served()), expected);
     }
 
-    /// Forges that put a mark before an owner: a tilde at one host, as
-    /// SourceHut does, and an at sign at another, as Tangled does.
+    /// Two forges whose repository URLs put a mark before the owner: a
+    /// tilde at one host, as SourceHut does, and an at sign at another,
+    /// as Tangled does.
     fn owner_marked() -> Forges {
         let layouts = r#"
 metadata: {name: tilde}

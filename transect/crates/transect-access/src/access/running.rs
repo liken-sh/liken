@@ -1,6 +1,6 @@
-//! What a pod gives an account that may exec into it or start one like
-//! it: the ServiceAccount it runs as, whether it mounts that account's
-//! token, and the Secrets it mounts, by name.
+//! What an account gains by being able to exec into a pod or create a
+//! similar one: the ServiceAccount the pod runs as, whether it mounts
+//! that account's token, and the names of the Secrets it uses.
 
 use k8s_openapi::api::core::v1::{EnvFromSource, EnvVar, Pod, ServiceAccountTokenProjection};
 
@@ -10,17 +10,18 @@ use k8s_openapi::api::core::v1::{EnvFromSource, EnvVar, Pod, ServiceAccountToken
 pub struct Running {
     pub namespace: String,
     pub name: String,
-    /// The machine it is scheduled on, whose kubelet runs its
-    /// containers.
+    /// The node it is scheduled on.
     pub node: Option<String>,
     /// The ServiceAccount it runs as.
     pub account: String,
     /// Whether it mounts a token of its ServiceAccount that the API
-    /// server accepts.  The API server adds the token as a projected
-    /// volume unless `automountServiceAccountToken` turns it off, so
-    /// this field comes from the volume and not from that setting.
+    /// server accepts.  It is read from the pod's projected volumes and
+    /// not from `automountServiceAccountToken`, because the API server
+    /// writes the token volume into the pod spec when that setting
+    /// allows it.
     pub token: bool,
-    /// The Secrets its volumes and environment name.
+    /// The names of the Secrets that its volumes and environment
+    /// variables use.
     pub secrets: Vec<String>,
 }
 
@@ -74,11 +75,11 @@ impl Running {
     }
 }
 
-/// The audiences of the API server's own tokens: an unset audience,
-/// which the API server fills with its own, and the default issuer's
-/// URL that kubeadm and k3s give the API server.  A token minted for
-/// another audience is refused by the API server, so it signs in as no
-/// account there.
+/// The audiences that the API server accepts by default: the issuer
+/// URL that kubeadm and k3s configure, with and without
+/// `.cluster.local`.  A token for any other audience does not
+/// authenticate at the API server.  A projection with no audience gets
+/// the API server's own, so `for_the_api` accepts it too.
 const API_AUDIENCES: [&str; 2] = [
     "https://kubernetes.default.svc",
     "https://kubernetes.default.svc.cluster.local",
@@ -92,7 +93,7 @@ fn for_the_api(projection: &ServiceAccountTokenProjection) -> bool {
     }
 }
 
-/// The Secrets an environment of `env` and `env_from` reads.
+/// The names of the Secrets that `env` and `env_from` read.
 fn environment(env: &Option<Vec<EnvVar>>, env_from: &Option<Vec<EnvFromSource>>) -> Vec<String> {
     let keys = env.iter().flatten();
     let keys = keys.filter_map(|var| {
@@ -134,7 +135,7 @@ mod tests {
     }
 
     #[test]
-    fn a_finished_pod_gives_nothing() {
+    fn a_finished_pod_is_not_read() {
         let mut finished = pod("{containers: [{name: main}]}");
         finished.status = serde_yaml::from_str("{phase: Succeeded}").unwrap();
         assert_eq!(Running::read(&finished), None);

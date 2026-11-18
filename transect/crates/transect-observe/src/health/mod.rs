@@ -3,14 +3,13 @@
 //!
 //! Each rule returns a `Reason` that records what it found as data: the
 //! workload or pod, and the counts or times that broke the rule.  The map
-//! colors a parcel by the worst level among its reasons, and the reasons
+//! colors a tile by the worst level among its reasons, and the reasons
 //! render as template sentences in `sentence.rs`, so every screen that
 //! repeats a finding shows it in the same words.
 //!
-//! Every rule is a pure function of the objects and `now`.  Rules that
-//! depend on how long something has lasted change with no watch event, so
-//! `recheck` marks the cluster changed on a coarse tick to re-evaluate
-//! them.
+//! Every rule is a pure function of the objects and `now`.  A rule that
+//! measures how long something has lasted can change its result with no
+//! watch event, so `recheck` marks the cluster changed every `RECHECK`.
 
 mod attribute;
 mod cron_jobs;
@@ -57,17 +56,16 @@ pub use searched::{
 };
 pub use sentence::{FROM_NO_POD, GONE_POD, SETTLED, times};
 
-/// How often the time-based rules are evaluated again.  The shortest
-/// window a rule measures is five minutes, so a parcel changes color at
-/// most this long after the window closes.
+/// How often the rules that measure a duration run again.  A tile
+/// changes color at most this long after a duration passes its threshold.
 pub const RECHECK: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Level {
     #[default]
     Healthy,
-    /// A reason that gets a line in "Now", drawn in gray, because it
-    /// does not need attention on its own.
+    /// Listed in "Now" and drawn in gray, because it does not need
+    /// attention on its own.
     Notice,
     Warning,
     Failing,
@@ -140,10 +138,9 @@ pub enum Reason {
     LastRunFailed {
         workload: Workload,
     },
-    /// The condition that reports whether a custom resource works is not
-    /// `True`.  That condition is the one its kind knowledge names, or
-    /// `Ready`.  `status` is `None` when the resource reports no such
-    /// condition.
+    /// A custom resource's health condition is not `True`.  The
+    /// condition is the one that its kind knowledge names, or `Ready`.
+    /// `status` is `None` when the resource has no such condition.
     Condition {
         workload: Object,
         condition: String,
@@ -221,11 +218,11 @@ impl Reason {
                 restarts: ..2,
                 ..
             } => Level::Notice,
-            // These are gray because an error line is often routine.
-            // When transect read only the pods whose pages were opened,
-            // a parcel's color would depend on who opened which pages,
-            // not on the cluster.  A pattern is a person's statement of
-            // which lines matter.
+            // An error line is often routine, so a count of them stays
+            // gray.  A `Matched` pattern is a Warning, because a person
+            // wrote it to say which lines matter.  A `Seen::Read` count
+            // also covers only the pods whose pages someone opened, so a
+            // higher level would color a tile by who opened which pages.
             Self::LoggedErrors { .. } => Level::Notice,
             Self::Alert { level, .. } => *level,
             _ => Level::Warning,
@@ -250,7 +247,7 @@ impl Health {
         }
     }
 
-    /// Every reason as a sentence, one per line, for a parcel's title.
+    /// Every reason as a sentence, one per line, for a tile's title.
     pub fn title(&self) -> Option<String> {
         if self.reasons.is_empty() {
             return None;
@@ -261,10 +258,10 @@ impl Health {
 }
 
 /// The health of every namespace that has a reason to report.  A
-/// namespace missing from the map is healthy.  `ownership` ties each
-/// pod to the workload whose replicas it counts toward, and `revisions`
-/// gives the time of each controller's last rollout, which restarts on
-/// its machines may have followed.
+/// namespace missing from the map is healthy.  `ownership` gives the
+/// workload whose replicas each pod counts toward.  `revisions` gives
+/// each controller's newest revision, so that restarts can be tied to
+/// another workload's rollout on the same machine.
 pub fn assess(
     objects: &Objects,
     ownership: &Ownership,
@@ -344,9 +341,8 @@ pub fn assess(
         .collect()
 }
 
-/// `health` with `reasons` added, each to its namespace, such as the
-/// conditions of the custom resources there, which the rules above do
-/// not read.
+/// `health` with `reasons` added to their namespaces, for findings that
+/// `assess` does not make, such as the conditions of custom resources.
 pub fn with_reasons(
     mut health: HashMap<String, Health>,
     reasons: Vec<(String, Reason)>,
@@ -363,10 +359,9 @@ pub fn with_reasons(
     health
 }
 
-/// Marks the cluster changed every `RECHECK`, so a pod that has been
-/// pending for five minutes turns its parcel amber when no watch event
-/// starts a render.  When a render produces the same page, transect sends
-/// nothing to the browser.
+/// Marks the cluster changed every `RECHECK`, so a pod that stays
+/// pending turns its tile amber even when no watch event arrives.  A
+/// render that produces the same page sends nothing to the browser.
 pub fn recheck(changed: watch::Sender<()>) {
     tokio::spawn(async move {
         let mut ticks = tokio::time::interval(RECHECK);
@@ -378,12 +373,11 @@ pub fn recheck(changed: watch::Sender<()>) {
     });
 }
 
-/// The number of minute boundaries between `then` and `now`, never
-/// negative.  Because of this, every age on a page changes at the top of
-/// the minute at the same time, so transect pushes the open page once a
-/// minute for them, not once for each age at its own second.  When the
-/// clocks of the API server and this machine are skewed, the function
-/// returns zero, not a time in the future.
+/// The number of minute boundaries between `then` and `now`.  Counting
+/// boundaries makes every age on a page change at the same second, so an
+/// open page updates once a minute and not once for each age.  The result
+/// is zero when `then` is later than `now`, which happens when the API
+/// server's clock is ahead of this machine's.
 pub fn minutes_between(then: Timestamp, now: Timestamp) -> i64 {
     (now.as_second().div_euclid(60) - then.as_second().div_euclid(60)).max(0)
 }

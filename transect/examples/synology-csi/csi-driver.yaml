@@ -1,8 +1,8 @@
-# The console annotation Synology's CSI driver would ship on its
-# CSIDriver: its StorageClasses and volumes name the NAS as `dsm`, and
-# DSM serves its console on 5001 by default.  As written here it is an
-# overlay, which transect merges onto the CSIDriver the cluster serves;
-# moved into the driver's own manifest, it is the same annotation.
+# The console annotation that Synology's CSI driver would ship on its
+# CSIDriver. Its StorageClasses and PersistentVolumes give the NAS
+# address as `dsm`, and DSM serves its console on port 5001 by
+# default. This file is an overlay that transect merges onto the
+# cluster's CSIDriver.
 apiVersion: storage.k8s.io/v1
 kind: CSIDriver
 metadata:

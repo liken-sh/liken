@@ -1,14 +1,15 @@
-//! Each kind's name in a URL, in kubectl's form: the plural alone for
-//! the core group and for `apps` and `batch`, and `<plural>.<group>`
-//! for every other group, so no two kinds share one, such as
-//! `caches.cache.example.io`.
-//! Kubernetes's own kinds have their plurals here; a custom kind's
-//! comes from discovery.
+//! The name of a kind in a page URL, in the form kubectl accepts: the
+//! plural alone for the core group, `apps`, and `batch`, and
+//! `<plural>.<group>` for every other group, such as
+//! `caches.cache.example.io`, so that two kinds with the same plural in
+//! different groups get different URLs. The plurals of the built-in
+//! kinds are in a table here, and a custom kind's plural comes from API
+//! discovery.
 
 use crate::edges::{Object, Plurals};
 
-/// Kubernetes's own kinds a page may show, by group and kind, with
-/// their plurals.  `objects::kinds` defines how a page reads each.
+/// The built-in kinds a page may show, as (group, kind, plural).
+/// `transect_map::objects::kinds` reads each one.
 const BUILT_IN: [(&str, &str, &str); 30] = [
     ("", "ConfigMap", "configmaps"),
     ("", "LimitRange", "limitranges"),
@@ -46,9 +47,9 @@ const BUILT_IN: [(&str, &str, &str); 30] = [
     ("storage.k8s.io", "StorageClass", "storageclasses"),
 ];
 
-/// The built-in kinds that can be a top owner, by group and kind, with
-/// their plurals.  A bare `Pod` is left out, because a link to it opens
-/// the pod page, which is a different URL.
+/// The built-in kinds that can be a top owner, as (group, kind, plural).
+/// A bare `Pod` is left out because its link opens the pod page, which
+/// has a different URL.
 const WORKLOADS: [(&str, &str, &str); 5] = [
     ("apps", "Deployment", "deployments"),
     ("apps", "StatefulSet", "statefulsets"),
@@ -57,12 +58,11 @@ const WORKLOADS: [(&str, &str, &str); 5] = [
     ("batch", "Job", "jobs"),
 ];
 
-/// Whether a URL names a kind of `group` by its plural alone.
 fn plural_alone(group: &str) -> bool {
     matches!(group, "" | "apps" | "batch")
 }
 
-/// `plural` of `group` as a URL names it.
+/// The URL name of the kind with this `plural` in `group`.
 pub fn url_name(group: &str, plural: &str) -> String {
     match plural_alone(group) {
         true => plural.into(),
@@ -70,23 +70,21 @@ pub fn url_name(group: &str, plural: &str) -> String {
     }
 }
 
-/// The plural of Kubernetes's own kind `group`/`kind`, when it is one
-/// a page shows.
+/// The plural of the built-in kind `group`/`kind`, or none when a page
+/// does not show that kind.
 pub fn plural(group: &str, kind: &str) -> Option<&'static str> {
     let found = BUILT_IN.iter().find(|(g, k, _)| *g == group && *k == kind);
     found.map(|(_, _, plural)| *plural)
 }
 
-/// Every kind of Kubernetes's own a page may show, by group and kind,
-/// for the test that `objects::kinds` reads each one.
+/// Every built-in kind a page may show, as (group, kind), so a test can
+/// check that `objects::kinds` reads each one.
 #[cfg(any(test, feature = "fixtures"))]
 pub fn built_in() -> impl Iterator<Item = (&'static str, &'static str)> {
     BUILT_IN.iter().map(|(group, kind, _)| (*group, *kind))
 }
 
-/// The name in a URL of `object`'s kind, or none for a kind with no
-/// URL: Kubernetes's own kinds by the table, and a custom kind by the
-/// plural discovery gave it.
+/// The URL name of `object`'s kind, or none when the kind has no URL.
 pub fn url_of(object: &Object, plurals: &Plurals) -> Option<String> {
     match plural(&object.group, &object.kind) {
         Some(plural) => Some(url_name(&object.group, plural)),
@@ -94,13 +92,12 @@ pub fn url_of(object: &Object, plurals: &Plurals) -> Option<String> {
     }
 }
 
-/// The name in a URL of the kind of `object`, a top owner, or none for
-/// a kind with no page.  The page for a URL finds its workload by naming
-/// each of the namespace's top owners this way and taking the one that
-/// matches, so no name has to be parsed back into a kind.  A custom
-/// kind discovery has not resolved has none either, because its plural
-/// comes from the API, and a guess at it makes a link to a page that
-/// does not exist.
+/// The URL name of the kind of `object`, a top owner, or none when the
+/// kind has no workload page. The web pages find the workload for a URL
+/// by calling this for each top owner and comparing, so no URL is parsed
+/// back into a kind. A custom kind that discovery has not returned has
+/// no URL name, because a guessed plural would link to a page that does
+/// not exist.
 pub fn workload(object: &Object, plurals: &Plurals) -> Option<String> {
     if let Some((_, _, plural)) = WORKLOADS
         .iter()

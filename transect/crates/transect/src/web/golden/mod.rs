@@ -1,14 +1,13 @@
-//! Text goldens: the visible text of the pages that moving project
-//! knowledge out of the code touches, rendered from the fixture
-//! cluster and its signals at the fixture's `NOW`, and held in `pages/`
-//! beside this file.  A page drawn at a pinned time says the same ages
-//! on every run, so the changed list holds the changes of the last day
-//! and no age needs masking.
+//! Golden files of the visible text of pages, rendered from the fixture
+//! cluster and its signals at the fixture's `NOW` and stored in
+//! `pages/` beside this file.  The pinned time keeps every age the same
+//! on every run, so no age needs masking.
 //!
-//! A golden holds only the words a reader sees, so a change to markup
-//! or style leaves it alone, and a change to what a page says fails
-//! `cargo test` with the lines that changed.  When the change is meant,
-//! write the goldens again and review their diff in the commit:
+//! A golden holds only the words that a reader sees, so a change to
+//! markup or style does not affect it.  A change to what a page says
+//! fails `cargo test` and prints the lines that changed.  When the
+//! change is intended, rewrite the goldens and review their diff in the
+//! commit:
 //!
 //! ```bash
 //! TRANSECT_GOLDEN=rewrite cargo test golden
@@ -43,7 +42,8 @@ fn render_from(
 ) -> String {
     let uri: Uri = url.parse().unwrap();
     let Query(query) = Query::<view::Query>::try_from_uri(&uri).unwrap();
-    // The server's router reads the path percent-decoded.
+    // The server's router decodes percent-escapes in the path before it
+    // matches it.
     let path = transect_graph::links::percent_decoded(uri.path().trim_start_matches('/'));
     let view = View::at(&path, query).unwrap();
     let reads = transect_map::objects::reads::Reads::default();
@@ -67,8 +67,9 @@ fn golden(name: &str) -> PathBuf {
     here.join(format!("{name}.txt"))
 }
 
-/// The lines `then` and `now` differ by, `-` for a line gone and `+`
-/// for a line new, from the longest run of lines they share.
+/// A line diff of `then` against `now`, built from the longest common
+/// subsequence of their lines.  `-` marks a line only in `then`, and
+/// `+` marks a line only in `now`.
 fn diff(then: &str, now: &str) -> String {
     let (a, b): (Vec<&str>, Vec<&str>) = (then.lines().collect(), now.lines().collect());
     let mut shared = vec![vec![0usize; b.len() + 1]; a.len() + 1];
@@ -184,7 +185,7 @@ fn golden_text(#[case] name: &str, #[case] url: &str) {
     let then = std::fs::read_to_string(&path).unwrap_or_default();
     assert!(
         then == now,
-        "{url}'s text differs from {}; run `TRANSECT_GOLDEN=rewrite cargo test golden` if the change is meant:\n{}",
+        "the text of {url} differs from {}. If the change is intended, run TRANSECT_GOLDEN=rewrite cargo test golden. The diff is:\n{}",
         path.display(),
         diff(&then, &now)
     );
@@ -199,8 +200,8 @@ fn diffs_by_line(#[case] then: &str, #[case] now: &str, #[case] expected: &str) 
     assert_eq!(diff(then, now), expected);
 }
 
-/// A user's name is whatever a binding's subject says, so a page draws
-/// it as text, never as markup.
+/// A user's name comes from a binding's subject and can hold anything,
+/// so a page must escape it as text and never write it as markup.
 #[rstest]
 #[case::the_accounts("/access/accounts")]
 #[case::its_own_page(&transect_graph::links::user(r#"<b>"odd" & co"#))]

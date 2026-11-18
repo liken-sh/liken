@@ -1,16 +1,16 @@
-//! What each host of an Ingress routes to: its own rules' paths, and
-//! the default backend where a request may reach it.
+//! The backends that a request to each host of an Ingress may reach.
 
 use k8s_openapi::api::networking::v1::{Ingress, IngressBackend};
 
 use super::Sources;
 use transect_graph::edges::Object;
 
-/// Each host `ingress`'s rules name, or "any host" for a rule that
-/// names none, with the backends a request to it may reach: its rules'
-/// paths, and the default backend unless a path of `/` takes every
-/// request first.  The default backend also gets an "any host" entry,
-/// for a host that no rule names.
+/// For each host in `ingress`'s rules, or "any host" for a rule with no
+/// host, the backends that a request to that host may reach.  These are
+/// the backends of the host's rule paths, plus the default backend
+/// unless a path of `/` that is not `Exact` already takes every
+/// request.  The default backend also gets an "any host" entry, for
+/// hosts that no rule lists.
 pub fn routed(ingress: &Ingress) -> Vec<(String, Vec<&IngressBackend>)> {
     let spec = ingress.spec.as_ref();
     let rules = spec
@@ -55,8 +55,8 @@ pub fn routed(ingress: &Ingress) -> Vec<(String, Vec<&IngressBackend>)> {
 
 const ANY_HOST: &str = "any host";
 
-/// The workloads behind the Services `backends` of an Ingress in
-/// `namespace` route to.
+/// The workloads that the Services in `backends` select, where
+/// `backends` belong to an Ingress in `namespace`.
 pub fn workloads(
     namespace: Option<&str>,
     backends: &[&IngressBackend],

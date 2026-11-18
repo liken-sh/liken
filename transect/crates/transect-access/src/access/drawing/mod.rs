@@ -1,11 +1,15 @@
 //! A workload's access drawing shows what may reach each port that the
-//! workload serves, what the workload runs as, holds, and may call, and
-//! who may change it.  It is the same kind of drawing as the section
-//! view: the server places the boxes, and the lines go under them in
-//! one SVG at the same coordinates, drawn with the section view's box
-//! macro and line paths.  The drawing goes from left to right, from
-//! what reaches the workload to the workload, and from the workload to
-//! what it holds and calls.
+//! workload serves, what the workload runs as, what it holds, what it
+//! may call, and who may change it.  What it holds is what its pod
+//! specs give it: claims, Secrets, devices, host paths, and access to
+//! the machine.  What reaches the workload is on the left, the workload
+//! is in the middle, and what it runs as, holds, and may call is on the
+//! right.
+//!
+//! The drawing is built like the section view.  The server places the
+//! boxes with the section view's box macro, and one SVG under them, in
+//! the same coordinates, draws the lines with the section view's line
+//! paths.
 
 pub mod account;
 pub mod account_page;
@@ -20,12 +24,13 @@ mod tests;
 
 use transect_map::map::section_drawing::{Line, Point, Rect, SectionBox, Style, rounded};
 
-/// The width that every access drawing is laid out at.  The page zooms
-/// the drawing to the width of its column, as the section view does.
+/// The width that every access drawing is laid out at.  The page
+/// scales the drawing to the width of its column, as the section view
+/// does.
 pub const WIDTH: i32 = 1280;
 
-/// A drawing laid out: its boxes, the lines under them, the gates on
-/// the lines, its words, and the ports on the workload's edge.
+/// A laid-out drawing: its boxes, the lines under them, the gates on
+/// the lines, its text, and the ports on the workload's edge.
 #[derive(Debug, Default)]
 pub struct Drawing {
     pub width: i32,
@@ -35,11 +40,11 @@ pub struct Drawing {
     pub dots: Vec<Dot>,
     pub texts: Vec<Text>,
     pub sockets: Vec<Socket>,
-    /// The turns of each line, in the order of `lines`.
+    /// The points where each line turns, in the order of `lines`.
     pub routes: Vec<Vec<Point>>,
 }
 
-/// One box at its place, with the class it is drawn with.
+/// One box with its position and the CSS class it is drawn with.
 #[derive(Debug)]
 pub struct Placed {
     pub boxed: SectionBox,
@@ -48,15 +53,15 @@ pub struct Placed {
 }
 
 impl Placed {
-    /// The inline style that puts it at its place.
+    /// The inline style that positions the box.
     pub fn place(&self) -> String {
         style(&self.rect)
     }
 }
 
-/// A gate on a line, as a dot: its class, the sentence it shows on
-/// hover, and whether a sentence declares it.  A declared gate is drawn
-/// with a ring.
+/// A gate on a line, drawn as a dot.  `title` is the sentence it shows
+/// on hover.  `declared` is true when a line of intent declares the
+/// gate, and such a gate is drawn with a ring.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Gate {
     pub class: &'static str,
@@ -64,7 +69,7 @@ pub struct Gate {
     pub declared: bool,
 }
 
-/// A gate placed on a line.
+/// A gate at a position on a line.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Dot {
     pub x: i32,
@@ -72,14 +77,14 @@ pub struct Dot {
     pub gate: Gate,
 }
 
-/// Words in the drawing: a column's heading, or a line's label.
+/// Text in the drawing: a column's heading or a line's label.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Text {
     pub x: i32,
     pub y: i32,
     pub text: String,
     pub class: &'static str,
-    /// The page that the words link to, when they are a name.
+    /// The page that the text links to, when it is a name.
     pub href: Option<String>,
 }
 
@@ -97,20 +102,21 @@ impl Socket {
     }
 }
 
-/// A column's heading, small and in capitals.
+/// A column's heading.
 pub const HEAD: &str = "section-label section-label-start ax-head";
-/// A line's label, starting at its point.
+/// A line's label, which starts at its point.
 pub const LABEL: &str = "section-label section-label-start";
-/// A policy's name before the gate it puts on a line, ending at its
-/// point.
+/// The name of a policy, placed before the gate it puts on a line.  The
+/// text ends at its x coordinate.
 pub const VIA: &str = "section-label section-label-end ax-via";
-/// A box with no style of its own.
+/// A box with no extra styling.
 pub const PLAIN: &str = "section-box";
 /// The workload the drawing is of.
 pub const WORKLOAD: &str = "section-box section-box-workload ax-box-ports ax-box-list";
-/// Something that follows from a grant.
+/// A box for access that an account gets by using another capability,
+/// with no binding that grants it.
 pub const FOLLOWS: &str = "section-box ax-box-follows";
-/// A stated "none".
+/// A box that states "none".
 pub const NONE: &str = "section-box ax-box-none";
 
 fn style(rect: &Rect) -> String {
@@ -120,11 +126,11 @@ fn style(rect: &Rect) -> String {
     )
 }
 
-/// The height that a box of `width` needs for its title and lines, each
-/// wrapped whole.  The character widths are those of 12.5px bold mono
-/// and 13px Source Sans 3 in a browser, measured a little wide so that
-/// a box is too tall rather than too short.  A box grows to fit all of
-/// its words, so none is cut short.
+/// The height that a box of `width` needs for its title and lines,
+/// wrapped as a browser wraps them.  The character widths approximate
+/// 12.5px bold mono for the title and 13px Source Sans 3 for the lines,
+/// rounded up so that a box comes out too tall rather than too short
+/// and no text is cut off.
 pub fn height(boxed: &SectionBox, width: i32) -> i32 {
     let inner = (width - 22).max(40);
     let title_chars = (inner * 10 / 85).max(1) as usize;
@@ -133,8 +139,8 @@ pub fn height(boxed: &SectionBox, width: i32) -> i32 {
     let names: Vec<&str> = boxed.names.iter().map(|part| part.text.as_str()).collect();
     let named = names.join(", ");
     for (at, line) in boxed.lines.iter().enumerate() {
-        // A box that represents several names lists them in its last
-        // line in place of that line's words.
+        // A box with several names lists them in its last line, in
+        // place of that line's text.
         let line = match at + 1 == boxed.lines.len() && !names.is_empty() {
             true => named.as_str(),
             false => line.as_str(),
@@ -150,8 +156,8 @@ pub fn height(boxed: &SectionBox, width: i32) -> i32 {
 }
 
 /// How many lines `text` takes at `most` characters a line, wrapped
-/// as a browser wraps it: after a space, a hyphen, a dot, or a slash,
-/// and inside a piece only when the piece alone is longer than a line.
+/// as a browser wraps it: after a space, a hyphen, a dot, or a slash.
+/// A piece breaks inside itself only when it is longer than a line.
 fn wrapped(text: &str, most: usize) -> usize {
     let mut lines = 1;
     let mut used = 0;
@@ -225,8 +231,8 @@ impl Drawing {
         });
     }
 
-    /// Whether `line` runs off the drawing's right edge, open-ended, as
-    /// "any address" does.
+    /// Whether `line` runs to the drawing's right edge with no end
+    /// box, as the line for "any address" does.
     pub fn open(line: &Line) -> bool {
         line.to.x >= WIDTH - 20
     }
@@ -239,8 +245,8 @@ impl Drawing {
         }
     }
 
-    /// The bottom of everything drawn, so the drawing's height includes
-    /// it.
+    /// The lowest y coordinate of everything drawn, which the drawing's
+    /// height must cover.
     fn bottom(&self) -> i32 {
         let boxes = self.boxes.iter().map(|b| b.rect.bottom());
         let sockets = self.sockets.iter().map(|s| s.rect.bottom());
@@ -248,9 +254,9 @@ impl Drawing {
         boxes.chain(sockets).chain(texts).max().unwrap_or(0)
     }
 
-    /// Whether every line that ends with an arrow ends on a box's or a
-    /// socket's edge.  A line with no arrow, which joins a trunk or runs
-    /// off open-ended, ends on its last point.
+    /// Whether every line that ends with an arrow ends on the edge of a
+    /// box or a socket.  A line with no arrow joins a trunk or runs off
+    /// the drawing, so it ends on its last point.
     #[cfg(test)]
     pub fn ends_on_edges(&self) -> bool {
         let rects: Vec<Rect> = self
@@ -265,10 +271,10 @@ impl Drawing {
             .all(|line| rects.iter().any(|r| r.on_edge(line.to.x, line.to.y)))
     }
 
-    /// The places where a level part of one line crosses an upright
-    /// part of another.  Lines that meet where one of them ends, as
-    /// when a caller's line joins its trunk or two lines share a port,
-    /// touch and do not cross.
+    /// The points where a horizontal segment of one line crosses a
+    /// vertical segment of another.  Lines that meet where one of them
+    /// ends, as when a caller's line joins its trunk or two lines share
+    /// a port, touch and do not cross.
     #[cfg(test)]
     pub fn crossings(&self) -> Vec<Point> {
         let parts = |route: &Vec<Point>| -> Vec<(Point, Point)> {

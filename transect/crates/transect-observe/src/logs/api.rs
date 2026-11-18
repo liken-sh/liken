@@ -1,7 +1,6 @@
-//! This module reads a pod's last lines from the Kubernetes API's
-//! `pods/log`, with `tailLines` and no follow, which needs nothing but
-//! the API.  It is the default source, and the fallback when a log
-//! store does not answer.
+//! Reads a pod's last lines from the `pods/log` subresource of the
+//! Kubernetes API. It needs no log store, so transect reads the tails
+//! here when no `LogSource` exists, and when the log store's query fails.
 
 use futures::future::join_all;
 use k8s_openapi::api::core::v1::Pod;
@@ -48,26 +47,25 @@ pub async fn read(client: &Client, namespace: &str, name: &str, containers: Vec<
     tails
 }
 
-/// The result of one container's read, or `None` when the API refused
-/// it as forbidden.  A refusal applies to every container of every pod
-/// in the namespace, because RBAC grants `pods/log` by namespace, not
-/// by container.
+/// The `Read` for one container's result, or `None` when the API
+/// returned Forbidden. RBAC cannot grant `pods/log` for one container
+/// alone, so a Forbidden for one container applies to all of them, and
+/// `read` stops there.
 fn read_of(result: Result<String, kube::Error>) -> Option<Read> {
     match result {
         Ok(text) => Some(tail::lines(&text)),
-        // A response whose body is not a `Status` contains only the
-        // code, and kube's `is_forbidden` checks the reason first, so
-        // this match also checks the code.
+        // When the error body is not a `Status`, kube sets the reason to
+        // "Failed to parse error data" and keeps the HTTP code.
+        // `is_forbidden` compares only the reason, so check the code too.
         Err(kube::Error::Api(status)) if status.is_forbidden() || status.code == 403 => None,
         Err(kube::Error::Api(status)) => Some(Read::Failed(status.message.clone())),
         Err(error) => Some(Read::Failed(error.to_string())),
     }
 }
 
-/// The containers whose logs the page reads, in the pod's own order:
-/// every app container, then each init container that has started.  An
-/// init container that still waits to start has no log, and the API
-/// would return an error for it.
+/// The containers whose logs the pod page reads: every app container,
+/// then each init container that has started. The API returns an error
+/// for an init container that has not started, because it has no log.
 pub fn containers(pod: &Pod) -> Vec<String> {
     let Some(spec) = &pod.spec else {
         return Vec::new();
@@ -139,7 +137,7 @@ mod tests {
         refused(400, "container is waiting to start"),
         Some(Read::Failed("container is waiting to start".into()))
     )]
-    fn a_read_says_what_the_api_gave(
+    fn a_read_reflects_the_apis_result(
         #[case] result: Result<String, kube::Error>,
         #[case] read: Option<Read>,
     ) {

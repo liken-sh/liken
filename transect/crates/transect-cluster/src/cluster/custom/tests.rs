@@ -1,5 +1,6 @@
-//! Which custom kinds are watched, and how, and what serves each one
-//! while its watch starts again.
+//! Tests which custom kinds get a watch, whether each watch is whole or
+//! trimmed, and which store serves a kind while its replacement watch
+//! is still listing.
 
 use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition;
 use rstest::rstest;
@@ -22,14 +23,14 @@ fn resource(name: &str) -> ApiResource {
 }
 
 #[rstest]
-#[case::an_owner(&["Database"], &[], &[], &[], &[], &[("Database", Holding::Whole, false, 0)])]
-#[case::an_owner_discovered(&["Database"], &[], &[], &[], &["Database"], &[("Database", Holding::Whole, true, 0)])]
-#[case::an_owner_with_a_crd(&["Database"], &["Database"], &[], &[], &[], &[("Database", Holding::Whole, false, 0)])]
-#[case::any_other_crd(&[], &["Certificate"], &[], &[], &[], &[("Certificate", Holding::Trimmed, true, 0)])]
-#[case::only_controlled(&[], &[], &["Issuer"], &[], &[], &[("Issuer", Holding::Trimmed, false, 0)])]
-#[case::controlled_with_a_crd(&[], &["Issuer"], &["Issuer"], &[], &[], &[("Issuer", Holding::Trimmed, true, 0)])]
-#[case::a_crd_with_fields_kept(&[], &["Tree"], &[], &["Tree"], &[], &[("Tree", Holding::Trimmed, false, 1)])]
-#[case::a_crd_with_fields_kept_discovered(&[], &["Tree"], &[], &["Tree"], &["Tree"], &[("Tree", Holding::Trimmed, true, 1)])]
+#[case::an_owner(&["Database"], &[], &[], &[], &[], &[("Database", Stored::Whole, false, 0)])]
+#[case::an_owner_discovered(&["Database"], &[], &[], &[], &["Database"], &[("Database", Stored::Whole, true, 0)])]
+#[case::an_owner_with_a_crd(&["Database"], &["Database"], &[], &[], &[], &[("Database", Stored::Whole, false, 0)])]
+#[case::any_other_crd(&[], &["Certificate"], &[], &[], &[], &[("Certificate", Stored::Trimmed, true, 0)])]
+#[case::only_controlled(&[], &[], &["Issuer"], &[], &[], &[("Issuer", Stored::Trimmed, false, 0)])]
+#[case::controlled_with_a_crd(&[], &["Issuer"], &["Issuer"], &[], &[], &[("Issuer", Stored::Trimmed, true, 0)])]
+#[case::a_crd_with_fields_kept(&[], &["Tree"], &[], &["Tree"], &[], &[("Tree", Stored::Trimmed, false, 1)])]
+#[case::a_crd_with_fields_kept_discovered(&[], &["Tree"], &[], &["Tree"], &["Tree"], &[("Tree", Stored::Trimmed, true, 1)])]
 #[case::nothing(&[], &[], &[], &[], &[], &[])]
 fn watches_whole_objects_only_where_fields_are_read(
     #[case] whole: &[&str],
@@ -37,7 +38,7 @@ fn watches_whole_objects_only_where_fields_are_read(
     #[case] controlled: &[&str],
     #[case] kept: &[&str],
     #[case] discovered: &[&str],
-    #[case] expected: &[(&str, Holding, bool, usize)],
+    #[case] expected: &[(&str, Stored, bool, usize)],
 ) {
     let served: BTreeMap<GroupKind, (ApiResource, Vec<Column>)> = crds
         .iter()
@@ -58,16 +59,16 @@ fn watches_whole_objects_only_where_fields_are_read(
         &kept,
         &preferred,
     );
-    let found: Vec<(GroupKind, Holding, bool, usize)> = found
+    let found: Vec<(GroupKind, Stored, bool, usize)> = found
         .into_iter()
         .map(|(group_kind, want)| {
             let resolved = want.resource.is_some();
-            (group_kind, want.holding, resolved, want.fields.len())
+            (group_kind, want.stored, resolved, want.fields.len())
         })
         .collect();
-    let expected: Vec<(GroupKind, Holding, bool, usize)> = expected
+    let expected: Vec<(GroupKind, Stored, bool, usize)> = expected
         .iter()
-        .map(|(name, holding, resolved, fields)| (kind(name), *holding, *resolved, *fields))
+        .map(|(name, stored, resolved, fields)| (kind(name), *stored, *resolved, *fields))
         .collect();
     assert_eq!(found, expected);
 }
@@ -97,8 +98,9 @@ fn watches_each_crd_at_its_storage_version() {
     );
 }
 
-/// A start that counts its calls and gives each kind a watch that
-/// has listed only when `listed` is true, as of its start.
+/// A fake for the function that starts a watch. It counts the watches
+/// it starts, and each watch reports that it has listed only when
+/// `listed` was true at its start.
 struct Starts {
     count: Arc<std::sync::atomic::AtomicUsize>,
     listed: Arc<AtomicBool>,
@@ -123,14 +125,14 @@ impl Starts {
                 &changed,
                 || std::future::ready(Ok(())),
                 move |()| {
-                    // The writer is dropped, so a wait for the store to
-                    // be ready ends at once, and the store holds nothing.
+                    // The `Writer` is dropped here, so the store stays
+                    // empty and a wait for it to be ready returns at once.
                     let store =
                         kube::runtime::reflector::store::Writer::new(resource.clone()).as_reader();
                     let task = tokio::spawn(std::future::pending::<()>()).abort_handle();
                     Watched {
                         resource,
-                        holding: want.holding,
+                        stored: want.stored,
                         store,
                         listed,
                         _running: Arc::new(Running(task)),
@@ -141,11 +143,11 @@ impl Starts {
     }
 }
 
-fn want(holding: Holding) -> BTreeMap<GroupKind, Want> {
-    let want = match holding {
-        Holding::Whole => Want::whole(None),
-        Holding::Trimmed => Want {
-            holding,
+fn want(stored: Stored) -> BTreeMap<GroupKind, Want> {
+    let want = match stored {
+        Stored::Whole => Want::whole(None),
+        Stored::Trimmed => Want {
+            stored,
             resource: Some(resource("Widget")),
             columns: Vec::new(),
             fields: Vec::new(),
@@ -154,14 +156,16 @@ fn want(holding: Holding) -> BTreeMap<GroupKind, Want> {
     BTreeMap::from([(kind("Widget"), want)])
 }
 
-async fn settle() {
+/// Lets the probe tasks that `track` spawned finish, on the paused clock.
+async fn let_tasks_run() {
     tokio::time::sleep(Duration::from_secs(1)).await;
 }
 
-/// What the watch that serves Widgets holds, if one does.
-fn serving(owners: &CustomOwners) -> Option<Holding> {
+/// The `Stored` of the watch that serves `Widget`s, or `None` when no
+/// watch does.
+fn serving(owners: &CustomOwners) -> Option<Stored> {
     let watched = owners.watched().into_iter().next();
-    watched.map(|(_, watched)| watched.holding)
+    watched.map(|(_, watched)| watched.stored)
 }
 
 /// Marks every running watch as having listed.
@@ -178,14 +182,14 @@ fn list_all(owners: &CustomOwners) {
 async fn a_kind_keeps_its_old_store_until_the_new_one_lists() {
     let (owners, starts) = (CustomOwners::default(), Starts::new());
     let (changed, _) = watch::channel(());
-    owners.track(want(Holding::Trimmed), starts.start(), &changed);
-    settle().await;
+    owners.track(want(Stored::Trimmed), starts.start(), &changed);
+    let_tasks_run().await;
     starts.listed.store(false, Ordering::SeqCst);
-    owners.track(want(Holding::Whole), starts.start(), &changed);
-    settle().await;
-    assert_eq!(serving(&owners), Some(Holding::Trimmed));
+    owners.track(want(Stored::Whole), starts.start(), &changed);
+    let_tasks_run().await;
+    assert_eq!(serving(&owners), Some(Stored::Trimmed));
     list_all(&owners);
-    assert_eq!(serving(&owners), Some(Holding::Whole));
+    assert_eq!(serving(&owners), Some(Stored::Whole));
 }
 
 #[rstest]
@@ -193,21 +197,21 @@ async fn a_kind_keeps_its_old_store_until_the_new_one_lists() {
 async fn a_kind_once_whole_stays_whole() {
     let (owners, starts) = (CustomOwners::default(), Starts::new());
     let (changed, _) = watch::channel(());
-    owners.track(want(Holding::Whole), starts.start(), &changed);
-    settle().await;
-    owners.track(want(Holding::Trimmed), starts.start(), &changed);
-    settle().await;
+    owners.track(want(Stored::Whole), starts.start(), &changed);
+    let_tasks_run().await;
+    owners.track(want(Stored::Trimmed), starts.start(), &changed);
+    let_tasks_run().await;
     let count = starts.count.load(Ordering::SeqCst);
-    assert_eq!((serving(&owners), count), (Some(Holding::Whole), 1));
+    assert_eq!((serving(&owners), count), (Some(Stored::Whole), 1));
 }
 
 #[rstest]
 #[tokio::test(start_paused = true)]
-async fn a_kind_nothing_names_stops() {
+async fn a_kind_no_longer_wanted_loses_its_watch() {
     let (owners, starts) = (CustomOwners::default(), Starts::new());
     let (changed, _) = watch::channel(());
-    owners.track(want(Holding::Trimmed), starts.start(), &changed);
-    settle().await;
+    owners.track(want(Stored::Trimmed), starts.start(), &changed);
+    let_tasks_run().await;
     owners.track(BTreeMap::new(), starts.start(), &changed);
     assert_eq!(serving(&owners), None);
 }
@@ -216,12 +220,15 @@ async fn a_kind_nothing_names_stops() {
 #[case::listed(true, super::Watch::Listed)]
 #[case::listing(false, super::Watch::Listing)]
 #[tokio::test(start_paused = true)]
-async fn says_how_far_each_watch_has_come(#[case] listed: bool, #[case] expected: super::Watch) {
+async fn reports_whether_each_watch_has_listed(
+    #[case] listed: bool,
+    #[case] expected: super::Watch,
+) {
     let (owners, starts) = (CustomOwners::default(), Starts::new());
     starts.listed.store(listed, Ordering::SeqCst);
     let (changed, _) = watch::channel(());
-    owners.track(want(Holding::Trimmed), starts.start(), &changed);
-    settle().await;
+    owners.track(want(Stored::Trimmed), starts.start(), &changed);
+    let_tasks_run().await;
     let found = owners.watched_kinds();
     assert_eq!(found.get(&kind("Widget")), Some(&expected));
 }

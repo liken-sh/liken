@@ -1,14 +1,14 @@
-//! Ways in: every host or address, and port, where a request from
-//! outside the cluster enters it, with the gates the cluster's objects
-//! put on the way to a pod: TLS, sign-in, and a NetworkPolicy.
+//! The ways in: each host, or address and port, where a request from
+//! outside the cluster enters it.  Each way has three gates, the checks
+//! that the cluster's objects put on the path to a pod: TLS, sign-in,
+//! and a NetworkPolicy.
 //!
-//! The rows come from three sources.  Ingresses give a row on each port
-//! their controller serves them on.  LoadBalancer and NodePort Services
-//! give a row each.  Pods that hold host ports or run on their machine's
-//! network give a row each.  A load balancer's listener pods are part
-//! of their Service's row, and requests to the Ingress hosts enter
-//! through the ingress controller's own Service, so neither of those
-//! gets a row of its own.
+//! An Ingress gets a row for each port that its controller serves it
+//! on.  A LoadBalancer or NodePort Service gets a row.  A pod that uses
+//! host ports or the host network gets a row.  A load balancer's
+//! listener pods are part of their Service's row.  The address of the
+//! ingress controller's Service, where requests to the Ingress hosts
+//! enter, gets no row, and the page states it under the table instead.
 
 pub mod addresses;
 pub mod backends;
@@ -46,13 +46,13 @@ use transect_resources::intent::Line;
 pub enum Isolation {
     Isolated,
     Open,
-    /// Its pods are on their machine's network, where no NetworkPolicy
-    /// applies.
+    /// Its pods use the host network, where NetworkPolicy does not
+    /// apply.
     MachineNetwork,
 }
 
 /// The ingress controller that serves an Ingress: its workload, and the
-/// ports it declares it serves Ingresses on.
+/// entry points where it serves Ingresses.
 pub struct Controller<'a> {
     pub workload: Option<Object>,
     pub entry_points: Option<&'a EntryPoints>,
@@ -73,18 +73,19 @@ pub struct Sources<'a> {
     /// The workloads a Service selects.
     pub selected: &'a dyn Fn(&Object) -> Vec<Object>,
     pub isolation: &'a dyn Fn(&Object) -> Option<Isolation>,
-    /// The rules that admit callers to an isolated workload.
+    /// The NetworkPolicy rules that let callers reach an isolated
+    /// workload.
     pub admissions: &'a dyn Fn(&Object) -> Vec<Admission>,
-    /// The objects an Ingress sends each request to before its
-    /// workload, which sign its callers in.
+    /// The objects that sign in an Ingress's callers, which receive
+    /// each request before the Ingress's workload does.
     pub sign_in: &'a dyn Fn(&Object) -> Vec<Object>,
     pub controller: &'a dyn Fn(&Ingress) -> Controller<'a>,
-    /// The workloads that at least one route signs its callers in
-    /// through.
+    /// The workloads that at least one route uses to sign in its
+    /// callers.
     pub signs_in: &'a BTreeSet<Object>,
-    /// The sentence, written on a workload or a route, that states that
-    /// the workload signs its callers in itself.  The API does not show
-    /// this, so a person has to write it.
+    /// The line of intent on a workload or a route that says the
+    /// workload signs in its callers itself.  No Kubernetes object
+    /// shows this, so a person declares it.
     pub declares: &'a dyn Fn(&Object) -> Option<Line>,
 }
 
@@ -100,10 +101,10 @@ pub enum Through {
     MachineNetwork,
 }
 
-/// Whether the cluster's objects put a gate on a way: on all of the
-/// routes or pods in a row, on some, or on none.  When the API does not
-/// show a gate, the gate is declared if the people who run the cluster
-/// wrote a sentence that states it is there.
+/// How much of a row a gate covers: `On` when every route or pod in
+/// the row has it, `Half` when some do, and `Off` when none do.  A gate
+/// is `Declared` when no object shows it but a line of intent says it
+/// is there.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum State {
     On,
@@ -112,14 +113,14 @@ pub enum State {
     Off,
 }
 
-/// One gate on one way: its state, its title, the objects that put it
-/// there, and where the sentence that declares it was written.
+/// One gate on one way.  `names` lists the objects that put it there,
+/// and `declared_at` is where the line of intent that declares it was written.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Gate {
     pub state: State,
     pub title: String,
     pub names: Vec<Object>,
-    pub said: Option<Provenance>,
+    pub declared_at: Option<Provenance>,
 }
 
 impl Gate {
@@ -128,32 +129,32 @@ impl Gate {
             state,
             title: title.into(),
             names: Vec::new(),
-            said: None,
+            declared_at: None,
         }
     }
 
-    /// The gate a sentence declares.
+    /// The gate that a line of intent declares.
     fn declared(line: &Line) -> Self {
         Self {
             state: State::Declared,
             title: line.text.clone(),
             names: Vec::new(),
-            said: Some(line.provenance.clone()),
+            declared_at: Some(line.provenance.clone()),
         }
     }
 }
 
 /// The sign-in gate of a way that reaches `workloads`, when no object
-/// puts one on it.  The gate is declared when each of them has a
-/// sentence that states it signs its callers in itself, half when some
-/// do, and open otherwise.
+/// puts one on it.  The gate is `Declared` when every workload has a
+/// line of intent that says it signs in its callers itself, `Half` when
+/// some do, and `Off` when none do.
 fn declared_sign_in(workloads: &[Object], sources: &Sources) -> Gate {
     let declared: Vec<Line> = workloads.iter().filter_map(sources.declares).collect();
     match declared.first() {
         Some(line) if declared.len() == workloads.len() => Gate::declared(line),
         Some(line) => Gate {
             state: State::Half,
-            said: Some(line.provenance.clone()),
+            declared_at: Some(line.provenance.clone()),
             ..Gate::of(
                 State::Half,
                 &format!(
@@ -173,25 +174,26 @@ fn declared_sign_in(workloads: &[Object], sources: &Sources) -> Gate {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Way {
     pub through: Through,
-    /// A host, or the addresses it answers on, in words.
+    /// A host, or a description of the addresses that accept requests.
     pub name: String,
-    /// The objects that open it: Ingresses, or a Service.
+    /// The objects that create it: Ingresses, or a Service.
     pub via: Vec<Object>,
     pub ports: Vec<String>,
     pub tls: Gate,
     pub sign_in: Gate,
     pub policy: Gate,
     pub reaches: Vec<Object>,
-    /// The Services it passes and the ports its workloads answer on.
+    /// The Services it passes through and the ports its workloads
+    /// serve.
     pub backends: Vec<Backend>,
-    /// The machine whose address this way is, when it is the address of
-    /// one machine.  `name` includes the machine's name.
+    /// The machine, when this way is the address of one machine.
+    /// `name` starts with the machine's name.
     pub machine: Option<String>,
 }
 
 impl Way {
-    /// How `self` and `other` order in a list: by what they go through,
-    /// then by name, hosts in DNS order, then by ports.
+    /// Orders ways by what they go through, then by name (hosts in DNS
+    /// order), then by ports.
     pub fn order(&self, other: &Way) -> std::cmp::Ordering {
         self.through
             .cmp(&other.through)
@@ -199,10 +201,9 @@ impl Way {
             .then_with(|| self.ports.cmp(&other.ports))
     }
 
-    /// Splits the name into the machine's name, with a link to the
-    /// machine's page, and the words after it, so a page can link the
-    /// machine on its own.  A way that is not the address of one
-    /// machine returns no machine and its whole name.
+    /// Splits `name` into the machine's name, linked to the machine's
+    /// page, and the rest of the name.  A way that is not one machine's
+    /// address returns `None` and the whole name.
     pub fn on_machine(&self) -> (Option<Named>, String) {
         let parted = self.machine.as_deref().and_then(|machine| {
             let rest = self.name.strip_prefix(machine)?;
@@ -216,9 +217,9 @@ impl Way {
     }
 }
 
-/// An ingress controller the hosts enter through: its workload, how
-/// many hosts it serves, and the Service it answers on, with its ports
-/// and addresses.
+/// An ingress controller that receives the requests to Ingress hosts:
+/// its workload, how many hosts it serves, and its Service with that
+/// Service's ports and addresses.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Entered {
     pub workload: Object,
@@ -226,19 +227,18 @@ pub struct Entered {
     pub service: Option<(Object, Vec<String>, String)>,
 }
 
-/// Every way in, and the objects that the page names in the lines under
+/// Every way in, and the objects that the page lists in the lines under
 /// the rows.
 #[derive(Debug, Default)]
 pub struct Ways {
     pub rows: Vec<Way>,
     pub entered: Vec<Entered>,
-    /// The Ingresses that route only to workloads that other routes sign
-    /// in through, with the number of hosts each routes.  Such an
-    /// Ingress is the sign-in's own callback, so it is not a way in of
-    /// its own.
+    /// The Ingresses that route only to sign-in workloads of other
+    /// routes, with the number of hosts each routes.  Such an Ingress
+    /// serves the sign-in's callback, so it is not a way in.
     pub callbacks: Vec<(Object, usize)>,
-    /// The Ingresses whose class transect finds no ingress controller
-    /// workload for in the cluster, so they are not ways in.
+    /// The Ingresses whose class has no ingress controller workload in
+    /// the cluster, so they are not ways in.
     pub unserved: Vec<Object>,
 }
 
@@ -252,7 +252,6 @@ impl Ways {
     }
 }
 
-/// "3 machines' addresses", or "1 machine's address".
 fn machines(count: usize) -> String {
     match count {
         1 => "1 machine's address".into(),
@@ -260,8 +259,9 @@ fn machines(count: usize) -> String {
     }
 }
 
-/// "node-a's address" for one machine, by name, and "3 machines'
-/// addresses" for several, with the one machine's name.
+/// A description of the addresses of `nodes`, such as "node-a's
+/// address" or "3 machines' addresses", and the machine's name when
+/// there is exactly one.
 fn machines_named(nodes: &std::collections::BTreeSet<String>) -> (String, Option<String>) {
     match nodes.iter().collect::<Vec<_>>().as_slice() {
         [node] => (format!("{node}'s address"), Some(node.to_string())),

@@ -1,7 +1,7 @@
-//! How traffic reaches each workload.  This crate evaluates each
-//! `NetworkPolicy`, builds the entry of each workload from its
-//! Services and Ingresses, and resolves the addresses that
-//! one object names of another.
+//! Evaluates how traffic reaches each workload: `NetworkPolicy`
+//! rules, the entry path of each workload through its `Service` and
+//! `Ingress` objects, and the objects that an address or name in one
+//! object's fields refers to.
 
 pub mod addresses;
 pub mod entry;

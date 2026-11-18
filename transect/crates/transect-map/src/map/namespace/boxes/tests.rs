@@ -1,5 +1,5 @@
-//! Tests that build the boxes from a namespace of workloads, pods, and
-//! Services.
+//! Tests that build the boxes from a namespace with workloads, pods,
+//! and Services.
 
 use k8s_openapi::api::apps::v1::Deployment;
 use k8s_openapi::api::batch::v1::CronJob;
@@ -26,8 +26,8 @@ fn cron_job(name: &str) -> Arc<CronJob> {
     )))
 }
 
-/// A pod of the app labelled `app`, on `node`, in `phase`, with
-/// `volumes` as YAML.
+/// A pod of the app labelled `app`, on `node`, in `phase`, whose
+/// `volumes` are the YAML `volumes`.
 fn pod(app: &str, node: &str, phase: &str, volumes: &str) -> Pod {
     yaml(&format!(
         "metadata: {{namespace: shop, name: {app}-1, labels: {{app: {app}}}}}\nspec: {{nodeName: {node}, containers: [], volumes: {volumes}}}\nstatus: {{phase: {phase}}}"
@@ -65,7 +65,7 @@ impl Namespace {
         }
     }
 
-    /// A `Deployment` named `name`, with one pod per entry in `nodes`.
+    /// A `Deployment` named `name`, with one pod on each node in `nodes`.
     fn deployment(mut self, name: &str, nodes: &[&str], template: &str, volumes: &str) -> Self {
         let owner = workload("apps", "Deployment", name);
         for node in nodes {

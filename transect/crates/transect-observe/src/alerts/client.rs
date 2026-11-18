@@ -7,21 +7,20 @@ use std::time::Duration;
 use super::parse;
 use super::{Alert, Source};
 
-/// How long one request may take.  An Alertmanager that stops answering
-/// would otherwise hold a poll open forever, and the map would keep
+/// How long one request may take.  Without a limit, an Alertmanager
+/// that stops responding holds a poll open forever, and the map keeps
 /// showing the last alerts it read as if they still fired.
 const TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Clone)]
 pub struct Alertmanager {
     client: reqwest::Client,
-    /// The URL that `Alertmanager::new` received, without a trailing
-    /// slash.
+    /// The API's URL without a trailing slash, for `serves`.
     url: String,
     alerts_url: String,
-    /// The base URL of the web interface that a browser opens.  It may
-    /// differ from the address where transect reads the API, for
-    /// example when transect reads the API through a port-forward.
+    /// The base URL of the web interface that a browser opens.  It
+    /// differs from `url` when transect reads the API through a
+    /// port-forward, for example.
     ui: String,
 }
 
@@ -36,7 +35,9 @@ impl std::fmt::Display for FetchError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Unreachable(error) => write!(f, "Alertmanager is unreachable: {error}"),
-            Self::Unreadable(error) => write!(f, "Alertmanager's answer was unreadable: {error:#}"),
+            Self::Unreadable(error) => {
+                write!(f, "Alertmanager's response was unreadable: {error:#}")
+            }
         }
     }
 }
@@ -79,7 +80,7 @@ impl Alertmanager {
             .await
             .map_err(|error| FetchError::Unreadable(error.into()))?;
         if !status.is_success() {
-            let error = anyhow::anyhow!("{status}");
+            let error = anyhow::anyhow!("the status is {status}");
             return Err(FetchError::Unreadable(error));
         }
         let mut alerts = parse::alerts(&body, source).map_err(FetchError::Unreadable)?;
@@ -90,10 +91,10 @@ impl Alertmanager {
     }
 }
 
-/// Alertmanager's page for the alerts named `name`.  The alerts API
-/// does not report which group an alert is in, and an alert is in one
-/// group for each route that it matches.  So the link filters on the
-/// alert's name, because routes conventionally group by `alertname`.
+/// Alertmanager's page for the alerts named `name`.  `/api/v2/alerts`
+/// does not say which group an alert is in, and an alert is in a group
+/// for each route that it matches.  So the link filters on `alertname`,
+/// which routes conventionally group by.
 fn group_link(ui: &str, name: &str) -> String {
     let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
     let filter = format!("{{alertname=\"{escaped}\"}}");

@@ -1,12 +1,8 @@
-//! Health by workload, with each reason attributed to the top owner of
-//! the built-in workload or pod that it names.
-//!
-//! The rules read Kubernetes's own kinds, so a reason about the
-//! `StatefulSet` that an operator's cache runs, or about one of its
-//! pods, belongs to the cache.  A custom kind's own conditions mean
-//! whatever its operator defines them to mean, so only the condition
-//! that its kind knowledge names, or a `Ready` condition, adds a reason
-//! of the cache's own.
+//! Groups a namespace's health by workload.  The pod and workload rules
+//! read only Kubernetes's own kinds, so each reason goes to the top owner
+//! of the object it is about.  A reason about the `StatefulSet` that a
+//! custom resource runs, or about one of its pods, shows on that custom
+//! resource.
 
 use std::collections::HashMap;
 
@@ -15,10 +11,11 @@ use transect_cluster::ownership::Ownership;
 use transect_graph::edges::Object;
 
 impl Reason {
-    /// The page that a card links the reason's line to.  `page` returns
-    /// the page of the pod that the reason is about, or of the top owner
-    /// of what it is about.  The function returns `None` when that object
-    /// is `own`, the object whose card it is, or when it has no page.
+    /// The page that a card links this reason's line to: the pod's page
+    /// for a reason about a pod, and otherwise the page of the top owner
+    /// of the reason's subject.  Returns `None` when that object is
+    /// `own`, the object whose card this is, or when `page` has no page
+    /// for it.
     pub fn page(
         &self,
         namespace: &str,
@@ -50,8 +47,8 @@ impl Reason {
             Self::RestartedAcross { workload, .. }
             | Self::Condition { workload, .. }
             | Self::LoggedErrors { workload, .. } => workload.clone(),
-            // A pod that is gone has no page that loads, so its matches
-            // are about the namespace.
+            // Lines from a pod that no longer exists, or from no pod, have
+            // no page to link to, so they count for the namespace.
             Self::Matched { origin, .. } => match origin {
                 Origin::Workload(workload) => workload.clone(),
                 Origin::GonePod(_) | Origin::NoPod => Object::new("", "Namespace", None, namespace),

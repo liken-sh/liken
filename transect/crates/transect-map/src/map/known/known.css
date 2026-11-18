@@ -1,7 +1,8 @@
 /*
- * A custom resource of a known kind in the middle of its relations.  The
- * server places the boxes, as it places the section view's, so the lines
- * under them end on their edges.  Colors are liken's tokens.
+ * A custom resource of a known kind, in the middle of its relations.
+ * The server positions the boxes, as it does for the section view, so
+ * the lines drawn under them end at the box edges.  The colors are the
+ * `liken` tokens.
  */
 
 .known-map {
@@ -16,9 +17,8 @@
 
 .known-count { color: var(--ink-faint); }
 
-/* The diagram is in a frame as wide as the column, on the background
-   color of the workload page's rows.  It is centered when the column is
-   wider than the diagram and scrolls sideways when it is narrower. */
+/* The diagram is centered in a frame as wide as the column, and scrolls
+   sideways when the column is narrower than the diagram. */
 .known-frame {
   padding: 16px;
   display: flex;
@@ -47,8 +47,8 @@
   border-radius: 10px;
 }
 
-/* The object in the middle takes a heavier rule than the boxes around
-   it, and its health's outline when it needs attention. */
+/* The object in the middle has a heavier border than the boxes around
+   it, and an outline in its health color when it needs attention. */
 .known-object {
   border: 2px solid var(--rule-strong);
   gap: 6px;
@@ -92,19 +92,19 @@
 
 .known-none { font-style: italic; }
 
-/* Why an object is at rest, under its name, in gray because rest is not
-   a problem. */
+/* The reason an object is at rest, below its name, is gray because
+   being at rest is not a problem. */
 .known-resting { color: var(--ink-muted); }
 
-/* Under the board, a legend for every relation on it. */
+/* The legend below the board lists every relation on it. */
 .known-caption {
   margin: 6px 0 0;
   font-size: 12px;
   color: var(--ink-faint);
 }
 
-/* The field a relation was read from ends its box, faint, since it is
-   where to look, not what to read first. */
+/* The field that a relation was read from is the last line of its box,
+   in faint ink, because it is not the first thing to read. */
 .known-source {
   margin-top: auto;
   color: var(--ink-faint);
@@ -127,7 +127,6 @@
   color: var(--ink-muted);
 }
 
-/* A value that names no object, such as a monitor, has a line in the
-   rule's color, because the field names the value but no object on the
-   map represents it. */
+/* The line to a value that is not the name of an object is in the rule
+   color, because the value has no box of its own on the map. */
 .known-path-value { stroke: var(--rule-strong); }

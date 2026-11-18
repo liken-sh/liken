@@ -1,6 +1,6 @@
-//! The event stream: a view's `main` block, pushed to each page open on
-//! that view over server-sent events after the cluster changes.  The
-//! renderings come from the view's task in `views`.
+//! The server-sent event stream of a page. When the cluster changes,
+//! the view's task in `views` renders the page's `main` block again,
+//! and each browser that has the page open receives it.
 
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -9,28 +9,27 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use futures::{Stream, StreamExt};
 use tokio::sync::watch;
 
-/// The SSE event name each page's `sse-swap` listens for.
+/// The SSE event name that each page's `sse-swap` attribute listens for.
 pub const VIEW: &str = "view";
 
-/// Streams the latest rendering as soon as a browser connects, then each
-/// new one.  The first event matters after a restart: htmx reconnects on
-/// its own, and the page it holds may be minutes old by then.  Dropping
-/// the stream when the browser leaves drops `latest`, which lowers the
-/// receiver count that the view's task reads to find how many browsers
-/// have it open.
+/// Sends the latest rendering when a browser connects, then each new
+/// rendering. The first event matters after a server restart, because
+/// htmx reconnects by itself and the page it shows may be minutes old.
+/// When the browser disconnects, axum drops the stream and `latest`
+/// with it. The view's task stops when no receiver is left.
 pub fn stream(
     latest: watch::Receiver<Arc<str>>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let events = renderings(latest).map(|html| Ok(Event::default().event(VIEW).data(&*html)));
-    // Proxies and load balancers close a connection that stays idle, often
-    // after a minute.  The keep-alive comment, sent every 15 s, keeps it
-    // open through a quiet cluster.
+    // Proxies and load balancers often close a connection that is idle
+    // for a minute. axum's default keep-alive sends a comment every 15
+    // seconds, so the connection stays open while the cluster is quiet.
     Sse::new(events).keep_alive(KeepAlive::default())
 }
 
-/// The latest rendering, then each new one.  An empty rendering, which a
-/// view publishes when its first render failed, is never sent, since
-/// swapping it in would blank the page.
+/// The latest rendering, then each new one. An empty rendering is
+/// skipped, because swapping it in would blank the page. A view
+/// publishes an empty rendering when its first render fails.
 fn renderings(latest: watch::Receiver<Arc<str>>) -> impl Stream<Item = Arc<str>> {
     futures::stream::unfold((latest, true), |(mut latest, mut first)| async move {
         loop {
@@ -66,7 +65,8 @@ mod tests {
     async fn skips_an_empty_rendering() {
         let (published, latest) = watch::channel(Arc::from(""));
         let mut renderings = std::pin::pin!(renderings(latest));
-        // The stream reads the empty rendering before this publishes.
+        // `yield_now` lets the stream read the empty rendering before
+        // the next one is published.
         let publish = async {
             tokio::task::yield_now().await;
             published.send_replace(Arc::from("two"));

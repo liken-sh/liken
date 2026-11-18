@@ -1,10 +1,10 @@
-//! The section view's lines, as SVG paths computed from the same layout as its
-//! boxes.  Every spine line runs down from the middle of one box's
-//! bottom edge to the middle of another's top edge: straight when the
-//! two share a column, and otherwise down, across at the middle of the
-//! gap, and down again, so the lines from one box to several share a
-//! trunk and are drawn as a fan.  A line to a side box runs across
-//! instead, on the route that `side` computes.
+//! The section view's lines, as SVG paths computed from the same layout
+//! as its boxes. A spine line runs down from the middle of one box's
+//! bottom edge to the middle of another box's top edge. It is straight
+//! when the two boxes share a column. Otherwise it runs down, across
+//! at the middle of the gap, and down again, so the lines from one box
+//! to several share a trunk and are drawn as a fan. A line to a side box
+//! runs across instead, on the route that `side` computes.
 
 mod outer;
 mod side;
@@ -16,23 +16,24 @@ use std::collections::HashMap;
 
 use super::layout::{At, Layout, Rect};
 
-/// How far the arrowhead reaches past the end of its path, so the path
-/// stops short and the arrow's tip touches the box's edge.  The marker
-/// is 4 units long with its reference point 2 in, at a stroke width of 2.
+/// How far the arrowhead's tip extends past the end of its path. Each
+/// path stops this far short of its box so that the tip touches the
+/// box's edge. The SVG marker's tip is 2 marker units past its reference
+/// point, and the marker scales with the lines' stroke width of 2.
 pub const ARROW: i32 = 4;
 /// The radius of a line's corners.
 const CORNER: i32 = 8;
-/// The farthest below its source a spine line turns.  Between two
-/// adjacent rows it turns at the middle of the gap; across rows of side
-/// boxes, as from the entry to a workload with its callers' layers
-/// between them, it turns just under its source and runs down the spine,
-/// clear of the side lines' lanes.
+/// A spine line turns at the middle of the gap between its ends, but
+/// never more than this far below its source. So when rows of side boxes
+/// lie between its ends, as with the layers of a workload's callers
+/// between the entry and the workload, the line turns just below its
+/// source and stays clear of the side lines' lanes.
 const TURN: i32 = 48;
-/// How far to the right of the line it names a label is drawn.
+/// How far to the right of its line a spine label is drawn.
 const LABEL_OFFSET: i32 = 10;
 
 /// How a line is drawn, as the section view's legend explains: solid for
-/// structure, dashed for callers, and dotted for an edge transect
+/// structure, dashed for callers, and dotted for an edge that transect
 /// guessed.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Style {
@@ -52,9 +53,9 @@ impl Style {
     }
 }
 
-/// Which end of a label its point is.  A spine line's label starts
-/// beside the line.  A side line's label ends or starts at its side box,
-/// so the label is beside the box whose edge it names.
+/// Which end of a label its x coordinate is. A spine line's label
+/// starts beside the line. A side line's label starts or ends at its
+/// side box.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Anchor {
     Start,
@@ -77,8 +78,8 @@ pub struct Link {
     pub to: At,
     pub label: String,
     pub style: Style,
-    /// The source of an edge that the API did not give, which the line
-    /// shows on hover.
+    /// Where an edge came from when the API did not report it. The
+    /// line shows this on hover.
     pub title: Option<String>,
 }
 
@@ -114,11 +115,10 @@ pub struct Drawn {
     pub labels: Vec<Label>,
 }
 
-/// The paths of `links` over `layout`, and their labels.  A link to a
-/// box the layout lacks is left out.  When lines from one box share a
-/// label, it is drawn once on their trunk.  When lines into one box share
-/// a label, it is drawn once on the drop into that box.  So a fan shows
-/// one label.
+/// The paths of `links` over `layout`, and their labels. A link to a box
+/// that the layout lacks is left out. When lines from one box share a
+/// label, it is drawn once on their trunk. When lines into one box share
+/// a label, it is drawn once on the drop into that box.
 pub fn draw(layout: &Layout, links: &[Link]) -> Drawn {
     let (ties, rest): (Vec<&Link>, Vec<&Link>) = links.iter().partition(|link| is_tie(link));
     let (sides, spine): (Vec<&Link>, Vec<&Link>) = rest
@@ -132,7 +132,7 @@ pub fn draw(layout: &Layout, links: &[Link]) -> Drawn {
     drawn
 }
 
-/// Whether `link` joins two side boxes, as a tie does.
+/// Whether `link` joins two side boxes.
 pub fn is_tie(link: &Link) -> bool {
     link.from.on_side().is_some() && link.to.on_side().is_some()
 }
@@ -190,8 +190,9 @@ fn spine_lines(layout: &Layout, links: &[&Link]) -> Drawn {
     drawn
 }
 
-/// Straight down when the ends share a column; otherwise down to
-/// `middle`, across with rounded corners, and down to the end.
+/// A path that runs straight down when the ends share a column.
+/// Otherwise it runs down to `middle`, across with rounded corners, and
+/// down to the end.
 fn path(from: Point, to: Point, middle: i32) -> String {
     let end = to.y - ARROW;
     let dx = to.x - from.x;

@@ -1,27 +1,25 @@
-//! How tall the boxes of a known kind's diagram have to be to show
-//! everything in them.  The server places the boxes and draws the lines
-//! to their edges, so it sizes each box before the browser lays out its
-//! text.  A box sized by the browser alone would grow past the end of
-//! the line drawn to it, and a box of a fixed height clips its last
-//! lines.  The sizes are estimates from the box's width and the map's
-//! monospace, which wraps at a known number of characters.  The
-//! estimates are generous, so a box gets room to spare rather than too
-//! little.
+//! Estimates the heights of the boxes in a known kind's diagram.  The
+//! server draws each line to the edge of a box, so it sets the box's
+//! height before the browser lays out the text.  A box that the browser
+//! sized could grow past the end of its line, and a box of fixed height
+//! would clip its last lines.  The estimates count wrapped lines of the
+//! monospace font and round up, so a box has room to spare.
 
 use super::{Chip, End};
 
-/// The characters of the map's 12px monospace that fit across a box's
-/// inside, after its padding and rule.
-const CHARS: usize = 34;
+/// How many characters of the 12px monospace font in `known.css` fit
+/// on one line inside a box's padding and border.
+const LINE_CHARS: usize = 34;
 
-/// One line of text, and the gap between a box's items.
+/// The height of one line of text, and the gap between a box's items.
 const LINE: i32 = 19;
 const GAP: i32 = 4;
 
-/// A box's padding and rule, top and bottom together.
+/// A box's padding and border, top and bottom together.
 const FRAME: i32 = 2 * 12 + 2 * 2;
 
-/// The object's name, in the larger type, and one condition's chip.
+/// The heights of the object's name, which is in larger type, and of
+/// one chip.
 const NAME: i32 = 26;
 const CHIP: i32 = 26;
 const CHIP_GAP: i32 = 6;
@@ -29,7 +27,7 @@ const CHIP_GAP: i32 = 6;
 /// The lines `text` wraps to across a box.
 fn lines(text: &str) -> i32 {
     let chars = text.chars().count().max(1);
-    chars.div_ceil(CHARS) as i32
+    chars.div_ceil(LINE_CHARS) as i32
 }
 
 /// The height of a stack of items of the heights in `items`, with the
@@ -40,9 +38,9 @@ fn stacked(items: impl IntoIterator<Item = i32>) -> i32 {
     heights.iter().sum::<i32>() + gaps
 }
 
-/// The height a relation's box needs for its label, each end with what
-/// it reaches, and the field it was read from.  A box that names nothing
-/// shows one line that states this.
+/// The height a relation's box needs for its label, each value with
+/// the note under it, and the field the values were read from.  A box
+/// with no values still shows one line, "names nothing now".
 pub fn relation(label: &str, ends: &[End], source: &str) -> i32 {
     let mut items = vec![lines(label) * LINE];
     for end in ends {
@@ -56,9 +54,8 @@ pub fn relation(label: &str, ends: &[End], source: &str) -> i32 {
     FRAME + stacked(items)
 }
 
-/// The height the object's own box needs for its kind, its name, why
-/// it is at rest when it is, and each condition's chip on a line of its
-/// own.
+/// The height the object's box needs for its kind, its name, the calm
+/// reason in `resting` when there is one, and one line for each chip.
 pub fn center(kind: &str, resting: Option<&str>, chips: &[Chip]) -> i32 {
     let chips = CHIP * chips.len() as i32 + CHIP_GAP * (chips.len() as i32 - 1).max(0);
     let resting = resting.map_or(0, |text| lines(text) * LINE);
@@ -120,7 +117,7 @@ mod tests {
     }
 
     #[rstest]
-    fn makes_room_for_why_it_rests() {
+    fn makes_room_for_the_calm_reason() {
         let resting = center("Player", Some("Not reserved"), &[]);
         assert_eq!(resting, center("Player", None, &[]) + LINE + GAP);
     }

@@ -1,7 +1,8 @@
-//! The workload that serves each `IngressClass`'s Ingresses: the one
-//! that runs the image an `IngressController` declares for the class's
-//! controller, or a guess from the workloads that take the cluster's
-//! web traffic.
+//! Finds the workload that runs each `IngressClass`'s controller: the
+//! workload that runs the image an `IngressController` declares for
+//! it. When no `IngressController` declares one, `Serving` guesses
+//! among the workloads that a `LoadBalancer` `Service` sends web
+//! traffic to.
 
 use super::Snapshot;
 use transect_graph::edges::Object;
@@ -16,6 +17,8 @@ impl Snapshot {
             &self.ownership,
             self.alerts_service(),
         );
+        // `vital` returns a `HashMap`. Sort so the guess does not
+        // depend on its iteration order.
         let mut way_in: Vec<Object> = vital
             .into_iter()
             .filter(|(_, vital)| *vital == loss::Vital::WayIn)

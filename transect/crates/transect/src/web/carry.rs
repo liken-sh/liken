@@ -1,12 +1,12 @@
-//! Adding a view's edge kinds to every link it renders, so a click, a
-//! link opened in a new tab, and the page's own event stream all keep
-//! showing the edge kinds that the reader turned on, and pointing each
-//! name that a page of the access lens draws at its access page.
+//! Rewrites the links of a rendered page so the next page keeps the
+//! reader's view. `carry` adds the `edges` query parameter, the edge
+//! kinds that the reader turned on, to each link, so a click, a new
+//! tab, and the page's event stream show the same kinds. `carry_loss`
+//! keeps the loss view, and `carry_access` keeps the access lens.
 //!
-//! The links come from a dozen templates and view models, each of which
-//! would otherwise need the view's kinds passed down to it.  Rewriting
-//! the rendered page in one place keeps them all plain paths, and a
-//! link added later gets the kinds with no change to its template.
+//! The rewrite runs on the rendered HTML so that the templates write
+//! plain paths and need no view state passed down to them, and a link
+//! added to a template later is rewritten with no change.
 
 use std::collections::HashSet;
 
@@ -14,15 +14,15 @@ use std::collections::HashSet;
 const ATTRIBUTES: [&str; 3] = [" href=\"", " hx-get=\"", " sse-connect=\""];
 
 /// `html` with `edges=<edges>` added to each in-page link: every
-/// `href`, `hx-get`, and `sse-connect` whose value starts with `/`, but
-/// not static files and not a link that names its edge kinds already.
-/// The kinds go before a fragment, so a link to a band keeps its place.
+/// `href`, `hx-get`, and `sse-connect` whose value starts with `/`.
+/// Links to `/static/` and links that already have `edges=` are left
+/// alone. The parameter goes before a `#fragment`, so the link still
+/// opens at the same place on the page.
 pub fn carry(html: &str, edges: &str) -> String {
     let mut out = String::with_capacity(html.len() + html.len() / 16);
-    // Where each attribute next starts at or after `done`.  An attribute
-    // is searched for again only once the copy passes it, so each search
-    // resumes where its last one stopped and the page is read once per
-    // attribute, however many links it holds.
+    // The position of each attribute's next occurrence. Each is searched
+    // for again only after the copy passes it, so the page is scanned
+    // once per attribute, however many links it has.
     let mut next = ATTRIBUTES.map(|attribute| html.find(attribute));
     let mut done = 0;
     while let Some((which, at)) = first(&next) {
@@ -43,7 +43,8 @@ pub fn carry(html: &str, edges: &str) -> String {
     out
 }
 
-/// Which attribute starts first, and where.
+/// The index in `ATTRIBUTES` and the position of the attribute that
+/// occurs first.
 fn first(next: &[Option<usize>; 3]) -> Option<(usize, usize)> {
     let found = next.iter().enumerate();
     let found = found.filter_map(|(which, at)| Some((which, (*at)?)));
@@ -63,9 +64,9 @@ fn carried(link: &str, edges: &str) -> String {
     format!("{path}{joiner}edges={edges}{fragment}")
 }
 
-/// `html` with each link that selects a namespace on the cluster map
-/// keeping the loss of `lose`, so a click on a parcel in a loss view
-/// stays in the loss and opens that namespace's card in it.
+/// `html` with `lose=<lose>` added to each `href` and `hx-get` that
+/// starts with `/?select=`, so a namespace clicked on the cluster map
+/// opens in the same loss view.
 pub fn carry_loss(html: &str, lose: &[String]) -> String {
     let lose = lose.join(",");
     let mut out = html.to_string();
@@ -77,26 +78,23 @@ pub fn carry_loss(html: &str, lose: &[String]) -> String {
     out
 }
 
-/// The parts of a page whose links lead out of the access lens: the
-/// crumb, to each ancestor's usual page, and the lens tabs, to the
-/// object's other lenses.  Each opens with the first string and closes
-/// with the second.
-const LEAVING: [(&str, &str); 2] = [
+/// The parts of a page whose links `carry_access` leaves alone, as the
+/// text that opens each part and the text that closes it. The breadcrumb
+/// links to each ancestor's overview page, and the lens tabs link to the
+/// object's other lenses.
+const UNCHANGED_PARTS: [(&str, &str); 2] = [
     ("<nav class=\"elevation\"", "</nav>"),
     ("<span class=\"lens-tabs\"", "</span>"),
 ];
 
 /// `html`, a page of the access lens, with each link to an object that
-/// has an access page sent to that page, because a reader there is
-/// following access.  `paths` holds the usual page of each such object,
-/// every namespace and every workload that serves a port.  The crumb and
-/// the lens tabs keep their links.  Every card, drawing, list, and
-/// switcher row links names by their usual pages, and this function
-/// sends them all into the lens in one place.
+/// has an access page pointed at that access page instead, so the reader
+/// stays in the lens. `paths` holds the overview path of each such
+/// object: every namespace and every workload that serves a port.
 pub fn carry_access(html: &str, paths: &HashSet<String>) -> String {
     let mut out = String::with_capacity(html.len() + html.len() / 32);
     let mut rest = html;
-    while let Some((at, close)) = leaving(rest) {
+    while let Some((at, close)) = next_unchanged_part(rest) {
         out.push_str(&into_access(&rest[..at], paths));
         let end = rest[at..].find(close).map_or(rest.len(), |end| at + end);
         out.push_str(&rest[at..end]);
@@ -106,17 +104,17 @@ pub fn carry_access(html: &str, paths: &HashSet<String>) -> String {
     out
 }
 
-/// Where the first part of `html` that leads out of the lens starts,
-/// and what closes it.
-fn leaving(html: &str) -> Option<(usize, &'static str)> {
-    let found = LEAVING
+/// The position of the first part of `html` listed in
+/// `UNCHANGED_PARTS`, and the text that closes it.
+fn next_unchanged_part(html: &str) -> Option<(usize, &'static str)> {
+    let found = UNCHANGED_PARTS
         .iter()
         .filter_map(|(open, close)| Some((html.find(open)?, *close)));
     found.min_by_key(|(at, _)| *at)
 }
 
-/// `html` with each `href` and `hx-get` in `paths` sent to its access
-/// page, keeping its query and fragment.
+/// `html` with each `href` and `hx-get` whose path is in `paths`
+/// changed to that path plus `/access`, keeping its query and fragment.
 fn into_access(html: &str, paths: &HashSet<String>) -> String {
     let mut out = String::with_capacity(html.len());
     let mut done = 0;
@@ -190,7 +188,7 @@ mod tests {
     }
 
     #[rstest]
-    #[case::a_parcel(
+    #[case::a_namespace_on_the_map(
         r#"<a href="/?select=shop" hx-get="/?select=shop">"#,
         r#"<a href="/?lose=alpha,beta&select=shop" hx-get="/?lose=alpha,beta&select=shop">"#
     )]
@@ -217,7 +215,7 @@ mod tests {
         r#"<a class="object-link" href="/namespaces/shop/deployments/web">"#,
         r#"<a class="object-link" href="/namespaces/shop/deployments/web/access">"#
     )]
-    #[case::a_place_on_it(
+    #[case::a_fragment(
         r#"<a href="/namespaces/shop/deployments/web#changes">"#,
         r#"<a href="/namespaces/shop/deployments/web/access#changes">"#
     )]
@@ -241,11 +239,11 @@ mod tests {
         r#"<input data-hx-get="/namespaces/shop">"#,
         r#"<input data-hx-get="/namespaces/shop">"#
     )]
-    #[case::a_machine_named_in_a_way_in(
+    #[case::a_machine_link_beside_a_workload_link(
         r#"<a href="/machines/node-a">node-a</a><a href="/namespaces/shop/deployments/web">'s address</a>"#,
         r#"<a href="/machines/node-a">node-a</a><a href="/namespaces/shop/deployments/web/access">'s address</a>"#
     )]
-    fn carries_the_access_lens_onto_names(#[case] html: &str, #[case] expected: &str) {
+    fn points_links_at_access_pages(#[case] html: &str, #[case] expected: &str) {
         assert_eq!(carry_access(html, &paths()), expected);
     }
 }

@@ -1,8 +1,8 @@
-# k3s's service load balancer answers each LoadBalancer Service with a
-# DaemonSet in kube-system whose pods open the Service's ports as host
-# ports, and names the Service in two labels on each pod.  With this
-# resource, Ways in counts those pods on their Service's row and does
-# not show each as a host port of its own.
+# For each LoadBalancer Service, k3s's service load balancer creates a
+# DaemonSet in kube-system. Its pods open the Service's ports as host
+# ports and have the Service's name and namespace in two labels. With
+# this resource, "Ways in" shows those pods on their Service's row
+# instead of listing each one as a host port of its own.
 apiVersion: transect.liken.sh/v1alpha1
 kind: LoadBalancerController
 metadata:

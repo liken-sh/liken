@@ -1,16 +1,15 @@
-//! What an `IngressController` declares in `entry` about reading its
-//! traffic from Prometheus: the queries for each backend's request
-//! rate, 95th-percentile latency, and 5xx rate, the label that names a
-//! backend in their results, and how the controller names a `Service`
-//! it sends to.  transect's code names no controller's metrics, so the
-//! resource declares them.
+//! The `entry` section of an `IngressController`: the Prometheus
+//! queries for each backend's request rate, 95th-percentile latency,
+//! and 5xx rate, and how to find a backend in their results.  Each
+//! controller names its metrics differently, and transect has none of
+//! those names built in, so the resource declares them.
 
 use serde::Deserialize;
 
 /// The placeholders a backend's name may contain.
 const BACKEND_PLACEHOLDERS: [&str; 3] = ["{namespace}", "{service}", "{port}"];
 
-/// The `entry` section of an `IngressController`, validated.
+/// The `entry` section, validated.
 #[derive(Clone, Debug, PartialEq)]
 pub struct EntryQueries {
     /// The label that names the backend in each result.
@@ -24,11 +23,12 @@ pub struct EntryQueries {
     pub latency: String,
     /// Responses with a 5xx status per second, by backend.
     pub errors: String,
-    /// The span the queries' rates cover, as the page shows it.
+    /// The time range of the queries' rates, as text for the page,
+    /// such as `5m`.
     pub window: String,
 }
 
-/// The section as written.
+/// The section as it is in the YAML.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Written {
@@ -50,7 +50,7 @@ pub fn read(written: Written) -> Result<EntryQueries, String> {
     let name = &written.backend.name;
     if !name.contains("{service}") {
         return Err(format!(
-            "entry.backend.name {name:?} has no {{service}}, so it would name every backend alike"
+            "entry.backend.name {name:?} has no {{service}}, so every backend would get the same name"
         ));
     }
     let mut rest = name.clone();
@@ -59,7 +59,7 @@ pub fn read(written: Written) -> Result<EntryQueries, String> {
     }
     if rest.contains('{') {
         return Err(format!(
-            "entry.backend.name {name:?} contains a placeholder other than {{namespace}}, {{service}}, and {{port}}"
+            "entry.backend.name {name:?} has a placeholder other than {{namespace}}, {{service}}, and {{port}}"
         ));
     }
     Ok(EntryQueries {
@@ -73,7 +73,7 @@ pub fn read(written: Written) -> Result<EntryQueries, String> {
 }
 
 impl EntryQueries {
-    /// The name the controller gives the backend `service` on `port` in
+    /// The value of `label` for the backend `service` on `port` in
     /// `namespace`.
     pub fn backend(&self, namespace: &str, service: &str, port: &str) -> String {
         self.backend
@@ -102,7 +102,7 @@ mod tests {
     #[rstest]
     #[case::no_service("'{namespace}-{port}'", "no {service}")]
     #[case::another_placeholder("'{namespace}-{service}-{host}'", "other than")]
-    fn says_why_a_backend_name_does_not_validate(#[case] name: &str, #[case] says: &str) {
+    fn rejects_an_invalid_backend_name_with_the_reason(#[case] name: &str, #[case] message: &str) {
         let spec = SPEC.replace("'{namespace}-{service}-{port}'", name);
         let text = format!(
             "metadata: {{name: proxy}}
@@ -110,6 +110,6 @@ spec: {spec}
 "
         );
         let error = parse(DocId::default(), serde_yaml::from_str(&text).unwrap()).unwrap_err();
-        assert!(error.contains(says), "{error:?} does not say {says:?}");
+        assert!(error.contains(message), "{error:?} lacks {message:?}");
     }
 }

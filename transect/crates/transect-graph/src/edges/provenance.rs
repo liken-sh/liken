@@ -1,9 +1,9 @@
-//! Which layer of "What transect knows" a fact came from.  A fact read
-//! from the API has no mark, because such facts are most of the map; a
-//! fact from stored text has one, so a reader can tell what the cluster
-//! reports from what someone wrote about it.
+//! Where an edge or a card line came from.  A line that does not come
+//! from the API shows a mark, so a reader can tell what the cluster
+//! reports from what someone wrote about it or what `transect` guessed.
+//! Facts from the API, which are most of the map, show no mark.
 
-/// Where an edge or a card line came from.
+/// The source of an edge or a card line.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Provenance {
     /// Read from the Kubernetes API.
@@ -11,31 +11,31 @@ pub enum Provenance {
     Kubernetes,
     /// Written by the people who run the cluster.
     Intent(Stated),
-    /// Read through the kind knowledge an operator ships: its name, and
-    /// the field of it, or the field path of the object, that gave the
-    /// fact.
+    /// Read through a `KindKnowledge` that an operator ships.  `field`
+    /// is the field of the knowledge, or the path in the object, that
+    /// gave the fact.
     Kinds { knowledge: String, field: String },
-    /// Read through the device knowledge a DRA driver's operator ships:
-    /// the driver it is named for, the attribute that gave the fact, and
-    /// the reference's label, the verb a page shows for the edge.
+    /// Read through the `DeviceKnowledge` for a DRA driver.  `attribute`
+    /// is the device attribute that gave the fact, and `label` is the
+    /// verb that a page shows for the edge.
     Devices {
         driver: String,
         attribute: String,
         label: String,
     },
     /// Read from the description at the top of a custom kind's CRD
-    /// schema, by the CRD's name, which the operator writes as it
-    /// writes kind knowledge.
+    /// schema.  The operator ships it with the kind, so it takes the
+    /// same mark as kind knowledge.
     Definition { crd: String },
-    /// Read from an image's labels, with the image when the line is not
-    /// shown under it.
+    /// Read from an image's labels.  The image is named when the line
+    /// is not shown under that image.
     Image(Option<String>),
     /// Guessed from the name of a field of a custom resource whose kind
-    /// has no knowledge, by its path.
+    /// has no kind knowledge.  `field` is the field's path.
     Guess { field: String },
-    /// Read from the labels and annotations a custom kind's CRD shares
-    /// with one workload, which show they were installed together: the
-    /// CRD's name, and each label that matched as `key=value`.
+    /// Read from the labels and annotations that a CRD shares with a
+    /// workload, which show that they were installed together.  `labels`
+    /// lists each one that matched, as `key=value`.
     Package { crd: String, labels: Vec<String> },
 }
 
@@ -44,36 +44,32 @@ pub enum Provenance {
 pub enum Stated {
     /// An annotation on the object, as "Deployment web".
     Annotation { field: String, on: String },
-    /// An overlay that takes the place of that annotation, by its file.
+    /// An overlay file that supplies the same field as an annotation.
     Overlay { field: String, file: String },
     /// An `Intent` resource, as "shop/the-database".
     Resource { field: String, name: String },
     /// An `Outside` resource, by its name.
     Outside { field: String, name: String },
-    /// An `IngressController` resource, by its name, which declares
-    /// what its controller's own configuration does.
+    /// An `IngressController` resource, by its name.
     IngressController { field: String, name: String },
     /// Intent written for a `Secret`, and so for the workloads that read
-    /// it, with the way `transect` read it.  `transect` never reads a
-    /// `Secret`'s data, and reads its annotations only when
-    /// `--secret-annotations` is set.
+    /// it.  `transect` never reads a `Secret`'s data, and reads its
+    /// annotations only with `--secret-annotations`.
     Secret { stated: Box<Stated>, way: Way },
 }
 
-/// Which way `transect` read the intent for a `Secret`.
+/// How `transect` found the intent for a `Secret`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Way {
-    /// From the object that writes the `Secret`, such as a secrets
-    /// operator's custom resource, by the `Secret`'s name.
+    /// From the object that writes the `Secret`, such as a custom
+    /// resource of a secrets operator.  `secret` is the `Secret`'s name.
     Producer { secret: String },
-    /// From the `Secret`'s own annotations, by its name, which `transect`
-    /// reads only with `--secret-annotations`.
+    /// From the `Secret`'s own annotations.  `secret` is the `Secret`'s
+    /// name.
     Annotations { secret: String },
 }
 
-/// The words a mark shows, which the legend explains.  The first three
-/// are stored text; a guess is read from the cluster, but only from what
-/// a field is named.
+/// The text of each mark, and its meaning in the legend.
 const MARKS: [(&str, &str); 4] = [
     ("intent", "written by the people who run the cluster"),
     ("kind", "from the kind knowledge"),
@@ -81,11 +77,13 @@ const MARKS: [(&str, &str); 4] = [
     ("guess", "from what a field of a custom resource is named"),
 ];
 
-/// How many of `MARKS` are stored text.
+/// The first `STORED` marks are for text that someone stored.  A guess
+/// is read from the cluster, from the name of a field, so the legend
+/// does not call it stored text.
 const STORED: usize = 3;
 
 impl Provenance {
-    /// The word the mark shows, or none for a fact that has no mark.
+    /// The text of this fact's mark, or none when the fact has no mark.
     pub fn mark(&self) -> Option<&'static str> {
         match self {
             Self::Kubernetes | Self::Package { .. } => None,
@@ -96,8 +94,8 @@ impl Provenance {
         }
     }
 
-    /// The mark's title: what the mark means, then where the fact was
-    /// written, so a reader who hovers a mark learns both.
+    /// The hover text of the mark: what the mark means, then where the
+    /// fact came from.
     pub fn hover(&self) -> String {
         let meaning = MARKS.iter().find(|(mark, _)| Some(*mark) == self.mark());
         match meaning {
@@ -106,7 +104,7 @@ impl Provenance {
         }
     }
 
-    /// Where the fact came from.
+    /// A phrase that says where the fact came from.
     pub fn title(&self) -> String {
         match self {
             Self::Kubernetes => "from the Kubernetes API".into(),
@@ -143,7 +141,8 @@ fn capitalized(text: &str) -> String {
 }
 
 impl Stated {
-    /// Where the intent was written, for a mark's title.
+    /// A phrase that says where the intent was written, for the hover
+    /// text of a mark.
     pub fn title(&self) -> String {
         match self {
             Self::Annotation { field, on } => format!("from {field} on {on}"),
@@ -167,8 +166,9 @@ impl Stated {
 }
 
 impl Provenance {
-    /// This provenance for a list read for the workloads that read a
-    /// `Secret`, the way `way` gives.  Only intent is read that way.
+    /// This provenance as found through a `Secret` in the way `way`.
+    /// Only intent can come through a `Secret`, so any other provenance
+    /// is returned unchanged.
     pub fn through(self, way: Way) -> Self {
         match self {
             Self::Intent(stated) => Self::Intent(Stated::Secret {
@@ -180,11 +180,11 @@ impl Provenance {
     }
 }
 
-/// The mark a section's heading shows in place of its lines' marks:
-/// the one that all of two or more lines have, or, for lines read through
-/// one kind knowledge from different fields, that knowledge.  A section
-/// with an unmarked line, or with marks from different places, keeps
-/// each line's own.
+/// The provenance that a section's heading shows in place of the marks
+/// on its lines, when two or more lines all have the same marked
+/// provenance.  Lines from different fields of one `KindKnowledge`
+/// share that knowledge, with no field.  Otherwise it returns none, and
+/// each line keeps its own mark.
 pub fn shared<'a>(marks: impl IntoIterator<Item = Option<&'a Provenance>>) -> Option<Provenance> {
     let marks: Vec<&Provenance> = marks.into_iter().collect::<Option<_>>()?;
     let (first, rest) = marks.split_first()?;
@@ -204,10 +204,10 @@ pub fn shared<'a>(marks: impl IntoIterator<Item = Option<&'a Provenance>>) -> Op
     })
 }
 
-/// The mark a group of a section's lines shows, when the section has
-/// unmarked lines and two or more marked ones that share a mark: the
-/// unmarked lines list first, and the marked ones follow under the one
-/// mark, so it shows once in place of on every line.
+/// The provenance for the marked lines of a section that also has
+/// unmarked lines, as `shared` finds it for the marked lines alone.  The
+/// section shows the unmarked lines first and the marked lines after
+/// them under one mark.  It returns none when every line is marked.
 pub fn grouped<'a>(marks: impl IntoIterator<Item = Option<&'a Provenance>>) -> Option<Provenance> {
     let (marked, unmarked): (Vec<_>, Vec<_>) = marks
         .into_iter()
@@ -218,9 +218,9 @@ pub fn grouped<'a>(marks: impl IntoIterator<Item = Option<&'a Provenance>>) -> O
     shared(marked)
 }
 
-/// The legend line for a card whose lines have `provenances`, which
-/// states what each mark among them means, or none when no line is
-/// marked.
+/// The legend line for a card whose lines have `provenances`.  It
+/// explains each mark that appears, and returns none when no line has a
+/// mark.
 pub fn legend<'a>(provenances: impl IntoIterator<Item = &'a Provenance>) -> Option<String> {
     let shown: Vec<&str> = provenances
         .into_iter()
@@ -256,7 +256,7 @@ mod tests {
         "Written by the people who run the cluster · from why on Deployment web"
     )]
     #[case::the_api(Provenance::Kubernetes, "from the Kubernetes API")]
-    fn its_title_says_what_the_mark_means_and_where(
+    fn hover_text_says_what_the_mark_means_and_where_it_came_from(
         #[case] provenance: Provenance,
         #[case] hover: &str,
     ) {
@@ -280,7 +280,7 @@ mod tests {
     #[case::an_unmarked_line(vec![Some(kind("spec.a")), None], None)]
     #[case::kubernetes_lines(vec![Some(Provenance::Kubernetes), Some(Provenance::Kubernetes)], None)]
     #[case::different_places(vec![Some(kind("spec.a")), Some(annotation())], None)]
-    fn marks_a_heading_when_every_line_shares_a_mark(
+    fn marks_a_heading_when_every_line_shares_a_provenance(
         #[case] marks: Vec<Option<Provenance>>,
         #[case] title: Option<&str>,
     ) {
@@ -355,12 +355,12 @@ mod tests {
         Some("guess"),
         "a guess from the field spec.serviceName"
     )]
-    #[case::the_image_above(
+    #[case::a_line_shown_under_its_image(
         Provenance::Image(None),
         Some("image"),
         "from the image's description label"
     )]
-    fn marks_stored_text(
+    fn marks_and_titles_each_provenance(
         #[case] provenance: Provenance,
         #[case] mark: Option<&str>,
         #[case] title: &str,
@@ -377,7 +377,7 @@ mod tests {
         vec![Provenance::Image(None), Provenance::Kubernetes, Provenance::Image(None)],
         Some("Marked lines are stored text, not read from the cluster. image: from an image's labels. Hover a mark for its source.")
     )]
-    #[case::both_in_the_legends_order(
+    #[case::marks_in_the_order_of_the_table(
         vec![Provenance::Image(None), annotation()],
         Some("Marked lines are stored text, not read from the cluster. intent: written by the people who run the cluster; image: from an image's labels. Hover a mark for its source.")
     )]
@@ -385,7 +385,7 @@ mod tests {
         vec![Provenance::Guess { field: "spec.a".into() }],
         Some("guess: from what a field of a custom resource is named. Hover a mark for its source.")
     )]
-    fn explains_the_marks_a_card_shows(
+    fn explains_the_marks_on_a_card(
         #[case] provenances: Vec<Provenance>,
         #[case] expected: Option<&str>,
     ) {

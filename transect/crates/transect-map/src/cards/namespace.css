@@ -1,8 +1,7 @@
 /*
- * The namespace card, which takes the sidebar's column when a namespace
- * is selected.  Names, hosts, and chips are monospace, as the map
- * draws names, and the chips have the --panel background of the
- * parcels that they represent.
+ * The namespace card, which replaces the sidebar's content when a
+ * namespace is selected. Names, hosts, and chips use the monospace font,
+ * as names do on the map.
  */
 
 .namespace-head {
@@ -29,8 +28,8 @@
   color: var(--ink-muted);
 }
 
-/* The card's dot is smaller than a concern's, so it
-   looks like part of the word beside it. */
+/* Smaller than a concern's dot, so that it reads as part of the word
+   beside it. */
 .namespace-health .dot {
   width: 8px;
   height: 8px;
@@ -43,8 +42,8 @@
   gap: 4px;
 }
 
-/* The volume count is plain text under the chips, a fact about the
-   namespace as a whole, so it does not look like one more workload. */
+/* The volume count describes the whole namespace, so it is plain text
+   under the chips and does not look like another workload. */
 .namespace-volumes {
   font-size: 12px;
   color: var(--ink-muted);
@@ -58,9 +57,9 @@
   overflow-wrap: break-word;
 }
 
-/* Two columns of equal chips.  A chip with a long name spans both, and
-   a name never breaks inside a word: what does not fit is cut short,
-   with the whole name in the chip's title. */
+/* The workload chips, in two columns. A chip with a long name
+   spans both. A name that still does not fit is cut off, and the
+   chip's title shows the whole name. */
 .chips {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -80,12 +79,12 @@
 
 .chip-wide { grid-column: span 2; }
 
-/* A chip's names open their workloads.  They keep the chip's ink, so
-   the grid looks like a grid of names, and underline on hover. */
+/* A chip's link keeps the chip's text color, so that the grid reads as
+   a grid of names. */
 .chip .object-link { color: inherit; }
 
-/* A chip whose workload needs attention takes --warm as a parcel does:
-   outlined for a warning, filled for a failure. */
+/* A chip uses --warm as a namespace tile does: an outline for a
+   warning, a fill for a failure. */
 .chip-warning {
   box-shadow: inset 0 0 0 1px var(--warm);
 }
@@ -96,8 +95,7 @@
   font-weight: 600;
 }
 
-/* On the cluster page the name opens the namespace.  It takes the link
-   color, and underlines on hover. */
+/* On the cluster page the name links to the namespace. */
 a.namespace-name {
   color: var(--link);
   text-decoration: none;
@@ -106,9 +104,8 @@ a.namespace-name {
 a.namespace-name:hover { text-decoration: underline; }
 
 /* What a card's object depends on, and what depends on it: a small
-   label over the names, which are monospace as every name is and open
-   their pages in --link.  Both cards draw this section, so its rules
-   are in this file, with the card the cluster page shows first. */
+   label over a list of links. Every card uses these rules. They are in
+   this file because the cluster page shows the namespace card first. */
 .card-depends {
   display: flex;
   flex-direction: column;
@@ -135,9 +132,8 @@ a.namespace-name:hover { text-decoration: underline; }
   overflow-wrap: break-word;
 }
 
-/* Marked lines that share one mark follow the section's unmarked ones
-   under that mark, set off by a rule to show that the mark applies
-   to them. */
+/* Lines that share a label come after the section's unlabeled lines,
+   with a rule at their left to show that the label applies to them. */
 .card-depends-group {
   display: flex;
   flex-direction: column;
@@ -151,22 +147,20 @@ a.namespace-name:hover { text-decoration: underline; }
 
 .card-depends-ends a:hover { text-decoration: underline; }
 
-/* A holder's machine is named once, in faint ink, after the holder's
-   name, and its devices are listed under it in the indented group. */
+/* In the list of workloads that hold devices, the machine and the
+   device driver are faint, so that the names of the workload and the
+   device stand out. */
 .card-holds-on { color: var(--ink-faint); }
 
-/* Each holder after the first has a margin to separate it from the
-   devices above it, and a device's driver is gray, as its machine is,
-   so the device's own name is the most visible part of the line. */
+/* Separates each workload from the devices of the workload above it. */
 .card-holds-holder:not(:first-child) { margin-top: 6px; }
 
-/* A reader scans a row of callers for its names, so the ports that the
-   callers reach follow the names in a fainter ink. */
+/* The ports after a caller's name are faint, because a reader scans
+   the list for the names. */
 .card-calls-ports { color: var(--ink-faint); }
 
-/* Where the card's object is declared.  Paths are monospace, as names
-   are, and wrap anywhere, because a repository URL is often wider than
-   the card.  Only an applier that is not ready is drawn in color. */
+/* Where the card's object is declared. Paths wrap at any character,
+   because a repository URL is often wider than the card. */
 .card-code {
   display: flex;
   flex-direction: column;
@@ -194,8 +188,8 @@ a.namespace-name:hover { text-decoration: underline; }
   color: var(--ink-faint);
 }
 
-/* A loop is worth knowing but is not a failure, so its section is set
-   off by a rule in the card's own grays, not by color. */
+/* A loop is not a failure, so its section has a gray border and no
+   color. */
 .card-loop {
   display: flex;
   flex-direction: column;
@@ -216,8 +210,8 @@ a.namespace-name:hover { text-decoration: underline; }
   color: var(--ink-faint);
 }
 
-/* Each cycle shows as one line of members, with the edge kind on
-   each arrow in a fainter ink so the members stand out. */
+/* One line for each cycle. The edge kind on each arrow is faint, so
+   the members stand out. */
 .loop-cycles {
   margin: 2px 0 0;
   padding: 0;
@@ -242,10 +236,10 @@ a.namespace-name:hover { text-decoration: underline; }
   white-space: nowrap;
 }
 
-/* What a custom resource's fields name, through its kind's knowledge:
-   the verb, the named object in monospace as every name is, and the
-   field it was read from in a fainter ink, because the named object
-   is what a reader scans for. */
+/* A labeled fact or related object, such as one that a custom
+   resource's field refers to through its kind knowledge, with the
+   field it was read from. The label and the field are faint, because
+   readers scan for the object. */
 .card-related {
   font-family: var(--mono);
   font-size: 12px;

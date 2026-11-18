@@ -1,6 +1,6 @@
-//! One reading of the cluster's stores, and what every page derives
-//! from it the same way: health, the map, the machines, and the edge
-//! graph.
+//! A copy of the cluster's stores and loaded resources, taken once per
+//! render, and the values that every page derives from it in the same
+//! way: health, the map, the machines, and the graph of edges.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -64,20 +64,19 @@ mod underneath;
 pub use access::fingerprint;
 pub use paged::Paged;
 
-/// The values the cluster's signals returned in one reading, besides
-/// usage, which only the machines and the pages that draw it read.
+/// The latest reading of each poller that `Snapshot::take` copies.
+/// Usage is not here, because only `Snapshot::machines` reads it, and
+/// its callers pass it in.
 pub struct Signals {
     pub logs: Counted,
     pub alerts: alerts::Reading,
-    /// The ingress controllers' metrics for each backend.
     pub entry: entry::poll::Reading,
-    /// The bytes each claim's volume holds, from the metrics source.
     pub volumes_used: transect_observe::metrics::Reading,
-    /// The name of the pod that runs Prometheus, once read.
     pub prometheus_pod: Option<String>,
 }
 
-/// The cluster's stores as one render reads them.
+/// The stores and inputs of one render, copied together so that every
+/// value derived from them describes the same moment.
 pub struct Snapshot {
     pub namespaces: Vec<Arc<Namespace>>,
     pub nodes: Vec<Arc<Node>>,
@@ -94,42 +93,45 @@ pub struct Snapshot {
     pub replica_sets: Vec<Arc<PartialObjectMeta<ReplicaSet>>>,
     pub controller_revisions: Vec<Arc<PartialObjectMeta<ControllerRevision>>>,
     pub jobs: Vec<Arc<PartialObjectMeta<Job>>>,
-    /// ConfigMaps, as metadata, which intent can be written on.
+    /// Only the metadata, because `transect` reads `ConfigMap`s only for
+    /// their intent annotations.
     pub config_maps: Vec<Arc<PartialObjectMeta<ConfigMap>>>,
-    /// Secrets, as metadata, or none when `transect` does not read
-    /// their annotations.
+    /// Secret metadata, or `None` when `transect` does not read Secret
+    /// annotations. `transect` never reads Secret data.
     pub secrets: Option<Vec<Arc<PartialObjectMeta<Secret>>>>,
     pub ownership: Ownership,
-    /// What applied each top owner, by the marks its tool writes.
+    /// The tool that applied each top-level owner, found from the labels
+    /// and annotations that the tool writes on it.
     pub applied: Applied,
     /// The objects of the GitOps tools that kind knowledge describes.
     pub gitops: GitOps,
     pub plurals: Plurals,
-    /// Every claim followed to where its volume stores its data, with
-    /// the backends an `Outside` groups renamed to its box.
+    /// Where each claim's volume stores its data. Backends that an
+    /// `Outside` groups appear as that `Outside`.
     pub storage: Storage,
-    /// The CSI drivers, whose `data-on` intent states where their data
-    /// is.
+    /// The CSI drivers. A driver's `data-on` intent says which machines
+    /// store its data.
     pub csi_drivers: Vec<Arc<CSIDriver>>,
-    /// The Outsides, by the backends they group.
+    /// The `Outside`s and the backends that each one groups.
     pub outsides: Outsides,
     pub addresses: Addresses,
-    /// Who RBAC lets write each custom kind's status.
+    /// The subjects that RBAC allows to write each custom kind's status.
     pub grants: Grants,
     /// The managers that write each custom resource's status.
     pub status_managers: StatusManagers,
     /// The devices each allocated claim holds, or why there are none.
     pub devices: Devices,
-    /// The image labels read so far.
+    /// The image labels read from registries so far.
     pub images: Arc<Known>,
-    /// The contents of each pod log read that is still cached, and the
-    /// matches that the log source's searches returned.
+    /// The pod logs read so far and still cached, and the matches that
+    /// the log source's searches returned.
     pub logs: Counted,
     /// The alerts that Alertmanager last reported as firing.
     pub alerts: alerts::Reading,
-    /// The ingress controllers' metrics for each backend.
+    /// The results of the ingress controllers' traffic queries for each
+    /// backend.
     pub entry: entry::poll::Reading,
-    /// The bytes each claim's volume holds, from the metrics source.
+    /// The bytes used on each claim's volume, from Prometheus.
     pub volumes_used: transect_observe::metrics::Reading,
     /// The name of the pod that runs Prometheus, once read.
     pub prometheus_pod: Option<String>,
@@ -137,36 +139,39 @@ pub struct Snapshot {
     /// kinds that own pods or that kind knowledge describes, and trimmed
     /// to metadata and conditions for the rest.
     pub custom: Vec<(ApiResource, Vec<Arc<Custom>>)>,
-    /// `transect`'s own resources, as of this reading.
+    /// `transect`'s own resources, as loaded when the snapshot was
+    /// taken.
     pub resources: Arc<Loaded>,
     /// The overlays merged onto the objects above.
     pub overlaid: Overlaid,
-    /// The intent declared for each object, from its annotations and the
-    /// Intents.
+    /// The intent declared for each object, from its annotations and
+    /// from the loaded `Intent` resources.
     pub intents: Intents,
     /// The kind knowledge matched to the kinds the cluster serves.
     pub kinds: Kinds,
     /// The kinds discovery found that are not namespaced.
     pub cluster_scoped: ClusterScoped,
-    /// What each custom resource of a known kind names, through its
-    /// kind's knowledge.
+    /// The objects that each custom resource of a known kind refers to,
+    /// as its kind knowledge describes.
     pub relations: HashMap<Object, Vec<Relation>>,
-    /// The description each custom kind's CRD gives of it.
+    /// The description in each custom kind's CRD.
     pub definitions: Definitions,
-    /// The issuer of each `Ingress`'s certificate, as kind knowledge's
-    /// `referencedBy` with role `issues-tls` names it.
+    /// The issuer of each `Ingress`'s certificate, found through the
+    /// `referencedBy` entry with role `issues-tls` in kind knowledge.
     pub issuers: transect_network::entry::Issuers,
-    /// The kinds held only for their own pages.
+    /// The stores that are read only for the pages of their own
+    /// objects.
     pub paged: Paged,
-    /// Every object that has a page.
-    pub held: HashSet<Object>,
+    /// Every object that has a page, except `Secret`s.
+    pub with_pages: HashSet<Object>,
 }
 
 impl Snapshot {
-    /// The cluster's stores as of now, with `resources`' overlays merged
-    /// onto the objects they name.  Ownership and the appliers' marks are
-    /// read from the stores themselves, because an overlay holds intent,
-    /// not owner references.
+    /// Copies the cluster's stores, with the overlays of `resources`
+    /// merged onto the objects they name. Ownership, and the labels and
+    /// annotations that show which tool applied an object, are read from
+    /// the stores without overlays, because an overlay adds intent and
+    /// never owner references.
     pub fn take(
         cluster: &Cluster,
         images: Arc<Known>,
@@ -206,9 +211,8 @@ impl Snapshot {
         let appliers = gitops.appliers();
         let (ownership, applied) =
             cluster.ownership(|marked, ownership| Applied::build(marked, ownership, &appliers));
-        // A `ServiceAccount`'s intent states why it is bound as it is,
-        // and an overlay may supply that intent in place of its
-        // annotations.
+        // An overlay can give a `ServiceAccount` the intent annotation that
+        // explains its bindings.
         let mut paged = Paged::take(cluster);
         paged.service_accounts = overlaid.apply(std::mem::take(&mut paged.service_accounts));
         let mut snapshot = Self {
@@ -256,18 +260,16 @@ impl Snapshot {
             definitions: cluster.definitions(),
             issuers: Default::default(),
             paged,
-            held: HashSet::new(),
+            with_pages: HashSet::new(),
         };
         snapshot
             .derive(|on_machines| transect_ground::storage::Storage::read(cluster, on_machines));
         snapshot
     }
 
-    /// Fills in what the stores and the resources give together: the
-    /// kind knowledge matched to the kinds served, the intent on every
-    /// object, the storage that `storage` follows with the CSI drivers
-    /// intent places on machines, the relations of each custom resource
-    /// of a known kind, and the objects that have a page.
+    /// Fills in the fields that depend on both the copied stores and the
+    /// loaded resources. `storage` reads the storage backends, given the
+    /// machines where intent places each CSI driver's data.
     pub fn derive(&mut self, storage: impl FnOnce(&OnMachines) -> Storage) {
         self.kinds = Kinds::resolve(
             &self.resources.kinds,
@@ -285,33 +287,35 @@ impl Snapshot {
         let storage = storage(&self.on_machines());
         self.storage = self.outsides.fold_storage(storage);
         self.relations = self.read_relations();
-        self.held = self.held_objects();
+        self.with_pages = self.objects_with_pages();
         self.issuers = self.tls_issuers();
     }
 
-    /// The input to the entry's traffic numbers: the answers to each
-    /// controller's queries, and whether any `IngressController`
-    /// declares the `entry` section that reads them.
-    pub fn traffic(&self) -> transect_network::entry::Answers<'_> {
+    /// The inputs for the traffic numbers on each `Ingress`: the results
+    /// of the controllers' queries, whether any `IngressController`
+    /// declares the `entry` section that makes `transect` run them, and
+    /// the name of an `IngressController` that failed to load.
+    pub fn traffic(&self) -> transect_network::entry::TrafficResults<'_> {
         let controllers = self.resources.ingress_controllers.iter();
-        transect_network::entry::Answers {
+        transect_network::entry::TrafficResults {
             measured: &self.entry,
             declared: controllers.into_iter().any(|c| c.entry.is_some()),
             unloaded: self.resources.directory.unloaded("IngressController"),
         }
     }
 
-    /// The `Service` the `MetricsSource`'s alerts section names, whose
-    /// pods are the cluster's alerting path, when it names one.
+    /// The `Service` in front of Alertmanager, from the `MetricsSource`'s
+    /// `alerts.service`. The loss view reads it to tell whether a loss
+    /// stops alerts.
     pub fn alerts_service(&self) -> Option<&transect_graph::upstream::Service> {
         let source = self.resources.metrics_source.as_ref()?;
         source.alerts.as_ref()?.service.as_ref()
     }
 
-    /// What decides which objects have a page, as of this reading.
+    /// The inputs that decide which objects have a page.
     pub fn pages(&self) -> Pages<'_> {
         Pages {
-            held: &self.held,
+            with_pages: &self.with_pages,
             ownership: &self.ownership,
             relations: &self.relations,
             gitops: &self.gitops,
@@ -319,8 +323,8 @@ impl Snapshot {
         }
     }
 
-    /// A snapshot of a cluster with nothing in it, which a test or the
-    /// fixture fills.
+    /// A snapshot of a cluster with nothing in it, for a test or the
+    /// fixture to fill.
     #[cfg(any(test, debug_assertions))]
     pub fn empty() -> Self {
         Self {
@@ -368,14 +372,14 @@ impl Snapshot {
             definitions: Definitions::default(),
             issuers: Default::default(),
             paged: Paged::default(),
-            held: HashSet::new(),
+            with_pages: HashSet::new(),
         }
     }
 
-    /// The health of every namespace that has a reason to report: the
-    /// rules over the built-in kinds, the condition that means each
-    /// custom workload works, the error lines in the logs, the error
-    /// and warning patterns' matches, and the alerts firing about it.
+    /// The health of every namespace that has something to report, from
+    /// the rules over the built-in kinds, the conditions of custom
+    /// workloads, error lines in the logs, matches of the log patterns,
+    /// and firing alerts.
     pub fn health(&self, now: Timestamp) -> HashMap<String, Health> {
         let health = health::assess(&self.objects(), &self.ownership, &self.revisions(), now);
         let mut reasons = self.conditions_of_custom();
@@ -384,7 +388,8 @@ impl Snapshot {
         health::with_reasons(health, reasons)
     }
 
-    /// When each controller last rolled, from the revisions it keeps.
+    /// When each controller last rolled out, from the revisions it
+    /// keeps.
     pub fn revisions(&self) -> Revisions {
         let replica_sets = self.replica_sets.iter().map(|meta| &meta.metadata);
         let controller_revisions = self.controller_revisions.iter().map(|meta| &meta.metadata);
@@ -444,8 +449,9 @@ impl Snapshot {
         machines
     }
 
-    /// Who the NetworkPolicies allow to call whom.  `workloads`
-    /// gives the pod templates of each workload with no running pod.
+    /// Which workloads the NetworkPolicies allow to call which.
+    /// `workloads` supplies the pod templates of each workload that has no
+    /// running pod.
     pub fn allowed(&self, workloads: &Workloads) -> Allowed {
         let idle = self.ownership.all_workloads().map(|owner| {
             let workload = workloads.get(owner);

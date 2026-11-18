@@ -1,15 +1,13 @@
-//! The usage queries that a `MetricsSource` declares: what each machine
-//! and each container uses, and the labels that identify the machine or
-//! the container.  Which exporter writes these series, and which label
-//! its scrape configuration puts a `Node`'s name in, differ from one
-//! cluster to the next, so the cluster declares the queries and the
-//! labels, and transect's code does not contain them.
+//! The usage queries of a `MetricsSource`: what each machine and each
+//! container uses, and the labels that identify the machine or the
+//! container.  The exporter that writes these series, and the label
+//! that holds a `Node`'s name, differ from one cluster to the next, so
+//! the cluster declares them.
 
 use serde::Deserialize;
 
-/// The usage that a cluster declares how to read.  Each query may be
-/// left out, and the page then shows the figure that it would return
-/// as missing.
+/// The usage queries a cluster declares.  Each query is optional, and
+/// the page shows the figure of a missing query as missing.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Queries {
     /// The labels that may name the `Node` of a machine's series, tried
@@ -50,7 +48,7 @@ pub struct MachineQuery {
 }
 
 impl Queries {
-    /// The queries as declared, or why they do not validate.
+    /// The declared queries, or the reason they are invalid.
     pub fn read(
         node_labels: Vec<String>,
         machine_cpu: Option<MachineQuery>,
@@ -79,14 +77,14 @@ impl Queries {
         }
         let names_machines = queries.machine_cpu.is_some() || queries.machine_memory.is_some();
         if names_machines && queries.node_labels.is_empty() {
-            return Err("nodeLabels names no label, so no series matches a machine".into());
+            return Err("nodeLabels is empty, so no series can match a machine".into());
         }
         if queries
             .node_labels
             .iter()
             .any(|label| label.trim().is_empty())
         {
-            return Err("nodeLabels names an empty label".into());
+            return Err("nodeLabels has an empty label".into());
         }
         let containers = [
             ("containerCpu", &queries.container_cpu),
@@ -106,7 +104,7 @@ impl Queries {
                 .iter()
                 .any(|label| label.trim().is_empty())
             {
-                return Err(format!("queries.{name}.labels names an empty label"));
+                return Err(format!("queries.{name}.labels has an empty label"));
             }
         }
         Ok(queries)

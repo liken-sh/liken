@@ -1,13 +1,13 @@
 //! Stored descriptions as plain text.  Many projects copy their README's
 //! first paragraph into `org.opencontainers.image.description`, and a
 //! CRD's schema description is a Go doc comment, Markdown and all.  A
-//! card shows the text as written, so a link's brackets and URL, a
-//! heading's hashes, and emphasis marks show there as noise.
+//! card shows the text as written, so the brackets and URL of a link,
+//! the hashes of a heading, and emphasis marks appear as noise.
 
 /// `text` with its Markdown marks taken out: a link or an image becomes
 /// its text, and the marks of headings, quotes, list bullets, emphasis,
 /// and code are removed.  An underscore stays, because names such as
-/// `snake_case` hold one far more often than emphasis does.
+/// `snake_case` contain one far more often than emphasis does.
 pub fn plain(text: &str) -> String {
     let lines = text.lines().map(|line| {
         let line = line.trim_start();

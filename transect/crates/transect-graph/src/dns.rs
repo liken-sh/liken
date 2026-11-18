@@ -1,22 +1,22 @@
-//! The order of names in DNS form: API groups, DRA driver names, and
-//! hosts.  A list of them sorts by the name's labels read from the right,
-//! so `liken.sh`, `audio.liken.sh`, and `media.liken.sh` sort together,
-//! and `cert-manager.io` sorts next to `acme.cert-manager.io`, while each
-//! name still shows as it is written.  The core API group, the empty
-//! name, sorts first.
+//! Sorting of DNS-style names such as API groups, DRA driver names, and
+//! hosts. Names sort by their labels from the right, so `liken.sh`,
+//! `audio.liken.sh`, and `media.liken.sh` are together, and
+//! `cert-manager.io` comes right before `acme.cert-manager.io`. Each
+//! name is still shown as written. The core API group, the empty name,
+//! sorts first.
 //!
-//! Labels compare one at a time, not as one reversed string, because in a
-//! string `-` sorts before `.`, which would put `sh.liken-x` between
-//! `sh.liken` and `sh.liken.audio`.
+//! Labels compare one at a time, instead of as one reversed string,
+//! because `-` sorts before `.` in a string. A reversed string would put
+//! `sh.liken-x` between `sh.liken` and `sh.liken.audio`.
 
 use std::cmp::Ordering;
 
-/// The sort key of `name`: its labels, rightmost first, lowercased.
+/// The sort key of `name`: its lowercased labels, rightmost first.
 pub fn key(name: &str) -> Vec<String> {
     name.rsplit('.').map(str::to_lowercase).collect()
 }
 
-/// How `a` and `b` order in a list of names in DNS form.
+/// The order of `a` and `b` by their labels from the right.
 pub fn order(a: &str, b: &str) -> Ordering {
     a.rsplit('.')
         .map(str::to_lowercase)
@@ -48,7 +48,7 @@ mod tests {
         &["secrets.example.com", "kustomize.toolkit.fluxcd.io", "storage.k8s.io"]
     )]
     #[case::ignores_case(&["B.example.test", "a.example.test"], &["a.example.test", "B.example.test"])]
-    fn orders_names_by_their_labels_from_the_right(
+    fn sorts_names_by_their_labels_from_the_right(
         #[case] names: &[&str],
         #[case] expected: &[&str],
     ) {

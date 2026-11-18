@@ -1,10 +1,11 @@
 # Kind knowledge for trivy-operator's reports, as trivy-operator would
-# ship it.  A report runs no pods, so the controller's image identifies
-# the operator that writes a report.  Each kind stays watched
-# trimmed.  A vulnerability report's findings knowledge keeps
-# each finding's id, severity, score, package, versions, link, and
-# title, and none of its description; every other report keeps none of
-# its contents.
+# ship it. A report runs no pods, so the controller's image identifies
+# the operator that writes it.
+#
+# Reports are large, so transect keeps only each report's metadata,
+# conditions, and printer columns. For a `VulnerabilityReport` it also
+# keeps the fields that `findings` lists, which leave out each
+# finding's description.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:

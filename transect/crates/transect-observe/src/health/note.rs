@@ -5,8 +5,9 @@ use crate::alerts::markup;
 use super::Reason;
 
 impl Reason {
-    /// Returns `note` as HTML.  The function renders the inline
-    /// Markdown of an alert's summary, and escapes every other note.
+    /// The `note` as HTML. An alert's note is its summary, which can
+    /// contain inline Markdown, so it is rendered. Every other note is
+    /// plain text and is escaped.
     pub fn note_html(&self) -> Option<String> {
         let note = self.note()?;
         Some(match self {

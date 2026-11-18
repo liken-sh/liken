@@ -15,7 +15,7 @@
 <main class="board-page" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
 <nav class="switcher" aria-label="Custom resources in {{ namespace }}">
 <a class="switcher-namespace" href="/namespaces/{{ namespace }}" hx-get="/namespaces/{{ namespace }}">{{ namespace }}</a>
-{%- for entry in strip %}
+{%- for entry in kind_links %}
 {%- if let Some(href) = entry.href %}
 <a class="switch{% if entry.current %} switch-current{% endif %}" href="{{ href }}" hx-get="{{ href }}"{% if entry.current %} aria-current="page"{% endif %}>{{ entry.text }}</a>
 {%- endif %}

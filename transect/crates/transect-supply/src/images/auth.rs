@@ -1,13 +1,13 @@
-//! How transect responds when a registry refuses a request: which
-//! credential transect sends to which host, and what transect reads from
-//! a token service's answer.
+//! What transect does when a registry refuses a request: which
+//! credential it sends to which host, and how it reads a token from a
+//! token service's response.
 //!
 //! A credential belongs to one registry host.  A registry often serves a
-//! blob by a redirect to object storage on another host, and that host
-//! can answer with a challenge of its own that names any realm.  So
-//! transect answers a challenge only when it came from the host that
-//! transect requested.  transect requests a token from a realm only over
-//! https, so a credential sent to the realm is never sent unencrypted.
+//! blob by redirecting to object storage on another host, and that host
+//! can reply with its own challenge that names any realm.  So transect
+//! acts on a challenge only when it came from the host that transect
+//! requested.  transect requests a token from a realm only over https,
+//! so it never sends a credential to a realm unencrypted.
 
 use std::time::Duration;
 
@@ -18,8 +18,8 @@ use super::Failure;
 use super::challenge::Challenge;
 use super::credentials::Credential;
 
-/// How long transect keeps a token when its registry gives no lifetime,
-/// and how long transect keeps a credential that it sends as Basic.
+/// How long transect caches a token whose response has no `expires_in`,
+/// and how long it caches a credential that it sends as Basic.
 pub const TOKEN_LIFETIME: Duration = Duration::from_secs(60);
 
 #[derive(Clone)]
@@ -28,7 +28,7 @@ pub enum Auth {
     Basic(Credential),
 }
 
-/// What to try after a refusal.
+/// What to do after a refusal.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Step {
     /// Request a token from the challenge's realm, with or without the
@@ -50,9 +50,9 @@ pub struct Tried {
 
 /// The next step after a refusal with `status`, given the last
 /// challenge, what the request has tried, and whether transect has a
-/// credential for the host.  A registry answers an anonymous client with
-/// 403 or 429 when it requires the client to identify itself, so
-/// transect sends the credential after those statuses too.
+/// credential for the host.  Some registries refuse an anonymous client
+/// with 403 or 429 instead of 401, so transect sends the credential
+/// after those statuses too.
 pub fn next(status: u16, challenge: Option<&Challenge>, tried: Tried, credential: bool) -> Step {
     let refused = match tried.credential {
         true => Failure::Refused,
@@ -74,14 +74,14 @@ pub fn next(status: u16, challenge: Option<&Challenge>, tried: Tried, credential
     }
 }
 
-/// Whether transect may answer a refusal from `answered` with the
-/// credential of `requested`'s host, which requires the same scheme,
-/// host, and port.  A refusal from any other address came after a
-/// redirect away from the registry.
-pub fn heeded(requested: &Url, answered: &Url) -> bool {
-    requested.scheme() == answered.scheme()
-        && requested.host_str() == answered.host_str()
-        && requested.port_or_known_default() == answered.port_or_known_default()
+/// Whether a refusal from `responded` may be met with the credential of
+/// `requested`'s host.  It may when both URLs have the same scheme, host,
+/// and port.  A refusal from any other address came after a redirect
+/// away from the registry.
+pub fn same_origin(requested: &Url, responded: &Url) -> bool {
+    requested.scheme() == responded.scheme()
+        && requested.host_str() == responded.host_str()
+        && requested.port_or_known_default() == responded.port_or_known_default()
 }
 
 #[derive(Deserialize)]
@@ -94,10 +94,11 @@ struct Token {
     expires_in: Option<u64>,
 }
 
-/// Returns the token in a realm's answer with `status` and `body`, and
+/// Returns the token in a realm's response with `status` and `body`, and
 /// the token's lifetime.  It returns `None` when the realm refuses to
-/// give a token, and `next` then treats the result as a refusal of the
-/// request.  Any other answer is `NoToken`, whatever its body contains.
+/// issue a token (401 or 403), and `next` then treats that as a refusal
+/// of the request.  Any other status that is not 2xx, and any 2xx body
+/// without a non-empty `token` or `access_token`, is `NoToken`.
 pub fn granted(status: u16, body: &[u8]) -> Result<Option<(Auth, Duration)>, Failure> {
     match status {
         401 | 403 => return Ok(None),
@@ -175,7 +176,7 @@ mod tests {
         false,
         Step::Fail(Failure::RateLimited)
     )]
-    fn answers_a_refusal(
+    fn picks_the_next_step_after_a_refusal(
         #[case] status: u16,
         #[case] challenge: Option<Challenge>,
         #[case] tried: Tried,
@@ -195,10 +196,13 @@ mod tests {
     #[case::a_subdomain("https://cdn.registry.example/v2/a/blobs/x", false)]
     #[case::another_port("https://registry.example:8443/v2/a/blobs/x", false)]
     #[case::plain_http("http://registry.example/v2/a/blobs/x", false)]
-    fn answers_only_a_refusal_from_the_host_asked(#[case] answered: &str, #[case] expected: bool) {
+    fn trusts_a_challenge_only_from_the_requested_host(
+        #[case] responded: &str,
+        #[case] expected: bool,
+    ) {
         let requested = Url::parse("https://registry.example/v2/a/blobs/x").unwrap();
-        let answered = Url::parse(answered).unwrap();
-        assert_eq!(heeded(&requested, &answered), expected);
+        let responded = Url::parse(responded).unwrap();
+        assert_eq!(same_origin(&requested, &responded), expected);
     }
 
     fn token(status: u16, body: &str) -> Result<Option<String>, Failure> {
@@ -220,7 +224,7 @@ mod tests {
     #[case::not_found(404, "", Err(Failure::NoToken))]
     #[case::a_server_error(500, "", Err(Failure::NoToken))]
     #[case::a_redirect(302, "", Err(Failure::NoToken))]
-    fn says_nothing_of_a_realm_but_its_token(
+    fn reads_a_token_only_from_a_successful_token_response(
         #[case] status: u16,
         #[case] body: &str,
         #[case] expected: Result<Option<String>, Failure>,

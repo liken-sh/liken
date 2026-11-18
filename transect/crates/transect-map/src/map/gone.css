@@ -1,8 +1,8 @@
 /*
- * The page for an object that is gone.  Nothing on it needs fixing, so
- * it is gray and quiet, as a healthy page is.  It shows one line that
- * names what the object was, and a row of links to the places above it
- * that still exist.
+ * The page for an object that no longer exists.  Nothing on it needs
+ * action, so it is gray, like a healthy page.  It shows one line that
+ * says what the object was, and links to the parent pages that still
+ * exist.
  */
 
 .gone {

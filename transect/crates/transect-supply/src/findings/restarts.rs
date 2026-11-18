@@ -1,13 +1,15 @@
-//! The finding for containers that restarted too long ago to count
-//! toward health: one line per workload and container, and why they are
-//! listed here instead of in "Now".
+//! The finding for containers that last restarted between
+//! `RECENT_MINUTES` and `EARLIER_MINUTES` ago.  A restart that old no
+//! longer affects a namespace's health, so the sidebar's "Now" list does
+//! not show it, and this finding lists it with one line for each
+//! workload and container.
 
 use super::Finding;
 use transect_observe::health::{EARLIER_MINUTES, Earlier, RECENT_MINUTES, times};
 use transect_resources::knowledge::age;
 
-/// One container's earlier restarts, with the page a link to its
-/// workload opens.
+/// One container's earlier restarts, with the link to its workload's
+/// page.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Restarted {
     pub earlier: Earlier,
@@ -29,7 +31,7 @@ pub fn title(restarted: &[Restarted]) -> String {
     )
 }
 
-/// What follows the workload's name in its line, as "app restarted in
+/// The text after the workload's name on its line, as "app restarted in
 /// 2 pods, the latest 3h ago".
 pub fn line(earlier: &Earlier) -> String {
     let restarted = if earlier.clean {
@@ -47,6 +49,7 @@ pub fn line(earlier: &Earlier) -> String {
     }
 }
 
+/// The explanation shown with the finding.
 pub fn body() -> String {
     format!(
         "A restart {} old or older no longer colors its namespace. A container that restarts every few hours shows only here.",
@@ -75,7 +78,7 @@ mod tests {
     }
 
     #[rstest]
-    fn nothing_restarted_earlier_is_no_finding() {
+    fn no_earlier_restarts_make_no_finding() {
         assert_eq!(finding(Vec::new()), None);
     }
 
@@ -89,7 +92,10 @@ mod tests {
         restarted("app", 2, 120, false),
         "app restarted in 2 pods, the latest 2h ago"
     )]
-    fn names_each_workloads_container(#[case] restarted: Restarted, #[case] expected: &str) {
+    fn lists_each_workloads_container_with_its_restarts(
+        #[case] restarted: Restarted,
+        #[case] expected: &str,
+    ) {
         let found = finding(vec![restarted]).unwrap();
         let lines: Vec<(String, String)> = found
             .lines()

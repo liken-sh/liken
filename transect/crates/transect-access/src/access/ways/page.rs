@@ -1,7 +1,7 @@
-//! `/access` lists every way in, one row each.  It groups the rows in
-//! runs whose rows share their gates: hosts first, ordered by the gates
-//! on them, then LoadBalancer Services, NodePort Services, host ports,
-//! and pods on their machine's network.
+//! The `/access` page: one row for each way in, in runs under headings.
+//! Hosts come first, in a run for each combination of gate states.
+//! Then come LoadBalancer Services, Services' external IPs, node ports,
+//! host ports, and pods on their machine's network.
 
 use std::collections::BTreeMap;
 
@@ -13,15 +13,17 @@ use transect_frame::frame::crumbs::Crumb;
 use transect_graph::edges::{Object, Provenance};
 use transect_graph::links::Part;
 
-/// A gate's dot, as a cell draws it.  Beside a declared gate's dot, the
-/// cell draws the mark of the sentence that declares it.
+/// A gate's dot in a cell of the table.
 #[derive(Debug, PartialEq)]
 pub struct Dot {
     pub class: &'static str,
     pub title: String,
     /// The objects that put the gate there, beside the dot.
     pub names: Vec<Named>,
-    pub said: Option<Provenance>,
+    /// The source of the statement that a declared gate rests on, such
+    /// as a field of an `IngressController` or stored text.  The cell
+    /// shows its mark beside the dot.
+    pub declared_at: Option<Provenance>,
 }
 
 impl Dot {
@@ -34,17 +36,16 @@ impl Dot {
             class: class(gate.state),
             title: gate.title.clone(),
             names: names.collect(),
-            said: gate.said.clone(),
+            declared_at: gate.declared_at.clone(),
         }
     }
 
     /// Whether the cell shows more than the dot.
     pub fn wide(&self) -> bool {
-        !self.names.is_empty() || self.said.is_some()
+        !self.names.is_empty() || self.declared_at.is_some()
     }
 }
 
-/// The class of a dot in `state`.
 pub fn class(state: State) -> &'static str {
     match state {
         State::On => "ax-dot ax-dot-on",
@@ -54,13 +55,10 @@ pub fn class(state: State) -> &'static str {
     }
 }
 
-/// One row: the way in, the objects that open it, its ports, its three
-/// gates, and the workloads it reaches.
 #[derive(Debug, PartialEq)]
 pub struct Row {
-    /// The one machine whose address this way is, which links to the
-    /// machine's page.  `name` is the rest of the way's name, which links
-    /// to the way in's page.
+    /// The machine whose address this way is, linked to the machine's
+    /// page.  `name` is the rest of the way's name.
     pub machine: Option<Named>,
     pub name: String,
     /// The page that the way in's name links to: the page of the first
@@ -69,8 +67,7 @@ pub struct Row {
     pub via: Vec<Named>,
     /// How it opens, such as "host port".
     pub how: Option<&'static str>,
-    /// Each port.  The cell does not break a port across lines, and
-    /// wraps only between ports.
+    /// One item per port, so the cell wraps only between ports.
     pub ports: Vec<String>,
     pub gates: [Dot; 3],
     pub reaches: Option<Named>,
@@ -96,13 +93,14 @@ pub struct WaysPage {
     /// The namespaces that hold pods and no NetworkPolicy that limits
     /// calls in.
     pub open: Vec<Part>,
-    /// The route kinds with objects the lens does not read.
+    /// The route kinds that have objects transect cannot read, because
+    /// nothing declares where their hosts and backends are.
     pub unread: Option<String>,
     pub no_gitops: bool,
 }
 
-/// What [`WaysPage::build`] reads besides the ways, such as the link to
-/// each object's page.
+/// The inputs of [`WaysPage::build`] besides the ways, such as the
+/// function that returns the link to an object's page.
 pub struct Look<'a> {
     pub href: &'a dyn Fn(&Object) -> Option<String>,
     pub open: Vec<String>,
@@ -134,10 +132,8 @@ impl WaysPage {
                 Through::NodePort => Some("node port"),
                 Through::Host => None,
             };
-            // The workload that listens opens a host port or a pod on
-            // its machine's network, and the row's "reaches" cell
-            // already names that workload, so the row shows only how it
-            // listens.
+            // A host-port or machine-network row shows no `via`, because
+            // the workload that listens is the one in the "reaches" cell.
             let via = match way.through {
                 Through::HostPort | Through::MachineNetwork => &Vec::new(),
                 _ => &way.via,
@@ -287,9 +283,10 @@ fn and(items: &[String]) -> String {
     }
 }
 
-/// A row's run, as a rank that orders the runs and a heading that names
-/// what its rows share: the gates on a host, or the kind of way in on
-/// any other row.
+/// The run that a row belongs to, as a rank and a heading.  The rank
+/// orders the runs of hosts, those with more gates on first.  The
+/// heading of a run of hosts lists their gates, and the heading of any
+/// other run names the kind of way in.
 fn heading(way: &Way) -> (u8, String) {
     match way.through {
         Through::LoadBalancer => (0, "LoadBalancer Services".into()),

@@ -1,4 +1,5 @@
-//! The namespace card a reading gives, and the forges it lists.
+//! The namespace card that a snapshot builds, and the forges the card
+//! lists.
 
 use std::collections::HashMap;
 
@@ -18,9 +19,10 @@ use transect_supply::gitops::CodeSection;
 use super::logged;
 
 impl Snapshot {
-    /// The forges the resources declare, with those the cluster serves
-    /// itself: each `Ingress` host, with the images of the workloads
-    /// behind the Services it routes to.
+    /// The forges that the resources declare, and the forges that the
+    /// cluster serves itself. `Forges::build` checks each `Ingress` host,
+    /// with the images of the workloads behind the `Service`s that the
+    /// host routes to.
     pub fn forges(&self, graph: &Graph, workloads: &Workloads) -> Forges {
         let mut hosts = Vec::new();
         for ingress in &self.ingresses {
@@ -48,9 +50,8 @@ impl Snapshot {
         Forges::build(&self.resources.forges, hosts)
     }
 
-    /// The card of `namespace`.  `forges` are those the cluster serves,
-    /// and `found` the log findings, of which the card lists those in
-    /// `namespace`.
+    /// The card of `namespace`. `found` holds the log findings of the
+    /// whole cluster, and the card lists those in `namespace`.
     pub fn card(
         &self,
         namespace: &str,
@@ -70,12 +71,16 @@ impl Snapshot {
         .linked(|object| self.pages().href(object));
         let by_workload = health::by_workload(&health, namespace, &self.ownership);
         let namespace_object = Object::new("", "Namespace", None, namespace);
-        // A built-in workload's chip names it alone; any other kind's
-        // names its kind too, so a `Player` and a `Remote` of one name
-        // each keep their own title.
+        // A built-in workload has two keys, its name and
+        // `owned_key(kind, name)`. A custom workload has only the
+        // `owned_key`, so a `Player` and a `Remote` with the same name
+        // do not overwrite each other.
         let mut whys = HashMap::new();
         for workload in self.ownership.workloads(namespace) {
-            let why = self.intents.of(workload).and_then(|said| said.why.as_ref());
+            let why = self
+                .intents
+                .of(workload)
+                .and_then(|intent| intent.why.as_ref());
             let why = why.map(|why| why.text.clone()).or_else(|| {
                 let knowledge = self.kinds.of_object(workload)?;
                 knowledge.summary.clone()

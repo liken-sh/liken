@@ -37,7 +37,7 @@ fn stranded_of(pod: &Pod, lost: &[&str]) -> Option<Stranded> {
 }
 
 /// A pod in shop on alpha that mounts `claims` and holds the claim
-/// `radio` when `radio` is set.
+/// `radio` when `radio` is true.
 fn pod(claims: &[&str], radio: bool) -> Pod {
     let volumes: Vec<String> = claims
         .iter()

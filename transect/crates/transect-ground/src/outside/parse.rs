@@ -1,5 +1,3 @@
-//! Reading one `Outside` resource out of its YAML document.
-
 use serde::Deserialize;
 
 use super::Outside;
@@ -30,19 +28,19 @@ struct Spec {
     url: Option<String>,
 }
 
-/// The Outside `value` declares, or why it does not validate.
+/// Returns the `Outside` that `value` declares, or the reason it is invalid.
 pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<Outside, String> {
     let document: Document = serde_yaml::from_value(value).map_err(|error| error.to_string())?;
     if document.metadata.namespace.is_some() {
-        return Err("an Outside names a thing outside the cluster, so it has no namespace".into());
+        return Err("metadata.namespace is set, but an Outside is not in the cluster, so it has no namespace".into());
     }
     let spec = document.spec;
     let title = spec.title.trim().to_string();
     if title.is_empty() {
-        return Err("title is empty".into());
+        return Err("spec.title is empty".into());
     }
     if spec.addresses.is_empty() && spec.drivers.is_empty() {
-        return Err("lists no addresses and no drivers, so nothing reaches it".into());
+        return Err("spec.addresses and spec.drivers are empty, so nothing connects to it".into());
     }
     Ok(Outside {
         doc,

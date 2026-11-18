@@ -1,13 +1,13 @@
-# The IngressController Traefik would ship: the identifier its
-# IngressClass names, the image its workload runs, and how to read the
+# The IngressController that Traefik would ship: the controller value
+# of its IngressClass, the image of its workload, and how to read the
 # traffic of the Ingresses it serves.  A distribution that packages
 # Traefik under another image, as k3s does with
-# rancher/mirrored-library-traefik, names that image here instead.
+# rancher/mirrored-library-traefik, sets that image here instead.
 #
-# Traefik's metrics name each backend in the `service` label as
+# Traefik's metrics name each backend Service in the `service` label as
 # <namespace>-<service>-<port>@kubernetes, with the port as the Ingress
-# writes it: a number, or a port's name.  The figures are per backend
-# Service.  The 5xx query answers only backends that ever sent a 5xx.
+# writes it, a number or a name.  The 5xx query returns only backends
+# that have sent at least one 5xx.
 apiVersion: transect.liken.sh/v1alpha1
 kind: IngressController
 metadata:
@@ -21,13 +21,14 @@ spec:
     latency: 'histogram_quantile(0.95, sum by (service, le) (rate(traefik_service_request_duration_seconds_bucket[5m])))'
     errors: 'sum by (service) (rate(traefik_service_requests_total{code=~"5.."}[5m]))'
     window: 5m
-  # Traefik serves an Ingress on the entry points its router.entrypoints
-  # annotation names, and on every entry point without it; a Helm
-  # install names them web and websecure.  web declares no redirectsTo:
-  # Traefik's own redirection of web is a catch-all router at the
-  # lowest priority, so an Ingress served on web takes precedence over
-  # it and answers in plain HTTP.  A cluster whose redirect does take
-  # precedence declares `redirectsTo: websecure` on web.
+  # Traefik serves an Ingress on the entry points in its
+  # router.entrypoints annotation, or on every entry point when the
+  # annotation is absent.  Traefik's Helm chart creates web and
+  # websecure.  Its redirect from web to websecure is a catch-all router
+  # with the lowest priority, so an Ingress served on web matches first
+  # and responds in plain HTTP.  That is why web has no redirectsTo.  On
+  # a cluster where the redirect matches first, set
+  # `redirectsTo: websecure` on web.
   entryPoints:
     annotation: traefik.ingress.kubernetes.io/router.entrypoints
     default: [web, websecure]

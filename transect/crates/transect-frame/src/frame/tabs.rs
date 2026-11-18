@@ -1,9 +1,8 @@
-//! The lenses an object's page offers, as a row of tabs, each its own
-//! URL: the overview, the section view, the loss view, the logs, the
-//! access, and the vulnerabilities.  A page shows only the tabs that
-//! apply to its object.
+//! The row of tabs on an object's page. Each tab is a different view
+//! of the same object at its own URL, and a page shows only the tabs
+//! that apply to its object.
 
-/// One way of looking at an object.
+/// One view of an object, shown as one tab.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Lens {
     Overview,
@@ -27,7 +26,7 @@ impl Lens {
     }
 }
 
-/// The row of tabs on an object's page.
+/// The tabs of one page, in display order.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Tabs {
     pub tabs: Vec<Tab>,
@@ -37,14 +36,13 @@ pub struct Tabs {
 pub struct Tab {
     pub label: &'static str,
     pub href: String,
-    /// The lens the page shows.
+    /// Whether this is the tab for the page being shown.
     pub current: bool,
 }
 
 impl Tabs {
-    /// A workload's tabs, from its page's path: its overview, its section,
-    /// its logs, and, when it serves a port, its access.  A workload gets
-    /// no "if lost" tab, since its pods may run on several machines.
+    /// A workload has no "if lost" tab because its pods can run on
+    /// several machines.
     pub fn workload(path: &str, current: Lens, access: bool) -> Self {
         let mut lenses = vec![
             (Lens::Overview, path.to_string()),
@@ -57,8 +55,8 @@ impl Tabs {
         Self::of(&lenses, current)
     }
 
-    /// These tabs with the access tab of the page at `path` added, for
-    /// a workload that serves a port.
+    /// Adds the access tab for `path`, unless the same tab with
+    /// `current` false is already there.
     pub fn with_access(mut self, path: &str) -> Self {
         let tab = Tab {
             label: Lens::Access.label(),
@@ -71,23 +69,20 @@ impl Tabs {
         self
     }
 
-    /// These tabs with the vulnerabilities tab of the workload at
-    /// `path` added, for a workload that a findings report names.  The
-    /// tab is marked current when the page is that tab.
+    /// Adds the vulnerabilities tab for the workload at `path`, unless a
+    /// tab with that URL is already there.
     pub fn with_vulnerabilities(mut self, path: &str, current: bool) -> Self {
         let tab = Tab {
             label: Lens::Vulnerabilities.label(),
             href: format!("{path}/vulnerabilities"),
             current,
         };
-        if !self.tabs.iter().any(|held| held.href == tab.href) {
+        if !self.tabs.iter().any(|existing| existing.href == tab.href) {
             self.tabs.push(tab);
         }
         self
     }
 
-    /// A namespace's tabs, from its page's path: its overview and its
-    /// access.
     pub fn namespace(path: &str, current: Lens) -> Self {
         Self::of(
             &[
@@ -98,7 +93,6 @@ impl Tabs {
         )
     }
 
-    /// A pod's tabs: its overview and its logs.
     pub fn pod(path: &str, current: Lens) -> Self {
         Self::of(
             &[
@@ -109,9 +103,9 @@ impl Tabs {
         )
     }
 
-    /// A machine's tabs, from its page's path and its name: its
-    /// overview and the loss view of it, which keeps its query form
-    /// because it takes a set of machines.
+    /// The "if lost" tab links to the cluster map with `?lose={name}`.
+    /// It has no path under the machine's page, because the map's `lose`
+    /// parameter takes a comma-separated list of machines.
     pub fn machine(path: &str, name: &str, current: Lens) -> Self {
         Self::of(
             &[
@@ -196,7 +190,7 @@ mod tests {
         Tabs::machine("/machines/alpha", "alpha", Lens::Overview),
         vec![tab("overview", "/machines/alpha", true), tab("if lost", "/?lose=alpha", false)]
     )]
-    fn shows_the_lenses_that_apply(
+    fn shows_the_tabs_that_apply(
         #[case] tabs: Tabs,
         #[case] expected: Vec<(&'static str, String, bool)>,
     ) {

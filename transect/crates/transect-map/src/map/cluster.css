@@ -1,10 +1,10 @@
 /*
- * The cluster elevation: bands stacked into one block, each with a
- * label column and its parcels.
+ * The cluster map: bands stacked into one block, each with a label
+ * column and its namespace tiles.
  */
 
-/* The sidebar beside the map pads the gap between them, so the map pads
-   its right side only once the sidebar moves under it. */
+/* The sidebar's own padding makes the gap between it and the map, so
+   the map pads its right side only when the sidebar moves below it. */
 .cluster {
   padding: 16px 0 16px 32px;
 }
@@ -12,11 +12,9 @@
 @media (max-width: 1000px) {
   .cluster { padding-right: 32px; }
 
-  /* When the page stacks, the map would push "Now" and a loss below
-     every band, which is a long scroll on a narrow screen, so the
-     cluster page's sidebar comes first.  A namespace's card stays below
-     the map, as a workload's does, since the map is what its page is
-     for. */
+  /* On a narrow screen the cluster page's sidebar comes first, so that
+     "Now" and a loss are not a long scroll below the map. A namespace's
+     card stays below the map, as a workload's does. */
   .view:has(> main.cluster) > .sidebar:not(.namespace-card) {
     order: -1;
     padding-top: 16px;
@@ -53,36 +51,33 @@
   color: var(--ink-faint);
 }
 
-.parcels {
+.ns-tiles {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-wrap: wrap;
   column-gap: 5px;
-  /* Rows are spaced by each parcel's bottom margin, not row-gap, so the
-     filler below adds no height when it wraps onto a line of its own. */
+  /* Each tile's bottom margin spaces the rows, not row-gap, so that
+     the filler below adds no height when it wraps onto its own line. */
   margin-bottom: -5px;
 }
 
-/* A filler after the last parcel keeps a short last row near its
-   parcels' own widths.  Without it, one light parcel alone on the last
-   row stretches across the band and looks like a heavy namespace.
-   Its basis is a quarter of the band, so it only fits on a last row
-   with that much room to spare.  On such a row its grow factor, far
-   above any row's total weight, takes nearly all the room.  A last row
-   with less room pushes it onto a line of its own and stretches to the
-   edge like the rows above it, which keeps a band of one full row
-   flush. */
-.parcels::after {
+/* Without this filler, one light tile alone on the last row would
+   stretch across the band and look like a heavy namespace. When the
+   last row has a quarter of the band free, the filler fits there, and
+   its grow factor, far above any row's total weight, gives it nearly all
+   the free room. When the last row has less free room, the filler
+   wraps onto its own line, and the tiles stretch to the edge like the
+   rows above. */
+.ns-tiles::after {
   content: "";
   flex: 1000 1 25%;
 }
 
-/* A parcel's share of its band follows its workload count.  Flex items
-   never shrink below their content, and a name never wraps, so a long
-   name in a light parcel widens the parcel instead of breaking at a
-   hyphen.  Only a name wider than the whole band is cut short. */
-.parcel {
+/* A tile's width follows --weight, its workload count. A name never
+   wraps, so a long name widens a light tile instead of breaking at a
+   hyphen. Only a name wider than the whole band is cut off. */
+.ns-tile {
   flex: var(--weight) 1 calc(var(--weight) * 30px);
   max-width: 100%;
   height: 52px;
@@ -101,61 +96,55 @@
   text-decoration: none;
 }
 
-/* The loop mark follows the name and keeps its place when a long name
-   is cut short. */
-.parcel-name {
+/* The loop mark follows the name and stays in place when a long name
+   is cut off. */
+.ns-tile-name {
   display: flex;
   white-space: nowrap;
 }
 
-.parcel-namespace {
+.ns-tile-namespace {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* Under a loss, the tag names every workload the loss takes, so the
-   parcel grows to hold it rather than cutting it short. */
-.parcel:has(.loss-tag) { height: auto; min-height: 52px; }
+/* When the map shows a loss, the tag lists every workload that goes
+   down, so the tile grows to fit the whole list. */
+.ns-tile:has(.loss-tag) { height: auto; min-height: 52px; }
 
-.parcel:has(.loss-tag) .parcel-count { white-space: normal; }
+.ns-tile:has(.loss-tag) .ns-tile-count { white-space: normal; }
 
-.parcel-count {
+.ns-tile-count {
   position: relative;
   color: var(--ink-faint);
   white-space: nowrap;
   overflow: hidden;
 }
 
-/* A parcel that the selection's edges reach is outlined in faint gray,
-   and its second line shows how: the relation replaces the count, in
-   the count's own type.  The relation is positioned over the count, so
-   it adds nothing to the width the parcel asks of its band.  The count
-   stays beneath it, hidden, and keeps the width it always had, so
-   selecting a parcel never resizes another or reflows a band.  A
-   relation longer than its parcel ends in an ellipsis, with the whole
-   of it in its title.
-   Color is kept for a loop and for problems.  The warning and failure
-   rules below come later, so a parcel that needs attention keeps its
-   --warm border. */
-.parcel-tagged {
+/* A tile that the selected object has an edge to gets a gray outline,
+   and its second line shows the relation in place of the workload
+   count. The relation is positioned over the hidden count, so the
+   tile keeps its width and selecting an object never reflows a band.
+   The warning and failure rules come later in this file, so a tile
+   that needs attention keeps its --warm border. */
+.ns-tile-tagged {
   border-color: var(--ink-faint);
   box-shadow: inset 0 0 0 1px var(--ink-faint);
 }
 
-.parcel-count:has(.parcel-relation) .parcel-workloads { visibility: hidden; }
+.ns-tile-count:has(.ns-tile-relation) .ns-tile-workloads { visibility: hidden; }
 
-.parcel-relation {
+.ns-tile-relation {
   position: absolute;
   inset: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* A loop is worth knowing but is not a failure, so its tag has no color
-   and puts no outline on the parcel.  It is a muted word in a thin rule
-   on the namespace page's folded bands, and a muted mark after the name
-   on the cluster map. */
+/* A loop is not a failure, so it gets no color and no outline on the
+   tile. The namespace page shows it as a bordered word, .loop-tag, and
+   the cluster map as a mark after the name, .loop-mark. */
 .loop-tag {
   margin-left: 4px;
   padding: 0 4px;
@@ -175,37 +164,32 @@
   color: var(--ink-muted);
 }
 
-/* Only a problem gets color.  A warning outlines the parcel in
-   --warm, two pixels wide with the inset shadow so the parcel keeps its
-   size.  A failure fills it, with text in the page color: dark on the
-   light orange of the dark scheme, white on the brown of the light
-   scheme, about 6.5 to 1 in both. */
-.parcel-warning {
+/* Only a problem gets color. A warning outlines the tile in --warm, two
+   pixels wide, with the second pixel an inset shadow so that the tile
+   keeps its size. A failure fills the tile with --warm, and the text
+   is in the page color, which contrasts with --warm in both schemes. */
+.ns-tile-warning {
   border-color: var(--warm);
   box-shadow: inset 0 0 0 1px var(--warm);
 }
 
-.parcel-failing {
+.ns-tile-failing {
   border-color: var(--warm);
   background: var(--warm);
   color: var(--page);
   font-weight: 600;
 }
 
-.parcel-failing .parcel-count { color: inherit; opacity: 0.8; }
+.ns-tile-failing .ns-tile-count { color: inherit; opacity: 0.8; }
 
-/* On a failure's fill the loop mark's muted ink does not show against
-   --warm, so the mark uses the parcel's page-colored text. */
-.parcel-failing .loop-mark { color: inherit; }
+/* The muted color does not show against --warm. */
+.ns-tile-failing .loop-mark { color: inherit; }
 
-/* The selected parcel takes a ring of the selection color outside its
-   border, so its own border and fill still show its health.  Selecting
-   a parcel changes one thing about it, and a parcel that needs
-   attention looks the same selected or not.  The ring is drawn in the
-   gap between parcels.  It keeps the pointer, since a second click
-   deselects it.  Its name keeps its weight, since a bold name can run
-   wider and widen the parcel. */
-.parcel-selected {
+/* The selected tile gets a ring outside its border, in the gap between
+   tiles, so its border and fill still show its health. The name does
+   not turn bold, because a bold name can be wider and would widen the
+   tile. */
+.ns-tile-selected {
   outline: 2px solid var(--link);
   outline-offset: 1px;
 }

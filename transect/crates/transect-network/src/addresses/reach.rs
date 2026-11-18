@@ -1,7 +1,7 @@
-//! What an address reaches on the map.  Each end from the index stands
-//! for the workloads a `Service` selects.  An address that names an
-//! `Ingress` host on a port the `Ingress` does not answer on is
-//! followed to the other `Service` of the same workload.
+//! What a configured address reaches on the map. An end that the index
+//! finds is replaced by the workloads it selects. An address with an
+//! `Ingress` host and a port the `Ingress` does not serve is resolved
+//! to another `Service` of the same workload.
 
 use super::index::Addresses;
 use super::parse::Address;
@@ -12,19 +12,21 @@ use transect_graph::edges::{Endpoint, Graph, Kind};
 pub struct Reach {
     /// Each end once, in the order the index gives them.
     pub to: Vec<Endpoint>,
-    /// Whether the ends are a guess: the address names an `Ingress`
-    /// host on a port the `Ingress` does not answer on, and no `Service`
-    /// of the `Ingress`'s workload exposes that port either, so the
-    /// workload is only the likeliest server of it.
+    /// Whether the ends are a guess. The address has an `Ingress` host
+    /// and a port the `Ingress` does not serve, and no `Service` of the
+    /// `Ingress`'s workload exposes that port either, so the workload is
+    /// only the likeliest server.
     pub guessed: bool,
 }
 
-/// What `address` reaches when it is configured in `namespace`.  A
-/// forge's URLs show why the `Ingress` host rule exists: its web host
-/// is an `Ingress`, while its SSH port on the same host is served by a
-/// `NodePort` or `LoadBalancer` `Service` of the same workload, and a
-/// GitOps source often fetches over SSH.  Without the rule that source
-/// reaches nothing.
+/// What `address` reaches when it is configured in `namespace`.
+///
+/// The fallback for an `Ingress` host with a port that the `Ingress`
+/// does not serve is for a git forge. The forge's web pages are behind
+/// an `Ingress`, but SSH on the same host is served by a `NodePort` or
+/// `LoadBalancer` `Service` of the same workload, and a GitOps source
+/// often fetches over SSH. Without the fallback, that source reaches
+/// nothing.
 pub fn reach(
     addresses: &Addresses,
     graph: &Graph,
@@ -66,10 +68,9 @@ impl Reach {
     }
 }
 
-/// What an end of the index stands for on the map: a `Service` stands
-/// for the workloads it selects.  A `Service` that selects nothing,
-/// such as one whose endpoints are named by hand, stands for itself, as
-/// a machine does.
+/// The ends to draw for `end`: the workloads a `Service` selects. An end
+/// that selects nothing, such as a machine or a `Service` whose
+/// endpoints are written by hand, is returned as itself.
 pub fn behind(graph: &Graph, end: &Endpoint) -> Vec<Endpoint> {
     let selected = graph.leaving(Kind::Selects, end);
     if selected.is_empty() {

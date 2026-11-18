@@ -1,11 +1,5 @@
-//! Reads usage from Prometheus on an interval and stores the latest
-//! reading in a `watch` channel that each render reads.
-//!
-//! Because the reading is in a `watch` channel, a render borrows the
-//! newest one without a lock of its own, and a new reading that matches
-//! the old one wakes no receiver.  When a reading differs, the poller
-//! marks the cluster as changed, and the event stream renders the page
-//! again and pushes it, as it does for any watch event.
+//! Reads machine and container usage from Prometheus, and keeps the
+//! latest reading in a `watch` channel that each render reads.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -13,7 +7,7 @@ use std::time::Duration;
 use tokio::sync::watch;
 use tokio::time::MissedTickBehavior;
 
-use super::{Answers, Queries, Usage};
+use super::{Queries, Usage, UsageSamples};
 use crate::metrics::Reaching;
 use crate::prometheus::{Prometheus, QueryError, Sample};
 
@@ -27,10 +21,9 @@ pub enum Reading {
     /// The first query has not returned yet.
     Waiting,
     Failed(Failure),
-    /// Shared through an `Arc`, because a reading of every container is
-    /// far larger than the other variants, and each render copies the
-    /// reading out of the channel instead of holding the channel's lock
-    /// while it draws.
+    /// In an `Arc` because each render clones the reading out of the
+    /// channel, so that it does not hold the channel's lock while it
+    /// draws, and a reading of every container is large.
     Read(Arc<Usage>),
 }
 
@@ -50,9 +43,9 @@ impl Reading {
     }
 
     /// The line that a page shows in place of used bars, with the text
-    /// of `note`.  When no usage is declared because the
-    /// `MetricsSource` did not load, the line reports that it did not
-    /// load.
+    /// of `note`.  When the reading is `Off` or `Undeclared` and a
+    /// `MetricsSource` did not load, the line says so in place of the
+    /// note.
     pub fn off_line(
         &self,
         loaded: &transect_resources::resources::Directory,
@@ -60,14 +53,13 @@ impl Reading {
         let note = self.note()?;
         Some(match self {
             Self::Off | Self::Undeclared => loaded.off("MetricsSource", "no usage: ", note),
-            _ => transect_resources::resources::OffLine::said(note),
+            _ => transect_resources::resources::OffLine::plain(note),
         })
     }
 
     /// One short line for the machines band when it draws no used bars.
-    /// While the first query is in progress, the band shows no line, so
-    /// transect does not show a warning at start that clears a moment
-    /// later.
+    /// It is `None` while the first query runs, so the band does not show
+    /// a warning at start that clears a moment later.
     pub fn note(&self) -> Option<&'static str> {
         match self {
             Self::Off => Some("no usage: no Prometheus configured"),
@@ -87,8 +79,9 @@ impl Reading {
 
 /// Sends the usage queries of the `MetricsSource` to the Prometheus
 /// that `reaching` selects, at once, then every `interval` and whenever
-/// the resources change.  It marks `changed` after each reading that
-/// differs from the one before.
+/// the resources change.  It sends a reading to the channel and marks
+/// `changed` only when the reading differs from the one before, so the
+/// event stream renders the page again and pushes it.
 pub fn poll(
     reaching: Reaching,
     interval: Duration,
@@ -140,8 +133,8 @@ fn replace_if_differs(current: &mut Reading, next: Reading) -> bool {
     differs
 }
 
-/// Sends every query that `queries` declares at the same time, so all
-/// the views drawn from one reading show the same figures.
+/// Sends the declared queries concurrently, and fails when any of them
+/// fails.
 async fn read(prometheus: &Prometheus, queries: &Queries) -> Result<Usage, QueryError> {
     let container_cpu = queries
         .container_cpu
@@ -152,23 +145,26 @@ async fn read(prometheus: &Prometheus, queries: &Queries) -> Result<Usage, Query
         .as_ref()
         .map(|query| query.query.as_str());
     let (machine_cpu, machine_memory, container_cpu, container_memory) = tokio::join!(
-        ask(prometheus, queries.machine_cpu.as_deref()),
-        ask(prometheus, queries.machine_memory.as_deref()),
-        ask(prometheus, container_cpu),
-        ask(prometheus, container_memory),
+        query_samples(prometheus, queries.machine_cpu.as_deref()),
+        query_samples(prometheus, queries.machine_memory.as_deref()),
+        query_samples(prometheus, container_cpu),
+        query_samples(prometheus, container_memory),
     );
-    let answers = Answers {
+    let samples_of = UsageSamples {
         machine_cpu: machine_cpu?,
         machine_memory: machine_memory?,
         container_cpu: container_cpu?,
         container_memory: container_memory?,
     };
-    Ok(Usage::answered(queries, answers))
+    Ok(Usage::from_query_samples(queries, samples_of))
 }
 
-/// The samples that `query` returns, or no samples for a query that is
-/// left out.
-async fn ask(prometheus: &Prometheus, query: Option<&str>) -> Result<Vec<Sample>, QueryError> {
+/// The samples that `query` returns, or no samples when the
+/// `MetricsSource` declares no such query.
+async fn query_samples(
+    prometheus: &Prometheus,
+    query: Option<&str>,
+) -> Result<Vec<Sample>, QueryError> {
     match query {
         Some(query) => prometheus.query(query).await,
         None => Ok(Vec::new()),
@@ -185,11 +181,9 @@ impl From<Result<Usage, QueryError>> for Reading {
     }
 }
 
-/// Whether `next` is the first reading or changes its `note`, as when
-/// a failure starts or ends, or a read finds no series.  A failure is
-/// logged when it starts and when it ends, not every
-/// interval, because a Prometheus that is down for an hour, polled every
-/// 30 s, would otherwise write 120 identical warnings.
+/// Whether to log `next`: it is the first reading, or its `note`
+/// differs from the previous reading's.  So a Prometheus that stays down
+/// logs one warning, not one on every interval.
 fn is_transition(previous: &Reading, next: &Reading) -> bool {
     *previous == Reading::Waiting || previous.note() != next.note()
 }

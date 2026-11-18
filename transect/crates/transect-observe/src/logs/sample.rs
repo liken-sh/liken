@@ -1,12 +1,11 @@
-//! The newest lines that a search matched across the cluster, read
-//! through the source's `lines` query, so a finding shows a few of the
-//! lines it counts instead of a number alone.
+//! Sample lines for a search's findings, so a finding can show some of
+//! the lines it counts.
 //!
-//! One query for each search reads at most `SAMPLE_ROWS` lines, newest
-//! first, and each finding keeps the few that came from its own pods.
-//! A pod that logs far more than the others can fill those rows, so a
-//! quieter workload's finding may show its counts with no lines.  The
-//! pod page of that workload's pod still reads its lines.
+//! Each search runs one `lines` query for the newest `SAMPLE_ROWS` rows
+//! across the cluster, and `Evidence::of` gives each finding the rows
+//! from its own pods. A pod that logs far more matching lines than the
+//! others can fill all the rows, and a quieter workload's finding then
+//! shows counts with no sample lines.
 
 use k8s_openapi::jiff::Timestamp;
 
@@ -21,7 +20,7 @@ const SAMPLE_ROWS: usize = 200;
 /// How many characters of one line a finding shows.
 const SAMPLE_CHARS: usize = 240;
 
-/// One line that a search matched, with the place it was logged.
+/// One line that a search matched, and the pod or machine that logged it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Sample {
     pub namespace: Option<String>,
@@ -32,9 +31,9 @@ pub struct Sample {
     pub message: String,
 }
 
-/// The `lines` query for `filter` over `window`, which requests only
-/// the fields that a sample shows.  It is `None` when the source
-/// declares no `lines` query.
+/// The `lines` query for `filter` over `window`, limited to the fields
+/// that a `Sample` holds. Returns `None` when the source has no `lines`
+/// query.
 pub fn query(reached: &Reached, filter: &str, window: &str) -> Option<String> {
     let source = &reached.source;
     let template = source.lines.as_ref()?;
@@ -58,9 +57,9 @@ pub fn query(reached: &Reached, filter: &str, window: &str) -> Option<String> {
     Some(source.language.keep(&query, &shown))
 }
 
-/// The samples in the rows of a `lines` response.  This function leaves
-/// out a row whose message is empty after the cut, because it would
-/// show nothing.
+/// The `Sample`s in the rows of a `lines` response. Skips a row with no
+/// message, or with a message of only whitespace and control
+/// characters, because it would show nothing.
 pub fn read(rows: &[Row], fields: &Fields) -> Vec<Sample> {
     let samples = rows.iter().filter_map(|row| {
         let message = row.get(&fields.message)?;
@@ -91,7 +90,7 @@ mod tests {
     }
 
     #[rstest]
-    fn asks_for_the_newest_lines_with_the_fields_a_sample_shows() {
+    fn builds_a_query_for_the_newest_lines_with_the_sample_fields() {
         let reached = source().reached(None, "cluster.local");
         assert_eq!(
             query(&reached, r#""refused""#, "1h").as_deref(),
@@ -102,7 +101,7 @@ mod tests {
     }
 
     #[rstest]
-    fn asks_nothing_without_a_lines_query() {
+    fn builds_no_query_without_a_lines_query() {
         let mut source = source();
         source.lines = None;
         let reached = source.reached(None, "cluster.local");

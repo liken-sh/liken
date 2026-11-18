@@ -1,5 +1,5 @@
-//! Where a pod runs: its machine, the machine's role and size, how many
-//! pods share it, when the pod started there, and the devices it holds.
+//! Where a pod runs: its machine with the machine's role, size, and pod
+//! count, when the pod started, and the devices that its claims hold.
 
 use k8s_openapi::api::core::v1::Pod;
 use k8s_openapi::jiff::Timestamp;
@@ -10,7 +10,7 @@ use transect_observe::health::minutes_between;
 
 #[derive(Debug, PartialEq)]
 pub struct Placement {
-    /// The machine, or `None` while the pod waits to be scheduled.
+    /// `None` while the pod is not scheduled.
     pub machine: Option<OnMachine>,
     /// When the pod started, and how many minutes ago.
     pub started: Option<(Timestamp, i64)>,
@@ -22,14 +22,14 @@ pub struct Placement {
 pub struct OnMachine {
     pub name: String,
     pub control_plane: bool,
-    /// The cores the machine gives its pods, when transect has read its
-    /// Node.
+    /// The machine's allocatable CPU cores, or `None` when transect has
+    /// no `Node` for it.
     pub cores: Option<f64>,
-    /// How many pods run there, this one among them.
+    /// How many pods run on the machine, this one included, or `None`
+    /// when transect has no `Node` for it.
     pub pods: Option<usize>,
 }
 
-/// Where `pod` runs, among `machines`, holding `held`.
 pub fn placement(pod: &Pod, machines: &[Machine], held: Vec<Device>, now: Timestamp) -> Placement {
     let node = pod.spec.as_ref().and_then(|spec| spec.node_name.as_deref());
     let machine = node.map(|name| {
@@ -84,7 +84,7 @@ mod tests {
             held: vec![],
         }
     )]
-    #[case::on_a_machine_transect_lacks(
+    #[case::on_a_node_missing_from_the_machines(
         pod("web-1", "{nodeName: gone, containers: []}", "{}"),
         Placement {
             machine: Some(OnMachine { name: "gone".into(), control_plane: false, cores: None, pods: None }),

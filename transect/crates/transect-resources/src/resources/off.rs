@@ -1,13 +1,12 @@
-//! The line a page shows where a resource of `transect`'s would fill a
-//! section: what would turn it on, or, when a resource of that kind is
-//! there but did not load, that it did not, with a link to
-//! `/resources`.  The link sends a reader who wrote the resource to the
-//! condition that states what is wrong with it, instead of a line that
-//! tells them to write it.
+//! The line a page shows in place of a section that needs a resource.
+//! When no resource of that kind exists, the line says which resource
+//! fills the section.  When one exists but did not load, the line names
+//! it and links to `/resources`, where its condition gives the reason,
+//! so a reader who already wrote the resource is not told to write it.
 
 use super::{Directory, Status};
 
-/// One line in place of what a page cannot show.
+/// The line shown in place of an empty section.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OffLine {
     pub text: String,
@@ -16,8 +15,8 @@ pub struct OffLine {
 }
 
 impl OffLine {
-    /// `text`, as the page shows it.
-    pub fn said(text: impl Into<String>) -> Self {
+    /// A line of `text` with no link to `/resources`.
+    pub fn plain(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
             see_resources: false,
@@ -26,9 +25,8 @@ impl OffLine {
 }
 
 impl Directory {
-    /// The name of the first document of `kind` that is there but did
-    /// not load, other than one left out as a second copy of a resource
-    /// that did.
+    /// The name of the first document of `kind` that did not load.  A
+    /// document left out as a duplicate does not count.
     pub fn unloaded(&self, kind: &str) -> Option<&str> {
         let documents = self.files.iter().flat_map(|file| &file.documents);
         let mut found = documents.filter(|document| document.kind == kind);
@@ -42,21 +40,20 @@ impl Directory {
         Some(failed.name.as_str())
     }
 
-    /// `said` for a section that a resource of `kind` would fill, or,
-    /// when one is there but did not load, `prefix` and a line that
-    /// states that.
-    pub fn off(&self, kind: &str, prefix: &str, said: &str) -> OffLine {
+    /// The line for a section that needs a resource of `kind`: `text`
+    /// when no document of `kind` failed to load, and otherwise
+    /// `prefix` followed by "the <kind> <name> did not load".
+    pub fn off(&self, kind: &str, prefix: &str, text: &str) -> OffLine {
         match self.unloaded(kind) {
             Some(name) => OffLine {
                 text: format!("{prefix}the {kind} {} did not load", shown(name)),
                 see_resources: true,
             },
-            None => OffLine::said(said),
+            None => OffLine::plain(text),
         }
     }
 }
 
-/// A document's name as a line shows it, or "with no name".
 fn shown(name: &str) -> &str {
     match name {
         "" => "with no name",
@@ -71,8 +68,8 @@ mod tests {
     use super::super::{Condition, Document, File};
     use super::*;
 
-    /// A directory of one file, with a `MetricsSource` named `metrics` for
-    /// each of `conditions`, the one condition loading it gave.
+    /// A directory of one file with one `MetricsSource` named `metrics`
+    /// for each condition in `conditions`.
     fn directory(conditions: &[Condition]) -> Directory {
         let documents = conditions.iter().map(|condition| Document {
             kind: "MetricsSource".into(),
@@ -109,7 +106,7 @@ mod tests {
     }
 
     #[rstest]
-    #[case::none_there(vec![], OffLine::said("a MetricsSource would show it"))]
+    #[case::none_there(vec![], OffLine::plain("a MetricsSource would show it"))]
     #[case::one_that_did_not(
         vec![invalid()],
         OffLine {

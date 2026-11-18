@@ -1,37 +1,37 @@
-# Kind knowledge for the GitOps tool in `flux.yaml`, written as the
-# tool would ship it: the two kinds that apply, and the four it fetches
-# through.  The code of `transect` contains none of these names.
+# Kind knowledge for the Flux objects in `flux.yaml`, written as Flux
+# would ship it. No `transect` code refers to these kinds, so the map
+# learns about them only from this file.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:
   name: kustomizations.kustomize.toolkit.fluxcd.io
 spec:
-  # Flux grants its controllers every kind of its groups, so no role
-  # names the writer of a `Kustomization`'s status.  The image names
-  # it.
+  # Flux gives all its controllers access to every kind in its API
+  # groups, so the RBAC rules do not show which controller writes a
+  # `Kustomization`'s status. The controller's image does.
   controller: {image: fluxcd/kustomize-controller}
   applies:
     name: {label: kustomize.toolkit.fluxcd.io/name}
     namespace: {label: kustomize.toolkit.fluxcd.io/namespace}
-    # A `Kustomization` may apply as a `ServiceAccount` in its own
-    # namespace.  Without one, it applies as the controller's own
-    # `ServiceAccount`.
+    # When `spec.serviceAccountName` is empty, the `Kustomization`
+    # applies as the controller's own `ServiceAccount`.
     account: {field: spec.serviceAccountName}
   source: [spec.sourceRef]
   directory: spec.path
   revision:
     paths: [status.lastAppliedRevision]
     formats: ['{ref}@sha1:{commit}', 'sha1:{commit}', '{ref}@*']
-  # A `Namespace` that an app's `Kustomization` declares, and that the
-  # root `Kustomization` also applies, is in both inventories.  Each
-  # reconcile rewrites these two labels to name the `Kustomization`
-  # that applied the `Namespace` last.
+  # When two `Kustomization`s apply the same `Namespace`, each reconcile
+  # rewrites these labels to the one that applied it last. transect
+  # ignores a change to them when it decides whether the `Namespace`
+  # changed.
   ignoreChanges:
     - {label: kustomize.toolkit.fluxcd.io/name, kinds: [{kind: Namespace}]}
     - {label: kustomize.toolkit.fluxcd.io/namespace, kinds: [{kind: Namespace}]}
 ---
-# A release's objects have its marks and the marks of the tree that
-# applied the release, so `precedence` makes the release win.
+# The objects of a Helm release have the release's labels and also the
+# labels of the `Kustomization` that applied the release. The higher
+# `precedence` makes the `HelmRelease` their applier.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:

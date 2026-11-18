@@ -1,6 +1,7 @@
-//! The objects that name a `ConfigMap`, an `IngressClass`, or a
-//! `PriorityClass`: the workloads whose pods read it, and the `Ingress`
-//! objects of a class.  A `ServiceAccount`'s page is its access drawing.
+//! The object page sections that list what uses a `ConfigMap`, an
+//! `IngressClass`, or a `PriorityClass`: the workloads whose pods read
+//! the `ConfigMap` or use the `PriorityClass`, and the `Ingress`
+//! objects of an `IngressClass`.
 
 use std::collections::BTreeSet;
 
@@ -12,8 +13,8 @@ use super::refer_object;
 use transect_graph::edges::Object;
 use transect_map::objects::{Section, Side, words};
 
-/// The top owners of the pods in `namespace`, or in every namespace,
-/// whose spec names the object, as `reads` decides.
+/// The top owners of the pods whose spec passes `reads`, in `namespace`,
+/// or in every namespace when it is `None`.
 fn workloads(
     snapshot: &Snapshot,
     namespace: Option<&str>,
@@ -42,8 +43,6 @@ fn refer_all(
         .collect()
 }
 
-/// Whether `spec` reads the `ConfigMap` `name`: as a volume, a projected
-/// source, or a container's environment.
 fn reads_config_map(spec: &PodSpec, name: &str) -> bool {
     let volumes = spec.volumes.iter().flatten();
     let mounted = volumes.clone().any(|volume| {
@@ -79,7 +78,7 @@ pub fn config_map(snapshot: &Snapshot, object: &Object) -> Vec<Section> {
     let depends = snapshot
         .intents
         .of(object)
-        .and_then(|said| said.depends_on.as_ref());
+        .and_then(|intent| intent.depends_on.as_ref());
     let depends = depends
         .into_iter()
         .flat_map(|listed| listed.entries.iter().map(words));
@@ -152,15 +151,15 @@ mod tests {
         "{containers: [{name: a, envFrom: [{configMapRef: {name: settings}}]}]}",
         true
     )]
-    #[case::one_key(
+    #[case::env_key_ref(
         "{containers: [{name: a, env: [{name: X, valueFrom: {configMapKeyRef: {name: settings, key: x}}}]}]}",
         true
     )]
-    #[case::another(
+    #[case::a_different_config_map(
         "{containers: [{name: a, envFrom: [{configMapRef: {name: other}}]}]}",
         false
     )]
-    fn finds_the_pods_that_read_a_config_map(#[case] yaml: &str, #[case] expected: bool) {
+    fn detects_each_way_a_pod_spec_reads_a_config_map(#[case] yaml: &str, #[case] expected: bool) {
         assert_eq!(reads_config_map(&spec(yaml), "settings"), expected);
     }
 }

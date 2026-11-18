@@ -1,12 +1,12 @@
-//! The stream limit an API server sends: its
-//! `SETTINGS_MAX_CONCURRENT_STREAMS`, which kube-apiserver sets with
-//! `--http2-max-streams-per-connection`.
+//! Reads the stream limit an API server announces in its HTTP/2
+//! `SETTINGS_MAX_CONCURRENT_STREAMS` setting, which kube-apiserver sets
+//! with `--http2-max-streams-per-connection`.
 //!
-//! hyper does not expose the settings its peer sent, so `transect`
-//! opens one connection of its own at the start, with the same TLS as
-//! its client, sends HTTP/2's preface, and reads the SETTINGS frame a
-//! server must send first.  It sends no request, so it needs no
-//! credentials.
+//! hyper does not expose the settings its peer sends. So at startup
+//! `transect` opens a connection of its own, with the same TLS
+//! configuration as its client, sends the HTTP/2 preface, and reads the
+//! SETTINGS frame that a server must send first. It sends no request, so
+//! it needs no credentials.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -18,35 +18,40 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_rustls::TlsConnector;
 use tokio_rustls::rustls::pki_types::ServerName;
 
-/// How long the read may take.
+/// How long the probe may take, from the TCP connect to the server's
+/// SETTINGS frame.
 const ATTEMPT: Duration = Duration::from_secs(5);
 
-/// What every HTTP/2 client sends first: the preface, then an empty
-/// SETTINGS frame.
+/// What an HTTP/2 client sends first: the connection preface, then an
+/// empty SETTINGS frame.
 const PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n\x00\x00\x00\x04\x00\x00\x00\x00\x00";
 
-/// A frame's type for SETTINGS, and the setting's identifier.
+/// The HTTP/2 frame type for SETTINGS, and the identifier of the
+/// maximum concurrent streams setting.
 const SETTINGS: u8 = 0x4;
 const MAX_CONCURRENT_STREAMS: u16 = 0x3;
 
-/// The protocol the API server uses, as its TLS handshake chose it.
+/// The protocol that `transect` uses with the API server.
 #[derive(Debug, PartialEq)]
 pub enum Spoken {
-    /// HTTP/1.1 alone, which a plain `http://` URL, such as `kubectl
-    /// proxy`'s, always uses.
+    /// HTTP/1.1. A plain `http://` URL, such as the one `kubectl proxy`
+    /// serves, always uses it, and so does a server that does not agree
+    /// to `h2` in the TLS handshake.
     Http1,
-    /// HTTP/2, with the stream limit it sent, or none when it set none.
+    /// HTTP/2, with the stream limit the server sent, or `None` when it
+    /// sent no limit.
     Http2(Option<u32>),
 }
 
-/// The protocol that the API server `config` names uses.
+/// Finds out which protocol the API server in `config` uses, and its
+/// stream limit when it uses HTTP/2.
 pub async fn spoken(config: &Config) -> anyhow::Result<Spoken> {
     if config.cluster_url.scheme_str() == Some("http") {
         return Ok(Spoken::Http1);
     }
     tokio::time::timeout(ATTEMPT, read(config))
         .await
-        .context("no answer")?
+        .context("waiting for the SETTINGS frame of the API server")?
 }
 
 async fn read(config: &Config) -> anyhow::Result<Spoken> {
@@ -70,13 +75,16 @@ async fn read(config: &Config) -> anyhow::Result<Spoken> {
             return Ok(Spoken::Http2(max_streams(settings)));
         }
         let read = stream.read(&mut chunk).await?;
-        anyhow::ensure!(read > 0, "the server closed the connection");
+        anyhow::ensure!(
+            read > 0,
+            "the API server closed the connection before it sent a SETTINGS frame"
+        );
         frame.extend_from_slice(&chunk[..read]);
     }
 }
 
-/// The payload of the SETTINGS frame at the start of `bytes`, once all
-/// of it has arrived.
+/// Returns the payload of the SETTINGS frame at the start of `bytes`,
+/// or `None` when the frame is another type or has not fully arrived.
 fn settings(bytes: &[u8]) -> Option<&[u8]> {
     let header = bytes.get(..9)?;
     let length = u32::from_be_bytes([0, header[0], header[1], header[2]]) as usize;
@@ -84,8 +92,8 @@ fn settings(bytes: &[u8]) -> Option<&[u8]> {
     bytes.get(9..9 + length)
 }
 
-/// The stream limit among `settings`, six bytes each: an identifier and
-/// a value.
+/// Returns the maximum concurrent streams in `settings`, which holds
+/// six-byte entries of a two-byte identifier and a four-byte value.
 fn max_streams(settings: &[u8]) -> Option<u32> {
     let (each, _) = settings.as_chunks::<6>();
     each.iter().find_map(|setting| {
@@ -101,7 +109,8 @@ mod tests {
 
     use super::*;
 
-    /// A frame of `kind` holding `settings`, followed by `extra` bytes.
+    /// Builds a frame of type `kind` with `settings` as its payload,
+    /// followed by `extra` bytes.
     fn frame(kind: u8, settings: &[(u16, u32)], extra: &[u8]) -> Vec<u8> {
         let payload: Vec<u8> = settings
             .iter()
@@ -129,8 +138,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn an_http_url_speaks_http1_without_a_probe() {
-        // Nothing listens on port 1, so a probe would fail.
+    async fn an_http_url_uses_http1_without_connecting() {
+        // Nothing listens on port 1, so a connection attempt would fail.
         let config = Config::new("http://127.0.0.1:1".parse().unwrap());
         assert_eq!(spoken(&config).await.unwrap(), Spoken::Http1);
     }

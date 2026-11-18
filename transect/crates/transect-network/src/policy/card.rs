@@ -1,13 +1,12 @@
-//! A card's "May be called by" section: the callers that each
-//! `NetworkPolicy` admits to the card's workload or namespace, read
-//! from the allowed-to-call summary.
+//! A card's "May be called by" section: the callers that
+//! `NetworkPolicy` objects admit to the card's workload or namespace,
+//! read from `Allowed`.
 //!
-//! A rule often admits a whole namespace, or anything at all.  A list
-//! of three hundred workloads one by one would hide the few rules that
-//! matter, so the card groups the callers by the ports they reach and
-//! folds each group.  When every workload of a namespace may call, the
-//! card shows the namespace, and when every namespace may call, the
-//! card shows "any pod".
+//! A rule often admits a whole namespace or any source at all, and a
+//! list of every workload would hide the rules that restrict callers.
+//! So the card makes one row for each set of ports that callers may
+//! reach. In a row, the card names a namespace when every workload of it
+//! may call, and shows "any pod" when every namespace may call.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -18,30 +17,31 @@ use transect_graph::links::{Named, Part, Reference};
 
 #[derive(Debug, Default, PartialEq)]
 pub struct Calls {
-    /// Why the card lists no caller, such as that nothing isolates it
-    /// or that policy admits none.  Each workload the note names is a
-    /// link.  The note is empty when the rows list who may call.
+    /// Why the card lists no callers, for example because no policy
+    /// isolates the workload or because policy admits none. A workload
+    /// named in the note is a link. The note is empty when `rows` list
+    /// the callers.
     pub note: Vec<Part>,
     pub rows: Vec<CallRow>,
 }
 
-/// The callers that reach the same ports.
+/// The callers that may reach the same ports.
 #[derive(Debug, PartialEq)]
 pub struct CallRow {
     pub who: Vec<Reference>,
-    /// The ports.  A namespace's card omits them, because each of its
-    /// workloads admits its own ports.
+    /// A namespace's card omits the ports, because each of its workloads
+    /// admits its own ports.
     pub ports: Option<String>,
 }
 
-/// The most callers a row names before it folds to their count.
-const MOST: usize = 6;
+/// The most callers a row lists before the card shows a count instead.
+const MAX_LISTED: usize = 6;
 
 impl CallRow {
-    /// Whether the row folds to a count that opens to its callers, as a
-    /// long list on a board does.
+    /// Whether the card shows the row as a count that expands to its
+    /// callers, as a board does with a long list.
     pub fn folds(&self) -> bool {
-        self.who.len() > MOST
+        self.who.len() > MAX_LISTED
     }
 }
 
@@ -77,8 +77,7 @@ impl Calls {
         }
     }
 
-    /// The card of `namespace`, where `href` gives the page of each
-    /// workload a note names.
+    /// `href` returns the page that a workload named in a note links to.
     pub fn of_namespace(
         allowed: &Allowed,
         namespace: &str,
@@ -96,9 +95,10 @@ impl Calls {
             }
             Some(NamespaceReach::Isolated(callers)) => callers,
         };
-        // The card shows a rule that admits every namespace as one
-        // line, and the map tags no parcel for it, because nearly every
-        // namespace may call.
+        // A rule that admits every namespace gets one line, because a
+        // list of nearly every namespace would not help the reader. For
+        // the same rule, the map does not tag each caller's namespace
+        // with "may call".
         if allowed.admits_every_namespace_in(namespace) {
             let others = allowed.namespaces().filter(|&other| other != namespace);
             let but: Vec<String> = others
@@ -125,12 +125,13 @@ impl Calls {
     }
 }
 
-/// Folds one group of a workload's callers into what a card names.
+/// Turns one group of a workload's callers into the references a card
+/// lists.
 struct Folded<'a> {
     allowed: &'a Allowed,
     target: &'a Object,
-    /// The namespaces with a workload that may call on any port, which
-    /// "any namespace but" leaves out of its exceptions.
+    /// The namespaces with a workload that may call on some ports, which
+    /// "any namespace but" does not list as an exception.
     calling: &'a BTreeSet<&'a str>,
 }
 
@@ -173,10 +174,9 @@ impl<'a> Folded<'a> {
         if !whole.is_empty() && whole.iter().all(|&whole| whole) {
             who.push(refer(Named::AnyPod));
         } else if self.allowed.admits_every_namespace(self.target, ports) {
-            // The row lists first the callers that a rule names one by
-            // one.  The rule that admits every namespace follows them
-            // as one entry, which names the namespaces none of whose
-            // pods may call.
+            // List the callers of each namespace that is only partly
+            // admitted, then one "any namespace" entry with an exception
+            // for each namespace that has no caller on any port.
             let here = self.target.namespace.as_deref();
             let mut but = Vec::new();
             for namespace in self.allowed.namespaces() {
@@ -214,9 +214,9 @@ impl<'a> Folded<'a> {
     }
 
     /// Whether the callers are every pod of `namespace`: a rule admits
-    /// the namespace whole, and `callers` contains every workload of it
-    /// except the target.  A namespace that contains only the target is
-    /// whole, so it never stops the card from showing "any pod".
+    /// the whole namespace, and `callers` has every workload of it except
+    /// the target. A namespace with no workload but the target counts as
+    /// whole, so it does not stop the card from showing "any pod".
     fn whole(&self, namespace: &str, callers: Option<&BTreeSet<&Object>>) -> bool {
         let mut others = self
             .allowed

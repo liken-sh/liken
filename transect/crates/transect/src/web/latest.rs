@@ -1,34 +1,28 @@
-//! The model of the cluster as of its latest change, built once per
-//! change and shared by every view that renders after it.
-//!
-//! Every open view wakes on the same change, and every page load asks
-//! for the same cluster, so building the model for each of them would
-//! repeat the same work once per view.  The first caller after a change
-//! builds it, on a blocking thread since it is CPU work, and callers
-//! that arrive meanwhile wait for that build instead of starting their
-//! own.
+//! The model of the cluster, built once per change and shared by every
+//! view and page load. The first caller after a change builds it on a
+//! blocking thread, because the build is CPU work, and callers that
+//! arrive during the build wait for that build.
 
 use std::sync::Arc;
 use std::time::Instant;
 
 use tokio::sync::{Mutex, watch};
 
-/// Builds a model, given the one before it, which a build may copy
-/// values from, such as the pods that have since gone.
+/// Builds a model from the previous one, if any. A build reads from the
+/// previous model what the cluster no longer reports, such as the pods
+/// that were deleted since then.
 type Build<T> = dyn Fn(Option<&T>) -> T + Send + Sync;
 
 pub struct Latest<T> {
     build: Arc<Build<T>>,
     state: Arc<Mutex<State<T>>>,
-    /// The last model built, which a caller that can take a model from
-    /// before the latest change reads without waiting for a build.  An
-    /// open page's event stream builds after each change, so it is
-    /// seldom more than a few seconds old.
+    /// A copy of the last model built, which `last` reads without
+    /// waiting for the lock that a build holds.
     last: Arc<std::sync::RwLock<Option<Arc<T>>>>,
 }
 
 struct State<T> {
-    /// Marked changed when the cluster changed since the last build.
+    /// Has a change when the cluster changed since the last build.
     changes: watch::Receiver<()>,
     built: Option<Arc<T>>,
 }
@@ -44,8 +38,8 @@ impl<T> Clone for Latest<T> {
 }
 
 impl<T: Send + Sync + 'static> Latest<T> {
-    /// `changes` marks the model stale; `build` makes a fresh one from
-    /// the last one built, or from none on the first build.
+    /// A send on `changes` makes the model out of date. `build` receives
+    /// the last model built, or `None` on the first build.
     pub fn new(
         changes: &watch::Sender<()>,
         build: impl Fn(Option<&T>) -> T + Send + Sync + 'static,
@@ -62,12 +56,11 @@ impl<T: Send + Sync + 'static> Latest<T> {
     }
 
     /// The last model built, without waiting for a build after a change,
-    /// or the latest when none has been built yet.  Page loads and quick
-    /// search read this, because on a cluster that changes every second,
-    /// waiting for each build would delay every click and keystroke by
-    /// the length of one.  When the cluster has changed since, it starts
-    /// a build on its own task, so the next keystroke reads a newer model
-    /// even on a page with no event stream to build one.
+    /// or a new one when none has been built. Page loads and quick search
+    /// call this, because on a cluster that changes every second a wait
+    /// for each build would delay every click and keystroke. When the
+    /// model is out of date and no build runs, it starts a build on its
+    /// own task, so the next call returns a newer model.
     pub async fn last(&self) -> Option<Arc<T>> {
         let last = self.last.read().unwrap_or_else(|e| e.into_inner()).clone();
         let Some(last) = last else {
@@ -80,8 +73,8 @@ impl<T: Send + Sync + 'static> Latest<T> {
         Some(last)
     }
 
-    /// Whether a model newer than the last one built is on its way or
-    /// due: a build is under way, or the cluster changed since the last.
+    /// Whether the last model built is out of date: a build is running,
+    /// or the cluster changed since the last build.
     pub fn behind(&self) -> bool {
         match self.state.try_lock() {
             Ok(state) => state.changes.has_changed().unwrap_or(false),
@@ -89,9 +82,9 @@ impl<T: Send + Sync + 'static> Latest<T> {
         }
     }
 
-    /// Whether the cluster changed since the last build, and no build
-    /// is under way.  A build holds the lock, and the next one after it
-    /// reads any change that landed meanwhile.
+    /// Whether the cluster changed since the last build and no build
+    /// runs. A running build holds the lock, and a change during that
+    /// build is still marked when it ends.
     fn stale(&self) -> bool {
         let Ok(state) = self.state.try_lock() else {
             return false;
@@ -107,19 +100,19 @@ impl<T: Send + Sync + 'static> Latest<T> {
         if let (Some(built), false) = (&state.built, changed) {
             return Some(built.clone());
         }
-        // Marked before the build, so a change that lands during it makes
-        // the next caller build again.
+        // Clear the changed flag before the build, so a change that
+        // arrives during the build makes the next caller build again.
         state.changes.mark_unchanged();
         let build = self.build.clone();
         let previous = state.built.clone();
         let built = tokio::task::spawn_blocking(move || {
             let started = Instant::now();
             let built = build(previous.as_deref());
-            tracing::debug!(elapsed = ?started.elapsed(), "built the model");
+            tracing::debug!(elapsed = ?started.elapsed(), "Built the model");
             built
         })
         .await
-        .inspect_err(|error| tracing::error!(%error, "building the model"))
+        .inspect_err(|error| tracing::error!(%error, "The task that builds the model ended before it returned a model"))
         .ok()?;
         let built = Arc::new(built);
         state.built = Some(built.clone());
@@ -190,8 +183,8 @@ mod tests {
         latest.last().await;
         sender.send_replace(());
         let stale = latest.last().await;
-        // The build runs on its own task: let it take the lock, then
-        // wait for it to release the lock.
+        // The build runs on its own task. Yield so that it takes the
+        // lock, then wait until it releases the lock.
         tokio::task::yield_now().await;
         drop(latest.state.lock().await);
         let fresh = latest.last().await;

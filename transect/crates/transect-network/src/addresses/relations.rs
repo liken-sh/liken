@@ -1,19 +1,19 @@
-//! What a kind knowledge relation reaches on the map.  An object
-//! resolves as an object entry of intent does, to a machine for a
-//! `Node` and to the workloads behind a `Service`.  In addition, a
-//! `ResourceClaim` that an object holds resolves to the devices its
-//! allocation names, as the pods that hold one draw it.  An object of
-//! a kind transect does not watch also resolves to itself, because an
-//! operator's status names a real object.  An address resolves as a
-//! configured one does, so an address in another namespace or outside
-//! the cluster resolves to the same end as a pod's address would.
+//! Resolves what a declared `Relation` of an object points at, to the
+//! ends of the edges that the relation draws.
+//!
+//! A relation that names an object resolves to the ends that
+//! `StatedReading::endpoints_of` gives. A `ResourceClaim` with an
+//! allocation resolves to its allocated devices instead, which are the
+//! same ends that the pods that use the claim draw edges to. A relation
+//! that names an address resolves like an address in a pod spec, so it
+//! reaches the same end that it would from a pod.
 
 use super::StatedReading;
 use transect_graph::edges::{Endpoint, Object};
 use transect_ground::devices::Devices;
 use transect_resources::knowledge::{Names, Reached, Relation};
 
-/// What `relation` of `from` reaches.
+/// The ends that `relation` of `from` points at.
 pub fn reached(
     relation: &Relation,
     from: &Object,
@@ -25,7 +25,7 @@ pub fn reached(
             let held = claim(object).then(|| devices.of_claim(object)).flatten();
             let ends = match held {
                 Some(held) => held.iter().cloned().map(Endpoint::Device).collect(),
-                None => reading.stands_for(object),
+                None => reading.endpoints_of(object),
             };
             Reached {
                 ends,

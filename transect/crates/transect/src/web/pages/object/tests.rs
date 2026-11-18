@@ -1,5 +1,6 @@
-//! What an object's page and a kind's page draw from the stores, and
-//! what a page of a kind no store holds draws from its one read.
+//! Tests of the object page and the kind page built from the stores, and
+//! of the object page for a kind that no store holds, which shows the
+//! result of one read of the object from the API server.
 
 use std::sync::Arc;
 
@@ -21,15 +22,16 @@ fn at<'a>(resource: &'a str, name: &'a str) -> ObjectAt<'a> {
     }
 }
 
-/// The text of the page `asked` names, drawn with `reads`: its note,
-/// then each fact, a line each.
-fn page(model: &Model, reads: &Reads, asked: ObjectAt) -> Option<String> {
+/// The text of the object page for `object`, built with `reads`: the
+/// note, then one "label: values" line for each fact. Returns `None`
+/// when there is no page.
+fn page(model: &Model, reads: &Reads, object: ObjectAt) -> Option<String> {
     let layers = &model.snapshot.resources.layers;
     let page = object_page(
         model,
         layers,
         reads,
-        asked,
+        object,
         k8s_openapi::jiff::Timestamp::now(),
     )?;
     let board = &page.board;
@@ -97,14 +99,14 @@ fn lease_key() -> Key {
 #[case::found(Some(Read::Found(lease())), Some(READ_ONCE))]
 #[case::refused(Some(Read::Refused("forbidden".into())), Some("The API server refused transect's read of this Lease. Its message: forbidden"))]
 #[case::failed(Some(Read::Failed("timed out".into())), Some("Reading this Lease failed; reload to try again. The error: timed out"))]
-#[case::not_kept(None, Some("This Lease has not been read; reload to read it."))]
+#[case::not_read_yet(None, Some("This Lease has not been read; reload to read it."))]
 #[case::missing(Some(Read::Missing), None)]
-fn a_kind_no_store_holds_draws_its_one_read(
+fn a_kind_no_store_holds_shows_the_state_of_its_read(
     #[case] read: Option<Read>,
     #[case] note: Option<&str>,
 ) {
     let reads = match read {
-        Some(read) => Reads::holding(lease_key(), read),
+        Some(read) => Reads::with_read(lease_key(), read),
         None => Reads::default(),
     };
     let text = page(&fixture::model(), &reads, at(LEASES, "web"));
@@ -133,7 +135,7 @@ fn reads_only_a_valid_name_of_a_kind_no_store_holds(
 }
 
 #[rstest]
-fn a_name_no_read_is_made_for_draws_no_page() {
+fn an_invalid_name_gets_no_page() {
     let reads = Reads::default();
     assert_eq!(
         page(&fixture::model(), &reads, at(LEASES, "web,other")),

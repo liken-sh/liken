@@ -1,6 +1,7 @@
-//! Depends on: each literal value a workload's pod specs set, in an
-//! environment variable or a container argument, resolved against the
-//! index to the workloads and machines it reaches.
+//! Finds what a workload depends on. It reads the addresses in the
+//! literal environment values and arguments of the workload's pod specs
+//! and resolves each one, through the `Addresses` index, to the
+//! workloads and machines it reaches.
 
 use k8s_openapi::api::core::v1::{Container, PodSpec};
 
@@ -15,20 +16,24 @@ use transect_graph::edges::{Edge, Endpoint, Graph, Kind, Object, Provenance};
 pub struct Dependency {
     /// The host and port, as `Address::text` shows them.
     pub address: String,
-    /// The workloads behind it, a `Service` that selects none, or a
-    /// machine; never the workload itself.
+    /// The workloads that the address reaches, a `Service` that selects
+    /// no workload, or a machine. It never contains the workload itself
+    /// or an object whose top owner is the workload.
     pub to: Vec<Endpoint>,
-    /// Whether what it reaches is a guess, as `Reach` records.
+    /// True when `reach` marked the match as a guess.
     pub guessed: bool,
 }
 
-/// What `workload`'s `templates` depend on, one entry per address in
-/// the order the specs first write it.  The paths of one host, which
-/// may reach different Services, are joined under that host.
-/// A workload's own address, such as the external URL that a web
-/// application is configured to serve on, is no dependency.  So the
-/// function omits an end whose top owner is the workload, and omits an
-/// address that reaches only such ends.
+/// What `workload`'s `templates` depend on, with one entry for each
+/// host and port, in the order the specs first write them. Addresses
+/// with the same host and port but different paths can reach different
+/// `Service`s. They merge into one entry with the ends of each, and the
+/// entry is a guess only when every one of them is.
+///
+/// A workload often has its own address in its configuration, such as
+/// the external URL that a web application serves on. That is not a
+/// dependency, so the function drops each end whose top owner is the
+/// workload, and each address that reaches only such ends.
 pub fn of_workload(
     addresses: &Addresses,
     graph: &Graph,
@@ -70,8 +75,8 @@ pub fn of_workload(
     found
 }
 
-/// A depends-on edge from each workload to each end its addresses
-/// reach, once per pair.
+/// A depends-on edge from each workload to each end that its addresses
+/// reach, with one edge for each pair.
 pub fn depends_on<'a>(
     addresses: &Addresses,
     graph: &Graph,
@@ -89,8 +94,9 @@ pub fn depends_on<'a>(
     edges
 }
 
-/// A depends-on edge from `from` to each end of `reached`, once per end.
-/// An edge is a guess only when every address that reaches its end is.
+/// A depends-on edge from `from` to each end of `reached`, with one
+/// edge for each end. An edge is a guess only when every address that
+/// reaches its end is.
 pub(super) fn edges_to(
     from: &Endpoint,
     reached: impl IntoIterator<Item = (Vec<Endpoint>, bool)>,
@@ -113,9 +119,9 @@ pub(super) fn edges_to(
     edges
 }
 
-/// Whether `end` is `workload` or one of its own objects.  A `Service`
-/// that selects nothing stands for itself, and when an operator made
-/// it, its top owner identifies the workload it belongs to.
+/// Whether `end` is `workload` or an object it owns, by top owner. A
+/// `Service` that an operator created for the workload has the
+/// workload as its top owner.
 fn owns(ownership: &Ownership, workload: &Object, end: &Endpoint) -> bool {
     match end {
         Endpoint::Object(object) => &ownership.top_owner(object) == workload,
@@ -123,10 +129,10 @@ fn owns(ownership: &Ownership, workload: &Object, end: &Endpoint) -> bool {
     }
 }
 
-/// Every address the literal values of `templates` write: each
-/// container's environment values and arguments, init containers'
-/// among them.  A value from a `Secret`, a `ConfigMap`, or a field is
-/// not in the spec, so it is not read.
+/// The addresses in the environment values and arguments of every
+/// container and init container of `templates`. A value that comes
+/// from a `Secret`, a `ConfigMap`, or a field reference is not in the
+/// spec, so it is skipped.
 fn written(templates: &[&PodSpec]) -> Vec<Address> {
     let containers = templates.iter().flat_map(|spec| {
         let init = spec.init_containers.iter().flatten();

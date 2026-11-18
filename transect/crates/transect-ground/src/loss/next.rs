@@ -1,12 +1,10 @@
-//! What happens next: when Kubernetes evicts the lost machines' pods,
-//! which of the pods stay stuck and why, and, for a machine that is
-//! really down, the taint that lets Kubernetes delete the stuck pods.
+//! What happens to the pods of the lost machines: when Kubernetes
+//! evicts them, and which of them stay stuck and why.
 //!
-//! transect reads the eviction time from each pod's tolerations, so the
-//! minutes that the sidebar shows are the minutes that the cluster will
-//! wait.  Most pods have the 300 seconds that Kubernetes admission adds
-//! to them, so the line states the most common value and names the
-//! pods that differ.
+//! transect reads each pod's eviction time from its tolerations, so the
+//! sidebar shows how long the cluster will wait.  Kubernetes admission
+//! gives most pods a toleration of 300 seconds, so the sidebar shows the
+//! most common time and names the pods whose time differs.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -21,23 +19,21 @@ pub struct Next {
     /// When Kubernetes evicts most of the pods on the lost machines, or
     /// `None` when every pod there belongs to a `DaemonSet`.
     pub usual: Option<Eviction>,
-    /// The names of the pods that Kubernetes evicts after a time other
-    /// than `usual`.  A pod that is never evicted is stuck instead.
+    /// The pods that Kubernetes evicts after a time other than `usual`.
+    /// A pod that is never evicted is stuck instead.
     pub differ: Vec<(String, Eviction)>,
-    /// The workloads whose pods stay stuck, grouped by reason.  Each
-    /// group has its first reason and the names of its workloads, in
-    /// name order.  A name that two namespaces share is shown as
-    /// `namespace/name`, and a name that two kinds share in one
-    /// namespace as `Kind name`, so two workloads with the same name
-    /// appear as two.
+    /// The workloads whose pods stay stuck, grouped by the rank of the
+    /// reason, each group in name order.  A name that two namespaces
+    /// share is shown as `namespace/name`, and a name that two kinds
+    /// share in one namespace as `Kind name`.
     pub stuck: Vec<(Stranded, Vec<Named>)>,
-    /// Whether every lost machine is really down, and not only selected
-    /// for a prediction.
+    /// Whether every lost machine is really down, not only selected to
+    /// predict the loss.
     pub really_lost: bool,
 }
 
-/// Collects the evictions and the stuck pods while `assess` goes
-/// through the workloads.
+/// Collects the evictions and the stuck workloads while `assess` walks
+/// the workloads.
 #[derive(Default)]
 pub struct Gather {
     evictions: Vec<(String, Eviction)>,
@@ -99,8 +95,7 @@ impl Gather {
 }
 
 /// The most common eviction among the pods.  When two are equally
-/// common, the function returns the sooner one, because the reader
-/// waits for it first.
+/// common, it returns the sooner one, because that one happens first.
 fn usual(evictions: impl Iterator<Item = Eviction>) -> Option<Eviction> {
     let mut counts: HashMap<Eviction, usize> = HashMap::new();
     for eviction in evictions {

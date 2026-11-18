@@ -1,7 +1,6 @@
-//! LogsQL, VictoriaLogs' query language.  This module quotes values,
-//! adds filters to a query, and reads a response.  A response is JSON
-//! lines, with one object for each log line or each stats group, and
-//! each field's value is a string.
+//! LogsQL, the query language of VictoriaLogs. This module quotes
+//! values, adds filters to a query, and parses a response. A response is
+//! JSON lines, with one object for each log line or stats group.
 
 use super::query::Row;
 
@@ -22,8 +21,9 @@ pub fn escape(value: &str) -> String {
     escaped
 }
 
-/// A field name written for LogsQL.  A plain name, such as
-/// `k8s.pod.name`, stays bare, and any other name is quoted.
+/// A field name written for LogsQL. A name of only letters, digits,
+/// `_`, `.`, and `-`, such as `k8s.pod.name`, is left as it is, and any
+/// other name is quoted.
 pub fn field(name: &str) -> String {
     let plain = !name.is_empty()
         && name
@@ -54,10 +54,9 @@ pub fn not(filter: &str) -> String {
     format!("!({filter})")
 }
 
-/// A filter for lines whose level `field` starts with one of `starts`,
-/// in any case, the same way the source's levels match a value.  The
-/// filter matches each start as literal text, so a `.` or a `|` in a
-/// start is not a pattern.
+/// A filter for lines whose level field `name` starts with one of
+/// `starts`, in any letter case. It matches each start as literal text,
+/// so a `.` or a `|` in a start is not a regular expression operator.
 pub fn at_least_error(name: &str, starts: &[String]) -> String {
     let starts: Vec<String> = starts.iter().map(|start| literal(start)).collect();
     let pattern = format!("(?i)^({})", starts.join("|"));
@@ -78,8 +77,8 @@ fn literal(text: &str) -> String {
 }
 
 /// `query` with `filter` added to its filters, before its first pipe.
-/// This function puts the query's own filters in parentheses first, so
-/// a query whose filters are joined by `or` keeps its meaning.
+/// The query's own filters go in parentheses first, so that `filter`
+/// applies to the whole of a query such as `a or b`.
 pub fn narrow(query: &str, filter: &str) -> String {
     match first_pipe(query) {
         Some(at) => format!(
@@ -91,7 +90,7 @@ pub fn narrow(query: &str, filter: &str) -> String {
     }
 }
 
-/// `query`, changed to return only `fields`.
+/// `query` with a `fields` pipe, so the response has only `fields`.
 pub fn keep(query: &str, fields: &[&str]) -> String {
     let names: Vec<String> = fields.iter().map(|name| field(name)).collect();
     format!("{} | fields {}", query.trim(), names.join(", "))
@@ -115,26 +114,24 @@ fn first_pipe(query: &str) -> Option<usize> {
     None
 }
 
-/// The text that VictoriaLogs returns in place of a line's message when
-/// the line had none, such as a blank line that a container wrote.  The
-/// text looks like an error, so a tail treats it as a blank line.
+/// The text that VictoriaLogs returns as the message of a line that has
+/// none, such as a blank line that a container wrote. A tail shows such
+/// a line as blank, because the text reads like an error.
 const NO_MESSAGE: &str = "missing _msg field; see https://docs.victoriametrics.com/";
 
-/// Whether `message` is the text that VictoriaLogs writes in place of a
-/// missing message.
+/// Whether `message` is the placeholder for a line with no message.
 pub fn no_message(message: &str) -> bool {
     message.starts_with(NO_MESSAGE)
 }
 
-/// The rows of a response.  A value that is not a string, such as a
-/// number from a stats pipe in another VictoriaLogs version, is kept as
-/// its JSON text.
+/// The rows of a response. A value that is not a JSON string, such as a
+/// number, becomes its JSON text.
 pub fn rows(body: &str) -> Result<Vec<Row>, String> {
     let lines = body.lines().filter(|line| !line.trim().is_empty());
     lines
         .map(|line| {
             let object: serde_json::Map<String, serde_json::Value> = serde_json::from_str(line)
-                .map_err(|error| format!("not LogsQL's JSON lines: {error}"))?;
+                .map_err(|error| format!("the response is not JSON lines: {error}"))?;
             Ok(object
                 .into_iter()
                 .map(|(key, value)| {
@@ -217,7 +214,7 @@ mod tests {
     }
 
     #[rstest]
-    fn asks_for_the_fields_it_reads() {
+    fn limits_the_response_to_the_named_fields() {
         assert_eq!(
             keep("a | limit 5", &["_time", "_msg", "pod name"]),
             r#"a | limit 5 | fields _time, _msg, "pod name""#
@@ -243,7 +240,7 @@ mod tests {
     }
 
     #[rstest]
-    fn says_when_an_answer_is_not_json_lines() {
+    fn rejects_a_response_that_is_not_json_lines() {
         assert!(rows("bad query").unwrap_err().contains("JSON lines"));
     }
 }

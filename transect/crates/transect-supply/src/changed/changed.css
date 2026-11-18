@@ -1,8 +1,8 @@
 /*
  * The list of changes, in the sidebar under "Changed" and in full on
- * /changed.  Each entry shows a time in the mono face beside its
- * sentence.  A commit and the restarts under a rollout use the faint
- * ink.
+ * /changed.  Each entry shows its time in the monospace face beside its
+ * sentence.  A commit link, and the time of each entry listed under a
+ * rollout, are in --ink-faint.
  */
 
 .changed-list {

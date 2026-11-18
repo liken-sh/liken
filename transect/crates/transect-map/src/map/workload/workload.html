@@ -39,7 +39,7 @@
 {%- for host in ingress.host_lines() %}<span class="flow-line">{{ host }}</span>{% endfor -%}
 <span class="flow-faint">{{ ingress.serving_words() }}{% if let Some(issuer) = ingress.issuer() %} {% call links::object_link(issuer.text, issuer.href.clone(), "") %}{% endcall %}{% endif %}</span>
 {#- Each backend's traffic in gray, with the backend named when there
-    are several, or the one line that tells what would show the traffic. -#}
+    are several, or else a line that says what would show the traffic. -#}
 {%- for line in ingress.traffic.lines(ingress.namespace, false) %}
 <span class="flow-line flow-traffic"{% if let Some(title) = ingress.traffic.title() %} title="{{ title }}"{% endif %}>{% if let Some(backend) = line.backend %}{% call links::object_link(backend.text, backend.href, "") %}{% endcall %} · {% endif %}{{ line.figures }}</span>
 {%- endfor %}

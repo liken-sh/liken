@@ -1,5 +1,5 @@
-//! The edges of a workload's entry: each `Service` that selects a
-//! workload, and each `Ingress` that routes to a `Service`.
+//! The selects edges from each `Service` to its workloads, and the
+//! routes-to edges from each `Ingress` to its `Service` objects.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -23,12 +23,11 @@ fn ingress_object(namespace: &str, name: &str) -> Object {
 }
 
 /// A selects edge from each `Service` to each workload in its namespace
-/// whose pods' labels its selector matches.  `workloads` gives each top
-/// owner with the label sets of its pods, or of its pod templates when
-/// none runs, so a workload scaled to zero keeps its `Service`.  A
-/// `Service` with no selector has hand-written endpoints and selects
-/// nothing.  A cluster-scoped owner is in no namespace, so no `Service`
-/// can select it.
+/// that has a label set matching the `Service`'s selector.  `workloads`
+/// pairs each top-level owner with the labels of its pods, or of its pod
+/// templates when it has no pods, so that a workload scaled to zero
+/// still matches.  A `Service` with no selector or an empty one has its
+/// endpoints managed by hand, and selects nothing.
 pub fn selects<'a>(
     services: &[Arc<Service>],
     workloads: impl IntoIterator<Item = (&'a Object, Vec<&'a Labels>)>,
@@ -72,9 +71,8 @@ pub fn selects<'a>(
     edges
 }
 
-/// A routes-to edge from each `Ingress` to each `Service` its rules or
-/// its default backend name, once per `Service`.  A backend that names
-/// a resource instead of a `Service` adds no edge.
+/// One routes-to edge from each `Ingress` to each `Service` in its
+/// rules or its default backend.  A `resource` backend adds no edge.
 pub fn routes_to(ingresses: &[Arc<Ingress>]) -> Vec<Edge> {
     let mut edges = Vec::new();
     for ingress in ingresses {
@@ -116,7 +114,7 @@ mod tests {
         Object::new("apps", "Deployment", Some(namespace), name)
     }
 
-    /// Each edge as the names at its two ends.
+    /// The names of each edge's two ends.
     fn ends(edges: Vec<Edge>) -> Vec<(String, String)> {
         let name = |end: Endpoint| match end {
             Endpoint::Object(object) => object.name,

@@ -1,4 +1,4 @@
 # cert-manager
 
-Kind knowledge for cert-manager's `Certificate`, `ClusterIssuer`, and `Issuer`.
-With it, an `Ingress`'s entry box shows "TLS from" the issuer of its certificate, found through the `Certificate` that writes its TLS `Secret` or through the `Ingress`'s own annotations.
+`KindKnowledge` resources for cert-manager's `Certificate`, `ClusterIssuer`, and `Issuer`.
+With them, the `Ingress` box on a workload's page shows which issuer provides its TLS certificate ("TLS from"). `transect` finds the issuer through the `Certificate` that writes the `Ingress`'s TLS `Secret`, or through the `Ingress`'s own annotations.

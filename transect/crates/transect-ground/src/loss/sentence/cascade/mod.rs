@@ -1,4 +1,18 @@
-//! The text of the cascade: what the dependents of a down workload lose.
+//! The sentences of the cascade: what the dependents of a down workload
+//! lose.
+//!
+//! A dependent is an object with an edge that points at the down
+//! workload: a workload that calls it, an application that signs its
+//! users in through it, a host that an `Ingress` routes to it, or a
+//! custom resource that it controls. A `Hop` is one dependent and the
+//! down workloads that it loses, and each `Hop` becomes one line.
+//!
+//! Intent is what the people who run the cluster write about its parts,
+//! in annotations, overlays, and `Intent` resources, which
+//! `transect_resources::intent` reads. When a line shows a fact from
+//! intent that the API does not report, the line ends with the mark
+//! `intent`, and hovering the mark shows where the fact was written.
+//! The legend under the lines explains each mark.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -16,23 +30,24 @@ impl Sidebar {
         format!("What else fails with {}", object(pronoun))
     }
 
-    /// What the marks on the cascade's lines mean, when any is marked.
+    /// The legend that explains the marks on the cascade's lines, or
+    /// `None` when no line has a mark.
     pub fn legend(&self) -> Option<String> {
         transect_graph::edges::provenance::legend(self.cascade.iter().flat_map(Hops::marks))
     }
 }
 
 impl fmt::Display for Hops {
-    /// What follows the namespace's name: "web can't reach db; shop.example.com
-    /// stops answering".
+    /// What follows the namespace's name in a cascade line: "web can't
+    /// reach db; shop.example.com stops answering".
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&texts(&self.hops, self.namespace.as_deref()).join("; "))
     }
 }
 
 impl Hops {
-    /// Where the line's stored text was written, each once, for the
-    /// provenance marks after the line.
+    /// Where each fact from intent in the line's hops was written, each
+    /// place once, for the marks after the line.
     pub fn marks(&self) -> Vec<&Provenance> {
         let mut marks: Vec<&Provenance> = Vec::new();
         for provenance in self.hops.iter().flat_map(Hop::provenances) {
@@ -45,12 +60,12 @@ impl Hops {
 }
 
 impl Hop {
-    /// The line for one dependent, naming objects outside `here` with
-    /// their namespace.  A caller whose name another in its line shares
-    /// is named with its kind, `kind`, so the two read as two.  Each
-    /// object it names is kept apart from the words, so a page links the
-    /// objects and never a word inside what intent declares a workload
-    /// provides.
+    /// The line for one dependent, as pieces.  An object outside `here`
+    /// is named with its namespace.  When `kind` is true, the dependent
+    /// is named with its kind, so that two dependents with the same name
+    /// read as two.  Each object is its own piece, so a page links each
+    /// object's name and never a word of a workload's `provides` text
+    /// from intent.
     pub fn pieces(&self, here: Option<&str>, kind: bool) -> Vec<Piece> {
         match self.subject(here, kind) {
             Some(mut pieces) => {
@@ -62,34 +77,35 @@ impl Hop {
         }
     }
 
-    /// The caller or the application that a line starts with, or `None`
-    /// for the line of a host or a custom resource, which starts with no
-    /// object.  The subject is named with its kind when `kind` is true
-    /// because another dependent has the same name, or when an object
-    /// that it loses has the same name.
+    /// The name of the caller or the application at the start of the
+    /// line.  Returns `None` for a host or a custom resource, because
+    /// `whole` writes the whole line for those.  The name includes the
+    /// kind when `kind` is true, or when a lost workload has the same
+    /// name as the dependent.
     fn subject(&self, here: Option<&str>, kind: bool) -> Option<Vec<Piece>> {
         let (Dependent::Caller(object) | Dependent::SignsIn(object)) = &self.dependent else {
             return None;
         };
         Some(
-            match kind || self.lost.iter().any(|lost| self.alike(lost)) {
+            match kind || self.lost.iter().any(|lost| self.shares_name(lost)) {
                 true => kinded(object, here),
                 false => named(object, here),
             },
         )
     }
 
-    /// Whether `lost` is another object of the dependent's name.
-    fn alike(&self, lost: &Object) -> bool {
+    /// Whether `lost` is a different object with the dependent's name.
+    fn shares_name(&self, lost: &Object) -> bool {
         let dependent = self.dependent.object();
         dependent.is_some_and(|object| object.name == lost.name && object != lost)
     }
 
-    /// What a caller or an application loses, after its name: "loses
-    /// order storage and can't reach db", or "lose" for several.  A lost
-    /// workload with a `provides` text from intent appears as that text
-    /// after "loses".  Any other lost workload appears as a name after
-    /// "can't reach", with its kind when the caller has the same name.
+    /// What a caller or application loses, written after its name:
+    /// "loses order storage and can't reach db", or "lose" when
+    /// `plural`.  A lost workload with a `provides` text from intent
+    /// appears as that text after "loses".  Any other lost workload
+    /// appears as a name after "can't reach", with its kind when it has
+    /// the dependent's name.
     fn predicate(&self, here: Option<&str>, plural: bool) -> Vec<Piece> {
         let loses = if plural { "lose" } else { "loses" };
         if let Dependent::SignsIn(_) = self.dependent {
@@ -98,7 +114,7 @@ impl Hop {
         let mut provided: Vec<String> = Vec::new();
         let mut reached: Vec<Vec<Piece>> = Vec::new();
         for lost in &self.lost {
-            match (self.provides.get(lost), self.alike(lost)) {
+            match (self.provides.get(lost), self.shares_name(lost)) {
                 (Some(provides), _) => provided.push(provides.text.clone()),
                 (None, true) => reached.push(kinded(lost, here)),
                 (None, false) => reached.push(named(lost, here)),
@@ -120,8 +136,8 @@ impl Hop {
         losing
     }
 
-    /// The line of a host or a custom resource, which is never joined
-    /// with another line.
+    /// The line of a host or a custom resource.  It is never combined
+    /// with the line of another dependent.
     fn whole(&self, here: Option<&str>) -> Vec<Piece> {
         let mut pieces = Vec::new();
         match &self.dependent {
@@ -144,8 +160,8 @@ impl Hop {
     }
 }
 
-/// One line of what stops if a workload goes down, with where its
-/// stored text was written.
+/// One line of what stops if a workload goes down, with where each fact
+/// from intent in it was written, for its marks.
 #[derive(Debug)]
 pub struct IfDownLine<'a> {
     pub pieces: Vec<Piece>,
@@ -153,10 +169,10 @@ pub struct IfDownLine<'a> {
 }
 
 impl Sidebar {
-    /// "Until applier in deploy returns, nothing reconciles 12
-    /// Bundles and Source shop.".  A kind with more than one object
-    /// appears as a count linked to the kind's page, and a kind with one
-    /// object appears as that object's name.
+    /// "Until deploy/applier returns, nothing reconciles Bucket
+    /// shop/charts and 3 Trees."  A kind with more than one object
+    /// appears as a count, linked to the kind's page when its plural is
+    /// known, and a kind with one object appears as that object.
     pub fn unreconciled_pieces(&self, line: &Unreconciled) -> Vec<Piece> {
         let verb = if line.controllers.len() == 1 {
             "returns"
@@ -202,17 +218,12 @@ impl Sidebar {
         pieces
     }
 
-    /// A cascade line with the objects its hops name linked.
     pub fn cascade_parts(&self, line: &Hops) -> Vec<Part> {
         line.parts(&self.linker)
     }
 }
 
 impl Hops {
-    /// The line with a link on each object that its hops name, to the
-    /// page that `linker` returns.  The names come from the hops and not
-    /// from a parse of the line's text, so a word in a workload's
-    /// `provides` text never becomes a link to a workload of that name.
     pub fn parts(&self, linker: &Linker) -> Vec<Part> {
         let lines = pieces(&self.hops, self.namespace.as_deref());
         let joined: Vec<Piece> = lines
@@ -233,10 +244,10 @@ impl IfDown {
     }
 
     /// One line per dependent, with names relative to the workload's own
-    /// namespace, each with where its stored text was written.  The
-    /// dependents that lose the same thing share one line: "celery and
+    /// namespace, each with where its facts from intent were written.
+    /// Dependents that lose the same thing share one line: "celery and
     /// beat lose the web app".  When the workload controls more than one
-    /// custom resource of a kind, the kind gets one line, in the place
+    /// custom resource of a kind, the kind gets one line at the position
     /// of its first resource: "Nothing reconciles 3 Clusters until
     /// operator returns".
     pub fn lines(&self) -> Vec<IfDownLine<'_>> {
@@ -260,7 +271,7 @@ impl IfDown {
         for hop in &self.hops {
             match kind_of(hop) {
                 None => {
-                    let named_alike = alike(hop, &single);
+                    let named_alike = shares_name(hop, &single);
                     let Some(subject) = hop.subject(here, named_alike) else {
                         lines.push(IfDownLine {
                             pieces: hop.pieces(here, named_alike),
@@ -293,8 +304,9 @@ impl IfDown {
         lines
     }
 
-    /// The one line for the objects of `kind` that `hops` reach, its
-    /// count linked to the kind's page.
+    /// The line for the custom resources of `kind` in `hops`: their
+    /// count, linked to the kind's page when its plural is known, and
+    /// the lost workloads that reconcile them.
     fn counted(
         &self,
         (group, kind): (&str, &str),
@@ -322,14 +334,12 @@ impl IfDown {
         }
     }
 
-    /// `line` with the objects it names linked, and the count of a
-    /// kind's objects linked to the kind's page.
     pub fn line_parts(&self, line: &IfDownLine) -> Vec<Part> {
         self.linker.link(&line.pieces)
     }
 
     /// The text that the card shows in place of the lines when no edge
-    /// reaches the workload.
+    /// reaches the workload, or `None` when there are lines.
     pub fn nothing_text(&self) -> Option<&'static str> {
         self.hops
             .is_empty()
@@ -338,7 +348,8 @@ impl IfDown {
 }
 
 /// The dependents that lose the same thing.  One line names them
-/// together, at the position of the first of them.
+/// together, at the position of the first of them.  `at` is the index
+/// of that line in the lines that `IfDown::lines` returns.
 struct Shared<'a> {
     at: usize,
     subjects: Vec<Vec<Piece>>,
@@ -362,7 +373,8 @@ impl<'a> Shared<'a> {
     }
 
     /// "web loses the app", or "web, feed, and cron lose the app", with
-    /// the marks of every hop in the line, each once.
+    /// where the facts from intent in every hop were written, each place
+    /// once.
     fn line(self, here: Option<&str>) -> IfDownLine<'a> {
         let plural = self.subjects.len() > 1;
         let mut pieces = listed(self.subjects);
@@ -378,11 +390,11 @@ impl<'a> Shared<'a> {
     }
 }
 
-/// Whether another of `hops` has a dependent of `hop`'s name that is not
-/// the same object.  An application that both calls a workload and
-/// signs in through it is one dependent in two lines, so its name alone
-/// is enough.
-fn alike(hop: &Hop, hops: &[&Hop]) -> bool {
+/// Whether another of `hops` has a dependent with `hop`'s name that is a
+/// different object.  An application that both calls a workload and
+/// signs in through it is one object in two hops, so it does not count
+/// as sharing its own name.
+fn shares_name(hop: &Hop, hops: &[&Hop]) -> bool {
     let name = hop.dependent.name();
     let object = hop.dependent.object();
     hops.iter()
@@ -390,8 +402,8 @@ fn alike(hop: &Hop, hops: &[&Hop]) -> bool {
 }
 
 /// The kind of the custom resource that `hop` reaches, when `by_kind`
-/// has more than one resource of that kind, so that one line counts
-/// them.
+/// has more than one resource of that kind.  `IfDown::lines` writes one
+/// line with the count of those resources in place of a line for each.
 fn counted_kind<'h>(
     hop: &'h Hop,
     by_kind: &BTreeMap<(&str, &str), Vec<&Hop>>,
@@ -403,33 +415,31 @@ fn counted_kind<'h>(
     (by_kind[&kind].len() > 1).then_some(kind)
 }
 
-/// Each hop's line, which names a dependent with its kind when another
-/// dependent in `hops` has the same name.
 fn texts(hops: &[Hop], here: Option<&str>) -> Vec<String> {
     let pieces = pieces(hops, here);
     pieces.iter().map(|pieces| text(pieces)).collect()
 }
 
-/// Each hop's line as `texts` writes it, in pieces.  A dependent is
-/// named with its kind when another in `hops` has the same name.
+/// A dependent is named with its kind when another dependent in `hops`
+/// has the same name.
 fn pieces(hops: &[Hop], here: Option<&str>) -> Vec<Vec<Piece>> {
     let all: Vec<&Hop> = hops.iter().collect();
     hops.iter()
-        .map(|hop| hop.pieces(here, alike(hop, &all)))
+        .map(|hop| hop.pieces(here, shares_name(hop, &all)))
         .collect()
 }
 
 /// `object`'s kind and name, with its namespace when it is not `here`:
-/// "Player den", "Catalog media/catalog".  The kind is words and the
-/// name is the link.
+/// "Player den", "Catalog media/catalog".  The kind is plain words and
+/// the name is the link.
 fn kinded(object: &Object, here: Option<&str>) -> Vec<Piece> {
-    let said = transect_graph::links::kind_and_name_in(object, here);
+    let full = transect_graph::links::kind_and_name_in(object, here);
     let name = transect_graph::links::name_in(object, here);
-    match said.strip_suffix(&name) {
+    match full.strip_suffix(&name) {
         Some(kind) if !kind.is_empty() => {
             vec![Piece::Words(kind.into()), Piece::Name(object.clone(), name)]
         }
-        _ => vec![Piece::Name(object.clone(), said)],
+        _ => vec![Piece::Name(object.clone(), full)],
     }
 }
 

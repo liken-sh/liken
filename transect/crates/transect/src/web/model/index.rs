@@ -1,9 +1,7 @@
-//! The search index of one model: the fixed pages, every namespace and
-//! machine, every custom kind, every object that `map::pages::Pages`
-//! gives a page, including every object a store holds, every group and
-//! user a binding names, and each host an `Ingress` serves, which opens
-//! the workload behind it.  A namespace, and a workload that serves a
-//! port, offers its access tab beside its other lenses.
+//! The search index of one model: an entry for each fixed page,
+//! namespace, machine, custom kind, outside system, and object that has
+//! a page, for each group and user that a binding refers to, and for each
+//! host that an `Ingress` serves, which opens the workload behind it.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
@@ -17,8 +15,8 @@ use transect_map::search::{Entry, Index, Sort};
 
 mod subjects;
 
-/// The pages every cluster has, which an empty query lists, each with
-/// its other names: `/access` opens on Ways in.
+/// The pages that every cluster has, which an empty query lists, as
+/// the name, the path, and other names that also find the page.
 const FIXED: [(&str, &str, &[&str]); 6] = [
     ("cluster", "/", &[]),
     ("access", "/access", &["ways in"]),
@@ -28,9 +26,8 @@ const FIXED: [(&str, &str, &[&str]); 6] = [
     ("resources", "/resources", &[]),
 ];
 
-/// The index of `snapshot`, with hosts followed through `graph`, the
-/// groups and users `access` holds, and the access tab of each workload
-/// in `serving`.
+/// Hosts resolve to workloads through `graph`, `access` supplies the
+/// groups and users, and each workload in `serving` gets an access lens.
 pub fn index(
     snapshot: &Snapshot,
     graph: &Graph,
@@ -88,7 +85,7 @@ pub fn index(
         }
     }));
     entries.extend(kinds(snapshot, &names));
-    entries.extend(ground(snapshot));
+    entries.extend(outside_systems(snapshot));
     let workloads: BTreeSet<&Object> = snapshot.ownership.all_workloads().collect();
     for &workload in &workloads {
         let Some(href) = pages.href(workload) else {
@@ -116,15 +113,16 @@ pub fn index(
             object: Some(workload.clone()),
         });
     }
-    // The resource that describes a machine is found as the machine, so
-    // a machine is one row whichever of the two a query matched.
+    // An object that describes a machine has no row of its own. The
+    // machine's row is found by that object's kind names instead, so a
+    // query returns one row per machine.
     let describing = snapshot.describing_machines();
     let describes_a_machine = |object: &Object| describing.contains(object);
     let others: BTreeSet<&Object> = snapshot
         .relations
         .keys()
         .chain(snapshot.gitops.objects())
-        .chain(snapshot.held.iter())
+        .chain(snapshot.with_pages.iter())
         .filter(|object| !workloads.contains(object) && !describes_a_machine(object))
         .filter(|object| {
             !matches!(
@@ -170,8 +168,8 @@ pub fn index(
     Index::new(entries)
 }
 
-/// Every name of each custom kind the cluster serves, by group and
-/// kind: its kind and plural, and its CRD's singular and short names.
+/// The names that find each custom kind, keyed by API group and kind:
+/// the lowercase kind and plural, then the names from its CRD.
 fn kind_names(snapshot: &Snapshot) -> HashMap<(String, String), Arc<[String]>> {
     let kinds = snapshot.custom.iter().map(|(resource, _)| {
         let defined = snapshot.definitions.names(&resource.group, &resource.kind);
@@ -188,8 +186,7 @@ fn kind_names(snapshot: &Snapshot) -> HashMap<(String, String), Arc<[String]>> {
     kinds.collect()
 }
 
-/// The names of every kind whose objects describe a machine, so a
-/// machine's row is found by them as its own kind's rows are.
+/// The names of every kind whose objects describe a machine.
 fn machine_names(
     snapshot: &Snapshot,
     names: &HashMap<(String, String), Arc<[String]>>,
@@ -209,10 +206,10 @@ fn machine_names(
     all.into()
 }
 
-/// One entry per ground box: each `Outside`, found by its title, its own
-/// name, and every address and driver it lists, and each backend no
-/// `Outside` lists, by its address or driver.
-fn ground(snapshot: &Snapshot) -> Vec<Entry> {
+/// One entry per `Outside`, found by its title, its name, and each
+/// address and driver it lists, and one entry for each storage backend
+/// whose name is not the title of an `Outside`.
+fn outside_systems(snapshot: &Snapshot) -> Vec<Entry> {
     let outsides = &snapshot.outsides;
     let entry = |name: &str, aliases: Vec<String>| Entry {
         name: name.into(),
@@ -243,8 +240,8 @@ fn ground(snapshot: &Snapshot) -> Vec<Entry> {
     entries
 }
 
-/// One entry per custom kind, found by any of its names, which opens
-/// its page of every object of it.
+/// One entry per custom kind, which opens the page that lists the
+/// objects of that kind.
 fn kinds(snapshot: &Snapshot, names: &HashMap<(String, String), Arc<[String]>>) -> Vec<Entry> {
     let kinds = snapshot.custom.iter().map(|(resource, _)| {
         let key = (resource.group.clone(), resource.kind.clone());
@@ -263,8 +260,8 @@ fn kinds(snapshot: &Snapshot, names: &HashMap<(String, String), Arc<[String]>>) 
     kinds.collect()
 }
 
-/// One entry per host an `Ingress` serves and workload behind it: the
-/// `Ingress` routes to a `Service`, which selects the workload.
+/// One entry per host that an `Ingress` serves, for each workload that
+/// a `Service` of the `Ingress` selects.
 fn hosts(snapshot: &Snapshot, graph: &Graph) -> Vec<Entry> {
     let pages = snapshot.pages();
     let mut entries = Vec::new();
@@ -315,10 +312,10 @@ fn hosts(snapshot: &Snapshot, graph: &Graph) -> Vec<Entry> {
 }
 
 impl super::Model {
-    /// What `query` names when it is an address, such as a host or a
-    /// `Service`'s DNS name: the workloads behind each `Service` it
-    /// resolves to, and each machine.  Empty for a query that is no
-    /// address.
+    /// The entries that `query` finds when it is an address, such as a
+    /// host or a `Service`'s DNS name: each machine it resolves to, and
+    /// the workloads that each `Service` it resolves to selects. A query
+    /// with no `.`, `:`, or `/` is not an address.
     pub fn addressed(&self, query: &str) -> Vec<Entry> {
         let query = query.trim();
         if !query.contains(['.', ':', '/']) {
@@ -383,8 +380,8 @@ mod tests {
     use crate::web::fixture;
     use crate::web::pages::search_results;
 
-    /// The first row `query` shows in the fixture cluster: what it
-    /// opens, and the words beside its name.
+    /// The link, kind, and context of the first search result for
+    /// `query` in the fixture cluster.
     fn first(query: &str) -> Option<(String, String, Option<String>)> {
         let results = search_results(&fixture::model(), query, transect_map::search::DIALOG_LIST);
         let row = results.rows.into_iter().next()?;
@@ -450,8 +447,8 @@ mod tests {
             Some("gizmos.example.test")
         )
     )]
-    #[case::a_ground_box_by_its_title("archive", row("/ground/archive-nas", "ground", None))]
-    #[case::a_ground_box_by_an_address(
+    #[case::an_outside_system_by_its_title("archive", row("/ground/archive-nas", "ground", None))]
+    #[case::an_outside_system_by_an_address(
         "nas.example.te",
         row("/ground/archive-nas", "ground", None)
     )]
@@ -471,7 +468,7 @@ mod tests {
         assert_eq!(first(query), expected);
     }
 
-    /// Where each row `query` shows opens.
+    /// The link of each search result for `query`.
     fn hrefs(query: &str) -> Vec<String> {
         let results = search_results(&fixture::model(), query, transect_map::search::DIALOG_LIST);
         results.rows.into_iter().map(|row| row.href).collect()

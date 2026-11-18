@@ -1,8 +1,9 @@
-//! A volume's board, at `/volumes/{pv}` and at its claim's URL: the
-//! volume in the middle with what it holds and how full it is, its claim
-//! to its left with the pods and CronJobs that mount it,
-//! and where its bytes are to its right.  A claim that waits for a
-//! volume draws the same board around the claim.
+//! The page of a `PersistentVolume`, at `/volumes/{pv}` and at the URL
+//! of its `PersistentVolumeClaim`.  The board shows the volume's
+//! capacity, usage, and access modes in the center, its claim on the
+//! left, the pods and `CronJob`s that mount it, and on the right where
+//! its data is stored.  A claim that is not bound to a volume gets the
+//! same page, filled from the claim.
 
 use k8s_openapi::api::core::v1::{PersistentVolume, PersistentVolumeClaim};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
@@ -22,25 +23,25 @@ use transect_map::objects::{self, ObjectBoard, ObjectPage, Section, Side, words}
 use transect_observe::health::Level;
 use transect_resources::layers::Layers;
 
-/// What a volume's URL names.
+/// What the URL of a volume page identifies.
 #[derive(Clone, Copy)]
-pub enum Asked<'a> {
+pub enum VolumeAt<'a> {
     /// A `PersistentVolume`, by name.
     Volume(&'a str),
     /// A claim, by namespace and name.
     Claim(&'a str, &'a str),
 }
 
-/// The board of the volume `asked` names, or none when the cluster
-/// holds no such volume or claim.
+/// The page for `at`, or `None` when the cluster has no such volume or
+/// claim.
 pub fn volume_page(
     model: &Model,
     layers: &Layers,
-    asked: Asked,
+    at: VolumeAt,
     now: Timestamp,
 ) -> Option<ObjectPage> {
     let snapshot = &model.snapshot;
-    let (volume, claim) = find(snapshot, asked)?;
+    let (volume, claim) = find(snapshot, at)?;
     let claim_key = claim.and_then(|claim| {
         let meta = &claim.metadata;
         Some(Claim::new(
@@ -58,9 +59,9 @@ pub fn volume_page(
         ),
         (None, None) => return None,
     };
-    let path = match asked {
-        Asked::Volume(name) => transect_graph::links::volume(name),
-        Asked::Claim(..) => transect_graph::links::page(&object, &snapshot.plurals)?,
+    let path = match at {
+        VolumeAt::Volume(name) => transect_graph::links::volume(name),
+        VolumeAt::Claim(..) => transect_graph::links::page(&object, &snapshot.plurals)?,
     };
     let namespace = claim_key.as_ref().map(|claim| claim.namespace.as_str());
     let place = match namespace {
@@ -72,12 +73,12 @@ pub fn volume_page(
         (Some(claim), Some(_)) => snapshot
             .volumes_used
             .missing_line(claim, &snapshot.resources.directory),
-        (_, None) => Some(OffLine::said("This claim waits for a volume.")),
-        (None, Some(_)) => Some(OffLine::said("No claim is bound to this volume.")),
+        (_, None) => Some(OffLine::plain("This claim waits for a volume.")),
+        (None, Some(_)) => Some(OffLine::plain("No claim is bound to this volume.")),
     };
-    // A reader follows a claim's name to its volume, so the page is
-    // titled by the claim, and the `PersistentVolume`'s generated name is
-    // a fact in its box.
+    // A claim has a name that people chose, and a volume that a claim
+    // binds has a generated one. So a page that has a claim is titled by
+    // the claim, and the volume's name is a fact in its box.
     let (kind, name) = match &claim_key {
         Some(claim) => ("PersistentVolumeClaim", claim.name.clone()),
         None => (object.kind.as_str(), object.name.clone()),
@@ -92,15 +93,21 @@ pub fn volume_page(
         messages: Vec::new(),
     };
     let mut sections = vec![belongs_to(snapshot, &object, claim_key.as_ref(), namespace)];
-    sections.push(own(snapshot, volume, claim, claim_key.as_ref(), now));
+    sections.push(volume_facts(
+        snapshot,
+        volume,
+        claim,
+        claim_key.as_ref(),
+        now,
+    ));
     if let Some(claim) = &claim_key {
         sections.extend(mounted(snapshot, claim));
     }
     if let Some(volume) = volume {
-        sections.push(bytes_are(snapshot, volume));
+        sections.push(where_stored(snapshot, volume));
     }
     let graph = model.graph(&Shown::default());
-    // The card is the claim's, as the title is, when there is one.
+    // The card describes the claim, like the title, when there is one.
     let (titled, created) = match (&claim_key, claim) {
         (Some(key), Some(claim)) => (
             Object::new("", "PersistentVolumeClaim", Some(&key.namespace), &key.name),
@@ -121,11 +128,12 @@ pub fn volume_page(
     })
 }
 
-/// The volume and the claim `asked` names: a volume and the claim its
-/// `claimRef` names, or a claim and the volume bound to it.
+/// The volume and the claim for `at`. A volume URL finds the claim in
+/// the volume's `claimRef`, and a claim URL finds the volume in the
+/// claim's `volumeName`. Either can be `None`, but not both.
 fn find<'a>(
     snapshot: &'a Snapshot,
-    asked: Asked,
+    at: VolumeAt,
 ) -> Option<(
     Option<&'a PersistentVolume>,
     Option<&'a PersistentVolumeClaim>,
@@ -144,8 +152,8 @@ fn find<'a>(
         });
         found.map(AsRef::as_ref)
     };
-    match asked {
-        Asked::Volume(name) => {
+    match at {
+        VolumeAt::Volume(name) => {
             let volume = volume_named(name)?;
             let claim_ref = volume
                 .spec
@@ -156,7 +164,7 @@ fn find<'a>(
             });
             Some((Some(volume), claim))
         }
-        Asked::Claim(namespace, name) => {
+        VolumeAt::Claim(namespace, name) => {
             let claim = claim_named(namespace, name)?;
             let bound = claim
                 .spec
@@ -167,8 +175,6 @@ fn find<'a>(
     }
 }
 
-/// A volume whose phase the API server reports as `Failed`, or a claim
-/// whose phase is `Lost`, fails; any other draws no dot.
 fn level(
     volume: Option<&PersistentVolume>,
     claim: Option<&PersistentVolumeClaim>,
@@ -178,8 +184,8 @@ fn level(
     (volume_phase == Some("Failed") || claim_phase == Some("Lost")).then_some(Level::Failing)
 }
 
-/// Its claim, named without the claim's namespace, which the page is
-/// in.
+/// The "Belongs to" section: the claim bound to the volume. It is empty
+/// on the page of a claim that has no volume yet.
 fn belongs_to(
     snapshot: &Snapshot,
     object: &Object,
@@ -200,9 +206,8 @@ fn belongs_to(
     Section::new("Belongs to", Side::BelongsTo).fact("claimed by", claim.into_iter().collect())
 }
 
-/// What it holds, how full it is, how it may be mounted, what happens
-/// to it when its claim goes, and its age.
-fn own(
+/// The facts of the volume, or of the claim when it has no volume yet.
+fn volume_facts(
     snapshot: &Snapshot,
     volume: Option<&PersistentVolume>,
     claim: Option<&PersistentVolumeClaim>,
@@ -255,8 +260,8 @@ fn own(
         .text("age", age)
 }
 
-/// The pods that mount `claim`, each on its machine, and the `CronJob`
-/// objects that mount it when they run.
+/// The pods that mount `claim`, split by whether they write, each with
+/// the machine it runs on, and the `CronJob`s whose pods would mount it.
 fn mounted(snapshot: &Snapshot, claim: &Claim) -> Vec<Section> {
     let here = Some(claim.namespace.as_str());
     let (mut writers, mut readers) = (Vec::new(), Vec::new());
@@ -294,9 +299,10 @@ fn machine_link(machine: &str) -> Reference {
     }
 }
 
-/// Where its bytes are: its `StorageClass`, the driver that provisions
-/// it, and the ground box or the machine that holds them.
-fn bytes_are(snapshot: &Snapshot, volume: &PersistentVolume) -> Section {
+/// Where the volume's data is stored: its `StorageClass`, the CSI driver
+/// or provisioner behind it, the server or machine that holds the data,
+/// and the path on it.
+fn where_stored(snapshot: &Snapshot, volume: &PersistentVolume) -> Section {
     let spec = volume.spec.as_ref();
     let class = spec
         .and_then(|spec| spec.storage_class_name.clone())

@@ -1,9 +1,9 @@
-//! The kind that a URL's name refers to, and how a page reads it.
-//!
-//! `links::kinds` writes each kind's name in a URL.  Kubernetes's own
-//! kinds are listed here with their version, their scope, and how a
-//! page reads each, in one table that the object lookup follows.  The
-//! same facts for a custom kind come from its store.
+//! Resolves the kind in an object page's URL to an API resource, and
+//! says how the page reads objects of that kind.  `links::kinds` writes
+//! the kind's name in the URL.  Kubernetes's own kinds are listed in
+//! `BUILT_IN` with their version, their scope, and how a page reads
+//! them.  For a custom kind, `Catalog` takes the version and the scope
+//! from the discovered resources.
 
 use kube::core::ApiResource;
 
@@ -18,10 +18,10 @@ pub enum ReadFrom {
     /// The store that holds the kind's metadata alone.  A ConfigMap is
     /// read this way, so no page can show what it contains.
     Metadata,
-    /// Nowhere here: the kind has a page of its own, which its URL
-    /// reaches or redirects to.
+    /// Not read by the generic object page, because the kind has a page
+    /// of its own, which its URL serves or redirects to.
     OwnPage,
-    /// One GET when its page loads, because no store contains the kind.
+    /// With one GET when the page loads, because no store holds the kind.
     Get,
     /// Never: a Secret's page would show what transect may not read.
     Never,
@@ -128,8 +128,8 @@ const BUILT_IN: [(&str, &str, &str, bool, ReadFrom); 30] = [
 pub struct Served {
     pub resource: ApiResource,
     pub namespaced: bool,
-    /// How a page reads an object of a kind of Kubernetes's own, or
-    /// none for a custom kind, which its store holds.
+    /// How a page reads a kind of Kubernetes's own.  `None` for a custom
+    /// kind, which a page always reads from its store.
     pub read: Option<ReadFrom>,
 }
 

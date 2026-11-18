@@ -1,6 +1,6 @@
 //! The "Code" section of a card: where the card's object is declared,
-//! read from the graph's reconciles-from edges, or the reason that the
-//! card cannot show it.
+//! found through the graph's reconciles-from edges, or the reason that
+//! the card cannot show it.
 
 use super::{Code, GitOps, Off};
 use crate::forge::{self, Forges};
@@ -9,12 +9,12 @@ use transect_graph::edges::{Endpoint, Graph, Object};
 #[derive(Debug, Default, PartialEq)]
 pub struct CodeSection {
     pub entries: Vec<Code>,
-    /// The reason that reconciles-from is off, or a note that no applier
-    /// marks the card's object.  The card shows this note in place of
-    /// code entries.
+    /// Why `entries` is empty: the reason that reconciles-from is off, or
+    /// that no GitOps applier's label or annotation is on the object.
+    /// It is `None` whenever `entries` has an entry.
     pub note: Option<transect_resources::resources::OffLine>,
-    /// The card's namespace, which the card omits from an applier's
-    /// name.
+    /// The card's namespace.  The card does not print the namespace of an
+    /// applier in this namespace.
     pub here: Option<String>,
 }
 
@@ -33,10 +33,9 @@ impl CodeSection {
     }
 
     /// The directories where `workloads` are declared, each listed once,
-    /// in the order that the workloads first reach them.  The namespace's
-    /// card leaves out the releases, because each workload's card names
-    /// its own chart.  The namespace's card shows only the directories,
-    /// and a few appliers usually cover them.
+    /// in the order of the first workload that has it.  A namespace's
+    /// card leaves out the releases, because each workload's card shows
+    /// its own chart.
     pub fn of_namespace<'a>(
         graph: &Graph,
         gitops: &GitOps,
@@ -52,12 +51,12 @@ impl CodeSection {
         section.or_unmarked("no GitOps applier's label or annotation is on its workloads")
     }
 
-    /// The section with the note `unmarked` when the tool is on and the
-    /// section lists no code, so that the section always shows a line.
+    /// Sets the note `unmarked` when reconciles-from is on and found no
+    /// entries, so the card never shows an empty section.
     fn or_unmarked(self, unmarked: &str) -> Self {
         match (&self.note, self.entries.is_empty()) {
             (None, true) => Self {
-                note: Some(transect_resources::resources::OffLine::said(unmarked)),
+                note: Some(transect_resources::resources::OffLine::plain(unmarked)),
                 ..self
             },
             _ => self,
@@ -93,8 +92,7 @@ impl CodeSection {
         self.here.as_deref()
     }
 
-    /// The section with a link from each applier that it names to the
-    /// applier's page, at the address that `href` returns.
+    /// Links each applier to the URL that `href` returns for it.
     pub fn linked(mut self, href: impl Fn(&Object) -> Option<String>) -> Self {
         for code in &mut self.entries {
             if let Some(release) = &mut code.release {
@@ -107,8 +105,8 @@ impl CodeSection {
         self
     }
 
-    /// The section with each directory marked as built here when one of
-    /// `sources` names the directory's repository.  `sources` are the
+    /// The section with each directory marked `built_here` when one of
+    /// `sources` is the directory's repository.  `sources` are the
     /// source labels of the images that the workload runs.
     pub fn with_image_sources<'a>(mut self, sources: impl IntoIterator<Item = &'a str>) -> Self {
         let sources: Vec<forge::Web> = sources.into_iter().filter_map(forge::web).collect();
@@ -134,7 +132,7 @@ mod tests {
     #[case::no_knowledge(GitOps::off(Off::NoKnowledge), Some(Off::NoKnowledge.note()))]
     #[case::on_and_unmarked(
         crate::gitops::fixtures::gitops(&[]),
-        Some(transect_resources::resources::OffLine::said(
+        Some(transect_resources::resources::OffLine::plain(
             "no GitOps applier's label or annotation is on it"
         ))
     )]

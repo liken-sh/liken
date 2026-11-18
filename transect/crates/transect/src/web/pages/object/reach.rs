@@ -1,5 +1,6 @@
-//! The edges that leave an object and those that reach it, by kind, so
-//! a page names everything the graph connects it to.
+//! The edges that leave an object and the edges that reach it, grouped
+//! by kind, so a page lists everything the graph connects to the
+//! object.
 
 use super::super::super::snapshot::Snapshot;
 use super::{refer, refer_object};
@@ -7,7 +8,9 @@ use transect_graph::edges::{Endpoint, Graph, Kind, Object};
 use transect_map::objects::{Section, Side};
 use transect_resources::knowledge;
 
-/// Every edge kind but those the section that `about` builds names.
+/// The edge kinds that `edges` lists in both directions. `edges` lists
+/// only the `ControlledBy` edges that reach the object, because `about`
+/// lists the ones that leave it. `part_of` lists `PartOf`.
 const KINDS: [Kind; 10] = [
     Kind::RoutesTo,
     Kind::Selects,
@@ -21,11 +24,11 @@ const KINDS: [Kind; 10] = [
     Kind::RunsOn,
 ];
 
-/// Two sections: the far end of each edge that leaves `object`, and
-/// each object its annotations name through kind knowledge's
-/// `referencedBy`; then the near end of each edge that reaches it, and
-/// each object whose annotations name it.  A kind with none is left
-/// out.
+/// Two sections. "Refers to" lists the target of each edge that leaves
+/// `object`, and each object that its annotations name, as the
+/// `referencedBy` field of a `KindKnowledge` declares. "Referred to by"
+/// lists the source of each edge that reaches `object`, and each object
+/// whose annotations name it.
 pub fn edges(snapshot: &Snapshot, object: &Object, graph: &Graph) -> Vec<Section> {
     let here = object.namespace.as_deref();
     let end = Endpoint::Object(object.clone());
@@ -71,8 +74,8 @@ mod tests {
     use super::super::super::super::fixture;
     use super::*;
 
-    /// The labels of `object`'s section `title`, each with the names it
-    /// lists.
+    /// The labels of `object`'s section `title`, each with the names
+    /// listed under it.
     fn facts(object: &Object, title: &str) -> Vec<(String, Vec<String>)> {
         let model = fixture::model();
         let graph = model.graph(&Default::default());

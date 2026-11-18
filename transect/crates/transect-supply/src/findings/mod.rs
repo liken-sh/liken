@@ -3,11 +3,11 @@
 //! the workloads, and the labels of the running images, and it also
 //! reports the loops that the edge graph finds.
 //!
-//! Each rule returns a `Finding` that records what the rule matched as
+//! Each rule returns a `Finding` that holds what the rule matched as
 //! data, and the templates in `sentence.rs` render the finding as a
 //! title and a body.  Every machine rule is a pure function of the
-//! machines, so the sidebar changes exactly when the machines band
-//! changes.  The workload rules are in `workloads/`.
+//! machines, so the sidebar changes only when the machines change.  The
+//! workload rules are in `workloads/`.
 
 mod images;
 mod logged;
@@ -27,25 +27,25 @@ use transect_graph::edges::{Loop, Object};
 use transect_ground::machines::{Amount, Machine};
 use transect_observe::logs::evidence::Evidence;
 
-/// The share of a machine's allocatable CPU or memory that its pods may
-/// request before the machine counts as nearly full.  Past it, a pod of
-/// ordinary size starts failing to schedule there.
+/// The percentage of a machine's allocatable CPU or memory that its
+/// pods may request before the machine counts as nearly full.  Above
+/// it, a pod of ordinary size may no longer fit on the machine.
 const NEARLY_FULL_PERCENT: i128 = 85;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Finding {
     /// Requests fill more than `NEARLY_FULL_PERCENT` of the machine's CPU,
-    /// its memory, or both.  A resource below the line is `None`.
+    /// its memory, or both.  A resource at or under the threshold is
+    /// `None`.
     NearlyFull {
         machine: String,
         cpu: Option<Fill>,
         memory: Option<Fill>,
     },
-    /// On each machine listed, the pods that set a memory request use,
-    /// together, at least `memory::OVER_REQUESTS_BYTES` more than they
-    /// requested.  One finding names every such machine, the largest
-    /// excess first, so the sidebar shows one card in place of a
-    /// near-identical card for each machine.
+    /// The machines whose pods with a memory request use, in total, at
+    /// least `memory::OVER_REQUESTS_BYTES` more than they requested, the
+    /// largest excess first.  One finding lists them all, so the sidebar
+    /// shows one card and not a card for each machine.
     OverMemoryRequests { machines: Vec<Overage> },
     /// Across the cluster, some pod that requests no memory uses at least
     /// `memory::HEAVY_UNREQUESTED_BYTES`.
@@ -66,19 +66,21 @@ pub enum Finding {
     /// registry and reason.
     Unreadable(Vec<Unreadable>),
     /// Containers whose last restart was too long ago to count toward
-    /// health, and recent enough to be worth knowing, the latest first.
+    /// health and recent enough to be worth knowing, latest first.
     RestartedEarlier(Vec<Restarted>),
-    /// A log pattern only worth knowing matched in these namespaces
-    /// over its window, or an error or warning pattern matched there
-    /// longer ago than counts as now, the most matches first.
+    /// The matches of one log pattern that the sidebar lists: every match
+    /// of a `WorthKnowing` pattern, and the matches of an error or warning
+    /// pattern that are not recent or that come from a `CronJob` whose
+    /// last run succeeded.  `namespaces` has one entry for each workload,
+    /// gone pod, or namespace, most matches first.
     Logged {
         pattern: String,
         meaning: String,
         window: String,
         namespaces: Vec<Matched>,
     },
-    /// The machines' own logs contained error lines over `window`,
-    /// listed by machine, the most first.
+    /// The machines' own logs contained error lines during `window`,
+    /// listed by machine, highest count first.
     MachineLogs {
         window: String,
         machines: Vec<MachineLogged>,
@@ -138,36 +140,35 @@ pub struct Fill {
 }
 
 impl Fill {
-    /// What a new pod may still request and schedule.  A pod that names
-    /// its node skips the scheduler, so requests can pass what the
-    /// machine allocates.  Then nothing is free.
+    /// What a new pod can still request on this machine.  It is zero when
+    /// requests exceed allocatable, which happens because a pod that sets
+    /// `spec.nodeName` is not checked by the scheduler.
     pub fn free(&self) -> Amount {
         (self.allocatable - self.requested).max(Amount::default())
     }
 
-    /// Compared in whole thousandths, not floats, so a machine exactly at
-    /// the line is not past it.
+    /// Integer millis keep the comparison exact, so a machine exactly at
+    /// the threshold is not nearly full.
     fn nearly_full(&self) -> bool {
         let (requested, allocatable) = (self.requested.millis(), self.allocatable.millis());
         allocatable > 0 && requested * 100 > allocatable * NEARLY_FULL_PERCENT
     }
 }
 
-/// What happened in the pods that the findings list: each pattern's
-/// finding, and the containers that restarted earlier.
+/// The findings that come from the pods: one finding for each log
+/// pattern, and the containers that restarted earlier.
 #[derive(Default)]
 pub struct Happened {
     pub patterns: Vec<Finding>,
     pub restarted: Vec<Restarted>,
 }
 
-/// Every finding about `machines`, `workloads`, the findings about
-/// each workload, `images`, what `happened` in the pods, and `loops`:
-/// the one about the whole cluster's memory first, then the nearly full
-/// machines in the machines' order, then the one about every machine
-/// with pods over their memory requests, then a count per workload
-/// rule, then the unlabelled images and the unreadable ones, then the
-/// earlier restarts, then each pattern's, then each loop.
+/// Every finding about `machines`, `workloads`, `images`, the pods in
+/// `happened`, and `loops`, in this order: the cluster-wide memory
+/// finding, the nearly full machines in the machines' order, the one
+/// finding for machines with pods over their memory requests, one
+/// finding per workload rule, the unlabelled images, the unreadable
+/// images, the earlier restarts, each log pattern, and each loop.
 pub fn find(
     machines: &[Machine],
     workloads: impl IntoIterator<Item = (WorkloadFinding, Linked)>,
@@ -364,8 +365,8 @@ mod tests {
         assert_eq!(full(nearly_full(&machine("alpha", cpu, memory))), expected);
     }
 
-    /// One registry with an unlabelled image and one transect cannot
-    /// read.
+    /// One registry with an unlabelled image, and another with an image
+    /// that transect cannot read.
     fn census() -> Census {
         Census {
             gaps: vec![Gap {

@@ -1,9 +1,9 @@
-//! A card's "Controlled by" and "Controls" sections.  "Controlled by"
-//! lists the controllers that reconcile the card's custom resources.
-//! "Controls" lists what the card's object reconciles: for a workload, a
-//! count of each kind, and for a namespace, the namespaces whose custom
-//! resources its workloads reconcile.  Both are read from the graph's
-//! controlled-by edges.
+//! The "Controlled by" and "Controls" sections of a card, from the
+//! controlled-by edges of the graph. "Controlled by" lists the
+//! controllers that reconcile the card's custom resources. "Controls"
+//! lists what the card's object reconciles: for a workload, a count of
+//! objects of each kind, and for a namespace, the namespaces whose
+//! custom resources its workloads reconcile.
 
 use std::collections::BTreeMap;
 
@@ -14,13 +14,13 @@ use transect_graph::links::{Named, Reference};
 pub struct Managed {
     pub by: Vec<Controller>,
     pub manages: Vec<Reference>,
-    /// The RBAC kinds `transect` may not list.  The card then states
-    /// that controllers may be missing.
+    /// The RBAC kinds that `transect` may not list. When there are any,
+    /// the card says that controllers may be missing.
     pub missing: Vec<&'static str>,
 }
 
-/// One controller a card names, with the mark of the kind knowledge
-/// that named it, when one did.
+/// A controller listed on a card. `mark` is where the attribution came
+/// from, and is `None` when it came from the Kubernetes API.
 #[derive(Debug, PartialEq)]
 pub struct Controller {
     pub reference: Reference,
@@ -28,16 +28,16 @@ pub struct Controller {
 }
 
 impl Managed {
-    /// The mark the "Controlled by" heading shows for every controller,
-    /// when two or more share it.
+    /// The mark that the "Controlled by" heading shows when two or more
+    /// controllers have the same mark, in place of a mark on each line.
     pub fn shared_by(&self) -> Option<Provenance> {
         transect_graph::edges::provenance::shared(
             self.by.iter().map(|controller| controller.mark.as_ref()),
         )
     }
 
-    /// The workloads that control `workload`, and how many objects of
-    /// each kind it controls.
+    /// The workloads that control `workload`, which can be any object,
+    /// and how many objects of each kind it controls.
     pub fn of_workload(
         graph: &Graph,
         workload: &Object,
@@ -84,8 +84,8 @@ impl Managed {
 
     /// The namespaces whose workloads control `namespace`'s custom
     /// resources, and the namespaces whose custom resources its
-    /// workloads control.  A namespace that manages its own is left
-    /// out, because its boxes already show that.
+    /// workloads control. Control inside `namespace` itself is left out,
+    /// because the namespace's page already shows it.
     pub fn of_namespace(graph: &Graph, namespace: &str, missing: &[&'static str]) -> Self {
         let in_here = |end: &Endpoint| in_namespace(end) == Some(namespace);
         let edges: Vec<&Edge> = graph
@@ -111,7 +111,7 @@ impl Managed {
         self.by.is_empty() && self.manages.is_empty()
     }
 
-    /// Where each marked controller came from, for the card's legend.
+    /// The provenance of each marked controller, for the card's legend.
     pub fn provenances(&self) -> impl Iterator<Item = &Provenance> {
         self.by
             .iter()
@@ -119,10 +119,11 @@ impl Managed {
     }
 }
 
-/// How many objects of each kind the edges leave from, "16 Clusters",
-/// each a reference to the kind's page, so an operator's card counts
-/// what it manages rather than naming every namespace it manages
-/// objects in.
+/// Counts the objects at the `from` end of `edges` by kind, as
+/// references such as "16 Clusters" that link to the kind's page, so an
+/// operator's card shows a count and not every namespace that the
+/// objects are in. A count is a
+/// guess only when every edge of that kind is a guess.
 fn by_kind<'a>(edges: impl Iterator<Item = &'a Edge>, plurals: &Plurals) -> Vec<Reference> {
     let mut kinds: BTreeMap<(&str, &str), (usize, bool)> = BTreeMap::new();
     for edge in edges {
@@ -150,8 +151,8 @@ fn by_kind<'a>(edges: impl Iterator<Item = &'a Edge>, plurals: &Plurals) -> Vec<
         .collect()
 }
 
-/// The namespace of each edge's `end`, each once and sorted, as a
-/// reference to its page.
+/// The namespaces at the `end` of `edges`, sorted and without
+/// duplicates, as references to their pages.
 fn namespaces<'a>(
     edges: impl Iterator<Item = &'a Edge>,
     end: impl Fn(&'a Edge) -> &'a Endpoint,
@@ -166,8 +167,8 @@ fn namespaces<'a>(
         .collect()
 }
 
-/// The namespace of each edge's `end`, and whether it is a guess, which
-/// it is only when every edge that reaches it is one.
+/// The namespaces at the `end` of `edges`, each with `true` when every
+/// edge that reaches it is a guess.
 fn guessed_by_namespace<'a>(
     edges: impl Iterator<Item = &'a Edge>,
     end: impl Fn(&'a Edge) -> &'a Endpoint,
@@ -189,9 +190,6 @@ fn in_namespace(end: &Endpoint) -> Option<&str> {
     }
 }
 
-/// `text` as is, or for an end that controller attribution could not
-/// tell apart from another, marked as a guess, as "Deployment operator
-/// in cache-system (a guess)".
 fn guess(text: String, guessed: bool) -> String {
     if guessed {
         format!("{text} (a guess)")
@@ -200,8 +198,8 @@ fn guess(text: String, guessed: bool) -> String {
     }
 }
 
-/// Why a card's "Controlled by" may be short, as "Controllers may be
-/// missing: transect may not list Roles and RoleBindings."
+/// The sentence that says why a card's "Controlled by" section may be
+/// incomplete, or `None` when `kinds` is empty.
 fn rbac_missing(kinds: &[&str]) -> Option<String> {
     let listed = match kinds {
         [] => return None,
@@ -214,8 +212,8 @@ fn rbac_missing(kinds: &[&str]) -> Option<String> {
 }
 
 impl Managed {
-    /// Why the section may be short, or none when `transect` read every
-    /// RBAC kind.
+    /// The sentence that says which RBAC kinds `transect` could not
+    /// list, or `None` when it could list all of them.
     pub fn missing_text(&self) -> Option<String> {
         rbac_missing(&self.missing)
     }

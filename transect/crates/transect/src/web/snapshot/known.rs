@@ -1,6 +1,7 @@
-//! What kind knowledge gives one snapshot: the custom resources of
-//! known kinds, the counts of those that run nothing, the layer a
-//! namespace's kinds name, and what each resource's fields name.
+//! The parts of `Snapshot` that read custom resources through kind
+//! knowledge. Kind knowledge is what a resource declares about a custom
+//! kind: which condition means an object is healthy, which layer its
+//! namespaces belong to, and which fields refer to other objects.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -19,14 +20,14 @@ use transect_resources::knowledge::{self, Count, Named, Names, Reached, Relation
 use transect_resources::layers::Layers;
 
 impl Snapshot {
-    /// The custom kind `group`/`kind`, with the objects its store holds.
+    /// The custom kind `group`/`kind`, with its objects.
     pub fn custom_kind(&self, group: &str, kind: &str) -> Option<&(ApiResource, Vec<Arc<Custom>>)> {
         let mut custom = self.custom.iter();
         custom.find(|(api, _)| api.group == group && api.kind == kind)
     }
 
-    /// The custom kind `resource` names in a URL, as `<plural>.<group>`,
-    /// with the objects its store holds.
+    /// The custom kind at the URL segment `resource`, which is written
+    /// `<plural>.<group>`, with its objects.
     pub fn custom_at(&self, resource: &str) -> Option<&(ApiResource, Vec<Arc<Custom>>)> {
         let mut custom = self.custom.iter();
         custom.find(|(api, _)| {
@@ -52,16 +53,16 @@ impl Snapshot {
         objects.collect()
     }
 
-    /// The objects of known kinds in `namespace` that run nothing, one
-    /// count per kind.
+    /// For each known kind, how many of its objects in `namespace` run
+    /// nothing.
     pub fn counts(&self, namespace: &str) -> Vec<Count> {
         let workloads = self.ownership.workloads(namespace).collect();
         let objects = self.custom_objects();
         knowledge::counts(&self.kinds, &objects, &workloads, namespace, &self.plurals)
     }
 
-    /// The custom resources in `namespace` that are not its workloads,
-    /// one group per kind, for its page's Resources list.
+    /// The custom resources in `namespace` that are not workloads, one
+    /// group per kind, for the namespace page's Resources list.
     pub fn resources_in(&self, namespace: &str) -> Vec<Group> {
         let workloads = self.ownership.workloads(namespace).collect();
         let pages = self.pages();
@@ -74,8 +75,9 @@ impl Snapshot {
         sources.groups(namespace, &workloads)
     }
 
-    /// The layer `namespace`'s kinds' knowledge names, when neither its
-    /// annotation nor a selector of `layers` places it.
+    /// The layer that kind knowledge assigns to `namespace`, or `None`
+    /// when the namespace's annotation or a selector in `layers` places
+    /// it, because those take precedence.
     pub(super) fn layer_named(&self, namespace: &str, layers: &Layers) -> Option<Named> {
         let meta = self.namespaces.iter().map(|n| &n.metadata);
         let meta = meta
@@ -89,10 +91,10 @@ impl Snapshot {
         named.remove(namespace)
     }
 
-    /// The reason each custom workload's own condition gives, by its
-    /// namespace: the condition its kind knowledge names, or `Ready`.
-    /// Only a workload draws a box for its health to color, so the
-    /// resources of known kinds that run nothing are left out.
+    /// The health reason of each custom resource that is a workload,
+    /// with its namespace, read from the condition that its kind
+    /// knowledge names, or from `Ready`. Only a workload's box shows
+    /// health, so other custom resources are skipped.
     pub(super) fn conditions_of_custom(&self) -> Vec<(String, Reason)> {
         let workloads: HashSet<&Object> = self.ownership.all_workloads().collect();
         let mut reasons = Vec::new();
@@ -116,8 +118,9 @@ impl Snapshot {
         reasons
     }
 
-    /// The pod that takes writes for each custom resource whose kind
-    /// knowledge names a `primary`, by the pod's name.
+    /// Maps each custom resource to the name of its primary pod, the
+    /// pod that accepts writes, read from the field at its kind
+    /// knowledge's `primary` path.
     pub fn primaries(&self) -> HashMap<Object, String> {
         let mut primaries = HashMap::new();
         for (resource, objects) in &self.custom {
@@ -141,8 +144,8 @@ impl Snapshot {
         primaries
     }
 
-    /// What each custom resource of a known kind names through its
-    /// kind's knowledge, by the resource.
+    /// Reads the references to other objects in the fields that each
+    /// custom resource's kind knowledge names.
     pub(super) fn read_relations(&self) -> HashMap<Object, Vec<Relation>> {
         let mut relations = HashMap::new();
         let wanted = self
@@ -172,19 +175,20 @@ impl Snapshot {
         relations
     }
 
-    /// The edges device knowledge draws between devices, and from a
-    /// device to the object whose field holds one of its attributes.
+    /// The edges that device knowledge defines: between devices, and
+    /// from a device to the object whose field holds one of the
+    /// device's attributes.
     pub(super) fn device_edges(&self, reading: &StatedReading) -> Vec<Edge> {
         let knowledge = &self.resources.devices;
         let wanted: Vec<_> = transect_ground::devices::device_matched(knowledge).collect();
         let matches = knowledge::Matches::build(wanted, &self.custom);
-        let stands_for = |object: &Object| reading.stands_for(object);
-        transect_ground::devices::device_edges(&self.devices, knowledge, &matches, stands_for)
+        let endpoints_of = |object: &Object| reading.endpoints_of(object);
+        transect_ground::devices::device_edges(&self.devices, knowledge, &matches, endpoints_of)
     }
 
-    /// The edges kind knowledge's references draw, resolved against
-    /// `graph` and `reading` as intent's entries are, leaving out what
-    /// `graph` already holds from the API.
+    /// The edges for the references that kind knowledge reads. Each
+    /// reference is resolved the way intent entries are, and an edge
+    /// that `graph` already has from the API is left out.
     pub(super) fn known_edges(&self, graph: &Graph, reading: &StatedReading) -> Vec<Edge> {
         let mut edges = Vec::new();
         for (object, relations) in &self.relations {
@@ -202,10 +206,10 @@ impl Snapshot {
         edges
     }
 
-    /// The edges objects of known kinds give the applications behind the
-    /// objects whose annotations name them, such as the identity
-    /// provider a middleware's forward auth reaches, for each
-    /// application behind an `Ingress` that lists the middleware.
+    /// The edges that an object's annotation makes for other objects.
+    /// For example, an `Ingress` lists a middleware whose forward auth
+    /// reaches an identity provider, so each application behind that
+    /// `Ingress` gets an edge to the identity provider.
     pub(super) fn referred_edges(&self, graph: &Graph, reading: &StatedReading) -> Vec<Edge> {
         let described = self.described();
         let referrals = knowledge::referrals(&self.kinds, &self.custom_objects(), &described);
@@ -222,8 +226,9 @@ impl Snapshot {
         knowledge::referred_edges(&referrals, &self.relations, reached, behind, owns, graph)
     }
 
-    /// The `Secret` each custom resource of a known kind writes, by the
-    /// resource, from its knowledge's `writesSecret`.
+    /// Maps each custom resource to the `Secret` that its kind
+    /// knowledge's `writesSecret` names. A resource whose `writesSecret`
+    /// does not resolve to one object is left out.
     pub(super) fn secrets_written(&self) -> HashMap<Object, Object> {
         let mut written = HashMap::new();
         for (resource, objects) in &self.custom {
@@ -246,15 +251,16 @@ impl Snapshot {
         written
     }
 
-    /// How the intent for each `Secret` is read: from what writes it, and
-    /// from its own annotations when `transect` watches them.
+    /// Where the intent for each `Secret` comes from: the resources
+    /// that write it, and the `Secret`'s own annotations when
+    /// `transect` watches `Secret`s.
     pub fn secret_intent(&self) -> SecretIntent {
         SecretIntent::new(self.secrets.is_some(), &self.secrets_written())
     }
 
-    /// The edges guessed from the field names of each custom resource
-    /// whose kind has no knowledge.  Pods and claims count among what a
-    /// field can name, as `known`'s objects do.
+    /// Guesses edges from the fields of each custom resource whose kind
+    /// has no kind knowledge. A field can name an object in `known`, a
+    /// claim, or a pod.
     pub(super) fn guessed_edges(
         &self,
         graph: &Graph,
@@ -264,10 +270,10 @@ impl Snapshot {
         let watched = self.guessable(known);
         let lookup = self.lookup(&watched, reading);
         let mut edges = Vec::new();
-        // A trimmed kind keeps only its conditions, whose messages name
-        // nothing a guess should follow, so only the kinds watched whole
-        // are walked.  Walking every trimmed object would take seconds
-        // on each change on a cluster with a few thousand of them.
+        // Only kinds watched whole are walked. A trimmed object keeps
+        // only its metadata, conditions, and printer-column values, and
+        // walking every trimmed object would be slow on a cluster with
+        // thousands of them.
         let whole = self.custom.iter().filter(|(resource, _)| {
             let kind = (resource.group.clone(), resource.kind.clone());
             self.paged.whole.contains(&kind)
@@ -296,8 +302,7 @@ impl Snapshot {
         edges
     }
 
-    /// What a guess may name: `known`'s objects, the claims, and the
-    /// pods.
+    /// The objects a guessed reference can point to.
     fn guessable(&self, known: &HashSet<Object>) -> HashSet<Object> {
         let mut watched = known.clone();
         watched.extend(self.storage.claim_objects());
@@ -323,8 +328,8 @@ impl Snapshot {
         }
     }
 
-    /// Each relation `object`'s fields hold, with what it reaches on
-    /// `graph`, for its board.
+    /// Each reference in `object`'s fields, with the endpoints it
+    /// reaches in `graph`, for the object's page.
     pub fn relations_reached(&self, object: &Object, graph: &Graph) -> Vec<(&Relation, Reached)> {
         let known = self.known_objects();
         let readers = Readers::default();
@@ -346,17 +351,18 @@ impl Snapshot {
     }
 }
 
-/// The applications behind `referrer`: the workloads behind each
-/// `Service` an `Ingress` routes to, or what any other object stands
-/// for.
+/// The applications behind `referrer`. For an object that routes to
+/// `Service`s, such as an `Ingress`, they are the applications behind
+/// each `Service`, as `reading.endpoints_of` returns them. Otherwise they
+/// are what `reading.endpoints_of` returns for `referrer`.
 fn applications(graph: &Graph, reading: &StatedReading, referrer: &Object) -> Vec<Object> {
     let routed = graph.leaving(Kind::RoutesTo, &Endpoint::Object(referrer.clone()));
     let ends: Vec<Endpoint> = match routed.is_empty() {
-        true => reading.stands_for(referrer),
+        true => reading.endpoints_of(referrer),
         false => routed
             .into_iter()
             .filter_map(|end| match end {
-                Endpoint::Object(service) => Some(reading.stands_for(service)),
+                Endpoint::Object(service) => Some(reading.endpoints_of(service)),
                 _ => None,
             })
             .flatten()

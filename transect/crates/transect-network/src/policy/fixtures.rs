@@ -20,7 +20,7 @@ status: {{phase: Running, podIPs: [{{ip: {address}}}]}}"
     .unwrap()
 }
 
-/// `pod` on its machine's network, where its address is the machine's.
+/// `pod` with host networking, so its address is its node's address.
 pub fn on_machine_network(mut pod: Pod) -> Pod {
     if let Some(spec) = pod.spec.as_mut() {
         spec.host_network = Some(true);

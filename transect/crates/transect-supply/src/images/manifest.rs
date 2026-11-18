@@ -1,19 +1,20 @@
-//! A registry's manifest for one digest: an image's, which names its
-//! config blob, or an index's, which names one image per platform.
+//! A registry's manifest for one digest: either an image manifest, which
+//! names the image's config blob, or an index, which lists one image
+//! manifest per platform.
 
 use serde::Deserialize;
 
 use super::{Failure, digest};
 
-/// The media types transect accepts for a manifest, the OCI and the
-/// Docker ones for both an index and an image.
+/// The `Accept` header value for a manifest request: the OCI and Docker
+/// media types of an index and of an image manifest.
 pub const ACCEPT: &str = "application/vnd.oci.image.index.v1+json, \
     application/vnd.docker.distribution.manifest.list.v2+json, \
     application/vnd.oci.image.manifest.v1+json, \
     application/vnd.docker.distribution.manifest.v2+json";
 
-/// A machine's operating system and CPU, as an index names the platform
-/// of each image in it.
+/// An operating system and CPU architecture, as an index labels each
+/// image manifest in it.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 pub struct Platform {
     pub os: String,
@@ -23,8 +24,8 @@ pub struct Platform {
 }
 
 impl Platform {
-    /// The platform that transect uses for a machine whose `Node`
-    /// reports none.  Most clusters run this platform.
+    /// The platform that transect assumes for a machine whose `Node`
+    /// reports none, `linux/amd64`.
     pub fn fallback() -> Self {
         Self::new("linux", "amd64")
     }
@@ -81,11 +82,11 @@ struct Descriptor {
     digest: String,
 }
 
-/// Parses the manifest in `body` by its shape, not by its media type,
-/// because some registries answer with a generic content type.  Docker's
+/// Parses the manifest in `body` by its fields, not by its media type,
+/// because some registries respond with a generic content type.  Docker's
 /// schema 1 has no config blob, so it is unsupported.  transect puts
-/// every digest that the manifest names into a later request's path, so
-/// a manifest that names anything except a digest is malformed.
+/// each digest from the manifest into the path of a later request, so
+/// `parse` returns `Malformed` when any digest is not well formed.
 pub fn parse(body: &[u8]) -> Result<Manifest, Failure> {
     let raw: Raw = serde_json::from_slice(body).map_err(|_| Failure::Malformed)?;
     let manifest = match (raw.schema_version, raw.manifests, raw.config) {
@@ -103,10 +104,11 @@ pub fn parse(body: &[u8]) -> Result<Manifest, Failure> {
     named_ok.then_some(manifest).ok_or(Failure::Malformed)
 }
 
-/// The manifest in an index for `platform`: one whose operating system
-/// and architecture match, preferring one whose variant matches too.
-/// An index lists attestations with the platform `unknown/unknown`, so
-/// they never match a machine.
+/// The digest of the manifest in an index for `platform`: the first
+/// entry whose operating system, architecture, and variant all match,
+/// else the first whose operating system and architecture match.  An
+/// index lists attestations with the platform `unknown/unknown`, so they
+/// never match a machine.
 pub fn select<'a>(entries: &'a [Entry], platform: &Platform) -> Option<&'a str> {
     let matching = || {
         entries.iter().filter(|entry| {
@@ -162,7 +164,7 @@ mod tests {
     fn entries() -> Vec<Entry> {
         match parse(index().as_bytes()) {
             Ok(Manifest::Index(entries)) => entries,
-            other => panic!("not an index: {other:?}"),
+            other => panic!("the manifest is {other:?}, want an index"),
         }
     }
 

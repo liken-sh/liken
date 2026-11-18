@@ -1,47 +1,43 @@
-//! Watches on custom kinds: whole on the kinds that own pods and
-//! workloads and those whose kind knowledge reads their fields, and
-//! trimmed on every other CRD the cluster serves.
+//! Watches on custom resource kinds. No list of custom kinds is
+//! configured. `discover_custom_kinds` collects them after the
+//! cluster's first list and again after each change, so an operator
+//! installed later gets a watch without a restart.
 //!
-//! No list of custom kinds is configured.  `transect` finds the kinds it
-//! reads whole in the owner references it already holds, once the
-//! cluster's first list is in, and again whenever the cluster changes,
-//! so a new operator's kind gets a watch without a restart.  A kind
-//! whose knowledge reads its fields, such as a reference to another
-//! object, is watched whole too, even when it owns nothing.  Each of
-//! these is resolved by discovery, in its group's preferred version,
-//! because its knowledge's paths are written against that version.
+//! A kind is watched whole when an owner reference on a pod, a
+//! workload, or an object of a whole kind names it, when kind knowledge
+//! reads a field that a trimmed object drops, or when device knowledge
+//! reads it. Every other kind that a CRD defines is watched trimmed. So
+//! is a cluster-scoped custom kind whose status some `ServiceAccount`
+//! may write, because its controller's card lists it. A trimmed object
+//! keeps its metadata, its conditions, the values of its printer
+//! columns, and the fields that kind knowledge reads. So every kind
+//! gets a `Ready` dot and object pages, and no spec is stored.
 //!
-//! Every other CRD is watched trimmed, on its storage version, which
-//! the CRD store already holds, so no discovery call is made per kind.
-//! An object stored at that version needs no conversion webhook to be
-//! read.  An object still stored at an older version, which the CRD's
-//! `status.storedVersions` lists until a migration rewrites it, does.
-//! A trimmed object keeps its metadata, its conditions, and its printer
-//! columns' values, so every kind has a `Ready` dot and its objects'
-//! pages, and no spec reaches a store.  A custom kind outside any CRD
-//! whose status some `ServiceAccount` may write is watched trimmed too,
-//! after discovery, because its controller's card lists it.
+//! Kind knowledge writes its field paths against the group's preferred
+//! version, so a whole kind, and a trimmed kind that keeps fields, is
+//! watched at the version that discovery prefers. Any other trimmed
+//! kind is watched at its CRD's storage version, which needs no
+//! discovery call and no conversion webhook. An object still stored at
+//! an older version, which the CRD lists in `status.storedVersions`
+//! until a migration rewrites it, does need the webhook.
 //!
-//! Each kind is tried with a list of one object before its watch
-//! starts, in the background and again after a transient failure, at
-//! most `PROBES` at once.  The first scan finds every CRD at once, and
-//! a burst of a hundred probes or more opens as many connections, some
-//! of which the API server has refused.  A kind that `transect` may not
-//! list gets no store, and the ownership walk ends at its owner
-//! reference, which names the kind and the object well enough to count
-//! it.  Nothing waits for these stores, so a slow or missing kind never
-//! holds up a page.
+//! Before a kind's watch starts, a probe lists one object of it. The
+//! probe runs in the background and runs again after a transient
+//! failure. At most `PROBES` run at once, because the first scan finds
+//! every CRD together and would otherwise open a connection to the API
+//! server for each of them at the same moment. When `transect` may not
+//! list a kind, the kind gets no store, and the ownership walk ends at
+//! the owner reference, whose kind and name are enough to count the
+//! workload. Nothing waits for these stores, so a slow or missing kind
+//! never delays a page.
 //!
-//! A kind that nothing names any more, because its operator was removed
-//! or its knowledge was, has its watch stopped.  A kind whose need
-//! changes from trimmed to whole, or whose CRD changes its storage
-//! version or its printer columns, is watched again.  The pages read its
-//! previous store until the next one holds its first list, so its
-//! objects never leave the pages while it is listed again.  A kind
-//! watched whole stays whole until `transect` restarts, because a kind
-//! whose objects owned pods once, such as one that starts Jobs, will
-//! likely own them again, and each change back and forth would cost a
-//! full list.
+//! When nothing refers to a kind any more, its watch stops. When a kind
+//! changes from trimmed to whole, or its CRD changes its storage version
+//! or printer columns, a new watch starts, and pages read the old store
+//! until the new store has its first list. A kind watched whole stays
+//! whole until `transect` restarts. A kind whose objects owned pods
+//! once, such as one that starts Jobs, will likely own pods again, and
+//! each switch between whole and trimmed costs a full list.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -57,7 +53,7 @@ use tokio::task::AbortHandle;
 
 use super::Cluster;
 use super::discovery::{Optional, Ready, Refusal, State};
-use super::reflect::{Changes, CustomWatch, Holding, reflect_custom};
+use super::reflect::{Changes, CustomWatch, Stored, reflect_custom};
 use crate::ownership::kinds_to_watch;
 use transect_graph::edges::Plurals;
 use transect_resources::knowledge::KindKnowledge;
@@ -68,39 +64,39 @@ mod want;
 use named::{controlled, described, kept};
 use want::{Want, served, wants};
 
-/// How long after a change `transect` looks for new owner kinds.  Pods
-/// change many times a second during a rollout; a new owner kind
-/// appears when an operator is installed, which can wait this long.
+/// The wait after a change before the next scan for custom kinds.
+/// During a rollout pods change many times a second, and a new owner
+/// kind appears only when an operator is installed, so one scan per
+/// `RESCAN` is enough.
 const RESCAN: Duration = Duration::from_secs(10);
 
-/// The most probes of custom kinds that run at once.
+/// The most probes that run at once. See the module comment.
 const PROBES: usize = 8;
 
 /// A custom kind by its group and kind.
 pub type GroupKind = (String, String);
 
-/// How far the watch on one kind has come.
+/// How far one kind's watch has progressed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Watch {
     Listed,
-    /// Still finding the kind, or waiting for its first list.
+    /// Discovery or the first list has not finished.
     Listing,
-    /// `transect` may not list it.
+    /// `transect` may not list the kind.
     Refused,
 }
 
-/// One custom resource, whole, as its watch holds it.
+/// One custom resource object, as a whole-kind watch stores it.
 pub type Custom = DynamicObject;
 
-/// One custom kind's watch: the resource discovery resolved, what it
-/// holds of each object, and the objects its store holds.  The watch
-/// stops once the last clone is dropped.
+/// One custom kind's running watch. The watch task stops when the last
+/// clone is dropped.
 #[derive(Clone)]
 struct Watched {
     resource: ApiResource,
-    holding: Holding,
+    stored: Stored,
     store: Store<Custom>,
-    /// Whether its first list is in.
+    /// Whether the first list has completed.
     listed: Arc<AtomicBool>,
     _running: Arc<Running>,
 }
@@ -111,7 +107,7 @@ impl Watched {
     }
 }
 
-/// A running watch, which stops when this is dropped.
+/// Aborts the watch task when dropped.
 struct Running(AbortHandle);
 
 impl Drop for Running {
@@ -126,8 +122,8 @@ impl Ready for Watched {
     }
 }
 
-/// The watches running, shared by the cluster's clones, each with what
-/// it holds, and the probes that may run.
+/// The watches on custom kinds, shared by every clone of `Cluster`, and
+/// the semaphore that limits probes.
 #[derive(Clone)]
 pub struct CustomOwners {
     kinds: Arc<Mutex<BTreeMap<GroupKind, Tracked>>>,
@@ -143,9 +139,9 @@ impl Default for CustomOwners {
     }
 }
 
-/// One kind's watch, or its discovery, what it was asked for, and the
-/// watch it replaced, which the pages read until the new one has
-/// listed.
+/// One kind's watch, how it is watched (`want`), and the watch it
+/// replaced. Pages read `previous` until the new watch has its first
+/// list.
 struct Tracked {
     want: Want,
     watch: Optional<Watched>,
@@ -153,9 +149,9 @@ struct Tracked {
 }
 
 impl Tracked {
-    /// The watch whose store the pages read now: the kind's watch once
-    /// it has listed, and until then the one it replaced, or the kind's
-    /// watch when it replaced none.
+    /// The watch whose store pages read: the current watch once it has
+    /// its first list, until then the previous watch, or the current one
+    /// when there is no previous watch.
     fn serving(&mut self) -> Option<Watched> {
         let current = match self.watch.state() {
             State::On(watched) => Some(watched),
@@ -173,7 +169,7 @@ impl Tracked {
 }
 
 impl CustomOwners {
-    /// Every watched kind's resource and the objects its store holds.
+    /// Every watched kind's resource and the objects in its store.
     pub fn snapshot(&self) -> Vec<(ApiResource, Vec<Arc<Custom>>)> {
         self.watched()
             .into_iter()
@@ -181,7 +177,7 @@ impl CustomOwners {
             .collect()
     }
 
-    /// The plural of every watched kind, by group and kind.
+    /// The plural name of every watched kind, by group and kind.
     pub fn plurals(&self) -> Plurals {
         self.watched()
             .into_iter()
@@ -189,22 +185,21 @@ impl CustomOwners {
             .collect()
     }
 
-    /// The objects of every kind watched whole, whose owners are watched
-    /// whole in turn.
+    /// The objects of every kind watched whole.
     pub fn whole(&self) -> Vec<Vec<Arc<Custom>>> {
         let whole = self.watched().into_iter();
-        let whole = whole.filter(|(_, watched)| watched.holding == Holding::Whole);
+        let whole = whole.filter(|(_, watched)| watched.stored == Stored::Whole);
         whole.map(|(_, watched)| watched.store.state()).collect()
     }
 
     /// The kinds watched whole, by group and kind.
     pub fn whole_kinds(&self) -> std::collections::HashSet<GroupKind> {
         let whole = self.watched().into_iter();
-        let whole = whole.filter(|(_, watched)| watched.holding == Holding::Whole);
+        let whole = whole.filter(|(_, watched)| watched.stored == Stored::Whole);
         whole.map(|(group_kind, _)| group_kind).collect()
     }
 
-    /// How far the watch on each kind has come, by group and kind.
+    /// The progress of each kind's watch, by group and kind.
     pub fn watched_kinds(&self) -> std::collections::HashMap<GroupKind, Watch> {
         let mut kinds = self.kinds.lock().unwrap();
         kinds
@@ -221,7 +216,7 @@ impl CustomOwners {
             .collect()
     }
 
-    /// The watch that serves each kind now.
+    /// Each kind with the watch that pages read.
     fn watched(&self) -> Vec<(GroupKind, Watched)> {
         let mut kinds = self.kinds.lock().unwrap();
         kinds
@@ -230,13 +225,12 @@ impl CustomOwners {
             .collect()
     }
 
-    /// Watches exactly the kinds in `found`, each holding what its
-    /// `Want` gives, with `start`: starts each new one, stops each one
-    /// `found` leaves out, and starts again each one whose want changed,
-    /// keeping its old watch until the new one has listed.  A kind
-    /// watched whole is never asked to be trimmed again.  A discovery
-    /// still probing when its kind is dropped sends its watch into a
-    /// channel that nothing reads, so the watch is dropped and stops.
+    /// Makes the watches match `found`: starts a watch with `start` for
+    /// each new kind, stops the watch of each kind missing from `found`,
+    /// and replaces the watch of each kind whose `Want` changed. A kind
+    /// watched whole is never changed to trimmed. When a probe is still
+    /// running for a kind that was removed, its watch is dropped, and so
+    /// stops, when the probe finishes.
     fn track(
         &self,
         found: BTreeMap<GroupKind, Want>,
@@ -263,8 +257,8 @@ impl CustomOwners {
                 );
                 continue;
             };
-            let want = match (tracked.want.holding, want.holding) {
-                (Holding::Whole, Holding::Trimmed) => Want::whole(tracked.want.resource.clone()),
+            let want = match (tracked.want.stored, want.stored) {
+                (Stored::Whole, Stored::Trimmed) => Want::whole(tracked.want.resource.clone()),
                 _ => want,
             };
             if tracked.want == want {
@@ -279,18 +273,19 @@ impl CustomOwners {
             };
         }
         if stopped > 0 {
-            tracing::info!(stopped, "stopped watching custom kinds nothing names");
+            tracing::info!(
+                stopped,
+                "Stopped watching custom kinds that no object references"
+            );
             changed.send_replace(());
         }
     }
 }
 
-/// Starts a watch on each custom owner kind `cluster` names now, and on
-/// each kind `knowledge` describes, and on each kind device knowledge
-/// reads whole, `device_kinds`, then on each new one after a change.
-/// A reload of the resources is a change too.  The caller starts it
-/// once the cluster has synced, so the first scan reads every owner
-/// reference.
+/// Starts the task that keeps a watch on every custom kind that needs
+/// one. The task scans again after each change of the cluster, which
+/// includes a reload of the resources. Call it after the cluster has
+/// synced, so the first scan reads every owner reference.
 pub fn discover_custom_kinds(
     cluster: Cluster,
     client: Client,
@@ -341,7 +336,7 @@ fn discover(
     let started = changes.clone();
     let (group, kind) = group_kind.clone();
     let Want {
-        holding,
+        stored,
         resource,
         columns,
         fields,
@@ -354,8 +349,8 @@ fn discover(
             let (group, kind) = (group.clone(), kind.clone());
             let probes = probes.clone();
             async move {
-                // The semaphore is never closed, so this always waits
-                // for a permit.
+                // The semaphore is never closed, so `acquire_owned`
+                // only waits.
                 let _permit = probes.acquire_owned().await.ok();
                 let resource = match resource {
                     Some(resource) => resource,
@@ -373,12 +368,12 @@ fn discover(
                 starting,
                 resource.clone(),
                 started,
-                holding,
+                stored,
                 (columns, fields),
             );
             Watched {
                 resource,
-                holding,
+                stored,
                 store,
                 listed,
                 _running: Arc::new(Running(task)),
@@ -387,33 +382,31 @@ fn discover(
     )
 }
 
-/// The kind's resource in its group's preferred version, once discovery
-/// resolves it.  A kind it cannot resolve ends the ownership walk at its
-/// owners.
+/// The kind's resource at its group's preferred version, from
+/// discovery.
 async fn resolve(client: &Client, group: &str, kind: &str) -> Result<ApiResource, Refusal> {
     let found = kube::discovery::group(client, group).await;
     let found = found.map(|served| served.recommended_kind(kind));
     match found {
         Ok(Some((resource, _capabilities))) => Ok(resource),
         Ok(None) => {
-            tracing::warn!(%group, %kind, "the API group does not serve this kind; the ownership walk stops at an owner of this kind");
+            tracing::warn!(%group, %kind, "The API group does not serve this kind, so the ownership walk stops at an owner of this kind");
             Err(Refusal::NotServed)
         }
         Err(error) => {
-            tracing::warn!(%group, %kind, %error, "cannot resolve this kind; the ownership walk stops at an owner of this kind");
+            tracing::warn!(%group, %kind, %error, "Discovery of this kind returned an error, so the ownership walk stops at an owner of this kind");
             Err(error.into())
         }
     }
 }
 
-/// `resource`, once a list of one of it succeeds.  A kind `transect` may
-/// not list ends the ownership walk at its owners.
+/// `resource`, after a list of one object of it succeeds.
 async fn listable(client: Client, resource: ApiResource) -> Result<ApiResource, Refusal> {
     let api: Api<DynamicObject> = Api::all_with(client, &resource);
     let one = ListParams::default().limit(1);
     api.list_metadata(&one).await.inspect_err(|error| {
         let (group, kind) = (&resource.group, &resource.kind);
-        tracing::warn!(%group, %kind, %error, "cannot list this kind; the ownership walk stops at an owner of this kind");
+        tracing::warn!(%group, %kind, %error, "Listing this kind returned an error, so the ownership walk stops at an owner of this kind");
     })?;
     Ok(resource)
 }

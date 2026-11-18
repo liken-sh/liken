@@ -133,12 +133,15 @@ fn evaluates_who_may_call(
     vec![policy("shop", "{podSelector: {}, policyTypes: [Ingress], ingress: [{from: [{podSelector: {}}, {namespaceSelector: {matchLabels: {team: ops}}}]}]}")],
     NamespaceReach::Isolated(BTreeSet::from(["watch".into()]))
 )]
-fn projects_to_namespaces(#[case] policies: Vec<NetworkPolicy>, #[case] expected: NamespaceReach) {
+fn summarizes_reach_by_namespace(
+    #[case] policies: Vec<NetworkPolicy>,
+    #[case] expected: NamespaceReach,
+) {
     assert_eq!(evaluate(&policies).of_namespace("shop"), Some(expected));
 }
 
 #[rstest]
-fn a_namespace_with_no_running_pod_says_nothing() {
+fn a_namespace_with_no_running_pod_has_no_reach() {
     assert_eq!(evaluate(&[]).of_namespace("empty"), None);
 }
 
@@ -173,14 +176,13 @@ fn labels(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
         .collect()
 }
 
-/// A `CronJob` between runs, evaluated by its templates' labels.
-/// Before its pods run, the workload may call what policy admits its
-/// pods to call.
+/// A `CronJob` with no running pod is evaluated as if it ran a pod with
+/// the labels of each of its pod templates.
 #[rstest]
 #[case::admitted_by_its_template("{from: [{podSelector: {matchLabels: {app: report}}}]}", vec![labels(&[("app", "report")])], true)]
 #[case::not_admitted("{from: [{podSelector: {matchLabels: {app: web}}}]}", vec![labels(&[("app", "report")])], false)]
-// A template with no labels, as a `CronJob`'s often has, gives no label
-// set at all, and an empty pod selector still matches its pods.
+// A `CronJob` template often has no labels. It then contributes no
+// label set, and an empty pod selector still matches its pods.
 #[case::a_template_with_no_labels("{from: [{podSelector: {}}]}", vec![], true)]
 fn a_workload_between_runs_calls_by_its_template(
     #[case] rule: &str,
@@ -206,16 +208,16 @@ fn a_workload_between_runs_calls_by_its_template(
     assert_eq!(allowed.edges().contains(&edge), admitted);
 }
 
-/// The fixture's pods with the database on its machine's network.
+/// The fixture's pods, with `hostNetwork: true` on the database's pod.
 fn with_db_on_machine_network() -> Vec<Pod> {
     let mut pods = pods();
     pods[0] = on_machine_network(pods.remove(0));
     pods
 }
 
-/// No `NetworkPolicy` selects a pod on its machine's network, so a
-/// policy that names it limits none of its callers and adds no edge to
-/// it.
+/// No `NetworkPolicy` applies to a pod with `hostNetwork: true`, so a
+/// policy that selects it does not limit its callers and draws no edge
+/// to it.
 #[rstest]
 #[case::no_policy(vec![])]
 #[case::a_policy_that_selects_it(vec![to_db("{from: [{podSelector: {matchLabels: {app: web}}}]}")])]
@@ -233,8 +235,7 @@ fn no_policy_applies_on_the_machines_network(#[case] policies: Vec<NetworkPolicy
     );
 }
 
-/// No policy limits the calls out of a pod on its machine's network,
-/// whatever egress policy its namespace has.
+/// No egress policy limits the calls from a pod with `hostNetwork: true`.
 #[rstest]
 fn no_egress_policy_limits_a_pod_on_its_machines_network() {
     let mut pods = pods();
@@ -248,7 +249,7 @@ fn no_egress_policy_limits_a_pod_on_its_machines_network() {
     ];
     let allowed = Allowed::evaluate(&policies, &pods, [], &namespaces(), &Ownership::default());
     let Some(Reach::Isolated(callers)) = allowed.reach(&workload("shop", "db")) else {
-        panic!("the database is isolated");
+        panic!("shop/db has no Reach::Isolated, want one");
     };
     let web = Caller::Workload {
         namespace: "shop".into(),
@@ -257,14 +258,14 @@ fn no_egress_policy_limits_a_pod_on_its_machines_network() {
     assert!(callers.contains_key(&web));
 }
 
-/// A caller on its machine's network calls from its machine's address,
-/// so a selector does not admit it and a block that contains the
-/// address does.
+/// A caller with `hostNetwork: true` connects from its node's address, so
+/// a pod or namespace selector does not admit it, and an `ipBlock` that
+/// contains the node's address does.
 #[rstest]
 #[case::a_pod_selector("{from: [{podSelector: {matchLabels: {app: web}}}]}", false)]
 #[case::its_whole_namespace("{from: [{podSelector: {}}]}", false)]
 #[case::every_namespace("{from: [{namespaceSelector: {}}]}", false)]
-#[case::a_block_that_holds_its_address("{from: [{ipBlock: {cidr: 10.1.0.0/24}}]}", true)]
+#[case::a_block_that_contains_its_address("{from: [{ipBlock: {cidr: 10.1.0.0/24}}]}", true)]
 #[case::no_peers("{ports: [{port: 5432}]}", true)]
 fn admits_a_caller_on_its_machines_network_by_its_address(
     #[case] rule: &str,
@@ -280,7 +281,7 @@ fn admits_a_caller_on_its_machines_network_by_its_address(
         &Ownership::default(),
     );
     let Some(Reach::Isolated(callers)) = allowed.reach(&workload("shop", "db")) else {
-        panic!("the database is isolated");
+        panic!("shop/db has no Reach::Isolated, want one");
     };
     let web = Caller::Workload {
         namespace: "shop".into(),
@@ -289,9 +290,10 @@ fn admits_a_caller_on_its_machines_network_by_its_address(
     assert_eq!(callers.contains_key(&web), admitted);
 }
 
-/// Each rule that admits callers keeps its policy's name and its ports.
+/// Each rule that admits callers is recorded with its policy's name and
+/// ports.
 #[rstest]
-fn keeps_each_rule_that_admits_callers() {
+fn records_each_rule_that_admits_callers() {
     let policies = [to_db(
         "{from: [{podSelector: {matchLabels: {app: web}}}], ports: [{port: 5432}]}",
     )];
@@ -304,8 +306,8 @@ fn keeps_each_rule_that_admits_callers() {
     assert_eq!(found, vec![("p", "port 5432".to_string(), 1)]);
 }
 
-/// The policies that limit a workload's calls in, by name, whether or
-/// not their rules admit anyone.
+/// The names of the policies that limit calls into a workload, whether
+/// or not their rules admit anyone.
 #[rstest]
 #[case::none(vec![], None)]
 #[case::one_with_a_rule(vec![to_db("{ports: [{port: 5432}]}")], Some(vec!["p"]))]

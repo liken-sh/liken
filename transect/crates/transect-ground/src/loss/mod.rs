@@ -1,21 +1,21 @@
 //! The loss: what the cluster loses if a set of machines goes down.
-//! transect computes it from the machines where each workload's pods
-//! run now.
+//! transect computes it from the machines that each workload's pods
+//! run on now.
 //!
-//! One rule computes both the prediction and the recovery.  Under a
-//! loss, a workload's state is the number of its ready pods on machines
-//! outside the lost set, compared with the replicas it declares.  On a
-//! healthy day the pods on a lost machine are ready, and the rule does
-//! not count them.  When a machine is really down, its pods are already
-//! not ready, and the rule counts each replacement that starts on
-//! another machine when it becomes ready.  So transect needs no second
-//! model of what Kubernetes will do.
+//! One rule computes both the prediction and the recovery.  A
+//! workload's state is the number of its ready pods on machines outside
+//! the lost set, compared with the replicas it declares.  For a
+//! prediction, the machines are still up, and the rule leaves out their
+//! ready pods.  When a machine is really down, its pods are already not
+//! ready, and the rule counts each replacement pod on another machine
+//! once it is ready.  So transect needs no second model of what
+//! Kubernetes will do.
 //!
-//! `assess` returns the loss as data, and `sentence.rs` contains every
-//! word that the sidebar and the map show for it.  The reason a down
-//! workload waits, the cascade one hop out, and what happens next each
-//! add to the same `Loss` from the stores that they read, so each one
-//! is a pure function with its own tests.
+//! `assess` returns the loss as data, and the `sentence` module writes
+//! the text that the sidebar and the map show for it.  The `stranded`,
+//! `cascade`, and `next` modules each compute one part of the `Loss`:
+//! why a down workload stays down, what its dependents lose, and what
+//! happens next.
 
 pub mod blind;
 pub mod cascade;
@@ -38,7 +38,7 @@ use k8s_openapi::api::core::v1::Pod;
 pub use cascade::IfDown;
 use next::Gather;
 pub use next::Next;
-pub use real::{Counted, Gone, Majority, not_ready};
+pub use real::{Counted, Majority, NotReadyMachine, not_ready};
 pub use rule::State;
 use rule::{Role, role};
 pub use sidebar::Sidebar;
@@ -52,15 +52,14 @@ use transect_resources::intent::Line;
 pub use unknown::{text as unknown_text, unknown};
 pub use vital::{Vital, vital};
 
-/// The machines a loss takes, each once, in name order.
+/// The machines of a loss, sorted by name.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Lost(BTreeSet<String>);
 
 impl Lost {
-    /// The machines named in `names` that are also in `machines`.  The
-    /// function leaves out a name that the cluster does not have, such
-    /// as a machine removed after someone copied a link, in the same way
-    /// that the page leaves out a selected namespace that was deleted.
+    /// The machines in `names` that are also in `machines`.  It drops a
+    /// name that the cluster does not have, such as a machine removed
+    /// after someone copied a link.
     pub fn of<'a>(
         names: impl IntoIterator<Item = &'a str>,
         machines: impl IntoIterator<Item = &'a str>,
@@ -83,7 +82,7 @@ impl Lost {
     }
 
     /// Whether `pod` runs on one of the lost machines.
-    fn holds(&self, pod: &Pod) -> bool {
+    fn includes_pod(&self, pod: &Pod) -> bool {
         let node = pod.spec.as_ref().and_then(|spec| spec.node_name.as_deref());
         node.is_some_and(|node| self.contains(node))
     }
@@ -93,54 +92,57 @@ impl Lost {
 #[derive(Debug, PartialEq)]
 pub struct Loss {
     pub machines: Lost,
-    /// How many pods run on the lost machines, Jobs' pods included.
+    /// How many unfinished pods run on the lost machines, including
+    /// pods of `Job` objects.
     pub pods: usize,
-    /// Each workload the loss leaves down or short, in namespace and
-    /// name order.
+    /// Each workload that the loss leaves down, short, or without its
+    /// primary, sorted by namespace and name.
     pub workloads: Vec<Taken>,
-    /// How many DaemonSets run a pod on the lost machines.  A DaemonSet
-    /// runs one pod per machine, so a loss never leaves it short.
+    /// How many `DaemonSet` objects have a pod on the lost machines.  A
+    /// `DaemonSet` runs one pod for each machine, so a loss never makes
+    /// it short.
     pub daemon_sets: usize,
     pub next: Next,
-    /// What the dependents of the down workloads lose, one hop out.  The
-    /// list leaves out a dependent that the loss also leaves down,
-    /// because that dependent has its own line.
+    /// What the dependents of the down workloads lose, one hop out.  A
+    /// dependent that the loss also takes down is not in the list,
+    /// because it has its own line.
     pub cascade: Vec<cascade::Loss>,
 }
 
-/// A workload the loss leaves down or short.
+/// A workload that the loss leaves down, short, or without its primary.
 #[derive(Debug, PartialEq)]
 pub struct Taken {
     pub object: Object,
     pub state: State,
-    /// Why a workload left down stays down until the lost machines
-    /// return, or `None` when its pods can start elsewhere.
+    /// Why a down workload stays down until the lost machines return.
+    /// `None` when its pods can start on other machines.
     pub stranded: Option<Stranded>,
-    /// What the workload provides, as its intent records it.  Its parcel
-    /// shows this text as gone in place of the workload's name.
+    /// What the workload provides, according to its intent.  When the
+    /// workload is down, the map's tile for its namespace shows this
+    /// text in place of the workload's name.
     pub provides: Option<Line>,
-    /// What it does that the cluster cannot do without.
+    /// What the workload does that the cluster cannot do without.
     pub vital: Option<Vital>,
 }
 
-/// The stores that `assess` reads a loss from.
+/// The stores that `assess` reads to compute a loss.
 pub struct Reading<'r, 'a> {
     pub pods: &'r [Arc<Pod>],
     pub workloads: &'r Workloads<'a>,
     pub ownership: &'r Ownership,
     pub stranding: Stranding<'r>,
     pub edges: cascade::Edges<'r>,
-    /// For each workload whose kind knowledge names a primary, the name
-    /// of the pod that accepts writes.
+    /// For each workload whose kind has a known primary, the name of the
+    /// pod that accepts writes.
     pub primaries: &'r HashMap<Object, String>,
-    /// What each workload the cluster cannot do without does.
+    /// What each vital workload does.
     pub vital: &'r HashMap<Object, Vital>,
 }
 
 /// Applies the rule to every workload with a pod on `machines`.  A
-/// `Job`'s pod on a lost machine is lost, and its `CronJob` runs again
-/// on its schedule.  So the function counts that pod in `Loss::pods`
-/// and in the eviction times, and in no workload's state.
+/// `Job` pod on a lost machine is lost, but its `CronJob` runs again on
+/// its schedule.  So `assess` counts that pod in `Loss::pods` and in the
+/// eviction times, and adds no `Taken` for its `Job`.
 pub fn assess(machines: Lost, reading: &Reading) -> Loss {
     let Reading {
         pods,
@@ -151,7 +153,7 @@ pub fn assess(machines: Lost, reading: &Reading) -> Loss {
         primaries,
         vital,
     } = reading;
-    let there = |pod: &&Pod| machines.holds(pod);
+    let there = |pod: &&Pod| machines.includes_pod(pod);
     let running = pods.iter().map(AsRef::as_ref).filter(|pod| !finished(pod));
     let count = running.filter(there).count();
     let mut taken = Vec::new();
@@ -180,7 +182,12 @@ pub fn assess(machines: Lost, reading: &Reading) -> Loss {
         };
         let primary = primaries.get(object);
         let primary_lost = lost.iter().any(|pod| pod.metadata.name.as_ref() == primary);
-        let state = rule::state(wanted, &running, |pod| machines.holds(pod), primary_lost);
+        let state = rule::state(
+            wanted,
+            &running,
+            |pod| machines.includes_pod(pod),
+            primary_lost,
+        );
         let Some(state) = state else {
             continue;
         };
@@ -217,9 +224,9 @@ pub fn assess(machines: Lost, reading: &Reading) -> Loss {
     }
 }
 
-/// What the dependents lose of each workload in `taken` that is down,
-/// or that accepts no writes until a replica is promoted.  A short
-/// workload still serves requests, so its dependents lose nothing.
+/// What the dependents lose of each workload in `taken` that is down or
+/// accepts no writes until a replica is promoted.  A short workload
+/// still serves requests, so its dependents lose nothing.
 fn cascade_of(taken: &[Taken], edges: &cascade::Edges) -> Vec<cascade::Loss> {
     let down: Vec<&Object> = taken
         .iter()
@@ -237,10 +244,9 @@ fn cascade_of(taken: &[Taken], edges: &cascade::Edges) -> Vec<cascade::Loss> {
 }
 
 /// Why a workload stays down, from the reasons of its pods on the lost
-/// machines.  Each pod has a reason, or `None` when it can start on
-/// another machine.  The function returns the first pod's reason when
-/// every pod has one, and `None` otherwise, because one pod that can
-/// start on another machine brings the workload back.
+/// machines.  Returns the first pod's reason when every pod has one, and
+/// `None` when any pod can start on another machine, because that one
+/// pod brings the workload back.
 fn stranded(reasons: impl Iterator<Item = Option<Stranded>>) -> Option<Stranded> {
     let mut first = None;
     for reason in reasons {
@@ -251,10 +257,9 @@ fn stranded(reasons: impl Iterator<Item = Option<Stranded>>) -> Option<Stranded>
 }
 
 impl Loss {
-    /// The name that a line shows for `taken`.  It is the workload's own
+    /// The name that a line shows for `taken`.  It is the workload's
     /// name, with its kind before it when another workload of the loss
-    /// in the same namespace has the same name, as a player and its
-    /// remote often do.
+    /// in the same namespace has the same name.
     pub fn name_of(&self, taken: &Taken) -> String {
         let object = &taken.object;
         let shared = self.workloads.iter().any(|other| {
@@ -269,35 +274,37 @@ impl Loss {
     }
 }
 
-/// What one namespace loses, as the map draws it on the namespace's
-/// parcel.
+/// What one namespace loses, drawn on the namespace's tile of the
+/// map.
 #[derive(Debug, PartialEq)]
-pub struct Parcel {
+pub struct NamespaceTile {
     /// `Level::Failing` when a workload is down or without its primary,
     /// and `Level::Warning` when the workloads are only short.  The map
-    /// colors the parcel with this level in the same way as for health.
+    /// colors the tile by this level, as it does for health.
     pub level: Level,
     /// The name and state of each workload that the namespace loses,
-    /// except a down workload that `lacks` names by what it provides.
+    /// except a down workload that has `provides` text.  `lacks` shows
+    /// that text instead.
     pub taken: Vec<(String, State)>,
-    /// Whether the namespace has only one workload, so the tag does not
-    /// need to name it.
+    /// Whether the namespace has only one workload, so its tag does not
+    /// need to name the workload.
     pub alone: bool,
-    /// What the down workloads provide, as their intent records it.  The
-    /// list includes the namespace's own down workloads and the ones in
-    /// other namespaces that its workloads lose.  Each entry appears
-    /// once, in sorted order.
+    /// What the lost workloads provide, according to their intent.  It
+    /// covers the namespace's own down workloads and the workloads in
+    /// other namespaces that its workloads lose.  An application that
+    /// signs in through a lost workload adds the sign-in text.  The list
+    /// is sorted, without duplicates.
     pub lacks: Vec<String>,
-    /// The names of the workloads in other namespaces that its workloads
-    /// lose, except one that `lacks` names.  A lost workload in the same
-    /// namespace already has its own down tag.
+    /// The names of the workloads in other namespaces that its callers
+    /// lose and that have no `provides` text.  A lost workload in the
+    /// same namespace has its own entry in `taken`.
     pub loses: Vec<String>,
 }
 
 impl Loss {
     /// What `namespace` loses, where `workloads` is the number of
-    /// workloads in it.  Returns `None` when the namespace loses nothing.
-    pub fn parcel(&self, namespace: &str, workloads: usize) -> Option<Parcel> {
+    /// workloads in it.  `None` when the namespace loses nothing.
+    pub fn tile(&self, namespace: &str, workloads: usize) -> Option<NamespaceTile> {
         let in_namespace = self.workloads.iter();
         let in_namespace: Vec<&Taken> = in_namespace
             .filter(|t| t.object.namespace.as_deref() == Some(namespace))
@@ -335,7 +342,7 @@ impl Loss {
             list.dedup();
         }
         let nothing = taken.is_empty() && lacks.is_empty() && loses.is_empty();
-        (!nothing).then_some(Parcel {
+        (!nothing).then_some(NamespaceTile {
             level,
             taken,
             alone: workloads == 1,

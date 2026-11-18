@@ -1,5 +1,6 @@
-//! The page of a custom resource of a kind with knowledge, read
-//! the way a workload's page reads it, so its card matches.
+//! The page of a custom resource whose kind has a `KindKnowledge`. It
+//! reads the resource the way a workload's page does, so the two pages
+//! show the same card.
 
 use super::super::model::Model;
 use super::WorkloadAt;
@@ -17,9 +18,9 @@ use transect_observe::usage;
 use transect_resources::knowledge::plural_label;
 use transect_resources::layers::Layers;
 
-/// The page for the custom resource `namespace/name` of the kind
-/// `resource` names, or `None` when no watched resource of a kind with
-/// knowledge has that name.
+/// The page for the custom resource `namespace/name` whose kind is
+/// served under the URL segment `resource`, or `None` when no watched
+/// resource of a kind with a `KindKnowledge` matches.
 pub fn known_page(
     model: &Model,
     layers: &Layers,
@@ -104,7 +105,8 @@ pub fn known_page(
                 ground: &|title| super::ground_link(model, title),
                 device: &|device| snapshot.devices.named(device, &snapshot.resources.devices),
             };
-            // The card is on the object's own page, so its title is no link.
+            // The card is on the object's own page, so its title does not
+            // link.
             let card = workload.then(|| workload_card(&object, &contents).with_href(None));
             let known = known_through(&object, &contents)?;
             let deciding = Deciding::of(&snapshot.kinds, &object);
@@ -143,8 +145,8 @@ pub fn known_page(
     if super::has_access(model, namespace, resource, name) {
         page.tabs = page.tabs.map(|tabs| tabs.with_access(&page.path));
     }
-    // The edge kinds change only the diagram, so a page without one
-    // leaves them out of the masthead.
+    // The edge kinds affect only the diagram, so a page without a
+    // diagram has no edge kinds in its masthead.
     if !page.diagram() {
         return Some(page);
     }

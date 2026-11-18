@@ -1,12 +1,10 @@
-//! The machines' own lines are the lines that a machine's kubelet,
-//! container runtime, or kernel logs.  A log source stores them beside
-//! the pods' lines.  When a pod ships them, such as a `DaemonSet` that
-//! reads each machine's journal, the store records that pod as their
-//! source.  If transect counted them as that pod's workload's lines,
-//! the shipper would look like the workload in trouble.  The source's
-//! `fields.machine` declares which lines these are, so each search runs
-//! twice: once for the pods' lines alone, and once for the machines'
-//! lines, counted by machine and unit.
+//! Counts of the lines that a machine's kubelet, container runtime, or
+//! kernel logs.  When a pod ships these lines to the log store, such as
+//! a `DaemonSet` that reads each machine's journal, the store records
+//! that pod as their source.  Counted as that pod's lines, they would
+//! mark the shipper's workload unhealthy.  So when the `LogSource` sets
+//! `fields.machine`, each search runs twice: once for the pods' lines
+//! alone, and once for the machines' lines, counted by machine and unit.
 
 use k8s_openapi::jiff::Timestamp;
 
@@ -14,7 +12,7 @@ use super::query::Row;
 use super::search::named;
 use super::source::LogSource;
 
-/// One machine's own lines that a search matched, in one of its logs.
+/// How many of a machine's lines a search matched in one of its logs.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MachineCount {
     pub node: String,

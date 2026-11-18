@@ -1,11 +1,10 @@
-//! A loop drawn as the cycles through its members: each member, the
-//! kind of edge it needs the next one by, and back to where it started.
-//! A reader follows "A needs B needs C needs A" in one line, where a
-//! sentence per edge leaves the reader to put the cycle together.
+//! A loop shown as cycles through its members, so a reader can follow
+//! "A needs B needs C needs A" on one line instead of piecing the cycle
+//! together from one sentence per edge.
 //!
-//! A loop is a strongly connected component, which can hold more edges
-//! than one cycle uses.  The cycles shown are the shortest one through
-//! each member that no earlier cycle passed, so every member appears and
+//! A loop is a strongly connected component, which can have more edges
+//! than one cycle uses. For each member that no earlier cycle covers,
+//! the shortest cycle through it is shown, so every member appears and
 //! each line is as short as the loop allows.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -18,16 +17,17 @@ pub struct Cycle {
     pub steps: Vec<Step>,
 }
 
-/// A member of a cycle and the kinds of the edges by which it needs the
-/// member after it.
+/// A member of a cycle, and the kinds of the edges from it to the next
+/// member.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Step {
     pub member: String,
     pub kinds: Vec<Kind>,
 }
 
-/// The cycles through every member that `links` join, members in name
-/// order, each cycle starting at the first member it covers.
+/// The cycles that cover every member joined by `links`. Each cycle
+/// starts at the first member, in name order, that no earlier cycle
+/// covers.
 pub fn cycles(links: &[Link]) -> Vec<Cycle> {
     let mut next: BTreeMap<&str, BTreeMap<&str, &[Kind]>> = BTreeMap::new();
     for link in links {
@@ -123,7 +123,7 @@ mod tests {
             Cycle { steps: vec![step("c", &[D]), step("d", &[D]), step("a", &[D]), step("b", &[D])] },
         ]
     )]
-    fn draws_a_loop_as_cycles_through_every_member(
+    fn covers_every_member_with_the_shortest_cycles(
         #[case] links: Vec<Link>,
         #[case] expected: Vec<Cycle>,
     ) {

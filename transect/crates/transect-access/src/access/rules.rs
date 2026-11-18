@@ -1,10 +1,11 @@
-//! What a role's rules grant, in the short text that an account's
-//! drawing puts in a box.  Each of the six capabilities that a rule
-//! grants gets a box with the capability's name and the verbs and kinds
-//! that grant it.  A rule with every verb on every kind gives one box
-//! for the whole role.  Every other rule gets a box from a template of
-//! its verbs and kinds: "read" for `get`, `list`, and `watch`, and the
-//! verb, or "write", for the verbs that change objects.
+//! The short text that an account's drawing puts in boxes to say what a
+//! role's rules grant.  Each of the six capabilities that a rule grants
+//! gets a box with the capability's name and the verbs and kinds that
+//! grant it.  A rule with every verb on every kind gives one box for the
+//! whole role.  The kinds that no capability covers get boxes of their
+//! own: "read" for the verbs `get`, `list`, and `watch`, and for the
+//! verbs that change objects, the verb itself, or "write" when there are
+//! several.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -15,7 +16,8 @@ use super::capability::{self, ALL, Capability, GitOpsKind, Scope, allows};
 /// The verbs that only read.
 const READS: [&str; 3] = ["get", "list", "watch"];
 
-/// The most kinds a box names before it counts the rest.
+/// The most kinds a line names before it counts the rest.  A line that
+/// would count only one more kind names all of them.
 const NAMED: usize = 2;
 
 /// The most boxes that a role draws for rules that change objects.  The
@@ -25,7 +27,9 @@ const WRITES: usize = 4;
 /// One box of what a role grants.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Grant {
-    /// The capability that the box shows, when it is one of the six.
+    /// The capability that the box shows.  `None` for the box of every
+    /// verb on every kind, and for the boxes of kinds that none of the
+    /// six covers.
     pub capability: Option<Capability>,
     /// Whether it is every verb on every kind.
     pub everything: bool,
@@ -79,13 +83,13 @@ fn granted(
         return None;
     }
     // The kinds that each set of verbs applies to, in the order that
-    // the capability names them.
+    // the capability lists them.
     let mut by_verbs: Vec<(Vec<&str>, Vec<String>)> = Vec::new();
     let mut hint: Vec<String> = Vec::new();
     let mut notes: Vec<String> = Vec::new();
-    for ask in capability::asked(capability, gitops, scope) {
-        let (group, resource) = (ask.group, ask.resource);
-        let allowed: Vec<&str> = ask
+    for target in capability::granting_verbs(capability, gitops, scope) {
+        let (group, resource) = (target.group, target.resource);
+        let allowed: Vec<&str> = target
             .verbs
             .into_iter()
             .filter(|verb| {
@@ -101,7 +105,7 @@ fn granted(
             group => format!(" in {group}"),
         };
         hint.push(format!("{} on {resource}{in_group}", allowed.join(", ")));
-        if let Some(note) = ask.note {
+        if let Some(note) = target.note {
             notes.push(note.into());
         }
         let kind = labelled(&group, &resource, label);
@@ -110,11 +114,11 @@ fn granted(
             None => by_verbs.push((allowed, vec![kind])),
         }
     }
-    let said: Vec<String> = by_verbs
+    let clauses: Vec<String> = by_verbs
         .iter()
         .map(|(verbs, kinds)| format!("{} {}", verbs.join(", "), listed(kinds)))
         .collect();
-    let mut line = said.join("; ");
+    let mut line = clauses.join("; ");
     let unnamed = matched.iter().any(|(_, names)| names.is_empty());
     if !unnamed {
         let names: BTreeSet<&String> = matched.iter().flat_map(|(_, names)| names).collect();
@@ -149,20 +153,19 @@ fn labelled(group: &str, resource: &str, label: Label) -> String {
     }
 }
 
-/// The kinds that a rule names, each as a box names it, except the
-/// kinds that the six capabilities cover for this rule, because the
-/// capabilities' own boxes name those.  Every subresource shows,
-/// because a subresource such as `nodes/proxy` may give access to more
-/// than its kind.  The only exception is a kind's `status` beside the
-/// kind itself in a rule that only reads, because reading the kind
-/// reads its status.
+/// The kinds that a rule names, as a box names them, leaving out the
+/// kinds that a capability's box already shows for this rule.  A
+/// subresource shows even when the rule names its kind, because a
+/// subresource such as `nodes/proxy` can give more access than its
+/// kind.  The exception is `status` in a read-only rule that also names
+/// the kind, because reading a kind reads its status.
 fn kinds(rule: &PolicyRule, gitops: &[GitOpsKind], scope: Scope, label: Label) -> Vec<String> {
     let reads = rule.verbs.iter().all(|verb| READS.contains(&verb.as_str()));
     let covered: BTreeSet<(String, String)> = ALL
         .iter()
         .filter(|capability| capability::grants(rule, **capability, gitops, scope).is_some())
-        .flat_map(|capability| capability::asked(*capability, gitops, scope))
-        .map(|ask| (ask.group, ask.resource))
+        .flat_map(|capability| capability::granting_verbs(*capability, gitops, scope))
+        .map(|target| (target.group, target.resource))
         .collect();
     let resources = rule.resources.iter().flatten();
     let status_beside_kind = |resource: &str| {
@@ -188,8 +191,8 @@ fn kinds(rule: &PolicyRule, gitops: &[GitOpsKind], scope: Scope, label: Label) -
             }
         }
     }
-    // A rule on every kind of several groups gets one entry that counts
-    // the groups, in place of an entry for each group.
+    // Several "every kind in <group>" entries become one entry that
+    // counts the groups.
     let groups = found
         .iter()
         .filter(|kind| kind.starts_with(EVERY_KIND_IN))
@@ -210,9 +213,9 @@ fn group_name(group: &str) -> &str {
     }
 }
 
-/// The boxes for every rule that is none of the six capabilities.  The
-/// kinds that the rules change get a box for each set of verbs, and the
-/// kinds that the rules only read share one box.
+/// The boxes for the kinds that the rules grant beyond the six
+/// capabilities.  Kinds that the rules change get a box for each set of
+/// verbs, and kinds that the rules only read share one box.
 fn others(rules: &[PolicyRule], gitops: &[GitOpsKind], scope: Scope, label: Label) -> Vec<Grant> {
     let mut writes: BTreeMap<Vec<String>, Vec<String>> = BTreeMap::new();
     let mut reads: Vec<String> = Vec::new();
@@ -266,9 +269,8 @@ fn others(rules: &[PolicyRule], gitops: &[GitOpsKind], scope: Scope, label: Labe
 }
 
 /// The box of the kinds that `verbs` change.  Its title is the verb,
-/// such as "patch", or "write" for several verbs.  Its kinds go under
-/// the title in the same form as in the "read" box, and the verbs show
-/// on hover.
+/// such as "patch", or "write" for several verbs or for `*`.  The hover
+/// text lists the verbs.
 fn write(verbs: &[String], kinds: &[String]) -> Grant {
     let word = match verbs {
         [one] if one != "*" => one.clone(),
@@ -287,7 +289,8 @@ fn write(verbs: &[String], kinds: &[String]) -> Grant {
     }
 }
 
-/// `kinds` named in a line: the first few, and how many more.
+/// `kinds` as one line: the first `NAMED` kinds, then a count of the
+/// rest.
 fn listed(kinds: &[String]) -> String {
     match kinds.len() > NAMED + 1 {
         true => format!(
@@ -315,11 +318,11 @@ mod tests {
         first.into_iter().chain(chars).collect()
     }
 
-    fn said(text: &str) -> Vec<String> {
-        said_through(text, Scope::Cluster)
+    fn summaries(text: &str) -> Vec<String> {
+        summaries_through(text, Scope::Cluster)
     }
 
-    fn said_through(text: &str, scope: Scope) -> Vec<String> {
+    fn summaries_through(text: &str, scope: Scope) -> Vec<String> {
         let gitops = vec![("apply.example.test".to_string(), "trees".to_string())];
         let found = grants(&rules(text), &gitops, scope, &label);
         found
@@ -373,7 +376,7 @@ mod tests {
         &["read: Checks status"]
     )]
     fn says_what_a_role_grants(#[case] text: &str, #[case] expected: &[&str]) {
-        assert_eq!(said(text), expected);
+        assert_eq!(summaries(text), expected);
     }
 
     #[test]
@@ -388,6 +391,9 @@ mod tests {
     #[test]
     fn says_a_cluster_scoped_rule_through_a_rolebinding_reaches_only_its_kind() {
         let text = "[{apiGroups: [''], resources: [nodes/proxy], verbs: [get]}]";
-        assert_eq!(said_through(text, Scope::Namespace), ["read: Nodes proxy"]);
+        assert_eq!(
+            summaries_through(text, Scope::Namespace),
+            ["read: Nodes proxy"]
+        );
     }
 }

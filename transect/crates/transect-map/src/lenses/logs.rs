@@ -1,7 +1,7 @@
-//! The logs lens: one pod's log lines at a time, full width, one
-//! container at a time, with the lines each log pattern tags and the
-//! source they came from.  A workload's lens lists its pods, the least
-//! healthy first and then the newest, and opens on the first.
+//! The logs lens: the log lines of one container of one pod, shown at
+//! full width, with the lines that match each log pattern listed
+//! separately.  A workload's lens lists its pods, the least healthy
+//! first and then the newest, and opens on the first.
 
 use std::sync::Arc;
 
@@ -18,50 +18,53 @@ use transect_observe::logs::{self, Read, Tail, Tails};
 #[template(path = "lenses/logs.html", blocks = ["main"])]
 pub struct LogsPage {
     pub namespace: String,
-    /// The layer the namespace is in, which the crumb names.
+    /// The layer the namespace is in, which the crumb shows.
     pub layer: String,
     /// The pod or workload the lens is of.
     pub subject: Subject,
-    /// The lens's path with its query, which its event stream's URL
-    /// includes, so a push renders the same pod and container.
+    /// The lens's path with its query. The event stream's URL includes
+    /// it, so a pushed update renders the same pod and container.
     pub path: String,
     pub tabs: Tabs,
-    /// The workload's pods to switch between; none for a pod's lens.
+    /// The workload's pods to switch between. Empty for a pod's lens.
     pub pods: Vec<Choice>,
+    /// The containers to switch between. Empty when the pod has only one.
     pub containers: Vec<Choice>,
-    /// The pod whose lines show, or none for a workload with no pods.
+    /// The pod whose lines the page shows, or none for a workload with
+    /// no pods.
     pub pod: Option<String>,
-    /// The container whose lines show.
+    /// The container whose lines the page shows.
     pub container: Option<String>,
-    /// The lines a page load read, or none before the first.
+    /// The lines the last read returned, or none before the first read.
     pub logs: Option<Arc<Tails>>,
 }
 
 /// What a logs lens is of.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Subject {
-    /// A pod, with the workload that runs it when one does, by its name
-    /// and its page.
+    /// A pod, and the workload that runs it when there is one, each as
+    /// a name and the path of its page.
     Pod {
         name: String,
         workload: Option<(String, Option<String>)>,
     },
-    /// A workload, by its name and its page.
+    /// A workload, as a name and the path of its page.
     Workload { name: String, path: String },
 }
 
-/// One pod or container in a row to switch between.
+/// One pod or container in a row of links that switch the lens.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Choice {
     pub label: String,
     pub href: String,
     pub current: bool,
-    /// A pod's health, which its dot shows; none for a container.
+    /// A pod's health, shown as a dot. None for a container.
     pub level: Option<Level>,
 }
 
 impl Choice {
-    /// The dot's class, as a search row's: clear when healthy.
+    /// The CSS classes of the dot, the same as a search result row's.
+    /// A healthy pod gets the clear dot.
     pub fn dot_class(&self) -> Option<&'static str> {
         Some(match self.level? {
             Level::Healthy => "dot dot-clear",
@@ -72,8 +75,8 @@ impl Choice {
     }
 }
 
-/// One container whose lines the lens can show: an app container, or
-/// an init container that has started.
+/// A container whose logs can be read: an app container, or an init
+/// container that has started.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Container {
     pub name: String,
@@ -81,8 +84,8 @@ pub struct Container {
 }
 
 impl Container {
-    /// Its name, and "(init)" after an init container's, so a reader
-    /// knows why its lines stop.
+    /// The name, followed by "(init)" for an init container, because
+    /// an init container's lines end when it exits.
     fn label(&self) -> String {
         match self.init {
             true => format!("{} (init)", self.name),
@@ -91,35 +94,35 @@ impl Container {
     }
 }
 
-/// What the lens is built from.
-pub struct Asked<'a> {
+/// The request and the cluster state that `LogsPage::build` turns into
+/// a page.
+pub struct LogsRequest<'a> {
     pub namespace: &'a str,
     pub layer: String,
     pub subject: Subject,
-    /// The workload's pods, by name with their health, in the order the
-    /// lens lists them; for a pod's lens, the pod.
+    /// The workload's pods with their health, in the order the lens
+    /// lists them. For a pod's lens, just that pod.
     pub pods: Vec<(String, Level)>,
-    /// The pod asked for, when the query names one of `pods`.
+    /// The pod the query names, when it is one of `pods`.
     pub pod: Option<&'a str>,
-    /// The containers of the shown pod whose logs can be read: its
-    /// app containers in its spec's order, then its started init
-    /// containers.
+    /// The containers of the shown pod whose logs can be read: its app
+    /// containers in spec order, then its started init containers.
     pub containers: Vec<Container>,
     pub container: Option<&'a str>,
 }
 
 impl LogsPage {
-    pub fn build(asked: Asked, logs: Option<Arc<Tails>>) -> Self {
-        let base = match &asked.subject {
-            Subject::Pod { name, .. } => transect_graph::links::pod(asked.namespace, name),
+    pub fn build(request: LogsRequest, logs: Option<Arc<Tails>>) -> Self {
+        let base = match &request.subject {
+            Subject::Pod { name, .. } => transect_graph::links::pod(request.namespace, name),
             Subject::Workload { path, .. } => path.clone(),
         };
         let lens = format!("{base}/logs");
-        let pod_names: Vec<String> = asked.pods.iter().map(|(name, _)| name.clone()).collect();
-        let pod = chosen(&pod_names, asked.pod);
-        let names: Vec<String> = asked.containers.iter().map(|c| c.name.clone()).collect();
-        let container = chosen(&names, asked.container);
-        let is_workload = matches!(asked.subject, Subject::Workload { .. });
+        let pod_names: Vec<String> = request.pods.iter().map(|(name, _)| name.clone()).collect();
+        let pod = chosen(&pod_names, request.pod);
+        let names: Vec<String> = request.containers.iter().map(|c| c.name.clone()).collect();
+        let container = chosen(&names, request.container);
+        let is_workload = matches!(request.subject, Subject::Workload { .. });
         let query = |pod: Option<&str>, container: Option<&str>| {
             let mut query = Vec::new();
             if let Some(pod) = pod.filter(|_| is_workload) {
@@ -140,7 +143,7 @@ impl LogsPage {
             }
         };
         let pods = match is_workload {
-            true => asked
+            true => request
                 .pods
                 .iter()
                 .map(|(name, level)| Choice {
@@ -152,9 +155,9 @@ impl LogsPage {
                 .collect(),
             false => Vec::new(),
         };
-        let containers = match asked.containers.len() {
+        let containers = match request.containers.len() {
             0 | 1 => Vec::new(),
-            _ => asked
+            _ => request
                 .containers
                 .iter()
                 .map(|shown| Choice {
@@ -165,15 +168,15 @@ impl LogsPage {
                 })
                 .collect(),
         };
-        let path = query(pod.as_deref(), asked.container.and(container.as_deref()));
-        let tabs = match &asked.subject {
+        let path = query(pod.as_deref(), request.container.and(container.as_deref()));
+        let tabs = match &request.subject {
             Subject::Pod { .. } => Tabs::pod(&base, Lens::Logs),
             Subject::Workload { .. } => Tabs::workload(&base, Lens::Logs, false),
         };
         Self {
-            namespace: asked.namespace.into(),
-            layer: asked.layer,
-            subject: asked.subject,
+            namespace: request.namespace.into(),
+            layer: request.layer,
+            subject: request.subject,
             path,
             tabs,
             pods,
@@ -194,8 +197,8 @@ impl LogsPage {
         &self.tabs.tabs[0].href
     }
 
-    /// The crumb: the cluster, the layer, the namespace, the workload,
-    /// the pod for a pod's lens, and then "logs".
+    /// The breadcrumb trail: the cluster, the layer, the namespace, the
+    /// workload, the pod for a pod's lens, and then "logs".
     pub fn crumbs(&self) -> Vec<Crumb> {
         let select = format!("/?select={}", self.namespace);
         let mut crumbs = vec![
@@ -231,7 +234,8 @@ impl LogsPage {
         format!("/events{}", self.path)
     }
 
-    /// The tail of the container that shows.
+    /// The tail of the shown container, or of the first container when
+    /// none matches.
     pub fn tail<'t>(&self, tails: &'t Tails) -> Option<&'t Tail> {
         let named = tails
             .containers
@@ -240,7 +244,7 @@ impl LogsPage {
         named.or(tails.containers.first())
     }
 
-    /// Each pattern's lines from the container that shows.
+    /// The lines that match one pattern, from the shown container only.
     pub fn matching_lines<'t>(&self, matching: &'t logs::Matching) -> Vec<&'t logs::Line> {
         let shown = |container: &String| match &self.container {
             Some(chosen) => container == chosen,
@@ -253,9 +257,9 @@ impl LogsPage {
         lines.map(|(_, line)| line).collect()
     }
 
-    /// "3 lines since it started match", above one pattern's lines in
-    /// this pod, or "The latest 50 lines that match" when the store's
-    /// answer stopped at its limit.
+    /// The heading over one pattern's matching lines: "3 lines since it
+    /// started match", or "The latest 50 lines that match" when `count`
+    /// reaches `logs::TAIL_LINES`, the most lines that one read returns.
     pub fn matching_heading(&self, count: usize) -> String {
         match count {
             1 => "1 line since it started matches".into(),
@@ -266,8 +270,8 @@ impl LogsPage {
         }
     }
 
-    /// How many lines of the container that shows, from where, and
-    /// when they were read.
+    /// How many lines of the shown container the page has, where they
+    /// came from, and when they were read.
     pub fn note(&self, tails: &Tails) -> String {
         logs::note(tails, self.container.as_deref())
     }
@@ -297,9 +301,9 @@ impl LogsPage {
     }
 }
 
-/// `asked` when `names` contains it, or else the first of `names`.
-fn chosen(names: &[String], asked: Option<&str>) -> Option<String> {
-    let found = asked.and_then(|asked| names.iter().find(|name| *name == asked));
+/// `requested` when `names` contains it, otherwise the first of `names`.
+fn chosen(names: &[String], requested: Option<&str>) -> Option<String> {
+    let found = requested.and_then(|requested| names.iter().find(|name| *name == requested));
     found.or(names.first()).cloned()
 }
 
@@ -309,8 +313,8 @@ mod tests {
 
     use super::*;
 
-    fn asked<'a>(pod: Option<&'a str>, container: Option<&'a str>) -> Asked<'a> {
-        Asked {
+    fn request<'a>(pod: Option<&'a str>, container: Option<&'a str>) -> LogsRequest<'a> {
+        LogsRequest {
             namespace: "shop",
             layer: "apps".into(),
             subject: Subject::Workload {
@@ -337,7 +341,7 @@ mod tests {
         pod: Option<&str>,
         container: Option<&str>,
     ) -> (Option<String>, Option<String>, String) {
-        let page = LogsPage::build(asked(pod, container), None);
+        let page = LogsPage::build(request(pod, container), None);
         (page.pod, page.container, page.path)
     }
 
@@ -360,7 +364,7 @@ mod tests {
 
     #[test]
     fn switches_between_pods_and_containers() {
-        let page = LogsPage::build(asked(Some("web-2"), Some("proxy")), None);
+        let page = LogsPage::build(request(Some("web-2"), Some("proxy")), None);
         let hrefs = |choices: &[Choice]| -> Vec<(String, bool)> {
             choices
                 .iter()

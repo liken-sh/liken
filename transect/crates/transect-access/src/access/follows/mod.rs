@@ -1,34 +1,35 @@
-//! What follows from the grants: the steps by which an account may do
-//! what no binding grants it.  [`close`] repeats the steps until a pass
-//! finds nothing new.
+//! The capabilities that an account gets without a binding that grants
+//! them, by acting as another account or by changing a role.  [`close`]
+//! adds them to each account's `Held`.  An account gets a capability in
+//! these ways:
 //!
-//! - An account that may run pods or change workloads in a namespace
-//!   may run a pod as any ServiceAccount there, so it may do what that
-//!   account may.  A pod it starts may also mount any Secret there.
-//! - An account that may exec into a pod may read the Secrets the pod
-//!   mounts, by name, and act as the pod's ServiceAccount through the
-//!   token the pod mounts, when it mounts one.
-//! - An account that may change an object that applies may do what
-//!   the account the object applies as may: the ServiceAccount the
-//!   object names, or its controller's.  When the object may name its
-//!   account, the account that changes it may also do what every
-//!   ServiceAccount in the object's namespace may, and what the object
-//!   applies as when it names none.  An account that may change the
-//!   source an applier fetches through, in any namespace, may do what
-//!   the applier's account may.
-//! - An account that may bind a role and create a binding that may
-//!   name it may bind the role to itself, so it may do what the role
-//!   grants there.  An account that may escalate and update a role it
-//!   is bound to may rewrite the role to grant anything.
-//! - An account that may create a ServiceAccount's token, or
-//!   impersonate an account, may do what that account may.  One that
-//!   may impersonate Group `system:masters`, with a user to impersonate
-//!   beside it, may do everything everywhere, because the API server's
-//!   authorizer lets that group do anything, bound or not.
+//! - It may run pods or change workloads in a namespace.  It can start
+//!   a pod that runs as any ServiceAccount there, so it may do what
+//!   that ServiceAccount may.  A pod it starts can also mount any
+//!   Secret in the namespace, so it may read them.
+//! - It may exec into pods.  It may read the Secrets that those pods
+//!   mount, by the Secrets' names.  When a pod mounts a ServiceAccount
+//!   token, it can use that token to act as the ServiceAccount.
+//! - It may change an object that applies other objects, such as a Flux
+//!   `Kustomization`, so it may do what the object applies as: the
+//!   ServiceAccount that the object names, or the account of the kind's
+//!   controller when the object names none.  When the kind has a field
+//!   that names the ServiceAccount, the account can set it to any
+//!   ServiceAccount in the object's namespace, or unset it.  An account
+//!   that may change the object's source, in any namespace, may also do
+//!   what the object applies as.
+//! - It may bind a role and create a binding that names the role.  It
+//!   can bind the role to itself, so it may do what the role grants
+//!   there.  When it may escalate and update a role that it is bound
+//!   to, it can rewrite the role to grant anything.
+//! - It may create a token for a ServiceAccount, or impersonate an
+//!   account, so it may do what that account may.  When it may
+//!   impersonate the group `system:masters` and a user beside it, it
+//!   may do everything everywhere, because the API server's authorizer
+//!   allows that group every request, with or without a binding.
 //!
-//! Each capability records the first hop of its chain, so a capability
-//! reached in two hops names the first hop.  A cycle ends when a pass
-//! finds nothing new.
+//! Each added capability records the first hop of the chain that
+//! reached it.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -41,24 +42,23 @@ use transect_graph::edges::Object;
 mod appliers;
 mod routes;
 
-/// What one account may reach in one pass: the accounts it may act as,
-/// and the capabilities that follow for it alone.
+/// The accounts that one account may act as, and the capabilities it
+/// gets without acting as another account.
 struct Steps {
     acts_as: Vec<(Account, Hop)>,
     own: Vec<(Capability, Where, Follow)>,
 }
 
-/// What one pass finds for one account.
 struct Found {
     account: Account,
     follows: Vec<(Capability, Where, Follow)>,
 }
 
-/// Adds every capability that follows to `held`, as a follow.  Each
-/// pass reads what the pass before it left, and adds what it found only
-/// after it has read every account.  So the first pass finds what one
-/// hop gives, the second what two hops give, and each capability keeps
-/// the first hop of a shortest chain.
+/// Adds to `held` every capability that an account gets by a chain of
+/// steps, and returns when a pass adds nothing, which also ends a cycle
+/// of accounts.  Each pass reads every account before it writes any, so
+/// pass n finds the chains of n hops, and a capability keeps the first
+/// hop of a shortest chain.
 pub fn close(held: &mut BTreeMap<Account, Held>, inputs: &Inputs) {
     let places = Places::read(inputs, held);
     loop {
@@ -80,8 +80,8 @@ pub fn close(held: &mut BTreeMap<Account, Held>, inputs: &Inputs) {
     }
 }
 
-/// What `account`, which holds `mine`, finds in one pass over `held`:
-/// what each account it may act as holds that it does not.
+/// The capabilities that `account`, which has `mine`, gets in one pass:
+/// those of each account it may act as, and those of its own steps.
 fn find(account: &Account, mine: &Held, held: &BTreeMap<Account, Held>, places: &Places) -> Found {
     let mut steps = steps(mine, places);
     let mut follows: Vec<(Capability, Where, Follow)> = Vec::new();
@@ -107,11 +107,10 @@ fn find(account: &Account, mine: &Held, held: &BTreeMap<Account, Held>, places: 
             }
         }
     }
-    // The capabilities of the accounts it acts as come first, so a
-    // capability that applies everywhere through one of them is not also
-    // listed in single namespaces through the account's own steps.
-    // Within each group, every namespace sorts before one namespace, so
-    // a single namespace is not listed beside every namespace.
+    // `close` skips a capability in a namespace when the account
+    // already has it everywhere.  So each list puts `Where::Everywhere`
+    // before `Where::In`, and a capability that applies everywhere is
+    // not also listed for single namespaces.
     follows.sort_by(|a, b| a.1.cmp(&b.1));
     steps.own.sort_by(|a, b| a.1.cmp(&b.1));
     follows.extend(steps.own);
@@ -121,10 +120,9 @@ fn find(account: &Account, mine: &Held, held: &BTreeMap<Account, Held>, places: 
     }
 }
 
-/// What the pods and ServiceAccounts of each namespace give an account
-/// that reaches it.
+/// The pods, accounts, appliers, and roles that the steps look up.
 struct Places {
-    /// Every namespace that holds a ServiceAccount or a pod.
+    /// Every namespace that has a ServiceAccount or a pod.
     namespaces: BTreeSet<String>,
     accounts: BTreeMap<String, Vec<Account>>,
     /// The ServiceAccounts whose token a pod in the namespace mounts.
@@ -132,14 +130,14 @@ struct Places {
     /// The Secrets the pods in the namespace mount, by name.
     secrets: BTreeMap<String, BTreeSet<String>>,
     appliers: Vec<Applier>,
-    /// The pods of each namespace, for a grant that names them.
+    /// The pods of each namespace, for a grant limited to pods by name.
     pods: BTreeMap<String, Vec<Running>>,
     /// The users and groups a binding names.
     users: Vec<Account>,
     groups: Vec<Account>,
-    /// Every role, with what it grants: those with every verb on every
-    /// kind first, then by name, so a step that binds a role names the
-    /// widest one.
+    /// Every role with what it grants.  The roles that allow every verb
+    /// on every resource sort first, because a step that binds a role
+    /// takes the first role that fits.
     roles: Vec<(Object, RoleGrants)>,
 }
 
@@ -185,7 +183,7 @@ impl Places {
         places
     }
 
-    /// The namespaces `place` covers.
+    /// The namespaces in which a grant at `place` applies.
     fn within<'a>(&'a self, place: &'a Where) -> impl Iterator<Item = &'a String> + 'a {
         self.namespaces
             .iter()
@@ -193,8 +191,7 @@ impl Places {
     }
 }
 
-/// Every step that an account with `held` may take from what it may do
-/// now.
+/// Every step that an account with `held` can take.
 fn steps(held: &Held, places: &Places) -> Steps {
     let mut steps = Steps {
         acts_as: Vec::new(),
@@ -269,9 +266,9 @@ fn steps(held: &Held, places: &Places) -> Steps {
     steps
 }
 
-/// The first hop of a step that `basis` at `at` takes as `hop`: `hop`
-/// itself when a binding grants the basis there, and the first hop of
-/// the basis when it follows from another step.
+/// The hop to record for a step that depends on the capability `basis`
+/// at `at`.  It is `hop` when a binding grants `basis` there, and the
+/// first hop of `basis` when `basis` came from an earlier step.
 fn first(held: &Held, basis: Capability, at: &Where, hop: Hop) -> Hop {
     let Some(cell) = held.cells.get(&basis) else {
         return hop;

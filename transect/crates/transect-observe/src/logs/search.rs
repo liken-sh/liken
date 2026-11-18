@@ -1,13 +1,12 @@
-//! The searches across the cluster.  transect searches each pattern
-//! over the pattern's window, and the error lines by the level field
-//! over the last hour.  The searches run in the background every
-//! `EVERY`, and again when the source or the patterns change.
+//! Searches the logs of the whole cluster for each pattern over the
+//! pattern's window, and for error lines, by the level field, over the
+//! last hour.  The searches run in the background every `EVERY`, and
+//! again when the source or the patterns change.
 //!
-//! Three limits bound each search: the window, the rows of a stats
-//! query, and `TIMEOUT`.  A stats query returns one row for each
-//! namespace and pod, and at most `ROWS`.  So a search costs the store
-//! one scan of its window, however many lines match, and transect
-//! reads a few kilobytes back.
+//! Each search is a stats query that groups its matches by namespace
+//! and pod, returns at most `ROWS` rows, and stops at `TIMEOUT`.  So a
+//! search costs the store one scan of its window, however many lines
+//! match.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,22 +23,21 @@ use super::sample::Sample;
 use super::source::{Fields, Reached};
 use super::store::Store;
 
-/// How often every search runs.
+/// How often the searches run.
 const EVERY: Duration = Duration::from_secs(300);
 
 /// How long one search may take.
 pub const TIMEOUT: Duration = Duration::from_secs(15);
 
-/// The most rows one search reads.  The search requests this number
-/// through its `{limit}`.
+/// The most rows one search reads.  `search_query` writes it into the
+/// template's `{limit}`.
 pub const ROWS: usize = 200;
 
 /// The window that transect counts the error lines over.
 pub const ERRORS_WINDOW: &str = "1h";
 
-/// The matches in one namespace.  When the search groups by pod,
-/// container, or machine, the count is also for that one pod,
-/// container, or machine.
+/// The matches of one search in one namespace, and in one pod,
+/// container, or node when the search groups by it.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Count {
     pub namespace: String,
@@ -62,50 +60,50 @@ pub struct Searched {
     /// Each pattern, with the counts its search found or the reason it
     /// found nothing.
     pub patterns: Vec<(LogPattern, Result<Vec<Count>, String>)>,
-    /// The newest lines of each search, by the thing it searched for,
-    /// when the source declares a `lines` query.
-    pub samples: Vec<(Asked, Vec<Sample>)>,
+    /// The newest matching lines of each search, when the source
+    /// declares a `lines` query.
+    pub samples: Vec<(SearchTarget, Vec<Sample>)>,
     /// The machines' own lines that each search matched, by machine and
-    /// unit, for the searches that the store answered.
-    pub machines: Vec<(Asked, Vec<MachineCount>)>,
+    /// unit, for the searches that the store responded to.
+    pub machines: Vec<(SearchTarget, Vec<MachineCount>)>,
     /// The newest of the machines' own lines that each search matched.
-    pub machine_samples: Vec<(Asked, Vec<Sample>)>,
+    pub machine_samples: Vec<(SearchTarget, Vec<Sample>)>,
 }
 
-/// The thing one search looked for: the error lines, or one pattern by
-/// name.
+/// Which search a result belongs to: the search for error lines, or
+/// the search for one pattern, by the pattern's name.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Asked {
+pub enum SearchTarget {
     Errors,
     Pattern(String),
 }
 
 impl Searched {
-    /// The newest lines that the search for `asked` read, newest first.
-    pub fn samples(&self, asked: &Asked) -> &[Sample] {
-        found(&self.samples, asked)
+    /// The newest lines that the search for `target` read, newest first.
+    pub fn samples(&self, target: &SearchTarget) -> &[Sample] {
+        found(&self.samples, target)
     }
 
-    /// The machines' own lines that the search for `asked` counted.
-    pub fn machines(&self, asked: &Asked) -> &[MachineCount] {
-        found(&self.machines, asked)
+    /// The machines' own lines that the search for `target` counted.
+    pub fn machines(&self, target: &SearchTarget) -> &[MachineCount] {
+        found(&self.machines, target)
     }
 
     /// The newest of the machines' own lines that the search for
-    /// `asked` read, newest first.
-    pub fn machine_samples(&self, asked: &Asked) -> &[Sample] {
-        found(&self.machine_samples, asked)
+    /// `target` read, newest first.
+    pub fn machine_samples(&self, target: &SearchTarget) -> &[Sample] {
+        found(&self.machine_samples, target)
     }
 }
 
-fn found<'a, T>(all: &'a [(Asked, Vec<T>)], asked: &Asked) -> &'a [T] {
-    let found = all.iter().find(|(one, _)| one == asked);
+fn found<'a, T>(all: &'a [(SearchTarget, Vec<T>)], target: &SearchTarget) -> &'a [T] {
+    let found = all.iter().find(|(one, _)| one == target);
     found.map_or(&[], |(_, found)| found.as_slice())
 }
 
 /// The counts in a search's rows.  This function drops a row with no
 /// namespace, because it counts lines from outside any pod, such as a
-/// machine's own log, and no parcel can show those.
+/// machine's own log, and the namespace views cannot show those.
 pub fn counts(rows: &[Row], fields: &Fields) -> Vec<Count> {
     let counts = rows.iter().filter_map(|row| {
         Some(Count {
@@ -142,22 +140,22 @@ pub fn search_query(reached: &Reached, filter: &str, window: &str) -> String {
 }
 
 /// Runs every search now, then every `EVERY`, and again when the source
-/// or the patterns change.  Each round sends on `changed`, so health
-/// and the findings read the round's results with no change in the
-/// cluster.
+/// or the patterns change.  After each round it sends on `changed`, so
+/// health and the findings read the new results even when no resource
+/// changed.
 pub fn watch(
     store: Store,
     sourcing: Sourcing,
     changed: watch::Sender<()>,
 ) -> watch::Receiver<Arc<Searched>> {
     let (sender, receiver) = watch::channel(Arc::new(Searched::default()));
-    // A change to any resource wakes the loop, which compares the
-    // source and patterns it would search now with the ones the last
-    // round searched, and starts a round only when they differ.
+    // Each load of the resources wakes the loop, but it starts a new
+    // round only when the source or the patterns differ from the last
+    // round's.
     let mut resources = sourcing.patterns.clone();
     tokio::spawn(async move {
         loop {
-            let now = asked(&sourcing);
+            let now = current(&sourcing);
             let searched = round::round(&store, &now, TIMEOUT).await;
             sender.send_replace(Arc::new(searched));
             changed.send_replace(());
@@ -170,7 +168,7 @@ pub fn watch(
                         if result.is_err() {
                             return;
                         }
-                        if asked(&sourcing) != now {
+                        if current(&sourcing) != now {
                             break;
                         }
                     }
@@ -182,7 +180,7 @@ pub fn watch(
 }
 
 /// The source and the patterns that a round searches.
-fn asked(sourcing: &Sourcing) -> (Option<Reached>, Vec<LogPattern>) {
+fn current(sourcing: &Sourcing) -> (Option<Reached>, Vec<LogPattern>) {
     let patterns = sourcing.patterns.read();
     (sourcing.reached(), patterns)
 }

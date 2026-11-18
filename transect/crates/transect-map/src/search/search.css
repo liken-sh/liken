@@ -1,7 +1,7 @@
 /* Quick search: a dialog near the top of the window over a dimmed
-   page, the query on top and the rows under it.  Rows are names, so
+   page, with the query field above the result rows.  Rows are names, so
    they are monospace.  A dot shows each row's health in the map's
-   colors, and only a problem takes --warm. */
+   colors, and only a problem uses --warm. */
 
 .search {
   width: min(680px, calc(100vw - 32px));
@@ -37,13 +37,13 @@
   outline: none;
 }
 
-/* The browser's own clear button on a search field draws in its
-   accent color, the only blue on the page; Escape and the close button
-   do what a reader wants from it. */
+/* Hide the browser's clear button on a search field. It draws in the
+   browser's accent color, the only blue on the page, and Escape and the
+   close button already clear and close the dialog. */
 .search-input::-webkit-search-cancel-button { appearance: none; }
 
-/* The close button and the masthead's search control are drawn as the
-   lens chips are, in the gray inks. */
+/* The close button and the masthead's search button have the same
+   outline as the .search-lens links in the result rows. */
 .search-close,
 .search-open {
   flex: none;
@@ -91,8 +91,8 @@
 
 .search-result:focus-within { background: var(--row); }
 
-/* Enter in the query opens the first row, so the first row is marked
-   as the one in focus while the query is. */
+/* Enter in the query field opens the first row, so the first row is
+   highlighted while the field has focus. */
 .search:has(.search-input:focus) .search-result:first-child { background: var(--row); }
 
 .search-row {
@@ -153,8 +153,8 @@
   color: var(--ink-faint);
 }
 
-/* `/search` as a page of its own: the same field and rows, in the
-   main column. */
+/* `/search` as a full page: the same field and rows, in the main
+   column. */
 .search-page {
   max-width: 680px;
   padding: 16px 32px;

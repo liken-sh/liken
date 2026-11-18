@@ -1,8 +1,8 @@
-# The pin makes a workstation and CI compile with the same rustc, and
-# `ci pins` holds it to the Rust of the rust image in
+# The pin makes a workstation and CI compile with the same rustc. `ci
+# pins` checks that it matches the Rust version of the rust image in
 # toolchains/images.toml, which the image build compiles with. The
-# components are what the gates run: clippy, rustfmt, and the LLVM
-# tools that cargo-llvm-cov measures coverage with.
+# components are the tools the checks run: clippy, rustfmt, and the LLVM
+# tools that cargo-llvm-cov needs to measure coverage.
 [toolchain]
 channel = "1.99.1"
 profile = "minimal"

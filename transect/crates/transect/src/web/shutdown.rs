@@ -1,10 +1,9 @@
-//! Stopping on SIGTERM.  The kubelet sends SIGTERM when it stops the
-//! pod, and on a rollout the new pod is already serving.  axum's
-//! graceful shutdown stops accepting and waits for every open response
-//! to finish, but an event stream never finishes, so after the signal
-//! the open streams get a short grace and then the server returns.  The
-//! browser's event source reconnects, through the `Service`, to a pod
-//! that is still running.
+//! Graceful shutdown on SIGTERM. axum's graceful shutdown stops
+//! accepting connections and waits for every open response to end, but
+//! an event stream never ends. So after the signal the server waits
+//! `GRACE` and then returns anyway. The browser's event source then
+//! reconnects through the `Service` to another pod, which during a
+//! rollout is already serving.
 
 use std::future::Future;
 use std::time::Duration;
@@ -13,9 +12,9 @@ use axum::Router;
 use futures::FutureExt;
 use tokio::net::TcpListener;
 
-/// How long open responses, mostly event streams, have to end after the
-/// signal.  It is well under the 30 seconds the kubelet waits before
-/// SIGKILL.
+/// How long open responses have to end after the signal. It is well
+/// under the 30 seconds that the kubelet waits by default before it
+/// sends SIGKILL. `deploy/transect.yaml` does not change that default.
 pub const GRACE: Duration = Duration::from_secs(5);
 
 /// Serves `router` on `listener` until `stop` finishes, then waits at
@@ -35,7 +34,7 @@ pub async fn serve_until(
     tokio::select! {
         served = server.into_future() => served,
         () = deadline => {
-            tracing::info!(?grace, "closing the responses still open after the grace period");
+            tracing::info!(?grace, "Closing the open responses because the grace period ended");
             Ok(())
         }
     }
@@ -43,18 +42,19 @@ pub async fn serve_until(
 
 /// Finishes on SIGTERM or on Ctrl-C.
 pub async fn signal() {
-    let mut terminate =
-        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
-            Ok(terminate) => terminate,
-            Err(error) => {
-                tracing::warn!(%error, "cannot listen for SIGTERM; stopping on Ctrl-C only");
-                let _ = tokio::signal::ctrl_c().await;
-                return;
-            }
-        };
+    let mut terminate = match tokio::signal::unix::signal(
+        tokio::signal::unix::SignalKind::terminate(),
+    ) {
+        Ok(terminate) => terminate,
+        Err(error) => {
+            tracing::warn!(%error, "Cannot listen for SIGTERM, so only Ctrl-C stops the server");
+            let _ = tokio::signal::ctrl_c().await;
+            return;
+        }
+    };
     tokio::select! {
-        _ = terminate.recv() => tracing::info!("SIGTERM: stopping"),
-        _ = tokio::signal::ctrl_c() => tracing::info!("interrupted: stopping"),
+        _ = terminate.recv() => tracing::info!("Received SIGTERM, stopping"),
+        _ = tokio::signal::ctrl_c() => tracing::info!("Received Ctrl-C, stopping"),
     }
 }
 
@@ -69,7 +69,7 @@ mod tests {
     use tokio::net::{TcpListener, TcpStream};
     use tokio::sync::oneshot;
 
-    /// A route whose body never ends, as an event stream's does not.
+    /// A route whose body never ends, like an event stream's body.
     fn endless() -> Router {
         Router::new().route(
             "/events",
@@ -79,8 +79,8 @@ mod tests {
         )
     }
 
-    /// Opens a request to `/events` and reads its headers, so the server
-    /// holds the response open.
+    /// Requests `/events` and reads the status line, so the server has
+    /// an open response when the test stops it.
     async fn open_stream(address: std::net::SocketAddr) -> TcpStream {
         let mut stream = TcpStream::connect(address).await.unwrap();
         stream
@@ -112,6 +112,9 @@ mod tests {
         stop.send(()).unwrap();
         let served = tokio::time::timeout(Duration::from_secs(5), server).await;
 
-        assert!(matches!(served, Ok(Ok(Ok(())))), "{served:?}");
+        assert!(
+            matches!(served, Ok(Ok(Ok(())))),
+            "the server finished with {served:?}, want a clean stop within 5 seconds"
+        );
     }
 }

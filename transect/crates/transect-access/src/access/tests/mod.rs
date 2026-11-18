@@ -1,6 +1,7 @@
-//! The reduction, over one small cluster written for it: what each
-//! account is granted, and what follows, for every form of rule and of
-//! step.
+//! Tests of `Access::build`, which turns RBAC objects into what each
+//! account is granted and what follows from it.  They read
+//! `cluster.yaml`, which has an example of each form of rule and each
+//! kind of `Hop`.
 
 use std::sync::Arc;
 
@@ -12,11 +13,6 @@ use super::*;
 
 mod subjects;
 
-/// The cluster: an admin, a deployer who may change its namespace's
-/// workloads, a GitOps tool's controller and an account that may edit
-/// what it applies, accounts limited by name, by exec, and by binding,
-/// a group, a user bound through an aggregated role, and two accounts
-/// that may each run pods as the other.
 const CLUSTER: &str = include_str!("cluster.yaml");
 
 const ACCOUNTS: [(&str, &str); 31] = [
@@ -62,8 +58,8 @@ fn access() -> Access {
     reduce(CLUSTER, accounts.collect(), appliers())
 }
 
-/// The reduction of `cluster`, whose ServiceAccounts are `accounts`
-/// and the ones its documents declare.
+/// The `Access` of `cluster`.  Its ServiceAccounts are `accounts` and
+/// the ones that its documents declare.
 fn reduce(cluster: &str, mut accounts: Vec<(String, String)>, appliers: Vec<Applier>) -> Access {
     let mut rbac = RbacObjects::default();
     let mut pods: Vec<Running> = Vec::new();
@@ -84,7 +80,7 @@ fn reduce(cluster: &str, mut accounts: Vec<(String, String)>, appliers: Vec<Appl
                 let text = |key: &str| meta[key].as_str().unwrap().to_string();
                 accounts.push((text("namespace"), text("name")));
             }
-            other => panic!("no {other} in the reduction's cluster"),
+            other => panic!("the cluster has a {other}, which reduce does not read"),
         }
     }
     let inputs = Inputs {
@@ -100,9 +96,10 @@ fn reduce(cluster: &str, mut accounts: Vec<(String, String)>, appliers: Vec<Appl
     Access::build(&inputs)
 }
 
-/// The main cluster's appliers: a Tree its controller applies, which
-/// fetches through a Repo in another namespace; one that names the
-/// account it applies as, in a field; and one a grant names.
+/// The appliers of `CLUSTER`: a Tree that its controller applies and
+/// that fetches through a Repo in another namespace, two Trees that
+/// name the account they apply as in a field, and a Tree that a grant
+/// names in `resourceNames`.
 fn appliers() -> Vec<Applier> {
     let controller = vec![Account::service_account("ops", "applier")];
     let tree = |namespace: &str, name: &str| {
@@ -189,11 +186,11 @@ fn hop(hop: &Hop) -> String {
     }
 }
 
-/// Each grant and follow of `capability` to `account`, in a line.
-fn said(access: &Access, account: &str, capability: Capability) -> Vec<String> {
+/// Each grant and follow of `capability` to `account`, one line each.
+fn grant_lines(access: &Access, account: &str, capability: Capability) -> Vec<String> {
     let held = access
         .of(&named(account))
-        .unwrap_or_else(|| panic!("no {account}"));
+        .unwrap_or_else(|| panic!("the access has no account {account}"));
     let Some(cell) = held.cells.get(&capability) else {
         return Vec::new();
     };
@@ -276,7 +273,7 @@ fn reduces_rbac_to_what_each_account_may_do(
     #[case] capability: Capability,
     #[case] expected: &[&str],
 ) {
-    assert_eq!(said(&access(), account, capability), expected);
+    assert_eq!(grant_lines(&access(), account, capability), expected);
 }
 
 #[rstest]
@@ -330,7 +327,10 @@ fn heads_a_run_through_an_admin_by_the_account_it_may_run_as() {
         .map(|run| run.heading.iter().map(|part| part.text.as_str()).collect())
         .collect();
     let through = "May run pods or change workloads in Namespace ops, and so may run as ServiceAccount ops/admin, which is bound to ClusterRole cluster-admin";
-    assert!(headings.iter().any(|h| h == through), "{headings:#?}");
+    assert!(
+        headings.iter().any(|h| h == through),
+        "no heading is {through:?}, the headings are {headings:#?}"
+    );
 }
 
 #[test]
@@ -359,6 +359,6 @@ fn says_a_row_s_role_and_step_in_one_line() {
         lines
             .iter()
             .any(|line| line.as_deref() == Some("ClusterRole changer → may run as ledger/db")),
-        "{lines:#?}"
+        "no line says the ClusterRole changer may run as ledger/db, the lines are {lines:#?}"
     );
 }

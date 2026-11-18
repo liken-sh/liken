@@ -1,8 +1,9 @@
-//! The side boxes of the spine's rows: what has an edge to or from the
-//! workload, each in its own band's row, with callers on the left and
-//! what the workload reaches on the right.  A column draws at most
-//! `MOST_SIDE` boxes and then one box in place of the rest, so a row
-//! stays short however many workloads call this one.  A fold of only one
+//! The side boxes beside the spine, the main column of a workload's
+//! section view. A side box is an object that has an edge to or from
+//! the workload, and it is drawn in its band's row. Callers go on the left
+//! and what the workload reaches goes on the right. A column draws at
+//! most `MOST_SIDE` boxes and folds the rest into one box, so a row
+//! stays short however many workloads call this one. A fold of a single
 //! box saves no room, so the column draws that box instead.
 
 use super::{Band, Look, SectionBox};
@@ -27,28 +28,28 @@ pub struct SideBox {
     /// Whether the edge runs from the side box into the spine, as a
     /// caller's does, so the arrow points at the spine.
     pub inward: bool,
-    /// The machine whose box the line joins, for a device a pod holds
-    /// there; any other side box joins the workload.
+    /// The machine whose box the line joins, for a device that a pod
+    /// holds on that machine. Any other side box joins the workload.
     pub machine: Option<String>,
     /// The machine's name, for the box of a machine that the workload is
-    /// configured to reach.  When one of the workload's pods runs there,
-    /// the spine already draws the machine, so the line goes to that box
-    /// instead.
+    /// configured to reach. When one of the workload's pods runs there,
+    /// the spine already draws that machine, so this box is not drawn
+    /// and the line joins the spine's machine box.
     pub names: Option<String>,
-    /// The edge's source when the API did not give the edge, which the
-    /// line shows on hover.
+    /// Where the edge came from when it is not a Kubernetes API object.
+    /// The line shows it on hover.
     pub title: Option<String>,
-    /// The name that a folded box gives this box.  A section view may
-    /// draw several boxes with one name, so it is an object's kind and
-    /// name, or else the box's title.
+    /// The name that a folded box lists this box by. A section can draw
+    /// several boxes with the same title, so this is the object's kind
+    /// and name when the box draws an object, and the title otherwise.
     pub kinded: Option<String>,
-    /// The graph endpoint that this box draws, by which `ties` finds a
-    /// tie to another side box.
+    /// The graph endpoint that this box draws. A `Tie` names its two
+    /// boxes by their endpoints.
     pub end: Option<Endpoint>,
 }
 
 /// A line between two side boxes in the right column, for an edge
-/// between the endpoints that they draw, such as a device to the radio
+/// between the endpoints that they draw, such as a device and the radio
 /// it pairs through.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tie {
@@ -56,7 +57,7 @@ pub struct Tie {
     pub to: Endpoint,
     pub label: String,
     pub style: Style,
-    /// Where the edge came from, which the line shows on hover.
+    /// Where the edge came from. The line shows it on hover.
     pub title: Option<String>,
 }
 
@@ -77,7 +78,7 @@ impl SideBox {
         }
     }
 
-    /// The box with `end` as the graph endpoint that it draws.
+    /// Sets `end` as the endpoint that the box draws.
     pub fn standing(self, end: Endpoint) -> Self {
         Self {
             end: Some(end),
@@ -85,8 +86,7 @@ impl SideBox {
         }
     }
 
-    /// The box with the name that a fold gives it: `object`'s kind and
-    /// name.
+    /// Sets the box's folded name to `object`'s kind and name.
     pub fn of(self, object: &transect_graph::edges::Object) -> Self {
         let kinded = transect_graph::edges::kind_and_name(&object.kind, &object.name);
         Self {
@@ -95,13 +95,13 @@ impl SideBox {
         }
     }
 
-    /// The name that a fold gives it.
+    /// The name that a fold lists this box by.
     fn folded_name(&self) -> &str {
         self.kinded.as_deref().unwrap_or(&self.boxed.title)
     }
 
-    /// The box with its line titled by the source that `provenance` gives
-    /// for the edge, unless the API gave the edge.
+    /// Sets the hover title of the box's line from `provenance`, unless
+    /// the edge came from the Kubernetes API.
     pub fn from(self, provenance: &Provenance) -> Self {
         let title = (*provenance != Provenance::Kubernetes).then(|| provenance.title());
         Self { title, ..self }
@@ -126,10 +126,10 @@ impl SideBox {
     }
 }
 
-/// The boxes of `sides` in `band`'s row on `side`, in the order given,
-/// with every one past the first `MOST_SIDE` folded into one box that
-/// names them, when there are at least two to fold.  The folded box is
-/// joined to the spine in the same way as the first box that it replaces.
+/// The boxes of `sides` in `band`'s row on `side`. When two or more
+/// boxes come after the first `MOST_SIDE`, they fold into one box that
+/// lists their names, and that box joins the spine the way the first of
+/// them does.
 pub fn column(sides: &[SideBox], band: &Band, side: Side) -> Vec<SideBox> {
     let all: Vec<&SideBox> = sides
         .iter()

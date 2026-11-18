@@ -1,16 +1,16 @@
-//! A `LogPattern` resource declares a query fragment in the log
-//! source's language, how much a match matters, and what a match means.
-//! transect tags the matching lines of a pod's tail with the pattern.
-//! It also searches the pattern across the cluster over the pattern's
-//! window, and the result is a reason on each namespace where it
-//! matches, or a finding when the pattern is only worth knowing.
+//! A `LogPattern` resource declares a filter in the log source's query
+//! language, a severity, and what a match means. transect tags the
+//! matching lines of a pod's tail, and searches the whole cluster for
+//! the pattern over its window. A match becomes a reason on each
+//! namespace where it occurs, or a finding when the severity is
+//! `worth-knowing`.
 
 use serde::Deserialize;
 
 use transect_graph::untrusted::capped;
 use transect_resources::resources::DocId;
 
-/// The most characters of a pattern's meaning that a card shows.
+/// The most characters of a pattern's meaning that the page keeps.
 const MEANING_CHARS: usize = 300;
 
 /// The window that a pattern searches when it declares none.
@@ -29,9 +29,9 @@ pub struct LogPattern {
     pub window: String,
 }
 
-/// How much a match matters.  The page shows an error or a warning in
-/// the health colors, on the line and on its namespace.  A match that
-/// is only worth knowing gets no color, and it becomes a finding.
+/// How much a match matters. The page shows an error or a warning in
+/// the health colors, on the line and on its namespace. A match that is
+/// only worth knowing has no color and becomes a finding.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Severity {
     WorthKnowing,
@@ -82,8 +82,8 @@ struct Spec {
     window: Option<String>,
 }
 
-/// The `LogPattern` that `value` declares, or the reason it does not
-/// validate.
+/// The `LogPattern` that `value` declares, or the reason it is not
+/// valid.
 pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<LogPattern, String> {
     let document: Document = serde_yaml::from_value(value).map_err(|error| error.to_string())?;
     let spec = document.spec;
@@ -107,9 +107,9 @@ pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<LogPattern, String>
     })
 }
 
-/// The seconds in `text`, when it is a duration that both LogsQL and
-/// Prometheus parse: one or more counts, each followed by a unit, such
-/// as `1h30m`.  Milliseconds round down to whole seconds.
+/// The number of seconds in `text`, when it is a duration that both
+/// LogsQL and Prometheus accept: one or more counts, each followed by a
+/// unit, such as `1h30m`. Milliseconds round down to whole seconds.
 pub fn seconds(text: &str) -> Option<i64> {
     let units = [
         ("ms", 0),
@@ -139,7 +139,6 @@ pub fn seconds(text: &str) -> Option<i64> {
 pub mod fixtures {
     use super::*;
 
-    /// A pattern named `name` that matches `matches`.
     pub fn pattern(name: &str, matches: &str, severity: Severity) -> LogPattern {
         LogPattern {
             doc: DocId::default(),
@@ -194,9 +193,12 @@ mod tests {
         "duration"
     )]
     #[case::an_unknown_field("{match: a, severity: error, meaning: x, query: b}", "query")]
-    fn says_why_a_pattern_does_not_validate(#[case] spec: &str, #[case] says: &str) {
+    fn rejects_an_invalid_pattern_with_the_reason(#[case] spec: &str, #[case] reason: &str) {
         let error = parse(DocId::default(), document(spec)).unwrap_err();
-        assert!(error.contains(says), "{error:?} does not say {says:?}");
+        assert!(
+            error.contains(reason),
+            "the error is {error:?}, want it to mention {reason:?}"
+        );
     }
 
     #[rstest]

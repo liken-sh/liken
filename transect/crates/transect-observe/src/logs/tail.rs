@@ -1,7 +1,6 @@
-//! One read of a pod's logs, in the form the page shows.  A read records
-//! the last lines of each container with the level of each line, or the
-//! reason a container has no lines, and the place transect read them
-//! from.
+//! One read of a pod's logs, in the form the page shows: the last lines
+//! of each container with the level of each line, or the reason a
+//! container has no lines, and where transect read them from.
 
 use k8s_openapi::jiff::Timestamp;
 
@@ -11,19 +10,20 @@ use super::patterns::Severity;
 use super::query::Row;
 use super::source::LogSource;
 
-/// How many lines transect requests from the API for each container.
+/// How many lines transect requests for each container, from the API or
+/// from the log source.
 pub const TAIL_LINES: i64 = 50;
 
-/// How many bytes of a container's tail the page keeps.  The API's
-/// `limitBytes` counts from the start of the tail, so it would cut the
-/// newest lines.  This module cuts the tail instead, from the oldest
-/// end.
+/// How many bytes of a container's tail the page keeps, cut from the
+/// oldest end.  The API's `limitBytes` stops the output after that many
+/// bytes, so it cuts the newest lines and cannot do this cut.
 pub const KEEP_BYTES: usize = 16 * 1024;
 
-/// The most bytes the API may return, so one container that writes
-/// megabyte lines cannot make a page load slow.  It is larger than
-/// `KEEP_BYTES`, so that usually the cut to `KEEP_BYTES`, not the API,
-/// decides which lines are kept.
+/// The most bytes the API may return, so a container that writes
+/// megabyte lines cannot slow a page load.  It is larger than
+/// `KEEP_BYTES`, so it decides which lines the page shows only when the
+/// last `TAIL_LINES` lines are larger than this.  Then the API cuts the
+/// newest of them.
 pub const LIMIT_BYTES: i64 = 64 * 1024;
 
 /// How many characters of one line the page shows.
@@ -38,7 +38,7 @@ pub struct Tails {
     pub containers: Vec<Tail>,
     /// The pod's lines that each log pattern matches, from the pod's
     /// start, for each pattern that matches at least one line.  Only a
-    /// store can return these.
+    /// log source can return these.
     pub matching: Vec<Matching>,
 }
 
@@ -83,10 +83,10 @@ pub enum Read {
 pub struct Line {
     pub text: String,
     pub level: Level,
-    /// When the line was written.  A store records this time, and the
-    /// API's tail does not.
+    /// When the line was written.  A log source records this time, and
+    /// the API's tail does not.
     pub time: Option<Timestamp>,
-    /// The patterns the line matches, which only a store can return.
+    /// The patterns the line matches, which only a log source can return.
     pub tags: Vec<Tag>,
 }
 
@@ -106,9 +106,7 @@ impl Line {
             .map(|at| at.strftime("%Y-%m-%d %H:%M:%S UTC").to_string())
     }
 
-    /// The line's CSS class.  The page colors an error or a warning with
-    /// `--warm`, as health does, and a plain line in the panel's text
-    /// color.
+    /// The line's CSS class, which colors an error or a warning.
     pub fn class(&self) -> &'static str {
         match self.level {
             Level::Plain => "log-line",
@@ -161,13 +159,11 @@ pub fn lines(text: &str) -> Read {
     Read::Lines(lines)
 }
 
-/// The lines of a store's response to a tail query.  The store returns
-/// them newest first, and this function puts them newest last, in the
-/// order of the API's lines.  A line's level is the level that its
-/// level field names, when the field names one, and otherwise the level
-/// that `level` guesses from its text.  The query's own limit bounds the
-/// number of lines, and `KEEP_BYTES`, the same byte limit as the API's
-/// tail, bounds their size.
+/// The lines of a log source's response to a tail query.  The source
+/// returns them newest first, and this function puts them newest last,
+/// like the API's lines.  A line's level comes from its level field when
+/// that names a level, and otherwise `level` guesses it from the text.
+/// The lines are cut to `KEEP_BYTES` from the oldest end, like the API's.
 pub fn from_rows(rows: &[Row], source: &LogSource) -> Read {
     let fields = &source.fields;
     let mut kept = Vec::new();
@@ -198,17 +194,16 @@ pub fn from_rows(rows: &[Row], source: &LogSource) -> Read {
     Read::Lines(kept)
 }
 
-/// Whether a store's `message` contains no line, because it is empty or
-/// it is the text that VictoriaLogs writes in place of a missing
-/// message.
+/// Whether a log source's `message` is empty, or is the text that
+/// VictoriaLogs returns in place of a missing message.
 pub fn blank(message: &str) -> bool {
     message.trim().is_empty() || logsql::no_message(message)
 }
 
 /// The text of `line` on one line, without control characters or
-/// direction marks, cut to `LINE_CHARS` with an ellipsis.  A store
-/// keeps a line's own newlines, such as a stack trace's, and the panel
-/// shows them as spaces.
+/// direction marks, cut to `LINE_CHARS` with an ellipsis.  A log source
+/// keeps the newlines inside a line, such as a stack trace's, and the
+/// panel shows them as spaces.
 pub fn cut(line: &str) -> String {
     let line: String = line
         .chars()

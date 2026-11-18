@@ -1,13 +1,8 @@
-//! What a GitOps tool's kind knowledge declares: which objects of the
-//! kind apply others and how an applied object names its applier, where
-//! an applier fetches from, and the revision it last applied or fetched.
-//! A tool keeps its source in a kind of its own or inline on the
-//! applier, so every field here may appear on any kind, and a kind
-//! holds the ones that apply to it.
-//!
-//! The same knowledge names the metadata keys a tool rewrites on
-//! objects without changing anything, which a watch ignores when it
-//! decides whether an object changed.
+//! The fields of a GitOps tool's kind knowledge: which objects of the
+//! kind apply other objects, how an applied object names its applier,
+//! where an applier fetches from, and which revision it last applied or
+//! fetched. A tool can keep its source in a separate kind or inline in
+//! the applier, so any kind may declare any of these fields.
 
 use serde::Deserialize;
 
@@ -18,36 +13,42 @@ pub enum MetaKey {
     Annotation(String),
 }
 
-/// Where an applied object names one part of its applier: a label or
-/// an annotation, and, when the value holds more than that part, the
-/// templates that find it, tried in order, such as `{namespace}_{name}:*`
-/// before `{name}:*`.
+/// The label or annotation in which an applied object records its
+/// applier's name or namespace. When the value holds more than that,
+/// `formats` are templates such as `{namespace}_{name}:*`, tried in
+/// order, and the first that matches gives the parts. With no formats,
+/// the whole value is the part.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Mark {
     pub key: MetaKey,
     pub formats: Vec<String>,
 }
 
-/// How an object this kind applied names the object that applied it.
+/// How an object that this kind applied names the object that applied
+/// it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Applies {
     pub name: Mark,
-    /// Where the applier's namespace is written.  Without it, the
-    /// applier is the one object of the kind with that name.
+    /// Where the applier's namespace is recorded. Without it, the
+    /// namespace comes from a `{namespace}` in the formats of `name`.
+    /// When neither gives a namespace, the applier is found only when
+    /// exactly one object of the kind has that name.
     pub namespace: Option<Mark>,
-    /// Which applier wins when an object names two: a chart's objects
-    /// have its release's marks and the marks of whatever applied the
-    /// release, and the higher precedence, the more specific, wins.
+    /// When an object has the marks of two appliers, the one with the
+    /// higher precedence applied it. A chart's objects have the marks of
+    /// its release and of whatever applied the release, so the release
+    /// needs the higher precedence.
     pub precedence: i64,
-    /// The `ServiceAccount` an applier applies as, when its object may
-    /// name one.  Without it, an applier applies as its controller's
+    /// The `ServiceAccount` that an applier applies as, when its object
+    /// can name one. Without it, an applier applies as its controller's
     /// account.
     pub account: Option<AppliesAs>,
 }
 
-/// Where an applier names the `ServiceAccount` it applies as: a field,
-/// read in the applier's own namespace, and the account it applies as
-/// when the field is empty, or its controller's when none is given.
+/// The field of an applier that names the `ServiceAccount` it applies
+/// as, which is in the applier's namespace. When the field is empty,
+/// the account is `default`, and without a `default` it is the
+/// controller's account.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AppliesAs {
     pub field: String,
@@ -57,19 +58,19 @@ pub struct AppliesAs {
 /// The revision an object last applied or fetched.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Revision {
-    /// The fields that may hold it, tried in order; the first value read
-    /// wins.
+    /// The fields that may hold the revision. The first that has a
+    /// value is used.
     pub paths: Vec<String>,
-    /// The field holding when it was applied or fetched.
+    /// The field that holds the time of the apply or fetch.
     pub at: Option<String>,
-    /// How a revision splits into its ref and its commit, tried in
-    /// order, such as `{ref}@sha1:{commit}`.  A revision none matches is
-    /// all ref.
+    /// Templates that split a revision into its ref and its commit,
+    /// tried in order, such as `{ref}@sha1:{commit}`. A revision that
+    /// no template matches is all ref.
     pub formats: Vec<String>,
 }
 
-/// The fields that name a git ref.  `name` holds a ref that may be a
-/// branch, a tag, or a commit, and does not state which.
+/// The fields that hold a git ref. `name` holds a ref that can be a
+/// branch, a tag, or a commit, without saying which.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Refs {
     pub branch: Option<String>,
@@ -78,27 +79,31 @@ pub struct Refs {
     pub name: Option<String>,
 }
 
-/// A kind's GitOps fields, validated.
+/// The GitOps fields of a kind, after validation.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct GitOpsFields {
     pub applies: Option<Applies>,
-    /// The fields that may hold a reference to the object this one
-    /// fetches through, `{apiVersion, kind, name, namespace}`, tried in
-    /// order.
+    /// The fields that may hold a reference to the source object that
+    /// this one fetches from, with `apiVersion`, `kind`, `name`, and
+    /// `namespace`. They are tried in order.
     pub source: Vec<String>,
-    /// The field holding the directory in the source it applies.
+    /// The field that holds the directory of the source that it
+    /// applies.
     pub directory: Option<String>,
-    /// The field holding the chart it installs.
+    /// The field that holds the chart that it installs.
     pub chart: Option<String>,
     pub revision: Option<Revision>,
-    /// Templates of the repository's URL, such as `{spec.url}`, each
-    /// placeholder a field; the first whose fields all read wins.
+    /// Templates of the repository URL, such as `{spec.url}`, where
+    /// each placeholder is a field path. The first template whose
+    /// fields all have values is used.
     pub repository: Vec<String>,
     pub reference: Refs,
 }
 
-/// A metadata key a tool rewrites without changing anything, for the
-/// kinds it names, or for every kind when it names none.
+/// A label or an annotation that a tool rewrites without changing
+/// anything else, on objects of `kinds`, or of every kind when `kinds`
+/// is empty. A watch ignores a change to it when it decides whether an
+/// object changed.
 #[derive(Clone, Debug, PartialEq)]
 pub struct IgnoreChange {
     pub key: MetaKey,
@@ -125,19 +130,20 @@ impl GroupKind {
 }
 
 impl IgnoreChange {
-    /// Whether it holds for objects of `kind` in `group`.
+    /// Whether the key is ignored on objects of `kind` in `group`.
     pub fn holds_for(&self, group: &str, kind: &str) -> bool {
         let named = |named: &GroupKind| named.group == group && named.kind == kind;
         self.kinds.is_empty() || self.kinds.iter().any(named)
     }
 }
 
-/// The key a label or an annotation names: exactly one of the two.
+/// The key of a mark or an ignored key. Exactly one of `label` and
+/// `annotation` must be set.
 fn key(label: Option<String>, annotation: Option<String>) -> Result<MetaKey, String> {
     match (label, annotation) {
         (Some(label), None) => Ok(MetaKey::Label(label)),
         (None, Some(annotation)) => Ok(MetaKey::Annotation(annotation)),
-        _ => Err("names a label or an annotation, and exactly one".into()),
+        _ => Err("must set exactly one of label and annotation".into()),
     }
 }
 
@@ -206,12 +212,12 @@ pub(super) struct Written {
     pub reference: Option<WrittenRefs>,
 }
 
-/// The placeholders an applier's mark may hold, and those a revision's
-/// format may hold.
+/// The placeholders that the formats of a mark and the formats of a
+/// revision may use.
 const MARK_PLACEHOLDERS: [&str; 2] = ["name", "namespace"];
 const REVISION_PLACEHOLDERS: [&str; 2] = ["ref", "commit"];
 
-/// The fields `written` declares, or none when it declares none.
+/// The validated fields, or none when `written` declares no field.
 pub(super) fn read(written: Written) -> Result<Option<GitOpsFields>, String> {
     let applies = written.applies.map(applies).transpose()?;
     let revision = match written.revision {
@@ -231,7 +237,7 @@ pub(super) fn read(written: Written) -> Result<Option<GitOpsFields>, String> {
     for (at, template) in written.repository.iter().enumerate() {
         if placeholders(template).is_empty() {
             return Err(format!(
-                "repository[{at}] {template:?} has no {{field}}, so it would name one URL for every object"
+                "repository[{at}] {template:?} has no {{field}}, so it would produce the same URL for every object"
             ));
         }
     }
@@ -279,7 +285,6 @@ fn mark(written: WrittenMark) -> Result<Mark, String> {
     })
 }
 
-/// The ignored keys as written, each validated.
 pub(super) fn ignores(written: Vec<WrittenIgnore>) -> Result<Vec<IgnoreChange>, String> {
     let read = written.into_iter().enumerate().map(|(at, written)| {
         let key = key(written.label, written.annotation);
@@ -292,14 +297,14 @@ pub(super) fn ignores(written: Vec<WrittenIgnore>) -> Result<Vec<IgnoreChange>, 
     read.collect()
 }
 
-/// Whether `template`'s placeholders are all among `known`.
+/// Fails when `template` has a placeholder that is not in `known`.
 fn check(template: &str, known: &[&str]) -> Result<(), String> {
     let unknown = placeholders(template)
         .into_iter()
         .find(|name| !known.contains(&name.as_str()));
     match unknown {
         Some(name) => Err(format!(
-            "{template:?} contains {{{name}}}, and transect reads only {}",
+            "{template:?} contains {{{name}}}, but transect reads only {}",
             known
                 .iter()
                 .map(|name| format!("{{{name}}}"))
@@ -311,7 +316,8 @@ fn check(template: &str, known: &[&str]) -> Result<(), String> {
 }
 
 impl GitOpsFields {
-    /// Every field path these fields read, which a trimmed watch keeps.
+    /// Every field path that these fields read, which a trimmed watch
+    /// keeps.
     pub fn paths(&self) -> Vec<String> {
         let mut paths: Vec<String> = self.source.clone();
         paths.extend(self.directory.iter().chain(&self.chart).cloned());
@@ -397,7 +403,7 @@ mod tests {
     #[rstest]
     #[case::both_keys(
         "{applies: {name: {label: a, annotation: b}}}",
-        "applies.name names a label or an annotation, and exactly one"
+        "applies.name must set exactly one"
     )]
     #[case::an_unknown_mark_placeholder(
         "{applies: {name: {annotation: a, formats: ['{name}:*', '{app}:*']}}}",
@@ -448,7 +454,7 @@ mod tests {
     #[case::not_for_another(&[("", "Namespace")], ("", "ConfigMap"), false)]
     #[case::not_for_its_name_in_another_group(&[("", "Namespace")], ("example.test", "Namespace"), false)]
     #[case::for_every_kind(&[], ("", "ConfigMap"), true)]
-    fn says_which_kinds_an_ignored_key_holds_for(
+    fn reports_which_kinds_an_ignored_key_applies_to(
         #[case] kinds: &[(&str, &str)],
         #[case] kind: (&str, &str),
         #[case] holds: bool,

@@ -1,6 +1,6 @@
-//! Restarts that are too old to count toward health, but recent enough
-//! to list.  A container that restarts every few hours never shows in
-//! "Now", because each restart is out of the recent span before the
+//! Restarts that are too old to count toward health but recent enough
+//! to list. A container that restarts every few hours never appears in
+//! "Now", because each restart is older than `RECENT_MINUTES` before the
 //! next one happens.
 
 use std::collections::BTreeMap;
@@ -16,15 +16,17 @@ use transect_cluster::ownership::Ownership;
 use transect_graph::edges::Object;
 use transect_graph::pods::finished;
 
-/// How far back an earlier restart is listed.  A pod's status records
-/// its last restart's time for as long as the pod runs, so without a
-/// limit, one restart last month would be listed until the pod is
-/// replaced.
+/// How far back an earlier restart is listed. A pod's status keeps the
+/// time of its last restart for as long as the pod runs, so without
+/// this limit a restart from last month would be listed until the pod
+/// is replaced.
 pub const EARLIER_MINUTES: i64 = 24 * 60;
 
-/// One container of a workload that restarted earlier in `pods` of the
-/// workload's pods, and the latest restart was `minutes_ago`.  `clean`
-/// is true when each of those last runs exited 0.
+/// A container of a workload that restarted between `RECENT_MINUTES` and
+/// `EARLIER_MINUTES` ago. `pods` counts the workload's pods where it
+/// restarted in that window. `minutes_ago` is the age of the newest of
+/// those restarts, and `clean` is true when every run that ended in a
+/// restart exited 0.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Earlier {
     pub workload: Object,
@@ -34,12 +36,12 @@ pub struct Earlier {
     pub clean: bool,
 }
 
-/// Each container of `pods` whose last restart was at least
-/// `RECENT_MINUTES` and less than `EARLIER_MINUTES` ago, by the top
-/// owner of its pod, with the latest first.  The function lists no
-/// crash looping container, because "Now" shows it however long ago it
-/// last ran.  It lists no pod that has finished or is being deleted,
-/// because that pod will not restart again.
+/// The containers of `pods` whose last restart was at least
+/// `RECENT_MINUTES` and less than `EARLIER_MINUTES` ago, grouped by the
+/// pod's top owner and the container's name, newest first. Skips a
+/// container in `CrashLoopBackOff`, because "Now" already shows it no
+/// matter how long ago it last ran. Skips a pod that has finished or is
+/// being deleted, because it will not restart again.
 pub fn restarts(pods: &[Arc<Pod>], ownership: &Ownership, now: Timestamp) -> Vec<Earlier> {
     let mut found: BTreeMap<(Object, String), Earlier> = BTreeMap::new();
     for pod in pods {
@@ -140,7 +142,10 @@ mod tests {
         vec![web("web-0", container("app").restarted(1, minutes_before(90))).deleting()],
         vec![]
     )]
-    fn lists_restarts_past_the_recent_span(#[case] pods: Vec<Pod>, #[case] expected: Vec<Earlier>) {
+    fn lists_restarts_older_than_the_recent_span(
+        #[case] pods: Vec<Pod>,
+        #[case] expected: Vec<Earlier>,
+    ) {
         assert_eq!(found(pods), expected);
     }
 }

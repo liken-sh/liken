@@ -1,9 +1,10 @@
-//! The spine's boxes, row by row: the entry, the workload in its
-//! layer's row, its claims one box per backend, the machines its pods
-//! run on, and the backends outside the cluster, with the side boxes of
-//! `sides` beside them.  A row with no box is left out, so a workload
-//! with no Service starts at its own row, and a layer's row appears only
-//! when it contains the workload or a side box.
+//! The rows of the section view's center column, which this module calls
+//! the spine.  From top to bottom: the Ingresses and Services that reach
+//! the workload, the workload in its layer's row, its claims with one box
+//! per backend, the machines its pods run on, and the backends outside
+//! the cluster.  `sides` places other boxes beside these rows.  A row
+//! with no box is not drawn, so a layer's row appears only when it has
+//! the workload or a side box.
 
 mod links;
 mod sides;
@@ -19,13 +20,12 @@ use transect_graph::edges::Provenance;
 use transect_graph::links::Part;
 use transect_ground::storage::{Backend, Type};
 
-/// The most machines the machines row draws one by one.  When there are
-/// more, one box is drawn in place of them all, so a DaemonSet's section
-/// fits on one screen.
+/// The most machines that the machines row draws as separate boxes.
+/// With more machines it draws one box for all of them, so the section
+/// of a DaemonSet fits on one screen.
 pub const MOST_MACHINES: usize = 4;
 
-/// The map's band that a row belongs to, which gives the row its label
-/// and its color.
+/// The band of a row, which sets the row's label and color.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Band {
     Entry,
@@ -46,9 +46,8 @@ impl Band {
         }
     }
 
-    /// Each band takes its color from the cluster map, so the section
-    /// view shows the same colors from the top down to the ground as the
-    /// map.
+    /// The CSS classes of the row.  The Machines and Ground rows use the
+    /// background colors of those bands on the cluster map.
     pub fn class(&self) -> &'static str {
         match self {
             Self::Entry | Self::Layer(_) => "section-row",
@@ -63,12 +62,14 @@ impl Band {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Look {
     Plain,
-    /// A Service with an endpoint that is not ready, or none.
+    /// Drawn with a warning border: a Service with no endpoints or with
+    /// an endpoint that is not ready, or a side box whose workload has
+    /// fewer ready pods than it should run.
     Short,
-    /// The workload the section view is of.
+    /// The workload that the section view shows.
     Workload,
     Machine,
-    /// A backend outside the cluster, dashed as the ground's boxes are.
+    /// A backend outside the cluster, drawn with a dashed border.
     Ground,
 }
 
@@ -78,26 +79,27 @@ pub struct SectionBox {
     pub lines: Vec<String>,
     pub look: Look,
     pub href: Option<String>,
-    /// What the title shows on hover in place of itself, for a box
-    /// whose title is a count or a shortened name.
+    /// The hover text of the title, for a box whose title is a count
+    /// or a shortened name.
     pub hint: Option<String>,
-    /// Where its first line was written, when it is stored text.
+    /// The source of the first line's text, such as an intent
+    /// annotation, drawn as a mark before that line.
     pub mark: Option<Provenance>,
-    /// The boxes or claims that a box counts, each by its title and the
-    /// page it opens.  The box's last line lists them, linked, in place
-    /// of its text.
+    /// For a box whose title is a count, such as "3 claims", the name and
+    /// page of each counted object.  The template draws them as links in
+    /// place of the box's last line.
     pub names: Vec<Part>,
-    /// The link from a ground box to the backend's own console, drawn
-    /// beside the link to its page.
+    /// For an outside system's box, a link to the backend's own console, drawn
+    /// beside the link to the box's page.
     pub external: Option<String>,
-    /// The class of a mark drawn before the title, such as the block of
-    /// a capability an access drawing names.
+    /// The CSS class of a mark drawn before the title, such as the mark
+    /// of a granted permission in the access drawings.
     pub block: Option<&'static str>,
-    /// The classes of the marks drawn in a line of their own under the
-    /// others.
+    /// The CSS classes of marks drawn on a line of their own, under the
+    /// other lines.
     pub blocks: Vec<&'static str>,
-    /// The names a box counts, which open in a list under it on a
-    /// click, each linked.
+    /// The objects that a box counts, as links in a list that opens
+    /// under the box when the reader clicks its title.
     pub folded: Vec<Part>,
 }
 
@@ -118,7 +120,6 @@ impl SectionBox {
         }
     }
 
-    /// The box with its first line marked as stored text.
     pub fn marked(self, provenance: Provenance) -> Self {
         Self {
             mark: Some(provenance),
@@ -126,7 +127,7 @@ impl SectionBox {
         }
     }
 
-    /// The box with `line` under its others, drawn short when `short`.
+    /// Appends `line`, and draws the box as `Look::Short` when `short`.
     pub fn with_line(mut self, line: String, short: bool) -> Self {
         self.lines.push(line);
         if short {
@@ -139,7 +140,6 @@ impl SectionBox {
         Self { href, ..self }
     }
 
-    /// The box with `block` drawn before its title.
     pub fn with_block(self, block: &'static str) -> Self {
         Self {
             block: Some(block),
@@ -147,7 +147,6 @@ impl SectionBox {
         }
     }
 
-    /// The box with a line of `blocks` under its others.
     pub fn with_blocks(self, blocks: Vec<&'static str>) -> Self {
         Self { blocks, ..self }
     }
@@ -156,7 +155,6 @@ impl SectionBox {
         Self { names, ..self }
     }
 
-    /// The box with `folded`, the names it counts, opening under it.
     pub fn with_folded(self, folded: Vec<Part>) -> Self {
         Self { folded, ..self }
     }
@@ -168,38 +166,37 @@ impl SectionBox {
         }
     }
 
-    /// How many lines its title takes in a side box: a title too long
-    /// for one wraps to a second before it is cut short.
+    /// How many lines the title takes in a side box.  The CSS wraps a
+    /// long title to a second line and cuts it off after that.
     pub fn title_lines(&self) -> usize {
         wrapped(&self.title, SIDE_TITLE_CHARS)
     }
 
-    /// How many lines its title and the lines under it take, each line
-    /// too long for one taking a second.
+    /// How many lines of text the box takes in a side box, counting each
+    /// title or line that is too long for one line as two.
     pub fn text_lines(&self) -> usize {
         let under = self.lines.iter().map(|line| wrapped(line, LINE_CHARS));
         self.title_lines() + under.sum::<usize>()
     }
 
-    /// The title in pieces that end at each dot, so that a host name
-    /// breaks after a dot, where a reader splits it, before mid-word.
-    /// Each piece is text, and the page puts the break between pieces.
+    /// The title split after each dot.  The template puts a `<wbr>`
+    /// between the pieces, so a long host name wraps after a dot and not
+    /// in the middle of a word.
     pub fn title_parts(&self) -> Vec<&str> {
         self.title.split_inclusive('.').collect()
     }
 
-    /// The title's hover text: its hint, or the title itself.
     pub fn tooltip(&self) -> &str {
         self.hint.as_deref().unwrap_or(&self.title)
     }
 }
 
-/// The most characters of a line under a title that fit on one line of
-/// a side box, in 13px Source Sans 3, whose letters are narrower than
-/// the title's monospace.
+/// How many characters of a line under a title fit on one line of a
+/// side box, at 13px Source Sans 3.  Its letters are narrower than the
+/// monospace of the title, so more of them fit than `SIDE_TITLE_CHARS`.
 const LINE_CHARS: usize = 26;
 
-/// How many lines `text` takes, at most two, when one holds `most`
+/// How many lines `text` takes, at most two, when one line holds `most`
 /// characters.
 fn wrapped(text: &str, most: usize) -> usize {
     match text.chars().count() > most {
@@ -208,6 +205,9 @@ fn wrapped(text: &str, most: usize) -> usize {
     }
 }
 
+/// One row of the section view.  Each entry of `tiers` is a line of
+/// boxes centered on the spine, and `left` and `right` hold the boxes of
+/// the side columns.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Row {
     pub band: Band,
@@ -223,7 +223,8 @@ pub struct Held {
     /// Its page, which shows the volume bound to it.
     pub href: String,
     pub size: Option<String>,
-    /// The kind of its volume, or `None` while it waits for one.
+    /// The kind of its volume, or `None` while the claim waits for a
+    /// volume.
     pub kind: Option<Type>,
 }
 
@@ -231,18 +232,19 @@ pub struct Held {
 /// mount them.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Backing {
-    /// Where their data is stored, or `None` for claims that wait for a
-    /// volume.
+    /// Where the claims store their data, or `None` for claims that
+    /// wait for a volume.
     pub backend: Option<Backend>,
     pub claims: Vec<Held>,
-    /// The NFS volumes its pods name inline, with no claim, by the
-    /// names the pod spec gives them.
+    /// The names of the NFS volumes that the pods define inline in
+    /// their specs, with no claim.
     pub inline: Vec<String>,
     pub machines: BTreeSet<String>,
 }
 
 impl Backing {
-    /// The kinds of its claims' volumes, each once, in claim order.
+    /// The kinds of the claims' volumes, each listed once, in claim
+    /// order.
     pub fn claim_kinds(&self) -> Vec<&Type> {
         let mut kinds: Vec<&Type> = Vec::new();
         for kind in self.claims.iter().filter_map(|claim| claim.kind.as_ref()) {
@@ -253,7 +255,8 @@ impl Backing {
         kinds
     }
 
-    /// The kinds of all its volumes, with its inline NFS volumes last.
+    /// `claim_kinds`, followed by NFS when the pods mount NFS volumes
+    /// inline and no claim is NFS.
     pub fn kinds(&self) -> Vec<&Type> {
         let mut kinds = self.claim_kinds();
         if !self.inline.is_empty() && !kinds.contains(&&Type::Nfs) {
@@ -262,8 +265,8 @@ impl Backing {
         kinds
     }
 
-    /// The ground box it draws as, or `None` for a machine's own disk or
-    /// claims that wait.
+    /// The name of the outside system that shows its backend, or `None` for
+    /// a machine's own disk or for claims that wait for a volume.
     pub fn outside(&self) -> Option<&str> {
         self.backend.as_ref()?.outside()
     }
@@ -277,17 +280,17 @@ pub struct Host {
     pub control_plane: bool,
 }
 
-/// What the spine is drawn from.
+/// What `rows` draws the spine from.
 #[derive(Debug, Default)]
 pub struct Parts {
     pub layer: String,
-    /// Every layer of the map, in its order, which orders the rows of
-    /// the layers that side boxes are in.
+    /// Every layer of the cluster map, in the map's order, which is the
+    /// order of the layer rows.
     pub layers: Vec<String>,
     pub ingresses: Vec<SectionBox>,
     pub services: Vec<SectionBox>,
-    /// Which Service each Ingress routes to, as indexes into
-    /// `ingresses` and `services`.
+    /// The Service that each Ingress routes to, as a pair of indexes
+    /// into `ingresses` and `services`.
     pub routes: Vec<(usize, usize)>,
     pub workload: Option<SectionBox>,
     pub backings: Vec<Backing>,
@@ -303,15 +306,13 @@ impl Parts {
         self.hosts.iter().map(|host| host.pods).sum()
     }
 
-    /// Whether `side` is a machine the spine already draws, as one of
-    /// the hosts or among those that one box is drawn in place of.
+    /// Whether `side` is one of the workload's machines, which the
+    /// machines row already draws.
     fn on_spine(&self, side: &SideBox) -> bool {
         let named = side.names.as_ref();
         named.is_some_and(|name| self.hosts.iter().any(|host| host.name == *name))
     }
 
-    /// The side boxes drawn beside the spine: every one but those the
-    /// spine already draws.
     fn beside(&self) -> Vec<SideBox> {
         let sides = self.sides.iter().filter(|side| !self.on_spine(side));
         sides.cloned().collect()
@@ -321,8 +322,8 @@ impl Parts {
 /// The spine's rows, top to bottom.
 pub fn rows(parts: &Parts) -> Vec<Row> {
     let mut rows = Vec::new();
-    let door = vec![parts.ingresses.clone(), parts.services.clone()];
-    push(&mut rows, parts, Band::Entry, door);
+    let entry = vec![parts.ingresses.clone(), parts.services.clone()];
+    push(&mut rows, parts, Band::Entry, entry);
     for layer in layers(parts) {
         let workload = parts.workload.clone().filter(|_| layer == parts.layer);
         let tiers = vec![workload.into_iter().collect()];
@@ -338,7 +339,7 @@ pub fn rows(parts: &Parts) -> Vec<Row> {
 }
 
 /// The layers that contain the workload or a side box, in the map's
-/// order.
+/// order.  A layer that the map does not list sorts last.
 fn layers(parts: &Parts) -> Vec<String> {
     let mut used = vec![parts.layer.clone()];
     for side in &parts.sides {
@@ -353,8 +354,8 @@ fn layers(parts: &Parts) -> Vec<String> {
     used
 }
 
-/// Adds the row of `band` with its non-empty `tiers` and its side
-/// columns, unless it has no box at all.
+/// Appends the row of `band` with its empty tiers removed.  A row with
+/// no tier and no side box is not appended.
 fn push(rows: &mut Vec<Row>, parts: &Parts, band: Band, tiers: Vec<Vec<SectionBox>>) {
     let tiers: Vec<Vec<SectionBox>> = tiers.into_iter().filter(|t| !t.is_empty()).collect();
     let side = |side: Side| -> Vec<SectionBox> {
@@ -373,9 +374,9 @@ fn push(rows: &mut Vec<Row>, parts: &Parts, band: Band, tiers: Vec<Vec<SectionBo
     });
 }
 
-/// The box for one claim takes the claim's name as its title and opens
-/// its page.  The box for several claims takes their count as its title,
-/// and the line under the count names each claim, linked.
+/// The box for the claims of one backend.  A single claim is titled
+/// with its name and links to its page.  Several claims are titled with
+/// their count, and the last line links each claim by name.
 fn claims_box(backing: &Backing) -> SectionBox {
     let line = sentence::claims_line(backing);
     match backing.claims.as_slice() {
@@ -399,18 +400,19 @@ fn claims_box(backing: &Backing) -> SectionBox {
     }
 }
 
-/// Each machine by name, or past `MOST_MACHINES`, one box for them all.
+/// One box for each machine, or one box for all of them when there are
+/// more than `MOST_MACHINES`.
 fn machine_boxes(parts: &Parts) -> Vec<SectionBox> {
-    let of = parts.pods();
+    let total_pods = parts.pods();
     if parts.hosts.len() > MOST_MACHINES {
         let title = sentence::machines_title(parts.hosts.len());
-        let line = sentence::machines_line(of);
+        let line = sentence::machines_line(total_pods);
         return vec![SectionBox::new(title, vec![line], Look::Machine)];
     }
     let hosts = parts.hosts.iter();
     hosts
         .map(|host| {
-            let line = sentence::machine_line(host.pods, of, host.control_plane);
+            let line = sentence::machine_line(host.pods, total_pods, host.control_plane);
             let href = format!("/machines/{}", host.name);
             SectionBox::new(host.name.clone(), vec![line], Look::Machine).with_href(Some(href))
         })
@@ -423,10 +425,10 @@ fn ground_box(backing: &Backing) -> Option<SectionBox> {
     Some(SectionBox::new(name.into(), lines, Look::Ground))
 }
 
-/// Each row's shape for the layout, where a box's count of lines is its
-/// title's lines and the lines under the title.  When a line from a side
-/// box runs to another row, each row from one end to the other keeps that
-/// side clear.
+/// The shape of each row for the layout: the number of text lines in
+/// each box.  When a line runs from a side box to a box in another row,
+/// each row from one end to the other gets that side in `crossed`, so
+/// the layout keeps the row's tiers out of that column.
 pub fn shapes(rows: &[Row], links: &[Link]) -> Vec<Shape> {
     let lines =
         |boxes: &[SectionBox]| -> Vec<usize> { boxes.iter().map(SectionBox::text_lines).collect() };

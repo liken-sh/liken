@@ -1,5 +1,6 @@
-//! What to watch of each custom kind: whole or trimmed, at which
-//! version, and with which printer columns and knowledge fields kept.
+//! Decides how to watch each custom kind: whole or trimmed objects, at
+//! which API version, and which printer columns and fields a trimmed
+//! object keeps.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -9,28 +10,29 @@ use kube::core::ApiResource;
 
 use super::GroupKind;
 use crate::cluster::plurals::Preferred;
-use crate::cluster::reflect::Holding;
+use crate::cluster::reflect::Stored;
 use transect_resources::knowledge::Column;
 
-/// What to watch of one kind: whole or trimmed, the resource to watch
-/// it at, and the printer columns and the fields of its kind knowledge
-/// that a trimmed kind keeps.  The resource is set when the kind's CRD
-/// or the discovery at the start gives one, and otherwise discovery
-/// resolves it.
+/// How to watch one custom kind. `resource` is `None` when neither the
+/// kind's CRD nor API discovery at startup gave a version, and the
+/// watch looks one up when it starts. `columns` and `fields` apply only
+/// to a trimmed kind: the printer columns to keep, and the fields that
+/// kind knowledge reads.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Want {
-    pub(super) holding: Holding,
+    pub(super) stored: Stored,
     pub(super) resource: Option<ApiResource>,
     pub(super) columns: Vec<Column>,
     pub(super) fields: Vec<String>,
 }
 
 impl Want {
-    /// Whole objects, at `preferred`, the version discovery prefers,
-    /// when the discovery at the start found the kind.
+    /// Whole objects at `preferred`, the version that API discovery
+    /// prefers. It is `None` when discovery at startup did not find the
+    /// kind.
     pub(super) fn whole(preferred: Option<ApiResource>) -> Self {
         Self {
-            holding: Holding::Whole,
+            stored: Stored::Whole,
             resource: preferred,
             columns: Vec::new(),
             fields: Vec::new(),
@@ -38,15 +40,15 @@ impl Want {
     }
 }
 
-/// What to watch of each kind: whole objects for the kinds in `whole`,
-/// and trimmed objects for every other kind in `served`, the CRDs, and
-/// in `controlled`, each keeping the fields `kept` names for it.  A kind
-/// read whole is watched at the version discovery prefers, and so is a
-/// trimmed kind that keeps fields, because its knowledge's paths are
-/// written against that version.  `preferred` gives that version for
-/// each kind the discovery at the start found, and the rest are
-/// resolved one by one.
-/// Any other trimmed kind is watched at its CRD's storage version.
+/// Picks how to watch each kind. Kinds in `whole` are watched whole.
+/// Every other kind in `served` (from the CRDs) or in `controlled`
+/// (kinds whose status a controller may write) is watched trimmed, and
+/// keeps the fields that `kept` lists for it.
+///
+/// A whole kind, and a trimmed kind that keeps fields, is watched at the
+/// version that API discovery prefers, because the field paths in kind
+/// knowledge are written against that version. Any other trimmed kind
+/// is watched at its CRD's storage version.
 pub(super) fn wants(
     whole: impl IntoIterator<Item = GroupKind>,
     served: &BTreeMap<GroupKind, (ApiResource, Vec<Column>)>,
@@ -62,7 +64,7 @@ pub(super) fn wants(
             false => preferred.get(group_kind).cloned(),
         };
         Want {
-            holding: Holding::Trimmed,
+            stored: Stored::Trimmed,
             resource,
             columns: served
                 .map(|(_, columns)| columns.clone())
@@ -86,11 +88,9 @@ pub(super) fn wants(
     found
 }
 
-/// Each kind a CRD in `crds` defines, at the version etcd stores it in,
-/// with the printer columns of that version.
-/// A CRD with no storage version, which the API server refuses, or
-/// whose storage version is not served, which no watch can read, is
-/// left out.
+/// Returns each kind that a CRD in `crds` defines, at its storage
+/// version, with that version's printer columns. A CRD whose storage
+/// version is not served is left out, because no watch can read it.
 pub(super) fn served(
     crds: &[Arc<CustomResourceDefinition>],
 ) -> BTreeMap<GroupKind, (ApiResource, Vec<Column>)> {

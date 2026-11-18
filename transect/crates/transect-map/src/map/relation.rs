@@ -1,11 +1,11 @@
-//! How a selected namespace relates to a parcel its edges reach, as the
-//! short line that replaces the parcel's workload count.
+//! How the selected namespace relates to another namespace, as a short
+//! phrase that replaces the workload count in that namespace's tile,
+//! the rectangle that the cluster map draws for it.
 //!
-//! A narrow parcel cuts the line with an ellipsis, so each phrase is a
-//! few words whose first word shows the direction: "it needs" when the
-//! selection depends on this namespace, "needs it" when this namespace
-//! depends on the selection.  However much is cut, the reader still
-//! knows which way the relation runs.
+//! A narrow tile truncates the phrase with an ellipsis, so each phrase
+//! is a few words and its first word shows the direction: "it needs"
+//! when the selection depends on the tile's namespace, and "needs it"
+//! when that namespace depends on the selection.
 
 use std::collections::BTreeMap;
 
@@ -20,8 +20,9 @@ pub enum Way {
     To,
 }
 
-/// One kind of edge between the selection and a parcel, in one
-/// direction, and whether every such edge is a guess.
+/// One kind of edge between the selection and a tile, in one
+/// direction. `guessed` is true when every such edge was inferred and
+/// none was read from the API.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Relation {
     pub kind: Kind,
@@ -29,10 +30,10 @@ pub struct Relation {
     pub guessed: bool,
 }
 
-/// The order in which a parcel shows its relations, most important first.
-/// What the selection needs and what needs it come first, since those
-/// are what a loss takes; "may call" comes last, since policy lets many
-/// namespaces call one and few of them do.
+/// The order a tile lists its relations in. Dependencies come first,
+/// because they show what breaks when one side fails. `AllowedToCall`
+/// comes last, because a policy often allows many more callers than
+/// actually call.
 const PRIORITY: [Kind; 12] = [
     Kind::DependsOn,
     Kind::AuthenticatesThrough,
@@ -49,7 +50,8 @@ const PRIORITY: [Kind; 12] = [
 ];
 
 impl Relation {
-    /// A caller a policy names, which "may call" the selection.
+    /// The relation of a namespace that a network policy allows to call
+    /// the selection.
     pub fn may_call() -> Self {
         Self {
             kind: Kind::AllowedToCall,
@@ -58,10 +60,7 @@ impl Relation {
         }
     }
 
-    /// The phrase, with "it" as the selected namespace.  Each phrase
-    /// starts with the word that shows which way the relation runs: "it"
-    /// when the selection acts on the parcel, the verb when the parcel
-    /// acts on the selection.
+    /// The phrase, where "it" is the selected namespace.
     pub fn phrase(self) -> &'static str {
         use Way::{From, To};
         match (self.kind, self.way) {
@@ -92,7 +91,7 @@ impl Relation {
         }
     }
 
-    /// The phrase as the parcel shows it: a guess ends in "?".
+    /// The phrase for the tile's line. A guess ends in "?".
     pub fn short(self) -> String {
         match self.guessed {
             true => format!("{}?", self.phrase()),
@@ -100,8 +99,8 @@ impl Relation {
         }
     }
 
-    /// The phrase as the parcel's title shows it, with what a guess was
-    /// read from.
+    /// The phrase for the tile's title. A guess ends in "?" and adds
+    /// "(a guess)", or "(a guess from labels)" for `ControlledBy`.
     pub fn long(self) -> String {
         match (self.guessed, self.kind) {
             (false, _) => self.phrase().into(),
@@ -110,25 +109,23 @@ impl Relation {
         }
     }
 
-    /// Where the relation sorts: what transect read before what it
-    /// guessed, then by `PRIORITY`, and within a kind, what the
-    /// selection does to the parcel first.
+    /// Relations read from the API sort before guesses, then by
+    /// `PRIORITY`, then `Way::From` before `Way::To`.
     fn rank(self) -> (bool, usize, Way) {
         let at = PRIORITY.iter().position(|kind| *kind == self.kind);
         (self.guessed, at.unwrap_or(PRIORITY.len()), self.way)
     }
 }
 
-/// Puts `relations` in the order a parcel shows them.
+/// Sorts `relations` into the order a tile lists them.
 pub fn arrange(relations: &mut [Relation]) {
     relations.sort_by_key(|relation| relation.rank());
 }
 
-/// The relations the selected namespace's edges give each other
-/// namespace they reach, by namespace.  A relation is a guess only when
-/// every edge that gives it is one.  "Allowed to call" is left out,
-/// because the map tags only the callers a policy names.  The policy
-/// summary names those callers, and these edges do not.
+/// The relations between `selected` and each other namespace that its
+/// edges reach, by namespace. `AllowedToCall` edges are skipped,
+/// because the page adds "may call it" from the network policies
+/// instead, only for the callers that a policy names.
 pub fn across(graph: &Graph, selected: &str) -> BTreeMap<String, Vec<Relation>> {
     let mut found: BTreeMap<String, Vec<Relation>> = BTreeMap::new();
     let edges = graph.touching_namespace(selected);
@@ -146,8 +143,9 @@ pub fn across(graph: &Graph, selected: &str) -> BTreeMap<String, Vec<Relation>> 
     found
 }
 
-/// Adds `relation` to `relations`, once for its kind and way, keeping it
-/// a guess only while every edge that gave it is one.
+/// Adds `relation` to `relations`, or merges it into the relation of
+/// the same kind and way. The merged relation stays a guess only when
+/// both are guesses.
 pub fn add(relations: &mut Vec<Relation>, relation: Relation) {
     let same = relations
         .iter_mut()
@@ -158,8 +156,8 @@ pub fn add(relations: &mut Vec<Relation>, relation: Relation) {
     }
 }
 
-/// The namespace at the edge's far end from `selected`, and which end
-/// the selection is at, for an edge that crosses between two namespaces.
+/// The other namespace of an edge between `selected` and a different
+/// namespace, and which end `selected` is at.
 fn far<'a>(edge: &'a Edge, selected: &str) -> Option<(&'a str, Way)> {
     let (from, to) = (namespace(&edge.from), namespace(&edge.to));
     match (from, to) {

@@ -1,5 +1,5 @@
-//! The access lens's identity on every page it draws: the masthead's
-//! `access` link is current there and nowhere else.
+//! The masthead's `access` link is marked current on every access page,
+//! and on no other page.
 
 use rstest::rstest;
 

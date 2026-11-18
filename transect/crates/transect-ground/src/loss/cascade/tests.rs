@@ -46,8 +46,9 @@ fn edge(kind: Kind, from: Object, to: Object) -> Edge {
 }
 
 /// A shop namespace.  `web`, and `feed` in blog, call its `db`.  Two
-/// hosts route to its `web` through its `Service`, and its `operator`
-/// controls two Players in media.  No edge arrives at `cache`.
+/// hosts and a default backend route to `web` through its `Service`, and
+/// its `operator` controls two Players in media.  No edge arrives at
+/// `cache`.
 struct Shop {
     graph: Graph,
     ingresses: Vec<Arc<Ingress>>,
@@ -131,7 +132,7 @@ impl Shop {
     "cache",
     vec![]
 )]
-fn a_down_workload_takes_what_reaches_it(
+fn finds_the_dependents_of_a_down_workload(
     shop: Shop,
     #[case] name: &str,
     #[case] dependents: Vec<Dependent>,
@@ -140,7 +141,7 @@ fn a_down_workload_takes_what_reaches_it(
 }
 
 #[rstest]
-fn a_kind_turned_off_takes_nothing(shop: Shop) {
+fn an_edge_kind_turned_off_finds_no_dependents(shop: Shop) {
     let shown = transect_graph::edges::Shown::parse(Some(""));
     let graph = shop.graph.only(&shown);
     let edges = Edges {
@@ -156,7 +157,7 @@ fn loss(dependent: Dependent, lost: &str) -> Loss {
         dependent,
         lost: deployment("shop", lost),
         provides: None,
-        stated: None,
+        declared_in: None,
     }
 }
 
@@ -178,21 +179,21 @@ fn hops_join_one_dependents_losses_by_namespace() {
                 dependent: Dependent::Caller(deployment("blog", "feed")),
                 lost: vec![deployment("shop", "db")],
                 provides: BTreeMap::new(),
-                stated: Vec::new(),
+                declared_in: Vec::new(),
             },
             Hop {
                 namespace: Some("shop".into()),
                 dependent: web(),
                 lost: vec![deployment("shop", "cache"), deployment("shop", "db")],
                 provides: BTreeMap::new(),
-                stated: Vec::new(),
+                declared_in: Vec::new(),
             },
             Hop {
                 namespace: Some("shop".into()),
                 dependent: Dependent::Host("shop.example.com".into()),
                 lost: vec![deployment("shop", "web")],
                 provides: BTreeMap::new(),
-                stated: Vec::new(),
+                declared_in: Vec::new(),
             },
         ]
     );
@@ -252,13 +253,13 @@ fn only_a_down_workload_cascades_and_never_into_another_down_one() {
             dependent: Dependent::Caller(deployment("shop", "web")),
             lost: deployment("shop", "db"),
             provides: None,
-            stated: None,
+            declared_in: None,
         }]
     );
 }
 
 #[rstest]
-fn a_loss_carries_what_intent_says_the_lost_workload_provides(shop: Shop) {
+fn a_loss_has_the_provides_text_of_the_lost_workload(shop: Shop) {
     let meta: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta = serde_yaml::from_str(
         "{name: db, annotations: {transect.liken.sh/provides: order storage}}",
     )
@@ -313,7 +314,7 @@ fn an_application_that_signs_in_through_it_loses_sign_in_marked_as_intent() {
     let found: Vec<(Dependent, Option<Provenance>)> = edges
         .of(&deployment("auth", "login"))
         .into_iter()
-        .map(|loss| (loss.dependent, loss.stated))
+        .map(|loss| (loss.dependent, loss.declared_in))
         .collect();
     assert_eq!(
         found,

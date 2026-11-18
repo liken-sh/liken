@@ -22,6 +22,7 @@ use super::{Failure, Known, Lookup, Provenance, Want};
 const IMAGE_WAIT: Duration = Duration::from_secs(60);
 /// The wait after a registry's first failure.
 const REGISTRY_WAIT: Duration = Duration::from_secs(300);
+/// The longest wait after any failure.
 const MAX_WAIT: Duration = Duration::from_secs(3600);
 
 #[derive(Debug, Default)]
@@ -38,8 +39,8 @@ enum Entry {
     },
     Read(Arc<Provenance>),
     Failed {
-        /// The registry the image was read from.  A change of that
-        /// registry's mirror makes the next read go to another address.
+        /// The registry the image was read from, so that `forget` can
+        /// retry the failed images of a registry whose mirror changed.
         registry: String,
         failure: Failure,
         failures: u32,
@@ -62,17 +63,17 @@ fn backoff(first: Duration, failures: u32) -> Duration {
 
 impl State {
     /// The images in `wanted` to read now, each once: those not read
-    /// yet, and those whose wait after a failure is over, unless their
-    /// registry's wait is not over.  This function marks each image that
-    /// it returns as being read.
+    /// yet, and those whose wait after a failure is over, except the
+    /// images of a registry whose own wait is not over.  It marks each
+    /// image it returns as being read.
     pub fn due(&mut self, wanted: impl IntoIterator<Item = Want>, now: Instant) -> Vec<Want> {
         let mut due = Vec::new();
         for want in wanted {
-            let held = self
+            let registry_down = self
                 .registries
                 .get(&want.image.registry)
                 .is_some_and(|down| now < down.retry);
-            if held {
+            if registry_down {
                 continue;
             }
             let ready = match self.digests.entry(want.image.digest.clone()) {
@@ -98,20 +99,20 @@ impl State {
         due
     }
 
-    /// Whether `want`'s registry went down while the read waited for its
-    /// turn.  When it did, this function drops the read and forgets the
-    /// image, so transect reads it again when the registry's wait is
-    /// over.  A registry that is down then costs only the reads that were
-    /// already in progress.
+    /// Returns true, and forgets `want`'s image, when its registry
+    /// failed as a whole while the read waited in the queue.  The caller
+    /// then skips the read, and `due` returns the image again when the
+    /// registry's wait ends.  So a registry that is down costs only the
+    /// reads already in progress.
     pub fn drop_if_held(&mut self, want: &Want, now: Instant) -> bool {
-        let held = self
+        let registry_down = self
             .registries
             .get(&want.image.registry)
             .is_some_and(|down| now < down.retry);
-        if held {
+        if registry_down {
             self.digests.remove(&want.image.digest);
         }
-        held
+        registry_down
     }
 
     /// Records the result of reading `want`.  It returns the registry's
@@ -136,11 +137,11 @@ impl State {
                 // Forget the image, so transect reads it again as soon as
                 // its registry's wait is over.
                 self.digests.remove(&digest);
-                let held = self
+                let already_down = self
                     .registries
                     .get(registry)
                     .is_some_and(|down| now < down.retry);
-                if held {
+                if already_down {
                     return None;
                 }
                 let failures = self
@@ -211,8 +212,8 @@ impl State {
     }
 
     /// Forgets every digest that is not in `wanted`, except a digest that
-    /// is being read.  That read's result is recorded, and the next call
-    /// forgets it.
+    /// is being read.  `land` records that read's result, and the next
+    /// call forgets it.
     pub fn keep_only<'a>(&mut self, wanted: impl IntoIterator<Item = &'a str>) {
         let wanted: HashSet<&str> = wanted.into_iter().collect();
         self.digests.retain(|digest, entry| {
@@ -284,17 +285,17 @@ mod tests {
     }
 
     #[rstest]
-    fn a_registry_down_holds_back_every_image_it_serves() {
+    fn a_registry_that_is_down_delays_every_image_it_serves() {
         let mut state = State::default();
         let now = Instant::now();
         let (a, b) = (want("registry.example", 'a'), want("registry.example", 'b'));
         let other = want("other.example", 'c');
         state.due([a.clone()], now);
         state.land(&a, Err(Failure::Unreachable), now);
-        let held = state.due([a.clone(), b.clone(), other], now + MINUTE);
+        let during = state.due([a.clone(), b.clone(), other], now + MINUTE);
         let later = state.due([a, b], now + REGISTRY_WAIT);
         assert_eq!(
-            (digests(&held), digests(&later)),
+            (digests(&during), digests(&later)),
             (vec![digest('c')], vec![digest('a'), digest('b')])
         );
     }
@@ -327,7 +328,7 @@ mod tests {
     }
 
     #[rstest]
-    fn knows_what_each_read_gave() {
+    fn reports_the_state_of_each_read() {
         let mut state = State::default();
         let now = Instant::now();
         let (read, failed, waiting) = (
@@ -388,7 +389,7 @@ mod tests {
     }
 
     #[rstest]
-    fn forgets_what_no_pod_runs_any_more() {
+    fn forgets_digests_that_no_pod_runs() {
         let mut state = State::default();
         let now = Instant::now();
         let (read, failed, gone, reading) = (
@@ -406,9 +407,9 @@ mod tests {
         state.land(&gone, Ok(Provenance::default()), now);
         let kept = [digest('a'), digest('b')];
         state.keep_only(kept.iter().map(String::as_str));
-        let mut held: Vec<String> = state.digests.keys().cloned().collect();
-        held.sort();
-        assert_eq!(held, vec![digest('a'), digest('b'), digest('d')]);
+        let mut remaining: Vec<String> = state.digests.keys().cloned().collect();
+        remaining.sort();
+        assert_eq!(remaining, vec![digest('a'), digest('b'), digest('d')]);
     }
 
     #[rstest]

@@ -1,9 +1,11 @@
-//! Who may change a workload: the accounts a binding grants `patch`,
-//! `update`, or `delete` on its own kind in its namespace, with exec
-//! into its pods on the same line; the controller of a custom kind; the
-//! GitOps objects that apply it and who may change them; the accounts
-//! bound to a role with every verb, in one box; and one outlined box for
-//! the accounts that may change it by running a pod as an account that
+//! The "who may change this workload" section of the access tab. It
+//! lists the accounts that a binding lets `patch`, `update`, or
+//! `delete` the workload's kind in its namespace (with `exec` into its
+//! pods on the same line), the controller of a custom kind, the GitOps
+//! objects that apply the workload and the accounts that may change
+//! those, and the accounts bound to a role with every verb, which share
+//! one box. A last box, drawn with an outline, holds the accounts that
+//! can change the workload only by running a pod as an account that
 //! may.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -18,9 +20,9 @@ use transect_graph::links::Part;
 use transect_map::map::WorkloadContents;
 use transect_map::map::section_drawing::{Look as BoxLook, SectionBox};
 
-/// Whether `account` may do `capability` to every object in
-/// `namespace` by a grant.  When `follows` is true, a capability that
-/// follows from a grant also counts.
+/// Whether `account` has `capability` on every object of `namespace`,
+/// through a grant that names no particular resource. When `follows` is
+/// true, a capability that follows from a grant also counts.
 fn may(
     model: &Model,
     account: &Account,
@@ -44,15 +46,15 @@ fn may(
     }
 }
 
-/// Whether every binding that names `account` is one Kubernetes ships,
-/// as its own controllers' are.
+/// Whether `account` has bindings, and every one is a default binding
+/// that Kubernetes creates itself, like those of its own controllers.
 fn shipped(model: &Model, account: &Account) -> bool {
     let held = model.access.of(account);
     let bound = held.map(|held| held.bound.as_slice()).unwrap_or_default();
     !bound.is_empty() && bound.iter().all(|bound| bound.defaults)
 }
 
-/// What `account` is called in a box, and the page its name opens.
+/// The text and link that name `account` in a box.
 fn named(account: &Account, look: &Look) -> Part {
     let href = look.account(account);
     Part {
@@ -65,7 +67,7 @@ pub fn change(model: &Model, object: &Object, contents: &WorkloadContents, look:
     let namespace = object.namespace.clone().unwrap_or_default();
     let key = (object.group.clone(), object.kind.clone());
     let plural = contents.plurals.get(&key).cloned().unwrap_or_default();
-    let mut everything: BTreeMap<Account, BTreeSet<String>> = BTreeMap::new();
+    let mut all_verbs: BTreeMap<Account, BTreeSet<String>> = BTreeMap::new();
     for (account, held) in &model.access.accounts {
         let roles = held
             .everything
@@ -73,7 +75,7 @@ pub fn change(model: &Model, object: &Object, contents: &WorkloadContents, look:
             .filter(|(at, _)| at.covers(&namespace));
         let roles: BTreeSet<String> = roles.map(|(_, role)| role.name.clone()).collect();
         if !roles.is_empty() {
-            everything.insert(account.clone(), roles);
+            all_verbs.insert(account.clone(), roles);
         }
     }
     let direct = model
@@ -90,9 +92,9 @@ pub fn change(model: &Model, object: &Object, contents: &WorkloadContents, look:
             .map(|(ns, name)| Account::service_account(ns, name))
             .collect(),
     };
-    // Each account's lines, by what it may do.
+    // The lines of each account's box, by what the account may do.
     let mut lines: BTreeMap<Account, Vec<(Target, String)>> = BTreeMap::new();
-    for account in direct.iter().filter(|a| !everything.contains_key(*a)) {
+    for account in direct.iter().filter(|a| !all_verbs.contains_key(*a)) {
         let label = match may(model, account, Capability::Exec, &namespace, false) {
             true => "may change it · exec into its pods",
             false => "may change it",
@@ -118,7 +120,7 @@ pub fn change(model: &Model, object: &Object, contents: &WorkloadContents, look:
     for (index, applier) in appliers.iter().enumerate() {
         let at = applier.namespace.as_deref().unwrap_or_default();
         for account in model.access.accounts.keys() {
-            if everything.contains_key(account)
+            if all_verbs.contains_key(account)
                 || !may(model, account, Capability::ChangeApplied, at, false)
             {
                 continue;
@@ -127,9 +129,10 @@ pub fn change(model: &Model, object: &Object, contents: &WorkloadContents, look:
             entry.insert(0, (Target::Applier(index), "may patch".into()));
         }
     }
-    // Changing it follows for an account that may run a pod as an
-    // account that may change it.
-    let through: BTreeSet<String> = lines
+    // An account with no line can still change the workload by running
+    // a pod as a listed service account. `follows` holds the accounts
+    // that may run pods or change workloads in the namespace of one.
+    let service_account_namespaces: BTreeSet<String> = lines
         .keys()
         .chain(&controllers)
         .filter_map(|account| match account {
@@ -141,9 +144,9 @@ pub fn change(model: &Model, object: &Object, contents: &WorkloadContents, look:
         .access
         .accounts
         .keys()
-        .filter(|account| !lines.contains_key(*account) && !everything.contains_key(*account))
+        .filter(|account| !lines.contains_key(*account) && !all_verbs.contains_key(*account))
         .filter(|account| {
-            through.iter().any(|ns| {
+            service_account_namespaces.iter().any(|ns| {
                 may(model, account, Capability::RunPods, ns, true)
                     || may(model, account, Capability::ChangeWorkloads, ns, true)
             })
@@ -155,15 +158,16 @@ pub fn change(model: &Model, object: &Object, contents: &WorkloadContents, look:
         let object = account.object()?;
         model.snapshot.intents.of(&object)?.why.clone()
     };
-    // An account with a sentence of its own, or the controller, gets a
-    // box of its own; the others share a box with the accounts whose
-    // lines read the same.
+    // An account that Kubernetes ships goes in the combined box below.
+    // An account with an intent sentence, and the controller, each get a
+    // box. Every other account shares a box with the accounts that have
+    // the same lines.
     let mut shared: BTreeMap<Vec<(Target, String)>, Vec<Account>> = BTreeMap::new();
-    let mut own: Vec<Account> = Vec::new();
+    let mut built_in: Vec<Account> = Vec::new();
     for (account, its) in &lines {
         let part = named(account, look);
         if shipped(model, account) {
-            own.push(account.clone());
+            built_in.push(account.clone());
         } else if let Some(line) = why(account) {
             let boxed = SectionBox::new(part.text, vec![line.text], BoxLook::Plain)
                 .with_href(part.href)
@@ -189,13 +193,13 @@ pub fn change(model: &Model, object: &Object, contents: &WorkloadContents, look:
             shared.entry(its.clone()).or_default().push(account.clone());
         }
     }
-    if !everything.is_empty() {
-        let roles: BTreeSet<&String> = everything.values().flatten().collect();
+    if !all_verbs.is_empty() {
+        let roles: BTreeSet<&String> = all_verbs.values().flatten().collect();
         let role = match roles.into_iter().collect::<Vec<_>>().as_slice() {
             [one] => (*one).clone(),
             _ => "a role with every verb".into(),
         };
-        let (accounts, others): (Vec<&Account>, Vec<&Account>) = everything
+        let (accounts, others): (Vec<&Account>, Vec<&Account>) = all_verbs
             .keys()
             .partition(|a| matches!(a, Account::ServiceAccount { .. }));
         let title = match accounts.len() {
@@ -209,7 +213,7 @@ pub fn change(model: &Model, object: &Object, contents: &WorkloadContents, look:
                 vec![format!("and {}", and(&names))]
             }
         };
-        let names: Vec<String> = everything.keys().map(Account::text).collect();
+        let names: Vec<String> = all_verbs.keys().map(Account::text).collect();
         let boxed = SectionBox::new(title, lines, BoxLook::Plain)
             .with_href(Some("/access/accounts".into()))
             .with_hint(names.join(", "));
@@ -249,20 +253,18 @@ pub fn change(model: &Model, object: &Object, contents: &WorkloadContents, look:
             lines: its,
         });
     }
-    if !own.is_empty() {
-        // Kubernetes' own components and controllers fold into one box,
-        // as on the accounts matrix.
-        let parts: Vec<Part> = own
+    if !built_in.is_empty() {
+        let parts: Vec<Part> = built_in
             .iter()
             .map(|a| Part {
                 text: a.short(),
                 ..named(a, look)
             })
             .collect();
-        let names: Vec<String> = own.iter().map(Account::text).collect();
+        let names: Vec<String> = built_in.iter().map(Account::text).collect();
         let title = format!(
             "{} of Kubernetes' own components and controllers",
-            own.len()
+            built_in.len()
         );
         let boxed = SectionBox::new(title, vec![String::new()], BoxLook::Plain)
             .with_names(parts)
@@ -305,8 +307,8 @@ pub fn change(model: &Model, object: &Object, contents: &WorkloadContents, look:
             SectionBox::new(title, vec![line], BoxLook::Plain).with_href(look.href(applier))
         })
         .collect();
-    // The workload is the page, so its box opens nothing, and its name
-    // drops the page's namespace.
+    // The page is this workload's, so its box has no link, and its
+    // title leaves out the namespace.
     let workload = SectionBox::new(
         transect_graph::links::kind_and_name_in(object, Some(&namespace)),
         Vec::new(),

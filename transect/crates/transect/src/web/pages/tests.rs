@@ -1,6 +1,7 @@
-//! The cluster page under a machine that is really lost, from `Node`
-//! objects built by hand, so the tests cover the loss taking over the
-//! sidebar without an outage.
+//! Tests of the cluster page when a control-plane `Node` is lost, using
+//! `Node` objects built in the test. A lost machine shows the loss in
+//! the sidebar. A cordoned machine that is still ready, and a selected
+//! namespace, do not.
 
 use std::sync::Arc;
 
@@ -15,8 +16,8 @@ use transect_graph::edges::Shown;
 use transect_observe::usage;
 use transect_resources::layers::Layers;
 
-/// A control-plane machine named `name`, cordoned when `cordoned`, whose
-/// `Ready` condition is `ready` and last changed three minutes ago.
+/// A control-plane `Node` named `name`, cordoned when `cordoned`, whose
+/// `Ready` condition has the status `ready` and changed 200 seconds ago.
 fn node(name: &str, ready: &str, cordoned: bool) -> Arc<Node> {
     let since = Timestamp::now() - 200.seconds();
     Arc::new(
@@ -29,9 +30,10 @@ status: {{conditions: [{{type: Ready, status: '{ready}', lastTransitionTime: '{s
     )
 }
 
-/// The cluster page of alpha, beta, and gamma, with beta's `Ready`
-/// condition `ready`, as `focus` asks for it: the loss's title, its
-/// majority line, and each lost strip's tag.
+/// Builds the cluster page of the control-plane machines alpha, beta,
+/// and gamma, with `focus` applied and beta's `Ready` status set to
+/// `ready`. Returns the loss's title, its majority line, and the tag of
+/// each lost machine, or `None` when the page shows no loss.
 fn page(
     ready: &str,
     cordoned: bool,
@@ -91,7 +93,7 @@ fn lost(
     Focus::Select(None),
     lost("beta is lost · 3 minutes", MAJORITY, &["Lost 3m"])
 )]
-#[case::a_question_on_top(
+#[case::a_hypothetical_loss_added_to_a_real_one(
     "Unknown",
     false,
     Focus::Lose(&["alpha".to_string()], None),
@@ -101,8 +103,13 @@ fn lost(
         &["if lost", "Lost 3m"]
     )
 )]
-#[case::a_selection_shows_its_card("Unknown", false, Focus::Select(Some("shop")), None)]
-fn a_machine_really_lost_takes_over_the_sidebar(
+#[case::a_selected_namespace_shows_its_card_instead(
+    "Unknown",
+    false,
+    Focus::Select(Some("shop")),
+    None
+)]
+fn shows_the_loss_in_the_sidebar_only_for_a_lost_machine(
     #[case] ready: &str,
     #[case] cordoned: bool,
     #[case] focus: Focus,

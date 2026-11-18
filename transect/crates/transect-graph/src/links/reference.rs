@@ -1,42 +1,43 @@
-//! How a card names one end of an edge: its words, and the page it
-//! opens when it has one.  Every section that lists ends, whatever its
-//! domain, names them the same way.
+//! The text of an edge's end on a card, and the page it links to when
+//! it has one. Every section that lists ends uses these, so all of them
+//! write an end the same way.
 
 use std::fmt;
 
 use crate::edges::{Endpoint, Object, Plurals};
 
-/// One end a card names, with the page it opens when it has one.
+/// One end of an edge as a card shows it, with its page if it has one.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Reference {
     pub text: String,
     pub href: Option<String>,
 }
 
-/// What a reference names.
+/// What a `Reference` refers to.
 #[derive(Debug, PartialEq)]
 pub enum Named<'a> {
     /// An object, and whether it is in the namespace of the card that
-    /// names it, in which case the card leaves out its namespace.
+    /// shows it. When it is, the text leaves out the namespace.
     Object {
         object: &'a Object,
         here: bool,
     },
     Machine(&'a str),
     Namespace(&'a str),
-    /// Every pod in a namespace, which a policy rule admits whole.
+    /// Every pod in a namespace, for a policy rule that selects the whole
+    /// namespace.
     EveryPod(&'a str),
     /// Every pod in the cluster.
     AnyPod,
-    /// Any namespace, for a rule that admits every one, except the
-    /// namespaces in `but`; with `pods`, any pod in them.
+    /// Any namespace, for a rule that admits all of them except the ones
+    /// in `but`. With `pods`, it means any pod in those namespaces.
     AnyNamespace {
         pods: bool,
         but: &'a [String],
     },
     /// Anything that can reach the pod, inside the cluster or out.
     Anything,
-    /// The addresses in a block, but those in its exceptions.
+    /// The addresses in a CIDR block, minus the ones in `except`.
     Addresses {
         cidr: &'a str,
         except: &'a [String],
@@ -58,8 +59,8 @@ impl Reference {
                 text: Named::Machine(machine).to_string(),
                 href: Some(super::machine(machine)),
             },
-            // A ground box's page is under its `Outside`'s name, which
-            // only the caller's `Outsides` holds.
+            // An outside system's page URL uses the name of its
+            // `Outside`, and only the caller's `Outsides` has that name.
             Endpoint::Outside(name) => Self {
                 text: name.clone(),
                 href: None,
@@ -111,8 +112,8 @@ impl fmt::Display for Named<'_> {
     }
 }
 
-/// The most namespaces "any namespace but" names before it counts the
-/// rest.
+/// The most namespaces that "any namespace but" lists before it counts
+/// the rest.
 const MOST_NAMED: usize = 4;
 
 /// "a", "a and b", "a, b, and c", or "a, b, c, d, and 3 more".
@@ -152,7 +153,7 @@ mod tests {
         Named::Addresses { cidr: "10.0.0.0/8", except: &["10.1.0.0/16".into(), "10.2.0.0/16".into()] },
         "addresses in 10.0.0.0/8 except 10.1.0.0/16, 10.2.0.0/16"
     )]
-    fn names_a_caller(#[case] named: Named, #[case] text: &str) {
+    fn writes_the_text_of_each_kind_of_end(#[case] named: Named, #[case] text: &str) {
         assert_eq!(named.to_string(), text);
     }
 }

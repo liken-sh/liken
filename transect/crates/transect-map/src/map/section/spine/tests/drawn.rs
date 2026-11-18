@@ -1,5 +1,6 @@
-//! Whole section views with side boxes, from their parts to their lines: no two
-//! boxes overlap, and every line ends on the edges of its boxes.
+//! Tests that draw whole section views with side boxes, from their parts
+//! to their lines. No two boxes overlap, and every line ends on the edge
+//! of a box.
 
 use rstest::rstest;
 
@@ -43,8 +44,8 @@ fn with_sides(parts: Parts, sides: Vec<SideBox>) -> Parts {
     }
 }
 
-/// A web application called from its own layer and the one above, that
-/// calls a database and reconciles from an applier below.
+/// A web application with callers in its own layer and the layer above,
+/// and with dependencies in its own layer and the layer below.
 fn a_web_application() -> Parts {
     let backing = mounted(nfs(&["media"]), &["machine-1"]);
     with_sides(
@@ -58,8 +59,9 @@ fn a_web_application() -> Parts {
     )
 }
 
-/// A StatefulSet on `machines` machines, holding a device on each of
-/// `held`, with a caller and a dependency beside it.
+/// A StatefulSet on `machines` machines, with a device held on each
+/// machine listed in `held`, and with a caller and a dependency beside
+/// it.
 fn a_stateful_set(machines: usize, held: &[usize]) -> Parts {
     let names: Vec<String> = (1..=machines).map(|i| format!("machine-{i}")).collect();
     let names: Vec<&str> = names.iter().map(String::as_str).collect();
@@ -69,8 +71,8 @@ fn a_stateful_set(machines: usize, held: &[usize]) -> Parts {
     with_sides(parts(0, 1, vec![backing], hosts(machines)), sides)
 }
 
-/// A workload configured with a machine's address, whose line crosses
-/// the claims row on its way down.
+/// A workload configured with a machine's address. Its line crosses
+/// the claims row on the way down.
 fn calls_a_machine() -> Parts {
     let backing = mounted(nfs(&["media"]), &["machine-1", "machine-2"]);
     let backings = vec![backing, local("machine-2")];
@@ -80,8 +82,8 @@ fn calls_a_machine() -> Parts {
     )
 }
 
-/// A workload on `hosts` machines, configured with the address of the
-/// machine named `machine`.
+/// A workload on `hosts` machines, configured with the address of
+/// `machine`.
 fn calls(machine: &str, hosts: usize) -> Parts {
     let sides = vec![on_a_machine(machine)];
     with_sides(parts(0, 0, vec![], self::hosts(hosts)), sides)
@@ -111,9 +113,12 @@ fn no_two_boxes_overlap(#[case] parts: Parts) {
     let all = layout.all();
     for (i, a) in all.iter().enumerate() {
         for b in &all[i + 1..] {
-            assert!(!a.overlaps(b), "{a:?} overlaps {b:?}");
+            assert!(!a.overlaps(b), "box {a:?} overlaps box {b:?}");
         }
-        assert!(a.x >= 0 && a.right() <= WIDTH, "{a:?} leaves the boxed");
+        assert!(
+            a.x >= 0 && a.right() <= WIDTH,
+            "box {a:?} extends past the layout width {WIDTH}"
+        );
     }
 }
 
@@ -129,7 +134,7 @@ fn every_line_ends_on_its_boxes_edges(#[case] parts: Parts) {
     let (layout, links) = drawn(&parts);
     let lines = draw(&layout, &links).lines;
     assert_eq!(lines.len(), links.len());
-    // `draw` gives the spine's lines first and the side lines after.
+    // `draw` returns the spine's lines first, then the side lines.
     let mut spine: Vec<&Link> = links
         .iter()
         .filter(|l| l.from.on_side().is_none() && l.to.on_side().is_none())
@@ -146,9 +151,12 @@ fn every_line_ends_on_its_boxes_edges(#[case] parts: Parts) {
         );
         assert!(
             from.on_edge(line.from.x, line.from.y),
-            "{link:?} starts off {from:?}"
+            "the line of {link:?} starts off the edge of {from:?}"
         );
-        assert!(to.on_edge(line.to.x, line.to.y), "{link:?} ends off {to:?}");
+        assert!(
+            to.on_edge(line.to.x, line.to.y),
+            "the line of {link:?} ends off the edge of {to:?}"
+        );
     }
 }
 

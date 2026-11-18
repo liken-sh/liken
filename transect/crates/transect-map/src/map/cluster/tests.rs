@@ -25,20 +25,20 @@ spec:
 #[rstest]
 #[case::unselected(false, "/?select=shop")]
 #[case::selected(true, "/?lose=alpha")]
-fn a_second_click_on_a_parcel_deselects_it(#[case] selected: bool, #[case] href: &str) {
-    let parcel = Parcel {
+fn a_second_click_on_a_tile_deselects_it(#[case] selected: bool, #[case] href: &str) {
+    let tile = NamespaceTile {
         selected,
-        ..parcel("shop", 1)
+        ..tile("shop", 1)
     };
-    assert_eq!(parcel.href("/?lose=alpha"), href);
+    assert_eq!(tile.href("/?lose=alpha"), href);
 }
 
 fn band_names(map: &ClusterMap) -> Vec<&str> {
     map.bands.iter().map(|band| band.name.as_str()).collect()
 }
 
-fn parcel(namespace: &str, workloads: usize) -> Parcel {
-    Parcel {
+fn tile(namespace: &str, workloads: usize) -> NamespaceTile {
+    NamespaceTile {
         namespace: namespace.into(),
         workloads,
         health: Health::default(),
@@ -50,7 +50,7 @@ fn parcel(namespace: &str, workloads: usize) -> Parcel {
 }
 
 #[rstest]
-fn parcels_sort_by_name_whatever_their_weight(layers: Layers) {
+fn tiles_sort_by_name_whatever_their_weight(layers: Layers) {
     let namespaces = [
         namespace("blog", &[("tier", "apps")], None),
         namespace("Shop", &[("tier", "apps")], None),
@@ -66,12 +66,12 @@ fn parcels_sort_by_name_whatever_their_weight(layers: Layers) {
         &HashMap::new(),
     );
     assert_eq!(
-        map.bands[0].parcels,
+        map.bands[0].tiles,
         vec![
-            parcel("blog", 1),
-            parcel("chat", 0),
-            parcel("Shop", 3),
-            parcel("wiki", 1)
+            tile("blog", 1),
+            tile("chat", 0),
+            tile("Shop", 3),
+            tile("wiki", 1)
         ]
     );
 }
@@ -103,11 +103,11 @@ fn unmatched_namespaces_go_to_unsorted_at_the_bottom(layers: Layers) {
         &HashMap::new(),
     );
     assert_eq!(band_names(&map), vec!["apps", "platform", UNSORTED]);
-    assert_eq!(map.bands[2].parcels, vec![parcel("scratch", 0)]);
+    assert_eq!(map.bands[2].tiles, vec![tile("scratch", 0)]);
 }
 
 #[rstest]
-fn a_parcel_takes_its_namespaces_health(layers: Layers) {
+fn a_tile_takes_its_namespaces_health(layers: Layers) {
     let namespaces = [
         namespace("blog", &[("tier", "apps")], None),
         namespace("shop", &[("tier", "apps")], None),
@@ -125,17 +125,17 @@ fn a_parcel_takes_its_namespaces_health(layers: Layers) {
         &HashMap::new(),
     );
     let levels: Vec<(&str, &str)> = map.bands[0]
-        .parcels
+        .tiles
         .iter()
-        .map(|parcel| (parcel.namespace.as_str(), parcel.health_class()))
+        .map(|tile| (tile.namespace.as_str(), tile.health_class()))
         .collect();
-    assert_eq!(levels, vec![("blog", ""), ("shop", " parcel-failing")]);
+    assert_eq!(levels, vec![("blog", ""), ("shop", " ns-tile-failing")]);
 }
 
 #[rstest]
 #[case::a_namespace_on_the_map("dns", Some(("dns", "platform")), vec!["dns"])]
 #[case::a_namespace_not_on_the_map("gone", None, vec![])]
-fn selecting_marks_one_parcel_and_names_its_layer(
+fn selecting_marks_one_tile_and_names_its_layer(
     layers: Layers,
     #[case] select: &str,
     #[case] expected: Option<(&str, &str)>,
@@ -160,14 +160,14 @@ fn selecting_marks_one_parcel_and_names_its_layer(
             layer: layer.into(),
         })
     );
-    let selected_parcels: Vec<&str> = map
+    let selected_tiles: Vec<&str> = map
         .bands
         .iter()
-        .flat_map(|band| &band.parcels)
-        .filter(|parcel| parcel.selected)
-        .map(|parcel| parcel.namespace.as_str())
+        .flat_map(|band| &band.tiles)
+        .filter(|tile| tile.selected)
+        .map(|tile| tile.namespace.as_str())
         .collect();
-    assert_eq!(selected_parcels, marked);
+    assert_eq!(selected_tiles, marked);
 }
 
 fn related(kind: Kind, way: Way, guessed: bool) -> Relation {
@@ -175,7 +175,7 @@ fn related(kind: Kind, way: Way, guessed: bool) -> Relation {
 }
 
 #[rstest]
-fn relates_a_parcel_once_per_kind_and_way(layers: Layers) {
+fn relates_a_tile_once_per_kind_and_way(layers: Layers) {
     let namespaces = [
         namespace("blog", &[("tier", "apps")], None),
         namespace("dns", &[("tier", "platform")], None),
@@ -193,8 +193,8 @@ fn relates_a_parcel_once_per_kind_and_way(layers: Layers) {
     let relations: Vec<(&str, &[Relation])> = map
         .bands
         .iter()
-        .flat_map(|band| &band.parcels)
-        .map(|parcel| (parcel.namespace.as_str(), parcel.relations.as_slice()))
+        .flat_map(|band| &band.tiles)
+        .map(|tile| (tile.namespace.as_str(), tile.relations.as_slice()))
         .collect();
     assert_eq!(
         relations,
@@ -232,8 +232,8 @@ fn marks_each_namespace_in_a_loop(layers: Layers) {
     let looped: Vec<(&str, bool)> = map
         .bands
         .iter()
-        .flat_map(|band| &band.parcels)
-        .map(|parcel| (parcel.namespace.as_str(), parcel.looped))
+        .flat_map(|band| &band.tiles)
+        .map(|tile| (tile.namespace.as_str(), tile.looped))
         .collect();
     assert_eq!(
         looped,
@@ -257,17 +257,17 @@ fn marks_each_namespace_in_a_loop(layers: Layers) {
     "it needs +1",
     "it needs · may call it"
 )]
-fn a_parcel_says_its_first_relation_and_counts_the_rest(
+fn a_tile_says_its_first_relation_and_counts_the_rest(
     #[case] relations: Vec<Relation>,
     #[case] line: &str,
     #[case] title: &str,
 ) {
-    let parcel = Parcel {
+    let tile = NamespaceTile {
         relations,
-        ..parcel("blog", 3)
+        ..tile("blog", 3)
     };
     assert_eq!(
-        (parcel.relation().as_str(), parcel.relation_title().as_str()),
+        (tile.relation().as_str(), tile.relation_title().as_str()),
         (line, title)
     );
 }
@@ -276,6 +276,6 @@ fn a_parcel_says_its_first_relation_and_counts_the_rest(
 #[case::none(0, 1)]
 #[case::one(1, 1)]
 #[case::several(9, 9)]
-fn parcel_weight(#[case] workloads: usize, #[case] weight: usize) {
-    assert_eq!(parcel("blog", workloads).weight(), weight);
+fn tile_weight(#[case] workloads: usize, #[case] weight: usize) {
+    assert_eq!(tile("blog", workloads).weight(), weight);
 }

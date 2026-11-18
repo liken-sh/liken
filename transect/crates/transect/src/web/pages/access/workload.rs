@@ -1,6 +1,7 @@
-//! A workload's access tab: what may reach each port it serves, from
-//! the ways in the model read and the NetworkPolicies it
-//! evaluated, and what it runs as, holds, and may call.
+//! A workload's access tab. It shows each way in to the workload's
+//! ports (`ways::Way`: through an `Ingress`, a `Service`, a host port,
+//! or the machine's network), whether a `NetworkPolicy` allows it, and
+//! what the workload runs as, what it holds, and what it calls.
 
 use k8s_openapi::jiff::Timestamp;
 
@@ -22,8 +23,8 @@ use transect_map::map::section_drawing::{Look as BoxLook, SectionBox};
 use transect_observe::usage;
 use transect_resources::layers::Layers;
 
-/// The access tab of the workload `at` names, or `None` when there is no
-/// such workload or it serves no port.
+/// The access tab of the workload `at`, or `None` when there is no such
+/// workload or it serves no port.
 pub fn access_page(
     model: &Model,
     layers: &Layers,
@@ -166,8 +167,8 @@ fn scene(model: &Model, object: &Object, contents: &WorkloadContents, look: &Loo
             path,
         });
     }
-    // A `Service` that selects it and is on no way's path is drawn with
-    // its line to the ports it sends to.
+    // A `Service` that selects the workload gets a box even when no way
+    // in goes through it.
     let end = Endpoint::Object(object.clone());
     let isolation = isolation(model, object);
     for selecting in contents.graph.reaching(Kind::Selects, &end) {
@@ -211,8 +212,10 @@ fn scene(model: &Model, object: &Object, contents: &WorkloadContents, look: &Loo
     }
 }
 
-/// A way at a machine's address, named for the machine when its pods
-/// run on one, with the address its pod gives.
+/// The title, line, and link of a host port or machine network way in.
+/// When the workload's running pods are all on one machine, the box is
+/// titled with that machine and shows the pod's `hostIP`, or its first
+/// pod IP when it has no `hostIP`.
 fn machine_address(
     contents: &WorkloadContents,
     object: &Object,
@@ -262,7 +265,9 @@ fn controller_of(model: &Model, way: &ways::Way, look: &Look) -> Option<SectionB
     Some(plain(workload.name.clone(), lines, look.href(&workload)))
 }
 
-/// The place of `backend`'s `Service` among `services`, added when new.
+/// The index of `backend`'s `Service` in `services`, after adding its
+/// box when it has none. A backend with no `Service` returns 0, so
+/// callers pass only `Service` backends.
 fn service_box(
     services: &mut Vec<(Object, ServiceBox)>,
     backend: &Backend,
@@ -308,9 +313,9 @@ fn service_box(
     services.len() - 1
 }
 
-/// The workload's box: its pods and where they run.  The workload is
-/// the page, so its box opens nothing, and the one machine its pods
-/// run on, when they run on one, is a link of its own.
+/// The workload's box, with its running pods and their machines. The
+/// box has no link, because the page is the workload's own. When the
+/// pods run on one machine, the machine's name links to its page.
 fn workload_box(object: &Object, contents: &WorkloadContents) -> SectionBox {
     let workload = contents.workloads.get(object);
     let running = workload.running();

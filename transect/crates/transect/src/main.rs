@@ -34,21 +34,23 @@ const SYNC_TIMEOUT: Duration = Duration::from_secs(30);
 /// more often finds nothing new.
 const ALERTS_INTERVAL: Duration = Duration::from_secs(30);
 
-/// How often to read where Prometheus sends alerts, which changes only
-/// when an Alertmanager's pod moves.
+/// How often to read the name of the pod that runs Prometheus, which
+/// changes only when that pod is replaced.
 const PROMETHEUS_POD_INTERVAL: Duration = Duration::from_secs(60);
 
-/// How often the ingress controllers' traffic is read.  Their queries
-/// take rates over minutes, so a reading a minute old gives the same
-/// numbers.
-const FRONT_DOOR_INTERVAL: Duration = Duration::from_secs(60);
+/// How often to run the traffic queries of each `IngressController`.
+/// The queries compute rates over a window of minutes, as the `[5m]` in
+/// `examples/traefik` does, so a shorter interval changes the numbers
+/// little.
+const ENTRY_INTERVAL: Duration = Duration::from_secs(60);
 
 /// How often the bytes on each volume are read.  The kubelet measures a
 /// volume once a minute, so a reading more often finds nothing new.
 const VOLUMES_USED_INTERVAL: Duration = Duration::from_secs(60);
 
-/// Every flag also reads an environment variable, `TRANSECT_` and the
-/// flag's name in capitals, so a Deployment sets them in `env`.
+/// Every flag can also be set by an environment variable named
+/// `TRANSECT_` followed by the flag's name in capitals, with underscores
+/// for hyphens, so a Deployment can set the flags in `env`.
 #[derive(Parser)]
 #[command(about = "A live, read-only map of a Kubernetes cluster")]
 struct Args {
@@ -64,15 +66,14 @@ struct Args {
     context: Option<String>,
 
     /// The Prometheus that transect queries, such as a port-forward to
-    /// it, in place of the address that the MetricsSource resource
-    /// gives.  The queries that transect sends come from the
-    /// MetricsSource.
+    /// it, in place of the address in the MetricsSource resource.  The
+    /// queries that transect sends come from the MetricsSource.
     #[arg(long, env = "TRANSECT_PROMETHEUS", value_name = "URL", value_parser = upstream::base_url)]
     prometheus: Option<String>,
 
     /// The Alertmanager that transect reads the firing alerts from, such
-    /// as a port-forward to it, in place of the address that the alerts
-    /// section of the MetricsSource gives.  transect reads only the
+    /// as a port-forward to it, in place of the address in the alerts
+    /// section of the MetricsSource.  transect reads only the
     /// alerts that are neither silenced nor inhibited, and writes
     /// nothing to Alertmanager.
     #[arg(long, env = "TRANSECT_ALERTMANAGER", value_name = "URL", value_parser = upstream::base_url)]
@@ -113,7 +114,7 @@ struct Args {
     /// api-server for the registry that the API server's address also
     /// serves, such as the embedded registry of k3s, which transect
     /// reads with its credentials for the API.  Use this flag for a host
-    /// that does not answer as a registry from where transect runs: a
+    /// that does not respond as a registry from where transect runs: a
     /// host whose images the machines pull from a mirror, or a host
     /// whose images the machines already hold and no registry serves.
     /// Repeat the flag for several hosts, or separate the hosts with
@@ -123,7 +124,7 @@ struct Args {
     registry_mirror: Vec<(String, images::mirror::Mirror)>,
 
     /// The base URL of the log store, such as a port-forward to it, in
-    /// place of the address that its LogSource resource gives.  transect
+    /// place of the address in its LogSource resource.  transect
     /// sends the store no credentials.
     #[arg(long, env = "TRANSECT_LOG_SOURCE_URL", value_name = "URL", value_parser = upstream::base_url)]
     log_source_url: Option<String>,
@@ -134,7 +135,7 @@ struct Args {
     /// that may already read Secrets, such as a workstation's admin
     /// kubeconfig.  Without this flag, transect reads a Secret's intent
     /// from the object that writes the Secret, which the writesSecret
-    /// field of its kind knowledge names.  With or without this flag,
+    /// field of its kind knowledge identifies.  With or without this flag,
     /// transect never reads a Secret's data.
     #[arg(long, env = "TRANSECT_SECRET_ANNOTATIONS")]
     secret_annotations: bool,
@@ -183,7 +184,7 @@ impl Args {
         if !machines.is_empty() {
             tracing::warn!(
                 ?machines,
-                "drawing these machines as not ready, as --pretend-not-ready names them"
+                "drawing these machines as not ready because --pretend-not-ready lists them"
             );
         }
         cluster::Pretend::new(machines, k8s_openapi::jiff::Timestamp::now())
@@ -205,17 +206,17 @@ impl Args {
     }
 }
 
-/// The threads that run the watches, the event streams, and HTTP, which
-/// wait far more than they compute.
+/// The worker threads of the tokio runtime. jemalloc keeps a cache of
+/// freed memory for each thread that allocates, so every thread costs
+/// memory. The watches, event streams, and HTTP handlers mostly wait on
+/// the network, so a few fixed threads serve them, in place of tokio's
+/// default of one worker per core and up to 512 blocking threads.
 const WORKERS: usize = 2;
 
-/// The most threads tokio starts for blocking work, which is mostly
-/// rendering pages, and also resolving names.
+/// The most threads tokio starts for blocking work: rendering pages,
+/// and resolving host names.
 const BLOCKING: usize = 4;
 
-/// Every thread that allocates holds a cache of freed memory, so the
-/// runtime starts a fixed few threads rather than tokio's default of a
-/// worker per core and up to 512 blocking threads.
 #[global_allocator]
 static ALLOCATOR: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
@@ -237,7 +238,7 @@ async fn run() -> anyhow::Result<()> {
     let args = Args::parse();
     #[cfg(debug_assertions)]
     if args.fixture {
-        tracing::warn!("serving the fixture cluster; nothing is read from the network");
+        tracing::warn!("serving the fixture cluster, which reads nothing from the network");
         return web::serve_fixture(args.listen).await;
     }
 
@@ -251,7 +252,7 @@ async fn run() -> anyhow::Result<()> {
     tokio::time::timeout(SYNC_TIMEOUT, cluster.synced())
         .await
         .with_context(|| {
-            format!("the cluster's first list did not finish in {SYNC_TIMEOUT:?}; is the API server reachable?")
+            format!("the first list of the cluster did not finish in {SYNC_TIMEOUT:?}, check that the API server is reachable")
         })??;
     tracing::info!(namespaces = cluster.namespaces().len(), "cluster synced");
     let reads = objects::reads::Reads::new(client.clone());
@@ -262,11 +263,8 @@ async fn run() -> anyhow::Result<()> {
         Some(dir) => resources::watch(dir.clone(), cluster.change_signal()),
         None => tokio::sync::watch::channel(Default::default()).1,
     };
-    // Each domain reads its own field of the resources.
     let field = Fields(&resources);
 
-    // Every Prometheus poller queries the Prometheus that `--prometheus`
-    // names, or else the one the `MetricsSource` gives at each round.
     let reaching = metrics::Reaching::new(
         args.prometheus.clone(),
         field.of(|loaded| loaded.metrics_source.clone()),
@@ -290,7 +288,7 @@ async fn run() -> anyhow::Result<()> {
     let entry = entry::poll::poll(
         reaching.clone(),
         field.of(|loaded| loaded.ingress_controllers.clone()),
-        FRONT_DOOR_INTERVAL,
+        ENTRY_INTERVAL,
         cluster.change_signal(),
     );
     let volumes_used = metrics::poll::poll(
@@ -351,7 +349,9 @@ async fn run() -> anyhow::Result<()> {
     web::serve(args.listen, cluster, sources).await
 }
 
-/// The resources each domain reads, from the watch of every resource.
+/// Makes a `Field` from the receiver of loaded resources. The crates
+/// below this binary cannot name `Loaded`, so each one receives a
+/// function that reads its own part.
 struct Fields<'a>(&'a tokio::sync::watch::Receiver<Arc<Loaded>>);
 
 impl Fields<'_> {

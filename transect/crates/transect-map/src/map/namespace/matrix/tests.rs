@@ -1,5 +1,5 @@
-//! Tests that build the matrix from a namespace of DaemonSets on a few
-//! machines.
+//! Tests that build the matrix from a namespace with some DaemonSets on
+//! a few machines.
 
 use rstest::rstest;
 use serde::de::DeserializeOwned;
@@ -31,8 +31,9 @@ fn daemon_set(name: &str, template: &str) -> Arc<DaemonSet> {
     )))
 }
 
-/// A pod on `node` whose one container is `ready` and restarted
-/// `restarts` times, the last ten minutes before `now`.
+/// A pod on `node` with one container that is `ready` or not. The
+/// container restarted `restarts` times, the last time 10 minutes
+/// before `now()`.
 fn pod(name: &str, node: &str, ready: bool, restarts: i32) -> Pod {
     let last = if restarts > 0 {
         "lastState: {terminated: {exitCode: 1, finishedAt: '2026-01-01T11:50:00Z'}}"
@@ -73,7 +74,8 @@ impl Namespace {
         }
     }
 
-    /// A DaemonSet with `template` as YAML and `pods` as built.
+    /// A DaemonSet whose pod template is the YAML `template`, with the
+    /// pods `pods`.
     fn daemon_set(mut self, name: &str, template: &str, pods: Vec<Pod>) -> Self {
         let owner = workload("DaemonSet", name);
         for pod in pods {
@@ -119,8 +121,8 @@ impl Namespace {
 
 const RADIO: &str = "nodeSelector: {radio: usb}";
 
-/// A namespace of top owners, each `(kind, pods)`, with that many
-/// running pods.
+/// A namespace of top owners. Each `(kind, pods)` entry is an owner of
+/// that kind with that many running pods.
 fn owners(kinds: &[(&str, usize)]) -> (Vec<Object>, Vec<(Object, Pod)>) {
     let mut workloads = Vec::new();
     let mut pods = Vec::new();

@@ -1,5 +1,5 @@
-//! The words the namespace and workload cards show.  Everything else on
-//! them is a name or a number from the cluster.
+//! The text of the namespace card and the workload card. All other text
+//! on them is a name or a number from the cluster.
 
 use std::fmt;
 
@@ -10,20 +10,23 @@ use transect_observe::health::Level;
 use transect_resources::knowledge::age;
 
 impl NamespaceCard {
-    /// The namespace's health in a word.
+    /// A word for the namespace's health.
     pub fn health_word(&self) -> &'static str {
         health_word(self.health.level)
     }
 
-    /// The count of the namespace's volumes, or none when it has none.
+    /// The text for the number of volumes in the namespace, or `None`
+    /// when there are none.
     pub fn volumes_text(&self) -> Option<String> {
         (self.volumes > 0).then(|| transect_ground::storage::volumes(self.volumes))
     }
 }
 
 impl WorkloadCard {
-    /// Beside the health dot: "3 of 3 ready", or the health in a word
-    /// for a workload whose pods finish, such as a CronJob.
+    /// The text beside the health dot, such as "3 of 3 ready". A
+    /// workload with no running pods says so, with how its last job
+    /// ended. A workload with no ready count, such as a CronJob, gets a
+    /// word for its health.
     pub fn status_text(&self) -> String {
         match self.idle {
             Some(Idle::Unrun) => return "no running pods".into(),
@@ -40,8 +43,8 @@ impl WorkloadCard {
         }
     }
 
-    /// When it last rolled, as "4d ago", under the Runs box's "rolled"
-    /// heading.
+    /// How long ago the workload last rolled out, such as "4d ago". The
+    /// Runs box shows it under its "rolled" heading.
     pub fn rolled_ago(&self) -> Option<String> {
         self.rolled.map(|minutes| format!("{} ago", age(minutes)))
     }

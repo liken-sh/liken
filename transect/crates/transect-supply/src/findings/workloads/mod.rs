@@ -1,11 +1,10 @@
-//! The workload findings: a workload that runs more than one pod and
-//! lacks a guard that is worth having because the workload has several
-//! pods.
+//! Findings about a workload that runs more than one pod and has no
+//! readiness probe or no disruption budget.
 //!
-//! The workload page and card show each finding about one workload.
-//! The cluster sidebar shows one count per rule instead, because a
-//! cluster can have dozens of these, and a card for each would make the
-//! namespaces that need attention now hard to find.
+//! The workload page and card list each finding about that workload.
+//! The cluster sidebar shows one count for each rule instead, because a
+//! cluster can have dozens of these findings, and a card for each would
+//! hide the namespaces that need attention now.
 
 mod sentence;
 
@@ -14,9 +13,10 @@ use transect_ground::guards::Guards;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Rule {
-    /// Its `Service` sends requests to a new pod as soon as it starts.
+    /// A `Service` can send requests to its pods before they are ready.
     NoReadinessProbe,
-    /// Nothing limits how many of its pods can be evicted at once.
+    /// No `PodDisruptionBudget` limits how many of its pods a drain can
+    /// evict at once.
     NoDisruptionBudget,
 }
 
@@ -42,8 +42,8 @@ pub fn of_workload(guards: &Guards, replicas: i32) -> Vec<WorkloadFinding> {
         .collect()
 }
 
-/// The workloads each rule found, in the rules' order, each by
-/// namespace and name, leaving out a rule that found none.
+/// The workloads that each rule found, in the order of `Rule`, each
+/// rule's workloads sorted.  A rule that found none is left out.
 pub fn counts(
     findings: impl IntoIterator<Item = (WorkloadFinding, Linked)>,
 ) -> Vec<(Rule, Vec<Linked>)> {

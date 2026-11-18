@@ -1,6 +1,6 @@
-//! The words of the findings about running images: those with no source
-//! label, and those whose labels transect cannot read, each listed by
-//! registry.
+//! The text of two findings about running images: images with no source
+//! label, and images whose labels transect cannot read.  Each finding
+//! lists its images by registry.
 
 use crate::images::labels::{REVISION, SOURCE};
 use crate::images::{Gap, Unreadable};
@@ -19,7 +19,8 @@ pub fn unlabelled_body() -> String {
     )
 }
 
-/// "3 of the 18 images read", after the registry's name.
+/// The line for one registry, shown after its name, as "3 of the 18
+/// images read".
 pub fn gap_line(gap: &Gap) -> String {
     format!("{} of the {} images read", gap.unlabelled, gap.read)
 }
@@ -46,8 +47,9 @@ pub fn unreadable_body() -> &'static str {
     "Their containers show no commit until transect can read them. It tries each again later, waiting longer after each failure."
 }
 
-/// "2 images: the registry wants credentials transect does not have",
-/// and "read from the mirror …" when transect read a mirror.
+/// The line for one registry and one failure, as "2 images: the registry
+/// requires credentials that transect does not have".  When transect
+/// read from a mirror, the line ends with ", read from" and the mirror.
 pub fn unreadable_line(found: &Unreadable) -> String {
     let images = match found.images {
         1 => "1 image".to_string(),
@@ -89,12 +91,12 @@ mod tests {
         vec![gap("registry.example", 3, 4), gap("other.example", 2, 9)],
         "5 running images have no source label"
     )]
-    fn titles_the_unlabelled(#[case] gaps: Vec<Gap>, #[case] title: &str) {
+    fn writes_the_unlabelled_title(#[case] gaps: Vec<Gap>, #[case] title: &str) {
         assert_eq!(unlabelled_title(&gaps), title);
     }
 
     #[rstest]
-    fn lines_a_registrys_gap() {
+    fn writes_a_registrys_gap_line() {
         assert_eq!(
             gap_line(&gap("registry.example", 3, 18)),
             "3 of the 18 images read"
@@ -120,25 +122,25 @@ mod tests {
         ],
         "transect cannot read image labels from 2 registries"
     )]
-    fn titles_the_unreadable(#[case] found: Vec<Unreadable>, #[case] title: &str) {
+    fn writes_the_unreadable_title(#[case] found: Vec<Unreadable>, #[case] title: &str) {
         assert_eq!(unreadable_title(&found), title);
     }
 
     #[rstest]
     #[case::one(
         unreadable("pages.example", 1, Failure::NotARegistry),
-        "1 image: the host does not answer as a registry"
+        "1 image: the host does not respond as a registry"
     )]
     #[case::several(
         unreadable("private.example", 3, Failure::NeedsCredentials),
         "3 images: the registry requires credentials that transect does not have"
     )]
-    fn lines_a_registrys_failure(#[case] found: Unreadable, #[case] line: &str) {
+    fn writes_a_registrys_failure_line(#[case] found: Unreadable, #[case] line: &str) {
         assert_eq!(unreadable_line(&found), line);
     }
 
     #[rstest]
-    fn names_the_mirror_it_read() {
+    fn names_the_mirror_that_transect_read() {
         let found = Unreadable {
             mirror: Some("the mirror https://mirror.example".into()),
             ..unreadable("images.example", 2, Failure::NotFound)

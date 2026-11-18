@@ -1,5 +1,6 @@
-//! The access lens's pages, from the access the model reduced and the
-//! pages and intent of the objects they name.
+//! The pages of the access lens. They are built from the model's
+//! reduced RBAC access and from the pages and intent of the objects
+//! that they mention.
 
 use std::collections::BTreeSet;
 
@@ -27,8 +28,8 @@ use transect_graph::edges::{Endpoint, Kind, Object, Shown};
 use transect_network::policy::{NamespaceReach, Reach};
 pub use workload::access_page;
 
-/// Whether the workload `namespace/name` of the kind `resource` names
-/// serves a port, and so has an access tab.
+/// Whether the workload `namespace/name` of the kind `resource` serves
+/// a port. Only a workload that does has an access tab.
 pub fn has_access(model: &Model, namespace: &str, resource: &str, name: &str) -> bool {
     let snapshot = &model.snapshot;
     let mut owners = snapshot.ownership.workloads(namespace);
@@ -40,7 +41,7 @@ pub fn has_access(model: &Model, namespace: &str, resource: &str, name: &str) ->
     })
 }
 
-/// `/access/accounts`: what each account may do, and where.
+/// The page at `/access/accounts`: what each account may do, and where.
 pub fn accounts_page(model: &Model) -> AccountsPage {
     let snapshot = &model.snapshot;
     let names = look::Look::new(model);
@@ -53,7 +54,8 @@ pub fn accounts_page(model: &Model) -> AccountsPage {
     AccountsPage::build(&model.access, &look)
 }
 
-/// `/access`: every way in, with the gates on the way to it.
+/// The page at `/access`: every way into the cluster, with the network
+/// policies and sign-ins that each one passes through.
 pub fn ways_page(model: &Model) -> WaysPage {
     let snapshot = &model.snapshot;
     let allowed = model.allowed(&Shown::default());
@@ -72,7 +74,8 @@ pub fn ways_page(model: &Model) -> WaysPage {
     WaysPage::build(&model.ways(), look)
 }
 
-/// Every way in, read from the model's snapshot.
+/// Every way into the cluster from outside, read from the model's
+/// snapshot.
 pub fn read_ways(model: &Model) -> Ways {
     let snapshot = &model.snapshot;
     let graph = model.graph(&Shown::default());
@@ -88,9 +91,9 @@ pub fn read_ways(model: &Model) -> Ways {
         objects(graph.leaving(Kind::Selects, &Endpoint::Object(service.clone())))
     };
     let sign_ins = snapshot.route_sign_ins();
-    // The workloads that the routes' sign-in objects check each request
-    // with before it passes.  A route to one of these workloads alone is
-    // the sign-in's own callback.
+    // The workloads that the routes' sign-in objects authenticate
+    // through. A route that reaches only one of these workloads is the
+    // sign-in's own callback.
     let signs_in: BTreeSet<Object> = sign_ins
         .values()
         .flatten()

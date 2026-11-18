@@ -10,10 +10,9 @@ use super::Machine;
 use transect_graph::edges::{Edge, Endpoint, Graph, Kind, Object, Provenance};
 use transect_graph::pods::finished;
 
-/// An edge for each pod bound to a machine that has not finished, which
-/// includes a `Pending` pod the scheduler has placed.  A pod that
-/// Succeeded or Failed has stopped, so it runs nowhere and gets no
-/// edge.  The strip's own pod count leaves out the same pods.
+/// An edge for each unfinished pod that is bound to a machine, including
+/// a `Pending` pod that the scheduler has bound.  A pod that `Succeeded`
+/// or `Failed` gets no edge, which matches the strip's own pod count.
 pub fn runs_on<'a>(pods: impl IntoIterator<Item = &'a Pod>) -> Vec<Edge> {
     pods.into_iter()
         .filter(|pod| !finished(pod))
@@ -51,10 +50,9 @@ pub fn count_here(machines: &mut [Machine], graph: &Graph, namespace: &str) {
 }
 
 impl Machine {
-    /// The text that the strip shows after its pod count, which counts
-    /// the selected namespace's pods on this machine.  The text is short
-    /// so it fits beside the count.  The function returns `None` when
-    /// nothing is selected.
+    /// The number of the selected namespace's pods on this machine, as the
+    /// strip shows it beside the machine's pod count, or `None` when no
+    /// namespace is selected.
     pub fn here_text(&self) -> Option<String> {
         match self.here? {
             0 => Some("none here".into()),
@@ -88,10 +86,7 @@ mod tests {
     #[case::not_scheduled(pod("shop", "web", None, "Pending"), vec![])]
     #[case::succeeded(pod("shop", "web", Some("alpha"), "Succeeded"), vec![])]
     #[case::failed(pod("shop", "web", Some("alpha"), "Failed"), vec![])]
-    fn a_pod_runs_on_its_machine_while_it_holds_resources(
-        #[case] pod: Pod,
-        #[case] edges: Vec<Edge>,
-    ) {
+    fn a_pod_runs_on_its_machine_until_it_finishes(#[case] pod: Pod, #[case] edges: Vec<Edge>) {
         assert_eq!(runs_on([&pod]), edges);
     }
 
@@ -137,7 +132,7 @@ mod tests {
     }
 
     #[rstest]
-    fn nothing_selected_has_no_tag() {
+    fn no_selected_namespace_gives_no_here_text() {
         assert_eq!(machine("alpha").here_text(), None);
     }
 }

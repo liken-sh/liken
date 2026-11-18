@@ -1,24 +1,23 @@
-//! The allowed-to-call relation.  This module evaluates each built-in
-//! `NetworkPolicy` to find which pods may call which, and reports the
-//! result for each top owner and for each namespace.
+//! Evaluates each `networking.k8s.io/v1` `NetworkPolicy` to find which
+//! pods may call which, and reports the result for each top owner and
+//! each namespace.
 //!
 //! A pod may reach another on a port when the target's ingress rules
-//! and the caller's egress rules both admit it.  When no policy of a
-//! direction selects a pod, the pod is open in that direction, so the
-//! module lists callers only for a target that some policy isolates
-//! for ingress.  Any pod may call every other target, and the summary
-//! states that instead of listing every workload in the cluster.  The
-//! module reads only the `networking.k8s.io/v1` `NetworkPolicy` and
+//! and the caller's egress rules both admit it. A pod that no policy
+//! selects for a direction is open in that direction. So the module
+//! lists callers only for a target that some policy isolates for
+//! ingress. For every other target it reports that any pod may call
+//! it, instead of listing every workload in the cluster. The module
 //! does not read a CNI's own policy kinds, so on a cluster that uses
 //! them this view allows more than the network does.
 //!
-//! The module reads only the API, so an address block matches a pod by
-//! the addresses in the pod's status.  A pod on its machine's network
-//! has its machine's address there, and its calls come from that
-//! address.  So a pod selector or a namespace selector does not admit
-//! it as a caller, and a block that contains the address does.  No
-//! `NetworkPolicy` selects such a pod, in either direction, so nothing
-//! limits who calls it or what it calls.
+//! The module reads only the API, so it matches an address block
+//! against the addresses in a pod's status. A pod that uses its
+//! machine's network has its machine's address there, and its calls
+//! come from that address. So a pod selector or namespace selector
+//! never admits it as a caller, and a block that contains the address
+//! does. No `NetworkPolicy` applies to such a pod in either direction,
+//! so nothing limits who calls it or what it calls.
 
 mod admission;
 mod card;
@@ -73,9 +72,10 @@ pub enum Reach {
 pub enum NamespaceReach {
     /// No policy isolates any of its pods.
     Open,
-    /// Policy isolates some of its workloads and leaves these open: in
-    /// `open` no policy selects a pod, and in `machine_network` the pods
-    /// are on their machine's network, where none applies.
+    /// Policy isolates some of the namespace's workloads but not all.
+    /// `open` lists each workload with a pod that no ingress policy
+    /// selects, and `machine_network` each workload with a pod on its
+    /// machine's network.
     Partly {
         open: Vec<Object>,
         machine_network: Vec<Object>,
@@ -85,27 +85,30 @@ pub enum NamespaceReach {
     Isolated(BTreeSet<String>),
 }
 
+/// The result of evaluating the policies of a cluster.
 #[derive(Debug, Default)]
 pub struct Allowed {
-    /// Each workload with a pod or a template, by top owner.
+    /// The `Reach` of each workload with a pod or a template, by top
+    /// owner.
     reach: HashMap<Object, Reach>,
     /// The workloads with a pod or a template in each namespace, sorted.
     workloads: BTreeMap<String, BTreeSet<Object>>,
     /// The other namespaces whose pods may call each namespace's
     /// isolated workloads.
     callers: HashMap<String, BTreeSet<String>>,
-    /// The namespaces some rule admits whole to each isolated workload,
-    /// with no pod selector or an empty one.  A card shows "every pod
-    /// in" a namespace only for these, because a selector that matches
-    /// every pod of a namespace today admits none of the pods added
-    /// later.
+    /// For each isolated workload, the namespaces whose every pod some
+    /// rule admits, with no pod selector or an empty one. A card says
+    /// "every pod in" a namespace only for these, because a selector
+    /// that matches every current pod of a namespace may not match pods
+    /// added later.
     whole: HashMap<Object, BTreeSet<String>>,
-    /// The ports on which some rule admits every namespace to each
-    /// isolated workload it admits any to.
+    /// For each isolated workload, the ports on which some rule admits
+    /// every pod of every namespace. A workload with no such port has no
+    /// entry.
     everywhere: HashMap<Object, Ports>,
     /// The rules that admit callers to each isolated workload.
     admissions: HashMap<Object, Vec<Admission>>,
-    /// The policies that limit each workload's calls out.
+    /// The policies that limit each workload's calls out, by name.
     limits_out: HashMap<Object, BTreeSet<String>>,
     /// The policies that limit each workload's calls in, by name.
     limits_in: HashMap<Object, BTreeSet<String>>,
@@ -134,10 +137,11 @@ impl Allowed {
                 .or_default();
             owners.insert(member.owner.clone());
         }
-        // Members are sorted by owner, so each owner's members are
-        // contiguous, and the index of the first identifies the owner.
-        // The loop gathers callers by those indexes, and names each
-        // caller once for each pair of owners.
+        // Members are sorted by owner, so the members of one owner are
+        // adjacent. `first[i]` is the index of the first member with
+        // member `i`'s owner. The loops below key each owner by that
+        // index, so the callers of all of an owner's pods merge into
+        // one entry for each calling owner.
         let first: Vec<usize> = (0..members.len())
             .scan(0, |first, index| {
                 if members[index].owner != members[*first].owner {
@@ -286,7 +290,7 @@ impl Allowed {
     }
 
     /// Whether a rule admits every namespace to `workload` on each of
-    /// `ports`.
+    /// `ports`. Returns false when `ports` is empty.
     pub fn admits_every_namespace(&self, workload: &Object, ports: &Ports) -> bool {
         let Some(everywhere) = self.everywhere.get(workload) else {
             return false;
@@ -301,8 +305,7 @@ impl Allowed {
         workloads.any(|workload| self.everywhere.contains_key(workload))
     }
 
-    /// The workloads with a pod or a template in `namespace`, which a
-    /// card reads to state that a whole namespace may call.
+    /// The workloads with a pod or a template in `namespace`.
     pub fn workloads(&self, namespace: &str) -> impl Iterator<Item = &Object> {
         self.workloads.get(namespace).into_iter().flatten()
     }
@@ -313,8 +316,8 @@ impl Allowed {
     }
 
     /// An allowed-to-call edge from each workload to each isolated
-    /// workload it may call.  An open workload gets none, because every
-    /// workload may call it.
+    /// workload that it may call. A workload that is not isolated gets no
+    /// edges, because any pod may call it.
     pub fn edges(&self) -> Vec<Edge> {
         let mut edges = Vec::new();
         for (target, reach) in &self.reach {
@@ -337,8 +340,10 @@ impl Allowed {
     }
 }
 
-/// The callers of one target, or of one target workload's members
-/// together: other members, by index, and callers outside the cluster.
+/// The callers of one target workload, merged across its members.
+/// `pods` keys each calling workload by the index of its first member.
+/// `outside` holds the address blocks and `Caller::Anything`, which are
+/// not members.
 #[derive(Default)]
 struct Gathered {
     admissions: BTreeSet<Admission>,
@@ -348,14 +353,14 @@ struct Gathered {
     everywhere: Ports,
 }
 
-/// The callers of one member.
+/// The callers of one member, by index into the members.
 struct Found {
     admissions: Vec<Admission>,
     pods: Vec<(usize, Ports)>,
     outside: Vec<(Caller, Ports)>,
-    /// The namespaces a rule admits whole.
+    /// The namespaces whose every pod a rule admits.
     whole: BTreeSet<String>,
-    /// The ports on which a rule admits every namespace whole.
+    /// The ports on which a rule admits every pod of every namespace.
     everywhere: Ports,
 }
 
@@ -371,8 +376,8 @@ fn callers(compiled: &Compiled, members: &[Member], target: usize) -> Found {
     let mut whole = BTreeSet::new();
     let mut everywhere = Ports::none();
     let named = &members[target].named;
-    // Most rules admit a few members, so the map has an entry only for
-    // the members that a rule admits.
+    // A map keyed by member index, because most rules admit few
+    // members.
     let mut admitted: BTreeMap<usize, Ports> = BTreeMap::new();
     let mut admissions = Vec::new();
     let owner = &members[target].owner;

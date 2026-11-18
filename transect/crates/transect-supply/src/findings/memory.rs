@@ -1,32 +1,31 @@
 //! The memory findings: pods that use more than they requested, on each
 //! machine, and pods that request no memory, across the cluster.
 //!
-//! The two are separate because they have separate fixes.  A pod over a
-//! request it set needs a larger request; a pod with no request needs
-//! one at all.  Counting both together would make the per-machine
-//! finding show on nearly every machine, mostly because of pods that set
-//! no request.
+//! They are separate findings because the fixes differ.  A pod over a
+//! request it set needs a larger request, and a pod with no request
+//! needs a request.  A pod with no request has a request of zero, so
+//! counting those pods in the per-machine finding would list nearly
+//! every machine.
 
 use super::{Finding, Overage};
 use transect_ground::machines::{Machine, PodMemory};
 
-/// How far the pods on one machine that set a memory request may use
-/// memory past those requests, together, before it is worth knowing.
-/// Small pods drift a few Mi past small requests all the time, and
-/// without a floor the finding would show on most machines most of the
-/// time.
+/// A machine is listed when the pods on it that set a memory request use,
+/// in total, at least this much more than they requested.  Small pods
+/// often use a few Mi over a small request, and without this floor most
+/// machines would be listed.
 pub const OVER_REQUESTS_BYTES: f64 = (256u64 << 20) as f64;
 
-/// The working set at which a pod that requests no memory is worth
-/// knowing about.  Most such pods are small helpers using a few Mi, and
-/// the scheduler's error for those is too small to matter.
+/// The memory use at which a pod that requests no memory counts as
+/// heavy.  Most such pods are small helpers that use a few Mi, so the
+/// scheduler's underestimate for them is too small to matter.
 pub const HEAVY_UNREQUESTED_BYTES: f64 = (64u64 << 20) as f64;
 
-/// One finding naming every machine whose pods with a memory request use
-/// at least `OVER_REQUESTS_BYTES` past those requests, the largest excess
-/// first, or none when no machine does.  The rule needs a reading of what
-/// each pod uses, so transect never makes this finding when it runs with
-/// no Prometheus.
+/// One finding that lists every machine whose pods with a memory request
+/// use at least `OVER_REQUESTS_BYTES` past those requests, the largest
+/// excess first, or `None` when no machine does.  The rule needs each
+/// pod's memory use, so transect makes no such finding when it has no
+/// Prometheus.
 pub fn over_memory_requests(machines: &[Machine]) -> Option<Finding> {
     let mut over: Vec<Overage> = machines.iter().filter_map(over_on_machine).collect();
     over.sort_by(|a, b| b.excess.total_cmp(&a.excess));
@@ -49,9 +48,9 @@ fn over_on_machine(machine: &Machine) -> Option<Overage> {
 }
 
 /// One finding for the whole cluster when any pod that requests no
-/// memory uses `HEAVY_UNREQUESTED_BYTES` or more.  It counts every such
-/// pod, with a reading or without, so the title shows the real size of
-/// the problem even when only a few of the pods are heavy.
+/// memory uses `HEAVY_UNREQUESTED_BYTES` or more.  It counts every pod
+/// that requests no memory, whether or not its use is known, so the
+/// title shows how many pods have the problem even when few are heavy.
 pub fn requesting_no_memory(machines: &[Machine]) -> Option<Finding> {
     let unrequested: Vec<&PodMemory> = machines
         .iter()

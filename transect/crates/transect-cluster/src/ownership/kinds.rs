@@ -1,5 +1,6 @@
-//! Which owner kinds are custom, and which of those need a watch so the
-//! walk can pass through them.
+//! Separates custom owner kinds from built-in ones, and lists the
+//! custom kinds that need a watch so that an owner chain can be
+//! followed through them.
 
 use std::collections::BTreeMap;
 
@@ -7,27 +8,31 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
 
 use transect_graph::edges::Object;
 
-/// The API groups whose kinds `transect` already watches or never needs
-/// to: the core group, and the groups of the built-in workloads.
+/// The core group and the groups of the built-in workloads. An owner
+/// kind of these groups needs no custom watch, because `transect`
+/// already watches it or never follows an owner chain through it.
 const BUILT_IN_GROUPS: [&str; 3] = ["", "apps", "batch"];
 
-/// The group of an `apiVersion`: `apps` of `apps/v1`, and the empty core
-/// group of `v1`.
+/// The group of an `apiVersion`: `apps` for `apps/v1`, and the empty
+/// core group for `v1`.
 pub fn group_of(api_version: &str) -> &str {
     api_version
         .rsplit_once('/')
         .map_or("", |(group, _version)| group)
 }
 
-/// Whether `object` is of a kind a `CustomResourceDefinition` or an
-/// aggregated API serves, rather than one of Kubernetes's own.
+/// Whether `object`'s group is outside `BUILT_IN_GROUPS`. A kind of
+/// another built-in group, such as `networking.k8s.io`, counts as
+/// custom too.
 pub fn custom(object: &Object) -> bool {
     !BUILT_IN_GROUPS.contains(&object.group.as_str())
 }
 
-/// The custom kinds `owners` name, by group and kind, each with the
-/// first `apiVersion` an owner reference gave it.  The version is only
-/// what discovery is asked for; one watch serves a kind in every version.
+/// The custom kinds that `owners` refer to, by group and kind, each with
+/// the first `apiVersion` that an owner reference gave it. The version
+/// is only for API discovery to look the kind up. A kind gets one watch
+/// even when owner references use several versions, because a watch at
+/// one version returns every object of the kind.
 pub fn kinds_to_watch<'a>(
     owners: impl IntoIterator<Item = &'a OwnerReference>,
 ) -> BTreeMap<(String, String), String> {

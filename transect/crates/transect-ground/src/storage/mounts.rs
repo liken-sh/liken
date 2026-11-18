@@ -1,7 +1,7 @@
 //! The claims that one workload mounts, for the last column of the
 //! workload page.  The column lists each claim with its size, grouped
-//! under the backend that stores its data, so the column shows the path
-//! from the pods down to the ground.
+//! by the volume that stores its data, so that it shows the path from
+//! the pods to the storage.
 
 use k8s_openapi::api::core::v1::{Pod, PodSpec};
 
@@ -32,7 +32,7 @@ pub enum Sharing {
     /// Each claim belongs to one pod, as with the claims that a
     /// `StatefulSet`'s claim templates create.
     PerPod,
-    /// One pod, or a mix of the two.
+    /// One pod or none, no claims, or a mix of shared and per-pod claims.
     Neither,
 }
 
@@ -49,9 +49,9 @@ impl Mounts {
 }
 
 /// The claims that `pods` mount in `namespace`, or, when there is no
-/// pod, the claims that `templates` name.  A template's ephemeral volume
-/// is left out, because its claim is named for a pod that does not exist
-/// yet.
+/// pod, the claims in `templates`.  A template's ephemeral volume is
+/// left out, because its claim is named after a pod that does not
+/// exist yet.
 pub fn mounts(storage: &Storage, namespace: &str, pods: &[&Pod], templates: &[&PodSpec]) -> Mounts {
     let per_pod: Vec<Vec<Claim>> = if pods.is_empty() {
         let templates = templates
@@ -91,15 +91,14 @@ pub fn mounts(storage: &Storage, namespace: &str, pods: &[&Pod], templates: &[&P
             }),
         }
     }
-    // Claims with no volume to store their data yet go last, below the
-    // groups that have a volume.
+    // The group with no volume sorts last.
     groups.sort_by_key(|group| group.volume.is_none());
     Mounts { groups, sharing }
 }
 
-/// The claims `pod` mounts.  An ephemeral volume's claim is named for
-/// the pod and the volume, as Kubernetes' ephemeral volume controller
-/// names it.
+/// The claims `pod` mounts.  The claim of an ephemeral volume is named
+/// `<pod name>-<volume name>`, as Kubernetes' ephemeral volume
+/// controller names it.
 pub fn pod_claims(pod: &Pod, namespace: &str, name: &str) -> Vec<Claim> {
     let volumes = pod.spec.as_ref().and_then(|spec| spec.volumes.as_ref());
     volumes
@@ -155,7 +154,7 @@ mod tests {
         Some(Volume {
             backend: Backend::Address("nas.example.com".into()),
             kind: Type::Nfs,
-            stated: None,
+            declared_in: None,
         })
     }
 
@@ -163,7 +162,7 @@ mod tests {
         Some(Volume {
             backend: Backend::Driver("csi.example.com".into()),
             kind: Type::Class("fast".into()),
-            stated: None,
+            declared_in: None,
         })
     }
 

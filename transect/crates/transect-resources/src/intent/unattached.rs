@@ -1,20 +1,19 @@
-//! Lists of intent written where they draw nothing.  A `depends-on` or
-//! `authenticates-through` list draws edges only from a workload, or
-//! from a `ConfigMap` its workloads read; on a `Service`, a `Namespace`,
-//! or any other object, it is read and then ignored.  A list an overlay
-//! or an `Intent` resource wrote gets a condition on that resource, so
-//! the person who wrote it learns it draws nothing.  A list in the live
-//! object's own annotation gets no condition, because `transect` has no
-//! resource of its own to put the condition on.
+//! Reports a `depends-on` or `authenticates-through` list that
+//! `transect` ignores. Such a list produces edges only on a workload, or
+//! on a `ConfigMap` that a workload reads. When an overlay or an
+//! `Intent` wrote the list on any other object, such as a `Service`,
+//! `transect` sets a condition on that overlay or `Intent`, so its
+//! author learns that the list has no effect. A list in the object's
+//! own annotation gets no condition, because there is no `transect`
+//! resource to set it on.
 
-use super::{Intent, Listed, Said};
+use super::{Intent, Listed, ObjectIntent};
 use crate::resources::{Condition, DocId, Overlay};
 use transect_graph::edges::{Object, Provenance, Stated};
 
-/// One list field of what intent states about an object.
-type Field = fn(&Said) -> Option<&Listed>;
+type Field = fn(&ObjectIntent) -> Option<&Listed>;
 
-/// The list fields that draw edges, by their names.
+/// The list fields, by their annotation names.
 const LISTS: [(&str, Field); 2] = [
     ("depends-on", |said| said.depends_on.as_ref()),
     ("authenticates-through", |said| {
@@ -22,11 +21,11 @@ const LISTS: [(&str, Field); 2] = [
     }),
 ];
 
-/// A condition for each list among `said` that is on an object
-/// `attaches` reports draws no edges, on the overlay or `Intent` that
-/// wrote it, among `overlays` and `intents`.
+/// A condition for each list in `said` on an object for which
+/// `attaches` returns false, set on the overlay or `Intent` in `written`
+/// that wrote the list.
 pub fn unattached<'a>(
-    said: impl IntoIterator<Item = (&'a Object, &'a Said)>,
+    said: impl IntoIterator<Item = (&'a Object, &'a ObjectIntent)>,
     written: Written,
     attaches: impl Fn(&Object) -> bool,
 ) -> Vec<(DocId, Condition)> {
@@ -39,7 +38,7 @@ pub fn unattached<'a>(
             let Some(listed) = list(said) else {
                 continue;
             };
-            let Some(doc) = written.by(&listed.provenance, object) else {
+            let Some(doc) = written.writer_of(&listed.provenance, object) else {
                 continue;
             };
             let message = format!(
@@ -52,8 +51,8 @@ pub fn unattached<'a>(
     conditions
 }
 
-/// The resources of `transect`'s that write intent: the overlays and the
-/// Intents.
+/// The `transect` resources that can write intent: the overlays and the
+/// `Intent` resources.
 #[derive(Clone, Copy)]
 pub struct Written<'a> {
     pub overlays: &'a [Overlay],
@@ -61,14 +60,16 @@ pub struct Written<'a> {
 }
 
 impl Written<'_> {
-    /// The document of `transect`'s that wrote a list about `object`: the
-    /// overlay of that object in the file, or the `Intent` of that name.
-    fn by(self, provenance: &Provenance, object: &Object) -> Option<DocId> {
+    /// The document that wrote a list on `object`: the overlay for
+    /// `object` in the file that `provenance` records, or the `Intent`
+    /// that it gives by namespace and name. `None` for any other
+    /// provenance, such as the object's own annotation.
+    fn writer_of(self, provenance: &Provenance, object: &Object) -> Option<DocId> {
         match provenance {
             Provenance::Intent(Stated::Overlay { file, .. }) => self
                 .overlays
                 .iter()
-                .find(|overlay| &overlay.file == file && overlay.names(object))
+                .find(|overlay| &overlay.file == file && overlay.is_for(object))
                 .map(|overlay| overlay.doc),
             Provenance::Intent(Stated::Resource { name, .. }) => self
                 .intents
@@ -142,11 +143,11 @@ mod tests {
         })
     }
 
-    fn said(depends_on: Option<Listed>, authenticates_through: Option<Listed>) -> Said {
-        Said {
+    fn said(depends_on: Option<Listed>, authenticates_through: Option<Listed>) -> ObjectIntent {
+        ObjectIntent {
             depends_on,
             authenticates_through,
-            ..Said::default()
+            ..ObjectIntent::default()
         }
     }
 
@@ -165,7 +166,7 @@ mod tests {
     #[case::on_an_object_that_attaches(said(Some(by_overlay("depends-on")), None), true, vec![])]
     #[case::no_list(said(None, None), false, vec![])]
     fn says_where_a_list_draws_nothing(
-        #[case] said: Said,
+        #[case] said: ObjectIntent,
         #[case] attaches: bool,
         #[case] expected: Vec<(DocId, &str)>,
     ) {

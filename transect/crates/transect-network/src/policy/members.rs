@@ -1,23 +1,20 @@
-//! The pods that policy is evaluated over, grouped into members.  A
-//! member is the pods of one top owner that have the same labels.
+//! Groups pods into the members that `NetworkPolicy` is evaluated over.
+//! A member is the pods of one top owner that have the same labels.
 //!
-//! Every selector in a policy reads labels and namespaces, so pods of
-//! one workload with the same labels match the same rules, and the
-//! evaluation runs once for each member instead of once for each pod.
-//! A selector reads only the label keys it names, so before the pods
-//! are grouped, each pod's labels are reduced to the keys that some
-//! policy's pod selector names.  Without that step, the label that a
-//! `StatefulSet` or a `Job` sets on each pod with the pod's own name
-//! would make each pod a member, and the evaluation, which compares
-//! members in pairs, would grow with pairs of pods.  Only an `ipBlock`
-//! reads a pod's own address, so a member keeps every address its pods
-//! have, and a block matches the member when it contains any of them.
+//! A selector matches labels and namespaces, so pods of one workload
+//! with the same labels match the same rules, and the evaluation runs
+//! once for each member instead of once for each pod.
+//!
+//! Before the pods are grouped, each pod's labels are reduced to the
+//! keys that some policy's pod selector names. Without that step, a
+//! label that a `StatefulSet` or `Job` sets to each pod's own name would
+//! make every pod its own member. A member keeps the addresses of all
+//! its pods, so an `ipBlock` can match it by any of them.
 //!
 //! A workload with no running pod, such as a `CronJob` between runs or
-//! a `Deployment` scaled to zero, is a member by its pod template's
-//! labels, with no address.  Its pods will match the same selectors
-//! when they run, and a backup job that calls a database is a caller
-//! that a card should list between its runs too.
+//! a `Deployment` scaled to zero, is still a member, with the labels of
+//! its pod template and no address. So a card lists a backup `CronJob`
+//! that calls a database as a caller between its runs too.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
@@ -40,15 +37,14 @@ pub struct Member {
     pub namespace: String,
     pub labels: BTreeMap<String, String>,
     pub addresses: Vec<IpAddr>,
-    /// The ports its containers name, which a rule's named port
-    /// resolves to when a connection reaches it.
+    /// The named container ports, which resolve a rule's named port.
     pub named: Vec<NamedPort>,
-    /// Whether its pods are on their machine's network, where no
+    /// Whether its pods use the host network (`hostNetwork`), where no
     /// `NetworkPolicy` selects them.
     pub host_network: bool,
 }
 
-/// A workload's pod templates, which make it a member when it has no
+/// A workload's pod templates, used to make it a member when it has no
 /// running pod.
 pub struct Idle<'a> {
     pub owner: &'a Object,
@@ -56,8 +52,8 @@ pub struct Idle<'a> {
     pub specs: Vec<&'a PodSpec>,
 }
 
-/// The label keys any pod selector of `policies` names, in the pods a
-/// policy applies to or in its peers.
+/// The label keys that any pod selector of `policies` names, whether in
+/// the selector of the pods a policy applies to or in a peer.
 pub fn read_keys<'a>(policies: &[&'a NetworkPolicy]) -> BTreeSet<&'a str> {
     let mut keys = BTreeSet::new();
     for spec in policies.iter().filter_map(|policy| policy.spec.as_ref()) {
@@ -83,8 +79,7 @@ fn named_keys(selector: &LabelSelector) -> impl Iterator<Item = &str> {
         .map(String::as_str)
 }
 
-/// `labels` reduced to the keys in `keys`.
-fn read<'a>(
+fn only_keys<'a>(
     labels: impl IntoIterator<Item = (&'a String, &'a String)>,
     keys: &BTreeSet<&str>,
 ) -> BTreeMap<String, String> {
@@ -95,10 +90,10 @@ fn read<'a>(
         .collect()
 }
 
-/// The members of `pods`, then of each of `idle` that has none, with
-/// only the labels in `keys`.  A pod that has finished, such as a
-/// `Job`'s, has no address that a connection could reach, so the
-/// function omits it.
+/// The members of `pods`, plus a member for each of `idle` that has no
+/// pod in `pods`. Members keep only the labels in `keys`. A finished
+/// pod, such as a completed `Job`'s, has no address that a connection
+/// can reach, so it is skipped.
 pub fn members<'a>(
     pods: impl IntoIterator<Item = &'a Pod>,
     idle: impl IntoIterator<Item = Idle<'a>>,
@@ -114,7 +109,7 @@ pub fn members<'a>(
             continue;
         };
         let owner = ownership.top_owner(&Object::new("", "Pod", Some(namespace), name));
-        let labels = read(pod.metadata.labels.iter().flatten(), keys);
+        let labels = only_keys(pod.metadata.labels.iter().flatten(), keys);
         let member = found
             .entry((owner.clone(), labels.clone()))
             .or_insert_with(|| Member {
@@ -125,7 +120,7 @@ pub fn members<'a>(
                 named: pod.spec.iter().flat_map(named_ports).collect(),
                 host_network: false,
             });
-        member.host_network |= pod.spec.as_ref().is_some_and(on_machine_network);
+        member.host_network |= pod.spec.as_ref().is_some_and(uses_host_network);
         member.addresses.extend(addresses(pod));
     }
     let running: BTreeSet<Object> = found.keys().map(|(owner, _)| owner.clone()).collect();
@@ -136,7 +131,7 @@ pub fn members<'a>(
         let Some(namespace) = &idle.owner.namespace else {
             continue;
         };
-        let host_network = idle.specs.iter().any(|spec| on_machine_network(spec));
+        let host_network = idle.specs.iter().any(|spec| uses_host_network(spec));
         let named: Vec<NamedPort> = idle
             .specs
             .iter()
@@ -147,7 +142,7 @@ pub fn members<'a>(
         let none = BTreeMap::new();
         let unlabelled = (idle.labels.is_empty() && !idle.specs.is_empty()).then_some(&none);
         for labels in idle.labels.into_iter().chain(unlabelled) {
-            let labels = read(labels, keys);
+            let labels = only_keys(labels, keys);
             found
                 .entry((idle.owner.clone(), labels.clone()))
                 .or_insert_with(|| Member {
@@ -163,7 +158,7 @@ pub fn members<'a>(
     found.into_values().collect()
 }
 
-fn on_machine_network(spec: &PodSpec) -> bool {
+fn uses_host_network(spec: &PodSpec) -> bool {
     spec.host_network == Some(true)
 }
 
@@ -173,8 +168,8 @@ fn addresses(pod: &Pod) -> impl Iterator<Item = IpAddr> + '_ {
     listed.filter_map(|address| address.ip.parse().ok())
 }
 
-/// The named ports of every container.  The init containers are
-/// included, because a sidecar among them serves while the pod runs.
+/// The named ports of every container, including init containers,
+/// because a sidecar among them keeps serving while the pod runs.
 fn named_ports(spec: &PodSpec) -> Vec<NamedPort> {
     let containers = spec.containers.iter();
     containers

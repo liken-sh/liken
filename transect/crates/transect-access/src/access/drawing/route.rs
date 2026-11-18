@@ -1,14 +1,15 @@
-//! Paths and lanes for the access drawings' lines, which run across:
-//! from a box's right edge, along to a lane, up or down the lane, and
-//! along into the next box's left edge.
+//! Paths for the lines of the access drawings.  A line leaves a box's
+//! right edge, runs horizontally to a vertical lane, up or down the
+//! lane, and horizontally into the next box's left edge.
 
 use transect_map::map::section_drawing::Point;
 
-/// The radius of a turn.
+/// The radius, in SVG units, of a rounded turn.
 const CORNER: i32 = 8;
 
-/// The path through `points` with each turn rounded, ending on the last
-/// point, for a line with no arrow, such as one that joins a trunk.
+/// An SVG path through `points` with rounded turns that ends exactly on
+/// the last point.  It is for a line without an arrowhead, such as a
+/// caller's line that joins a line shared with other callers.
 pub fn open(points: &[Point]) -> String {
     let mut points: Vec<Point> = points.to_vec();
     points.dedup();
@@ -37,9 +38,9 @@ fn length(a: Point, b: Point) -> i32 {
     (b.x - a.x).abs() + (b.y - a.y).abs()
 }
 
-/// The points of a line from `from` across to `lane`, up or down to
-/// `to`'s height, and across to `to`.  A line already level runs
-/// straight.
+/// The points of a line from `from` horizontally to the x position
+/// `lane`, vertically to `to`'s height, and horizontally to `to`.  When
+/// both ends are at the same height, the line is straight.
 pub fn across(from: Point, lane: i32, to: Point) -> Vec<Point> {
     if from.y == to.y {
         return vec![from, to];
@@ -52,12 +53,14 @@ pub fn across(from: Point, lane: i32, to: Point) -> Vec<Point> {
     ]
 }
 
-/// The lane of each of the lines from `froms` to `tos`, by the heights
-/// they leave and arrive at, in a gap whose right side is `right`, each
-/// lane `gap` from the next.  Lines that leave in the order they arrive
-/// nest without crossing when each line that runs down takes a lane
-/// farther from the right side than the lines above it, and each line
-/// that runs up takes a lane farther than the lines below it.
+/// The x position of the lane for each line, where `froms[i]` and
+/// `tos[i]` are the heights that line `i` leaves and arrives at.  The
+/// lanes start at `right`, where the gap before the next boxes ends,
+/// and are `gap` apart.  A level line uses `right`.  Each line that
+/// runs down takes the lane left of the previous line that runs down,
+/// and the lines that run up do the same in reverse order.  So when
+/// the lines are sorted by `froms` and their `tos` are in the same
+/// order, no two lines cross.
 pub fn lanes(froms: &[i32], tos: &[i32], right: i32, gap: i32) -> Vec<i32> {
     let mut lanes = vec![right; froms.len()];
     let mut down = 0;

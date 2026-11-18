@@ -1,5 +1,6 @@
-//! A workload's access tab: its two drawings, with its card beside
-//! them.
+//! A workload's access tab: a drawing of what may reach it and what it
+//! may reach, a drawing of who may change it, and the workload's card
+//! beside them.
 
 use askama::Template;
 
@@ -16,7 +17,9 @@ pub struct AccessPage {
     pub name: String,
     /// The workload's own page.
     pub workload_path: String,
+    /// What may reach the workload, and what it may reach.
     pub reach: Drawing,
+    /// Who may change the workload.
     pub change: Drawing,
     pub card: WorkloadCard,
 }

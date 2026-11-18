@@ -1,34 +1,36 @@
-# Kind knowledge for Flux, as Flux would ship it: the two kinds that
-# apply objects, and the four sources they fetch through.
+# Kind knowledge for Flux, as Flux would ship it: the kinds that apply
+# objects, and the kinds of source that they fetch from.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:
   name: kustomizations.kustomize.toolkit.fluxcd.io
 spec:
-  # Flux grants its controllers every kind of its groups, so no role
-  # names the writer of a Kustomization's status, and the image names
-  # it instead.
+  # Flux's controllers can write every kind in Flux's groups, so no role
+  # tells which controller writes a Kustomization's status. Its image
+  # does.
   controller: {image: fluxcd/kustomize-controller}
   applies:
     name: {label: kustomize.toolkit.fluxcd.io/name}
     namespace: {label: kustomize.toolkit.fluxcd.io/namespace}
-    # A Kustomization may apply as a ServiceAccount in its own
-    # namespace; without one, it applies as the controller's own.
+    # Without spec.serviceAccountName, a Kustomization applies as the
+    # controller's own account.
     account: {field: spec.serviceAccountName}
   source: [spec.sourceRef]
   directory: spec.path
   revision:
     paths: [status.lastAppliedRevision]
     formats: ['{ref}@sha1:{commit}', 'sha1:{commit}', '{ref}@*']
-  # A Namespace that an app's Kustomization declares and the root one
-  # applies too is in both inventories, and each reconcile rewrites
-  # these two labels to name whichever applied it last.
+  # When two Kustomizations apply the same Namespace, each reconcile
+  # rewrites these labels to name the Kustomization that applied it
+  # last. transect ignores these labels when it decides whether a
+  # Namespace changed.
   ignoreChanges:
     - {label: kustomize.toolkit.fluxcd.io/name, kinds: [{kind: Namespace}]}
     - {label: kustomize.toolkit.fluxcd.io/namespace, kinds: [{kind: Namespace}]}
 ---
-# A release's objects have its marks and the marks of the tree that
-# applied the release, so the release takes precedence.
+# An object of a Helm release has the labels of the HelmRelease and of
+# the Kustomization that applied the HelmRelease. precedence: 1 makes the
+# HelmRelease win over the Kustomization, which has the default of 0.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:

@@ -1,7 +1,7 @@
-//! One domain's part of the loaded resources, read from the watch of
-//! every resource.  The binary holds the type with a field for each
-//! domain, and each domain names only its own field's type, so a domain
-//! low in the crate order reads its resources without naming the
+//! A view of one domain's part of the loaded resources.  The `transect`
+//! binary defines the type that holds every domain's resources, and a
+//! domain crate cannot depend on the binary.  A `Field` lets the domain
+//! read and wait on its own part through a function, without naming the
 //! binary's type.
 
 use std::future::Future;
@@ -10,14 +10,15 @@ use std::sync::Arc;
 
 use tokio::sync::watch;
 
-/// The value of one field of the resources, as of the latest load, and
-/// each change to the resources after it.
+/// One field of the loaded resources, read from the latest load, with
+/// a way to wait for the next load.
 pub struct Field<T> {
     source: Box<dyn Source<T>>,
 }
 
 impl<T: 'static> Field<T> {
-    /// What `read` reads of each load `receiver` sends.
+    /// A `Field` whose value is `read` applied to each load that
+    /// `receiver` sends.
     pub fn new<L: Send + Sync + 'static>(
         receiver: watch::Receiver<Arc<L>>,
         read: fn(&L) -> T,
@@ -30,31 +31,32 @@ impl<T: 'static> Field<T> {
         }
     }
 
-    /// The field now.
+    /// The field's value in the latest load.
     pub fn read(&self) -> T {
         self.source.read()
     }
 
-    /// The field now, marking the load seen, so `changed` waits for the
-    /// next one.
+    /// Returns the field's value in the latest load and marks that load
+    /// as seen, so `changed` waits for the next one.
     pub fn read_and_update(&mut self) -> T {
         self.source.read_and_update()
     }
 
-    /// Marks the load now seen, so `changed` waits for the next one.
+    /// Marks the latest load as seen, so `changed` waits for the next
+    /// one.
     pub fn mark_unchanged(&mut self) {
         self.source.mark_unchanged();
     }
 
-    /// Waits for the next load, or fails when nothing will load again.
+    /// Waits for the next load, and fails when the sender is dropped.
     pub async fn changed(&mut self) -> Result<(), watch::error::RecvError> {
         self.source.changed().await
     }
 }
 
 impl<T: Clone + Send + Sync + 'static> Field<T> {
-    /// `value`, which never changes, for a test or for `transect` run
-    /// with no resources directory.
+    /// A `Field` that always holds `value`, for tests and for `transect`
+    /// run with no resources directory.
     pub fn fixed(value: T) -> Self {
         Self::new(watch::channel(Arc::new(value)).1, T::clone)
     }

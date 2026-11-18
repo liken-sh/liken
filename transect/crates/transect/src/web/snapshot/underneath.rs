@@ -1,9 +1,9 @@
-//! The resource that describes a machine below the cluster, such as the
-//! record a machine operator keeps of the computer under each `Node`:
-//! an object of a kind whose knowledge's `node` names the `Node`.  A
-//! `Node`'s name is unique across the cluster, so the kind may be
-//! namespaced, as Cluster API's `Machine` is.  The machine page shows
-//! it, and search finds the machine by it.
+//! The object that describes the computer under a `Node`, such as the
+//! record that a machine operator keeps for it. Its kind's knowledge
+//! sets `node` to the path of the field that has the `Node` name. A
+//! `Node` name is unique in the cluster, so the kind may be namespaced,
+//! as Cluster API's `Machine` is. The machine page shows this object,
+//! and search finds the machine by it.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -14,15 +14,14 @@ use transect_graph::edges::Object;
 use transect_resources::knowledge::path;
 
 impl Snapshot {
-    /// The first object whose kind's knowledge declares `node` and whose
-    /// field there names the `Node` `name`.
+    /// The first object whose `node` field has the `Node` name `name`.
     pub fn underneath(&self, name: &str) -> Option<(Object, &Arc<Custom>)> {
         self.describing()
             .find(|(_, _, nodes)| nodes.iter().any(|node| node == name))
             .map(|(object, found, _)| (object, found))
     }
 
-    /// Every object that describes one of the cluster's Nodes.
+    /// Every object that describes one of the cluster's `Node` objects.
     pub fn describing_machines(&self) -> HashSet<Object> {
         let machines: HashSet<&str> = self
             .nodes
@@ -35,22 +34,19 @@ impl Snapshot {
             .collect()
     }
 
-    /// The kinds whose knowledge states which `Node` their objects
-    /// describe, by group and kind.
+    /// The group and kind of each kind whose knowledge sets `node`.
     pub fn describing_kinds(&self) -> impl Iterator<Item = &(String, String)> {
         self.kinds
             .kinds()
             .filter(|(group, kind)| self.node_path(group, kind).is_some())
     }
 
-    /// The field naming a `Node` on objects of `group` and `kind`, when
-    /// its knowledge declares one.
     fn node_path(&self, group: &str, kind: &str) -> Option<&str> {
         self.kinds.of(group, kind)?.node.as_deref()
     }
 
-    /// Every object of a describing kind, with the Nodes its field
-    /// names.
+    /// Every object of a kind whose knowledge sets `node`, with the
+    /// `Node` names in its `node` field.
     fn describing(&self) -> impl Iterator<Item = (Object, &Arc<Custom>, Vec<String>)> {
         self.custom.iter().flat_map(move |(resource, objects)| {
             let path = self.node_path(&resource.group, &resource.kind);
@@ -74,7 +70,7 @@ mod tests {
     use super::*;
     use transect_resources::knowledge::Kinds;
 
-    /// The fixture, with the knowledge of every kind but `without`'s.
+    /// The fixture, without the knowledge called `without`.
     fn snapshot(without: Option<&str>) -> Snapshot {
         let mut snapshot = fixture::snapshot();
         let kept: Vec<_> = snapshot
@@ -105,7 +101,7 @@ mod tests {
     }
 
     /// A cluster with one `Node` and a namespaced kind whose objects
-    /// name the `Node` they describe in `status.nodeRef.name`.
+    /// have the `Node` name in `status.nodeRef.name`.
     fn namespaced() -> Snapshot {
         let mut snapshot = Snapshot::empty();
         snapshot.nodes = vec![Arc::new(

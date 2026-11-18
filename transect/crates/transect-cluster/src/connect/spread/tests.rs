@@ -1,7 +1,8 @@
-//! What a request does at an HTTP/2 server's stream limit: one hyper
-//! client waits with no error, and `Spread` opens another connection.
-//! A stream also stops being counted however it ends: its body
-//! dropped, a reset, or a request given up on before its answer.
+//! Tests of how requests behave at an HTTP/2 server's stream limit. A
+//! single hyper client waits with no error, and `Spread` opens another
+//! connection. A stream stops counting as open however it ends: its
+//! response body is dropped, the server resets it, or the request is
+//! abandoned before a response arrives.
 
 use std::convert::Infallible;
 use std::time::Duration;
@@ -24,7 +25,7 @@ use super::*;
 #[case::the_fewest(&[2, 1, 2], 3, Some(1))]
 #[case::the_first_of_a_tie(&[1, 1], 2, Some(0))]
 #[case::every_one_full(&[2, 2], 2, None)]
-fn sends_a_request_where_it_has_room(
+fn sends_a_request_to_the_connection_with_room(
     #[case] open: &[usize],
     #[case] most: usize,
     #[case] expected: Option<usize>,
@@ -32,28 +33,26 @@ fn sends_a_request_where_it_has_room(
     assert_eq!(pick(open, most), expected);
 }
 
-/// How a test server answers each request.
+/// How a test server handles each request.
 #[derive(Clone, Copy)]
-enum Answer {
-    /// With a body it holds open, as a watch's is.
-    Held,
-    /// By resetting the stream.
+enum Reply {
+    /// It responds with a body that stays open, as a watch's does.
+    OpenBody,
+    /// It resets the stream.
     Reset,
-    /// Never.
-    Never,
+    /// It never responds.
+    NoResponse,
 }
 
-/// A server that allows `streams` streams on each connection and holds
-/// every response body open, as a watch's is, and counts the
-/// connections it accepts.
+/// A `server_replying` with `Reply::OpenBody`.
 async fn server(streams: u32) -> (String, Arc<AtomicUsize>) {
-    answering(streams, Answer::Held).await
+    server_replying(streams, Reply::OpenBody).await
 }
 
-/// A server that allows `streams` streams on each connection, answers
-/// each request as `answer` states, and counts the connections it
-/// accepts.
-async fn answering(streams: u32, answer: Answer) -> (String, Arc<AtomicUsize>) {
+/// A server that allows `streams` streams on each connection and
+/// handles each request with `reply`. It returns its URL and a count of
+/// the connections it accepts.
+async fn server_replying(streams: u32, reply: Reply) -> (String, Arc<AtomicUsize>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let (address, accepted) = (
         listener.local_addr().unwrap(),
@@ -65,10 +64,10 @@ async fn answering(streams: u32, answer: Answer) -> (String, Arc<AtomicUsize>) {
             counted.fetch_add(1, Ordering::SeqCst);
             tokio::spawn(async move {
                 let service = hyper::service::service_fn(move |_: Request<Incoming>| async move {
-                    match answer {
-                        Answer::Held => {}
-                        Answer::Reset => return Err("refused"),
-                        Answer::Never => futures::future::pending().await,
+                    match reply {
+                        Reply::OpenBody => {}
+                        Reply::Reset => return Err("refused"),
+                        Reply::NoResponse => futures::future::pending().await,
                     }
                     let open = futures::stream::pending::<Result<Frame<Bytes>, Infallible>>();
                     Ok(Response::new(StreamBody::new(open)))
@@ -92,33 +91,34 @@ fn hyper() -> Hyper {
         .build_http()
 }
 
-/// Whether each of `count` requests to `url` through `service` is
-/// answered within a second, holding every answer open.
-async fn answered<S>(service: S, url: &str, count: usize) -> Vec<bool>
+/// Whether each of `count` requests to `url` through `service` gets a
+/// response within a second. It keeps every response open.
+async fn responded<S>(service: S, url: &str, count: usize) -> Vec<bool>
 where
     S: tower::Service<Request<Empty<Bytes>>> + Clone,
 {
-    let mut held = Vec::new();
-    let mut answered = Vec::new();
+    let mut open_responses = Vec::new();
+    let mut responded = Vec::new();
     for _ in 0..count {
         let request = Request::get(url).body(Empty::new()).unwrap();
-        let answer = tokio::time::timeout(Duration::from_secs(1), service.clone().oneshot(request));
-        match answer.await {
+        let response =
+            tokio::time::timeout(Duration::from_secs(1), service.clone().oneshot(request));
+        match response.await {
             Ok(Ok(response)) => {
-                held.push(response);
-                answered.push(true);
+                open_responses.push(response);
+                responded.push(true);
             }
-            _ => answered.push(false),
+            _ => responded.push(false),
         }
     }
-    answered
+    responded
 }
 
 #[rstest]
 #[tokio::test]
 async fn one_client_waits_at_the_servers_limit_with_no_error() {
     let (url, _) = server(2).await;
-    assert_eq!(answered(hyper(), &url, 3).await, [true, true, false]);
+    assert_eq!(responded(hyper(), &url, 3).await, [true, true, false]);
 }
 
 #[rstest]
@@ -126,7 +126,7 @@ async fn one_client_waits_at_the_servers_limit_with_no_error() {
 async fn a_request_past_the_limit_opens_another_connection() {
     let (url, accepted) = server(2).await;
     let spread = Spread::new(2, hyper);
-    assert_eq!(answered(spread.clone(), &url, 5).await, [true; 5]);
+    assert_eq!(responded(spread.clone(), &url, 5).await, [true; 5]);
     assert_eq!(accepted.load(Ordering::SeqCst), 3);
 }
 
@@ -149,17 +149,17 @@ async fn a_closed_stream_makes_room_on_its_connection() {
 #[rstest]
 #[tokio::test]
 async fn a_reset_stream_is_no_longer_counted() {
-    let (url, _) = answering(2, Answer::Reset).await;
+    let (url, _) = server_replying(2, Reply::Reset).await;
     let spread = Spread::new(2, hyper);
     let request = Request::get(&url).body(Empty::<Bytes>::new()).unwrap();
-    let answered = spread.clone().oneshot(request).await;
-    assert_eq!((answered.is_err(), spread.open()), (true, vec![0]));
+    let result = spread.clone().oneshot(request).await;
+    assert_eq!((result.is_err(), spread.open()), (true, vec![0]));
 }
 
 #[rstest]
 #[tokio::test]
 async fn a_request_given_up_on_is_no_longer_counted() {
-    let (url, _) = answering(2, Answer::Never).await;
+    let (url, _) = server_replying(2, Reply::NoResponse).await;
     let spread = Spread::new(2, hyper);
     let request = Request::get(&url).body(Empty::<Bytes>::new()).unwrap();
     let waited = tokio::time::timeout(Duration::from_millis(100), spread.clone().oneshot(request));

@@ -1,18 +1,18 @@
-//! Reads the devices from the cluster's stores as they are now.
-
 use super::{Devices, Off};
 use transect_cluster::cluster::Cluster;
-use transect_cluster::cluster::discovery::{Off as Answer, State};
+use transect_cluster::cluster::discovery::{self, State};
 
 impl Devices {
-    /// The devices of every allocated claim in `cluster` as of now, or
-    /// the reason that transect cannot read the holds edges.
+    /// Builds `Devices` from the `ResourceClaim`s and `ResourceSlice`s in
+    /// `cluster`'s stores. When API discovery has not finished, or found
+    /// that the cluster does not serve these kinds or that transect may
+    /// not list them, the result is `Devices::off` with the reason.
     pub fn read(cluster: &Cluster) -> Self {
         let (claims, slices) = match cluster.device_objects() {
             State::On(objects) => objects,
             State::Probing | State::Retrying => return Devices::off(Off::Retrying),
-            State::Off(Answer::NotServed) => return Devices::off(Off::NotServed),
-            State::Off(Answer::Forbidden) => return Devices::off(Off::Forbidden),
+            State::Off(discovery::Off::NotServed) => return Devices::off(Off::NotServed),
+            State::Off(discovery::Off::Forbidden) => return Devices::off(Off::Forbidden),
         };
         Devices::build(
             claims.iter().map(AsRef::as_ref),

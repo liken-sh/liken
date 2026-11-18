@@ -1,23 +1,25 @@
-//! The workload a gone pod ran under, read from its name.  A pod's
-//! owner reference is deleted with the pod, but a `Job` names its pods
-//! `<job>-<suffix>`, with a random suffix of five letters and digits,
-//! and a `CronJob` names its Jobs `<cronjob>-<minutes>`, with the
-//! minute of the schedule it ran for.  So a gone pod of a `CronJob`
-//! that runs every few minutes still names the `CronJob`, and its log
-//! lines can be grouped with the `CronJob`'s own.
+//! Finds the workload of a deleted pod from the pod's name, so that the
+//! log lines of the pod are counted with its workload. A pod's owner
+//! references are deleted with the pod, but a `Job` names its pods
+//! `<job>-<suffix>`, with a random suffix of five lowercase letters and
+//! digits, and a `CronJob` names its `Job`s `<cronjob>-<minutes>`, where
+//! the number is the scheduled time in minutes since the Unix epoch. So
+//! the name still identifies the `CronJob` after its `Job` is deleted
+//! too.
 //!
-//! A name alone could be anything, so it counts only when the `Job` or
-//! the `CronJob` it names is in the cluster, in the pod's namespace.
+//! Any name can match this pattern, so a match counts only when the
+//! `Job` or `CronJob` exists in the pod's namespace.
 
 use super::Ownership;
 use transect_graph::edges::Object;
 
-/// The length of the random suffix Kubernetes gives a generated name.
+/// The length of the random suffix that Kubernetes adds to a generated
+/// name.
 const SUFFIX: usize = 5;
 
 impl Ownership {
-    /// The top owner of the gone pod `namespace/pod`, when its name is
-    /// that of a pod of a `Job` or a `CronJob` the index holds.
+    /// The top owner of the deleted pod `namespace/pod`, when its name
+    /// has the form of a pod of a `Job` or `CronJob` in the index.
     pub fn owner_by_name(&self, namespace: &str, pod: &str) -> Option<Object> {
         let (job, suffix) = pod.rsplit_once('-')?;
         let generated = suffix.len() == SUFFIX
@@ -50,8 +52,8 @@ mod tests {
     use super::super::fixtures::build;
     use super::*;
 
-    /// The `CronJob` `report`, its `Job` `report-29000010`, the `Job`
-    /// `backfill` alone, and the `Deployment` `web`.
+    /// The `CronJob` `report` with its `Job` `report-29000010`, the
+    /// `Job` `backfill` with no owner, and the `Deployment` `web`.
     fn ownership() -> Ownership {
         build(&[
             ("batch", "CronJob", Some("shop"), "report", vec![]),
@@ -72,7 +74,7 @@ mod tests {
     }
 
     #[rstest]
-    #[case::a_job_still_held("report-29000010-x7k2q", object("CronJob", "report"))]
+    #[case::a_job_still_present("report-29000010-x7k2q", object("CronJob", "report"))]
     #[case::a_cron_jobs_job_gone("report-29000020-b4n8z", object("CronJob", "report"))]
     #[case::a_job_alone("backfill-q9z2m", object("Job", "backfill"))]
     #[case::a_job_the_cluster_lacks("migrate-q9z2m", None)]

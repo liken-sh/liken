@@ -1,4 +1,5 @@
-//! The list of one kind's objects in one namespace.
+//! The page that lists the objects of one custom resource kind in one
+//! namespace.
 
 use k8s_openapi::jiff::Timestamp;
 use std::collections::BTreeSet;
@@ -10,9 +11,9 @@ use transect_map::map::KnownEntry;
 use transect_map::objects::{self, ListPage};
 use transect_resources::layers::Layers;
 
-/// The list of the custom kind `resource` names in `namespace`, or
-/// none when the map holds no such namespace or `transect` watches no
-/// such kind.  A kind with no objects in the namespace lists none.
+/// Returns none when the namespace is not in the map or `transect`
+/// does not watch the kind. A kind with no objects in the namespace
+/// returns a page with no rows.
 pub fn objects_page(
     model: &Model,
     layers: &Layers,
@@ -37,7 +38,7 @@ pub fn objects_page(
     };
     let path = transect_graph::links::objects(namespace, &url_name(&api.group, &api.plural));
     let groups = sources.groups(namespace, &BTreeSet::new());
-    let strip = groups.into_iter().map(|group| KnownEntry {
+    let kind_links = groups.into_iter().map(|group| KnownEntry {
         text: format!("{} ×{}", group.label, group.items.len() + group.more),
         current: group.href == path,
         href: Some(group.href),
@@ -47,7 +48,7 @@ pub fn objects_page(
         layer,
         label,
         everywhere: transect_graph::links::kind(&api.group, &api.plural),
-        strip: strip.collect(),
+        kind_links: kind_links.collect(),
         columns,
         rows,
         card: kind_card(model, api, found, here),

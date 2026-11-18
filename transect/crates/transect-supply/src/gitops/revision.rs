@@ -1,10 +1,11 @@
-//! The revisions that the appliers applied, and when.  For each applier,
-//! transect reads its last applied revision at the time that its status
-//! records.  When the status records no time, transect uses the time
-//! that the applier's source fetched that revision, because an applier
-//! applies what its source fetched within its interval.  When the
-//! source has fetched a newer revision since, transect uses the time
-//! that the applier's condition last changed.
+//! The last revision that each applier applied, and when.  The time
+//! comes from the applier's status when the status records one.
+//! Otherwise it is the time that the applier's source fetched that
+//! revision, because an applier applies what its source fetched.  When
+//! the source has since fetched a newer revision, that time belongs to
+//! the newer revision, so transect uses the `lastTransitionTime` of the
+//! applier's health condition.  An applier with none of these times is
+//! left out.
 
 use k8s_openapi::jiff::Timestamp;
 
@@ -12,8 +13,8 @@ use super::GitOps;
 use super::template::captures;
 use transect_graph::edges::Object;
 
-/// The shortest run of hex digits that transect reads as a commit.  Git
-/// uses the same length by default for a short hash.
+/// The fewest hex digits that transect accepts as a commit.  Git's
+/// default short hash has the same length.
 const SHORTEST_COMMIT: usize = 7;
 
 /// One applier's last applied revision.
@@ -24,7 +25,7 @@ pub struct Revision {
     /// The URL it fetches from.
     pub url: Option<String>,
     pub revision: String,
-    /// How the revision splits into its ref and its commit.
+    /// The formats that split `revision` into a ref and a commit.
     pub formats: Vec<String>,
     pub at: Timestamp,
 }
@@ -37,8 +38,8 @@ impl Revision {
 }
 
 impl GitOps {
-    /// The last applied revision, and its time, of every applier that
-    /// applies a directory.
+    /// The last applied revision of every applier that applies a
+    /// directory, sorted by applier.
     pub fn revisions(&self) -> Vec<Revision> {
         let found = self.found.values().filter_map(|found| {
             let fields = self.fields_of(&found.object)?;
@@ -66,11 +67,11 @@ impl GitOps {
     }
 }
 
-/// The ref that `revision` names, such as `main` in `main@sha1:0a1b2c3`,
-/// and its commit, read by the first of `formats` that matches.  A
-/// `{commit}` must be hex digits, so transect never reads a chart
-/// version as a commit.  When no format matches, the whole revision is
-/// the ref.
+/// Splits `revision` into its ref, such as `main` in `main@sha1:0a1b2c3`,
+/// and its commit, using the first of `formats` that matches.  A
+/// `{commit}` must be at least `SHORTEST_COMMIT` hex digits, so a chart
+/// version is never read as a commit.  When no format matches, the whole
+/// revision is the ref and there is no commit.
 pub fn parts<'a>(revision: &'a str, formats: &[String]) -> (&'a str, Option<&'a str>) {
     let commit = |found: &&'a str| {
         found.len() >= SHORTEST_COMMIT && found.chars().all(|c| c.is_ascii_hexdigit())
@@ -118,10 +119,9 @@ mod tests {
         )
     }
 
-    /// A tree that applied its source's current revision has the time
+    /// A tree whose source still has the applied revision gets the time
     /// that the source fetched it.  A tree whose source has fetched a
-    /// newer revision since has the time that its condition last
-    /// changed.
+    /// newer revision gets the time that its condition last changed.
     #[rstest]
     fn dates_each_revision_by_the_fetch_or_else_by_its_condition() {
         let repo = "spec: {url: 'https://forge.example.test/fleet.git'}\nstatus: {artifact: {revision: 'main@sha1:bbbbbbb', lastUpdateTime: '2026-01-01T10:00:00Z'}}";

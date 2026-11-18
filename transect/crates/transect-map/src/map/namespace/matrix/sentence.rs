@@ -1,13 +1,13 @@
-//! The words the matrix shows: each cell's title, the headers, and the
-//! legend.  Everything else in it is a name from the cluster.
+//! The text of the matrix: each cell's title, the headers, and the
+//! legend. All other text in the matrix comes from the cluster.
 
 use std::collections::BTreeMap;
 
 use super::{Cell, Matrix, Skip};
 
-/// The legend under the matrix, one entry per kind of cell, with the
-/// class and the glyph of its sample, so each sample looks like the
-/// cells that it explains.
+/// The legend under the matrix. Each entry is the CSS class, the glyph,
+/// and the label for one kind of cell, so that the legend's sample of
+/// each looks like the cells it describes.
 pub const LEGEND: [(&str, &str, &str); 5] = [
     ("cell cell-ready", "", "ready"),
     ("cell cell-restarting", "↻", "restarted within the hour"),
@@ -21,10 +21,6 @@ pub const LEGEND: [(&str, &str, &str); 5] = [
 ];
 
 impl Cell {
-    /// Only a problem has color.  A restart or a pod that is not ready
-    /// gets --warm, as a box would, and a missing pod's cell has a dashed
-    /// --warm outline.  A cell skipped by design is expected, so it has
-    /// no slot, only a faint dash.
     pub fn class(&self) -> &'static str {
         match self {
             Self::Ready => "cell cell-ready",
@@ -49,8 +45,8 @@ impl Cell {
         }
     }
 
-    /// The mark inside the cell.  A skipped cell's dash is the same for
-    /// every reason, and its title gives the reason.
+    /// The glyph inside the cell. A skipped cell has the same dash for
+    /// every reason, and its title states the reason.
     pub fn glyph(&self) -> &'static str {
         match self {
             Self::Ready | Self::NotReady => "",
@@ -62,7 +58,7 @@ impl Cell {
 }
 
 impl Matrix {
-    /// "10 DaemonSets · 88 pods", above the matrix.
+    /// The heading above the matrix, such as "10 DaemonSets · 88 pods".
     pub fn header(&self) -> String {
         format!(
             "{} · {}",
@@ -71,8 +67,8 @@ impl Matrix {
         )
     }
 
-    /// The other top owners counted by kind, as "2 Deployments · 1
-    /// StatefulSet", above their names.
+    /// The heading above the names of the other top owners, with a count
+    /// for each kind, such as "2 Deployments · 1 StatefulSet".
     pub fn others_header(&self) -> String {
         let mut kinds: BTreeMap<&str, usize> = BTreeMap::new();
         for other in &self.others {
@@ -86,8 +82,9 @@ impl Matrix {
     }
 }
 
-/// The label over the matrix and the label over the other names.
+/// The label over the matrix.
 pub const DAEMON_SETS: &str = "On each machine";
+/// The label over the names of the other top owners.
 pub const OTHERS: &str = "Also here";
 
 fn count(number: impl std::fmt::Display, noun: &str) -> String {

@@ -1,7 +1,7 @@
-# The way in: the proxy that serves the storefront's `Ingress`, as its
-# `IngressClass` names it, and the issuer of the storefront's
-# certificate.  The `Certificate` that writes the `Ingress`'s TLS
-# `Secret` names that issuer, and cert-manager reads it there.
+# How traffic reaches the storefront: the proxy that serves the
+# storefront's `Ingress` through the `proxy` `IngressClass`, and the
+# `ClusterIssuer` that signs the `Certificate` in the `Ingress`'s TLS
+# `Secret`.
 apiVersion: networking.k8s.io/v1
 kind: IngressClass
 metadata: {name: proxy}
@@ -72,11 +72,11 @@ spec:
   issuerRef: {name: shop-issuer, kind: ClusterIssuer, group: cert-manager.io}
 status: {conditions: [{type: Ready, status: 'True'}]}
 ---
-# The proxy's gates, each of which asks an address before the proxy
-# lets a request through.  The addresses are a `Service` in the
-# cluster by its namespaced name, a `Service` that does not exist in
-# its namespace, and a sign-in service outside the cluster.  Only the
-# last is a ground box.
+# Before the proxy lets a request through, a `Gate` calls the address
+# in its `checkWith`. The gates below call a `Service` that exists, a
+# `Service` that does not exist, and a sign-in service outside the
+# cluster. Only the sign-in service gets a box in the outside-systems
+# band of the map.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata: {name: gates.proxy.example.test}

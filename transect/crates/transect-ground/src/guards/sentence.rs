@@ -34,8 +34,8 @@ impl fmt::Display for Guard {
 }
 
 impl Guard {
-    /// The guard's tooltip, which names a budget, because a workload can
-    /// have more than one budget.
+    /// The tooltip of a budget guard, which gives the name of its
+    /// `PodDisruptionBudget`, because a workload can have more than one.
     pub fn title(&self) -> Option<String> {
         match self {
             Self::Budget { budget, .. } => Some(format!("PodDisruptionBudget {}", budget.name)),
@@ -76,7 +76,7 @@ mod tests {
         }
     }
 
-    fn moved(guard: Guard) -> Guard {
+    fn with_operator_moves(guard: Guard) -> Guard {
         match guard {
             Guard::Budget { budget, named, .. } => Guard::Budget {
                 budget,
@@ -100,11 +100,11 @@ mod tests {
         "PDB primary: min 1, none may be evicted"
     )]
     #[case::none_may_be_evicted_by_design(
-        moved(budget(Limit::MinAvailable("1".into()), 0)),
+        with_operator_moves(budget(Limit::MinAvailable("1".into()), 0)),
         "PDB: min 1, none may be evicted; its operator moves the primary first"
     )]
     #[case::some_may_be_evicted_with_an_operator(
-        moved(budget(Limit::MinAvailable("1".into()), 1)),
+        with_operator_moves(budget(Limit::MinAvailable("1".into()), 1)),
         "PDB: min 1, 1 may be evicted"
     )]
     #[case::no_budget(Guard::NoBudget, "no PodDisruptionBudget")]

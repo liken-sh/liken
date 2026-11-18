@@ -1,8 +1,9 @@
-//! What follows from an account's grants, as the last column of its
-//! drawing: the Secrets a pod it starts may mount, the accounts
-//! it may run as, each account a step goes through, and below each, a
-//! step at a time, how that account holds what follows, ending at the
-//! role the last account is bound to.
+//! The last column of an account's access drawing: the capabilities
+//! that follow from its grants, which no binding grants it directly.
+//! It shows the `Secret`s that a pod the account starts may mount, the
+//! accounts its pods may run as, and each account whose access a `Hop`
+//! reaches.  Under each reached account, a chain of boxes shows how
+//! that account gets the capabilities, down to the role bound to it.
 
 use std::collections::BTreeSet;
 
@@ -14,12 +15,15 @@ use transect_access::access::drawing::{FOLLOWS as OUTLINED, NONE};
 use transect_access::access::{ALL, Account, AppliesAs, Capability, Held, Hop, Where};
 use transect_map::map::section_drawing::{Look as BoxLook, SectionBox};
 
-/// The most accounts a chain goes through before it stops.
+/// The most accounts that one chain follows before it stops.
 const DEEPEST: usize = 4;
 
-/// The grant box that shows a capability, by its place in the scene.
+/// Returns the index of the grant box that shows a capability, when the
+/// drawing has one.
 pub type Place<'a> = &'a dyn Fn(Capability) -> Option<usize>;
 
+/// The boxes for what follows from `held`, the grants of `account`, in
+/// the order they are drawn.
 pub fn follows(
     model: &Model,
     account: &Account,
@@ -27,7 +31,8 @@ pub fn follows(
     place: Place,
     look: &Look,
 ) -> Vec<Follow> {
-    // Each capability that follows, where, and its first hop.
+    // One entry for each place where a capability follows, with its
+    // first hop and the names of the objects it is limited to.
     let mut steps: Vec<(Capability, &Where, &Hop, &[String])> = Vec::new();
     for capability in ALL {
         let Some(cell) = held.cells.get(&capability) else {
@@ -59,8 +64,9 @@ pub fn follows(
             sources(place, &[Capability::RunPods, Capability::ChangeWorkloads]),
         ));
     }
-    // A pod names any `ServiceAccount` in its namespace, so an account
-    // that may run pods or change workloads may run as any there.
+    // A pod can set any `ServiceAccount` in its namespace as its
+    // account, so an account that may run pods or change workloads may
+    // run as any account there.
     let bases = [Capability::RunPods, Capability::ChangeWorkloads];
     let running: BTreeSet<Where> = bases
         .iter()
@@ -80,8 +86,8 @@ pub fn follows(
         );
         found.push(outlined(title, sources(place, &bases)));
     }
-    // The accounts a step goes through, each once, with what follows
-    // through it.
+    // Group the steps by the account they reach, so that each account is
+    // drawn once, with every capability that follows through it.
     let mut through: Vec<(Account, Hop, Vec<Capability>)> = Vec::new();
     for (capability, _, hop, _) in &steps {
         let Some(target) = hop.account() else {
@@ -96,14 +102,14 @@ pub fn follows(
             None => through.push((target.clone(), (*hop).clone(), vec![*capability])),
         }
     }
-    // When an account a step reaches is bound to every verb in every
-    // namespace, all that follows through any account follows through
-    // it, so the drawing draws that one chain.
+    // When an account that a step reaches is bound to every verb in
+    // every namespace, everything that follows through any account also
+    // follows through that one, so draw only its chain.
     if let Some(top) = top(model, &through) {
         through = vec![top];
     }
-    // The accounts it runs as come first, right under the box that
-    // states it may run as any.
+    // Put the accounts it may run as first, directly under the "run as
+    // any account" box.
     through.sort_by_key(|(_, hop, _)| !matches!(hop, Hop::RunsAs { .. }));
     let mut visited: BTreeSet<Account> = BTreeSet::from([account.clone()]);
     for (at, (target, hop, capabilities)) in through.into_iter().enumerate() {
@@ -149,7 +155,8 @@ pub fn follows(
             ));
         }
     }
-    // Each role it may bind to itself, or rewrite, with where.
+    // Collect each role that it may bind to itself or rewrite, with the
+    // places where that applies.
     let mut roles: Vec<(&str, &transect_graph::edges::Object, Vec<&Where>)> = Vec::new();
     for (_, _, hop, _) in &steps {
         let (title, role, at) = match hop {
@@ -185,9 +192,10 @@ pub fn follows(
     found
 }
 
-/// How `account` holds `capabilities`, which follow through it: the
-/// role it is bound to that grants them, or the next account a step
-/// goes through, a box each, each below the one before.
+/// Appends the boxes that show how `account` gets `capabilities`: the
+/// role bound to it that grants them, then each account that its own
+/// hops reach, down to `DEEPEST` accounts.  A role bound in every
+/// namespace that allows every verb ends the chain.
 fn chain(
     model: &Model,
     account: &Account,
@@ -208,8 +216,8 @@ fn chain(
     if let Some((_, role)) = everything {
         let boxed = SectionBox::new(
             transect_graph::links::kind_and_name_in(role, None),
-            // The blocks under it do not name a capability on their own,
-            // so its lines state which of the six they are.
+            // The blocks under this box do not say which capability they
+            // stand for, so its lines say which of the six follow.
             vec![
                 "every verb, every kind".into(),
                 match capabilities.len() == ALL.len() {
@@ -229,8 +237,8 @@ fn chain(
         found.push(after(boxed, "bound to"));
         return;
     }
-    // The roles that grant it what follows, and what follows for it in
-    // turn, by the next account.
+    // Collect the roles that grant these capabilities to `account`, and
+    // the accounts that its own steps lead to next.
     let mut roles: Vec<&transect_graph::edges::Object> = Vec::new();
     let mut next: Vec<(&Account, &Hop, Vec<Capability>)> = Vec::new();
     for capability in capabilities {
@@ -297,10 +305,9 @@ fn chain(
     }
 }
 
-/// The one chain to draw when an account a step reaches is bound to
-/// every verb in every namespace: through an applier it may change that
-/// applies as such an account, or else through such an account a step
-/// reaches, with all that follows through any account.
+/// The single chain that the page draws when an account in `through` is bound to every
+/// verb in every namespace, with every capability that follows through
+/// any account in `through`.
 fn top(
     model: &Model,
     through: &[(Account, Hop, Vec<Capability>)],
@@ -326,7 +333,7 @@ fn top(
         return None;
     }
     all.sort();
-    // A step through an applier names the applier, so it comes first.
+    // Prefer the applier step, because its box names the applier.
     let applied = through.iter().find_map(|(target, hop, _)| {
         let applies = matches!(hop, Hop::Applies { .. });
         (applies && everything(target)).then(|| (target.clone(), hop.clone()))
@@ -339,7 +346,7 @@ fn top(
     Some((account, hop, all))
 }
 
-/// The box of an account a step goes through, with the step in words.
+/// The box for `target`, with a line that describes `hop`.
 fn step(target: &Account, hop: &Hop, look: &Look) -> SectionBox {
     let line = match hop {
         Hop::RunsAs { at, .. } => format!("a pod {} may run as it", at.words()),
@@ -379,8 +386,8 @@ fn step(target: &Account, hop: &Hop, look: &Look) -> SectionBox {
     SectionBox::new(target.text(), vec![line], BoxLook::Plain).with_href(look.account(target))
 }
 
-/// The dashed box of an account from which nothing follows, with the
-/// six it may do nowhere.
+/// The box for an account from which nothing follows, which says which
+/// of the six capabilities the account lacks.
 fn nothing(held: &Held) -> Follow {
     let missing: Vec<Capability> = ALL
         .iter()
@@ -435,7 +442,8 @@ fn after(boxed: SectionBox, label: &str) -> Follow {
     }
 }
 
-/// The grant boxes that show `capabilities`.
+/// The indexes of the grant boxes that show `capabilities`, sorted and
+/// without duplicates.
 fn sources(place: Place, capabilities: &[Capability]) -> Vec<usize> {
     let mut found: Vec<usize> = capabilities.iter().filter_map(|c| place(*c)).collect();
     found.sort();
@@ -443,8 +451,8 @@ fn sources(place: Place, capabilities: &[Capability]) -> Vec<usize> {
     found
 }
 
-/// Where a step holds, in words: "in every namespace", "in shop and
-/// ledger".
+/// Describes where a step applies, such as "in every namespace" or "in
+/// shop and ledger".
 fn places(places: &[&Where]) -> String {
     if places.contains(&&Where::Everywhere) {
         return "in every namespace".into();

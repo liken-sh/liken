@@ -1,14 +1,13 @@
-//! What each custom kind's CRD states it is: the description at the top
-//! of its schema, which the API server publishes with the kind.  A
-//! workload of a custom kind with no `why` and no summary in its kind's
-//! knowledge opens its card with it, since an operator that ships no
-//! knowledge often still documents its kinds there.
+//! The description of each custom kind, from the top of its CRD's
+//! schema. An operator that ships no `KindKnowledge` often documents its
+//! kinds in the CRD. So an object's card opens with the description, and
+//! a namespace's card shows it for a custom workload when no `Intent`
+//! gives a `why` and no `KindKnowledge` gives a summary.
 //!
-//! Code generators fill the description from the type's doc comment,
-//! and an undocumented type gets "Widget is the Schema for the widgets
-//! API", which states nothing a reader does not see in the kind's name.
-//! That sentence is left out, so the card opens with the image's
-//! description instead.
+//! Code generators write the description from the type's doc comment.
+//! For a type with no doc comment they write "Widget is the Schema for
+//! the widgets API", which says nothing beyond the kind's name, so
+//! `described` drops it.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -21,12 +20,12 @@ use crate::intent::Line;
 use transect_graph::edges::{Object, Provenance};
 use transect_graph::untrusted::{capped, markdown};
 
-/// The longest a CRD's description runs on a card, in characters, as
-/// long as an image's description runs.
+/// The length to which a CRD's description is cut, the same as for an
+/// image's description.
 const DESCRIPTION_CHARS: usize = 200;
 
-/// The description of each custom kind whose CRD gives one, and the
-/// names of every custom kind, by group and kind.
+/// The description of each custom kind whose CRD has one, and the names
+/// of every custom kind, both keyed by group and kind.
 #[derive(Debug, Default)]
 pub struct Definitions {
     described: HashMap<(String, String), Definition>,
@@ -55,9 +54,8 @@ impl Definitions {
         read
     }
 
-    /// Every name `group`'s `kind` goes by, lowercase: its kind, its
-    /// singular, its plural, and its short names, as `kubectl` takes
-    /// them.
+    /// Every lowercase name that `kubectl` accepts for `group`'s `kind`:
+    /// its kind, singular, plural, and short names.
     pub fn names(&self, group: &str, kind: &str) -> Arc<[String]> {
         let key = (group.to_string(), kind.to_string());
         self.names
@@ -66,7 +64,7 @@ impl Definitions {
             .unwrap_or_else(|| Arc::new([]))
     }
 
-    /// What `object`'s CRD states its kind is, as a card's opening line.
+    /// The description in `object`'s CRD, as a card's opening line.
     pub fn of(&self, object: &Object) -> Option<Line> {
         let key = (object.group.clone(), object.kind.clone());
         let found = self.described.get(&key)?;
@@ -79,9 +77,10 @@ impl Definitions {
     }
 }
 
-/// The first paragraph of the schema's description, as plain text, from
-/// the version the API server stores, or else the first version that
-/// has one.
+/// The first paragraph of the schema's description, as plain text. It
+/// comes from the version that the API server stores, or else from the
+/// first version that has a description. It is none when the
+/// description is the sentence a generator writes.
 fn described(versions: &[CustomResourceDefinitionVersion], kind: &str) -> Option<String> {
     let stored = versions.iter().filter(|version| version.storage);
     let others = versions.iter().filter(|version| !version.storage);
@@ -97,10 +96,10 @@ fn described(versions: &[CustomResourceDefinitionVersion], kind: &str) -> Option
     Some(sentences_within(&plain, DESCRIPTION_CHARS))
 }
 
-/// The whole sentences of `text` that fit in `chars` characters.  When
-/// even the first does not fit, the first whole, up to twice `chars`,
-/// since a reader would rather read a long sentence than half of one;
-/// past that, `text` cut short with "…".
+/// The whole sentences of `text` that fit in `chars` characters. When
+/// the first sentence alone does not fit, it is returned whole if it
+/// ends within twice `chars`, because a long sentence reads better than
+/// half of one. Otherwise `text` is cut at `chars` with "…".
 fn sentences_within(text: &str, chars: usize) -> String {
     if text.chars().count() <= chars {
         return text.to_string();
@@ -121,7 +120,7 @@ fn sentences_within(text: &str, chars: usize) -> String {
     }
 }
 
-/// The names in a CRD's `names`, lowercase, each once.
+/// The names in a CRD's `names`, lowercased, without duplicates.
 fn names(names: &CustomResourceDefinitionNames) -> Arc<[String]> {
     let kind = std::iter::once(&names.kind).chain(names.singular.as_ref());
     let all = kind
@@ -141,8 +140,9 @@ fn first_paragraph(text: &str) -> &str {
     text.split("\n\n").next().unwrap_or(text).trim()
 }
 
-/// Whether `text` is the sentence a code generator writes for a type
-/// with no doc comment: "Widget is the Schema for the widgets API".
+/// Whether `text` is the sentence that a code generator writes for a
+/// type with no doc comment, such as "Widget is the Schema for the
+/// widgets API".
 fn generated(text: &str, kind: &str) -> bool {
     let text = text.trim_end_matches('.');
     let rest = text.strip_prefix(kind).and_then(|rest| {
@@ -158,8 +158,8 @@ mod tests {
 
     use super::*;
 
-    /// The CRD of `Widget` in `widgets.example.com`, whose versions
-    /// `versions` gives in YAML.
+    /// The CRD of `Widget` in `widgets.example.com`, with `versions` as
+    /// YAML.
     fn crd(versions: &str) -> CustomResourceDefinition {
         serde_yaml::from_str(&format!(
             "metadata: {{name: widgets.widgets.example.com}}\n\
@@ -242,7 +242,7 @@ mod tests {
     }
 
     #[rstest]
-    fn names_the_crd_it_read() {
+    fn cites_the_crd_as_the_source() {
         let crd = crd(&format!("[{}]", version("v1", true, "Turns things.")));
         let widget = Object::new("widgets.example.com", "Widget", Some("shop"), "one");
         let line = Definitions::read([&crd]).of(&widget).unwrap();

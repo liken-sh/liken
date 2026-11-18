@@ -1,5 +1,5 @@
-//! The namespace card's grid of chips, one per workload or group of
-//! workloads, in the order a reader scans them.
+//! The chips on a namespace card. Each chip covers one workload, a pair
+//! of single-pod workloads, or a count of jobs.
 
 use std::collections::HashMap;
 
@@ -8,33 +8,35 @@ use transect_graph::edges::Object;
 use transect_graph::links::Part;
 use transect_observe::health::Level;
 
-/// One chip: what it names, and the worst health among the workloads
-/// that it names.
+/// One chip on the namespace card. Its `level` is the worst health
+/// among the workloads it covers.
 #[derive(Debug, PartialEq)]
 pub struct Chip {
     pub label: Label,
     pub level: Level,
-    /// What the workloads it names are, from their `why`.
+    /// The `why` text of the workloads it covers, shown as its tooltip.
     pub title: Option<String>,
-    /// The page of each workload it names, in the order it names them.
+    /// The page link of each workload it covers, in the order the label
+    /// lists the names.
     pub hrefs: Vec<Option<String>>,
 }
 
 #[derive(Debug, PartialEq)]
 pub enum Label {
-    /// A workload that runs some number of pods other than one.
+    /// A workload whose replica count is not one.
     Replicated { name: String, replicas: i32 },
-    /// One or two workloads of one pod each.  Pairing them keeps a
-    /// namespace of many small helpers from filling the card.
+    /// One or two workloads with one pod each. Pairing them keeps a
+    /// namespace with many small helpers from filling the card.
     Single(Vec<String>),
-    /// Every CronJob as one count, because a namespace's scheduled jobs
-    /// are many small names, and each name tells the reader little.
+    /// All the CronJobs of the namespace as one count, because their
+    /// individual names tell the reader little.
     CronJobs(usize),
-    /// Every Job that no CronJob or other owner started, as one count,
-    /// for the same reason.
+    /// All the Jobs that no CronJob or other owner created, as one
+    /// count, for the same reason.
     Jobs(usize),
-    /// A workload of any other kind, named by its kind, such as a cache
-    /// an operator runs.  `custom` marks a custom kind.
+    /// A workload of any other kind, shown with its kind, such as a
+    /// cache that an operator runs. `custom` is true when the kind is
+    /// not built in.
     Owned {
         kind: String,
         name: String,
@@ -42,19 +44,19 @@ pub enum Label {
     },
 }
 
-/// The key that looks up the `why` of a chip whose kind is not one of
-/// the built-in workloads: its kind and name, as "Player lobby".
+/// The key in the `whys` map for a workload that is not of a built-in
+/// kind: its kind and name, as in "Player lobby".
 pub fn owned_key(kind: &str, name: &str) -> String {
     format!("{kind} {name}")
 }
 
 impl Chip {
-    /// The chip with its title: the `why` of each workload it names,
-    /// as `whys` gives them by name, prefixed by the name when the chip
-    /// names two.  An operator often gives its objects of several kinds
-    /// the same name, so a chip of another kind looks its workload up by
-    /// kind and name, as "Player lobby".  A count of CronJobs or Jobs
-    /// names no workload.
+    /// Sets the chip's title from `whys`, which maps a workload's
+    /// name to its `why`. A chip of two workloads prefixes each `why`
+    /// with the workload's name. An operator often gives its objects of
+    /// several kinds the same name, so a chip of another kind looks up
+    /// its `why` with `owned_key` instead. A count of CronJobs or Jobs
+    /// gets no title.
     pub fn titled(self, whys: &HashMap<String, String>) -> Self {
         let names: Vec<String> = match &self.label {
             Label::Replicated { name, .. } => vec![name.clone()],
@@ -62,7 +64,7 @@ impl Chip {
             Label::Single(names) => names.clone(),
             Label::CronJobs(_) | Label::Jobs(_) => Vec::new(),
         };
-        let said: Vec<String> = match &names[..] {
+        let whys_found: Vec<String> = match &names[..] {
             [name] => whys.get(name).cloned().into_iter().collect(),
             _ => names
                 .iter()
@@ -70,13 +72,13 @@ impl Chip {
                 .collect(),
         };
         Self {
-            title: (!said.is_empty()).then(|| said.join("\n")),
+            title: (!whys_found.is_empty()).then(|| whys_found.join("\n")),
             ..self
         }
     }
 
-    /// What the chip shows, one name at a time.  Each workload of a pair
-    /// opens its own page, and a count opens no page.
+    /// The text the chip shows, as one part for each name. Each workload
+    /// of a pair links to its own page, and a count has no link.
     pub fn parts(&self) -> Vec<Part> {
         let href = |at: usize| self.hrefs.get(at).cloned().flatten();
         match &self.label {
@@ -95,9 +97,8 @@ impl Chip {
         }
     }
 
-    /// The chip's classes.  A chip whose words run past half the card's
-    /// width spans the card's width, and a chip whose workload needs
-    /// attention takes --warm, as its parcel would.
+    /// The CSS classes of the chip. A chip whose text is longer than
+    /// `WIDE` characters spans the whole card.
     pub fn class(&self) -> String {
         let mut class = String::from("chip");
         if self.to_string().chars().count() > WIDE {
@@ -112,14 +113,16 @@ impl Chip {
     }
 }
 
-/// The most characters that fit in a chip half the card's width.
+/// The most characters of text that fit in a chip of half the card's
+/// width.
 const WIDE: usize = 18;
 
-/// A namespace's workloads, sorted into the chips they draw as.
+/// A namespace's workloads, sorted by the kind of chip each one draws
+/// as.
 #[derive(Default)]
 pub(super) struct Sorted {
-    /// The built-in workloads that run pods, each a name, its replicas,
-    /// its health, and its page.
+    /// The built-in workloads that have replicas: name, replica count,
+    /// health, and page link.
     replicated: Vec<(String, i32, Level, Option<String>)>,
     cron_jobs: Vec<Level>,
     jobs: Vec<Level>,
@@ -127,8 +130,10 @@ pub(super) struct Sorted {
 }
 
 impl Sorted {
-    /// Adds `workload`, with its replicas when it is a built-in kind that
-    /// has them, and its page.
+    /// Sorts `workload` into the list for its chip. `replicas` is set
+    /// for a built-in kind that has replicas, and `href` is the
+    /// workload's page. A custom kind is always an owned chip, even
+    /// when its name matches a built-in kind such as `Job`.
     pub(super) fn add(
         &mut self,
         workload: &Object,
@@ -157,10 +162,12 @@ impl Sorted {
         }
     }
 
-    /// The replicated workloads come first, most replicas first, because
-    /// they run most of the namespace's pods.  The single-pod workloads
-    /// follow by name, two to a chip, then the counts of CronJobs and
-    /// Jobs, and then every other kind, by kind and name.
+    /// Returns the chips in display order. Workloads whose replica count
+    /// is not one come first, most replicas first and then by name,
+    /// because they run most of the namespace's pods.
+    /// Single-pod workloads follow by name, two to a chip. Then come the
+    /// count of CronJobs, the count of Jobs, and every other kind by
+    /// kind and name.
     pub(super) fn chips(mut self) -> Vec<Chip> {
         self.replicated
             .sort_by(|(a, a_replicas, ..), (b, b_replicas, ..)| {
@@ -344,7 +351,7 @@ mod tests {
         "chip chip-failing"
     )]
     #[case::wide(owned("Player", "lobby-speakers", true), "chip chip-wide")]
-    fn a_chip_takes_its_width_and_health(#[case] chip: Chip, #[case] class: &str) {
+    fn a_chip_class_follows_its_width_and_level(#[case] chip: Chip, #[case] class: &str) {
         assert_eq!(chip.class(), class);
     }
 
@@ -352,7 +359,7 @@ mod tests {
     #[case::one_workload(replicated("web", 3), Some("Sells things."))]
     #[case::one_of_a_pair(single(&["auth", "web"]), Some("web: Sells things."))]
     #[case::both_of_a_pair(single(&["mail", "web"]), Some("mail: Sends mail.\nweb: Sells things."))]
-    #[case::none_said(owned("Cache", "sessions", true), None)]
+    #[case::no_why_given(owned("Cache", "sessions", true), None)]
     #[case::another_kind_by_kind_and_name(owned("Cache", "web", true), Some("Keeps sessions."))]
     #[case::not_by_name_alone(owned("Queue", "web", true), None)]
     #[case::a_count(chip(Label::CronJobs(2)), None)]

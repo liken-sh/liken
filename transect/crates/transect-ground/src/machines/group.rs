@@ -14,9 +14,9 @@ pub struct Group<'a> {
 
 /// The control-plane machines and the workers, each in the order of
 /// `machines`, without an empty group.  When no node has the
-/// control-plane label, as on a managed cluster, the function returns
-/// one group with no label, because the labels do not show that every
-/// machine is a worker.
+/// control-plane label, as on a managed cluster, it returns one group
+/// with no label, even when `machines` is empty, because the labels do
+/// not show that every machine is a worker.
 pub fn groups(machines: &[Machine]) -> Vec<Group<'_>> {
     let (control_plane, workers): (Vec<_>, Vec<_>) =
         machines.iter().partition(|machine| machine.control_plane);
@@ -64,7 +64,7 @@ mod tests {
         }
     }
 
-    fn drawn<'a>(groups: &[Group<'a>]) -> Vec<(Option<&'static str>, Vec<&'a str>)> {
+    fn labels_and_names<'a>(groups: &[Group<'a>]) -> Vec<(Option<&'static str>, Vec<&'a str>)> {
         groups
             .iter()
             .map(|group| {
@@ -99,6 +99,6 @@ mod tests {
             .iter()
             .map(|&(name, control_plane)| machine(name, control_plane))
             .collect();
-        assert_eq!(drawn(&groups(&machines)), expected);
+        assert_eq!(labels_and_names(&groups(&machines)), expected);
     }
 }

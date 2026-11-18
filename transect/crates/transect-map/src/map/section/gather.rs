@@ -1,6 +1,6 @@
-//! Reads the parts of the cluster below the workload that the spine
-//! draws: the workload's claims, grouped by backend with the machines
-//! that mount them, and the machines that its pods run on.
+//! Builds the rows below the workload in the section view's main
+//! column: the workload's claims, grouped by storage backend with the
+//! machines that mount them, and the machines that its pods run on.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -11,10 +11,12 @@ use transect_graph::edges::Claim;
 use transect_ground::machines::Machine;
 use transect_ground::storage::{self, Backend, Storage};
 
-/// The claims `pods` mount, or with no pod, the claims `templates`
-/// name, one backing per backend in the order the workload page lists
-/// them.  Two kinds of volume on one server, such as NFS and iSCSI, are
-/// one backend, because the ground row draws them as one box.
+/// Groups the claims that `pods` mount, or that `templates` name when
+/// there is no pod, into one backing per backend, in the order the
+/// workload page lists them.  It adds each inline NFS volume to the
+/// backing of its server.  Two kinds of volume on one server, such as
+/// NFS and iSCSI, share one backend, because the ground row draws one
+/// box for the server.
 pub fn backings(
     storage: &Storage,
     namespace: &str,
@@ -83,11 +85,10 @@ fn backing_for(backings: &mut Vec<Backing>, backend: Option<Backend>) -> &mut Ba
     &mut backings[index]
 }
 
-/// Each NFS volume named inline by `pods`, or with no pod by
-/// `templates`: its name, its server, and the machine of the pod that
-/// mounts it.  A pod mounts such a volume directly, with no claim, so the
-/// volume has no box in the volumes row and is joined to the pod's
-/// machine.
+/// Each NFS volume that `pods`, or `templates` when there is no pod,
+/// declare inline: its name, its server, and the machine of the pod
+/// that mounts it.  Such a volume has no claim, so the volumes row has
+/// no box for it, and its backing records the pod's machine instead.
 fn inline_nfs<'a>(
     pods: &[&'a Pod],
     templates: &[&'a PodSpec],
@@ -111,8 +112,8 @@ fn inline_nfs<'a>(
     found
 }
 
-/// The machines `pods` run on, by name, with how many of them each
-/// runs.  A pod that is not yet scheduled is not counted on any machine.
+/// The machines `pods` run on, by name, with how many of the pods each
+/// runs.  A pod that is not scheduled yet counts for no machine.
 pub fn hosts(pods: &[&Pod], machines: &[Machine]) -> Vec<Host> {
     let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
     for pod in pods {

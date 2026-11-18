@@ -1,6 +1,6 @@
-//! A workload's Controls section: the custom resources its controller
-//! reconciles, read in reverse from the controlled-by edges, one table
-//! per kind, each read from its kind's store.
+//! The Controls section of a workload's page: one table for each kind of
+//! custom resource that the workload reconciles, found from the
+//! `ControlledBy` edges that point at the workload.
 
 use k8s_openapi::jiff::Timestamp;
 use std::collections::BTreeMap;
@@ -11,7 +11,8 @@ use super::kinds::table;
 use transect_graph::edges::{Endpoint, Kind, Object, Provenance, Shown};
 use transect_map::objects::{self, Manages};
 
-/// The workload `namespace/name` of the kind `resource` names.
+/// The workload `name` in `namespace` whose resource plural is
+/// `resource`.
 pub fn workload_at(
     snapshot: &Snapshot,
     namespace: &str,
@@ -28,8 +29,8 @@ pub fn workload_at(
     found.cloned()
 }
 
-/// The objects `workload`'s controller reconciles, by kind, each kind
-/// with how its first object was found to be controlled by it.
+/// The objects controlled by `workload`, grouped by group and kind, with
+/// the provenance of the first edge found for each kind.
 fn controlled(
     model: &Model,
     workload: &Object,
@@ -50,24 +51,25 @@ fn controlled(
     by_kind
 }
 
-/// How a Controls table's objects were found to be the workload's: the
-/// rule of controller attribution that matched, in words.
+/// The sentence under a Controls table that says how transect matched
+/// its objects to the workload.
 pub fn rule(provenance: &Provenance) -> String {
     match provenance {
         Provenance::Kinds { knowledge, .. } => {
             format!(
-                "Matched by image: the KindKnowledge {knowledge} names this workload's image as its controller."
+                "Matched by image: the KindKnowledge {knowledge} lists this workload's image as its controller."
             )
         }
         Provenance::Package { crd, labels } => format!(
             "A guess from labels: this workload and the CRD {crd} both have {}.",
             labels.join(", ")
         ),
-        _ => "Matched by who RBAC lets write their status, and who wrote it.".into(),
+        _ => "Matched by the accounts that RBAC allows to write their status, and by the account that wrote it.".into(),
     }
 }
 
-/// One table per kind of the custom resources `workload` controls.
+/// One table for each custom kind that `workload` controls. A kind that
+/// the snapshot has no store for is left out.
 pub fn manages(model: &Model, workload: &Object, shown: &Shown, now: Timestamp) -> Vec<Manages> {
     let snapshot = &model.snapshot;
     let labels = objects::labels(snapshot.custom.iter().map(|(api, _)| api));

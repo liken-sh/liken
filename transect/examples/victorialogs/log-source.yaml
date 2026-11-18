@@ -1,10 +1,10 @@
-# A LogSource for VictoriaLogs, with its LogsQL, for lines an
-# OpenTelemetry collector ships with its Kubernetes attributes:
-# k8s.namespace.name, k8s.pod.name, k8s.container.name, and
-# k8s.node.name, and OpenTelemetry's level names in severity_text.
-# Change the Service to match the release, and set `url` for a
-# port-forward from a workstation, which takes precedence over the
-# Service.
+# A LogSource for VictoriaLogs, with its LogsQL queries.  It expects
+# lines that an OpenTelemetry collector ships with the Kubernetes
+# attributes k8s.namespace.name, k8s.pod.name, k8s.container.name, and
+# k8s.node.name, and with OpenTelemetry's level names in severity_text.
+# Change the Service to match your release.  To reach the store through
+# a port-forward from a workstation, set `url`, which transect uses in
+# place of the Service.
 apiVersion: transect.liken.sh/v1alpha1
 kind: LogSource
 metadata:
@@ -21,21 +21,22 @@ spec:
     time: _time
     level: severity_text
     message: _msg
-  # severity_text contains ERROR, WARN, INFO, and the like, or
-  # Unspecified when the shipper read none, which leaves the line to the
-  # guess from its text.  Each entry is the start of a value, in any case.
+  # Each entry matches the start of a severity_text value, such as
+  # ERROR, Warn, or INFO, in any letter case.  When no entry matches a
+  # value, such as Unspecified, transect guesses the level from the
+  # text of the line.
   levels:
     error: [err, fatal, panic, crit]
     warning: [warn]
     plain: [info, debug, trace, notice]
   queries:
-    # {since} is the pod's start, which keeps the scan to its lifetime.
-    # transect narrows this to one container and asks only for the
-    # fields a line shows.
+    # {since} is the pod's start time, so the query reads only this
+    # pod's lines.  transect adds a filter for one container and asks
+    # for only the fields that a line shows.
     tail: '_time:>={since} {fields.namespace}:"{namespace}" {fields.pod}:"{pod}" | sort by ({fields.time}) desc | limit {limit}'
-    # Grouped by namespace and pod, so error lines tie to workloads,
-    # and by container and machine, so a finding names where they were.
+    # The namespace and pod map the matching lines to a workload, and the
+    # container and node tell a finding where the lines came from.
     search: '_time:{window} {pattern} | stats by ({fields.namespace}, {fields.pod}, {fields.container}, {fields.node}) count() matches, max({fields.time}) last | sort by (matches) desc | limit {limit}'
-    # The newest matching lines across the cluster, which a finding
-    # shows a few of.
+    # The newest matching lines across the cluster, for the few that a
+    # finding shows.
     lines: '_time:{window} {pattern} | sort by ({fields.time}) desc | limit {limit}'

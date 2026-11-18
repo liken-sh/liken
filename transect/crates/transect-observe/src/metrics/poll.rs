@@ -1,9 +1,6 @@
 //! Reads the bytes used on each claim's volume with the `volumeUsed`
-//! query that a `MetricsSource` declares.  The poller queries at once,
-//! then on an interval and whenever the resources change, and stores
-//! the latest reading in a watch channel that each render reads.  A
-//! reading that differs from the last one marks the cluster as changed,
-//! so an open volume page shows the new figure.
+//! query that a `MetricsSource` declares, and keeps the latest reading in
+//! a `watch` channel that each render reads.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -21,7 +18,7 @@ use transect_graph::edges::Claim;
 /// characters.
 const ERROR_CHARS: usize = 200;
 
-/// The result of the last round of the `volumeUsed` query.
+/// The result of the last `volumeUsed` query.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub enum Reading {
     /// Neither `--prometheus` nor a `MetricsSource` gives a Prometheus.
@@ -49,9 +46,9 @@ impl Reading {
     }
 
     /// The line that a volume page shows in place of its used bytes,
-    /// with the text of `missing`.  When no `volumeUsed` query is
-    /// declared because the `MetricsSource` did not load, the line
-    /// reports that it did not load.
+    /// with the text of `missing`.  When the reading is `Off` or
+    /// `Undeclared` and a `MetricsSource` did not load, the line says so
+    /// in place of that text.
     pub fn missing_line(
         &self,
         claim: &Claim,
@@ -60,13 +57,13 @@ impl Reading {
         let missing = self.missing(claim)?;
         Some(match self {
             Self::Off | Self::Undeclared => loaded.off("MetricsSource", "Used bytes: ", &missing),
-            _ => transect_resources::resources::OffLine::said(missing),
+            _ => transect_resources::resources::OffLine::plain(missing),
         })
     }
 
     /// The gray line that a volume page shows in place of its used
-    /// bytes, which explains what would show them.  It is `None` when
-    /// the reading has the bytes or the first query has not returned.
+    /// bytes, which says what would show them.  It is `None` when the
+    /// reading has the bytes or the first query has not returned.
     pub fn missing(&self, claim: &Claim) -> Option<String> {
         match self {
             Self::Off => Some(
@@ -89,8 +86,9 @@ impl Reading {
 
 /// Sends the `volumeUsed` query of the `MetricsSource` to the
 /// Prometheus that `reaching` selects, at once, then every `interval`
-/// and whenever the resources change.  It marks `changed` after each
-/// reading that differs from the one before.
+/// and whenever the resources change.  It sends a reading to the
+/// channel and marks `changed` only when the reading differs from the
+/// one before, so an open volume page shows the new figure.
 pub fn poll(
     reaching: Reaching,
     interval: Duration,
@@ -114,7 +112,7 @@ pub fn poll(
             let reading = match (reaching.prometheus(), query) {
                 (None, _) => Reading::Off,
                 (Some(_), None) => Reading::Undeclared,
-                (Some(prometheus), Some(query)) => ask(&prometheus, &query).await,
+                (Some(prometheus), Some(query)) => query_volumes(&prometheus, &query).await,
             };
             if readings.send_if_modified(|current| replace_if_differs(current, reading)) {
                 changed.send_replace(());
@@ -128,14 +126,14 @@ fn replace_if_differs(current: &mut Reading, next: Reading) -> bool {
     let differs = *current != next;
     if differs {
         if let Reading::Failed(why) = &next {
-            tracing::warn!(error = %why, "the volumeUsed query failed");
+            tracing::warn!(error = %why, "The volumeUsed query of the MetricsSource failed");
         }
         *current = next;
     }
     differs
 }
 
-async fn ask(prometheus: &Prometheus, query: &ClaimQuery) -> Reading {
+async fn query_volumes(prometheus: &Prometheus, query: &ClaimQuery) -> Reading {
     match prometheus.query(&query.query).await {
         Ok(samples) => Reading::Read(Arc::new(by_claim(&samples, &query.labels))),
         Err(error) => Reading::Failed(

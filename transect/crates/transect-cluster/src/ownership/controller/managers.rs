@@ -1,14 +1,13 @@
-//! Narrowing a kind's candidate controllers by the field manager that
-//! writes an object's status.
+//! Narrows the candidate controllers of a kind by the field manager
+//! that wrote the status of its objects.
 //!
-//! The API server records, in `metadata.managedFields`, the manager that
-//! last wrote each part of an object.  A client names itself, and most
-//! controllers take the name of their binary, such as `manager` or
-//! `prometheus-operator`, so the name often matches a container, its
-//! image, or its command.  Many Go clients send no name and appear as
-//! `Go-http-client`, which matches nothing; then the candidates stay as
-//! RBAC found them, unless the kind's knowledge names the image its
-//! controller runs.
+//! The API server records in `metadata.managedFields` which field
+//! manager last wrote each part of an object. The client chooses the
+//! manager name, and most controllers use the name of their binary, such
+//! as `manager` or `prometheus-operator`. That name is often also the
+//! name of a container, an image, or a command. A Go client that sets no
+//! name is recorded as `Go-http-client`, which matches no candidate, so
+//! the candidates from RBAC stay as they are.
 
 use std::collections::BTreeSet;
 
@@ -16,14 +15,13 @@ use k8s_openapi::api::core::v1::Pod;
 
 use transect_graph::edges::Object;
 
-/// A workload whose pods run as a `ServiceAccount` that may write a
-/// kind's status, with the names it could appear under as a field
-/// manager.
+/// A workload whose pods run as a `ServiceAccount` that RBAC lets write
+/// a kind's status, with the field manager names that would point to it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Candidate {
     pub workload: Object,
     names: BTreeSet<String>,
-    /// The image repositories its pods run, without a registry host.
+    /// The images of its pods' containers, without registry host or tag.
     repositories: BTreeSet<String>,
 }
 
@@ -37,18 +35,19 @@ impl Candidate {
         }
     }
 
-    /// Whether its pods run the image repository `wanted`, matched
-    /// without the registry host on either side, so a mirror that
-    /// serves the image under its own host, or under a path of its own
-    /// before the repository, still matches.
+    /// Whether a container of its pods runs an image of the repository
+    /// `wanted`. Registry host and tag are ignored, and the image may
+    /// have more path segments before `wanted`, so an image pulled
+    /// through a mirror with its own host and path prefix still matches.
     pub fn runs(&self, wanted: &str) -> bool {
         self.repositories
             .iter()
             .any(|repository| same_repository(repository, wanted))
     }
 
-    /// Adds the names `pod` could write under: its `ServiceAccount`, and
-    /// each container's name, image, and command.
+    /// Adds the manager names that would point to `pod`: its
+    /// `ServiceAccount`, and for each container its name, the last path
+    /// segment of its image, and the file name of its command.
     pub fn add_pod(&mut self, pod: &Pod) {
         let Some(spec) = &pod.spec else {
             return;
@@ -59,7 +58,7 @@ impl Candidate {
         for container in &spec.containers {
             self.names.insert(normal(&container.name));
             if let Some(image) = &container.image {
-                self.names.insert(normal(repository(image)));
+                self.names.insert(normal(image_name(image)));
                 let path = without_host(without_tag(image));
                 self.repositories.insert(path.to_string());
             }
@@ -71,9 +70,9 @@ impl Candidate {
     }
 }
 
-/// The candidates whose names match one of `managers`, or every
-/// candidate when none matches, because a manager that names no
-/// candidate gives no evidence of which of them wrote.
+/// Returns the candidates with a name that matches one of `managers`.
+/// When none matches, the managers say nothing about the candidates, so
+/// it returns all of them.
 pub fn narrow(candidates: Vec<Candidate>, managers: &[String]) -> Vec<Candidate> {
     let managers: BTreeSet<String> = managers.iter().map(|m| normal(manager(m))).collect();
     let matching: Vec<Candidate> = candidates
@@ -88,9 +87,8 @@ pub fn narrow(candidates: Vec<Candidate>, managers: &[String]) -> Vec<Candidate>
     }
 }
 
-/// The candidates that run `image`, or none when no candidate does,
-/// because an image that names no candidate gives no evidence of which
-/// of them is the controller.
+/// Returns the candidates that run `image`, or `None` when no candidate
+/// does.
 pub fn running(candidates: &[Candidate], image: &str) -> Option<Vec<Candidate>> {
     let matching: Vec<Candidate> = candidates
         .iter()
@@ -100,9 +98,8 @@ pub fn running(candidates: &[Candidate], image: &str) -> Option<Vec<Candidate>> 
     (!matching.is_empty()).then_some(matching)
 }
 
-/// Whether `image` is of the repository `wanted`, both without the
-/// registry host, so a mirror that serves the image under its own host,
-/// or under a path of its own before the repository, still matches.
+/// Whether `image` is of the repository `wanted`, compared as in
+/// `Candidate::runs`.
 pub fn runs_image(image: &str, wanted: &str) -> bool {
     same_repository(without_host(without_tag(image)), wanted)
 }
@@ -112,9 +109,10 @@ fn same_repository(repository: &str, wanted: &str) -> bool {
     repository == wanted || repository.ends_with(&format!("/{wanted}"))
 }
 
-/// An image without its tag or digest: `ghcr.io/example/operator` of
-/// `ghcr.io/example/operator:1.2@sha256:...`.  A colon before the last
-/// slash is a registry's port, not a tag.
+/// Removes the tag and digest from an image reference, so
+/// `ghcr.io/example/operator:1.2@sha256:...` becomes
+/// `ghcr.io/example/operator`. A colon before the last slash is a
+/// registry port.
 fn without_tag(image: &str) -> &str {
     let image = image.split_once('@').map_or(image, |(image, _)| image);
     match image.rfind(':') {
@@ -123,9 +121,10 @@ fn without_tag(image: &str) -> &str {
     }
 }
 
-/// An image's path without its registry host: `example/operator` of
-/// `ghcr.io/example/operator`.  The first part is a host when it has a
-/// dot or a port, or is `localhost`, as the container runtimes read it.
+/// Removes the registry host from an image path, so
+/// `ghcr.io/example/operator` becomes `example/operator`. The first
+/// segment is a host when it has a dot or a colon, or is `localhost`,
+/// which is the rule of Docker's image reference format.
 fn without_host(image: &str) -> &str {
     match image.split_once('/') {
         Some((first, rest)) if first.contains(['.', ':']) || first == "localhost" => rest,
@@ -133,15 +132,15 @@ fn without_host(image: &str) -> &str {
     }
 }
 
-/// A manager's name without the `@<host>` some controllers add, such as
-/// `helm-controller@alpha`.
+/// Removes the `@<suffix>` that some controllers add to their manager
+/// name, as in `helm-controller@alpha`.
 fn manager(name: &str) -> &str {
     name.split_once('@').map_or(name, |(name, _)| name)
 }
 
-/// The last path segment of an image, without its tag or digest:
-/// `operator` of `ghcr.io/example/operator:1.2@sha256:...`.
-fn repository(image: &str) -> &str {
+/// The last path segment of an image without its tag or digest, so
+/// `ghcr.io/example/operator:1.2@sha256:...` gives `operator`.
+fn image_name(image: &str) -> &str {
     let image = image.split_once('@').map_or(image, |(image, _)| image);
     let last = basename(image);
     last.split_once(':').map_or(last, |(name, _)| name)
@@ -151,8 +150,9 @@ fn basename(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
 
-/// `PrometheusOperator`, `prometheus-operator`, and
-/// `prometheus_operator` all compare as one name.
+/// Lowercases `name` and drops every character that is not an ASCII
+/// letter or digit, so `PrometheusOperator`, `prometheus-operator`, and
+/// `prometheus_operator` compare as equal.
 fn normal(name: &str) -> String {
     name.chars()
         .filter(char::is_ascii_alphanumeric)
@@ -183,7 +183,7 @@ mod tests {
             .collect()
     }
 
-    fn two() -> Vec<Candidate> {
+    fn cache_and_metrics() -> Vec<Candidate> {
         vec![
             candidate(
                 "cache-operator",
@@ -205,10 +205,10 @@ mod tests {
     #[case::an_image_in_another_case("MetricsOperator", vec!["metrics"])]
     #[case::a_command("run", vec!["metrics"])]
     #[case::a_workload_name("cache-operator", vec!["cache-operator"])]
-    #[case::with_a_host("exporter@alpha", vec!["metrics"])]
+    #[case::with_a_suffix("exporter@alpha", vec!["metrics"])]
     #[case::a_generic_client("Go-http-client", vec!["cache-operator", "metrics"])]
     fn narrows_by_the_status_manager(#[case] manager: &str, #[case] expected: Vec<&str>) {
-        let narrowed = narrow(two(), &[manager.into()]);
+        let narrowed = narrow(cache_and_metrics(), &[manager.into()]);
         assert_eq!(names(&narrowed), expected);
     }
 
@@ -219,7 +219,7 @@ mod tests {
     #[case::an_image_no_candidate_runs("example/other", vec![])]
     #[case::not_a_prefix_of_another_name("cache-operator", vec![])]
     fn keeps_the_candidates_that_run_an_image(#[case] image: &str, #[case] expected: Vec<&str>) {
-        let found = running(&two(), image).unwrap_or_default();
+        let found = running(&cache_and_metrics(), image).unwrap_or_default();
         assert_eq!(names(&found), expected);
     }
 
@@ -237,7 +237,7 @@ mod tests {
     #[rstest]
     fn no_manager_keeps_every_candidate() {
         assert_eq!(
-            names(&narrow(two(), &[])),
+            names(&narrow(cache_and_metrics(), &[])),
             vec!["cache-operator", "metrics"]
         );
     }

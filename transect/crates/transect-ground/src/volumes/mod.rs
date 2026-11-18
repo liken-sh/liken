@@ -1,10 +1,9 @@
-//! A volume's page, `/volumes/{pv}`, and the claim's page, which show
-//! the same board.  The board shows what a volume stores and how full
-//! it is, which pods mount it and whether each one writes to it, which
-//! CronJobs mount it when they run, and where its bytes are stored.
-//! Every value except the bytes used comes from the Kubernetes API.  The
-//! bytes used come from the `volumeUsed` query that a `MetricsSource`
-//! declares.
+//! The content of the volume page, `/volumes/{pv}`, and of the claim
+//! page: what the volume stores, how full it is, which pods mount it and
+//! whether each one can write to it, which CronJobs mount it, and where
+//! its data is stored.  The bytes used come from the `volumeUsed` query
+//! that a `MetricsSource` declares, and every other value comes from the
+//! Kubernetes API.
 
 use std::sync::Arc;
 
@@ -16,8 +15,9 @@ use transect_graph::edges::Claim;
 
 const KI: f64 = 1024.0;
 
-/// A pod that mounts a claim: its name, the machine it runs on once
-/// scheduled, and whether any of its containers may write to it.
+/// A pod that mounts a claim: its name, the machine it runs on (`None`
+/// until the pod is scheduled), and whether any of its containers may
+/// write to the claim.
 #[derive(Debug, PartialEq)]
 pub struct Mounter {
     pub pod: String,
@@ -52,10 +52,11 @@ fn finished(pod: &Pod) -> bool {
     matches!(phase, Some("Succeeded" | "Failed"))
 }
 
-/// Whether the pod `pod` with `spec` may write to `claim`, or `None`
-/// when the pod does not mount the claim.  The pod may not write when
-/// its volume marks the claim read-only, or when every container mounts
-/// the claim read-only.
+/// Whether the pod named `pod` may write to `claim`, or `None` when the
+/// pod does not mount the claim.  The pod may not write when its volume
+/// source is read-only, or when no container mounts the volume
+/// read-write.  Kubernetes names an ephemeral volume's claim
+/// `<pod>-<volume>`.
 fn writes(spec: &PodSpec, pod: &str, claim: &Claim) -> Option<bool> {
     let volume = spec.volumes.iter().flatten().find(|volume| {
         match (&volume.persistent_volume_claim, &volume.ephemeral) {
@@ -97,8 +98,8 @@ pub fn cron_jobs(cron_jobs: &[Arc<CronJob>], claim: &Claim) -> Vec<String> {
     found
 }
 
-/// Bytes in the binary units a quantity uses, with one decimal under
-/// ten of a unit: "512Mi", "3.2Gi", "40Gi".
+/// Bytes in binary units, with one decimal below 10: "512Mi", "3.2Gi",
+/// "40Gi".
 pub fn bytes(bytes: f64) -> String {
     let units = ["", "Ki", "Mi", "Gi", "Ti", "Pi"];
     let mut value = bytes.max(0.0);
@@ -113,12 +114,10 @@ pub fn bytes(bytes: f64) -> String {
     }
 }
 
-/// How full a volume of `capacity`, a quantity such as "8Gi", is with
-/// `used` bytes on it.  The function returns the bytes used with their
-/// share of the capacity, and the bytes free.  When the capacity does
-/// not parse, it returns only the bytes used.  When the bytes used
-/// exceed the capacity, the text states it and the function returns no
-/// bytes free, because no bytes are free in the claim's terms.  This
+/// How full a volume is, from its `capacity` quantity, such as "8Gi",
+/// and the bytes `used`: the bytes used with their percentage of the
+/// capacity, and the bytes free.  The bytes free are `None` when the
+/// capacity does not parse, and when the bytes used exceed it, which
 /// happens on a volume whose driver enforces no quota.
 pub fn fullness(capacity: Option<&str>, used: f64) -> (String, Option<String>) {
     let parsed = capacity.and_then(Amount::parse).map(Amount::units);

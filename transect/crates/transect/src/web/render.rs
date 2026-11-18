@@ -1,6 +1,6 @@
-//! Rendering one view: the latest model, the view's page drawn from it
-//! on a blocking thread, and the view's edge kinds written onto its
-//! links.
+//! Renders one view: draws the view's page from the latest model on a
+//! blocking thread, then writes the view's edge kinds onto the links in
+//! the page.
 
 use k8s_openapi::jiff::Timestamp;
 use std::sync::Arc;
@@ -32,16 +32,16 @@ use transect_supply::vulnerabilities::{IdPage, ListPage};
 pub struct Sources {
     pub models: Latest<Model>,
     pub usage: watch::Receiver<usage::Reading>,
-    /// The log tails a page load read, which every render of a pod page
-    /// takes from the cache without reading again.
+    /// The log tails that a page load read.  A later render of the same
+    /// pod page reads them from this cache.
     pub logs: LogTails,
-    /// The objects of kinds no store holds, read once when their page
-    /// loads, which every render of that page draws.
+    /// The objects of kinds that no store holds.  `prepare` reads one
+    /// when its page loads, and every render of that page draws it.
     pub reads: Reads,
 }
 
-/// A view's page rendered whole, or its `main` block alone for a pushed
-/// update.
+/// Whether to render a whole page, or only its `main` block, which is
+/// what an update pushed to the browser contains.
 #[derive(Clone, Copy)]
 pub enum Part {
     Whole,
@@ -51,8 +51,8 @@ pub enum Part {
 /// A view's HTML, and whether the object it names is in the cluster.
 pub struct Rendered {
     pub html: String,
-    /// False when the render drew the page that reports its object
-    /// gone, which a page load answers with 404.
+    /// False when the render drew the page that says the object is
+    /// gone.  A page load responds to that page with 404.
     pub found: bool,
 }
 
@@ -61,7 +61,7 @@ impl Sources {
     /// its renders draw what the API server returned.  Every other page
     /// reads nothing here.
     pub async fn prepare(&self, page: &Page) {
-        let asked = match page {
+        let object_at = match page {
             Page::Workload {
                 namespace,
                 resource,
@@ -81,24 +81,24 @@ impl Sources {
         let Some(model) = self.models.last().await else {
             return;
         };
-        if let Some(key) = super::pages::read_key(&model, asked) {
+        if let Some(key) = super::pages::read_key(&model, object_at) {
             self.reads.read(&key).await;
         }
     }
 
-    /// The view rendered from the latest model, or the page that reports
-    /// its object gone when the cluster holds no such thing, or
-    /// `Err(INTERNAL_SERVER_ERROR)` when rendering fails.  Drawing a
-    /// page is CPU work that grows with the cluster, so it runs on a
-    /// blocking thread and leaves the async workers free for the event
-    /// streams.
+    /// The view rendered from the latest model, the page that says the
+    /// object is gone when the cluster has no such object, or
+    /// `Err(INTERNAL_SERVER_ERROR)` when rendering fails.
     pub async fn render(&self, view: View, part: Part) -> Result<Rendered, StatusCode> {
         let model = self.models.get().await;
         self.render_on(model, view, part).await
     }
 
-    /// The view rendered from `model`, which the caller got from
-    /// `models`, or `Err(INTERNAL_SERVER_ERROR)` when there is none.
+    /// Renders the view from `model`, which the caller got from
+    /// `models`, or returns `Err(INTERNAL_SERVER_ERROR)` when `model` is
+    /// `None`.  Drawing a page is CPU work that grows with the cluster,
+    /// so it runs on a blocking thread and leaves the async workers free
+    /// for the event streams.
     pub async fn render_on(
         &self,
         model: Option<Arc<Model>>,
@@ -117,8 +117,9 @@ impl Sources {
     }
 
     fn draw(&self, model: &Model, view: &View, part: Part) -> Result<Rendered, StatusCode> {
-        // A copy of the reading, so the poller's next reading need not
-        // wait for this render to finish.
+        // Clone the reading so that the watch channel's read lock is
+        // released before the render starts.  A held lock would block the
+        // sender's next update until the render finished.
         let usage = self.usage.borrow().clone();
         let logs = |namespace: &str, name: &str| self.logs.cached(namespace, name);
         draw(
@@ -133,8 +134,8 @@ impl Sources {
     }
 }
 
-/// `view` drawn from `model`, with `usage` on its bars and `logs` giving
-/// the tails a pod page shows.
+/// Draws `view` from `model`.  `usage` fills the usage bars, and `logs`
+/// returns the log tails that a pod page shows.
 pub fn draw(
     model: &Model,
     view: &View,
@@ -221,13 +222,13 @@ pub fn draw(
                 resource,
                 name,
             };
-            // A GitOps object, which shares the URL, gets its own page
-            // even though its kind has knowledge.  Any other custom
-            // resource of a known kind gets its board, and any other
-            // workload gets its page.
+            // Every object in a namespace shares this URL form, so try
+            // the pages in order: a GitOps object, even when its kind has
+            // `KindKnowledge`, then a `ServiceAccount`'s access drawing,
+            // then a custom resource whose kind has knowledge, then a
+            // workload, and last the plain object page.
             let page = gitops_page(model, layers, namespace, resource, name, shown);
             let page = page.map(|page| template(page, part));
-            // A `ServiceAccount`'s page is its access drawing.
             let page = page.or_else(|| {
                 let page = (resource == "serviceaccounts")
                     .then(|| service_account_page(model, layers, namespace, name, now));
@@ -247,23 +248,23 @@ pub fn draw(
                     template(transect_map::map::WorkloadPage { manages, ..page }, part)
                 });
                 page.or_else(|| {
-                    let asked = ObjectAt {
+                    let object_at = ObjectAt {
                         namespace: Some(namespace),
                         resource,
                         name,
                     };
-                    let page = object_page(model, layers, reads, asked, now);
+                    let page = object_page(model, layers, reads, object_at, now);
                     page.map(|page| template(page, part))
                 })
             })
         }
         Page::ClusterObject { resource, name } => {
-            let asked = ObjectAt {
+            let object_at = ObjectAt {
                 namespace: None,
                 resource,
                 name,
             };
-            let page = object_page(model, layers, reads, asked, now);
+            let page = object_page(model, layers, reads, object_at, now);
             page.map(|page| template(page, part))
         }
         Page::Section {
@@ -344,9 +345,10 @@ pub fn draw(
     Ok(Rendered { html, found })
 }
 
-/// What a page names, for the page that reports it gone.  The cluster
-/// page is never gone: a selection it does not hold draws the plain
-/// cluster.
+/// The object that a page is for, so that the gone page can say what is
+/// missing.  Returns `None` for a page that is not for one object.  The
+/// cluster page is never gone: a selection that it does not hold draws
+/// the plain cluster.
 fn gone(page: &Page) -> Option<Gone> {
     Some(match page.clone() {
         Page::Cluster { .. }

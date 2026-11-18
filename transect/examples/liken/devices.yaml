@@ -1,10 +1,10 @@
-# The device knowledge liken's DRA drivers would ship, one resource per
-# driver, named as the ResourceSlices name the driver: liken.sh for
-# every device the kernel found, and the audio, display, bluetooth, and
-# media operators' drivers.
+# Device knowledge for the DRA drivers that liken ships. Each resource
+# is named for the driver name in that driver's ResourceSlices:
+# liken.sh for the devices the kernel found, and one for each of the
+# audio, display, bluetooth, and media operators.
 #
-# liken.sh lists every device the kernel found, titled by the name its
-# USB or PCI database gives.
+# A liken.sh device's name attribute comes from the USB or PCI ID
+# database.
 apiVersion: transect.liken.sh/v1alpha1
 kind: DeviceKnowledge
 metadata:
@@ -16,9 +16,9 @@ spec:
     - {attribute: class, label: class}
     - {attribute: driver, label: driver}
 ---
-# An HDMI or DisplayPort sound output names its monitor by the same
-# identifier the display driver gives the screen, so it is the speakers
-# of that screen.
+# An HDMI or DisplayPort sound output has the same monitor.liken.sh/id
+# as the display.liken.sh device of its monitor, so the map shows the
+# output as that monitor's speakers.
 apiVersion: transect.liken.sh/v1alpha1
 kind: DeviceKnowledge
 metadata:
@@ -42,10 +42,11 @@ spec:
     - {attribute: connector, label: connector}
     - {attribute: currentMode, label: mode}
 ---
-# A paired device's address is its Peripheral's status.address, and a
-# radio's media bus has the Adapter's.  A Peripheral is owned by its
-# Adapter, so the map draws it as that Adapter: the line from a paired
-# device ends at the radio it pairs through.
+# A paired device's address matches the status.address of its
+# Peripheral, and a radio's address matches the status.address of its
+# Adapter. The Adapter owns the Peripheral, so the map draws the
+# Peripheral as part of the Adapter, and the line from a paired device
+# ends at the radio it pairs through.
 apiVersion: transect.liken.sh/v1alpha1
 kind: DeviceKnowledge
 metadata:
@@ -60,10 +61,9 @@ spec:
     - {attribute: address, kind: Peripheral, group: bluetooth.liken.sh, match: status.address, label: pairs through}
     - {attribute: address, kind: Adapter, group: bluetooth.liken.sh, match: status.address, label: media bus of}
 ---
-# A GPU's media capabilities name its PCI address, which the GPU's own
-# devices in liken.sh have as their PCI bus ID.  The capability device
-# has no PCI bus ID of its own, so it draws apart from the GPU, with
-# a line naming it.
+# A media capability device's address is the PCI bus ID of its GPU. It
+# has no resource.kubernetes.io/pciBusID of its own, so the map draws it
+# apart from the GPU, with a line labeled "capability of".
 apiVersion: transect.liken.sh/v1alpha1
 kind: DeviceKnowledge
 metadata:

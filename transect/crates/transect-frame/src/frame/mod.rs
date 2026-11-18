@@ -1,7 +1,8 @@
-//! The page frame every full page extends: `layout.html`, the
-//! elevation crumb, the lens tabs, and the brand.  The frame names
-//! nothing else in `transect`, so every domain's pages can extend it.
-//! The binary serves the brand and the stylesheets from `web::assets`.
+//! `layout.html`, the template that every full page extends, with the
+//! breadcrumbs, the tabs, and the brand files. This crate depends on no
+//! other `transect` crate, so every other crate can use it without a
+//! dependency cycle. The `transect` binary serves the brand files from
+//! `web::assets`.
 
 pub mod crumbs;
 pub mod tabs;

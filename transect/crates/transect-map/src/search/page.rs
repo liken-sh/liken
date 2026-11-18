@@ -1,6 +1,6 @@
-//! What a query shows: its rows, as the dialog's fragment and as the
-//! `/search` page, each row with a health dot, its name, its kind,
-//! where it is, and its lens chips.
+//! The results of a search query, rendered as the fragment for the
+//! search dialog and as the `/search` page. Each row shows a health
+//! dot, the object's name and kind, its location, and its lens chips.
 
 use askama::Template;
 
@@ -15,8 +15,8 @@ pub struct Row {
     pub kind: String,
     pub context: Option<String>,
     pub href: String,
-    /// The health of what it opens, or none for a kind transect does
-    /// not assess, which shows no dot.
+    /// The health of the object that the row links to. `None` for a
+    /// kind that transect does not assess, which has no dot.
     pub level: Option<Level>,
     pub lenses: Vec<(&'static str, String)>,
 }
@@ -33,9 +33,9 @@ impl Row {
         }
     }
 
-    /// The dot's class: clear when healthy, as a card's dot is.  A row
-    /// with no assessed health keeps the dot's space with nothing drawn
-    /// in it, so its name lines up with the others and shows no health.
+    /// The dot's CSS class. A row with no level still gets an empty dot
+    /// element, so that its name lines up with the names of the other
+    /// rows.
     pub fn dot_class(&self) -> &'static str {
         match self.level {
             None => "dot",
@@ -47,15 +47,17 @@ impl Row {
     }
 }
 
-/// The id of the dialog's list of rows, which its field targets.
+/// The id of the dialog's list of rows. The dialog's search field swaps
+/// new rows into the element with this id.
 pub const DIALOG_LIST: &str = "search-results";
 
-/// The id of the `/search` page's own list.  The dialog is on every
-/// page, the search page too, so the two lists need ids of their own,
-/// or the page's field would swap its rows into the hidden dialog.
+/// The id of the `/search` page's list. Every page has the search
+/// dialog, the search page too, so with one id the page's search field
+/// would swap its rows into the hidden dialog's list.
 pub const PAGE_LIST: &str = "search-page-results";
 
-/// The rows a query found, which the dialog swaps in as it is typed.
+/// The rows that a query matched. The search field of the dialog or of
+/// the search page swaps them in as the user types.
 #[derive(Template)]
 #[template(path = "search/results.html")]
 pub struct Results {
@@ -65,8 +67,8 @@ pub struct Results {
     pub list: &'static str,
 }
 
-/// `/search?q=` as a page of its own, for a browser without the dialog
-/// or a link to a query.
+/// `/search?q=` as a full page, for a request that opens the URL
+/// directly, such as a link to a query.
 #[derive(Template)]
 #[template(path = "search/page.html")]
 pub struct SearchPage {
@@ -98,6 +100,10 @@ mod tests {
             },
         };
         let html = page.render().unwrap();
-        assert_eq!(html.matches(expected).count(), 1, "{expected}");
+        assert_eq!(
+            html.matches(expected).count(),
+            1,
+            "the page has {expected:?} other than once"
+        );
     }
 }

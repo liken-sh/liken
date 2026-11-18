@@ -1,9 +1,9 @@
-//! The ground band.  It draws one box per backend outside the cluster,
-//! with the backend's volumes counted by type, and one box per address
-//! outside the cluster that a depends-on edge reaches, with the number
-//! of objects that depend on it.  An address that is both gets one box
-//! with both counts.  When a namespace is selected, each box also shows
-//! that namespace's own counts.
+//! The outside-systems band of a page: one box for each backend outside the
+//! cluster, with its volumes counted by type, and one box for each
+//! address outside the cluster that a depends-on edge reaches, with the
+//! number of objects that depend on it.  An address that is both gets
+//! one box with both counts.  When a namespace is selected, each box
+//! also shows that namespace's own counts.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -34,15 +34,15 @@ impl Counts {
     }
 }
 
-/// The counts on a box for the whole cluster, or for one namespace.
+/// What a box counts, for the whole cluster or for one namespace.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Held {
+pub struct Totals {
     pub counts: Counts,
     /// How many objects depend on the box, by their depends-on edges.
     pub dependents: usize,
 }
 
-impl Held {
+impl Totals {
     pub fn is_empty(&self) -> bool {
         self.counts.is_empty() && self.dependents == 0
     }
@@ -52,36 +52,36 @@ impl Held {
 pub struct GroundBox {
     /// The address or driver that names the backend.
     pub name: String,
-    pub all: Held,
-    /// The selected namespace's share of the box, or `None` when nothing
-    /// is selected.
-    pub here: Option<Held>,
-    /// The lines of intent about the system that the box represents,
-    /// such as an `Outside` resource's `why` and `gotcha`.
+    pub all: Totals,
+    /// The selected namespace's counts, or `None` when no namespace is
+    /// selected.
+    pub here: Option<Totals>,
+    /// The intent lines about the backend or address, such as an
+    /// `Outside` resource's `why` and `gotcha`.
     pub about: Vec<Line>,
     /// The path of the box's own page, under `/ground/`.
     pub page: String,
-    /// The URL of the system's own console, when its `Outside` gives
-    /// one or its drivers' `console` templates give exactly one.
+    /// The URL of the backend's console: its `Outside`'s `url`, or else
+    /// its drivers' `console` URL when they have exactly one.
     pub link: Option<String>,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct Ground {
     pub boxes: Vec<GroundBox>,
-    /// The selected namespace, whose name the page shows before its
+    /// The selected namespace. The page writes its name before its
     /// counts on each box.
     pub selected: Option<String>,
 }
 
 impl Ground {
     /// A box for each backend outside the cluster and each address
-    /// outside it that `graph`'s depends-on edges reach.  The box with
-    /// the most volumes comes first, then the one with the most
-    /// dependents.  When a namespace is selected, each box also gets
-    /// `selected`'s share.  The selection's volumes count only when
-    /// `stores_on` is shown, because they are its stores-on edges.  The
-    /// selection marks boxes and does not move any, as with parcels.
+    /// outside it that `graph`'s depends-on edges reach, with the most
+    /// volumes first, then the most dependents, then by name.  A
+    /// selected namespace adds its own counts to each box but does not
+    /// change the order.  `stores_on` is whether the page shows
+    /// stores-on edges.  When it is false, the selected namespace's
+    /// volume counts are zero, because those edges draw its volumes.
     pub fn build(
         storage: &Storage,
         graph: &Graph,
@@ -108,11 +108,11 @@ impl Ground {
             .into_iter()
             .map(|name| {
                 let on = dependents.get(name);
-                let all = Held {
+                let all = Totals {
                     counts: counts(&tally, name),
                     dependents: on.map_or(0, BTreeSet::len),
                 };
-                let here = selected.map(|namespace| Held {
+                let here = selected.map(|namespace| Totals {
                     counts: counts(&here_tally, name),
                     dependents: on.map_or(0, |on| {
                         on.iter().filter(|end| end.in_namespace(namespace)).count()
@@ -143,8 +143,6 @@ impl Ground {
         }
     }
 
-    /// These boxes, each with the lines that `about` returns for the
-    /// box's name.
     pub fn with_about(mut self, about: impl Fn(&str) -> Vec<Line>) -> Self {
         for one in &mut self.boxes {
             one.about = about(&one.name);
@@ -152,8 +150,6 @@ impl Ground {
         self
     }
 
-    /// These boxes, each with the page and the link out that `pages`
-    /// gives for its name.
     pub fn with_pages(mut self, pages: impl Fn(&str) -> (String, Option<String>)) -> Self {
         for one in &mut self.boxes {
             (one.page, one.link) = pages(&one.name);
@@ -191,9 +187,9 @@ fn dependents(graph: &Graph) -> BTreeMap<String, BTreeSet<&Endpoint>> {
 }
 
 impl GroundBox {
-    /// The box's CSS classes.  When a namespace is selected, a box with
-    /// a share of that namespace gets the selection color, and the other
-    /// boxes fade.
+    /// The box's CSS classes.  When a namespace is selected, a box that
+    /// has counts for it gets `ground-box-here`, and a box with none
+    /// gets `ground-box-faded`.
     pub fn class(&self) -> &'static str {
         match &self.here {
             None => "ground-box",
@@ -203,9 +199,9 @@ impl GroundBox {
     }
 }
 
-/// The ground under one namespace, which the namespace's page shows as
-/// one line: each backend that stores the namespace's volumes, with the
-/// namespace's counts, and the backend with the most volumes first.
+/// Each backend that stores `namespace`'s volumes, with the namespace's
+/// counts there, the backend with the most volumes first.  The
+/// namespace's page shows them as one line.
 pub fn under(storage: &Storage, namespace: &str) -> Vec<(String, Counts)> {
     let mut under: Vec<(String, Counts)> = storage
         .tally(Some(namespace))
@@ -234,11 +230,11 @@ mod tests {
         Counts(vec![(Type::Nfs, count)])
     }
 
-    fn held(counts: Counts, dependents: usize) -> Held {
-        Held { counts, dependents }
+    fn totals(counts: Counts, dependents: usize) -> Totals {
+        Totals { counts, dependents }
     }
 
-    fn ground_box(name: &str, all: Held, here: Option<Held>) -> GroundBox {
+    fn ground_box(name: &str, all: Totals, here: Option<Totals>) -> GroundBox {
         GroundBox {
             name: name.into(),
             all,
@@ -262,7 +258,7 @@ mod tests {
 
     /// Two workloads in shop and one in blog that depend on an API
     /// outside the cluster, and one workload in shop that depends on the
-    /// NFS server it also stores on.
+    /// NFS server that it also stores volumes on.
     fn graph() -> Graph {
         Graph::new([vec![
             depends_on("shop", "web", "api.example.com"),
@@ -274,26 +270,26 @@ mod tests {
 
     #[rstest]
     #[case::nothing_selected(None, true, vec![
-        ground_box("nas.example.com", held(nfs(3), 1), None),
-        ground_box("csi.example.com", held(fast(2), 0), None),
-        ground_box("api.example.com", held(Counts::default(), 3), None),
+        ground_box("nas.example.com", totals(nfs(3), 1), None),
+        ground_box("csi.example.com", totals(fast(2), 0), None),
+        ground_box("api.example.com", totals(Counts::default(), 3), None),
     ])]
-    #[case::a_namespace_on_all(Some("shop"), true, vec![
-        ground_box("nas.example.com", held(nfs(3), 1), Some(held(nfs(2), 1))),
-        ground_box("csi.example.com", held(fast(2), 0), Some(held(fast(1), 0))),
-        ground_box("api.example.com", held(Counts::default(), 3), Some(held(Counts::default(), 2))),
+    #[case::shop_has_counts_on_every_box(Some("shop"), true, vec![
+        ground_box("nas.example.com", totals(nfs(3), 1), Some(totals(nfs(2), 1))),
+        ground_box("csi.example.com", totals(fast(2), 0), Some(totals(fast(1), 0))),
+        ground_box("api.example.com", totals(Counts::default(), 3), Some(totals(Counts::default(), 2))),
     ])]
-    #[case::a_namespace_on_two(Some("blog"), true, vec![
-        ground_box("nas.example.com", held(nfs(3), 1), Some(held(Counts::default(), 0))),
-        ground_box("csi.example.com", held(fast(2), 0), Some(held(fast(1), 0))),
-        ground_box("api.example.com", held(Counts::default(), 3), Some(held(Counts::default(), 1))),
+    #[case::blog_has_counts_on_two_boxes(Some("blog"), true, vec![
+        ground_box("nas.example.com", totals(nfs(3), 1), Some(totals(Counts::default(), 0))),
+        ground_box("csi.example.com", totals(fast(2), 0), Some(totals(fast(1), 0))),
+        ground_box("api.example.com", totals(Counts::default(), 3), Some(totals(Counts::default(), 1))),
     ])]
     #[case::stores_on_hidden(Some("blog"), false, vec![
-        ground_box("nas.example.com", held(nfs(3), 1), Some(held(Counts::default(), 0))),
-        ground_box("csi.example.com", held(fast(2), 0), Some(held(Counts::default(), 0))),
-        ground_box("api.example.com", held(Counts::default(), 3), Some(held(Counts::default(), 1))),
+        ground_box("nas.example.com", totals(nfs(3), 1), Some(totals(Counts::default(), 0))),
+        ground_box("csi.example.com", totals(fast(2), 0), Some(totals(Counts::default(), 0))),
+        ground_box("api.example.com", totals(Counts::default(), 3), Some(totals(Counts::default(), 1))),
     ])]
-    fn draws_a_box_per_backend_and_dependency_with_the_selections_share(
+    fn draws_a_box_per_backend_and_dependency_with_the_selected_namespaces_counts(
         #[case] selected: Option<&str>,
         #[case] stores_on: bool,
         #[case] boxes: Vec<GroundBox>,
@@ -314,18 +310,18 @@ mod tests {
 
     #[rstest]
     #[case::nothing_selected(None, "ground-box")]
-    #[case::volumes_here(Some(held(nfs(1), 0)), "ground-box ground-box-here")]
-    #[case::dependents_here(Some(held(Counts::default(), 1)), "ground-box ground-box-here")]
-    #[case::not_here(Some(Held::default()), "ground-box ground-box-faded")]
-    fn a_box_marks_the_selection(#[case] here: Option<Held>, #[case] class: &str) {
-        let one = ground_box("nas.example.com", held(nfs(1), 1), here);
+    #[case::volumes_here(Some(totals(nfs(1), 0)), "ground-box ground-box-here")]
+    #[case::dependents_here(Some(totals(Counts::default(), 1)), "ground-box ground-box-here")]
+    #[case::not_here(Some(Totals::default()), "ground-box ground-box-faded")]
+    fn a_box_marks_the_selection(#[case] here: Option<Totals>, #[case] class: &str) {
+        let one = ground_box("nas.example.com", totals(nfs(1), 1), here);
         assert_eq!(one.class(), class);
     }
 
     #[rstest]
     #[case::two_backends("shop", vec![("nas.example.com".into(), nfs(2)), ("csi.example.com".into(), fast(1))])]
     #[case::none("wiki", vec![])]
-    fn folds_the_ground_under_a_namespace(
+    fn lists_the_backends_that_store_a_namespace(
         #[case] namespace: &str,
         #[case] expected: Vec<(String, Counts)>,
     ) {

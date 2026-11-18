@@ -1,18 +1,17 @@
-//! Alerts: the alerts that Alertmanager reports as firing.  transect
-//! reads them from Alertmanager's API instead of from Prometheus's
-//! `ALERTS` series, so the map leaves out the alerts that a silence or
-//! an inhibition rule hides.  During a rollout, or while a machine is
-//! lost, `ALERTS` lists exactly the alerts that an inhibition exists to
-//! keep quiet.
+//! The alerts that Alertmanager reports as firing.  transect reads them
+//! from Alertmanager's API, not from Prometheus's `ALERTS` series,
+//! because `ALERTS` also lists the alerts that a silence or an
+//! inhibition rule hides, such as the alerts that an inhibition rule
+//! keeps quiet during a rollout or while a machine is lost.
 //!
 //! transect attaches each alert, by its labels, to the namespace,
-//! object, or machine that it is about.  When its labels name nothing
-//! in the cluster, the alert attaches to the whole cluster.  The
-//! `alerts` section of the `MetricsSource` sets which labels name which
-//! things, and what each severity means.  A namespace's alerts are
-//! reasons in its health, so they set the color of its parcel and show
-//! on its cards.  A machine's alerts mark its strip.  "Now" lists every
-//! alert.
+//! object, or machine that it is about, or to the whole cluster when
+//! its labels match nothing in the cluster.  The `alerts` section of the
+//! `MetricsSource` sets which labels identify which objects, and what
+//! each severity means.  A namespace's alerts are reasons in its health,
+//! so they set the color of its rectangle on the map and show on its
+//! cards.  A ready machine shows the count of its alerts on its strip in
+//! the map's machines band.  The "Now" page lists every alert.
 
 mod client;
 pub mod markup;
@@ -29,7 +28,7 @@ use k8s_openapi::jiff::Timestamp;
 use crate::health::Level;
 pub use now::{Alerted, Firing, firing, on_machines, reasons};
 #[cfg(any(test, debug_assertions))]
-pub use parse::alerts as parse_answer;
+pub use parse::alerts as parse_alerts;
 #[cfg(any(test, feature = "fixtures"))]
 pub use poll::Failure;
 pub use poll::{Reading, Sourcing, poll};

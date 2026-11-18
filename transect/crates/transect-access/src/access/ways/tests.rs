@@ -1,6 +1,6 @@
-//! Ways in, over small clusters written for them: which rows each
-//! Ingress, Service, and pod gives, what each row reaches, and the
-//! gates on it.
+//! Tests of `Ways`: the rows that an `Ingress`, a `Service`, or a pod
+//! produces, the workloads each row reaches, and each row's sign-in
+//! state.
 
 use rstest::rstest;
 
@@ -72,7 +72,7 @@ fn reads_what_each_hosts_rules_reach(#[case] ingress: &str, #[case] expected: &[
 }
 
 #[test]
-fn names_an_ingress_whose_class_no_controller_serves() {
+fn lists_an_ingress_whose_class_no_controller_serves() {
     let ways = shop(UNSERVED).ways();
     let names: Vec<&str> = ways.unserved.iter().map(|o| o.name.as_str()).collect();
     assert_eq!(names, ["shop"]);
@@ -95,7 +95,7 @@ spec:
 #[case::one_of_two_declares(TWO_PATHS, &["storefront"], &[("a.example.test", State::Half)])]
 #[case::none_declares(TWO_PATHS, &[], &[("a.example.test", State::Off)])]
 #[case::only_the_other_hosts_workload_declares(TWO_HOSTS, &["storefront"], &[("a.example.test", State::Declared), ("b.example.test", State::Off)])]
-fn declares_sign_in_only_for_the_workloads_that_say_so(
+fn marks_sign_in_only_for_workloads_that_declare_it(
     #[case] ingress: &str,
     #[case] declared: &[&str],
     #[case] expected: &[(&str, State)],
@@ -176,6 +176,6 @@ spec:
 #[case::a_node_port(NODE_PORT, &["every machine's address 30883 -> broker"])]
 #[case::external_ips(EXTERNAL_IPS, &["192.0.2.20, 192.0.2.21 1883 -> broker"])]
 #[case::the_ingress_controllers_node_ports(CONTROLLER, &["a.example.test 80 -> storefront", "every machine's address 30080,30443 -> controller"])]
-fn reads_every_address_a_service_answers_on(#[case] text: &str, #[case] expected: &[&str]) {
+fn reads_every_address_a_service_is_reachable_on(#[case] text: &str, #[case] expected: &[&str]) {
     assert_eq!(rows(&Cluster::of(text).ways()), expected);
 }

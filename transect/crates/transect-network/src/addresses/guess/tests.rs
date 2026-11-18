@@ -21,9 +21,9 @@ fn deployment(name: &str) -> Object {
     Object::new("apps", "Deployment", Some("shop"), name)
 }
 
-/// A shop with a `Deployment` db behind the `Service` db, a
-/// `Deployment` and a `ConfigMap` both named cache, a `Deployment`
-/// queue, and one machine.
+/// The `shop` namespace: a `Deployment` `db` behind the `Service`
+/// `db`, a `Deployment` and a `ConfigMap` that are both named `cache`,
+/// a `Deployment` `queue`, a `Widget` `front`, and the node `alpha`.
 struct Shop {
     addresses: Addresses,
     graph: Graph,
@@ -116,7 +116,7 @@ impl Shop {
             .into_iter()
             .map(|edge| match edge.provenance {
                 Provenance::Guess { field } => (edge.to, field),
-                other => panic!("a guess carried {other:?}"),
+                other => panic!("the edge has provenance {other:?}, want a guess"),
             })
             .collect()
     }

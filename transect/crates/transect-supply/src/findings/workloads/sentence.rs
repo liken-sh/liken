@@ -1,5 +1,5 @@
-//! The words the workload findings show, about one workload on its page
-//! and card, and as a count on the cluster sidebar.
+//! The text of the workload findings: for one workload, on its page and
+//! card, and as a count in the cluster sidebar.
 
 use super::{Rule, WorkloadFinding};
 
@@ -28,7 +28,8 @@ impl WorkloadFinding {
 }
 
 impl Rule {
-    /// The sidebar's title for `workloads` found by this rule.
+    /// The sidebar title for the number of `workloads` that this rule
+    /// flags.
     pub fn count_title(self, workloads: usize) -> String {
         match (self, workloads) {
             (Self::NoReadinessProbe, 1) => {
@@ -87,12 +88,12 @@ mod tests {
         5,
         "5 replicated workloads have no PodDisruptionBudget"
     )]
-    fn counts_in_the_sidebar(#[case] rule: Rule, #[case] workloads: usize, #[case] title: &str) {
+    fn writes_the_sidebar_title(#[case] rule: Rule, #[case] workloads: usize, #[case] title: &str) {
         assert_eq!(rule.count_title(workloads), title);
     }
 
     #[rstest]
-    fn a_budget_finding_names_the_workloads_pods() {
+    fn a_budget_finding_counts_the_workloads_pods() {
         let finding = WorkloadFinding {
             rule: Rule::NoDisruptionBudget,
             replicas: 3,

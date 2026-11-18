@@ -1,7 +1,7 @@
-//! A crawl of every page of the fixture cluster, from the map, through
-//! every link each page draws.  It tests the link rule: every link opens
-//! a page, and the name of every object with a page is a link wherever
-//! it shows, except on that object's own page.
+//! Tests that crawl every page of the fixture cluster, from the map
+//! along each link. Every link must open a page, and the name of every
+//! object that has a page must be a link wherever it appears, except on
+//! that object's own page.
 
 use std::collections::{BTreeSet, VecDeque};
 
@@ -15,14 +15,16 @@ use super::view::{self, View};
 use transect_graph::edges::Object;
 use transect_observe::usage;
 
-/// The most pages one crawl renders, which the fixture stays well under.
+/// The crawl fails at this many pages, so links that keep generating
+/// new URLs fail the test instead of running forever.
 const MOST: usize = 400;
 
-/// `url` rendered whole from `model`, or none for a URL no view serves.
+/// Renders `url` as a whole page from `model`, or `None` for a URL that
+/// no view serves.
 fn render(model: &Model, url: &str) -> Option<Rendered> {
     let uri: Uri = url.parse().ok()?;
     let Query(query) = Query::<view::Query>::try_from_uri(&uri).ok()?;
-    // The server's router reads the path percent-decoded.
+    // The router percent-decodes the path before it matches a view.
     let path = transect_graph::links::percent_decoded(uri.path().trim_start_matches('/'));
     let view = View::at(&path, query)?;
     let reads = transect_map::objects::reads::Reads::default();
@@ -38,8 +40,8 @@ fn render(model: &Model, url: &str) -> Option<Rendered> {
     .ok()
 }
 
-/// The page links in `html`: each `href` that starts with `/`, except
-/// the static files.
+/// The links in `html` that start with `/`, except links to static
+/// files.
 fn links(html: &str) -> Vec<String> {
     let mut found = Vec::new();
     let mut rest = html;
@@ -54,14 +56,18 @@ fn links(html: &str) -> Vec<String> {
     found
 }
 
-/// Every page the crawl reached from the map, with its HTML, and the
-/// links that opened no page.
+/// Renders every page reachable from `/`. Returns each page's URL with
+/// its HTML, and the URLs that did not render a page. A link to `#id`
+/// on a page counts as a link to the page.
 fn crawl(model: &Model) -> (Vec<(String, String)>, BTreeSet<String>) {
     let mut seen = BTreeSet::from(["/".to_string()]);
     let mut queue = VecDeque::from(["/".to_string()]);
-    let (mut pages, mut dead) = (Vec::new(), BTreeSet::new());
+    let (mut pages, mut broken) = (Vec::new(), BTreeSet::new());
     while let Some(url) = queue.pop_front() {
-        assert!(pages.len() < MOST, "the crawl passed {MOST} pages");
+        assert!(
+            pages.len() < MOST,
+            "the crawl rendered {MOST} pages and has more to visit"
+        );
         match render(model, &url) {
             Some(Rendered { html, found: true }) => {
                 for link in links(&html) {
@@ -73,17 +79,17 @@ fn crawl(model: &Model) -> (Vec<(String, String)>, BTreeSet<String>) {
                 pages.push((url, html));
             }
             _ => {
-                dead.insert(url);
+                broken.insert(url);
             }
         }
     }
-    (pages, dead)
+    (pages, broken)
 }
 
-/// The text of `html` a reader sees outside every link and every piece
-/// of literal text, such as a label selector: the head, the links, the
-/// code, a drawing's tooltips, which state where a fact was read as a
-/// `title` attribute does, and every tag removed.
+/// The visible text of `html`'s body outside links and literal text
+/// such as a label selector. It removes every `<a>`, `<code>`, and
+/// `<title>` element, because a `<title>` is an SVG drawing's tooltip,
+/// and then every tag.
 fn outside_links(html: &str) -> String {
     let body = html.split_once("<body>").map_or(html, |(_, body)| body);
     let text = without(&without(body, "<a", "</a>"), "<code", "</code>");
@@ -105,8 +111,9 @@ fn outside_links(html: &str) -> String {
     plain
 }
 
-/// `html` with every element that opens with `open` and closes with
-/// `close` removed.
+/// `html` with each element removed that starts with `open` and ends at
+/// the next `close`. The `open` tag must be followed by a space or `>`,
+/// so `<a` does not match `<abbr`.
 fn without(html: &str, open: &str, close: &str) -> String {
     let mut text = String::new();
     let mut rest = html;
@@ -121,8 +128,9 @@ fn without(html: &str, open: &str, close: &str) -> String {
     text
 }
 
-/// Whether `name` appears whole in `text`, not as part of a longer name.
-fn names(text: &str, name: &str) -> bool {
+/// Whether `name` appears in `text` and not as part of a longer name
+/// made of letters, digits, `-`, `.`, and `_`.
+fn mentions(text: &str, name: &str) -> bool {
     let part = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_');
     text.match_indices(name).any(|(at, _)| {
         let before = text[..at].chars().next_back();
@@ -131,9 +139,10 @@ fn names(text: &str, name: &str) -> bool {
     })
 }
 
-/// The object a page is about, which its title and crumb name without
-/// a link: the machine a loss view loses, or the last name in its path
-/// before a lens.
+/// The name of the object a page is about, which the page shows
+/// without a link. For a loss view it is the machine in `lose=`, and
+/// for any other page the last segment of the path before a lens
+/// suffix.
 fn subject(url: &str) -> &str {
     if let Some((_, lose)) = url.split_once("lose=") {
         return lose.split('&').next().unwrap_or_default();
@@ -165,24 +174,31 @@ fn a_page_is_about_its_subject(#[case] url: &str, #[case] expected: &str) {
 
 #[test]
 fn every_link_opens_a_page() {
-    let (pages, dead) = crawl(&fixture::model());
-    assert!(pages.len() > 10, "the crawl reached {} pages", pages.len());
-    assert_eq!(dead, BTreeSet::new());
+    let (pages, broken) = crawl(&fixture::model());
+    assert!(
+        pages.len() > 10,
+        "the crawl reached {} pages, want more than 10",
+        pages.len()
+    );
+    assert_eq!(broken, BTreeSet::new());
 }
 
 #[test]
-fn every_link_to_a_place_on_a_page_lands_on_it() {
+fn every_link_to_an_element_id_points_at_an_element_with_that_id() {
     let model = fixture::model();
     let (pages, _) = crawl(&model);
     let placed: BTreeSet<String> = pages
         .iter()
         .flat_map(|(_, html)| links(html))
-        // An escaped `&` between two query parameters, `&#38;`, names
-        // no place on the page.
+        // A query string can write `&` as `&#38;`, whose `#` is not an
+        // element id.
         .map(|link| link.replace("&#38;", "&"))
         .filter(|link| link.contains('#'))
         .collect();
-    assert!(!placed.is_empty(), "no link names a place on a page");
+    assert!(
+        !placed.is_empty(),
+        "no page links to an element id, want at least one"
+    );
     let missed: BTreeSet<&String> = placed
         .iter()
         .filter(|link| {
@@ -208,7 +224,7 @@ fn every_name_with_a_page_is_a_link() {
             let text = outside_links(html);
             let named = objects
                 .iter()
-                .filter(move |object| object.name != subject(url) && names(&text, &object.name));
+                .filter(move |object| object.name != subject(url) && mentions(&text, &object.name));
             named.map(|object| (url.clone(), object.name.clone()))
         })
         .collect();
@@ -242,8 +258,8 @@ fn a_namespace_lists_its_custom_resources_by_kind() {
 #[case::a_custom_resource("/namespaces/acme-shop/gizmos.gizmos.example.test/gizmo-blue", &["known-chip", "Not ready"])]
 #[case::the_kinds("/kinds", &["gizmos.example.test", "Gizmos", "1 not ready</span> of 2"])]
 #[case::one_kind("/kinds/gizmos.gizmos.example.test", &["gizmo-red", "gizmo-blue", "acme-shop", "<th>Ready</th>"])]
-#[case::a_ground_box("/ground/archive-nas", &["The archive NAS", "https://nas.example.test:5001", "data-ledger-db-0", "nas.example.test"])]
-#[case::a_ground_box_only_kind_knowledge_reaches("/ground/sign-in.example.test", &["Configured to reach it", "partner-gate"])]
+#[case::an_outside_system("/ground/archive-nas", &["The archive NAS", "https://nas.example.test:5001", "data-ledger-db-0", "nas.example.test"])]
+#[case::an_outside_address_only_kind_knowledge_reaches("/ground/sign-in.example.test", &["Configured to reach it", "partner-gate"])]
 #[case::an_address_of_a_service_in_the_cluster("/namespaces/acme-ops/gates.proxy.example.test/shop-gate", &["href=\"/namespaces/acme-shop/deployments/storefront\""])]
 #[case::an_address_of_a_service_not_there("/namespaces/acme-ops/gates.proxy.example.test/retired-gate", &["reaches <span class=\"object-name\">Service <span class=\"name-part\">acme-shop/</span><wbr><span class=\"name-part\">retired-checker</span></span>"])]
 #[case::a_volume("/namespaces/acme-ledger/persistentvolumeclaims/data-ledger-db-0", &["ledger-archive", "8Gi", "3.0Gi · 38%", "writes", "ledger-db-0", "node-alpha", "ledger-backup", "The archive NAS", "nas.example.test:/exports/ledger"])]
@@ -256,11 +272,11 @@ fn every_object_has_a_page(#[case] url: &str, #[case] shows: &[&str]) {
         .map(|(_, html)| html);
     let html = html.unwrap_or_else(|| panic!("the crawl did not reach {url}"));
     let missing: Vec<&&str> = shows.iter().filter(|text| !html.contains(**text)).collect();
-    assert!(missing.is_empty(), "{url} lacks {missing:?}");
+    assert!(missing.is_empty(), "{url} lacks the text {missing:?}");
 }
 
-/// The edge kinds show only where they change what a page draws, in the
-/// page's main column and never in the masthead.
+/// The edge-kind menu appears only on pages where the edge kinds change
+/// the drawing, and never in the masthead.
 #[rstest::rstest]
 #[case::the_map("/", true)]
 #[case::a_workload("/namespaces/acme-shop/deployments/storefront", true)]
@@ -272,56 +288,64 @@ fn every_object_has_a_page(#[case] url: &str, #[case] shows: &[&str]) {
 #[case::a_namespaces_list_of_a_kind("/namespaces/acme-shop/gizmos.gizmos.example.test", false)]
 #[case::a_generic_page("/namespaces/acme-shop/services/storefront-svc", false)]
 #[case::the_logs_lens("/namespaces/acme-shop/deployments/storefront/logs", false)]
-#[case::a_ground_box("/ground/archive-nas", false)]
+#[case::an_outside_system("/ground/archive-nas", false)]
 #[case::a_machine("/machines/node-alpha", false)]
 #[case::a_volume(
     "/namespaces/acme-ledger/persistentvolumeclaims/data-ledger-db-0",
     false
 )]
-fn shows_the_edge_kinds_only_where_they_work(#[case] url: &str, #[case] shown: bool) {
+fn shows_the_edge_menu_only_where_edge_kinds_change_the_drawing(
+    #[case] url: &str,
+    #[case] shown: bool,
+) {
     let (pages, _) = crawl(&fixture::model());
     let html = pages
         .iter()
         .find(|(found, _)| found == url)
         .map(|(_, html)| html);
     let html = html.unwrap_or_else(|| panic!("the crawl did not reach {url}"));
-    assert_eq!(html.contains("edge-menu"), shown, "{url}");
+    assert_eq!(html.contains("edge-menu"), shown, "edge menu on {url}");
     let masthead = html.split("</header>").next().unwrap_or_default();
-    assert!(!masthead.contains("edge-menu"), "{url}");
+    assert!(
+        !masthead.contains("edge-menu"),
+        "the masthead of {url} has the edge menu"
+    );
 }
 
-/// A namespace's card lists its workloads as chips beside the map,
-/// whose parcel only counts them, and not on the namespace's page,
-/// whose main column draws each one.
+/// The namespace card beside the map lists the namespace's workloads as
+/// chips, because the map's box for the namespace shows only their
+/// count. The namespace's own page draws each workload, so its card has
+/// no chips.
 #[rstest::rstest]
 #[case::beside_the_map("/?select=acme-shop", true)]
 #[case::on_its_page("/namespaces/acme-shop", false)]
 fn the_namespace_card_lists_workloads_only_beside_the_map(#[case] url: &str, #[case] listed: bool) {
     let page = render(&fixture::model(), url).unwrap();
-    assert_eq!(page.html.contains("<div class=\"chips\">"), listed, "{url}");
+    assert_eq!(
+        page.html.contains("<div class=\"chips\">"),
+        listed,
+        "chips on {url}"
+    );
 }
 
-/// Whether `url` is an access page: a workload's or a namespace's
-/// access tab, a page under `/access`, or a `ServiceAccount`'s page,
-/// which is its access drawing.
+/// Whether `url` is a page of the access lens: an access tab, a page
+/// under `/access`, or a `ServiceAccount` page, which draws the
+/// account's access.
 fn is_access(url: &str) -> bool {
     let path = url.split('?').next().unwrap_or_default();
     path.ends_with("/access") || path.starts_with("/access") || path.contains("/serviceaccounts/")
 }
 
-/// The links in `html` a reader follows inside the access lens: every
-/// link in the page's body, its card's and its switcher row's among
-/// them, except the masthead, whose crumbs lead out to each ancestor's
-/// page, and the lens tabs, which lead to the object's other lenses.
+/// The links in the body of `html`, outside the masthead and the lens
+/// tabs. The breadcrumb links to each ancestor's page and the tabs to
+/// the object's other lenses, so both leave the access lens.
 fn lens_links(html: &str) -> Vec<String> {
     let body = html.split_once("</header>").map_or("", |(_, body)| body);
     links(&without(body, "<span class=\"lens-tabs\"", "</span>"))
 }
 
-/// On an access page, a name opens the object's access page when it
-/// has one: a namespace's access tab and the access tab of a workload
-/// that serves a port, the page's own workload's too, and never their
-/// overviews.
+/// On an access page, a link to a namespace or to a workload that
+/// serves a port opens its access tab and not its overview.
 #[test]
 fn on_an_access_page_a_name_opens_its_access() {
     let model = fixture::model();
@@ -351,9 +375,10 @@ fn on_an_access_page_a_name_opens_its_access() {
     assert_eq!(wrong, BTreeSet::new());
 }
 
-/// A way in on one machine names the machine, and the machine's name
-/// opens its page, which the access lens has none of, beside the way
-/// in's own link to the workload it reaches.
+/// A way in that reaches one machine links the machine's name to its
+/// machine page, because the access lens has no page for a machine.
+/// After the machine's link comes a link to the workload that the way
+/// in reaches, or the text `'s address` when `way` is empty.
 #[rstest::rstest]
 #[case::the_ways_in("/access", "/namespaces/acme-promoter/deployments/promoter/access")]
 #[case::a_namespaces_ports("/namespaces/acme-ops/access", "")]
@@ -372,14 +397,15 @@ fn a_way_in_on_one_machine_links_the_machine(#[case] url: &str, #[case] way: &st
     };
     assert!(
         rest.starts_with(&expected),
-        "{url}: {}",
+        "after the machine's link on {url} the page has {}, want it to start with {expected}",
         &rest[..rest.len().min(200)]
     );
 }
 
-/// The lines of each access drawing in `html`, each a list of the
-/// points its path runs through.  A rounded turn counts as its chord,
-/// from where the turn starts to where it ends.
+/// The lines of each access drawing in `html`, each as the points of
+/// its SVG path. A `Q` curve adds only its end point, so a rounded
+/// corner counts as a straight line from where the turn starts to
+/// where it ends.
 fn drawn_lines(html: &str) -> Vec<Vec<Vec<(f64, f64)>>> {
     let drawings = html
         .split("<section class=\"section-drawing ax-drawing\"")
@@ -421,13 +447,12 @@ fn drawn_lines(html: &str) -> Vec<Vec<Vec<(f64, f64)>>> {
         .collect()
 }
 
-/// How many times a part of one line crosses a part of another, each
-/// passing through the other.  Lines that touch where one of them ends
-/// do not cross.
+/// How many times a segment of one line passes through a segment of
+/// another. Lines that only touch where one of them ends do not cross.
 fn crossings(lines: &[Vec<(f64, f64)>]) -> usize {
     type P = (f64, f64);
-    // Which side of the line through `p` and `q` `r` is on, and zero
-    // on it; `f64::signum` gives zero a side.
+    // The side of the line through `p` and `q` that `r` is on: 1, -1,
+    // or 0 on the line. `f64::signum` would return 1 for 0.0.
     let side = |p: P, q: P, r: P| {
         let turn = (q.0 - p.0) * (r.1 - p.1) - (q.1 - p.1) * (r.0 - p.0);
         (turn > 0.0) as i8 - (turn < 0.0) as i8
@@ -449,8 +474,9 @@ fn crossings(lines: &[Vec<(f64, f64)>]) -> usize {
     count
 }
 
-/// No two lines of any access drawing on the fixture's pages cross: a
-/// workload's reach and who may change it, and an account's drawing.
+/// No two lines of one access drawing cross. A workload's access page
+/// has two drawings, of who reaches the workload and of who may change
+/// it, and a `ServiceAccount`'s page has one.
 #[test]
 fn no_access_drawing_crosses_its_own_lines() {
     let (pages, _) = crawl(&fixture::model());
@@ -475,7 +501,11 @@ fn no_access_drawing_crosses_its_own_lines() {
         .iter()
         .filter(|(url, _)| url.contains("/serviceaccounts/"))
         .count();
-    assert!(workloads >= 3 && accounts >= 2, "{drawn:#?}");
+    // Without this, a fixture that draws nothing would pass.
+    assert!(
+        workloads >= 3 && accounts >= 2,
+        "the fixture draws {drawn:#?}, want at least 3 workloads and 2 accounts with two lines"
+    );
     assert_eq!(crossed, BTreeSet::new());
 }
 

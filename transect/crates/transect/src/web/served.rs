@@ -1,5 +1,5 @@
-//! Every page type the fixture cluster has an example of, served by
-//! the router `--fixture` runs, as a browser would request it.
+//! Tests that the router of `--fixture` serves each type of page that
+//! the fixture cluster has an example of.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -16,15 +16,14 @@ use tower::ServiceExt;
 use super::fixture;
 use super::latest::Latest;
 
-/// The status and the body the fixture's router answers `url` with.
+/// Requests `url` from a new router on the fixture cluster.
 async fn get(url: &str) -> (StatusCode, String) {
     let (changes, _) = watch::channel(());
     let router = super::router(&changes, super::fixture_sources(&changes).unwrap());
-    ask(router, url).await
+    get_from(router, url).await
 }
 
-/// The status and the body `router` answers `url` with.
-async fn ask(router: Router, url: &str) -> (StatusCode, String) {
+async fn get_from(router: Router, url: &str) -> (StatusCode, String) {
     let request = Request::get(url).body(Body::empty()).unwrap();
     let response = router.oneshot(request).await.unwrap();
     let status = response.status();
@@ -183,33 +182,38 @@ async fn ask(router: Router, url: &str) -> (StatusCode, String) {
     "/namespaces/acme-shop/pods/storefront-rs-one"
 )]
 #[tokio::test]
-async fn serves_every_page_type(#[case] url: &str, #[case] shows: &str) {
+async fn serves_every_page_type(#[case] url: &str, #[case] expected: &str) {
     let (status, html) = get(url).await;
     assert_eq!(
-        (status, html.contains(shows)),
+        (status, html.contains(expected)),
         (StatusCode::OK, true),
-        "{url}"
+        "GET {url} returned status {status} and a page that {} {expected:?}, want 200 and a page that contains it",
+        if html.contains(expected) {
+            "contains"
+        } else {
+            "lacks"
+        }
     );
 }
 
-/// A volume's page under `/cluster` redirects to `/volumes`, as a
-/// `Node`'s redirects to its machine.
+/// A `PersistentVolume` requested under `/cluster` redirects to its page
+/// under `/volumes`.
 #[tokio::test]
 async fn sends_a_volume_to_its_own_page() {
     let (status, _) = get("/cluster/persistentvolumes/ledger-archive").await;
     assert_eq!(status, StatusCode::PERMANENT_REDIRECT);
 }
 
-/// A click on the map requests a page while the cluster changes about
-/// every few seconds, and a model takes up to a second to build in a
-/// debug build.  The page draws from the last model built, and its
-/// event stream sends the newer one.
+/// A page request renders from the last model built and does not wait
+/// for a build that a cluster change started, because the cluster can
+/// change every few seconds and a build is slow. The page's event stream
+/// sends the newer rendering when the build finishes.
 #[rstest]
 #[tokio::test]
 async fn a_page_never_waits_for_a_model_build() {
     let (changes, _) = watch::channel(());
-    // Every build after the first waits on the gate, which the test
-    // holds until the page has answered.
+    // Every build after the first waits for `gate`, which the test
+    // holds until the page response arrives.
     let gate = Arc::new(Mutex::new(()));
     let held = gate.lock().await;
     let builds = AtomicUsize::new(0);
@@ -224,11 +228,14 @@ async fn a_page_never_waits_for_a_model_build() {
         }
     });
     let router = super::router(&changes, sources);
-    ask(router.clone(), "/").await;
+    get_from(router.clone(), "/").await;
     changes.send_replace(());
-    let answered = tokio::time::timeout(Duration::from_secs(5), ask(router, "/?select=acme-shop"))
-        .await
-        .map(|(status, _)| status);
+    let status = tokio::time::timeout(
+        Duration::from_secs(5),
+        get_from(router, "/?select=acme-shop"),
+    )
+    .await
+    .map(|(status, _)| status);
     drop(held);
-    assert_eq!(answered, Ok(StatusCode::OK));
+    assert_eq!(status, Ok(StatusCode::OK));
 }

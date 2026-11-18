@@ -14,7 +14,8 @@ fn link(from: At, to: At, label: &str) -> Link {
     }
 }
 
-/// One tier of `count` boxes with `left` and `right` side boxes beside.
+/// One tier of `count` boxes, with `left` side boxes on the left and
+/// `right` side boxes on the right.
 fn row(count: usize, left: usize, right: usize) -> Shape {
     Shape {
         tiers: vec![vec![2; count]],
@@ -26,8 +27,8 @@ fn row(count: usize, left: usize, right: usize) -> Shape {
 
 type Drawn = (Layout, Vec<Link>);
 
-/// A workload with a caller on its left and what it depends on on its
-/// right, both in its own row.
+/// A workload with a caller on its left and a dependency on its right,
+/// both in the workload's own row.
 fn beside_the_workload() -> Drawn {
     let links = vec![
         link(At::side(0, Side::Left, 0), At::new(0, 0, 0), "depends on"),
@@ -36,8 +37,8 @@ fn beside_the_workload() -> Drawn {
     (layout(&[row(1, 1, 1)]), links)
 }
 
-/// A workload with three boxes stacked on its right, each joined by
-/// another kind of edge.
+/// A workload with three boxes stacked on its right, each joined to it
+/// by a different kind of edge.
 fn a_stack_of_three() -> Drawn {
     let labels = ["depends on", "reconciles from", "controlled by"];
     let links = (0..3)
@@ -46,7 +47,7 @@ fn a_stack_of_three() -> Drawn {
     (layout(&[row(1, 0, 3)]), links)
 }
 
-/// A workload whose callers are in the rows above and below it, with
+/// A workload with callers in the rows above and below it, and with
 /// its GitOps object two rows down.
 fn callers_in_other_layers() -> Drawn {
     let shapes = [row(0, 1, 0), row(1, 1, 0), row(0, 1, 1), row(0, 0, 1)];
@@ -64,8 +65,8 @@ fn callers_in_other_layers() -> Drawn {
     (layout(&shapes), links)
 }
 
-/// A StatefulSet on `machines` machines, each holding a device, under a
-/// workload with a caller and a dependency.
+/// A StatefulSet on `machines` machines, each holding a device, in a
+/// row below a workload that has a caller and a dependency.
 fn machines_holding_devices(machines: usize, devices: usize) -> Drawn {
     let shapes = [row(1, 1, 1), row(1, 0, 0), row(machines, 0, devices)];
     let mut links = vec![
@@ -96,9 +97,12 @@ fn every_side_line_runs_from_edge_to_edge(#[case] given: Drawn) {
         let to = layout.rect(link.to).unwrap();
         assert!(
             from.on_edge(line.from.x, line.from.y),
-            "{link:?} starts off {from:?}"
+            "the line of {link:?} starts off the edge of {from:?}"
         );
-        assert!(to.on_edge(line.to.x, line.to.y), "{link:?} ends off {to:?}");
+        assert!(
+            to.on_edge(line.to.x, line.to.y),
+            "the line of {link:?} ends off the edge of {to:?}"
+        );
         assert!(
             line.d
                 .starts_with(&format!("M {} {} ", line.from.x, line.from.y))
@@ -136,7 +140,10 @@ fn callers_into_one_box_share_a_lane_and_an_entry() {
     let (layout, links) = callers_in_other_layers();
     let drawn = draw(&layout, &links);
     let ends: Vec<Point> = drawn.lines[..3].iter().map(|l| l.to).collect();
-    assert!(ends.iter().all(|end| *end == ends[0]), "{ends:?}");
+    assert!(
+        ends.iter().all(|end| *end == ends[0]),
+        "the lines end at {ends:?}, want one shared end point"
+    );
 }
 
 #[rstest]
@@ -161,7 +168,10 @@ fn the_farthest_line_takes_the_lane_nearest_the_spine() {
     let (layout, links) = callers_in_other_layers();
     let plans: Vec<Plan> = links.iter().filter_map(|l| plan(&layout, l)).collect();
     let lanes = lanes(&plans);
-    assert!(lanes[4] < lanes[3], "{lanes:?}");
+    assert!(
+        lanes[4] < lanes[3],
+        "the lanes are {lanes:?}, want lane 4 nearer the spine than lane 3"
+    );
 }
 
 #[rstest]

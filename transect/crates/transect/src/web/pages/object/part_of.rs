@@ -1,17 +1,16 @@
-//! What an object is part of and what is part of it, from the `part
-//! of` edges kind knowledge draws, for the nesting on its board.
+//! What an object is part of and what is part of it, from the `part of`
+//! edges that kind knowledge creates.
 
 use super::super::super::snapshot::Snapshot;
 use super::refer;
 use transect_graph::edges::{Endpoint, Graph, Kind, Object};
 use transect_map::objects::{Nesting, Part};
 
-/// `object`'s nesting in `graph`: the first thing it is part of as its
-/// frame, anything else as a line, and its parts, each with its own
-/// parts, by kind and then by name.  A cycle of `part of` edges, such as
-/// an object part of itself or of its own part, never draws an object
-/// inside itself: the object and what it is part of are left out of its
-/// parts at both depths.
+/// The first whole that `object` is part of is `frame`, and the other
+/// wholes are `also`. `parts` has its parts, each with its own parts,
+/// sorted by kind and then by name. The object and its wholes are left
+/// out of both levels of parts, so a cycle of `part of` edges does not
+/// nest an object inside itself.
 pub fn nesting(snapshot: &Snapshot, graph: &Graph, object: &Object) -> Nesting {
     let here = object.namespace.as_deref();
     let end = Endpoint::Object(object.clone());
@@ -46,9 +45,9 @@ pub fn nesting(snapshot: &Snapshot, graph: &Graph, object: &Object) -> Nesting {
     }
 }
 
-/// What is part of `end` first, by kind and then by name.  A part of
-/// two wholes nests under the first its knowledge names, and the second
-/// lists it on its own page only.
+/// The objects whose first `part of` edge in the graph goes to `end`,
+/// sorted by kind and then by name. So a part of two wholes is listed
+/// only under the first, and the second shows on the part's own page.
 fn parts_of<'a>(graph: &'a Graph, end: &Endpoint) -> Vec<&'a Endpoint> {
     let mut parts = graph.reaching(Kind::PartOf, end);
     parts.retain(|part| graph.leaving(Kind::PartOf, part).first() == Some(&end));
@@ -85,9 +84,9 @@ mod tests {
         }
     }
 
-    /// A telescope part of `wholes`, whose two trains are part of it,
-    /// with a camera part of one train, and a filter that is part of the
-    /// other train first.
+    /// A telescope that is part of each of `wholes`. Two trains are part
+    /// of the telescope. A camera is part of one train, and a filter is
+    /// part of the other train.
     fn graph(wholes: &[Endpoint]) -> Graph {
         let scope = rig("Telescope", "main");
         let mut edges: Vec<Edge> = wholes
@@ -102,8 +101,8 @@ mod tests {
         Graph::new([edges])
     }
 
-    /// The frame's text, each other whole's, and each part's with its
-    /// own parts'.
+    /// The frame's text, the text of each other whole, and the text of
+    /// each part together with the text of its own parts.
     type Read = (Option<String>, Vec<String>, Vec<(String, Vec<String>)>);
 
     fn read(nesting: Nesting) -> Read {
@@ -127,7 +126,7 @@ mod tests {
         vec![rig("Site", "hill"), rig("Pier", "north")],
         (Some("Site hill".into()), vec!["Pier north".into()], vec![])
     )]
-    fn frames_the_board_in_the_first_whole_and_lists_the_rest(
+    fn frames_the_object_in_its_first_whole_and_lists_the_rest(
         #[case] wholes: Vec<Endpoint>,
         #[case] expected: Read,
     ) {
@@ -159,11 +158,11 @@ mod tests {
             .collect();
         assert!(
             !inside.contains(&"Telescope main".to_string()),
-            "{inside:?}"
+            "the box holds {inside:?}, want no Telescope main"
         );
         assert!(
             frame.is_none_or(|frame| !inside.contains(&frame)),
-            "{inside:?}"
+            "the box holds {inside:?}, want it to leave out the frame"
         );
         assert!(also.is_empty());
     }

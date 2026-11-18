@@ -60,9 +60,9 @@ impl Alerted {
         self.names.join(", ")
     }
 
-    /// The tag's class.  A failure fills the tag and a warning draws an
-    /// outline around it, as the map does for a parcel.  Any other
-    /// level gets no class, so a notice's tag stays faint.
+    /// The tag's class.  A failure fills the tag and a warning outlines
+    /// it.  Any other level gets no class, so the tag of a notice stays
+    /// faint.
     pub fn tag_class(&self) -> &'static str {
         match self.level {
             Level::Failing => "strip-tag-warm",
@@ -132,11 +132,10 @@ impl About {
         }
     }
 
-    /// The page that a link to the alert's subject opens.  For a
-    /// namespace or an object in it, the link opens the namespace's
-    /// page.  For a machine, it opens the machine's page, as the
-    /// machines band does.  An alert about the whole cluster has no
-    /// link.
+    /// The page that a link to the alert's subject opens: the
+    /// namespace's page for a namespace or an object in it, and the
+    /// machine's page for a machine.  An alert about the whole cluster
+    /// has no link.
     pub fn href(&self) -> Option<String> {
         match self {
             Self::Namespace { namespace, .. } => Some(format!("/namespaces/{namespace}")),

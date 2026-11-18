@@ -1,7 +1,8 @@
-//! What a workload runs as and what it holds: the `ServiceAccount` its
-//! pods name, with what its bindings grant, and the claims, `Secret`
-//! objects by name, devices, host paths, and machine access its pods'
-//! specs give.  A `Secret` shows by its name alone, from the pod spec.
+//! The boxes for what a workload runs as and what it holds: the
+//! `ServiceAccount` of its pods with what its bindings grant, and what
+//! the pod specs declare, such as claims, `Secret` names, host paths, and
+//! access to the machine. A `Secret` shows by name only, because the page
+//! reads the pod spec and not the `Secret`.
 
 use k8s_openapi::api::core::v1::PodSpec;
 
@@ -12,8 +13,9 @@ use transect_graph::edges::Object;
 use transect_map::map::WorkloadContents;
 use transect_map::map::section_drawing::{Look as BoxLook, SectionBox};
 
-/// The specs a workload's pods run: the running pods', which name the
-/// claims a `StatefulSet` makes, or its templates' when none runs.
+/// The specs of the workload's running pods, or its pod templates when
+/// no pod runs. The running pods come first because only they name the
+/// claims that a `StatefulSet` creates from its volume claim templates.
 fn specs<'a>(object: &Object, contents: &'a WorkloadContents) -> Vec<&'a PodSpec> {
     let workload = contents.workloads.get(object);
     let running = workload.running();
@@ -23,8 +25,8 @@ fn specs<'a>(object: &Object, contents: &'a WorkloadContents) -> Vec<&'a PodSpec
     }
 }
 
-/// The box of the `ServiceAccount` its pods run as, with one line on
-/// what its bindings grant.
+/// The box for the `ServiceAccount` that the pods run as, with one line
+/// on what its bindings grant.
 pub fn runs_as(
     model: &Model,
     object: &Object,
@@ -84,14 +86,14 @@ pub fn runs_as(
     }
     let object = account
         .object()
-        .expect("a ServiceAccount stands for an object");
+        .expect("a ServiceAccount has an object to link to");
     let mut boxed = SectionBox::new(format!("ServiceAccount {name}"), lines, BoxLook::Plain)
         .with_href(look.href(&object));
     if let Some(why) = model
         .snapshot
         .intents
         .of(&object)
-        .and_then(|said| said.why.clone())
+        .and_then(|intent| intent.why.clone())
     {
         boxed.lines.insert(0, why.text);
         boxed = boxed.marked(why.provenance);
@@ -99,10 +101,11 @@ pub fn runs_as(
     boxed
 }
 
-/// What its pods hold: a box per claim and device claim, one for the
-/// Secrets they mount or read by name, and one each for host
-/// paths, the machine's network and processes, and privileged or added
-/// capabilities, the first of those with the `host-access` sentence.
+/// A box for each `PersistentVolumeClaim` and each resource claim, one
+/// box for all the `Secret` names, and one box each for host paths,
+/// `hostNetwork`, `hostPID`, privileged containers, and added
+/// capabilities. The workload's declared `host_access` intent goes at
+/// the top of the first of these host boxes.
 pub fn holds(
     model: &Model,
     object: &Object,
@@ -257,12 +260,12 @@ pub fn holds(
             BoxLook::Machine,
         ));
     }
-    let said = model
+    let intent = model
         .snapshot
         .intents
         .of(object)
-        .and_then(|said| said.host_access.clone());
-    if let (Some(first), Some(line)) = (host.first_mut(), said) {
+        .and_then(|intent| intent.host_access.clone());
+    if let (Some(first), Some(line)) = (host.first_mut(), intent) {
         first.lines.insert(0, line.text);
         first.mark = Some(line.provenance);
     }

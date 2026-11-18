@@ -1,19 +1,22 @@
-//! The NetworkPolicy gate of a way in, evaluated on each of its ports.
+//! The NetworkPolicy gate of a way in, worked out for each of its
+//! ports.
 //!
-//! A policy that selects the pods limits who may call them only when
-//! its rules do: a rule with no `from`, or an address block of every
-//! address with no exceptions, admits any caller on the ports it names.
-//! So the gate is on where a policy selects every pod the way reaches
-//! and no rule admits any caller on the way's ports, open where no
-//! policy selects them or a rule admits any caller on every port, and
-//! half otherwise.  For a way in through an ingress controller, the
-//! gate's title states whether the policy admits the controller's pods.
+//! A policy that selects a pod limits its callers only through its
+//! rules, and a rule with no `from`, or with an `ipBlock` of every
+//! address and no exceptions, admits any caller on its ports. So the
+//! gate is on when policies select every pod that the way reaches and
+//! no rule admits any caller on the way's ports. It is off when no
+//! policy selects the pods, when the pods are on their machine's
+//! network, or when rules admit any caller on every port of the way.
+//! It is half in every other case. For a way in through an ingress
+//! controller, the gate's title also says whether the policy admits the
+//! controller's pods.
 
 use super::{Backend, Gate, Isolation, Sources, State, Target};
 use transect_graph::edges::Object;
 use transect_network::policy::{Admission, Ports};
 
-/// One port of a way in, and the ports of the pods behind it.
+/// One port of a way in, with the pod ports that it forwards to.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Leg {
     pub port: String,
@@ -21,7 +24,8 @@ pub struct Leg {
 }
 
 impl Leg {
-    /// A way's single port, which forwards to each of `backends`.
+    /// The leg for a way's only port, which forwards to the distinct
+    /// ports of `backends`.
     pub fn of(port: impl ToString, backends: &[Backend]) -> Self {
         let mut targets: Vec<Target> = backends.iter().map(|b| b.port.clone()).collect();
         targets.sort();
@@ -70,7 +74,8 @@ pub fn gate(
         true => &every_port[..],
         false => legs,
     };
-    // Each leg's port, and the policy that admits any caller on it.
+    // `open` pairs a port with a policy that admits any caller on it.
+    // `limited` has the ports where no policy does.
     let mut open: Vec<(&str, String)> = Vec::new();
     let mut limited: Vec<&str> = Vec::new();
     for leg in legs {
@@ -100,17 +105,17 @@ pub fn gate(
             &format!(
                 "{}; a NetworkPolicy limits who may call on {}.",
                 admitting(&open),
-                and(&limited)
+                join_with_and(&limited)
             ),
         ),
     }
 }
 
-/// A workload's own policy gate, on any of its ports, from its
-/// isolation and the rules that admit callers to it.  The gate is on
-/// where a policy limits who may call every port, half where a rule
-/// admits any caller on some ports, and open where one admits any
-/// caller on every port or no policy selects its pods.
+/// The policy gate of a workload itself, for all its ports.  The gate
+/// is on when a policy limits who may call every port, half when a rule
+/// admits any caller on some ports, and off when a rule admits any
+/// caller on every port, when no policy selects its pods, or when its
+/// pods are on their machine's network.
 pub fn of_workload(isolation: Option<Isolation>, admissions: &[Admission]) -> Gate {
     match isolation {
         Some(Isolation::MachineNetwork) => {
@@ -133,7 +138,7 @@ pub fn of_workload(isolation: Option<Isolation>, admissions: &[Admission]) -> Ga
             .any(transect_network::policy::Caller::is_anyone)
     });
     let anyone: Vec<&Admission> = anyone.collect();
-    let said: Vec<String> = anyone
+    let sentences: Vec<String> = anyone
         .iter()
         .map(|a| {
             format!(
@@ -148,21 +153,21 @@ pub fn of_workload(isolation: Option<Isolation>, admissions: &[Admission]) -> Ga
             "A NetworkPolicy selects its pods and names who may call them.",
         ),
         found if found.iter().any(|a| a.ports == Ports::Any) => {
-            Gate::of(State::Off, &format!("{}.", said.join("; ")))
+            Gate::of(State::Off, &format!("{}.", sentences.join("; ")))
         }
         _ => Gate::of(
             State::Half,
             &format!(
                 "{}, and a NetworkPolicy names who may call on its other ports.",
-                said.join("; ")
+                sentences.join("; ")
             ),
         ),
     }
 }
 
-/// The on gate of a way where a policy limits every pod.  Its title
-/// states whether the policy admits the ingress controller that the
-/// way goes through.
+/// The on gate of a way whose every pod a policy selects and limits.
+/// Its title says whether the policy admits the ingress controller that
+/// the way goes through.
 fn limits(
     isolated: &[&Object],
     legs: &[Leg],
@@ -198,6 +203,7 @@ fn limits(
     Gate::of(State::On, &title)
 }
 
+/// The sentence for the `open` ports, with each policy's ports grouped:
 /// "NetworkPolicy a admits any caller on 80 and 443; NetworkPolicy b
 /// admits any caller on 8080".
 fn admitting(open: &[(&str, String)]) -> String {
@@ -208,16 +214,19 @@ fn admitting(open: &[(&str, String)]) -> String {
             None => policies.push((policy, vec![port])),
         }
     }
-    let said: Vec<String> = policies
+    let sentences: Vec<String> = policies
         .iter()
         .map(|(policy, ports)| {
-            format!("NetworkPolicy {policy} admits any caller on {}", and(ports))
+            format!(
+                "NetworkPolicy {policy} admits any caller on {}",
+                join_with_and(ports)
+            )
         })
         .collect();
-    said.join("; ")
+    sentences.join("; ")
 }
 
-fn and(items: &[&str]) -> String {
+fn join_with_and(items: &[&str]) -> String {
     match items {
         [] => String::new(),
         [one] => one.to_string(),
@@ -226,10 +235,11 @@ fn and(items: &[&str]) -> String {
     }
 }
 
-/// The port numbers `targets` name on `workload`'s pods: a number as
-/// it is, and a name as the pods' containers give it.  `None` means
-/// a target that names no number here, or for every port when there are
-/// no targets, and a rule covers it only when it admits every port.
+/// The port numbers that `targets` mean on `workload`'s pods.  A number
+/// stays as it is, and a name is looked up in the pods' container
+/// ports. `None` stands for a port with no known number: a name that no
+/// pod declares, or every port when `targets` is empty.  A rule covers
+/// `None` only when it admits every port.
 fn numbers(workload: &Object, targets: &[Target], sources: &Sources) -> Vec<Option<u16>> {
     if targets.is_empty() {
         return vec![None];
@@ -247,7 +257,8 @@ fn numbers(workload: &Object, targets: &[Target], sources: &Sources) -> Vec<Opti
     found
 }
 
-/// The number `workload`'s pods give the port `name`.
+/// The container port number that `workload`'s pods declare under the
+/// name `name`.
 fn named(workload: &Object, name: &str, sources: &Sources) -> Option<u16> {
     let pods = sources.pods.iter();
     let mut pods = pods.filter(|pod| (sources.workload_of)(pod).as_ref() == Some(workload));

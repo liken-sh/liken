@@ -1,11 +1,11 @@
-//! The objects a sentence names, linked.  A loss or a card writes its
-//! lines as pieces, which keep the words apart from the objects they
-//! name, and `Linker` makes each object with a page a link to it.
+//! Sentences with links to the objects they name. A caller, such as the
+//! machine-loss sentences of `transect-ground`, writes each line as
+//! `Piece`s, and `Linker` turns each object that has a page into a link.
 
 use crate::edges::Object;
 
-/// One piece of what a page shows: a name with the page it opens, or
-/// words between names, which open none.
+/// One run of text on a page. With an `href` it is a link, and without
+/// one it is plain words.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Part {
     pub text: String,
@@ -21,10 +21,10 @@ impl Part {
     }
 }
 
-/// One piece of a sentence as a loss or a card writes it: words, an
-/// object shown as the text given, or a page that is no object's, such
-/// as a kind's.  The objects stay apart from the words, so a page links
-/// each object a line names and never a word that looks like a name.
+/// One piece of a sentence: plain words, an object with the text to show
+/// for it, or a link to a page that is not an object's, such as a kind's
+/// page. Objects are kept apart from words so that a word that equals an
+/// object's name never becomes a link.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Piece {
     Words(String),
@@ -66,17 +66,15 @@ pub fn listed(items: Vec<Vec<Piece>>) -> Vec<Piece> {
     pieces
 }
 
-/// The objects a set of sentences may name, with their pages, so each
-/// line can link the names it holds.
+/// The pages of the objects that sentences may name.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Linker {
-    /// Each object with a page, and its page.
     pages: Vec<(Object, String)>,
 }
 
 impl Linker {
-    /// The linker of `objects`, each with the page `href` gives it; an
-    /// object with none is left out.
+    /// A linker for `objects`, each with the page that `href` returns
+    /// for it. An object with no page is left out.
     pub fn new(
         objects: impl IntoIterator<Item = Object>,
         href: impl Fn(&Object) -> Option<String>,
@@ -93,14 +91,14 @@ impl Linker {
         Self { pages }
     }
 
-    /// The page of `object`, when it is one of the linker's.
+    /// The page of `object`, or none when the linker has no page for it.
     pub fn href(&self, object: &Object) -> Option<&str> {
         let found = self.pages.iter().find(|(o, _)| o == object);
         found.map(|(_, href)| href.as_str())
     }
 
-    /// `pieces` as parts, each object they name linked to its page
-    /// when it has one, and the words between run together.
+    /// `pieces` as parts. An object that has a page is linked to it, and
+    /// neighboring unlinked text is merged into one part.
     pub fn link(&self, pieces: &[Piece]) -> Vec<Part> {
         let mut parts: Vec<Part> = Vec::new();
         for piece in pieces {

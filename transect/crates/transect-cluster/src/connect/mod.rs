@@ -1,14 +1,13 @@
-//! How `transect` connects to the API server: HTTP/2 when the server
-//! offers it, so the watches share a few connections, with keep-alive
-//! pings that find a connection that died without a reset.
+//! Builds the API server client. It uses HTTP/2 when the server offers
+//! it, so the watches share a few connections, and sends keep-alive
+//! pings to find a connection that died without a reset.
 //!
-//! kube's own client offers only HTTP/1.1, where each watch holds a
-//! connection of its own: one per watched kind, and every CRD is
-//! watched.  This client is built the way kube's custom-client example
-//! builds one, from the same `Config`: its TLS, its server name, its
-//! timeouts, its credentials, and its extra headers.  A kubeconfig that
-//! names a proxy gets kube's own client, because that client can
-//! connect through a proxy.
+//! kube's default client uses only HTTP/1.1, where each watch needs its
+//! own connection, and `transect` watches every kind, including every
+//! CRD. This client is built as in kube's custom-client example, from
+//! the same `Config`. When the kubeconfig sets a proxy, `transect` uses
+//! kube's default client instead, because only that client connects
+//! through a proxy.
 
 mod limit;
 mod spread;
@@ -30,42 +29,38 @@ use limit::Spoken;
 use spread::Spread;
 use tally::Tally;
 
-/// How long a connection may go without a frame before it is pinged.
+/// How long a connection may receive no frame before `transect` pings it.
 pub const KEEP_ALIVE: Duration = Duration::from_secs(20);
 
-/// How long a ping may wait for its answer before the connection is
-/// closed, which ends every watch on it, so each lists again on a new
-/// connection.
+/// How long a ping may wait for a reply before `transect` closes the
+/// connection. Each watch on it then lists again on a new connection.
 pub const KEEP_ALIVE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// The stream limit assumed when `transect` cannot read the server's
-/// limit: the least that RFC 9113 (section 6.5.2) recommends a server
-/// allow.
+/// The stream limit that `transect` assumes when it cannot read the
+/// server's limit. RFC 9113, section 6.5.2, recommends that a server
+/// allow at least 100 concurrent streams.
 const ASSUMED: u32 = 100;
 
 type Connector = TimeoutConnector<HttpsConnector<HttpConnector>>;
 
-/// A client of the API server `config` names, which opens at most
-/// `most` streams on one connection when that is below what the server
-/// allows.
+/// A client for the API server in `config`. It opens at most `most`
+/// streams on one connection, and never more than `most()` allows for
+/// the server's stream limit.
 pub async fn client(config: Config, most: Option<usize>) -> anyhow::Result<Client> {
     if config.proxy_url.is_some() {
-        tracing::info!("the kubeconfig names a proxy, so each watch uses a connection of its own");
+        tracing::info!("The kubeconfig sets a proxy, so each watch uses its own connection");
         return Ok(Client::try_from(config)?);
     }
     let connector = connector(&config)?;
     let tally = Tally::default();
     // hyper makes a request wait for a connection that is still opening
-    // only when the client is set to HTTP/2 from the start.  With ALPN
-    // alone, hyper reads the protocol after the connection is open, so a
-    // burst of watches on a new connection, as at the start or after a
-    // reset, would open one TCP connection each.  When the probe
-    // negotiated h2, each client is built with HTTP/2 only.
+    // only when the client is HTTP/2 only. With ALPN, hyper learns the
+    // protocol after the connection opens, so each watch in a burst at
+    // startup or after a reset would open its own TCP connection. So
+    // when `limit::spoken` negotiated h2, the clients are HTTP/2 only.
     let (limit, alpn) = match limit::spoken(&config).await {
         Ok(Spoken::Http1) => {
-            tracing::info!(
-                "the API server uses HTTP/1.1 here, so each watch uses a connection of its own"
-            );
+            tracing::info!("The API server speaks HTTP/1.1, so each watch uses its own connection");
             tally.clone().log(|| None);
             return layered(
                 &config,
@@ -75,16 +70,19 @@ pub async fn client(config: Config, most: Option<usize>) -> anyhow::Result<Clien
         Ok(Spoken::Http2(Some(limit))) => {
             tracing::info!(
                 streams = limit,
-                "the API server allows this many streams on a connection"
+                "The API server allows this many streams on one connection"
             );
             (limit, Alpn::Http2)
         }
         Ok(Spoken::Http2(None)) => {
-            tracing::info!(assumed = ASSUMED, "the API server set no stream limit");
+            tracing::info!(
+                assumed = ASSUMED,
+                "The API server reports no stream limit, so the assumed limit applies"
+            );
             (ASSUMED, Alpn::Http2)
         }
         Err(error) => {
-            tracing::warn!(%error, assumed = ASSUMED, "cannot read the API server's stream limit");
+            tracing::warn!(%error, assumed = ASSUMED, "Reading the API server's stream limit returned an error, so the assumed limit applies");
             (ASSUMED, Alpn::Offered)
         }
     };
@@ -92,21 +90,19 @@ pub async fn client(config: Config, most: Option<usize>) -> anyhow::Result<Clien
         Some(asked) => asked.min(self::most(limit)),
         None => self::most(limit),
     };
-    tracing::info!(most, "opening at most this many streams on one connection");
+    tracing::info!(most, "Opening at most this many streams on one connection");
     let spread = Spread::new(most, move || hyper_client(connector.clone(), alpn));
     let streams = spread.clone();
     tally.clone().log(move || Some(streams.open()));
     layered(&config, tally.around(spread))
 }
 
-/// A client that sends each request through `connections` with the
-/// layers kube's own client puts above its connections, in kube's
-/// order: the server's address, a retry of a 429, 503, or 504 that
-/// waits for the time `Retry-After` gives, the credentials, and the
-/// extra headers.
-/// Without the retry, a one-shot request such as discovery would fail
-/// on the first 429 that API Priority and Fairness answers a burst
-/// with.
+/// A client that sends each request through `connections`, with the
+/// layers of kube's default client in the same order: the server's base
+/// URI, a retry of a 429, 503, or 504 after the time in `Retry-After`,
+/// the credentials, and the extra headers. Without the retry, a single
+/// request such as discovery fails on the first 429 that API Priority
+/// and Fairness returns for a burst of requests.
 fn layered<S, B>(config: &Config, connections: S) -> anyhow::Result<Client>
 where
     S: tower::Service<http::Request<Body>, Response = http::Response<B>> + Clone + Send + 'static,
@@ -128,15 +124,15 @@ where
     Ok(Client::new(service, config.default_namespace.clone()))
 }
 
-/// The most streams `transect` opens on one connection: a fifth below
-/// the server's limit, because a stream the client has closed may
-/// still count against it for a moment.
+/// The most streams `transect` opens on one connection: the server's
+/// limit minus a fifth, because the server may still count a stream
+/// that the client has closed.
 fn most(limit: u32) -> usize {
     (limit - limit / 5).max(1) as usize
 }
 
-/// The connector kube's own client builds, with HTTP/2 offered beside
-/// HTTP/1.1.
+/// The connector that kube's default client builds, with HTTP/2 enabled
+/// as well as HTTP/1.1.
 fn connector(config: &Config) -> anyhow::Result<Connector> {
     let mut http = HttpConnector::new();
     http.enforce_http(false);
@@ -159,15 +155,16 @@ fn connector(config: &Config) -> anyhow::Result<Connector> {
 /// Which protocol a client's connections use.
 #[derive(Clone, Copy)]
 enum Alpn {
-    /// HTTP/2 from the start, for a server whose handshake chose h2.
+    /// HTTP/2 only, for a server whose TLS handshake negotiated h2.
     Http2,
-    /// Whichever the TLS handshake chooses, HTTP/2 or HTTP/1.1.
+    /// The protocol that the TLS handshake negotiates, HTTP/2 or
+    /// HTTP/1.1.
     Offered,
 }
 
-/// One connection's client: one HTTP/2 connection, pinged when quiet,
-/// or a pool of HTTP/1.1 connections when the server supports only
-/// that.
+/// A hyper client that pings its HTTP/2 connections even while they
+/// are idle. With `Alpn::Offered` and a server that offers only
+/// HTTP/1.1, it keeps a pool of HTTP/1.1 connections.
 fn hyper_client(
     connector: Connector,
     alpn: Alpn,

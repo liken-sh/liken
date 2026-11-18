@@ -1,6 +1,6 @@
-//! The title and the body that the page shows for each finding.  The
-//! words in these templates are the only words a finding shows, and the
-//! rest of each sentence is a name or a number from the finding.
+//! The title, body, and lines that the page shows for each finding.  The
+//! sentences are fixed text, and the only parts that vary are the names
+//! and numbers taken from the finding.
 
 use super::memory::{HEAVY_UNREQUESTED_BYTES, OVER_REQUESTS_BYTES};
 use super::{Fill, Finding, Line, Overage};
@@ -87,8 +87,7 @@ impl Finding {
     /// machine, registry, workload, or namespace that the finding names.
     /// A finding about memory over requests lists its machines only when
     /// there are several, because a finding about one machine names it
-    /// in the title.  A finding about images lists every registry it
-    /// counts, so the count for images built here gets its own line.
+    /// in the title.
     pub fn lines(&self) -> Vec<Line> {
         let line = |label: &str, href: Option<String>, text: String| Line {
             label: label.into(),
@@ -145,7 +144,7 @@ impl Finding {
     }
 }
 
-/// A workload as a line names it: "shop/web".
+/// A workload's label in a line, as "shop/web".
 fn named(object: &transect_graph::edges::Object) -> String {
     match &object.namespace {
         Some(namespace) => format!("{namespace}/{}", object.name),
@@ -153,7 +152,6 @@ fn named(object: &transect_graph::edges::Object) -> String {
     }
 }
 
-/// The page that a machine's name links to, as in the machines band.
 fn machine_page(machine: &str) -> String {
     format!("/machines/{machine}")
 }
@@ -161,8 +159,8 @@ fn machine_page(machine: &str) -> String {
 const EVICTS_OVER_REQUESTS: &str =
     "Under memory pressure, the kubelet evicts the pods over their requests first.";
 
-/// The sentence that states which machines the finding lists, because the
-/// finding leaves out the smaller drift that most machines show.
+/// States the threshold, so the reader knows that a machine with a
+/// smaller excess is not listed.
 fn threshold() -> String {
     format!(
         "A machine is listed when its pods use {} or more past their requests, together.",
@@ -191,20 +189,21 @@ fn over_requests(pods: usize, excess: f64) -> String {
     }
 }
 
-/// How many of the pods that request no memory are heavy, then what all
-/// of them use.  The total names "all {pods}" so no reader takes it for
-/// what the heavy ones alone use.
+/// How many of the pods that request no memory use at least
+/// `HEAVY_UNREQUESTED_BYTES`, then what all of them use together.  It
+/// says "all {pods}" so a reader does not take the total for the heavy
+/// pods' use alone.
 fn heavy_among(pods: usize, heavy: usize, used: f64) -> String {
-    let line = mi_or_gi(HEAVY_UNREQUESTED_BYTES);
+    let limit = mi_or_gi(HEAVY_UNREQUESTED_BYTES);
     let used = mi_or_gi(used);
     match (pods, heavy) {
         (1, _) => format!("It uses {used}."),
-        (_, 1) => format!("1 of them uses {line} or more, and all {pods} use {used} together."),
+        (_, 1) => format!("1 of them uses {limit} or more, and all {pods} use {used} together."),
         (_, _) if heavy == pods => {
-            format!("Each of the {pods} uses {line} or more, and they use {used} together.")
+            format!("Each of the {pods} uses {limit} or more, and they use {used} together.")
         }
         (_, _) => {
-            format!("{heavy} of them each use {line} or more, and all {pods} use {used} together.")
+            format!("{heavy} of them each use {limit} or more, and all {pods} use {used} together.")
         }
     }
 }
@@ -261,8 +260,8 @@ fn mi_or_gi(bytes: f64) -> String {
     }
 }
 
-/// Rounded up, never down, so "more than" stays true: a pod that requests
-/// more than the shown amount never fits in what is free.
+/// Free memory rounded up, so a pod that requests more than the shown
+/// amount never fits.
 fn free_memory(bytes: f64) -> String {
     if bytes >= BYTES_PER_GI {
         format!("{:.1} Gi", (bytes / BYTES_PER_GI * 10.0).ceil() / 10.0)

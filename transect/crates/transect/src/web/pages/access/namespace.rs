@@ -1,6 +1,6 @@
-//! A namespace's access tab, from the ways in and the access the model
-//! read, the NetworkPolicies it evaluated, and the namespace's
-//! own labels.
+//! A namespace's access tab: the ways in from outside the cluster, what
+//! each account may do in the namespace, the `NetworkPolicy` objects
+//! that limit each workload, and the namespace's Pod Security level.
 
 use k8s_openapi::jiff::Timestamp;
 
@@ -15,11 +15,11 @@ use transect_graph::edges::{Object, Shown};
 use transect_network::policy::Reach;
 use transect_resources::layers::Layers;
 
-/// The label that names the Pod Security level a namespace enforces.
+/// The label that sets the Pod Security level a namespace enforces.
 const ENFORCE: &str = "pod-security.kubernetes.io/enforce";
 
-/// The access tab of `namespace`, or none when the cluster holds no
-/// such namespace.
+/// The access tab of `namespace`, or none when the cluster has no such
+/// namespace.
 pub fn namespace_access_page(
     model: &Model,
     layers: &Layers,
@@ -78,8 +78,8 @@ pub fn namespace_access_page(
     Some(page)
 }
 
-/// Each workload in `namespace` that serves a port, by name, with the
-/// ways in that reach it.
+/// One entry for each workload in `namespace` that serves a port,
+/// sorted by name and kind, with the ways in that reach it.
 fn served(model: &Model, namespace: &str, look: &Look) -> Vec<Served> {
     let snapshot = &model.snapshot;
     let ways = model.ways();
@@ -169,7 +169,7 @@ fn served(model: &Model, namespace: &str, look: &Look) -> Vec<Served> {
         .collect()
 }
 
-/// One way in, as its row names it.
+/// One way in, as a row of the page shows it.
 fn way(model: &Model, owner: &Object, way: &ways::Way, look: &Look) -> Way {
     let href = |object: &Object| look.href(object);
     let how = match way.through {
@@ -181,10 +181,10 @@ fn way(model: &Model, owner: &Object, way: &ways::Way, look: &Look) -> Way {
         Through::Host => None,
     };
     let namespace = owner.namespace.as_deref();
-    let said = match way.through {
+    let declared_at = match way.through {
         Through::HostPort | Through::MachineNetwork => {
             let intent = model.snapshot.intents.of(owner);
-            let line = intent.and_then(|said| said.host_access.clone());
+            let line = intent.and_then(|intent| intent.host_access.clone());
             line.map(|line| (line.text, line.provenance))
         }
         _ => None,
@@ -193,7 +193,7 @@ fn way(model: &Model, owner: &Object, way: &ways::Way, look: &Look) -> Way {
     Way {
         name,
         machine,
-        said,
+        declared_at,
         via: way
             .via
             .iter()
@@ -217,7 +217,7 @@ fn gate(state: State, title: &str) -> Dot {
         state,
         title: title.into(),
         names: Vec::new(),
-        said: None,
+        declared_at: None,
     };
     Dot::of(&gate, &|_| None)
 }

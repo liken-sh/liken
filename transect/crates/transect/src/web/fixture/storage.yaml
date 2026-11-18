@@ -1,6 +1,7 @@
-# A block-storage driver whose `StorageClass` names the array it
-# provisions on.  The driver's console template fills in that array,
-# so the CSI driver's page lists the URL of the array's console.
+# A block-storage driver whose `StorageClass` has an `array` parameter
+# with the address of the array it provisions on. The driver's console
+# template substitutes that address, so the CSI driver's page lists the
+# URL of each array's console.
 apiVersion: storage.k8s.io/v1
 kind: CSIDriver
 metadata:

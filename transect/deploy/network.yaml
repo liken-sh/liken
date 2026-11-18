@@ -1,14 +1,15 @@
-# Refuses every caller.  The base cannot name the callers that should
-# reach transect, because each one is the cluster's own: an overlay adds
-# a rule that admits its ingress controller by that controller's labels,
-# and, on a CNI that drops the kubelet's probes under a policy like this
-# one, a rule that admits the probe port from the machines' addresses.
+# Refuses all ingress traffic to transect.  Which callers may reach
+# transect differs from cluster to cluster, so an overlay adds a rule
+# that admits the cluster's ingress controller by its labels.  On a CNI
+# that drops the kubelet's probes under a policy like this one, the
+# overlay also admits the probe port from the machines' addresses.
 #
-# Egress is left open.  What transect calls, the API server, Prometheus,
-# Alertmanager, a log store, and registries on 443, has addresses only
-# the cluster knows, and on a distribution that runs the API server on
-# the host network, such as k3s, the API server is an ipBlock and not a
-# pod.  An overlay that refuses egress by default admits those.
+# Egress stays open, because the base cannot know the addresses that
+# transect calls: the API server, Prometheus, Alertmanager, a log
+# store, and image registries on port 443.  An overlay that refuses
+# egress must admit each of them.  On a distribution that runs the API
+# server on the host network, such as k3s, the rule for the API server
+# is an ipBlock, not a pod selector.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

@@ -1,11 +1,11 @@
-//! The page for a URL whose object the cluster no longer holds.
+//! The page for a URL whose object is no longer in the cluster.
 
 use super::super::model::Model;
 use transect_map::map::{Above, Gone, GonePage};
 
-/// The page for `gone`, which the cluster no longer holds, linking to
-/// what remains above it: its namespace, and for a pod the workload
-/// that ran it, when that workload is still in the namespace.
+/// Links to the namespace when it still exists, and for a pod, to the
+/// workload that owned it when that workload is still in the
+/// namespace.
 pub fn gone_page(model: &Model, gone: &Gone) -> GonePage {
     let snapshot = &model.snapshot;
     let (namespace, pod) = match gone {

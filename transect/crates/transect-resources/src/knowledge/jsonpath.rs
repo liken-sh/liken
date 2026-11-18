@@ -1,12 +1,11 @@
-//! The part of JSONPath a CRD's printer columns use: dotted fields,
-//! `[n]`, `[*]`, and a filter of one equality, `[?(@.field=="value")]`,
-//! as in `.status.conditions[?(@.type=="Ready")].status`.  A path that
-//! uses anything else is refused with the part it could not read, so a
-//! page can show which column it left out and why.
+//! Reads the `jsonPath` of a CRD's printer columns. `transect` supports
+//! dotted fields, `[n]`, `[*]`, and a filter with one equality test,
+//! as in `.status.conditions[?(@.type=="Ready")].status`. Any other
+//! syntax is an error that returns the part `transect` could not parse,
+//! so a page can show which column it left out and why.
 
 use serde_json::Value;
 
-/// One step of a path.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Step {
     Field(String),
@@ -20,7 +19,8 @@ pub enum Step {
     },
 }
 
-/// The steps of `path`, or the part of it outside the subset.
+/// The steps of `path`, or the part of the path that is outside the
+/// subset.
 pub fn parse(path: &str) -> Result<Vec<Step>, String> {
     let path = path.trim();
     let path = path
@@ -53,7 +53,7 @@ fn field_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '-'
 }
 
-/// The step inside one pair of brackets.
+/// The step for the text between one pair of brackets.
 fn bracket(inner: &str) -> Result<Step, String> {
     let refused = || format!("[{inner}]");
     if inner == "*" {
@@ -88,8 +88,8 @@ fn bracket(inner: &str) -> Result<Step, String> {
     })
 }
 
-/// Every value `steps` reach in `value`, in order.  A missing field
-/// reaches nothing.
+/// Every value in `value` that `steps` select, in order. A step on a
+/// missing field selects nothing.
 pub fn values<'a>(value: &'a Value, steps: &[Step]) -> Vec<&'a Value> {
     let mut found = vec![value];
     for step in steps {
@@ -117,11 +117,12 @@ pub fn values<'a>(value: &'a Value, steps: &[Step]) -> Vec<&'a Value> {
     found
 }
 
-/// A value as a column shows it: text as it is, a number or a boolean
-/// as JSON writes it, and a list of them joined by commas.  An object
-/// shows as a count of its fields, "{3 fields}", and a list that holds
-/// an object or a list as a count of its items, "[2 items]", never as
-/// JSON, so a CRD's column on `.spec` cannot print the spec.
+/// A value as a column displays it. A string is shown as it is, a
+/// number or boolean as JSON writes it, and a list of those joined by
+/// commas. An object is shown as a count of its fields, "{3 fields}",
+/// and a list that contains an object or a list as a count of its
+/// items, "[2 items]", so a column on `.spec` never shows the spec's
+/// contents.
 pub fn text(value: &Value) -> String {
     match value {
         Value::Array(items) if items.iter().all(is_scalar) => {
@@ -145,17 +146,17 @@ fn scalar(value: &Value) -> String {
     }
 }
 
-/// "{3 fields}" or "[1 item]".
 fn counted(count: usize, noun: &str, brackets: &str) -> String {
     let (open, close) = brackets.split_at(1);
     let plural = if count == 1 { "" } else { "s" };
     format!("{open}{count} {noun}{plural}{close}")
 }
 
-/// Whether `text` is a count `text` writes for an object or a list,
-/// which a page draws gray, because it replaces a value the page does
-/// not show.  The trimmed store keeps a column's value as text, so this
-/// function recognizes the count by its form.
+/// Whether `text` is a count that `text()` returned for an object or a
+/// list. A page draws such a count gray, because it replaces a value
+/// that the page does not show. `transect` keeps the printer columns of
+/// a trimmed custom kind only as the strings that `text()` returns, so
+/// this function recognizes a count by its form.
 pub fn counted_structure(text: &str) -> bool {
     let inner = match (text.strip_prefix('{'), text.strip_prefix('[')) {
         (Some(rest), _) => rest.strip_suffix('}').map(|inner| (inner, "field")),

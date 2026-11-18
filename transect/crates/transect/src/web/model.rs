@@ -1,11 +1,10 @@
-//! What every view reads from one change of the cluster: the snapshot,
-//! the `NetworkPolicy` evaluation, the edge graph with every kind on, and
-//! the findings about each workload and image.  These are the costly
-//! steps of a render, and none depends on the view, so `latest` builds
-//! them once per change and each view turns kinds off in its own copy
-//! of the graph.  What depends on the edge kinds a view shows, or on
-//! the minute it renders in, the model makes on the first request and
-//! keeps for every render after it.
+//! What every view reads from one state of the cluster: the snapshot,
+//! the `NetworkPolicy` evaluation, the edge graph with every kind on,
+//! and the findings about each workload and image. These are costly and
+//! do not depend on the view, so `latest` builds them once per change,
+//! and each view turns edge kinds off in its own copy of the graph.
+//! Values that depend on the shown edge kinds or on the minute are
+//! computed on first request and cached.
 
 mod edge_set;
 mod index;
@@ -35,54 +34,54 @@ use transect_supply::findings::{Linked, WorkloadFinding};
 use transect_supply::images::{self, Census, Known};
 use transect_supply::vulnerabilities::{Stores, Vulnerabilities};
 
-/// How many edge sets a model keeps derived values for.
+/// How many sets of shown edge kinds a model caches derived values for.
 const EDGE_SETS: usize = 8;
 
-/// How many minutes a model keeps derived values for: the one a render
-/// is in, and the one before it, which a render begun just before the
-/// minute turned may still request.
+/// How many minutes a model caches values for: the current minute and
+/// the one before it, because a render that began just before the
+/// minute changed may still request the earlier one.
 const MINUTES: usize = 2;
 
 pub struct Model {
     pub snapshot: Snapshot,
-    /// The owners of pods gone since earlier models, which a gone pod's
-    /// page links to.
+    /// The owners of deleted pods, kept across models so that a deleted
+    /// pod's page can link to its owner.
     pub departed: Departed,
     allowed: Allowed,
     graph: Graph,
-    /// The entries of intent that name nothing `transect` can read, by
-    /// the workload whose card shows them.
+    /// The intent entries that refer to something `transect` cannot
+    /// read, by the workload whose card shows them.
     pub unread: HashMap<Object, Vec<Unread>>,
-    /// The evaluation a view with allowed-to-call turned off reads.
+    /// The empty `Allowed` that views read when allowed-to-call is off.
     no_calls: Allowed,
-    /// The findings about each workload, with the workload each is
-    /// about.
     pub workload_findings: Vec<(WorkloadFinding, Linked)>,
-    /// The images the running pods run, and which lack labels.
+    /// The images that the running pods use, and which of them lack
+    /// labels.
     pub census: Census,
     edge_sets: Memo<Shown, EdgeSet>,
     minutes: Memo<i64, Minute>,
-    /// Every way in, read once per model as it is built.
+    /// Every way in, computed when the model is built.
     ways: Memo<(), Ways>,
     /// The workloads that serve a port, which have an access tab.
     serving: HashSet<Object>,
-    /// The usual page of each object with an access page: every
-    /// namespace and every workload in `serving`.
+    /// The overview URL of each namespace and of each workload in
+    /// `serving`, the objects that have an access page.
     access_paths: HashSet<String>,
-    /// What quick search finds, built once per change.
+    /// The quick-search index.
     pub search: Index,
-    /// What every account may do, and where, from RBAC.
+    /// What each account may do, and where, computed from RBAC.
     pub access: Arc<Access>,
-    /// The fingerprint of what `access` was reduced from, so the next
-    /// model reduces again only when that changed.
+    /// A fingerprint of the RBAC objects that `access` was computed
+    /// from. The next model reuses `access` when the fingerprint is the
+    /// same, because computing it is costly.
     access_key: u64,
-    /// What the scanners' reports hold, read once per model.
+    /// The findings in the vulnerability scanners' reports.
     pub vulnerabilities: Arc<transect_supply::vulnerabilities::Vulnerabilities>,
 }
 
 impl Model {
-    /// The model of `cluster` as of now, keeping the gone pods that
-    /// `previous` held and adding those that left since it.
+    /// Builds the model of the cluster's current state. Its deleted pods
+    /// are those of `previous` plus those deleted since.
     pub fn take(
         cluster: &Cluster,
         images: Arc<Known>,
@@ -110,15 +109,15 @@ impl Model {
         }
     }
 
-    /// The model of `snapshot` alone, as the fixture builds it.
+    /// Builds the model of `snapshot` with no earlier model, for the
+    /// fixture.
     #[cfg(any(test, debug_assertions))]
     pub fn build(snapshot: Snapshot) -> Self {
         Self::build_on(snapshot, None)
     }
 
-    /// The model of `snapshot`, keeping `reduced`, the access an
-    /// earlier model reduced with its fingerprint, when nothing it was
-    /// reduced from changed.
+    /// Builds the model of `snapshot`. `reduced` is an earlier model's
+    /// `access` with its fingerprint.
     fn build_on(snapshot: Snapshot, reduced: Option<(u64, Arc<Access>)>) -> Self {
         let (access_key, access) = {
             let inputs = snapshot.access_inputs();
@@ -193,9 +192,9 @@ impl Model {
             access_key,
             vulnerabilities,
         };
-        // Most views show every kind, so their first render after a
-        // change finds this edge set and this minute made already, and
-        // an access page finds the ways in read.
+        // Compute the values that most first renders after a change
+        // read: the edge set with every kind shown, the current minute,
+        // and the ways in.
         model.edge_set(&Shown::default());
         model.minute(Timestamp::now());
         let started = Instant::now();
@@ -204,12 +203,13 @@ impl Model {
         model
     }
 
-    /// The graph with only the kinds `shown` turns on.
+    /// The graph with only the edge kinds that `shown` turns on.
     pub fn graph(&self, shown: &Shown) -> Graph {
         self.graph.only(shown)
     }
 
-    /// What the graph with only the kinds `shown` turns on gives.
+    /// The `EdgeSet` of the graph with only the kinds that `shown` turns
+    /// on, cached for each `Shown`.
     pub fn edge_set(&self, shown: &Shown) -> Arc<EdgeSet> {
         let make = || EdgeSet::read(&self.snapshot, &self.graph(shown));
         self.edge_sets.get(shown.clone(), make)
@@ -220,15 +220,15 @@ impl Model {
         self.serving.contains(workload)
     }
 
-    /// The usual page of each object with an access page.  On a page of
-    /// the access lens, a link to one of these pages goes to the object's
-    /// access page instead.
+    /// The overview URL of each object that has an access page. On a
+    /// page of the access lens, a link to one of these goes to the
+    /// object's access page instead.
     pub fn access_paths(&self) -> &HashSet<String> {
         &self.access_paths
     }
 
-    /// How many ways in reach each workload that serves a port, which
-    /// its card counts beside the link to its access tab.
+    /// How many ways in reach each workload that serves a port, for the
+    /// count beside the link to its access tab.
     pub fn ways_in(&self) -> HashMap<Object, usize> {
         let ways = self.ways();
         let reaching = |workload: &Object| {
@@ -241,21 +241,22 @@ impl Model {
             .collect()
     }
 
-    /// Every way in, with the gates on the way to it, read as the model
-    /// is built and kept for its life.
+    /// Every way in, with the gates along it, cached for the model's
+    /// life.
     pub fn ways(&self) -> Arc<Ways> {
         self.ways.get((), || super::pages::read_ways(self))
     }
 
-    /// What the snapshot gives in the minute `now` is in.
+    /// The values read from the snapshot for the minute of `now`,
+    /// cached for each minute.
     pub fn minute(&self, now: Timestamp) -> Arc<Minute> {
         let make = || Minute::read(&self.snapshot, now);
         self.minutes.get(Minute::of(now), make)
     }
 
-    /// Who the NetworkPolicies let call whom.  With allowed-to-call
-    /// turned off, the summary holds no namespace, so no tag or card line
-    /// reads one.
+    /// Which workloads the `NetworkPolicy` objects allow to call which,
+    /// or an empty `Allowed` when `shown` turns allowed-to-call off, so
+    /// that no tag or card line shows a policy.
     pub fn allowed(&self, shown: &Shown) -> &Allowed {
         if shown.is_on(Kind::AllowedToCall) {
             &self.allowed

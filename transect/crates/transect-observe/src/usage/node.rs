@@ -1,17 +1,15 @@
-//! What each machine uses right now, from the results of the
-//! `MetricsSource`'s machine queries.  Which label of a series holds
-//! the `Node`'s name depends on the scrape configuration, so the source
-//! lists the labels to try.
+//! Per-machine usage from the results of the `MetricsSource`'s machine
+//! queries.
 
 use std::collections::HashMap;
 
 use crate::prometheus::Sample;
 
-/// Stores each sample under every name that its `labels` give, because
-/// which label holds the `Node`'s name depends on the scrape config.
-/// No caller looks up a name that matches no `Node`, so the extra keys
-/// cost only a few bytes.  A label's value may be a scrape address, and
-/// the function removes its port.
+/// Maps the value of each of `labels` in a sample, with any port
+/// removed, to the sample's value. The scrape config decides which
+/// label holds the `Node` name, so a sample is stored under every one
+/// of `labels` that it has, and callers look up only real `Node` names.
+/// When several samples give the same name, the largest value is kept.
 pub fn by_name(samples: Vec<Sample>, labels: &[String]) -> HashMap<String, f64> {
     let mut by_name = HashMap::new();
     for sample in samples {
@@ -30,9 +28,10 @@ pub fn by_name(samples: Vec<Sample>, labels: &[String]) -> HashMap<String, f64> 
     by_name
 }
 
-/// `alpha:10250` as `alpha`.  An `instance` is a scrape address when the
-/// scrape config does not rename it.  An IPv6 address in brackets keeps
-/// its colons.
+/// `instance` without its port, as in `alpha:10250` to `alpha`. The
+/// `instance` label is a scrape address unless the scrape config
+/// renames it. An IPv6 address keeps its colons, and a bracketed one
+/// keeps its brackets.
 fn without_port(instance: &str) -> &str {
     if instance.starts_with('[') {
         return match instance.find(']') {
@@ -87,7 +86,7 @@ mod tests {
     #[case::ipv4("10.0.0.5:10250", "10.0.0.5")]
     #[case::ipv6_with_port("[fd00::5]:10250", "[fd00::5]")]
     #[case::ipv6_bare("fd00::5", "fd00::5")]
-    fn instance_without_its_port(#[case] instance: &str, #[case] expected: &str) {
+    fn removes_the_port_from_an_instance(#[case] instance: &str, #[case] expected: &str) {
         assert_eq!(without_port(instance), expected);
     }
 }

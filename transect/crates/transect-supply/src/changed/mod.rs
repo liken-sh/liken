@@ -12,9 +12,8 @@
 //! entry.
 //!
 //! A restart that follows a rollout of the same workload within
-//! `FOLLOWS_MINUTES` is listed under that rollout, because a reader who
-//! looks at a rollout needs first to see whether the new revision
-//! crashes.
+//! `FOLLOWS_MINUTES` is listed under that rollout, so a reader of the
+//! rollout sees at once whether the new revision crashes.
 
 mod page;
 mod read;
@@ -31,8 +30,8 @@ use transect_graph::edges::Object;
 pub const WINDOW_HOURS: i64 = 24;
 
 /// How long after a rollout a restart of the same workload is listed
-/// under the rollout.  The time is long enough for a new pod to start,
-/// crash, and restart once or twice under the kubelet's back-off.
+/// under the rollout.  The time is long enough for a new pod that
+/// crashes at start to restart a few times under the kubelet's back-off.
 pub const FOLLOWS_MINUTES: i64 = 10;
 
 /// How many entries the sidebar shows.  `/changed` shows the rest.
@@ -79,7 +78,7 @@ pub enum What {
         restarts: Vec<Restart>,
     },
     /// The conditions of a machine that changed within a minute of each
-    /// other, as all of them change when the machine reboots.
+    /// other, such as the conditions that a reboot changes.
     Node { node: String, moved: Vec<Moved> },
     /// Alerts of one name about the same subject that started firing.
     Alert {

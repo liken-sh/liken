@@ -1,7 +1,7 @@
-//! The custom kinds: `/kinds`, every one the cluster serves in a box
-//! per API group, and `/kinds/{plural.group}`, one kind's objects across
-//! namespaces with their health and printer columns, beside the kind's
-//! card.
+//! The pages for custom kinds.  `/kinds` lists every custom kind the
+//! cluster serves, in one box per API group.  `/kinds/{plural.group}`
+//! lists one kind's objects across all namespaces, with their health and
+//! printer columns, beside a card for the kind.
 
 use askama::Template;
 
@@ -13,18 +13,19 @@ use transect_graph::links::Reference;
 use transect_observe::health::Level;
 use transect_resources::intent::Line;
 
-/// The page that lists every custom kind.
 #[derive(Template)]
 #[template(path = "objects/kinds.html", blocks = ["main"])]
 pub struct KindsPage {
     /// The kinds that have objects, by API group.
     pub groups: Vec<ApiGroup>,
-    /// The kinds that have none, by API group, folded into one box.
+    /// The kinds that have no objects, by API group, shown together in
+    /// one box.
     pub empty: Vec<ApiGroup>,
 }
 
-/// One API group's kinds, and the workloads that control them when
-/// every kind in it shares them, which its box names once.
+/// One API group's kinds.  When every kind in the group has the same
+/// controllers, `controllers` lists them once for the group and each
+/// kind's own list is empty.
 #[derive(Debug, PartialEq)]
 pub struct ApiGroup {
     pub name: String,
@@ -32,25 +33,25 @@ pub struct ApiGroup {
     pub controllers: Vec<Reference>,
 }
 
-/// One kind: its plural, its page, how many objects it has and how
-/// many of those report a condition that is not healthy, the workloads
-/// that control them, and the first sentence of its CRD's description.
+/// One kind in the list.  `summary` is the first sentence of its CRD's
+/// description.
 #[derive(Debug, PartialEq)]
 pub struct KindRow {
     pub label: String,
     pub href: String,
     pub count: usize,
     pub unhealthy: usize,
-    /// The worst level among its objects, which colors the dot beside
-    /// the count of unhealthy ones.
+    /// The worst health level among its unhealthy objects, which colors
+    /// the dot beside their count.
     pub worst: Option<Level>,
     pub controllers: Vec<Reference>,
     pub summary: Option<String>,
 }
 
 impl KindRow {
-    /// Its plural inside its group's box.  The box names the group, so a
-    /// label that names the group to tell it from another's drops it.
+    /// The label inside its group's box.  A label ends with " (group)"
+    /// when another group has a kind of the same plural.  The box
+    /// already shows the group, so the suffix is dropped.
     pub fn label_in(&self, group: &str) -> &str {
         let suffix = format!(" ({group})");
         self.label
@@ -58,7 +59,8 @@ impl KindRow {
             .unwrap_or(&self.label)
     }
 
-    /// "2 not ready", with the dot's class, when any object is not.
+    /// The text "2 not ready" and the CSS class of its dot, or `None`
+    /// when no object is unhealthy.
     pub fn unhealthy_text(&self) -> Option<(String, &'static str)> {
         let worst = self.worst.filter(|_| self.unhealthy > 0)?;
         Some((
@@ -69,8 +71,8 @@ impl KindRow {
 }
 
 impl ApiGroup {
-    /// The group with the controllers every kind in it shares lifted to
-    /// the group, so its box names them once rather than on each row.
+    /// When every kind has the same non-empty controllers, they move to
+    /// the group, so the box shows them once instead of on each row.
     pub fn new(name: String, mut kinds: Vec<KindRow>) -> Self {
         let first = kinds.first().map(|kind| kind.controllers.clone());
         let shared = first.filter(|first| {
@@ -89,9 +91,8 @@ impl ApiGroup {
     }
 }
 
-/// The domain an API group is registered under, its last two labels:
-/// `fluxcd.io` for `source.toolkit.fluxcd.io`.  The groups sort by it
-/// first, read right to left.
+/// Returns the last two labels of an API group, such as `fluxcd.io` for
+/// `source.toolkit.fluxcd.io`, or the whole group when it has fewer.
 pub fn domain(group: &str) -> &str {
     let mut dots = group.rmatch_indices('.');
     match (dots.next(), dots.next()) {
@@ -101,9 +102,11 @@ pub fn domain(group: &str) -> &str {
 }
 
 impl KindsPage {
-    /// The small heading before the group at `at`: its domain, when the
-    /// group starts the domain's run of groups, so the reversed-DNS order
-    /// shows.  A domain whose one group is the domain itself gets none.
+    /// Returns the heading before the group at index `at`: the group's
+    /// domain, when it is the first group of that domain.  The page
+    /// sorts the groups by their labels from the right, so the groups
+    /// of a domain are next to each other.  A domain whose only group is
+    /// the domain itself gets no heading.
     pub fn heading(&self, at: &usize) -> Option<&str> {
         let at = *at;
         let name = &self.groups.get(at)?.name;
@@ -114,12 +117,12 @@ impl KindsPage {
         (starts && !alone).then_some(this)
     }
 
-    /// How many kinds have no objects.
     pub fn empty_count(&self) -> usize {
         self.empty.iter().map(|group| group.kinds.len()).sum()
     }
 
-    /// How many kinds have objects, and how many objects they have.
+    /// The number of kinds that have objects, and the total number of
+    /// those objects.
     pub fn totals(&self) -> (usize, usize) {
         let kinds = self.groups.iter().flat_map(|group| &group.kinds);
         kinds.fold((0, 0), |(kinds, objects), kind| {
@@ -127,7 +130,7 @@ impl KindsPage {
         })
     }
 
-    /// The kinds with an object that is not healthy, for the card.
+    /// The kinds that have an unhealthy object, for the card.
     pub fn unhealthy(&self) -> Vec<&KindRow> {
         let kinds = self.groups.iter().flat_map(|group| &group.kinds);
         kinds
@@ -144,36 +147,34 @@ impl KindsPage {
     }
 }
 
-/// One kind's objects in every namespace.
 #[derive(Template)]
 #[template(path = "objects/kind.html", blocks = ["main"])]
 pub struct KindPage {
     pub label: String,
     pub path: String,
-    /// The other kinds of its API group, this one among them.
-    pub strip: Vec<Entry>,
-    /// The printer columns' names, which head the table after the name
-    /// and the namespace.
+    /// The kinds of this kind's API group, including this one.
+    pub kind_links: Vec<Entry>,
+    /// The names of the CRD's printer columns, which follow the name and
+    /// namespace columns.
     pub columns: Vec<String>,
     pub rows: Vec<KindObject>,
-    /// What each report scanned, for a kind of findings reports.
+    /// What each report scanned, for a kind whose objects are
+    /// vulnerability reports.
     pub scans: Vec<transect_supply::vulnerabilities::Scan>,
     pub card: KindCard,
 }
 
-/// One object of the kind, with each printer column's value.
+/// One object of the kind, with the value of each printer column.
 #[derive(Debug, PartialEq)]
 pub struct KindObject {
     pub item: Item,
     pub namespace: Option<String>,
-    /// Its deciding condition in words, "Ready: issuing", or none when
-    /// it reports none.
+    /// The condition that decides its health, as text such as
+    /// "Ready: issuing", or `None` when it reports no condition.
     pub condition: Option<String>,
     pub values: Vec<String>,
 }
 
-/// A kind's card: its CRD's description, how many objects it has and
-/// how they are, and the workloads that control them.
 #[derive(Debug, PartialEq)]
 pub struct KindCard {
     pub label: String,
@@ -183,12 +184,13 @@ pub struct KindCard {
     pub worst: Option<Level>,
     pub why: Option<Line>,
     pub controllers: Vec<Reference>,
-    /// How the controllers were found, in words.
+    /// Which rule found the controllers, as text.
     pub rule: Option<String>,
 }
 
 impl KindCard {
-    /// Beside the dot: "3 objects", and how many are not ready.
+    /// The text beside the dot, such as "3 objects" or "5 objects, 2 not
+    /// ready".
     pub fn status_text(&self) -> String {
         let objects = match self.count {
             1 => "1 object".to_string(),
@@ -212,15 +214,16 @@ impl KindCard {
     }
 }
 
-/// Whether a table of objects with this many columns needs more than
-/// the column beside the card under 1400px.  Past four columns, the
-/// card drops below the table, so each name keeps more of its line.
+/// Whether a table with this many columns takes the full page width.
+/// Below 1400px, a table of more than four columns does not fit beside
+/// the card, so the card moves below it.
 pub fn wide_table(columns: usize) -> bool {
     columns > 4
 }
 
 impl KindPage {
-    /// Its table has the name, the namespace, and each printer column.
+    /// The table has a name column, a namespace column, and one column
+    /// for each printer column.
     pub fn wide(&self) -> bool {
         wide_table(self.columns.len() + 2)
     }
@@ -242,21 +245,21 @@ impl KindPage {
     }
 }
 
-/// One kind of the custom resources a workload's controller
-/// reconciles: the kind's plural and page, its printer columns, and a
-/// row for each object.
+/// A custom kind whose objects a workload controls, with a row for each
+/// object.
 #[derive(Debug, PartialEq)]
 pub struct Manages {
     pub label: String,
     pub href: String,
-    /// Which rule of controller attribution matched, in words.
+    /// Which rule matched the workload as this kind's controller, as
+    /// text.
     pub rule: String,
     pub columns: Vec<String>,
     pub rows: Vec<KindObject>,
 }
 
-/// The first sentence of `text`, which a kind's title on `/kinds`
-/// shows on hover.
+/// Returns the first sentence of `text`, for the kind's tooltip on
+/// `/kinds`.
 pub fn first_sentence(text: &str) -> String {
     match text.find(". ") {
         Some(at) => text[..=at].to_string(),

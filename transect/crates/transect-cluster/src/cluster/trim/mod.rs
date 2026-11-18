@@ -1,8 +1,8 @@
-//! What each store drops from the objects it holds.  Every field kept
-//! is one that some part of `transect` reads, and the rest would be
-//! most of the memory a store of every pod takes.  Code that starts to
-//! read another field has to keep it here first, or the field is unset
-//! in the store.
+//! Removes the fields that `transect` does not read from each object
+//! before a store keeps it, because those fields would be most of the
+//! memory that a store of every pod takes. Code that starts to read
+//! another field must keep it here first, or the field is unset in the
+//! store.
 
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
 use k8s_openapi::api::batch::v1::CronJob;
@@ -22,19 +22,19 @@ use transect_resources::knowledge::{Column, KEPT};
 mod conditions;
 mod fields;
 
-/// The annotation `kubectl apply` writes with the whole manifest it applied.
+/// The annotation where `kubectl apply` stores the whole manifest that it applied.
 const LAST_APPLIED: &str = "kubectl.kubernetes.io/last-applied-configuration";
 
-/// Managed fields and kubectl's copy of the last applied manifest are
-/// often the largest parts of an object, and nothing on the map reads
-/// them.
+/// Drops the managed fields and the last-applied annotation, which are
+/// often the largest parts of an object.
 pub fn meta(meta: &mut ObjectMeta) {
     meta.managed_fields = None;
     remove_last_applied(meta);
 }
 
-/// Keeps one entry, with only its manager's name, for each manager of
-/// the `status` subresource, which controller attribution reads.
+/// Like `meta`, but keeps the manager name of each managed fields entry
+/// for the `status` subresource, because controller attribution reads
+/// which managers write the status.
 pub fn all_but_status_managers(meta: &mut ObjectMeta) {
     let managers: Vec<ManagedFieldsEntry> = meta
         .managed_fields
@@ -58,13 +58,11 @@ fn remove_last_applied(meta: &mut ObjectMeta) {
     }
 }
 
-/// A pod without the parts of its spec and status nothing reads: how
-/// its containers run as a user, how it resolves names, and what the
-/// kubelet allocated and resized, to the pod and to each container.
-/// Its finalizers, its generations, its grace period, and its
-/// machine's address are dropped too, because `Job` tracking and the
-/// kubelet rewrite them as a pod starts and stops, and an event that
-/// changes only those would otherwise rebuild the model.
+/// Drops the parts of a pod that nothing reads. These include the
+/// finalizers, the generations, the deletion grace period, and the host
+/// address, which `Job` tracking and the kubelet rewrite as a pod starts
+/// and stops. If the store kept them, each of those writes would
+/// rebuild the model.
 pub fn pod(pod: &mut Pod) {
     meta(&mut pod.metadata);
     pod.metadata.finalizers = None;
@@ -113,9 +111,9 @@ pub fn claim(claim: &mut PersistentVolumeClaim) {
     conditions::claim(claim);
 }
 
-/// A custom resource of a kind `transect` reads whole: all of it but its
-/// managed fields, beyond the managers of its status, and its
-/// conditions' heartbeat times.
+/// Trims a custom resource of a kind that `transect` reads whole, as
+/// `all_but_status_managers` trims its metadata. It also drops the
+/// heartbeat times of the conditions.
 pub fn whole_custom(object: &mut DynamicObject) {
     all_but_status_managers(&mut object.metadata);
     conditions::custom(&mut object.data);
@@ -138,14 +136,13 @@ pub fn cron_job(cron_job: &mut CronJob) {
     }
 }
 
-/// A CRD with its name, group, and kind, and each version's top
-/// description and printer columns, which is all a page reads.  The
-/// schemas are most of a CRD's size, and a cluster runs a hundred or
-/// more CRDs.
+/// Trims a CRD to what a page reads: its names, and each version's
+/// top-level description and printer columns. The schemas are most of a
+/// CRD's size.
 pub fn definition(crd: &mut CustomResourceDefinition) {
     meta(&mut crd.metadata);
-    // Only the labels and annotations that name the package that
-    // installed it, which controller attribution matches to a workload.
+    // Controller attribution matches a CRD to a workload by the labels
+    // and annotations that name the package that installed the CRD.
     let package = |map: &mut Option<std::collections::BTreeMap<String, String>>| {
         if let Some(map) = map {
             map.retain(|key, _| crate::ownership::package_key(key));
@@ -168,18 +165,15 @@ pub fn definition(crd: &mut CustomResourceDefinition) {
     }
 }
 
-/// The fields of a condition a trimmed object keeps.
+/// The fields of a condition that a trimmed object keeps.
 const CONDITION_FIELDS: [&str; 5] = ["type", "status", "reason", "message", "lastTransitionTime"];
 
-/// A custom resource of a kind `transect` has no reason to read whole,
-/// cut to its metadata, its conditions, the generation its status was
-/// written for, and the value of each of `columns`, its CRD's printer
-/// columns, read before the cut, and each of `paths`, the paths its
-/// kind knowledge reads.  That is what its `Ready` dot, its
-/// controller, and its pages read.  The rest of its spec may hold a
-/// credential, and no page can detect one, so the rest never reaches
-/// the store.  It is also most of the memory a store of every custom
-/// resource would take.
+/// Trims a custom resource of a kind that `transect` does not read
+/// whole. It keeps the metadata, the conditions,
+/// `status.observedGeneration`, each of `paths`, which kind knowledge
+/// reads, and the value of each printer column in `columns`, under
+/// `KEPT`. The rest of the object can hold a credential that `transect`
+/// cannot detect, so it never reaches the store.
 pub fn conditions_and_columns(object: &mut DynamicObject, columns: &[Column], paths: &[String]) {
     all_but_status_managers(&mut object.metadata);
     let values =
@@ -211,7 +205,7 @@ pub fn conditions_and_columns(object: &mut DynamicObject, columns: &[Column], pa
     };
 }
 
-/// One condition with only the fields a page reads.
+/// A condition with only the fields in `CONDITION_FIELDS`.
 fn condition(condition: &Value) -> Value {
     let kept = CONDITION_FIELDS.iter().filter_map(|field| {
         let value = condition.get(*field)?;
@@ -229,8 +223,8 @@ fn template(template: &mut PodTemplateSpec) {
 fn pod_spec(spec: &mut PodSpec) {
     spec.dns_config = None;
     spec.enable_service_links = None;
-    // An ephemeral container is read only for the Secrets its
-    // environment names, which the access lens follows from exec.
+    // The access lens lists the `Secret`s that each container reads
+    // through its environment, and that includes ephemeral containers.
     spec.ephemeral_containers = spec
         .ephemeral_containers
         .take()
@@ -268,9 +262,9 @@ fn container(container: &mut Container) {
     container.working_dir = None;
 }
 
-/// What of a container's security context the access lens draws: that
-/// it is privileged, and the capabilities it adds.  Every other field,
-/// and a context that sets neither, is dropped.
+/// Keeps only whether a container is privileged and which capabilities
+/// it adds, which are what the access lens draws. It returns `None` when
+/// the context sets neither.
 fn host_access(context: SecurityContext) -> Option<SecurityContext> {
     let privileged = context.privileged.filter(|privileged| *privileged);
     let added = context

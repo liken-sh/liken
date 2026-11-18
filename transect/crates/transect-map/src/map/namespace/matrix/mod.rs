@@ -1,9 +1,8 @@
-//! Boxes that each say "on 10 machines" hide the one machine that a pod
-//! is missing from, so a namespace of DaemonSets draws as a matrix, with
-//! one row per DaemonSet and one column per machine.  Each cell shows
-//! whether the pod there is ready, restarting, or not ready, or why
-//! there is none.  The namespace's other top owners show below as a row
-//! of names.
+//! A namespace whose pods mostly belong to `DaemonSet`s is drawn as a
+//! matrix, with one row per `DaemonSet` and one column per machine. A
+//! box per `DaemonSet` that says "on 10 machines" does not show which
+//! machine is missing its pod, and a matrix does. The namespace's other
+//! top owners are listed by name below the matrix.
 
 mod sentence;
 
@@ -26,17 +25,15 @@ use transect_observe::health::{self, Health, Level, Reason};
 
 #[derive(Debug, PartialEq)]
 pub struct Matrix {
-    /// The columns: every machine, the control plane first and then by
-    /// name.
+    /// The columns, one per machine: control plane machines first, then
+    /// by name.
     pub machines: Vec<Column>,
     pub rows: Vec<Row>,
-    /// How many pods the DaemonSets run, for the matrix's header.
+    /// How many unfinished pods the `DaemonSet`s have, for the header.
     pub pods: usize,
-    /// The namespace's top owners that are not DaemonSets.
     pub others: Vec<Other>,
 }
 
-/// One machine's column.
 #[derive(Debug, PartialEq)]
 pub struct Column {
     pub name: String,
@@ -47,37 +44,39 @@ pub struct Column {
 pub struct Row {
     pub name: String,
     pub href: Option<String>,
-    /// One per machine, in the columns' order.
+    /// One cell per machine, in the same order as the columns.
     pub cells: Vec<Cell>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Cell {
     Ready,
-    /// A container restarted within the hour or is crash looping.  The
-    /// count is the pod's total, as Kubernetes keeps it.
+    /// A container restarted within the last hour or is crash looping.
+    /// `restarts` is the total of the pod's containers' restart counts.
     Restarting {
         restarts: i32,
     },
     NotReady,
-    /// Nothing keeps a pod off this machine, yet none runs here.
+    /// No pod runs on this machine, and the `DaemonSet`'s template does
+    /// not exclude the machine.
     Missing,
-    /// The DaemonSet keeps its pod off this machine by design.
+    /// The `DaemonSet`'s template excludes this machine by node selector,
+    /// node affinity, or an untolerated taint, so no pod is expected.
     Skipped(Skip),
 }
 
-/// A top owner that is not a DaemonSet, named in the row below.
+/// A top owner that is not a `DaemonSet`, listed by name below the
+/// matrix.
 #[derive(Debug, PartialEq)]
 pub struct Other {
     pub kind: String,
     pub name: String,
     pub href: Option<String>,
-    /// Whether its health is at `Warning` or worse, so its name takes
-    /// --warm as its box would.
+    /// Whether its health is `Warning` or worse. Its name then uses the
+    /// `--warm` color, as its box does on the namespace page.
     pub warm: bool,
 }
 
-/// What the matrix is read from.
 pub struct Sources<'a> {
     pub by_owner: &'a HashMap<Object, Vec<&'a Pod>>,
     pub daemon_sets: &'a [Arc<DaemonSet>],
@@ -87,12 +86,12 @@ pub struct Sources<'a> {
     pub now: Timestamp,
 }
 
-/// Whether a namespace with these top owners draws as a matrix: its
-/// DaemonSets run more than half of its running pods, and there are at
-/// least two of them.  Pods, not owners, are counted, since a namespace
-/// of agents often keeps a handful of one-replica controllers beside
-/// them, and those would outnumber the DaemonSets while running a tenth
-/// of the pods.  A matrix of one row shows less than its box does.
+/// Whether a namespace with these top owners is drawn as a matrix: it
+/// has at least two `DaemonSet`s, and they run more than half of its
+/// unfinished pods. The test counts pods, not owners, because a
+/// namespace of per-node agents often also has a few one-replica
+/// controllers, which can outnumber the `DaemonSet`s. A matrix with one
+/// row shows less than the `DaemonSet`'s box does.
 pub fn draws_as_matrix(workloads: &[&Object], by_owner: &HashMap<Object, Vec<&Pod>>) -> bool {
     let running = |workload: &Object| {
         let pods = by_owner.get(workload).into_iter().flatten();
@@ -108,9 +107,8 @@ pub fn draws_as_matrix(workloads: &[&Object], by_owner: &HashMap<Object, Vec<&Po
     daemon_sets.len() >= 2 && on_daemon_sets * 2 > all
 }
 
-/// The matrix of `workloads`, the namespace's top owners.  The rows and
-/// the names below are sorted by name, and the columns put the control
-/// plane first, as the machines band does, then sort by machine name.
+/// The matrix for `workloads`, the namespace's top owners. The columns
+/// are in the order of the cluster map's machines band.
 pub fn matrix(workloads: &[&Object], sources: &Sources) -> Matrix {
     let mut nodes: Vec<&Node> = sources.nodes.iter().map(AsRef::as_ref).collect();
     nodes.sort_by_key(|node| {
@@ -198,9 +196,9 @@ fn on_node(pod: &Pod, node: &Node) -> bool {
     name.is_some() && name == node.metadata.name.as_deref()
 }
 
-/// The worst state among the pods on one machine.  A DaemonSet runs
-/// two there only while a rollout replaces one, and the cell shows the
-/// one that needs attention.
+/// The worst state among the pods on one machine. A `DaemonSet` has two
+/// pods on a machine while a rollout replaces one, and the cell shows
+/// the one that needs attention.
 fn worst(pods: &[&Pod], now: Timestamp) -> Cell {
     let restarting = pods.iter().find(|pod| {
         health::pod_reasons(pod, now).iter().any(|reason| {

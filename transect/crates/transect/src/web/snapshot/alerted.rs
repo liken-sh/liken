@@ -1,7 +1,9 @@
-//! What the firing alerts add to a reading: health's reasons, the marks
-//! on the machines, and the lines of "Now".  Each matches what an alert
-//! is about against the namespaces and machines of this same reading,
-//! so an alert about a namespace that is gone counts as cluster-wide.
+//! Matches the labels of the firing alerts against the namespaces and
+//! nodes of this snapshot, for the health reasons, the alerts on each
+//! machine, and the lines at the top of "Now". An alert whose namespace
+//! label names a namespace that is not in the snapshot attaches to the
+//! machine its labels name, or to the whole cluster when they name
+//! none.
 
 use std::collections::HashMap;
 
@@ -41,7 +43,6 @@ impl Snapshot {
         alerts::on_machines(self.alerts.alerts(), &self.known_to_alerts())
     }
 
-    /// Every firing alert as the lines "Now" opens with.
     pub fn firing(&self, now: Timestamp) -> Vec<Firing> {
         alerts::firing(self.alerts.alerts(), &self.known_to_alerts(), now)
     }

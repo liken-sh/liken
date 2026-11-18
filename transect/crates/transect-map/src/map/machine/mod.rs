@@ -1,13 +1,12 @@
-//! The machine page: one Node as the machine it is, drawn as a board.
-//! A strip at the top shows its role, whether it is ready, and how full
-//! it is.  Under it, the pods that run there are in a box per layer, in
-//! the map's order, with a box per namespace and a row per pod.  Then
-//! come the devices it publishes by driver, the volumes on its disk or
-//! attached to it, its own logs, and the resource that describes it
-//! below the cluster, when kind knowledge's `node` names one.  The card
-//! beside them shows what its kubelet reports and its labels.  The
-//! cluster map answers what losing the machine would take, so the page
-//! links there instead of answering it here.
+//! The page of one `Node`. A strip at the top shows the machine's role,
+//! readiness, and capacity in use. Below it are the machine's pods,
+//! grouped by layer in the cluster map's order and then by namespace.
+//! Then come the devices the machine publishes, its volumes, the logs of
+//! its own services, and the custom resource that describes the machine
+//! below the cluster, when kind knowledge's `node` names a kind for it.
+//!
+//! The cluster map shows what the cluster would lose without this
+//! machine, so this page links there instead of repeating it.
 
 mod devices;
 mod layered;
@@ -39,33 +38,30 @@ pub struct MachinePage {
     pub name: String,
     pub path: String,
     pub facts: Facts,
-    /// Its strip's figures: what it allocates, and what its pods request
-    /// and use.
+    /// What the machine can allocate, and what its pods request and use.
     pub machine: Machine,
-    /// Every machine, to switch between.
+    /// Links to every machine's page.
     pub switches: Vec<Switch>,
-    /// Its pods, by band and namespace.
+    /// The pods on this machine, grouped by layer and namespace.
     pub bands: Vec<Band>,
-    /// What its pods' bars run to, under them.
+    /// The caption under the pods' usage bars that says what a full bar
+    /// represents.
     pub legend: String,
-    /// Why the bars show no usage, when they do not.
+    /// Why the bars show no usage, when they show none.
     pub usage_note: Option<transect_resources::resources::OffLine>,
-    /// The hardware it publishes, by driver.
     pub drivers: Vec<Driver>,
-    /// Why it lists no device, when the holds edge kind is turned off.
+    /// Why no device is listed, when the `holds` edge kind is off.
     pub devices_note: Option<&'static str>,
     pub volumes: Vec<VolumeLine>,
-    /// What the machine's own services logged.
     pub logs: OwnLogs,
-    /// The custom resource that describes the same machine below the
-    /// cluster, when there is one.
     pub underneath: Option<Underneath>,
-    /// Why there is none, when kind knowledge names a kind that describes
-    /// Nodes and no object of it describes this one.
+    /// Why `underneath` is empty, when kind knowledge names a kind that
+    /// describes nodes and no object of that kind describes this one.
     pub underneath_none: Option<String>,
 }
 
-/// One volume on the machine: its claim, and how it is there.
+/// One volume on the machine: its `PersistentVolumeClaim`, and how the
+/// volume is attached.
 #[derive(Debug, PartialEq)]
 pub struct VolumeLine {
     pub claim: Reference,
@@ -73,7 +69,6 @@ pub struct VolumeLine {
 }
 
 impl VolumeLine {
-    /// `pin`'s claim, linked by `href` to its page, and how it is here.
     pub fn of(pin: &Pin, href: impl Fn(&transect_graph::edges::Object) -> Option<String>) -> Self {
         let claim = pin.claim();
         let object = transect_graph::edges::Object::new(
@@ -92,21 +87,20 @@ impl VolumeLine {
     }
 }
 
-/// The custom resource that describes the machine below the cluster,
-/// as its kind knowledge's `node` names it.
+/// The custom resource that describes the machine below the cluster, of
+/// the kind that kind knowledge's `node` names.
 #[derive(Debug, PartialEq)]
 pub struct Underneath {
-    /// Its kind and name, as "Machine alpha".
+    /// The resource's kind and name, such as "Machine alpha".
     pub title: String,
-    /// Its own page, where its conditions and fields are listed in full.
     pub href: Option<String>,
     pub chips: Vec<Chip>,
-    /// Its kind's knowledge, which a card section draws.
+    /// What kind knowledge says about the kind.
     pub known: Option<KnownThrough>,
 }
 
 impl Underneath {
-    /// Where every mark in the section came from.
+    /// The provenance of each mark in the section.
     pub fn provenances(&self) -> Vec<Provenance> {
         let known = self.known.iter();
         known
@@ -128,8 +122,7 @@ impl MachinePage {
         format!("/events{}", self.path)
     }
 
-    /// Its lenses: this page, and the cluster map as it would be
-    /// without it.
+    /// The tabs: this page, and the cluster map with this machine lost.
     pub fn tabs(&self) -> Tabs {
         Tabs::machine(
             &transect_graph::links::machine(&self.name),
@@ -166,12 +159,13 @@ impl MachinePage {
         bar::unscaled_note(&tile.memory, &tile.cpu)
     }
 
-    /// "up 4d · 2 restarts", or "not ready · up 4d · 0 restarts".
+    /// The pod row's summary, such as "up 4d · 2 restarts" or "not ready
+    /// · up 4d · 0 restarts".
     pub fn row_line(&self, tile: &PodTile) -> String {
         sentence::row(tile)
     }
 
-    /// What the marks on the page mean, when any line is marked.
+    /// The key to the page's provenance marks, when the page has any.
     pub fn legend(&self) -> Option<String> {
         let marks = self.underneath.iter().flat_map(Underneath::provenances);
         transect_graph::edges::provenance::legend(&marks.collect::<Vec<_>>())

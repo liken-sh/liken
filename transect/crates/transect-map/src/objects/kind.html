@@ -16,7 +16,7 @@
 <main class="board-page" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
 <nav class="switcher" aria-label="Kinds in {{ card.group }}">
 <a class="switcher-namespace" href="/kinds" hx-get="/kinds">kinds</a>
-{%- for entry in strip %}
+{%- for entry in kind_links %}
 {%- if let Some(href) = entry.href %}
 <a class="switch{% if entry.current %} switch-current{% endif %}" href="{{ href }}" hx-get="{{ href }}"{% if entry.current %} aria-current="page"{% endif %}>{{ entry.text }}</a>
 {%- endif %}

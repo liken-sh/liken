@@ -1,12 +1,11 @@
 # Kind knowledge for cert-manager, as cert-manager would ship it.
-# transect finds an Ingress's issuer in either of two ways.  A
-# Certificate writes the Secret the Ingress serves its TLS from and
-# names its issuer in spec.issuerRef; a reference names one kind, so
-# this one reads the issuerRef as a ClusterIssuer's name, which is how
-# most clusters issue.
-# Or the Ingress names its issuer with the ingress-shim annotations: a
-# ClusterIssuer by its name, and an Issuer by its name in the Ingress's
-# own namespace.
+# transect finds an Ingress's issuer in two places.  The first is a
+# Certificate that writes the Secret the Ingress serves TLS from: its
+# spec.issuerRef names the issuer.  A reference in kind knowledge has
+# one kind, so this file reads issuerRef.name as a ClusterIssuer, which
+# is how most clusters issue.  The second is cert-manager's
+# ingress-shim annotations on the Ingress, which name a ClusterIssuer,
+# or an Issuer in the Ingress's namespace.
 apiVersion: transect.liken.sh/v1alpha1
 kind: KindKnowledge
 metadata:

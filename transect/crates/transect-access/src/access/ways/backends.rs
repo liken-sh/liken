@@ -1,6 +1,6 @@
-//! Where a way in arrives inside its workload: the Service it passes,
-//! and the port the workload answers it on.  A workload's drawing ends
-//! the way's line at that port.
+//! The Service that a way in goes through and the port of the
+//! workload's pods that it reaches.  A workload's drawing ends the
+//! way's line at that port.
 
 use k8s_openapi::api::core::v1::{ContainerPort, Pod, Service, ServicePort};
 use k8s_openapi::api::networking::v1::{IngressBackend, ServiceBackendPort};
@@ -9,8 +9,6 @@ use kube::ResourceExt;
 
 use transect_graph::edges::Object;
 
-/// The Service a way passes, when it passes one, and the port its
-/// workload answers on.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Backend {
     pub service: Option<Object>,
@@ -25,7 +23,7 @@ pub enum Target {
     Name(String),
 }
 
-/// The Service `service` as an object.
+/// `service` as a graph `Object`.
 pub fn object(service: &Service) -> Object {
     Object::new(
         "",
@@ -35,8 +33,8 @@ pub fn object(service: &Service) -> Object {
     )
 }
 
-/// The port of the pods behind `port`: its `targetPort`, or its own
-/// number when it names none.
+/// The pod port that the Service port `port` forwards to: its
+/// `targetPort`, or `port.port` when `targetPort` is unset.
 pub fn target(port: &ServicePort) -> Target {
     match &port.target_port {
         Some(IntOrString::Int(number)) => Target::Number(*number),
@@ -45,7 +43,8 @@ pub fn target(port: &ServicePort) -> Target {
     }
 }
 
-/// Each port of `service`, as a way through it reaches its pods.
+/// One `Backend` for each port of `service`, at the pod port that it
+/// forwards to.
 pub fn of_service(service: &Service) -> Vec<Backend> {
     let ports = service
         .spec
@@ -60,9 +59,9 @@ pub fn of_service(service: &Service) -> Vec<Backend> {
     found
 }
 
-/// The backends `backends` of an Ingress in `namespace` lead to,
-/// through the Services in `services`.  A backend port that names no
-/// port of its Service reaches no pod, so it is left out.
+/// The pod ports that the backends of an Ingress in `namespace` lead
+/// to, looked up in `services`.  It leaves out a backend whose port
+/// matches no port of its Service, because that backend reaches no pod.
 pub fn of_backends<'a>(
     namespace: Option<String>,
     backends: impl IntoIterator<Item = &'a IngressBackend>,
@@ -83,7 +82,7 @@ pub fn of_backends<'a>(
             .spec
             .iter()
             .flat_map(|spec| spec.ports.iter().flatten());
-        let mut matched = ports.filter(|port| names(port, named.port.as_ref()));
+        let mut matched = ports.filter(|port| matches(port, named.port.as_ref()));
         if let Some(port) = matched.next() {
             let backend = Backend {
                 service: Some(object(service)),
@@ -97,11 +96,11 @@ pub fn of_backends<'a>(
     found
 }
 
-/// Whether an `Ingress`'s backend port `asked` names the Service's
-/// `port`: by number or by name.  When it names neither, every port
-/// matches, and `of_backends` takes the Service's first.
-fn names(port: &ServicePort, asked: Option<&ServiceBackendPort>) -> bool {
-    match asked {
+/// Whether the Ingress backend port `requested` refers to the Service
+/// port `port`, by number or by name.  When it gives neither, every
+/// port matches, so `of_backends` uses the Service's first port.
+fn matches(port: &ServicePort, requested: Option<&ServiceBackendPort>) -> bool {
+    match requested {
         Some(ServiceBackendPort {
             number: Some(number),
             ..
@@ -113,9 +112,8 @@ fn names(port: &ServicePort, asked: Option<&ServiceBackendPort>) -> bool {
     }
 }
 
-/// The ports `pod`'s containers answer on: those with a host port that
-/// answers outside its machine when `host` is true, and every one
-/// otherwise.
+/// The container ports of `pod`.  When `host` is true, only the ports
+/// whose host port callers outside the machine can reach.
 pub fn of_pod(pod: &Pod, host: bool) -> Vec<Backend> {
     let containers = pod.spec.iter().flat_map(|spec| spec.containers.iter());
     let ports = containers.flat_map(|c| c.ports.iter().flatten());
@@ -128,9 +126,9 @@ pub fn of_pod(pod: &Pod, host: bool) -> Vec<Backend> {
         .collect()
 }
 
-/// The host port `port` opens to callers outside its machine: none when
-/// it has none, or when its `hostIP` is a loopback address, which only
-/// the machine itself can connect to.
+/// The host port of `port` that callers outside the machine can
+/// connect to.  It is `None` when the port has no host port, or when
+/// its `hostIP` is a loopback address.
 pub fn host_port(port: &ContainerPort) -> Option<i32> {
     let loopback = port
         .host_ip

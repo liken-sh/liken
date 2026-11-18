@@ -1,12 +1,12 @@
-//! A distribution's load balancer listeners: pods that answer a
-//! LoadBalancer Service's ports on their machines with host ports of
-//! their own.  They are part of the Service's way in, so they get no
-//! rows of their own.
+//! Listener pods of a distribution's load balancer.  A load balancer
+//! can serve a LoadBalancer Service by running a pod on each machine
+//! that opens the Service's ports as host ports.  These pods are part
+//! of the Service's way in, so they get no rows of their own.
 //!
-//! transect recognizes a listener in one of two ways, and neither
-//! depends on one distribution.  Either its DaemonSet has an owner
-//! reference to the Service, or a `LoadBalancerController` states which
-//! label or annotation of a listener names its Service:
+//! `transect` has no code for any one distribution.  It finds a
+//! listener when the pod's DaemonSet has an owner reference to the
+//! Service, or when a `LoadBalancerController` names the label or
+//! annotation of the pod that holds the Service's name and namespace:
 //!
 //! ```yaml
 //! apiVersion: transect.liken.sh/v1alpha1
@@ -32,8 +32,11 @@ use transect_resources::resources::DocId;
 pub struct LoadBalancerController {
     pub doc: DocId,
     pub name: String,
-    /// Where a listener names its Service's name and namespace.
+    /// The label or annotation of a listener pod that holds the
+    /// Service's name.
     pub service: MetaKey,
+    /// The label or annotation of a listener pod that holds the
+    /// Service's namespace.
     pub namespace: MetaKey,
 }
 
@@ -76,14 +79,14 @@ impl Key {
                 Ok(MetaKey::Annotation(annotation))
             }
             _ => Err(format!(
-                "listener.{field} names one label or one annotation"
+                "listener.{field} must set exactly one of label and annotation, to a non-empty key"
             )),
         }
     }
 }
 
-/// The `LoadBalancerController` `value` declares, or why it does not
-/// validate.
+/// The `LoadBalancerController` that `value` declares, or why `value`
+/// is not valid.
 pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<LoadBalancerController, String> {
     let document: Document = serde_yaml::from_value(value).map_err(|error| error.to_string())?;
     let listener = document.spec.listener;
@@ -107,9 +110,10 @@ fn value<'a>(meta: &'a ObjectMeta, key: &MetaKey) -> Option<&'a str> {
     map?.get(key).map(String::as_str)
 }
 
-/// The Service, by namespace and name, whose listener `pod` is: the one
-/// its DaemonSet's owner reference names, or the one a
-/// `LoadBalancerController` reads from its labels or annotations.
+/// The namespace and name of the Service that `pod` is a listener for,
+/// or `None` when it is not a listener.  A `LoadBalancerController`'s
+/// label or annotation is checked first, and then the Service that owns
+/// the pod's DaemonSet.
 pub fn service_of(
     pod: &Pod,
     daemon_sets: &[std::sync::Arc<DaemonSet>],
@@ -139,7 +143,9 @@ pub fn service_of(
     Some((namespace.into(), service.name.clone()))
 }
 
-/// Whether `controller` names the Service of any of `pods`.
+/// Whether any of `pods` has both the label or annotation that
+/// `controller` reads for a Service's name and the one it reads for its
+/// namespace.
 pub fn matches_any(controller: &LoadBalancerController, pods: &[std::sync::Arc<Pod>]) -> bool {
     pods.iter().any(|pod| {
         value(&pod.metadata, &controller.service).is_some()
@@ -167,21 +173,31 @@ mod tests {
     )]
     #[case::neither(
         "{listener: {name: {}, namespace: {label: a/namespace}}}",
-        Some("listener.name names one")
+        Some("listener.name must set exactly one")
     )]
     #[case::both(
         "{listener: {name: {label: a, annotation: b}, namespace: {label: c}}}",
-        Some("listener.name names one")
+        Some("listener.name must set exactly one")
     )]
     #[case::an_unknown_field(
         "{listener: {name: {label: a}, namespace: {label: b}}, port: 1}",
         Some("unknown field")
     )]
-    fn validates(#[case] spec: &str, #[case] says: Option<&str>) {
+    fn parses_a_controller_or_reports_why_not(
+        #[case] spec: &str,
+        #[case] expected_error: Option<&str>,
+    ) {
         let found = read(spec).err();
-        assert_eq!(found.is_some(), says.is_some(), "{found:?}");
-        if let (Some(error), Some(says)) = (found, says) {
-            assert!(error.contains(says), "{error:?}");
+        assert_eq!(
+            found.is_some(),
+            expected_error.is_some(),
+            "the error is {found:?}, want an error only for an invalid spec"
+        );
+        if let (Some(error), Some(expected_error)) = (found, expected_error) {
+            assert!(
+                error.contains(expected_error),
+                "the error is {error:?}, want it to contain {expected_error:?}"
+            );
         }
     }
 
@@ -193,7 +209,7 @@ mod tests {
     #[case::by_its_labels("{metadata: {namespace: system, name: lb-1, labels: {a/name: web, a/namespace: shop}}}", Some(("shop", "web")))]
     #[case::by_its_daemonsets_owner("{metadata: {namespace: shop, name: lb-2, ownerReferences: [{apiVersion: apps/v1, kind: DaemonSet, name: web-lb, uid: a}]}}", Some(("shop", "web")))]
     #[case::neither("{metadata: {namespace: shop, name: other}}", None)]
-    fn finds_the_service_a_listener_answers_for(
+    fn finds_the_service_that_a_listener_serves(
         #[case] text: &str,
         #[case] expected: Option<(&str, &str)>,
     ) {

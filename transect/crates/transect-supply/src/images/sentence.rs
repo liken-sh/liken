@@ -1,12 +1,13 @@
-//! The fixed text that an origin shows.  All other text in an origin is
-//! a label's text, truncated and escaped, or a name.
+//! The text that an `Origin` shows for an image: its commit, version,
+//! description, and documentation from the image's labels, and a note
+//! when there is no commit to show.
 
 use super::origin::Origin;
 use crate::forge::Commit;
 use transect_graph::edges::Provenance;
 
 impl Origin {
-    /// The commit's page, when transect can link it.
+    /// The URL of the commit's page, when transect can build one.
     pub fn href(&self) -> Option<&str> {
         match self.commit()? {
             Commit::Link { href, .. } => Some(href),
@@ -14,7 +15,8 @@ impl Origin {
         }
     }
 
-    /// "app@0a1b2c3" for a link, or the source and the revision as text.
+    /// The commit as text: "app@0a1b2c3" for a link, otherwise the source
+    /// and the revision.
     pub fn code_text(&self) -> Option<String> {
         Some(match self.commit()? {
             Commit::Link { text, .. } => text.clone(),
@@ -23,7 +25,7 @@ impl Origin {
         })
     }
 
-    /// Why there is no commit to show, when there is none.
+    /// The reason there is no commit to show, when there is none.
     pub fn note(&self) -> Option<String> {
         match self {
             Self::Reading => Some("reading the image's labels".into()),
@@ -50,7 +52,7 @@ impl Origin {
         }
     }
 
-    /// Where the description came from: the image's own labels.
+    /// The description comes from the image's own labels.
     pub fn description_provenance(&self) -> Provenance {
         Provenance::Image(None)
     }
@@ -118,7 +120,7 @@ mod tests {
         None,
         Some("labels unreadable: the registry requires credentials that transect does not have")
     )]
-    fn words_an_origin(
+    fn writes_the_code_text_and_the_note(
         #[case] origin: Origin,
         #[case] code: Option<&str>,
         #[case] note: Option<&str>,

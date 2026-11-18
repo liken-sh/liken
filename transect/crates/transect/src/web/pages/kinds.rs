@@ -1,6 +1,7 @@
-//! `/kinds` and `/kinds/{plural.group}`: the custom kinds, and one
-//! kind's objects across namespaces, read from the kind's store, which
-//! keeps each object's printer columns whether it is whole or trimmed.
+//! `/kinds` lists the custom kinds, and `/kinds/{plural.group}` lists
+//! one kind's objects in every namespace. Both pages read the printer
+//! columns, which the watch keeps also for a kind whose objects it
+//! trims.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -19,8 +20,8 @@ use transect_map::objects::{
 use transect_observe::health::{Level, reported};
 use transect_resources::knowledge::{Column, ColumnRead, columns};
 
-/// Every custom kind `transect` watches, by API group: those with
-/// objects in full, and those with none folded into one gray line.
+/// Every custom kind that `transect` watches, grouped by API group. The
+/// kinds with no objects go in `empty`, apart from the others.
 pub fn kinds_page(model: &Model) -> KindsPage {
     let snapshot = &model.snapshot;
     let graph = model.graph(&Shown::default());
@@ -83,8 +84,7 @@ pub fn kinds_page(model: &Model) -> KindsPage {
     }
 }
 
-/// One kind's objects across namespaces, or none for a kind `transect`
-/// does not watch.
+/// `None` for a kind that `transect` does not watch.
 pub fn kind_page(model: &Model, resource: &str, now: Timestamp) -> Option<KindPage> {
     let snapshot = &model.snapshot;
     let (api, stored) = snapshot.custom_at(resource)?;
@@ -93,7 +93,7 @@ pub fn kind_page(model: &Model, resource: &str, now: Timestamp) -> Option<KindPa
     let siblings = snapshot.custom.iter().filter(|(other, found)| {
         other.group == api.group && (!found.is_empty() || other.kind == api.kind)
     });
-    let mut strip: Vec<KnownEntry> = siblings
+    let mut kind_links: Vec<KnownEntry> = siblings
         .map(|(other, found)| KnownEntry {
             text: format!(
                 "{} ×{}",
@@ -104,11 +104,11 @@ pub fn kind_page(model: &Model, resource: &str, now: Timestamp) -> Option<KindPa
             current: other.kind == api.kind,
         })
         .collect();
-    strip.sort_by(|a, b| a.text.cmp(&b.text));
+    kind_links.sort_by(|a, b| a.text.cmp(&b.text));
     let page = KindPage {
         label: labels[&(api.group.clone(), api.kind.clone())].clone(),
         path: format!("/kinds/{resource}"),
-        strip,
+        kind_links,
         columns,
         rows,
         scans: model
@@ -119,9 +119,9 @@ pub fn kind_page(model: &Model, resource: &str, now: Timestamp) -> Option<KindPa
     Some(page)
 }
 
-/// The card of `api`'s kind, counting its objects among `found` that
-/// `keep` keeps: how many, how many are not healthy, and the workloads
-/// that control them.
+/// The card of `api`'s kind, for the objects in `found` that `keep`
+/// accepts: how many there are, how many are not healthy, and which
+/// workloads control them.
 pub fn kind_card(
     model: &Model,
     api: &ApiResource,
@@ -167,10 +167,9 @@ pub fn kind_card(
     }
 }
 
-/// The objects of `found`, of `api`'s kind, that `keep` keeps, as rows
-/// by namespace and name with each printer column's value, and the
-/// columns' names.  A column whose path `transect` does not read is left
-/// out of both, and so is one `kubectl get` prints only with `-o wide`.
+/// The column names, and a row for each object in `found` that `keep`
+/// accepts. A printer column is left out when `transect` cannot read its
+/// JSONPath, or when `kubectl get` prints it only with `-o wide`.
 pub fn table(
     snapshot: &Snapshot,
     api: &ApiResource,
@@ -216,7 +215,6 @@ pub fn table(
     (names.collect(), rows)
 }
 
-/// `found`, an object of `resource`'s kind, as an `Object`.
 fn as_object(resource: &ApiResource, found: &DynamicObject) -> Option<Object> {
     let meta = &found.metadata;
     let name = meta.name.as_deref()?;

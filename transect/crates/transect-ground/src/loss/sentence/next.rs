@@ -9,8 +9,9 @@ use transect_graph::links::{Piece, listed};
 /// The most pods the eviction line names before it counts the rest.
 const NAMED: usize = 4;
 
-/// The out-of-service taint, whose value gives the reason the machine
-/// is out of service.
+/// The out-of-service taint that a person applies to a machine that is
+/// confirmed off, so Kubernetes deletes its pods and detaches their
+/// volumes.
 const OUT_OF_SERVICE: &str = "node.kubernetes.io/out-of-service=nodeshutdown:NoExecute";
 
 impl Sidebar {
@@ -18,11 +19,12 @@ impl Sidebar {
         "What happens next"
     }
 
-    /// The eviction line's tag, "+5m", and its text, "Its pods are
-    /// evicted after the 5 minutes their tolerations allow, then the
-    /// replicas that can start elsewhere do."  For machines that are
-    /// really lost, the time counts from the loss: "+2m" while the wait
-    /// runs, and "done" after it ends.
+    /// The eviction line's tag, such as "+5m", and its text, such as
+    /// "Its pods are evicted after the 5 minutes their tolerations
+    /// allow, then the replicas that can start elsewhere do."  For
+    /// machines that are really lost, the tag is the time left until
+    /// the eviction, such as "+2m", and "done" once that time has
+    /// passed.
     pub fn eviction(&self) -> Option<(String, String)> {
         if let (Some(elapsed), Some(Eviction::After(seconds))) = (self.elapsed(), self.next.usual) {
             return Some(self.eviction_since(seconds, elapsed));
@@ -49,8 +51,8 @@ impl Sidebar {
         }
     }
 
-    /// The eviction line for machines lost `elapsed` seconds ago, whose
-    /// pods are evicted after `seconds`.
+    /// The eviction line for machines that were lost `elapsed` seconds
+    /// ago, whose pods are evicted `seconds` after the loss.
     fn eviction_since(&self, seconds: i64, elapsed: i64) -> (String, String) {
         let its = match self.machines.pronoun() {
             ("it", _) => "Its",
@@ -74,9 +76,9 @@ impl Sidebar {
         }
     }
 
-    /// The pods that Kubernetes evicts after a different time: "Not
-    /// every pod waits as long: db-0 after 30 seconds, and web-a after
-    /// 1 minute."
+    /// The pods whose eviction time differs from the usual one, such as
+    /// "Not every pod waits as long: db-0 after 30 seconds, and web-a
+    /// after 1 minute."
     pub fn differ_text(&self) -> Option<String> {
         let differ = &self.next.differ;
         if differ.is_empty() {
@@ -98,9 +100,10 @@ impl Sidebar {
         Some(format!("Not every pod waits as long: {named}."))
     }
 
-    /// "If alpha is really off, this deletes its pods and detaches
-    /// their volumes:".  The sidebar shows it only when the machines are
-    /// really down and a pod on them is stuck.
+    /// The sentence that introduces the out-of-service taint commands,
+    /// such as "If alpha is really off, this deletes its pods and
+    /// detaches their volumes:".  It is `None` unless the machines are
+    /// really lost and a pod on them is stuck.
     pub fn out_of_service_text(&self) -> Option<String> {
         if !self.next.really_lost || self.next.stuck.is_empty() {
             return None;
@@ -118,7 +121,8 @@ impl Sidebar {
         })
     }
 
-    /// The command for each lost machine, for the reader to run.
+    /// The `kubectl taint` command that the reader can run for each lost
+    /// machine.
     pub fn out_of_service_commands(&self) -> Vec<String> {
         let machines = self.machines.names();
         machines
@@ -130,7 +134,8 @@ impl Sidebar {
         "stuck"
     }
 
-    /// One line for each reason pods stay stuck, naming the workloads.
+    /// One line for each reason that pods cannot start elsewhere, with
+    /// the workloads that it affects.
     pub fn stuck_lines(&self) -> Vec<Vec<Piece>> {
         let lost = &self.machines;
         let one = lost.names().count() == 1;
@@ -178,7 +183,8 @@ impl Next {
     }
 }
 
-/// The eviction's tag: "+30s", "+5m".
+/// The tag of an eviction line for a wait of `seconds`, such as "+30s"
+/// or "+5m".
 fn tag(seconds: i64) -> String {
     match seconds {
         s if s % 60 == 0 || s >= 120 => format!("+{}m", (s + 30) / 60),

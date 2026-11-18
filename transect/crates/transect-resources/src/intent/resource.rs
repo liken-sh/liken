@@ -1,7 +1,7 @@
-//! The `Intent` resource: the intent annotations' fields, for prose
-//! longer than an annotation should hold, or for trying intent against a
-//! cluster before its manifests have the annotations.  It is
-//! namespaced and selects objects in its own namespace.
+//! An `Intent` resource sets the same fields as the intent annotations,
+//! on the objects that it selects in its own namespace. Use it for text
+//! that is too long for an annotation, or to try the fields on a
+//! cluster before the manifests have the annotations.
 
 use std::collections::BTreeMap;
 
@@ -19,8 +19,9 @@ pub struct Intent {
     pub fields: Fields,
 }
 
-/// One term of `selects`: a resource, as `kubectl` names it, and a name,
-/// labels, or both.
+/// One entry of `selects`. `resource` is a plural or `<plural>.<group>`,
+/// as `kubectl get` takes it, and the entry needs a name, labels, or
+/// both.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Select {
@@ -29,7 +30,8 @@ pub struct Select {
     pub match_labels: Option<BTreeMap<String, String>>,
 }
 
-/// The fields an `Intent` resource and the annotations share, as written.
+/// The fields that an `Intent` resource and the annotations have in
+/// common, as written.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Fields {
     pub why: Option<String>,
@@ -38,10 +40,10 @@ pub struct Fields {
     pub depends_on: Vec<String>,
     pub authenticates_through: Vec<String>,
     pub docs: Option<String>,
-    /// How the workload signs its callers in itself, which the API does
-    /// not show.
+    /// How the workload authenticates its callers itself, which its API
+    /// objects do not show.
     pub signs_in: Option<String>,
-    /// Why the workload uses its machine's network, a host port, a host
+    /// Why the workload uses the host network, a host port, a host
     /// path, or a privileged container.
     pub host_access: Option<String>,
 }
@@ -75,7 +77,6 @@ struct Metadata {
 }
 
 impl Intent {
-    /// The `Intent` `value` declares, or why it does not validate.
     pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<Self, String> {
         let document: Document =
             serde_yaml::from_value(value).map_err(|error| error.to_string())?;
@@ -95,13 +96,15 @@ impl Intent {
             host_access,
         } = document.spec;
         if selects.is_empty() {
-            return Err("selects names nothing".into());
+            return Err("selects is empty, and an intent must select at least one object".into());
         }
         if let Some(at) = selects
             .iter()
             .position(|s| s.name.is_none() && s.match_labels.is_none())
         {
-            return Err(format!("selects[{at}] needs a name, matchLabels, or both"));
+            return Err(format!(
+                "selects[{at}] sets neither name nor matchLabels, and needs at least one"
+            ));
         }
         Ok(Self {
             doc,
@@ -121,8 +124,8 @@ impl Intent {
         })
     }
 
-    /// Whether any term of `selects` names `object`, whose labels are
-    /// `labels`.
+    /// Whether `object`, which has `labels`, is in this `Intent`'s
+    /// namespace and matches any entry of `selects`.
     pub fn selects(
         &self,
         object: &Object,
@@ -145,7 +148,8 @@ impl Intent {
 }
 
 impl Select {
-    /// Whether this term names `object`, in any namespace.
+    /// Whether this entry matches `object`, ignoring the `Intent`'s
+    /// namespace.
     pub fn names(
         &self,
         object: &Object,
@@ -180,7 +184,7 @@ pub mod fixtures {
         ])
     }
 
-    /// The `Intent` `spec` declares, named `name` in `shop`.
+    /// An `Intent` called `name` in the namespace `shop`, with `spec`.
     pub fn intent(name: &str, spec: &str) -> Intent {
         let text = format!("metadata: {{namespace: shop, name: {name}}}\nspec: {spec}");
         Intent::parse(DocId::default(), serde_yaml::from_str(&text).unwrap()).unwrap()

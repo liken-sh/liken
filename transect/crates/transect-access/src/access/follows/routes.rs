@@ -1,7 +1,7 @@
-//! The steps from rules that grant none of the six capabilities: acting
-//! as an account through a token or impersonation, binding a role to
-//! itself, rewriting a role it is bound to, and exec into pods a grant
-//! names.
+//! How an account gets capabilities that no rule grants it directly:
+//! acting as another account by minting its token or impersonating it,
+//! binding a role to itself, rewriting a role it is bound to, and
+//! running exec in pods that a grant names.
 
 use super::super::account::{Account, Hop, Where};
 use super::super::capability::{ALL, Scope};
@@ -10,14 +10,15 @@ use super::super::routes::{Names, Route, admits};
 use super::{Follow, Places, Steps};
 use transect_graph::edges::Object;
 
-/// The group the API server's authorizer lets do anything, bound or
-/// not.
+/// The group that the API server's authorizer allows every request,
+/// with or without a binding.
 const MASTERS: &str = "system:masters";
 
-/// The accounts that `routes` let an account act as, through a token it
-/// may mint or an account it may impersonate.  Each step's hop is
-/// `through` when the routes come through another step, such as a role
-/// it may bind, and the route itself otherwise.
+/// Records the accounts that `routes` let an account act as, by minting
+/// a token for a ServiceAccount or by impersonating an account.  When
+/// the routes come from another step, such as a role that the account
+/// may bind, `through` is that step and is each new step's hop.
+/// Otherwise the hop is the route itself.
 pub(super) fn acts_through(
     routes: &[(Route, Where, Names)],
     through: Option<&Hop>,
@@ -64,6 +65,9 @@ pub(super) fn acts_through(
             _ => {}
         }
     }
+    // The API server accepts an `Impersonate-Group` header only beside an
+    // `Impersonate-User` header, and a ServiceAccount counts as a user.
+    // So a grant on groups alone lets the account impersonate no group.
     if !impersonates_a_user {
         return;
     }
@@ -81,17 +85,18 @@ pub(super) fn acts_through(
             let own = Hop::Impersonates {
                 account: Account::Group(MASTERS.into()),
             };
-            all_six(Where::Everywhere, hop(own), steps);
+            every_capability(Where::Everywhere, hop(own), steps);
         }
     }
 }
 
-/// Every role `held` may bind to itself, and so what it may do through
-/// each.  Binding a role requires `bind` on its kind, by its name, and
-/// `create` on the binding kind, in a place where both grants apply.  A
-/// RoleBinding in a namespace may name that namespace's Roles or any
-/// ClusterRole.  A ClusterRoleBinding may name a ClusterRole, and only
-/// a ClusterRoleBinding's grant may create one.
+/// Records each role that `held` may bind to itself, and so what it may
+/// do through that role.  Binding a role takes `bind` on the role's
+/// kind, covering its name, and `create` on the binding's kind, in a
+/// place where both grants apply.  A RoleBinding can bind a Role of its
+/// own namespace or any ClusterRole.  A ClusterRoleBinding can bind
+/// only a ClusterRole, and creating one takes a grant in every
+/// namespace, because the kind is cluster-scoped.
 pub(super) fn binds(held: &super::Held, places: &Places, steps: &mut Steps) {
     let at = |wanted: Route| {
         let routes = held.routes.iter();
@@ -128,9 +133,10 @@ pub(super) fn binds(held: &super::Held, places: &Places, steps: &mut Steps) {
             let Some(both) = meet(binds, creates) else {
                 continue;
             };
-            // A RoleBinding in a namespace grants a ClusterRole's
-            // namespaced rules in that namespace, so when both grants
-            // apply everywhere, the rules apply in every namespace.
+            // A RoleBinding grants a ClusterRole's rules only in its
+            // own namespace. When both grants apply everywhere, the
+            // account can create one in each namespace, so the rules
+            // apply in every namespace.
             let places_bound: Vec<Where> = match &both {
                 Where::Everywhere => vec![Where::Everywhere],
                 Where::In(_) => places.within(&both).map(|n| Where::In(n.clone())).collect(),
@@ -156,9 +162,10 @@ pub(super) fn binds(held: &super::Held, places: &Places, steps: &mut Steps) {
     }
 }
 
-/// What follows when `held` may bind `role`, which grants `grants`, to
-/// itself at `at` through a binding of `scope`: what the role grants
-/// through such a binding.
+/// Records what follows when `held` binds `role`, whose rules are
+/// `grants`, to itself at `at` with a binding of `scope`: the
+/// capabilities the role grants through such a binding, the accounts it
+/// may act as, and the appliers it may change.
 fn bound(
     role: &Object,
     grants: &RoleGrants,
@@ -171,8 +178,9 @@ fn bound(
         role: role.clone(),
         at: at.clone(),
     };
-    // The place to read `grants` at, so that `grants` returns what a
-    // binding of `scope` grants.
+    // `grants` picks its rules by the kind of binding only: `Everywhere`
+    // for a ClusterRoleBinding and `In(_)` for a RoleBinding. It never
+    // reads the namespace, so an empty namespace is enough.
     let probe = match scope {
         Scope::Cluster => Where::Everywhere,
         Scope::Namespace => Where::In(String::new()),
@@ -196,11 +204,12 @@ fn bound(
     super::appliers::applies_through(&writes, Some(&hop), places, steps);
 }
 
-/// Every role `held` is bound to that it may rewrite to grant anything,
-/// and so all six capabilities where its binding applies.  Rewriting a
-/// role to grant more than the account has requires `escalate` and
-/// `update` or `patch` on the role's kind, by its name.  A ClusterRole
-/// is cluster-scoped, so only a ClusterRoleBinding's grant rewrites one.
+/// Records every capability, wherever the binding applies, for each
+/// role that `held` is bound to and may rewrite, because the account can
+/// add any rule to that role. Rewriting a role to grant more than the
+/// account already has takes `escalate`, and `update` or `patch`, on the
+/// role's kind, covering its name. A ClusterRole has no namespace, so
+/// only a grant in every namespace covers one.
 pub(super) fn rewrites(held: &super::Held, steps: &mut Steps) {
     let at = |wanted: Route| {
         let routes = held.routes.iter();
@@ -232,15 +241,14 @@ pub(super) fn rewrites(held: &super::Held, steps: &mut Steps) {
                         role: role.clone(),
                         at: bound_at.clone(),
                     };
-                    all_six(bound_at.clone(), hop, steps);
+                    every_capability(bound_at.clone(), hop, steps);
                 }
             }
         }
     }
 }
 
-/// Adds all six capabilities at `at`, through `hop`.
-fn all_six(at: Where, hop: Hop, steps: &mut Steps) {
+fn every_capability(at: Where, hop: Hop, steps: &mut Steps) {
     for capability in ALL {
         let follow = Follow {
             hop: hop.clone(),
@@ -259,13 +267,15 @@ fn meet(a: &Where, b: &Where) -> Option<Where> {
     }
 }
 
-/// What follows from exec into pods a grant names: by a pod's own name,
-/// or through `nodes/proxy`, by the name of the machine it runs on.
-/// An account that may exec into such a pod may act as the pod's
-/// account through its mounted token, and may read its Secrets, by
-/// name.
+/// Records what follows when a grant limits exec to named targets: pod
+/// names for `pods/exec`, or machine names for `nodes/proxy`. An
+/// account that can exec into such a pod can act as the pod's
+/// ServiceAccount through the token that the pod mounts, and can read
+/// the Secrets that the pod mounts.
 pub(super) fn execs_named(held: &super::Held, places: &Places, steps: &mut Steps) {
     for ((route, at), names) in &held.routes {
+        // A grant with no names is the `Exec` capability, which covers
+        // every pod, so this reads only the grants limited to names.
         if names.is_empty() {
             continue;
         }

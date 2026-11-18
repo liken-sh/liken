@@ -1,11 +1,11 @@
-# The fixture cluster's hardware: a radio and what pairs through it, a
-# till that holds a handset through Dynamic Resource Allocation, and the
-# devices each machine's ResourceSlices list.  Read after
-# `cluster.yaml`, whose machines and namespaces these name.
+# The fixture cluster's hardware: a radio, a handset paired through it,
+# a workload whose pod claims the handset through Dynamic Resource
+# Allocation, and the devices in each machine's ResourceSlices.  The
+# machines and namespaces come from `cluster.yaml`.
 
-# A radio and a handset paired through it, both outside any namespace.
-# The handset names its radio by the radio's address.  That is a
-# reference by value, so the store keeps the kind it points to whole.
+# Both kinds are cluster-scoped.  The handset refers to its radio by
+# the radio's address, a value and not an object reference, so transect
+# must watch the whole radio kind to resolve it.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata: {name: radios.radios.example.test}
@@ -34,11 +34,11 @@ kind: Handset
 metadata: {name: handset-till, uid: handset-till}
 status: {radio: '00:11:22:33:44:55', conditions: [{type: Ready, status: 'True'}]}
 ---
-# A till at the counter, a custom workload whose one pod holds a
-# handset device through a claim.  Device knowledge gives the handset
-# its title and links it to the radio its attributes name.  A GPU on
-# the other machine lists its render and display nodes under one PCI
-# bus ID, with no device knowledge.
+# A till, a custom workload whose one pod claims a handset device.
+# Device knowledge gives the handset a title and links it to the radio
+# whose address its attributes hold.  A GPU on the other machine lists
+# its render and display nodes under one PCI bus ID and has no device
+# knowledge.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata: {name: tills.tills.example.test}
@@ -128,12 +128,12 @@ spec:
       model: {string: A graphics card}
       resource.kubernetes.io/pciBusID: {string: '0000:01:00.0'}
 ---
-# `node-beta`'s other hardware, so its page draws several drivers: a
-# GPU whose render and display nodes share a PCI bus ID, held by a
-# claim with a long generated name, and a sound card's outputs.  A
-# claim holds one output, and more outputs are unheld than the page
-# lists unfolded for one driver.  Device knowledge gives a title only
-# to the outputs that have a `label` attribute.
+# More hardware on `node-beta`, so that its page draws several drivers:
+# a GPU whose render and display nodes share a PCI bus ID, allocated to
+# a claim with a long generated name, and a sound card's outputs.  One
+# claim holds one output, and there are more unclaimed outputs than the
+# page lists before it folds the rest.  Device knowledge gives a
+# title only to the outputs that have a `label` attribute.
 apiVersion: resource.k8s.io/v1
 kind: ResourceClaim
 metadata: {namespace: acme-shop, name: storefront-screen-claim-template-generated-x7k2p}
@@ -186,9 +186,9 @@ spec:
   - {name: usb-audio, attributes: {connector: {string: usb}, channels: {int: 2}}}
   - {name: usb-audio-capture, attributes: {connector: {string: usb}, channels: {int: 1}}}
 ---
-# The machine under `node-alpha`, as liken describes it: a
-# cluster-scoped resource named for its `Node`, whose kind knowledge
-# declares that with `node`.
+# The `Machine` that `liken` creates for `node-alpha`.  It is
+# cluster-scoped and has its `Node`'s name, which the kind knowledge for
+# `Machine` declares with `node`.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata: {name: machines.liken.sh}

@@ -1,15 +1,16 @@
-//! Spreading requests over a few HTTP/2 connections, so that no request
-//! waits for a stream.
+//! Spreads requests to the API server over several HTTP/2 connections,
+//! so that no request waits for a free stream.
 //!
-//! hyper's client keeps one HTTP/2 connection per host and multiplexes
-//! every request on it.  The server's `SETTINGS_MAX_CONCURRENT_STREAMS`
-//! caps how many streams are open on that connection at once, and a
-//! request past the cap waits for a stream to close, with no error.
-//! A watch holds its stream for as long as it runs, so a watch past the
-//! cap would wait forever.  So each request goes to the connection with the
-//! fewest open streams, and when every connection has `most` open, to a
-//! new one.  A stream counts as open from the request until its
-//! response body is dropped, which for a watch is when the watch stops.
+//! hyper's client sends every request to a host on one HTTP/2
+//! connection, and the server's `SETTINGS_MAX_CONCURRENT_STREAMS`
+//! limits how many streams are open on it at once. A request over the
+//! limit waits, with no error, until another stream closes. A watch
+//! keeps its stream open while it runs, so with enough watches a request
+//! can wait forever. So each request goes to the connection with the
+//! fewest open streams, or to a new connection when every connection
+//! already has `most` streams open. A stream counts as open from the
+//! request until its response body is dropped, which for a watch is when
+//! the watch stops.
 
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -21,14 +22,14 @@ use http::{Request, Response};
 use hyper::body::{Body, Frame, Incoming, SizeHint};
 use tower::ServiceExt;
 
-/// One connection's client, and how many of its streams are open.
+/// A client for one connection, with a count of its open streams.
 struct Connection<S> {
     client: S,
     open: Arc<AtomicUsize>,
 }
 
-/// Requests spread over clients that `connect` makes, each kept below
-/// `most` open streams.
+/// A client that sends each request on one of several connections, each
+/// made by `connect`, with at most `most` open streams on each.
 pub struct Spread<S> {
     connections: Arc<Mutex<Vec<Connection<S>>>>,
     connect: Arc<dyn Fn() -> S + Send + Sync>,
@@ -54,7 +55,7 @@ impl<S> Spread<S> {
         }
     }
 
-    /// How many connections it has opened, and the streams open on each.
+    /// The open stream count of each connection opened so far.
     pub fn open(&self) -> Vec<usize> {
         let connections = self.connections.lock().unwrap();
         let open = connections.iter();
@@ -64,9 +65,11 @@ impl<S> Spread<S> {
 }
 
 impl<S: Clone> Spread<S> {
-    /// The client of the connection a new request goes to, which one it
-    /// is, and the stream it opens, counted.
-    fn take(&self) -> (S, usize, Open) {
+    /// Chooses the connection for a new request, and opens a new one when
+    /// every connection has `most` streams open. Returns the connection's
+    /// client, its index, and a guard that counts the new stream as open
+    /// until the guard is dropped.
+    fn open_stream(&self) -> (S, usize, Open) {
         let mut connections = self.connections.lock().unwrap();
         let open: Vec<usize> = connections
             .iter()
@@ -79,7 +82,7 @@ impl<S: Clone> Spread<S> {
                     tracing::info!(
                         ?open,
                         most = self.most,
-                        "every connection to the API server has its most streams open; opening another"
+                        "Every connection to the API server has the most streams open, so a new connection opens"
                     );
                 }
                 connections.push(Connection {
@@ -95,10 +98,10 @@ impl<S: Clone> Spread<S> {
     }
 }
 
-/// The connection with the fewest of `open` streams, when it has fewer
-/// than `most`, or none, so that the caller opens another.  Ties go to
-/// the first, so the earliest connections fill before a later one is
-/// used.
+/// Returns the index of the connection with the fewest streams in
+/// `open`, or `None` when even that one has `most` or more, so the
+/// caller must open another. Ties go to the lowest index, so earlier
+/// connections fill first.
 pub fn pick(open: &[usize], most: usize) -> Option<usize> {
     let fewest = open
         .iter()
@@ -107,7 +110,7 @@ pub fn pick(open: &[usize], most: usize) -> Option<usize> {
     fewest.filter(|(_, open)| **open < most).map(|(at, _)| at)
 }
 
-/// One open stream, counted until this is dropped.
+/// One open stream, which stays counted until this is dropped.
 struct Open(Arc<AtomicUsize>);
 
 impl Drop for Open {
@@ -116,7 +119,8 @@ impl Drop for Open {
     }
 }
 
-/// A response body that keeps its stream counted until it is dropped.
+/// A response body that keeps its stream counted as open until the body
+/// is dropped.
 pub struct Counted<B> {
     body: B,
     _open: Open,
@@ -153,19 +157,24 @@ where
     type Error = tower::BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    /// Always ready: a request that would find every connection full
-    /// opens another rather than wait.
+    /// Always ready, because a request that finds every connection at
+    /// `most` streams opens another connection instead of waiting.
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, request: Request<B>) -> Self::Future {
-        let (client, connection, open) = self.take();
+        let (client, connection, open) = self.open_stream();
         let path = request.uri().path_and_query().map(ToString::to_string);
         Box::pin(async move {
             let response = client.oneshot(request).await.map_err(Into::into)?;
             let status = response.status().as_u16();
-            tracing::trace!(connection, status, ?path, "answered");
+            tracing::trace!(
+                connection,
+                status,
+                ?path,
+                "The API server responded to a request"
+            );
             Ok(response.map(|body| Counted { body, _open: open }))
         })
     }

@@ -1,6 +1,5 @@
-//! Sorting the documents of every file into the resources they are.
-//! The sort is pure, so each way a document can go wrong is a table
-//! test, beside the binary's `Sorts`.
+//! Sorts the documents of every file into resources.  Sorting does no
+//! I/O, so a test can give it YAML text directly.
 
 use serde::Deserialize;
 
@@ -8,15 +7,15 @@ use std::sync::Arc;
 
 use super::{Condition, DocId, Document, File, GROUP, Overlay, Sorts, VERSION};
 
-/// One file as read from the directory: its path under it, and its text
-/// or why it could not be read.
+/// One file from the directory: its path relative to the directory, and
+/// its text or the error from reading it.
 pub struct Read {
     pub path: String,
     pub text: Result<String, String>,
 }
 
-/// Every resource in `files`, in their order, with a condition for each
-/// document.
+/// Sorts every document in `files` into `S`, in file order, and records
+/// a condition for each document.  Empty documents are skipped.
 pub fn sort<S: Sorts>(files: Vec<Read>) -> S {
     let mut sorted = S::default();
     for (at, read) in files.into_iter().enumerate() {
@@ -46,7 +45,8 @@ pub fn sort<S: Sorts>(files: Vec<Read>) -> S {
     sorted
 }
 
-/// The YAML documents in `text`, or why it is not YAML.
+/// The YAML documents in `text`, or an error message if `text` is not
+/// valid YAML.
 fn documents(text: &str) -> Result<Vec<serde_yaml::Value>, String> {
     serde_yaml::Deserializer::from_str(text)
         .map(serde_yaml::Value::deserialize)
@@ -54,8 +54,9 @@ fn documents(text: &str) -> Result<Vec<serde_yaml::Value>, String> {
         .map_err(|error| format!("not YAML: {error}"))
 }
 
-/// A document's kind and name, as the page lists it, or blanks for a
-/// document that does not give them.
+/// A document's kind and its name, as the page lists them.  The name is
+/// `namespace/name` when the document has a namespace.  Either is empty
+/// when the document does not set it.
 fn identify(value: &serde_yaml::Value) -> (String, String) {
     let text = |value: Option<&serde_yaml::Value>| {
         value
@@ -72,9 +73,10 @@ fn identify(value: &serde_yaml::Value) -> (String, String) {
     (text(value.get("kind")), name)
 }
 
-/// Keeps `value` as the resource its kind names, or gives the reason it
-/// does not.  A document of `GROUP` goes to `sorted`; any other is an
-/// overlay.
+/// Stores `value` in `sorted` and returns the document's condition.  A
+/// document of `GROUP/VERSION` goes to `Sorts::take`, a document of
+/// another version of `GROUP` is left out as `UnknownVersion`, and any
+/// other document is parsed as an overlay.
 fn take<S: Sorts>(sorted: &mut S, doc: DocId, path: &str, value: serde_yaml::Value) -> Condition {
     let api_version = value.get("apiVersion").and_then(|v| v.as_str());
     let kind = value

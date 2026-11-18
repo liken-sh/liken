@@ -1,16 +1,17 @@
-//! The fields kind knowledge reads, copied out of an object a trimmed
-//! watch cuts, so a kind whose knowledge reads a handful of fields, such
-//! as a GitOps tool's source and revision, is held as those fields and
-//! not whole.  A whole object of such a kind can hold a list of every
-//! object it applied and a history that grows on each reconcile, which
-//! a page never draws and which would count as a change each time.
+//! Copies the fields that kind knowledge reads into the trimmed form of
+//! an object. A kind whose knowledge reads only a few fields, such as a
+//! GitOps tool's source and revision, can then be stored as those fields
+//! instead of whole. A whole object of such a kind can include a list of
+//! every object it applied and a history that grows on each reconcile.
+//! No page draws either, and each growth would count as a change.
 
 use serde_json::{Map, Value};
 
-/// Copies each field `paths` names from `from` into `into`, at the same
-/// path.  A path is written as kind knowledge writes it, with `[]` for
-/// each item of a list, and copies the value it ends at whatever its
-/// shape, so a path to an object keeps the whole object.
+/// Copies the field at each of `paths` from `from` into `into`, at the
+/// same path. A path uses the syntax of kind knowledge, with `[]` for
+/// each item of a list. The value at the end of a path is copied
+/// whatever its type, so a path that ends at an object copies the whole
+/// object.
 pub fn copy(from: &Value, into: &mut Map<String, Value>, paths: &[String]) {
     for path in paths {
         let segments: Vec<&str> = path.split('.').collect();
@@ -22,8 +23,8 @@ pub fn copy(from: &Value, into: &mut Map<String, Value>, paths: &[String]) {
     }
 }
 
-/// `value` with only what `segments` reach, or none when they reach
-/// nothing.
+/// A copy of `value` containing only the field that `segments` select,
+/// or none when `value` has no such field.
 fn project(value: &Value, segments: &[&str]) -> Option<Value> {
     let Some((segment, rest)) = segments.split_first() else {
         return Some(value.clone());
@@ -37,9 +38,9 @@ fn project(value: &Value, segments: &[&str]) -> Option<Value> {
         false => project(field, rest)?,
         true => {
             let items = field.as_array()?.iter();
-            // An item without the field keeps its place as an empty
-            // object, so the lists two paths project stay the same
-            // length and merge item by item.
+            // An item without the field becomes an empty object, so
+            // the lists from two paths have the same length and `merge`
+            // can combine them item by item.
             let empty = || Value::Object(Map::new());
             let kept: Vec<Value> = items
                 .map(|item| project(item, rest).unwrap_or_else(empty))
@@ -50,17 +51,18 @@ fn project(value: &Value, segments: &[&str]) -> Option<Value> {
     Some(Value::Object(Map::from_iter([(name.to_string(), kept)])))
 }
 
-/// Merges `from` into `into`, joining objects at every depth.  Two
-/// paths into one list each keep a projection of every item, so the
-/// lists merge item by item.
+/// Merges `from` into `into`, combining objects at every depth and
+/// lists of equal length item by item.
 fn merge(into: &mut Map<String, Value>, from: Map<String, Value>) {
     for (key, value) in from {
         match (into.get_mut(&key), value) {
-            (Some(Value::Object(held)), Value::Object(value)) => merge(held, value),
-            (Some(Value::Array(held)), Value::Array(value)) if held.len() == value.len() => {
-                for (held, value) in held.iter_mut().zip(value) {
-                    if let (Value::Object(held), Value::Object(value)) = (held, value) {
-                        merge(held, value);
+            (Some(Value::Object(existing)), Value::Object(value)) => merge(existing, value),
+            (Some(Value::Array(existing)), Value::Array(value))
+                if existing.len() == value.len() =>
+            {
+                for (existing, value) in existing.iter_mut().zip(value) {
+                    if let (Value::Object(existing), Value::Object(value)) = (existing, value) {
+                        merge(existing, value);
                     }
                 }
             }

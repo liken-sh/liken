@@ -1,6 +1,7 @@
-//! A workload's vulnerabilities tab: a box per container's current
-//! report, with its findings, and a box of the reports that name a
-//! digest no pod of it runs now.
+//! The vulnerabilities tab of a workload page. It has one box for each
+//! container's current scanner report, listing the findings, and one box
+//! for the reports of image digests that no pod of the workload runs
+//! now.
 
 use askama::Template;
 use k8s_openapi::jiff::Timestamp;
@@ -14,7 +15,7 @@ use transect_supply::vulnerabilities::{
     Counts, Group, PackageRow, Shown, Vulnerabilities, link, tone,
 };
 
-/// One finding id's row: its packages in a list inside it.
+/// One finding id with the packages that it affects.
 #[derive(Debug, PartialEq)]
 pub struct FindingRow {
     pub id: String,
@@ -36,7 +37,7 @@ pub struct Scanned {
     pub rows: Vec<FindingRow>,
 }
 
-/// A report of a digest no pod of the workload runs now.
+/// A report of an image digest that no pod of the workload runs now.
 #[derive(Debug, PartialEq)]
 pub struct Stale {
     pub container: String,
@@ -60,15 +61,16 @@ pub struct WorkloadVulnerabilitiesPage {
     pub card: WorkloadCard,
 }
 
-/// What a workload's tab draws, before its place and card.
+/// The tab's content, without the breadcrumbs and the card that
+/// `WorkloadVulnerabilitiesPage` adds.
 pub struct Drawn {
     pub choices: Vec<Choice>,
     pub scanned: Vec<Scanned>,
     pub stale: Vec<Stale>,
 }
 
-/// What `workload`'s tab draws of the reports in `vulnerabilities`, or
-/// none when no report names it.
+/// Returns `None` when no report, current or stale, is about `workload`,
+/// because then the workload has no vulnerabilities tab.
 pub fn drawn(
     vulnerabilities: &Vulnerabilities,
     workload: &Object,
@@ -80,7 +82,7 @@ pub fn drawn(
         return None;
     }
     let reports: Vec<_> = vulnerabilities.of_workload(workload).collect();
-    let held: Vec<_> = reports
+    let severities: Vec<_> = reports
         .iter()
         .filter(|r| r.current)
         .flat_map(|r| r.findings.iter().map(|f| f.severity.clone()))
@@ -120,7 +122,7 @@ pub fn drawn(
             vulnerabilities,
             &format!("{path}/vulnerabilities"),
             shown,
-            &held,
+            &severities,
         ),
         scanned: current.collect(),
         stale: stale.collect(),

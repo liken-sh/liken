@@ -1,13 +1,12 @@
-//! The credentials transect sends to a registry that refuses to answer
-//! without them, read from a Docker `config.json` given to transect
-//! itself.  transect never reads a pod's `imagePullSecrets`, because it
-//! reads no `Secret` at all.
+//! The credentials transect sends to a registry that requires
+//! authentication, read from a Docker `config.json` that is given to
+//! transect itself.  transect does not read a pod's `imagePullSecrets`,
+//! because it reads no `Secret`.
 //!
-//! transect reads only the `auths` entries with an `auth` field.  A
-//! credential store or helper runs a program to return the credential,
-//! and a read-only map must not run programs.  So transect ignores
-//! `credsStore` and `credHelpers`, and reports that it ignores them when
-//! it starts.
+//! transect reads only the `auths` entries that have an `auth` field.
+//! It ignores `credsStore` and `credHelpers`, because each names a
+//! program that returns the credential, and transect runs no programs.
+//! transect logs a warning at startup when the file sets either.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -38,7 +37,7 @@ impl fmt::Debug for Credential {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Credentials {
     by_registry: HashMap<String, Credential>,
-    /// Whether the file names a credential store or helpers, which
+    /// Whether the file sets `credsStore` or `credHelpers`, which
     /// transect does not run.
     pub ignored_helpers: bool,
 }
@@ -48,7 +47,7 @@ impl Credentials {
         self.by_registry.get(registry)
     }
 
-    /// The registries the file holds a credential for.
+    /// The registries that the file has a credential for, sorted.
     pub fn registries(&self) -> Vec<&str> {
         let mut names: Vec<&str> = self.by_registry.keys().map(String::as_str).collect();
         names.sort();
@@ -58,7 +57,7 @@ impl Credentials {
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("reading registry credentials from {}", path.display()))?;
-        parse(&text).with_context(|| format!("reading {} as a Docker config.json", path.display()))
+        parse(&text).with_context(|| format!("parsing {} as a Docker config.json", path.display()))
     }
 }
 
@@ -83,7 +82,7 @@ struct Auth {
 /// decode to `username:password` is skipped with a warning that names
 /// its registry, never its content.
 pub fn parse(text: &str) -> anyhow::Result<Credentials> {
-    let config: Config = serde_json::from_str(text).context("not a config.json")?;
+    let config: Config = serde_json::from_str(text).context("reading the JSON")?;
     let mut by_registry = HashMap::new();
     for (key, auth) in config.auths {
         let Some(encoded) = auth.auth else { continue };
@@ -95,7 +94,7 @@ pub fn parse(text: &str) -> anyhow::Result<Credentials> {
         let Some((username, password)) = decoded.as_deref().and_then(|d| d.split_once(':')) else {
             tracing::warn!(
                 registry,
-                "skipping a credential whose auth is not base64 of user:password"
+                "Skipped a registry credential whose auth field is not base64 of username:password"
             );
             continue;
         };
@@ -114,7 +113,7 @@ pub fn parse(text: &str) -> anyhow::Result<Credentials> {
     })
 }
 
-/// The host an `auths` key names, which Docker writes as a bare host or
+/// The host of an `auths` key.  Docker writes the key as a bare host or
 /// as a URL such as `https://index.docker.io/v1/`.
 fn host(key: &str) -> &str {
     let key = key.split_once("://").map_or(key, |(_, rest)| rest);

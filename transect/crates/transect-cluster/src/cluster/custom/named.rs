@@ -1,7 +1,9 @@
-//! The custom kinds other parts of the cluster name for a watch: those
-//! kind knowledge reads the fields of, the far kinds of its references
-//! by value, and those RBAC lets a controller write the status of, and
-//! the fields a trimmed watch keeps for a GitOps tool's kinds.
+//! Chooses custom kinds to watch for a reason other than owning pods or
+//! workloads: kind knowledge that reads fields a trimmed watch drops, a
+//! reference that matches objects of the kind by a field value, and
+//! RBAC that lets a controller write the status of a cluster-scoped
+//! kind. `kept` lists the fields that a trimmed watch keeps for the
+//! GitOps and findings kinds.
 
 use super::GroupKind;
 use crate::ownership::{Grants, custom};
@@ -10,12 +12,13 @@ use transect_graph::edges::ClusterScoped;
 use transect_graph::edges::{Object, Plurals};
 use transect_resources::knowledge::{KindKnowledge, Kinds};
 
-/// The kinds that `knowledge` describes, that the cluster
-/// serves, and whose knowledge reads fields a trimmed watch drops, by
-/// group and kind.  Knowledge that reads only what a trimmed object
-/// keeps, such as a summary and the image of its controller, leaves
-/// its kind trimmed, so a kind of many large objects, such as a
-/// scanner's reports, is not held whole for a line of text.
+/// The kinds the cluster serves that must be watched whole: each kind
+/// whose knowledge reads fields that a trimmed watch drops, each kind
+/// that a reference matches by a field value, and each of
+/// `device_kinds`. Knowledge that reads only what a trimmed object
+/// keeps, such as a summary and the controller's image, leaves its kind
+/// trimmed, so a kind with many large objects, such as a scanner's
+/// reports, is not stored whole for one line of text.
 pub(super) fn described(
     knowledge: &[KindKnowledge],
     device_kinds: &[GroupKind],
@@ -34,12 +37,11 @@ pub(super) fn described(
     found
 }
 
-/// The fields that the GitOps and findings knowledge in `knowledge`
-/// reads of each kind the cluster serves, which a trimmed watch keeps,
-/// by group and kind.  A
-/// tool's kinds are watched trimmed with these, so an applier that
-/// lists every object it applied, or grows a history on each
-/// reconcile, is not held whole for its source and its revision.
+/// The fields, by group and kind, that the GitOps and findings
+/// knowledge in `knowledge` reads from each kind the cluster serves. A
+/// trimmed watch keeps these fields, so a GitOps kind whose objects list
+/// every object they applied, or keep a history of reconciles, is not
+/// stored whole only for its source and revision.
 pub(super) fn kept(
     knowledge: &[KindKnowledge],
     plurals: &Plurals,
@@ -52,8 +54,8 @@ pub(super) fn kept(
     fields.collect()
 }
 
-/// The far kind of each reference by value, which is read whole,
-/// because the field a match reads is one a trimmed watch drops.
+/// The kind of each reference that matches objects by a field value.
+/// The field it matches on is one that a trimmed watch drops.
 fn matched(kinds: &Kinds) -> impl Iterator<Item = GroupKind> + '_ {
     let known = kinds
         .kinds()
@@ -61,13 +63,12 @@ fn matched(kinds: &Kinds) -> impl Iterator<Item = GroupKind> + '_ {
     known.flat_map(|known| known.matched().map(|(group, kind, _)| (group, kind)))
 }
 
-/// The custom kinds outside any namespace whose status RBAC lets some
-/// `ServiceAccount` write, by group and kind.  Such an object runs no
-/// pods and is no namespace's workload, so nothing else leads to a
-/// watch on it, yet its controller's card should list it.  Kubernetes's
-/// own groups, such as the one that serves CustomResourceDefinitions,
-/// are left out, because their controllers are part of the control
-/// plane.
+/// The cluster-scoped custom kinds, by group and kind, whose status
+/// RBAC lets some `ServiceAccount` write. Such an object usually owns
+/// nothing in a namespace, so no owner reference leads to it, but its
+/// controller's card lists it. The `k8s.io` groups, such as the one
+/// that serves `CustomResourceDefinition`s, are left out because the
+/// control plane runs their controllers.
 pub(super) fn controlled(
     grants: &Grants,
     plurals: &Plurals,
@@ -101,12 +102,9 @@ mod tests {
     }
 
     #[rstest]
-    #[case::the_far_kind_served(&[("Handset", "handsets"), ("Radio", "radios")], &["Handset", "Radio"])]
-    #[case::the_far_kind_not_served(&[("Handset", "handsets")], &["Handset"])]
-    fn reads_the_far_kind_of_a_match_whole(
-        #[case] served: &[(&str, &str)],
-        #[case] whole: &[&str],
-    ) {
+    #[case::the_matched_kind_served(&[("Handset", "handsets"), ("Radio", "radios")], &["Handset", "Radio"])]
+    #[case::the_matched_kind_not_served(&[("Handset", "handsets")], &["Handset"])]
+    fn watches_the_matched_kind_whole(#[case] served: &[(&str, &str)], #[case] whole: &[&str]) {
         let spec = "{references: [{path: status.radio, kind: Radio, group: radios.example.io, match: status.address}]}";
         let knowledge = [knowledge("handsets.radios.example.io", spec)];
         let found = described(&knowledge, &[], &plurals(served));

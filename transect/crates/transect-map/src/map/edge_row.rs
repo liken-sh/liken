@@ -1,33 +1,34 @@
-//! The row of edge kinds in the main column: one checkbox per kind this
-//! cluster has, each a link to this view with that kind flipped.
+//! The row of edge kinds in the main column. It has one checkbox for
+//! each kind that this cluster has. Each checkbox links to the same view
+//! with that kind switched on or off.
 
 use transect_graph::edges::{Kind, Shown};
 
 #[derive(Debug, Default, PartialEq)]
 pub struct EdgeRow {
     pub toggles: Vec<Toggle>,
-    /// What the kinds change on this page, when it draws no edges of
-    /// its own.
+    /// What the kinds change on a page that draws no edges itself.
     pub affects: Option<&'static str>,
 }
 
-/// What the kinds change on the cluster map, which draws no lines.
+/// What the edge kinds change on the cluster map, which draws no lines.
 pub const ON_THE_MAP: &str = "The map draws no lines. A selected namespace's relations, \
     the loop marks, and a loss's cascade follow the edges of the kinds that are on.";
 
 #[derive(Debug, PartialEq)]
 pub struct Toggle {
     pub label: &'static str,
-    /// What an edge of the kind means.
+    /// What an edge of this kind means.
     pub meaning: &'static str,
     pub on: bool,
-    /// This view with the kind flipped.
+    /// The link to this view with this kind switched.
     pub href: String,
 }
 
 impl EdgeRow {
-    /// A toggle for each of `offered`, linking from `here`, the view's
-    /// path and selection without its edge kinds.
+    /// A toggle for each kind in `offered`. `here` is the view's path
+    /// and selection without its `edges` parameter, and each toggle's
+    /// link is built from it.
     pub fn build(offered: &[Kind], shown: &Shown, here: &str) -> Self {
         let toggles = offered.iter().map(|&kind| Toggle {
             label: kind.words(),
@@ -41,7 +42,7 @@ impl EdgeRow {
         }
     }
 
-    /// The row with what its kinds change on a page that draws no edges.
+    /// Sets `affects`, for a page that draws no edges.
     pub fn affecting(self, affects: &'static str) -> Self {
         Self {
             affects: Some(affects),
@@ -50,8 +51,8 @@ impl EdgeRow {
     }
 }
 
-/// `here` with `edges` in its query, or `here` alone when every kind is
-/// on.
+/// `here` with `edges` as a query parameter, or `here` unchanged when
+/// `edges` is `None`, which means every kind is on.
 pub fn with_edges(here: &str, edges: Option<String>) -> String {
     match edges {
         None => here.into(),

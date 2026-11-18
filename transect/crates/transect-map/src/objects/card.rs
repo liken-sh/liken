@@ -1,6 +1,7 @@
-//! The card beside an object's board, in the sidebar every elevation
-//! has: what its kind is, its health, the workload whose controller
-//! reconciles it, where its code is, and its kind's knowledge.
+//! The card in the sidebar beside an object's board. It shows what the
+//! kind is, the object's health, the workloads whose controllers
+//! reconcile the object, the GitOps objects that apply it, and what
+//! transect has read about the kind.
 
 use transect_graph::edges::provenance::legend;
 use transect_graph::links::Reference;
@@ -13,22 +14,26 @@ pub struct ObjectCard {
     pub kind: String,
     pub name: String,
     pub level: Option<Level>,
+    /// The object's health condition is `False` with a reason that the
+    /// kind's knowledge lists as calm. The card then shows a gray dot and
+    /// "at rest" in place of a warning.
     pub resting: bool,
-    /// The description of its kind from its CRD.
+    /// The description of the kind, from its CRD.
     pub why: Option<Line>,
     pub controllers: Vec<Reference>,
-    /// The GitOps objects that apply it.
+    /// The GitOps objects that apply the object.
     pub code: Vec<Reference>,
-    /// Its kind's knowledge, for a kind that has knowledge.
+    /// The knowledge about the kind, for a kind that has any.
     pub known: Option<KnownThrough>,
-    /// Its kind and group, namespace, and age, each a label and a value,
-    /// which the card shows when it would otherwise show only a title.
+    /// The kind and group, the namespace, and the age, each as a label
+    /// and a value. The card shows them when it would otherwise show
+    /// only a title.
     pub facts: Vec<(&'static str, String)>,
 }
 
 impl ObjectCard {
-    /// Beside the dot: its health in a word, or "at rest", or none for
-    /// an object that reports no condition, which shows no dot.
+    /// The text beside the dot: a word for the object's health, or "at
+    /// rest". `None` for an object that has no level, which has no dot.
     pub fn status_text(&self) -> Option<&'static str> {
         Some(match (self.level?, self.resting) {
             (_, true) => "at rest",
@@ -46,8 +51,8 @@ impl ObjectCard {
         }
     }
 
-    /// Whether the card has nothing but its title, and so shows its
-    /// plain facts.
+    /// Whether the card has only a title, so that it shows `facts`
+    /// instead.
     pub fn bare(&self) -> bool {
         self.why.is_none()
             && self.controllers.is_empty()
@@ -55,7 +60,7 @@ impl ObjectCard {
             && self.known.is_none()
     }
 
-    /// The legend line, when any line on the card is marked.
+    /// The legend line, when any line on the card has a provenance mark.
     pub fn legend(&self) -> Option<String> {
         let why = self.why.iter().map(|line| &line.provenance);
         let known = self.known.iter().flat_map(|known| known.provenances());

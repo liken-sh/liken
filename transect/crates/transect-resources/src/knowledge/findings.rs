@@ -1,28 +1,29 @@
-//! What kind knowledge declares about a findings report: an object a
-//! scanner writes for one container's image, naming the workload it
-//! scanned, the digest of the image, when it ran, and a list of
-//! findings, each with an id, a severity, and what the scanner reports
-//! about it.  A kind with this knowledge stays trimmed, and its trimmed
-//! objects keep only the fields named here, so a store never holds a
-//! finding's description, or its title unless the knowledge names it.
+//! Kind knowledge for a scanner's findings report. A scanner writes one
+//! report for the image of one container, owned by the scanned
+//! workload, with the image digest, the time of the scan, and a list of
+//! findings. `transect` keeps only the paths that `Findings::paths`
+//! returns from such a report, so it never stores a finding's
+//! description, and stores its title only when the knowledge sets
+//! `item.title`.
 
 use serde::Deserialize;
 
 use super::MetaKey;
 
-/// How a findings report is read.
+/// The fields to read from a findings report.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Findings {
-    /// The label or annotation naming the container scanned.
+    /// The label or annotation that names the container that was
+    /// scanned.
     pub container: Option<MetaKey>,
-    /// The field holding the digest of the image scanned.
+    /// The path of the digest of the scanned image.
     pub digest: String,
-    /// The field holding when the scan ran.
+    /// The path of the time of the scan.
     pub scanned_at: Option<String>,
-    /// The scanner's severities, most severe first, each with the field
-    /// holding the report's own count of it.
+    /// The scanner's severity levels, most severe first, each with the
+    /// path where the report counts the findings of that level.
     pub summary: Vec<Severity>,
-    /// The list of findings, written with its `[]`.
+    /// The path of the list of findings, which ends with `[]`.
     pub items: String,
     pub item: Item,
 }
@@ -33,7 +34,7 @@ pub struct Severity {
     pub path: String,
 }
 
-/// The fields of one finding, each a path inside it.
+/// The fields of one finding. Each is a path relative to the finding.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item {
     pub id: String,
@@ -47,9 +48,7 @@ pub struct Item {
 }
 
 impl Findings {
-    /// Every path a trimmed watch keeps for the kind: the digest, the
-    /// scan time, the summary counts, and each item field inside each
-    /// finding.
+    /// The paths that a trimmed watch keeps for the kind.
     pub fn paths(&self) -> Vec<String> {
         let mut paths = vec![self.digest.clone()];
         paths.extend(self.scanned_at.clone());
@@ -118,18 +117,16 @@ struct WrittenItem {
     title: Option<String>,
 }
 
-/// The findings knowledge `written` declares, or why it does not
-/// validate.
 pub(super) fn read(written: Written) -> Result<Findings, String> {
     if !written.subject.owner {
         return Err(
-            "findings.subject.owner is false, and the owner is the one subject transect reads"
+            "findings.subject.owner is false, and transect reads only the owner as the subject"
                 .into(),
         );
     }
     if !written.items.ends_with("[]") {
         return Err(format!(
-            "findings.items is {:?}, and a list is written with its []",
+            "findings.items is {:?}, and a list path must end with []",
             written.items
         ));
     }
@@ -145,7 +142,7 @@ pub(super) fn read(written: Written) -> Result<Findings, String> {
         }) => Some(MetaKey::Annotation(annotation)),
         Some(_) => {
             return Err(
-                "findings.subject.container names a label or an annotation, and exactly one".into(),
+                "findings.subject.container must set exactly one of label and annotation".into(),
             );
         }
     };

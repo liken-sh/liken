@@ -1,24 +1,19 @@
-//! Loops: sets of parts that each need another of the set to come up.
-//! In steady state a loop is invisible, because every part is already
-//! running; on a cold start, such as after a power cut, no start order
-//! works unless a part of the loop can start on its own.
+//! Loops: sets of objects where each object needs another object of the
+//! set to come up.  A loop does no harm while everything runs.  After a
+//! cold start, such as a power cut, no start order brings the loop up
+//! unless one of its objects can start without the others.
 //!
-//! A loop is found among objects, and only then shown by the namespaces
-//! its objects are in.  Collapsing each edge to its namespaces first
-//! would join two namespaces whenever one object of each needs some
-//! object of the other, though no path of edges leads from an object of
-//! either back to itself: one namespace's small helper that depends on
-//! another's workload, and that workload applied from the first
-//! namespace's applier, is a path each way between the namespaces and
-//! no cycle among objects.
+//! A loop is a strongly connected component of the graph of objects
+//! that has objects in more than one namespace.  The graph finds cycles
+//! among objects first and reports their namespaces after.  Collapsing
+//! the edges to pairs of namespaces first would report a loop whenever
+//! each of two namespaces needs something in the other, even with no
+//! cycle among objects.  For example, a helper in namespace `a` depends
+//! on a workload in `b`, and an applier in `a` applies that workload.
 //!
-//! The loops are the strongly connected components of the object graph
-//! that hold objects of more than one namespace.  A component inside one
-//! namespace is left out, because there the counted kinds form cycles
-//! that every GitOps cluster has and that do not block a cold start,
-//! such as a tool's own applier applying the source it reconciles from,
-//! and a reader learns nothing from a tag on every namespace that holds
-//! one.
+//! A component inside one namespace is left out, because every GitOps
+//! cluster has one, such as an applier that applies the source it
+//! reconciles from, and it does not block a cold start.
 
 mod components;
 mod cycles;
@@ -35,17 +30,20 @@ use super::{Endpoint, Graph, Kind};
 pub use cycles::{Cycle, Step};
 use owners::Owners;
 
-/// The kinds a loop is made of, in the order a link names them.  Each
-/// states that its near end needs its far end to come up.  Allowed to
-/// call allows without requiring, runs on is a placement that the
-/// scheduler can change, and a `Service`'s selects and an `Ingress`'s
-/// routes-to stay inside one namespace, where depends-on already
-/// follows them.  Holds counts, because a pod that holds a device
-/// cannot start until the device's driver publishes it.  Authenticates
-/// through counts, because an application whose users cannot sign in
-/// is not up for them.  Owner references are not among them because
-/// they define the nodes: each object is represented by its top owner,
-/// the workload a reader knows it by.
+/// The edge kinds that make a loop, in the order a link lists them.  An
+/// edge of each kind means that its `from` end needs its `to` end to come
+/// up.  The other kinds are left out for these reasons:
+///
+/// - `AllowedToCall` permits a call and does not require it.
+/// - `RunsOn` is a placement that the scheduler can change.
+/// - `Selects` and `RoutesTo` stay inside one namespace, where
+///   `DependsOn` already follows them.
+/// - `ManagedBy` is not an edge of the graph of objects: each object is
+///   replaced by its top owner, the workload that a reader knows it by.
+///
+/// `Holds` counts because a pod cannot start until the driver publishes
+/// the device that its claim needs.  `AuthenticatesThrough` counts because an
+/// application is not up for its users while they cannot sign in.
 const COUNTED: [Kind; 6] = [
     Kind::ReconcilesFrom,
     Kind::DependsOn,
@@ -55,43 +53,46 @@ const COUNTED: [Kind; 6] = [
     Kind::Holds,
 ];
 
-/// One loop: the namespaces its objects are in, and every counted edge
-/// between two of its objects.
+/// One loop: the namespaces of its objects, and the counted edges
+/// between those objects.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Loop {
     /// The namespaces in the loop, sorted.
     pub namespaces: Vec<String>,
-    /// Each pair of members one or more counted edges join, sorted by
-    /// their names.
+    /// One link for each pair of members that has a counted edge from
+    /// one to the other, sorted by name.
     pub links: Vec<Link>,
 }
 
-/// The counted edges from one member of a loop to another, by the names
-/// a sentence gives them.
+/// The counted edges from one member of a loop to another.  `from` and
+/// `to` are the names that `sentence::name` writes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Link {
     pub from: String,
     pub to: String,
-    /// The kinds of the edges, each once, in `COUNTED`'s order.
+    /// The kinds of the edges, each once, in the order of `COUNTED`.
     pub kinds: Vec<Kind>,
 }
 
 impl Loop {
+    /// Whether one of the loop's objects is in `namespace`.
     pub fn holds(&self, namespace: &str) -> bool {
         self.namespaces.iter().any(|member| member == namespace)
     }
 
-    /// The cycles through every member, for drawing the loop.
+    /// The cycles that together pass through every member, for drawing
+    /// the loop.
     pub fn cycles(&self) -> Vec<Cycle> {
         cycles::cycles(&self.links)
     }
 }
 
-/// The ranks in `COUNTED` of the edges from one node to another.
+/// For each pair of nodes, the positions in `COUNTED` of the edge kinds
+/// that go from the first to the second.
 type Joined = BTreeMap<(Endpoint, Endpoint), BTreeSet<usize>>;
 
 impl Graph {
-    /// Every loop, ordered by its namespaces.
+    /// Every loop, sorted by its namespaces.
     pub fn loops(&self) -> Vec<Loop> {
         let owners = Owners::of(self);
         let mut joined: Joined = BTreeMap::new();
@@ -122,8 +123,8 @@ impl Graph {
     }
 }
 
-/// The loop that `members`, one component, make, with the links among
-/// them read from `joined`.
+/// The loop that the component `members` forms, with a link for each
+/// pair of members that `joined` has an edge between.
 fn close(members: &[Endpoint], joined: &Joined, owners: &Owners) -> Loop {
     let namespaces: BTreeSet<&str> = members
         .iter()

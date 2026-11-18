@@ -1,4 +1,4 @@
-//! The words the workload page shows.  Everything else on it is a name
+//! The text of the workload page. All other text on the page is a name
 //! or a number from the cluster.
 
 use super::super::bar::Bar;
@@ -25,7 +25,8 @@ pub fn pods_heading(tiles: &[PodTile]) -> String {
     }
 }
 
-/// The count of Secrets in the "Also needs" row: "4 Secrets", or none.
+/// The text for the count of Secrets in the "Also needs" row, such as
+/// "4 Secrets". `None` when the count is 0.
 pub fn secrets(count: usize) -> Option<String> {
     match count {
         0 => None,
@@ -34,7 +35,7 @@ pub fn secrets(count: usize) -> Option<String> {
     }
 }
 
-/// The line under a pod's name: "alpha · up 4d · 0 restarts".
+/// The line under a pod's name, such as "alpha · up 4d · 0 restarts".
 pub fn tile_line(tile: &PodTile) -> String {
     let machine = tile.machine.as_deref().unwrap_or("not scheduled");
     let mut parts = vec![machine.to_string()];
@@ -53,11 +54,12 @@ pub fn tile_line(tile: &PodTile) -> String {
     parts.join(" · ")
 }
 
-/// The legend under the tiles, which gives what a full bar measures.
-/// When memory and CPU follow one rule, one sentence covers both.
+/// The legend under the tiles, which says what a full bar stands for.
+/// When the memory bars and the CPU bars have the same scale, one
+/// sentence covers both.
 pub fn legend<'a>(tiles: impl Iterator<Item = &'a PodTile> + Clone) -> String {
-    let memory = RunsTo::of(tiles.clone().map(|tile| &tile.memory));
-    let cpu = RunsTo::of(tiles.map(|tile| &tile.cpu));
+    let memory = BarScale::of(tiles.clone().map(|tile| &tile.memory));
+    let cpu = BarScale::of(tiles.map(|tile| &tile.cpu));
     if memory == cpu {
         return memory.sentence(None);
     }
@@ -68,32 +70,34 @@ pub fn legend<'a>(tiles: impl Iterator<Item = &'a PodTile> + Clone) -> String {
     )
 }
 
-/// What a full bar measures for one resource across the tiles.
+/// What a full bar stands for, for one resource across all the tiles:
+/// the scale that `Bar::scale` returns. A bar with no scale shows only
+/// its figure.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum RunsTo {
-    Figure,
-    RequestOrFigure,
+enum BarScale {
+    Unscaled,
+    RequestOrUnscaled,
     Request,
     Limit,
     LimitOrRequest,
 }
 
-impl RunsTo {
+impl BarScale {
     fn of<'a>(bars: impl Iterator<Item = &'a Bar> + Clone) -> Self {
         let limited = bars.clone().filter(|bar| bar.limit.is_some()).count();
         let scaled = bars.clone().filter(|bar| bar.scale().is_some()).count();
         let all = bars.count();
         match limited {
-            0 if scaled == 0 => Self::Figure,
-            0 if scaled < all => Self::RequestOrFigure,
+            0 if scaled == 0 => Self::Unscaled,
+            0 if scaled < all => Self::RequestOrUnscaled,
             0 => Self::Request,
             _ if limited == all => Self::Limit,
             _ => Self::LimitOrRequest,
         }
     }
 
-    /// The sentence for one resource, or for both when `resource` is
-    /// `None`.
+    /// The legend sentence for `resource`, or for memory and CPU
+    /// together when `resource` is `None`.
     fn sentence(self, resource: Option<&str>) -> String {
         let no = resource.unwrap_or("memory or CPU");
         let bars = match resource {
@@ -102,10 +106,10 @@ impl RunsTo {
             None => "Bars".to_string(),
         };
         match self {
-            Self::Figure => {
+            Self::Unscaled => {
                 format!("No {no} request or limit, so the figures show what each uses.")
             }
-            Self::RequestOrFigure => format!(
+            Self::RequestOrUnscaled => format!(
                 "No {no} limit; bars run to the request, and the figures show what one with no request uses."
             ),
             Self::Request => format!("No {no} limit; bars run to the request."),

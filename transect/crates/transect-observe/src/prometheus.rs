@@ -1,5 +1,5 @@
-//! A small client for Prometheus' instant queries, one PromQL expression
-//! in and one sample per series out.
+//! A client for Prometheus instant queries. It takes one PromQL
+//! expression and returns one sample for each series.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -7,30 +7,30 @@ use std::time::Duration;
 use anyhow::{Context, bail};
 use serde::Deserialize;
 
-/// How long one query may take.  A Prometheus that stops answering would
-/// otherwise hold a poll open forever, and the map would keep showing the
-/// last numbers it read as if they were current.
+/// How long one request may take. Without a timeout, a Prometheus that
+/// stops responding would stall a poll forever, and the map would keep
+/// showing the last numbers it read as if they were current.
 const TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Clone)]
 pub struct Prometheus {
     client: reqwest::Client,
-    /// The URL that `Prometheus::new` received, without a trailing slash.
+    /// The URL given to `Prometheus::new`, without a trailing slash.
     base: String,
     query_url: String,
 }
 
 /// One series of an instant vector: its labels and its value at the
-/// query's time.
+/// time of the query.
 #[derive(Debug, PartialEq)]
 pub struct Sample {
     pub labels: HashMap<String, String>,
     pub value: f64,
 }
 
-/// Why a query returned no samples.  The map shows the reason in one
-/// short line, so the reader can tell a Prometheus that transect cannot
-/// reach from one that returned an error.
+/// Why a query failed. The map shows it in one line, so a reader can
+/// tell a Prometheus that transect cannot reach from one that returned
+/// an error.
 #[derive(Debug)]
 pub enum QueryError {
     Unreachable(reqwest::Error),
@@ -41,7 +41,7 @@ impl std::fmt::Display for QueryError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Unreachable(error) => write!(f, "Prometheus is unreachable: {error}"),
-            Self::Failed(error) => write!(f, "the Prometheus query failed: {error:#}"),
+            Self::Failed(error) => write!(f, "the Prometheus response is unusable: {error:#}"),
         }
     }
 }
@@ -73,9 +73,10 @@ impl Prometheus {
             .send()
             .await
             .map_err(QueryError::Unreachable)?;
-        // Prometheus returns a 4xx status and the same JSON envelope for
-        // a bad query.  The envelope's `error` field explains more than
-        // the status code, so this function parses the body in both cases.
+        // For a bad query, Prometheus returns a 4xx status with the same
+        // JSON envelope as a success, and the envelope's `error` field
+        // describes the failure better than the status code. So this
+        // parses the body whatever the status.
         let body = response
             .text()
             .await
@@ -85,8 +86,8 @@ impl Prometheus {
 }
 
 impl Prometheus {
-    /// The host name Prometheus runs under, from its runtime
-    /// information.  In a pod, that is the pod's name.
+    /// The host name that Prometheus reports in its runtime information.
+    /// In a pod, that is the pod's name.
     pub async fn hostname(&self) -> Result<String, QueryError> {
         let url = self
             .query_url
@@ -117,14 +118,13 @@ struct Runtime {
 }
 
 fn runtime_hostname(body: &str) -> anyhow::Result<String> {
-    let answer: RuntimeInfo = serde_json::from_str(body).context("reading the response")?;
-    if answer.status != "success" {
-        bail!("Prometheus answered {}", answer.status);
+    let info: RuntimeInfo = serde_json::from_str(body).context("reading the response")?;
+    if info.status != "success" {
+        bail!("Prometheus returned status {}", info.status);
     }
-    answer
-        .data
+    info.data
         .map(|data| data.hostname)
-        .context("the answer names no hostname")
+        .context("the response has no hostname")
 }
 
 #[derive(Deserialize)]
@@ -146,13 +146,12 @@ struct Data {
 #[derive(Deserialize)]
 struct Series {
     metric: HashMap<String, String>,
-    /// A timestamp in seconds, then the value as a string.  Prometheus
-    /// writes the value as a string because JSON has no number for
-    /// `NaN` or `+Inf`.
+    /// A timestamp in seconds, then the value as a string. The value is
+    /// a string because JSON has no number for `NaN` or `+Inf`.
     value: (f64, String),
 }
 
-/// Parses the body of an instant query that returned a vector.  Series
+/// Parses the body of an instant query that returned a vector. Series
 /// whose value is not a finite number are left out, because a `NaN` from
 /// a division by zero is not a measurement.
 fn parse(body: &str) -> anyhow::Result<Vec<Sample>> {
@@ -160,12 +159,15 @@ fn parse(body: &str) -> anyhow::Result<Vec<Sample>> {
     if envelope.status != "success" {
         bail!(
             "{}",
-            envelope.error.as_deref().unwrap_or("no error message")
+            envelope
+                .error
+                .as_deref()
+                .unwrap_or("the response has no error message")
         );
     }
     let data = envelope.data.context("the response has no data")?;
     if data.result_type != "vector" {
-        bail!("expected a vector, got a {}", data.result_type);
+        bail!("the result type is {}, want vector", data.result_type);
     }
     let result: Vec<Series> = serde_json::from_value(data.result).context("reading the vector")?;
     Ok(result
@@ -240,14 +242,14 @@ mod tests {
     )]
     #[case::scalar(
         r#"{"status":"success","data":{"resultType":"scalar","result":[1700000000,"1"]}}"#,
-        "expected a vector, got a scalar"
+        "the result type is scalar, want vector"
     )]
     #[case::not_json("<html>502 Bad Gateway</html>", "reading the response")]
     fn reports_a_response_that_is_not_a_vector(#[case] body: &str, #[case] message: &str) {
         let error = parse(body).unwrap_err();
         assert!(
             format!("{error:#}").contains(message),
-            "{error:#} does not mention {message:?}"
+            "the error is {error:#}, want it to mention {message:?}"
         );
     }
 
@@ -257,7 +259,7 @@ mod tests {
         Some("prometheus-0")
     )]
     #[case::an_error(r#"{"status":"error","error":"no"}"#, None)]
-    fn reads_the_hostname_prometheus_runs_under(
+    fn reads_the_hostname_from_the_runtime_information(
         #[case] body: &str,
         #[case] expected: Option<&str>,
     ) {

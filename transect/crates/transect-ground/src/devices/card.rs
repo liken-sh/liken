@@ -1,9 +1,8 @@
-//! A card's "Holds" lists the devices that the card's workloads hold,
-//! with one holder for each workload and each device that it holds under
-//! it.  When every device of a holder is on one machine, the holder's
-//! line names that machine once.  When a holder's devices are on several
-//! machines, as a driver's `DaemonSet`'s often are, each device's line
-//! names the device's own machine.
+//! The "Holds" list of a namespace's card: each workload that holds
+//! devices, with its devices listed under it.  When all of a workload's
+//! devices are on one machine, the workload's line shows that machine.
+//! When they are on several machines, as a `DaemonSet`'s devices often
+//! are, each device's line shows its own machine.
 
 use std::collections::BTreeMap;
 
@@ -19,33 +18,33 @@ pub struct Holds {
 pub struct HoldRow {
     /// The workload, as "DaemonSet radio", linked to its page.
     pub workload: Reference,
-    /// The one machine every device is on, linked to its page.
+    /// The machine that all of the devices are on, linked to its page.
     pub machine: Option<Reference>,
     /// How many machines the devices are on, when more than one.
     pub machines: Option<usize>,
     pub devices: Vec<Held>,
 }
 
-/// One device a holder holds.
+/// One device that a workload holds.
 #[derive(Debug, PartialEq)]
 pub struct Held {
-    /// The first label of the device's driver name, such as "radio",
-    /// which the line shows in gray before the device.
+    /// The first label of the device's driver name, such as "radio".
+    /// The line shows it in gray before the device.
     pub driver: String,
-    /// The device by its title, linked to its line on its machine's
-    /// page.
+    /// The device's name from `named`, without the driver prefix,
+    /// linked to its line on its machine's page.
     pub device: Reference,
-    /// The device's machine, when the holder's devices are on several
+    /// The device's machine, when the workload's devices are on several
     /// machines.
     pub machine: Option<Reference>,
-    /// Every part of the device's name, for the line's title.
+    /// The device's full name, for the line's `title` tooltip.
     pub full: String,
 }
 
 impl Holds {
-    /// The devices that `namespace`'s workloads hold, by workload name.
-    /// Each workload links to the page that `href` returns for it, and
-    /// each device has the name that `named` returns.
+    /// The devices that the workloads of `namespace` hold, sorted by
+    /// workload.  Each workload links to the page that `href` returns,
+    /// and each device shows the name that `named` returns.
     pub fn of_namespace(
         graph: &Graph,
         namespace: &str,
@@ -109,7 +108,6 @@ impl Holds {
     }
 }
 
-/// A machine, linked to its page.
 fn machine(name: &str) -> Reference {
     Reference {
         text: name.to_string(),
@@ -125,7 +123,7 @@ mod tests {
     use transect_graph::edges::Edge;
     use transect_graph::edges::fixtures::device;
 
-    /// The row as the card draws it: the holder and its machine, then
+    /// The row as the card draws it: the workload and its machine, then
     /// each device indented on its own line.
     fn text(row: &HoldRow) -> Vec<String> {
         let place = match (&row.machine, row.machines) {

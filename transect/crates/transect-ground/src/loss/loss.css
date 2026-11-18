@@ -1,8 +1,8 @@
 /*
- * The loss, which the sidebar shows in place of its usual content.  Its
- * head is drawn in --warm, as a failure is on the map.  Its lists use
- * the sidebar's ink colors, except that each down namespace's name is
- * in --warm.
+ * The loss view: what the cluster loses when a set of machines goes
+ * down. The sidebar shows it in place of its usual content. Only the
+ * head and the namespaces that are down use --warm, as a failure does
+ * on the map.
  */
 
 .loss { gap: 12px; }
@@ -34,8 +34,6 @@
   overflow-wrap: break-word;
 }
 
-/* A namespace's name is a link to the namespace's page, in --ink, which
-   is darker than the line's --ink-muted. */
 .loss-namespace {
   font-family: var(--mono);
   font-weight: 700;
@@ -49,13 +47,13 @@
 
 .loss-faint { color: var(--ink-faint); }
 
-/* The reason a workload stays down follows its line in --ink-faint, so
-   the reader sees the namespace and its workloads first. */
+/* The reason a workload stays down is faint, so that the reader sees
+   the namespace and its workloads first. */
 .loss-why { color: var(--ink-faint); }
 
-/* What happens next.  Each line starts with a fixed-width tag, so the
-   text of every line starts at the same edge.  The tag shows the time
-   to eviction in the sidebar's ink, or "stuck" in --warm. */
+/* What happens next. Each line starts with a fixed-width tag, the time
+   until eviction or "stuck", so the text of every line starts at the
+   same edge. */
 .loss-next {
   display: flex;
   gap: 8px;
@@ -71,8 +69,8 @@
 
 .loss-stuck { color: var(--warm); }
 
-/* The out-of-service taint is a command for the reader to run, so it
-   is set as code.  It wraps so that it does not widen the sidebar. */
+/* The command that sets the out-of-service taint wraps, so that it
+   does not widen the sidebar. */
 .loss-release {
   gap: 6px;
   font-size: 13px;
@@ -87,15 +85,14 @@
   overflow-wrap: break-word;
 }
 
-/* Under a loss, a parcel's tag uses the parcel's color: --warm on a
-   warning's outline, and the page color on a failure's fill. */
+/* On a namespace tile, the loss tag is --warm, and the page color on a
+   failure's fill. */
 .loss-tag { color: var(--warm); }
-.parcel-failing .loss-tag { color: inherit; }
+.ns-tile-failing .loss-tag { color: inherit; }
 
-/* A lost machine's strip is filled with --warm, as a failing parcel
-   is, with its text in the page color.  The inset shadow draws the
-   second pixel of the two-pixel outline inside the strip, so the
-   outline does not change the strip's size. */
+/* A lost machine's strip is filled with --warm, as a failing
+   namespace tile is. The inset shadow draws the second pixel of the
+   outline inside the strip, so the strip keeps its size. */
 .strip-lost {
   border-color: var(--warm);
   box-shadow: inset 0 0 0 1px var(--warm);
@@ -104,9 +101,8 @@
   font-weight: 600;
 }
 
-/* A lost strip draws no bars, so it has room for its tag under its
-   name.  The name then has the strip's whole width, and a long name is
-   not cut short beside the tag. */
+/* A lost strip has no bars, so its tag goes under its name, and the
+   name has the strip's whole width. */
 .strip-lost .strip-head {
   flex-direction: column;
   row-gap: 2px;
@@ -115,10 +111,8 @@
 .strip-lost .strip-tag,
 .strip-lost .strip-pods { color: inherit; opacity: 0.85; }
 
-/* "If it goes down" on a workload card.  Each dependent has one
-   sentence in the card's muted ink, the same as the card's depends-on
-   lines.  The line that shows that nothing depends on the workload is
-   fainter. */
+/* "If it goes down" on a workload card: one sentence for each
+   dependent, and a fainter line when nothing depends on the workload. */
 .card-if-down {
   font-size: 13px;
   line-height: 18px;
@@ -128,12 +122,12 @@
 
 .card-if-down-nothing { color: var(--ink-faint); }
 
-/* When the control plane's majority is a guess, the page shows it
-   fainter than the facts above it, and its title gives the reason. */
+/* When the majority line counts control-plane machines in place of
+   etcd members, it is an estimate, so it is faint, and its title gives
+   the reason. */
 .loss-guess { color: var(--ink-faint); }
 
-/* "What to know now" under a real loss uses the sidebar's spacing, and
-   a rule separates it from the loss. */
+/* "What to know now", under a loss of machines that are really down. */
 .loss-now {
   display: flex;
   flex-direction: column;
@@ -142,9 +136,9 @@
   border-top: 1px solid var(--rule);
 }
 
-/* Without a control-plane majority, Kubernetes evicts no pod and starts
-   no pod on another machine.  That changes the meaning of every list
-   below, so the page shows this line in --ink, as plainly as the head. */
+/* Without a control-plane majority, Kubernetes evicts no pod and
+   starts no pod on another machine. That changes the meaning of every
+   list below this line, so it is as prominent as the head. */
 .loss-headless {
   font-size: 13px;
   line-height: 18px;

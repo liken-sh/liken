@@ -1,8 +1,10 @@
-//! The findings for log patterns.  transect makes one finding for each
-//! worth-knowing pattern that matched in its window, and one for each
-//! error or warning pattern whose matches are no longer recent.  The
-//! finding lists one line for each workload whose pods the pattern
-//! matched in, one for each pod that is gone, and the pattern's meaning.
+//! The findings for log patterns.  A finding has the pattern's meaning
+//! and a line for each workload, pod that is gone, or namespace whose
+//! log lines matched the pattern.
+//!
+//! The recent matches of an `Error` or `Warning` pattern are reported
+//! as a reason on their namespace instead, so a finding lists them only
+//! when the workload is a `CronJob` whose last run succeeded.
 
 use super::Finding;
 use std::collections::HashSet;
@@ -19,17 +21,19 @@ use transect_observe::health::{
 };
 use transect_observe::logs::evidence::Evidence;
 use transect_observe::logs::patterns::Severity;
-use transect_observe::logs::search::{Asked, Searched};
+use transect_observe::logs::search::{SearchTarget, Searched};
 use transect_resources::knowledge::age;
 
-/// The matches of a pattern in one workload, in one pod that is gone, or
-/// in the lines of a namespace for which the log source names no pod.
+/// The matches of a pattern in one workload, in one pod that is gone,
+/// or in the log lines of a namespace that the log source does not
+/// attribute to a pod.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Matched {
     pub namespace: String,
     pub origin: Origin,
-    /// The page that the line links to: the workload's, or for a pod that
-    /// is gone or no pod, the namespace's while the namespace exists.
+    /// The page that the line links to.  It is the workload's page, or
+    /// the namespace's page for a pod that is gone or a line with no
+    /// pod, as long as the namespace exists.
     pub href: Option<String>,
     pub matches: usize,
     pub minutes_ago: i64,
@@ -38,13 +42,12 @@ pub struct Matched {
     pub settled: bool,
 }
 
-/// One finding for each worth-knowing pattern with a match, and one for
-/// each error or warning pattern with a match that is not recent or that
-/// came from a `CronJob` in `settled`, whose last run succeeded.  The
-/// findings follow the patterns' order.  The other matches of an error
-/// or a warning pattern show as a reason on their namespaces instead, so
-/// each match appears in one place.  `namespaces` lists the namespaces
-/// that the cluster has, because only their pages exist.
+/// The findings for the patterns in `searched`, in the patterns' order.
+/// A match is listed when its pattern has severity `WorthKnowing`, when
+/// it is not recent, or when its workload is in `settled`, the `CronJob`s
+/// whose last run succeeded.  A pattern with no listed match has no
+/// finding.  `namespaces` are the namespaces that the cluster has, and
+/// only those have pages to link to.
 pub fn worth_knowing(
     searched: &Searched,
     settled: &HashSet<Object>,
@@ -64,15 +67,13 @@ pub fn worth_knowing(
                 || one.settled
                 || !is_recent(one.minutes_ago, &pattern.window)
         };
-        let samples = searched.samples(&Asked::Pattern(pattern.name.clone()));
+        let samples = searched.samples(&SearchTarget::Pattern(pattern.name.clone()));
         let anchor = matching_anchor(&pattern.name);
         let matched: Vec<Matched> = tally_by_workload(counts, pods, ownership)
             .into_iter()
             .map(|one| Matched {
                 evidence: tally_evidence(&one, samples, &running, Some(&anchor)),
                 settled: is_settled(&one.origin, settled),
-                // A pod that is gone has no page, so its line links to
-                // the namespace, while the namespace still exists.
                 href: match &one.origin {
                     Origin::Workload(workload) => transect_graph::links::link(workload, plurals),
                     Origin::GonePod(_) | Origin::NoPod => namespaces
@@ -105,8 +106,8 @@ pub fn title(pattern: &str, window: &str, namespaces: &[Matched]) -> String {
     )
 }
 
-/// What a line names: "shop/web", "shop/web-9" for a pod that is
-/// gone, or "shop" for lines the source names no pod for.
+/// The label of a line: "shop/web" for a workload, "shop/web-9" for a
+/// pod that is gone, or "shop" for log lines with no pod.
 pub fn label(one: &Matched) -> String {
     match &one.origin {
         Origin::NoPod => one.namespace.clone(),
@@ -114,8 +115,9 @@ pub fn label(one: &Matched) -> String {
     }
 }
 
-/// What follows the name in its line, as "12, the latest 3m ago", and
-/// where the lines came from when no workload logged them.
+/// The text after a line's label, such as "12, the latest 3m ago".  It
+/// adds when a `CronJob`'s last run succeeded, or that the lines came
+/// from a pod that is gone or from no named pod.
 pub fn line(one: &Matched) -> String {
     let counted = format!("{}, the latest {} ago", one.matches, age(one.minutes_ago));
     match &one.origin {
@@ -148,7 +150,7 @@ mod tests {
         }
     }
 
-    /// The one running pod, `web-0` of the `StatefulSet` `shop/web`.
+    /// A running pod, `web-0` of the `StatefulSet` `shop/web`.
     fn pods() -> Vec<Arc<Pod>> {
         let pod = serde_yaml::from_str("metadata: {namespace: shop, name: web-0}").unwrap();
         vec![Arc::new(pod)]
@@ -167,7 +169,7 @@ mod tests {
         ])
     }
 
-    /// The namespaces in the cluster, which do not include `gone`.
+    /// The namespaces that the cluster has.  It has no `gone`.
     fn namespaces() -> HashSet<&'static str> {
         HashSet::from(["shop", "blog"])
     }
@@ -224,8 +226,9 @@ mod tests {
         );
     }
 
-    /// Each line names the workload that logged it, and a pod that is
-    /// gone by its own name, so no line leaves the reader to guess.
+    /// A line is labeled with the workload that logged it, with the pod
+    /// when the pod is gone, or with the namespace when the log source
+    /// gives no pod.
     #[rstest]
     #[case::a_running_pods_workload(
         "shop",
@@ -247,7 +250,7 @@ mod tests {
         Some("web-9"),
         vec![("gone/web-9", None, "2, the latest 3m ago, from a pod that no longer exists")]
     )]
-    fn each_line_says_where_its_lines_came_from(
+    fn labels_each_line_by_where_its_log_lines_came_from(
         #[case] namespace: &str,
         #[case] pod: Option<&str>,
         #[case] expected: Vec<(&str, Option<&str>, &str)>,
@@ -259,8 +262,8 @@ mod tests {
         assert_eq!(lines(&found), owned(expected));
     }
 
-    /// An error or a warning pattern's match that is no longer recent
-    /// is worth knowing, in gray, and its recent ones are in "Now".
+    /// A match of an error or a warning pattern is listed once it is no
+    /// longer recent.  A recent match is not listed here.
     #[rstest]
     #[case::an_error_inside_the_span(Severity::Error, "2026-01-01T11:04:00Z", vec![])]
     #[case::an_error_at_the_spans_edge(
@@ -278,7 +281,7 @@ mod tests {
         "2026-01-01T11:04:00Z",
         vec![("shop/web", Some("/namespaces/shop/statefulsets/web"), "2, the latest 59m ago")]
     )]
-    fn an_old_match_of_any_pattern_is_worth_knowing(
+    fn lists_an_old_match_of_any_pattern(
         #[case] severity: Severity,
         #[case] last: &str,
         #[case] expected: Vec<(&str, Option<&str>, &str)>,
@@ -291,7 +294,7 @@ mod tests {
     #[case::an_error_pattern(Severity::Error, Ok(vec![count("shop", Some("web-0"), 1, THREE_MINUTES_AGO)]))]
     #[case::no_match(Severity::WorthKnowing, Ok(vec![]))]
     #[case::a_failed_search(Severity::WorthKnowing, Err("unreachable".into()))]
-    fn gives_no_finding(#[case] severity: Severity, #[case] found: Result<Vec<Count>, String>) {
+    fn makes_no_finding(#[case] severity: Severity, #[case] found: Result<Vec<Count>, String>) {
         let now = NOW.parse().unwrap();
         let plurals = Plurals::default();
         let namespaces = namespaces();
@@ -309,10 +312,10 @@ mod tests {
         assert_eq!(found, vec![]);
     }
 
-    /// The recent matches of an error pattern in a `CronJob` whose last
-    /// run succeeded are listed here, in gray, with the reason.
+    /// A recent match of an error pattern is listed when its workload's
+    /// last run succeeded, and the line says so.
     #[rstest]
-    fn a_settled_workloads_recent_error_is_worth_knowing() {
+    fn lists_a_recent_error_of_a_settled_workload() {
         let now = NOW.parse().unwrap();
         let plurals = Plurals::default();
         let counts = vec![count("shop", Some("web-0"), 2, THREE_MINUTES_AGO)];

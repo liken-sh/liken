@@ -1,8 +1,9 @@
 //! Findings grouped by id.  A scanner writes one finding for each
-//! package that an id affects, so one id can repeat.  Every table lists
-//! each id once, with its packages in a list inside the row.  A row
-//! shows the most severe severity and the highest score of its
-//! findings, and the sort uses those values.
+//! package that an id affects, so one id can appear in several
+//! findings.  A table of findings has one row for each id, with the
+//! affected packages listed in the row.  A row shows the most severe
+//! severity and the highest score among its findings, and the table
+//! sorts by those.
 
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -18,17 +19,17 @@ pub struct Package {
     pub fixed: Option<Arc<str>>,
 }
 
-/// Every finding of one id in the findings given.
+/// The findings of one id.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Group {
     pub id: Arc<str>,
-    /// The most severe severity of its findings.
+    /// The most severe of its findings' severities.
     pub severity: Arc<str>,
     /// The highest score of its findings.
     pub score: Option<Arc<str>>,
     pub link: Option<Arc<str>>,
     pub title: Option<Arc<str>>,
-    /// Its distinct packages, in order.
+    /// Its distinct packages, sorted.
     pub packages: Vec<Package>,
 }
 
@@ -60,8 +61,9 @@ impl Group {
 }
 
 impl Vulnerabilities {
-    /// Where a severity sorts: the scanners' severities in their order,
-    /// then any other, then `UNKNOWN`.
+    /// The sort key of a severity: first the severities that the kind
+    /// knowledge's findings `summary` lists, in that order, then any
+    /// other severity, then `UNKNOWN`.
     fn severity_key(&self, severity: &str) -> (u8, usize) {
         match severity {
             "UNKNOWN" => (2, 0),
@@ -72,11 +74,10 @@ impl Vulnerabilities {
         }
     }
 
-    /// The order in which tables list ids.  Ids sort by severity, in
-    /// the scanners' order with any other severity after them and
-    /// `UNKNOWN` last.  Within a severity, the ids with a fixed version
-    /// come first, then the ids sort by score, highest first and no
-    /// score last, and then by id.
+    /// The order of the rows in a table.  Rows sort by severity as in
+    /// `severity_key`.  Within a severity, rows with a fixed version
+    /// come first. Then they sort by score, highest first and rows with
+    /// no score last, and finally by id.
     pub fn order(&self, a: &Group, b: &Group) -> Ordering {
         let score = match (a.number(), b.number()) {
             (Some(a), Some(b)) => b.total_cmp(&a),
@@ -133,7 +134,7 @@ impl Vulnerabilities {
     }
 }
 
-/// One package's line in a row's list, each field's text or a dash.
+/// One package's line in a row, with a dash for each missing field.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PackageRow {
     pub name: String,
@@ -156,7 +157,6 @@ impl From<&Package> for PackageRow {
 }
 
 impl Group {
-    /// The group's packages as a row's list.
     pub fn package_rows(&self) -> Vec<PackageRow> {
         self.packages.iter().map(PackageRow::from).collect()
     }

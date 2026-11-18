@@ -1,7 +1,7 @@
-//! Where a running container's image came from, as its block on the pod
-//! page and its workload's card show it: the commit it was built from,
-//! its release, its description, and its documentation, or the reason
-//! that transect cannot read them.
+//! Where a running container's image came from, for the pod page and
+//! the workload's card: the commit the image was built from, its
+//! version, its description, and its documentation, or the reason that
+//! transect cannot read them.
 
 use k8s_openapi::api::core::v1::{ContainerStatus, Pod};
 
@@ -17,7 +17,7 @@ pub enum Origin {
     Read(Built),
 }
 
-/// The facts from an image's labels, in the form that a page draws.
+/// The facts from an image's labels, as a page shows them.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Built {
     /// The commit, or none when the image has no source label.
@@ -46,8 +46,8 @@ impl Built {
     }
 }
 
-/// The labels that transect has read so far and the forges they link
-/// to.  Every origin on a page is read from them.
+/// The labels that transect has read so far, and the forges that the
+/// commit links point to.
 #[derive(Clone, Copy)]
 pub struct Origins<'a> {
     pub known: &'a Known,
@@ -55,12 +55,12 @@ pub struct Origins<'a> {
 }
 
 impl Origins<'_> {
-    /// The origin of the image that a container status of `pod` names.
-    /// It is `None` when the status names no image that a registry
-    /// serves, as before the pull, or when `pod` has finished.  transect
-    /// reads only the images of pods that have not finished, so a
-    /// finished pod's image would show as still being read for as long
-    /// as the pod exists.
+    /// The origin of the image in `status`, a container status of `pod`.
+    /// It is `None` when the status has no image id with a digest yet, as
+    /// before the pull, or when `pod` has finished.  transect reads labels
+    /// only for the images of unfinished pods, so without the check a
+    /// finished pod's image would show as `Reading` until the pod is
+    /// deleted.
     pub fn of(&self, pod: &Pod, status: &ContainerStatus) -> Option<Origin> {
         if finished(pod) {
             return None;
@@ -73,10 +73,11 @@ impl Origins<'_> {
         })
     }
 
-    /// The origins of each image `pods` run in their app containers, by
-    /// the image the spec names, each once, in the order the pods list
-    /// them.  A rollout runs two digests of one image, so one image can
-    /// have two origins.
+    /// The origins of the images that the app containers of `pods` run,
+    /// keyed by the image name in the pod spec, in the order of the pods,
+    /// with each pair of name and origin once.  During a rollout the pods
+    /// run two digests of one image name, so one name can have two
+    /// origins.
     pub fn of_pods<'p>(&self, pods: impl IntoIterator<Item = &'p Pod>) -> Vec<(String, Origin)> {
         let mut found: Vec<(String, Origin)> = Vec::new();
         for pod in pods {

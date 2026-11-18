@@ -1,13 +1,15 @@
-# The fixture cluster: every object the tests and `--fixture` serve.
+# The fixture cluster: every object that the tests and `--fixture`
+# serve.
 #
-# Every name is unique across kinds and appears in no page's prose, so
-# a test can find an object by its name in a page's text.  Each group
-# of documents below gives one page type an example; add to a group,
-# or start another, when a page needs one.  Keep the pods in their
-# order, because some tests replace a pod by its position.
+# Every name is unique across kinds and appears nowhere in a page's
+# fixed text, so a test can find an object by searching a page for its
+# name. Each group of documents below is an example for one type of
+# page. Add to a group, or start another, when a page needs an example.
+# Keep the pods in their order, because some tests replace a pod by its
+# index in the snapshot.
 
-# Two machines, both ready, of four cores and 16Gi each.  The second
-# is the control plane, so the rows of machines draw both groups.
+# Two ready nodes. The second is the control plane, so the machine rows
+# show both kinds of node.
 apiVersion: v1
 kind: Node
 metadata: {name: node-alpha}
@@ -43,9 +45,9 @@ kind: Namespace
 metadata: {name: acme-promoter, labels: {kubernetes.io/metadata.name: acme-promoter}}
 ---
 # A storefront `Deployment` behind an `Ingress` and a `Service`, which
-# calls the ledger in another namespace.  It is the example of a
-# workload with an entry, and its section view goes from the `Ingress`
-# down to the ledger's volume.
+# calls the ledger in another namespace. It is the example of a workload
+# with an entry point, and its section view runs from the `Ingress` down
+# to the ledger's volume.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -124,9 +126,9 @@ spec:
   tls: [{hosts: [shop.example.test], secretName: storefront-tls}]
   rules: [{host: shop.example.test, http: {paths: [{path: /, pathType: Prefix, backend: {service: {name: storefront-svc, port: {number: 80}}}}]}}]
 ---
-# The ledger's database, whose one pod stores its data on a claim bound
-# to an NFS volume on a NAS outside the cluster.  It gives the pages a
-# volume, its claim, and the ground box under the map.
+# The ledger's database. Its one pod stores data on a claim bound to an
+# NFS volume on a NAS outside the cluster, so the pages have a volume, a
+# claim, and a box for the NAS at the bottom of the cluster map.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -199,8 +201,8 @@ kind: StorageClass
 metadata: {name: archive-nfs}
 provisioner: nfs.csi.example.test
 ---
-# A nightly backup of the ledger, whose pods mount the database's claim
-# read-only.  It puts a `CronJob` on a volume's page.
+# A nightly backup of the ledger. Its pods mount the database's claim
+# read-only, which gives a volume's page a `CronJob` to show.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -220,7 +222,7 @@ spec:
           containers: [{name: main, image: example.test/ledger-backup-image:1, volumeMounts: [{name: data, mountPath: /var/lib/ledger, readOnly: true}]}]
           volumes: [{name: data, persistentVolumeClaim: {claimName: data-ledger-db-0}}]
 ---
-# The ledger's exporter, whose one pod crashes on start.  It is the
+# The ledger's exporter. Its one pod crashes on start, so it is the
 # example of a failing workload.
 apiVersion: apps/v1
 kind: Deployment
@@ -316,9 +318,8 @@ status:
     state: {waiting: {reason: CrashLoopBackOff, message: back-off 5m0s restarting failed container}}
     lastState: {terminated: {exitCode: 1, reason: Error}}
 ---
-# `Gizmo` is a custom kind that no kind knowledge describes and that
-# runs nothing, so its store is trimmed to metadata, conditions, and
-# printer columns.
+# `Gizmo` is a custom kind with no `KindKnowledge` that runs no pods, so
+# transect keeps only its metadata, conditions, and printer columns.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata: {name: gizmos.gizmos.example.test}
@@ -348,9 +349,9 @@ metadata: {namespace: acme-shop, name: gizmo-blue, uid: gizmo-blue}
 spec: {size: small, parts: [a, b]}
 status: {conditions: [{type: Ready, status: 'False'}]}
 ---
-# `Cache` is a custom kind that no kind knowledge describes and that
-# owns a `StatefulSet`, so a `Cache` is a workload of its own, and its
-# store keeps each object whole.
+# `Cache` is a custom kind with no `KindKnowledge` that owns a
+# `StatefulSet`, so a `Cache` counts as a workload and transect keeps
+# each object whole.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata: {name: caches.caches.example.test}
@@ -405,9 +406,9 @@ status:
   conditions: [{type: Ready, status: 'True'}]
   containerStatuses: [{name: main, ready: true, restartCount: 0, image: example.test/session-cache-image:1, imageID: '', state: {running: {}}}]
 ---
-# `Promotion` is a custom kind that kind knowledge describes and that
-# an operator in its own namespace reconciles, so the operator's page
-# has a Controls table.  The knowledge is in `resources.yaml`.
+# `Promotion` is a custom kind that has a `KindKnowledge` (in
+# `resources.yaml`) and is reconciled by an operator in its own
+# namespace, so the operator's page shows a Controls table.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata: {name: promotions.promotions.example.test}
@@ -471,8 +472,8 @@ status:
   conditions: [{type: Ready, status: 'True'}]
   containerStatuses: [{name: main, ready: true, restartCount: 0, image: example.test/promoter-image:1, imageID: '', state: {running: {}}}]
 ---
-# The operator's identity and what it may do, which the `ServiceAccount`
-# and `ClusterRole` pages draw.
+# The operator's `ServiceAccount` and its permissions, for the
+# `ServiceAccount` and `ClusterRole` pages.
 apiVersion: v1
 kind: ServiceAccount
 metadata: {namespace: acme-promoter, name: promoter}

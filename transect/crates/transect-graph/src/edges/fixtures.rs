@@ -1,4 +1,4 @@
-//! Edges and ends for tests.
+//! Builders of edges and ends for tests.
 
 use super::{Device, Edge, Endpoint, Kind, Object, Provenance};
 
@@ -16,8 +16,8 @@ pub fn runs_on(namespace: &str, pod_name: &str, machine: &str) -> Edge {
     }
 }
 
-/// A device on the machine its pool is named for, as a node-local
-/// driver's pools are.
+/// A device in a pool named for its machine, as a node-local driver
+/// names its pools.
 pub fn device(driver: &str, machine: &str, name: &str) -> Device {
     Device {
         driver: driver.into(),

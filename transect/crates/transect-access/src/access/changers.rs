@@ -1,7 +1,7 @@
-//! Who may change the objects of each kind, and where.  These are the
-//! subjects that a binding grants `patch`, `update`, or `delete` on the
-//! kind.  `Access::build` indexes them once per build, so a page looks
-//! them up without reading RBAC again.
+//! Which accounts may change the objects of each kind, and where.  An
+//! account may change a kind when a binding grants it `patch`,
+//! `update`, or `delete` on the kind.  `Access::build` indexes these
+//! grants once, so a page does not read the RBAC rules again.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -13,8 +13,8 @@ use super::account::{Account, Where};
 const CHANGES: [&str; 3] = ["patch", "update", "delete"];
 
 /// What one rule lets a subject change: a kind by API group and plural,
-/// either of which may be `*`, and the names it is limited to, or none
-/// for every object.
+/// either of which may be `*`, and the object names the rule is limited
+/// to.  An empty `names` means every object.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Changed {
     pub group: String,
@@ -22,9 +22,9 @@ pub struct Changed {
     pub names: Vec<String>,
 }
 
-/// The kinds `rules` let a subject change.  A subresource such as
-/// `deployments/scale` changes only that part, so this function skips
-/// it.
+/// The kinds that `rules` let a subject change.  It skips a rule on a
+/// subresource such as `deployments/scale`, because that rule changes
+/// only part of an object.
 pub fn changed(rules: &[PolicyRule]) -> Vec<Changed> {
     let mut found = Vec::new();
     for rule in rules {
@@ -52,7 +52,9 @@ pub fn changed(rules: &[PolicyRule]) -> Vec<Changed> {
     found
 }
 
-/// One subject a binding lets change a kind, where, and by which names.
+/// One account that a binding lets change a kind, the places the
+/// binding applies, and the object names it is limited to.  An empty
+/// `names` means every object.
 #[derive(Clone, Debug)]
 struct Grant {
     at: Where,
@@ -60,16 +62,15 @@ struct Grant {
     account: Account,
 }
 
-/// Every subject a binding lets change each kind, by the kind as the
-/// rule names it.
+/// The grants that let an account change each kind, keyed by the API
+/// group and plural exactly as the rule writes them, so `*` is a key.
 #[derive(Debug, Default)]
 pub struct Changers {
     by_kind: HashMap<(String, String), Vec<Grant>>,
 }
 
 impl Changers {
-    /// Records that a binding at `at` lets `account` change what
-    /// `changed` names.
+    /// Records that a binding at `at` lets `account` change `changed`.
     pub fn add(&mut self, changed: &Changed, at: &Where, account: &Account) {
         let key = (changed.group.clone(), changed.resource.clone());
         self.by_kind.entry(key).or_default().push(Grant {
@@ -79,8 +80,9 @@ impl Changers {
         });
     }
 
-    /// The subjects a binding lets change the object `name` of `plural`
-    /// in `group`, in `namespace`.
+    /// The accounts that a binding lets change the object `name` of the
+    /// kind `plural` in `group`, in `namespace`.  A grant whose group or
+    /// resource is `*` also matches.
     pub fn of(&self, group: &str, plural: &str, namespace: &str, name: &str) -> BTreeSet<Account> {
         let keys = [(group, plural), (group, "*"), ("*", plural), ("*", "*")];
         let grants = keys.iter().flat_map(|(group, resource)| {

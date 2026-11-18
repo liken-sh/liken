@@ -1,11 +1,12 @@
-//! Drawing a page's template, whole or its `main` block alone, with
-//! the values that the masthead, which every page shares, reads.
+//! Renders a page template, either whole or as its `main` block alone,
+//! and passes the values that the masthead reads. Every page shares the
+//! masthead.
 
 use askama::Template;
 
 use super::render::Part;
 
-/// The parts of a page template that `Part` names.
+/// A page template that can also render only its `main` block.
 pub trait Parts: Template {
     fn main(&self) -> impl Template + '_;
 }
@@ -48,17 +49,16 @@ parts!(
     transect_map::map::vulnerabilities::WorkloadVulnerabilitiesPage
 );
 
-/// The part of a page to draw, and what the masthead, which every page
-/// shares, reads besides the page: whether some kind knowledge describes
-/// a scanner's reports, which makes the masthead link the
-/// vulnerabilities.
+/// Which part of a page to render, and whether the masthead links to the
+/// vulnerabilities pages. It does when some loaded `KindKnowledge` has a
+/// `findings` section that describes a scanner's reports.
 #[derive(Clone, Copy)]
 pub struct Drawing {
     pub part: Part,
     pub vulnerabilities: bool,
 }
 
-/// A part alone, with no masthead link to the vulnerabilities.
+/// A part with the masthead's vulnerabilities link off.
 impl From<Part> for Drawing {
     fn from(part: Part) -> Self {
         Self {
@@ -80,6 +80,6 @@ fn render(template: &impl Template, drawing: Drawing) -> Option<String> {
     let values: [(&str, &dyn std::any::Any); 1] = [("vulnerabilities", &drawing.vulnerabilities)];
     template
         .render_with_values(&values)
-        .inspect_err(|error| tracing::error!(%error, "rendering a page"))
+        .inspect_err(|error| tracing::error!(%error, "A page did not render"))
         .ok()
 }

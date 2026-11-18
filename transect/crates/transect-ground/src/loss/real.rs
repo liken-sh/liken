@@ -1,8 +1,8 @@
-//! Machines that are really lost, which means that their `Node`'s
-//! `Ready` condition is not `True`.  When a machine is really lost, the
-//! cluster page draws its loss without a request from the reader,
-//! because at 2am that is what the reader needs first.  A cordoned
-//! machine that is still ready runs its pods and is not lost.
+//! Machines that are really lost, because their `Node`'s `Ready`
+//! condition is not `True`.  The cluster page shows their loss before
+//! the reader selects any machine, because a reader who opens the page
+//! during an outage needs that first.  A cordoned machine that is still
+//! ready keeps running its pods, so it is not lost.
 
 use std::sync::Arc;
 
@@ -13,7 +13,7 @@ use super::Lost;
 
 /// A machine that is not ready, and for how long.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Gone {
+pub struct NotReadyMachine {
     pub machine: String,
     /// Seconds since its `Ready` condition last changed, or `None` when
     /// the `Node` has no `Ready` condition.
@@ -21,8 +21,8 @@ pub struct Gone {
 }
 
 /// The machines of `nodes` that are not ready at `now`, in name order.
-pub fn not_ready(nodes: &[Arc<Node>], now: Timestamp) -> Vec<Gone> {
-    let mut gone: Vec<Gone> = nodes
+pub fn not_ready(nodes: &[Arc<Node>], now: Timestamp) -> Vec<NotReadyMachine> {
+    let mut gone: Vec<NotReadyMachine> = nodes
         .iter()
         .filter_map(|node| {
             let machine = node.metadata.name.clone()?;
@@ -34,18 +34,18 @@ pub fn not_ready(nodes: &[Arc<Node>], now: Timestamp) -> Vec<Gone> {
             }
             let since = ready.and_then(|c| c.last_transition_time.as_ref());
             let seconds = since.map(|since| (now.as_second() - since.0.as_second()).max(0));
-            Some(Gone { machine, seconds })
+            Some(NotReadyMachine { machine, seconds })
         })
         .collect();
     gone.sort_by(|a, b| a.machine.cmp(&b.machine));
     gone
 }
 
-/// How many of etcd's members remain after a loss, out of how many
-/// there are.  The Kubernetes API does not list etcd's members, so
-/// transect counts the machines with the etcd role label that k3s sets.
+/// How many of etcd's members remain after a loss, and how many there
+/// are in all.  The Kubernetes API does not list etcd's members, so
+/// transect counts the machines with the `ETCD_LABEL` that k3s sets.
 /// When no machine has that label, transect counts each control-plane
-/// machine as a member, and the line states that the count is a guess.
+/// machine as a member, and the sidebar marks the count as a guess.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Majority {
     pub remain: usize,
@@ -63,10 +63,10 @@ pub enum Counted {
 }
 
 impl Majority {
-    /// The count of members under the loss of `lost`.  Each item of
-    /// `machines` gives a machine's name, whether it is in the control
+    /// The member count after the loss of `lost`.  Each item of
+    /// `machines` is a machine's name, whether it is in the control
     /// plane, and whether it has the etcd role label.  Returns `None`
-    /// when the loss takes no member.
+    /// when the loss includes no member.
     pub fn of<'a>(
         machines: impl IntoIterator<Item = (&'a str, bool, bool)>,
         lost: &Lost,
@@ -93,8 +93,9 @@ impl Majority {
         })
     }
 
-    /// Whether the machines that remain are more than half.
-    pub fn kept(&self) -> bool {
+    /// Whether more than half of the members remain, which etcd needs
+    /// to keep serving.
+    pub fn has_quorum(&self) -> bool {
         self.remain * 2 > self.of
     }
 }
@@ -138,7 +139,7 @@ mod tests {
         #[case] node: Arc<Node>,
         #[case] seconds: Option<Option<i64>>,
     ) {
-        let expected = seconds.map(|seconds| Gone {
+        let expected = seconds.map(|seconds| NotReadyMachine {
             machine: "alpha".into(),
             seconds,
         });
@@ -190,7 +191,7 @@ mod tests {
         let names = machines.iter().map(|(name, _, _)| *name);
         let lost = Lost::of(lost.iter().copied(), names);
         let found = Majority::of(machines.clone(), &lost);
-        let found = found.map(|m| (m.remain, m.of, m.kept(), m.counted));
+        let found = found.map(|m| (m.remain, m.of, m.has_quorum(), m.counted));
         assert_eq!(found, expected);
     }
 }

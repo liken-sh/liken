@@ -1,12 +1,12 @@
 //! Kubernetes quantities, such as `250m`, `1.5Gi`, or `1e3`, parsed into
 //! exact amounts.
 //!
-//! An `Amount` stores billionths of a unit in an integer, so the sum of
-//! the requests of a hundred pods is the same total that the API server
-//! and kubectl compute, with no floating-point drift.  A billionth is the
-//! smallest suffix that Kubernetes accepts (`n`).  A finer value, written
-//! with an exponent, rounds up to one billionth, the same way that
-//! Kubernetes rounds a quantity up when it scales the quantity down.
+//! An `Amount` stores billionths of a unit in an integer, so a sum of
+//! many pods' requests equals the total that the API server and kubectl
+//! compute, with no floating-point drift.  A billionth is the smallest
+//! suffix that Kubernetes accepts (`n`).  A finer value, written with an
+//! exponent, rounds up to the next billionth, as Kubernetes rounds up
+//! when it scales a quantity down.
 
 use std::iter::Sum;
 use std::ops::{Add, Sub};
@@ -56,8 +56,8 @@ impl Amount {
             numerator.checked_mul(10i128.checked_pow(exponent.unsigned_abs())?)?
         } else {
             let divisor = 10i128.checked_pow(exponent.unsigned_abs())?;
-            // The numerator is never negative, because the sign is
-            // applied after this division.
+            // This division rounds up only because the numerator is not
+            // negative.  The sign is applied after it.
             numerator.checked_add(divisor - 1)? / divisor
         };
         Some(Self(if negative { -nanos } else { nanos }))

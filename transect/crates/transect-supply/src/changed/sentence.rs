@@ -1,4 +1,4 @@
-//! The words of each entry in the list of changes.
+//! The text of each entry in the list of changes.
 
 use k8s_openapi::jiff::Timestamp;
 use k8s_openapi::jiff::tz::TimeZone;
@@ -90,8 +90,9 @@ fn named(object: &Object) -> String {
     transect_graph::links::name_in(object, None)
 }
 
-/// "ops/shop applied main", or "41 Trees applied main from ops/fleet",
-/// named by the appliers' kind.
+/// "ops/shop applied main", or "41 Trees applied main from ops/fleet".
+/// The count names the appliers' kind, or "applier" when their kinds
+/// differ.
 fn applied(source: Option<&Object>, reference: &str, appliers: &[Object]) -> String {
     let reference = match reference {
         "" => "a commit",
@@ -124,7 +125,8 @@ fn one(restart: &Restart) -> String {
 }
 
 /// "shop/web: web in web-0 restarted (Error, exit 1)", or, for several
-/// restarts, their count and the latest one.
+/// restarts, how many containers restarted in how many pods, and the
+/// latest restart.
 fn restarted(workload: &Object, restarts: &[Restart]) -> String {
     let Some(latest) = restarts.last() else {
         return format!("{}: a container restarted", named(workload));
@@ -148,7 +150,7 @@ fn restarted(workload: &Object, restarts: &[Restart]) -> String {
 
 /// "machine-a became ready; DiskPressure and MemoryPressure became
 /// False", or "machine-a: MemoryPressure became True:
-/// KubeletHasInsufficientMemory" for one condition alone.
+/// KubeletHasInsufficientMemory" when `Ready` did not change.
 fn node_text(node: &str, moved: &[Moved]) -> String {
     let ready = moved.iter().find(|m| m.condition == "Ready");
     let ready = ready.map(|m| {
@@ -162,7 +164,7 @@ fn node_text(node: &str, moved: &[Moved]) -> String {
     let mut statuses: Vec<&str> = others.iter().map(|m| m.status.as_str()).collect();
     statuses.sort();
     statuses.dedup();
-    let said: Vec<String> = statuses
+    let clauses: Vec<String> = statuses
         .iter()
         .map(|status| {
             let these: Vec<&&Moved> = others.iter().filter(|m| m.status == *status).collect();
@@ -178,10 +180,10 @@ fn node_text(node: &str, moved: &[Moved]) -> String {
             )
         })
         .collect();
-    match (ready, said.is_empty()) {
+    match (ready, clauses.is_empty()) {
         (Some(ready), true) => ready,
-        (Some(ready), false) => format!("{ready}; {}", said.join("; ")),
-        (None, _) => format!("{node}: {}", said.join("; ")),
+        (Some(ready), false) => format!("{ready}; {}", clauses.join("; ")),
+        (None, _) => format!("{node}: {}", clauses.join("; ")),
     }
 }
 

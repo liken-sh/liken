@@ -2,9 +2,9 @@
 //! mounts, the volume behind it, and for a claim, its size, where its
 //! data is stored, and which other pods mount it too.
 //!
-//! Everything here comes from the pod spec and the claims transect
-//! already follows.  transect shows the name of a `Secret` or
-//! `ConfigMap` volume and never reads its contents.
+//! Everything here comes from the pod spec and the claims that transect
+//! already watches.  For a `Secret` or `ConfigMap` volume, transect
+//! shows the name and never reads the contents.
 
 use k8s_openapi::api::core::v1::{Pod, Volume as PodVolume};
 
@@ -22,7 +22,7 @@ pub struct PodMount {
     pub read_only: bool,
 }
 
-/// What a volume is.
+/// What backs a pod's volume.
 #[derive(Debug, PartialEq)]
 pub enum Source {
     Claim {
@@ -50,7 +50,7 @@ pub enum Source {
 
 /// The mounts of `pod`, in the order its containers list them.  `pods`
 /// are the namespace's running pods, which this function searches for
-/// the other pods that mount each claim.
+/// other pods that mount the same claim.
 pub fn pod_mounts(storage: &Storage, pod: &Pod, pods: &[&Pod]) -> Vec<PodMount> {
     let (Some(spec), Some(namespace), Some(name)) = (
         pod.spec.as_ref(),
@@ -233,7 +233,7 @@ mod tests {
                         volume: Some(Volume {
                             backend: Backend::Address("nas.example.com".into()),
                             kind: Type::Nfs,
-                            stated: None,
+                            declared_in: None,
                         }),
                         shared_with: vec!["web-2".into()],
                     },

@@ -1,11 +1,9 @@
-//! A pod's lifecycle, as far as the map reads it.
-
 use k8s_openapi::api::core::v1::Pod;
 
-/// Whether a pod has finished: its phase is `Succeeded` or `Failed`, so
-/// every container has stopped for good.  A finished pod holds no
-/// requests on its node, as the scheduler and `kubectl describe node`
-/// count them, and no address a connection could reach.
+/// Whether the pod's phase is `Succeeded` or `Failed`, which means its
+/// containers have stopped and will not restart.  The scheduler and
+/// `kubectl describe node` no longer count such a pod's requests against
+/// its node, and nothing can connect to it.
 pub fn finished(pod: &Pod) -> bool {
     let phase = pod.status.as_ref().and_then(|s| s.phase.as_deref());
     matches!(phase, Some("Succeeded" | "Failed"))

@@ -1,12 +1,11 @@
-//! The entry: how a request reaches a workload.  An `Ingress` routes
-//! a host to a `Service` by its backend, and a `Service` selects the
-//! workload's pods by their labels.
+//! How a request reaches a workload. An `Ingress` routes a host to a
+//! `Service` by its backend, and a `Service` selects the workload's pods
+//! by their labels.
 //!
 //! This module builds the selects and routes-to edges from each
-//! `Service` and `Ingress`, as every edge kind is built in its own
-//! domain.  The workload page follows the edges backward from the
-//! workload, to draw each `Service` that reaches it and each `Ingress`
-//! that reaches those.
+//! `Service` and `Ingress`. The workload page follows those edges
+//! backward from the workload, to show each `Service` that selects it
+//! and each `Ingress` that routes to one of those.
 
 pub mod controller;
 pub mod entry_points;
@@ -32,7 +31,7 @@ pub use queries::EntryQueries;
 pub use routes::{routes_to, selects};
 pub use service::{Endpoints, ServiceBox};
 pub use serving::{Serving, runs};
-pub use traffic::Answers;
+pub use traffic::TrafficResults;
 
 use transect_graph::edges::{Endpoint, Graph, Kind, Object, Plurals};
 
@@ -47,9 +46,9 @@ pub struct Entry {
 }
 
 impl Entry {
-    /// The Services whose selects edges reach `workload` in
-    /// `graph`, and the Ingresses whose routes-to edges reach
-    /// those Services, each group sorted by name.
+    /// The `Service`s whose selects edges reach `workload` in `graph`,
+    /// and the `Ingress`es whose routes-to edges reach those
+    /// `Service`s, each sorted by name.
     pub fn build(
         graph: &Graph,
         workload: &Object,
@@ -70,8 +69,8 @@ impl Entry {
         )
     }
 
-    /// `build`, with the workload that runs each `Ingress`'s
-    /// controller, as `serving` finds it.
+    /// Like `build`, and each `Ingress` also gets the workload that
+    /// runs its controller, as `serving` finds it.
     pub fn served(
         graph: &Graph,
         workload: &Object,
@@ -118,20 +117,20 @@ impl Entry {
 }
 
 impl Entry {
-    /// The entry with each `Ingress`'s traffic from `answers`.
-    pub fn with_traffic(self, answers: Answers) -> Self {
+    /// Sets each `Ingress`'s traffic from `results`.
+    pub fn with_traffic(self, results: TrafficResults) -> Self {
         let ingresses = self.ingresses.into_iter();
         Self {
             ingresses: ingresses
-                .map(|ingress| ingress.with_traffic(answers))
+                .map(|ingress| ingress.with_traffic(results))
                 .collect(),
             ..self
         }
     }
 }
 
-/// `issuer` as an `Ingress`'s TLS line names it: by its name, linked
-/// to its page.
+/// A reference to the issuer of an `Ingress`'s certificate, for its TLS
+/// line: the issuer's name, linked to its page.
 pub fn issued_by(issuer: &Object, plurals: &Plurals) -> transect_graph::links::Reference {
     transect_graph::links::Reference {
         text: issuer.name.clone(),
@@ -139,7 +138,8 @@ pub fn issued_by(issuer: &Object, plurals: &Plurals) -> transect_graph::links::R
     }
 }
 
-/// The object of `objects` that `end` names.
+/// The element of `objects` with the namespace and name of `end`, or
+/// none when `end` is not an object.
 fn find<'a, K: kube::Resource>(objects: &'a [Arc<K>], end: &Endpoint) -> Option<&'a K> {
     let Endpoint::Object(object) = end else {
         return None;
@@ -203,10 +203,11 @@ mod tests {
         Object::new("apps", "Deployment", Some("shop"), name)
     }
 
-    /// The names of the Ingresses and Services that reach
-    /// `workload`, in a shop whose web and api Deployments each
-    /// have a `Service`, whose web `Service` has two Ingresses,
-    /// and whose worker has neither.
+    /// The names of the `Ingress`es and `Service`s that reach
+    /// `workload`. The `Services` web and web-internal select the web
+    /// `Deployment`, and three `Ingress`es route to them. The `Service`
+    /// api selects the api `Deployment`, and nothing routes to it.
+    /// Nothing selects worker.
     fn reaching(workload: &str) -> (Vec<String>, Vec<String>) {
         let services = [
             service("shop", "web", "{app: web}"),

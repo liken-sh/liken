@@ -1,6 +1,7 @@
-//! What intent can be written on in one snapshot, where a CSI driver
-//! stores its data, and the conditions this reading of the cluster
-//! gives `transect`'s resources.
+//! What `Snapshot` derives from intent: the objects that intent can
+//! describe, the CSI drivers that store their data on machines, the
+//! console URLs of each CSI driver, and the conditions to report on
+//! `transect`'s own resources.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -17,7 +18,7 @@ use transect_resources::resources::{Condition, DocId};
 
 impl Snapshot {
     /// The CSI drivers whose `data-on` intent is `machines`, each with
-    /// where that intent was written.
+    /// the document that wrote it.
     pub(super) fn on_machines(&self) -> OnMachines {
         let drivers = self.csi_drivers.iter();
         let names = drivers.filter_map(|driver| driver.metadata.name.as_deref());
@@ -31,8 +32,9 @@ impl Snapshot {
             .collect()
     }
 
-    /// Each CSI driver's console URLs, from the `console` template its
-    /// intent gives, filled from its volumes and its StorageClasses.
+    /// The console URLs of each CSI driver, made by filling in the
+    /// `console` template of its intent with its volumes and
+    /// `StorageClass`es.
     pub fn consoles(&self) -> HashMap<String, Vec<String>> {
         let templates = self.csi_drivers.iter().filter_map(|driver| {
             let name = driver.metadata.name.as_deref()?;
@@ -48,13 +50,13 @@ impl Snapshot {
         )
     }
 
-    /// Every object intent can be written on, with its metadata: the
-    /// namespaces, the machines, the workloads, the Services, Ingresses,
-    /// PodDisruptionBudgets, and NetworkPolicies in front of and around
-    /// them, the ConfigMaps they read, the Secrets when their
-    /// annotations are read, the ServiceAccounts they run as, the CSI
-    /// drivers, and the custom kinds that own pods.  Pods are left out,
-    /// because a pod's card shows its workload's intent.
+    /// Every object that intent can describe, with its metadata:
+    /// namespaces, nodes, workloads, `Service`s, `Ingress`es,
+    /// `PodDisruptionBudget`s, `NetworkPolicy`s, `ConfigMap`s,
+    /// `ServiceAccount`s, `CSIDriver`s, and every watched custom
+    /// resource. `Secret`s are included only when `transect` reads their
+    /// annotations. Pods are not included, because a pod's card shows
+    /// the intent of its workload.
     pub fn described(&self) -> Vec<(Object, &ObjectMeta)> {
         fn of<K: Resource<DynamicType = ()>>(objects: &[Arc<K>]) -> Vec<(Object, &ObjectMeta)> {
             let (group, kind) = (K::group(&()), K::kind(&()));
@@ -100,9 +102,9 @@ impl Snapshot {
         .collect()
     }
 
-    /// A condition on the kind knowledge of each object whose reference
-    /// by value matched more than one object, so the graph has no edge
-    /// for it.
+    /// A condition on the kind knowledge of each reference whose value
+    /// matched more than one object. The graph draws no edge for such a
+    /// reference.
     fn ambiguous_matches(&self) -> Vec<(DocId, Condition)> {
         let mut found: Vec<(DocId, Condition)> = Vec::new();
         for (object, relations) in &self.relations {
@@ -125,11 +127,12 @@ impl Snapshot {
         found
     }
 
-    /// The conditions on `transect`'s resources that this reading of the
-    /// cluster gives: an overlay, a layer's selector, or an `Intent`'s
-    /// term that names nothing here, a list of intent on an object it
-    /// draws nothing from, and kind knowledge for a kind the
-    /// cluster does not serve or a layer it does not declare.
+    /// The conditions to report on `transect`'s resources, from this
+    /// snapshot. They cover an overlay, a layer selector, or an
+    /// `Intent` term that matches nothing in the cluster, intent lists
+    /// on an object that draws no edges from them, and kind knowledge
+    /// for a kind the cluster does not serve or a layer it does not
+    /// declare.
     pub fn conditions(&self) -> Vec<(DocId, Condition)> {
         let mut conditions = self.overlaid.unmatched();
         conditions.extend(self.intents.conditions.iter().cloned());

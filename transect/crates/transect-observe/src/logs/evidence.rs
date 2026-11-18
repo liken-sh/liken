@@ -1,52 +1,47 @@
-//! The evidence that a log finding shows besides its count: where the
-//! matches came from, by pod, container, and machine, and a few of the
-//! lines themselves.  With a count alone, a reader must open every pod
-//! to learn whether the lines are the same routine message or a new
-//! one.
+//! The evidence that a log finding shows besides its count: the pods,
+//! containers, and machines that the matches came from, and a few of
+//! the matching lines. With only a count, a reader must open every pod
+//! to tell whether the lines are one routine message or something new.
 
 use super::sample::Sample;
 use super::search::Count;
 use crate::health::times;
 
-/// The most places that a finding lists, with the most matches first.
+/// The most places that a finding lists, ordered by matches.
 const PARTS: usize = 6;
 
-/// The most lines a finding shows.
+/// The most sample lines that a finding shows.
 const SAMPLES: usize = 5;
 
-/// The places that one finding's matches came from, and a few of its
-/// lines.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Evidence {
     pub parts: Vec<Part>,
-    /// How many places matched beyond those listed.
+    /// The number of places with matches that are not in `parts`.
     pub more: usize,
     pub samples: Vec<Sample>,
 }
 
-/// One pod's, container's, or machine's matches.
+/// The matches from one pod, container, or machine.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Part {
     pub pod: Option<String>,
     pub container: Option<String>,
     pub node: Option<String>,
     pub matches: usize,
-    /// A link to the pod's page, at the pattern's matching lines, while
-    /// the pod runs.
+    /// A link to the pod's page, or to the pattern's matching lines on
+    /// its logs page. `None` when the pod no longer exists.
     pub href: Option<String>,
 }
 
 impl Evidence {
-    /// The evidence for the matches in `counts`, with the lines of
-    /// `samples` that came from the same pods, or from the same
-    /// machines for counts that name no pod.  `runs` returns whether a
-    /// pod still runs, so that the pod's line links to its page.  The
-    /// link goes to `anchor` when the pod page marks the matching
-    /// lines.
+    /// The evidence for the matches in `counts`, with the `samples` from
+    /// the same pods, or from the same machines for counts that have no
+    /// pod. A part links to its pod only when `exists` returns true for
+    /// the pod's namespace and name, because a deleted pod has no page.
     pub fn of(
         counts: &[Count],
         samples: &[Sample],
-        runs: impl Fn(&str, &str) -> bool,
+        exists: impl Fn(&str, &str) -> bool,
         anchor: Option<&str>,
     ) -> Self {
         let mut sorted: Vec<&Count> = counts.iter().collect();
@@ -59,10 +54,10 @@ impl Evidence {
             href: count
                 .pod
                 .as_deref()
-                .filter(|pod| runs(&count.namespace, pod))
+                .filter(|pod| exists(&count.namespace, pod))
                 .map(|pod| {
-                    // The pod's logs lens shows a pattern's lines under
-                    // the anchor.  A count with no anchor opens the pod.
+                    // The pod's logs page marks a pattern's matching
+                    // lines with the anchor.
                     match anchor {
                         Some(anchor) => {
                             format!("/namespaces/{}/pods/{pod}/logs#{anchor}", count.namespace)
@@ -91,9 +86,9 @@ impl Evidence {
         self.parts.is_empty() && self.samples.is_empty()
     }
 
-    /// Whether the page shows the list of places.  It does when there is
-    /// more than one place, or one place that names a container or a
-    /// machine, which is more than the finding's own line names.
+    /// Whether the page lists the places. It does when there is more
+    /// than one place, or when the one place has a container or a
+    /// machine, which the finding's own line does not show.
     pub fn lists_parts(&self) -> bool {
         self.parts.len() > 1
             || self
@@ -102,39 +97,41 @@ impl Evidence {
                 .any(|part| part.container.is_some() || part.node.is_some())
     }
 
-    /// "and 3 more", under a list that is cut short.
+    /// "and 3 more", shown under a list that was cut at `PARTS`.
     pub fn more_text(&self) -> Option<String> {
         (self.more > 0).then(|| format!("and {} more", self.more))
     }
 }
 
 impl Part {
-    /// The label of the place: its pod, or "lines with no pod".
+    /// The pod name, or "lines with no pod" when the matches have no
+    /// pod.
     pub fn label(&self) -> &str {
         self.pod.as_deref().unwrap_or("lines with no pod")
     }
 
-    /// "in web", after the pod, when the count names its container.
+    /// "in web", shown after the pod name when the count has a
+    /// container.
     pub fn container_text(&self) -> Option<String> {
         self.container
             .as_ref()
             .map(|container| format!("in {container}"))
     }
 
-    /// "12 lines", at the end of the place's line.
+    /// "12 lines".
     pub fn count_text(&self) -> String {
         times(self.matches as i64, "line")
     }
 }
 
 impl Sample {
-    /// "12:00:04", the time a line was logged, in UTC.
+    /// The time the line was logged, in UTC, as "12:00:04".
     pub fn at(&self) -> Option<String> {
         self.time.map(|time| time.strftime("%H:%M:%S").to_string())
     }
 
-    /// "web-0/web", where a line was logged.  For a line from no pod, it
-    /// names the line's machine.
+    /// Where the line was logged, as "web-0/web". A line with no pod
+    /// shows its machine, and its unit when it has one.
     pub fn from(&self) -> Option<String> {
         match (&self.pod, &self.container, &self.node) {
             (Some(pod), Some(container), _) => Some(format!("{pod}/{container}")),
@@ -171,7 +168,7 @@ mod tests {
         }
     }
 
-    fn running(_: &str, pod: &str) -> bool {
+    fn exists(_: &str, pod: &str) -> bool {
         pod != "web-9"
     }
 
@@ -199,16 +196,16 @@ mod tests {
         #[case] counts: Vec<Count>,
         #[case] expected: Vec<(&str, Option<&str>, usize)>,
     ) {
-        let evidence = Evidence::of(&counts, &[], running, Some("matching-refused"));
+        let evidence = Evidence::of(&counts, &[], exists, Some("matching-refused"));
         assert_eq!(parts(&evidence), expected);
     }
 
     #[rstest]
-    fn cuts_a_long_list_and_says_how_many_more() {
+    fn cuts_a_long_list_and_counts_the_rest() {
         let counts: Vec<Count> = (0..8)
             .map(|n| count(Some(&format!("web-{n}")), None, None, n + 1))
             .collect();
-        let evidence = Evidence::of(&counts, &[], running, None);
+        let evidence = Evidence::of(&counts, &[], exists, None);
         assert_eq!(
             (evidence.parts.len(), evidence.more_text()),
             (6, Some("and 2 more".into()))
@@ -223,7 +220,7 @@ mod tests {
             sample("shop", Some("web-0"), "ours"),
             sample("blog", Some("web-0"), "another namespace's"),
         ];
-        let evidence = Evidence::of(&counts, &samples, running, None);
+        let evidence = Evidence::of(&counts, &samples, exists, None);
         let messages: Vec<&str> = evidence
             .samples
             .iter()
@@ -236,12 +233,12 @@ mod tests {
     #[case::one_pod_alone(vec![count(Some("web-0"), None, None, 3)], false)]
     #[case::one_pod_on_a_machine(vec![count(Some("web-0"), None, Some("machine-a"), 3)], true)]
     #[case::two_pods(vec![count(Some("web-0"), None, None, 3), count(Some("web-1"), None, None, 1)], true)]
-    fn lists_places_only_when_they_say_more_than_the_line(
+    fn lists_places_only_when_the_finding_line_does_not_show_them(
         #[case] counts: Vec<Count>,
         #[case] lists: bool,
     ) {
         assert_eq!(
-            Evidence::of(&counts, &[], running, None).lists_parts(),
+            Evidence::of(&counts, &[], exists, None).lists_parts(),
             lists
         );
     }
@@ -251,7 +248,7 @@ mod tests {
     #[case::a_machines_unit(None, Some("k3s"), Some("machine-a"), Some("machine-a/k3s"))]
     #[case::a_machine(None, None, Some("machine-a"), Some("machine-a"))]
     #[case::nowhere(None, None, None, None)]
-    fn a_sample_says_where_it_was_logged(
+    fn a_sample_shows_where_it_was_logged(
         #[case] pod: Option<&str>,
         #[case] container: Option<&str>,
         #[case] node: Option<&str>,

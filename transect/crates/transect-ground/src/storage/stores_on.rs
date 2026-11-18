@@ -1,5 +1,5 @@
-//! The stores-on edges, from each workload to where the volumes that its
-//! pods mount store their data.
+//! The `StoresOn` edges, from each workload to where the volumes that
+//! its pods mount store their data.
 
 use std::collections::HashSet;
 
@@ -10,12 +10,11 @@ use super::{Backend, Claim, Storage};
 use transect_cluster::ownership::Ownership;
 use transect_graph::edges::{Edge, Endpoint, Kind, Object, Provenance};
 
-/// An edge from the top owner of each pod that mounts a claim to the
-/// claim's backend: a ground box, or the machine a local volume is on.
-/// When a workload's replicas share one claim, this function returns one
-/// edge for that claim, so the number of edges from a workload is the
-/// number of claims it stores on.  A claim that no pod mounts, such as a
-/// scaled-down workload's, gets no edge.
+/// One edge for each workload and claim, from the top owner of the pods
+/// that mount the claim to the claim's backend: a server outside the
+/// cluster, or the machine a local volume is on.  Replicas that share a
+/// claim give one edge, so a workload's edges count its claims.  A claim
+/// that no pod mounts, such as a scaled-down workload's, gets no edge.
 pub fn stores_on<'a>(
     storage: &Storage,
     pods: impl IntoIterator<Item = &'a Pod>,
@@ -44,7 +43,7 @@ pub fn stores_on<'a>(
                     from: Endpoint::Object(owner.clone()),
                     to,
                     guessed: false,
-                    provenance: volume.stated.clone().unwrap_or(Provenance::Kubernetes),
+                    provenance: volume.declared_in.clone().unwrap_or(Provenance::Kubernetes),
                 });
             }
         }
@@ -52,10 +51,10 @@ pub fn stores_on<'a>(
     edges
 }
 
-/// The top owner of each pod that mounts an NFS export by hand, with no
-/// claim, and the server the export names, with each pair listed once.
-/// No claim's count includes these mounts, so a ground page adds them to
-/// the workloads that store on the page's box.
+/// Each pair of a workload and an NFS server that one of its pods mounts
+/// directly in its volumes, with no claim.  `stores_on` gives these
+/// mounts no edge, so the server's ground page adds them to the
+/// workloads that store on the server.
 pub fn inline_nfs<'a>(
     pods: impl IntoIterator<Item = &'a Pod>,
     ownership: &Ownership,
@@ -81,9 +80,8 @@ pub fn inline_nfs<'a>(
     found
 }
 
-/// A local volume that names no machine stores its data on the machine
-/// its pod runs on, so this function returns `None` for a pod that is
-/// not scheduled yet.
+/// A local volume that names no machine stores its data on the pod's
+/// machine, so this returns `None` for a pod that is not scheduled yet.
 fn endpoint(backend: &Backend, pod: &Pod) -> Option<Endpoint> {
     match backend {
         Backend::Address(name) | Backend::Driver(name) => Some(Endpoint::Outside(name.clone())),

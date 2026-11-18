@@ -1,6 +1,5 @@
-/* The lens tabs end an object page's row, pushed to its right end.
-   They look like one control: the current lens takes the panel and the
-   ink, and the others stay muted until hovered. */
+/* The lens tabs are one bordered control at the right end of an object
+   page's header row. */
 .lens-tabs {
   margin-left: auto;
   display: flex;
@@ -28,8 +27,8 @@
   background: var(--panel);
 }
 
-/* The logs lens takes the whole width, since a log line is long and
-   the lens has no card beside it. */
+/* Log lines are long, so the logs lens has no card column and uses the
+   whole width of the page. */
 .logs-lens {
   display: flex;
   flex-direction: column;
@@ -39,7 +38,6 @@
   font-size: 12px;
 }
 
-/* A pod's chip leads with its health's dot, as a search row does. */
 .logs-lens .switch .dot {
   display: inline-block;
   margin-right: 6px;

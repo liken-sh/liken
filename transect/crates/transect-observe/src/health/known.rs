@@ -1,12 +1,12 @@
-//! A custom resource's health, read from its own condition.  With kind
-//! knowledge, the condition that the knowledge names decides: `True` is
-//! healthy, `False` fails, and `Unknown` or a missing condition is a
-//! warning.  A `False` whose reason the knowledge lists as calm, such as
-//! `Idle`, means the object is at rest, so it is not a failure and the
-//! page draws it gray.  Without knowledge, a `Ready` condition decides
-//! the same way, by the convention of the standard `status.conditions`.
-//! When the resource has neither, it adds no reason, and its health is
-//! the roll-up of the workloads under it.
+//! A custom resource's health, read from one of its conditions.  When
+//! kind knowledge names a condition, that condition decides: `True` is
+//! healthy, `False` is failing, and `Unknown` or a missing condition is
+//! a warning.  A `False` with a reason that the knowledge lists in
+//! `calm`, such as `Idle`, means that the object is at rest, so it is not
+//! a failure and the page draws it gray.  When no kind knowledge names a
+//! condition, `Ready` decides in the same way, except that a resource
+//! with no `Ready` condition adds no reason, and its health is the
+//! roll-up of the workloads under it.
 
 use kube::core::DynamicObject;
 use serde_json::Value;
@@ -16,17 +16,17 @@ use transect_graph::edges::Object;
 use transect_graph::untrusted::capped;
 use transect_resources::knowledge::Kinds;
 
-/// The condition that decides the health of a resource with no kind
-/// knowledge.
+/// The condition that decides a resource's health when no kind knowledge
+/// names one.
 const READY: &str = "Ready";
 
 /// The maximum length, in characters, of a condition's reason or message
 /// on a card.
 const MESSAGE_CHARS: usize = 200;
 
-/// The reason `resource`, the custom resource `object`, adds to its
-/// health, or none when its condition is `True`, is `False` with a calm
-/// reason, or is missing with no kind knowledge to name it.
+/// The reason that `resource` adds to its own health.  It is `None` when
+/// the deciding condition is `True` or at rest, and when no kind
+/// knowledge names a condition and the resource has no `Ready`.
 pub fn condition(kinds: &Kinds, object: &Object, resource: &DynamicObject) -> Option<Reason> {
     let named = kinds.of_object(object).and_then(|k| k.healthy.as_deref());
     let found = named.or(Some(READY)).and_then(|name| find(resource, name));
@@ -60,12 +60,11 @@ pub fn condition(kinds: &Kinds, object: &Object, resource: &DynamicObject) -> Op
     })
 }
 
-/// The level that `resource`'s own condition gives it, for its dot.
-/// The level is the one that `condition` finds, or healthy when that
-/// condition is `True` or is `False` with a calm reason.  The function
-/// returns `None` when the resource
-/// reports no condition to read, so the page draws no dot for a kind
-/// with no `Ready` condition, rather than a healthy one.
+/// The level of `resource`'s dot on the page: the level of the reason
+/// from `condition`, or `Healthy` when the deciding condition is `True`
+/// or at rest.  It is `None` when `condition` returns no reason because
+/// the resource has no `Ready`, so such a kind gets no dot in place of a
+/// healthy one.
 pub fn reported(kinds: &Kinds, object: &Object, resource: &DynamicObject) -> Option<Level> {
     if let Some(reason) = condition(kinds, object, resource) {
         return Some(reason.level());
@@ -74,9 +73,9 @@ pub fn reported(kinds: &Kinds, object: &Object, resource: &DynamicObject) -> Opt
     find(resource, named.unwrap_or(READY)).map(|_| Level::Healthy)
 }
 
-/// Why `resource` is at rest, when its kind knowledge's condition is
-/// `False` with a calm reason: the condition's message, or its reason
-/// when it gives none.  The page shows it as a gray line.
+/// Why `resource` is at rest, when the condition that its kind knowledge
+/// names is `False` with a calm reason: the condition's message, or its
+/// reason when it has no message.  The page shows it as a gray line.
 pub fn resting(kinds: &Kinds, object: &Object, resource: &DynamicObject) -> Option<String> {
     let named = kinds.of_object(object)?.healthy.as_deref()?;
     let condition = find(resource, named)?;
@@ -87,8 +86,8 @@ pub fn resting(kinds: &Kinds, object: &Object, resource: &DynamicObject) -> Opti
     text("message").or_else(|| text("reason"))
 }
 
-/// Whether `condition`, the one `object`'s kind knowledge names, is a
-/// `False` with one of the knowledge's calm reasons.
+/// Whether `condition` is the condition that `object`'s kind knowledge
+/// names, with status `False` and one of the knowledge's calm reasons.
 fn calm(kinds: &Kinds, object: &Object, condition: &Value) -> bool {
     let Some(knowledge) = kinds.of_object(object) else {
         return false;
@@ -99,13 +98,12 @@ fn calm(kinds: &Kinds, object: &Object, condition: &Value) -> bool {
     named && field("status") == Some("False") && reason
 }
 
-/// The condition that decides an object's health, and the reasons that
-/// mean the object is at rest, for drawing its conditions.  The
-/// condition is the one that its kind knowledge names, or `Ready` when
-/// the knowledge names none.  Only that condition gets a color.  For any
-/// other condition, such as `AttentionNeeded`, transect cannot determine
-/// whether `True` is good, so it colors neither of that condition's
-/// values.
+/// Which condition decides an object's health, and which `False`
+/// reasons mean it is at rest, for drawing the object's conditions.  The
+/// deciding condition is the one that the kind knowledge names, or
+/// `Ready` when the knowledge names none.  Only that condition gets a
+/// color, because for any other condition, such as `AttentionNeeded`,
+/// `True` can be good or bad.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Deciding {
     pub condition: String,
@@ -136,9 +134,9 @@ impl Deciding {
         }
     }
 
-    /// The level of the condition `kind` with `status` and `reason`.
-    /// The function returns `None`, which the page draws gray, for any
-    /// condition but the deciding one, and for the deciding one at rest.
+    /// The level of the condition `kind` with `status` and `reason`.  It
+    /// is `None`, which the page draws gray, for any condition but the
+    /// deciding one, and for the deciding one at rest.
     pub fn level(&self, kind: &str, status: &str, reason: Option<&str>) -> Option<Level> {
         if kind != self.condition {
             return None;

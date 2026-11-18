@@ -1,16 +1,14 @@
 //! The `MetricsSource` resource: the Prometheus that transect queries
-//! for the figures that Kubernetes itself does not report, the queries
-//! that transect sends, and the Alertmanager whose alerts it reads.
-//! Which exporter writes which metric, which label a scrape
-//! configuration puts a `Node`'s name in, and how alert rules label
-//! their alerts all differ from one cluster to the next, so the cluster
-//! declares every query and convention.
+//! for the figures that Kubernetes does not report, the queries it
+//! sends, and the Alertmanager whose alerts it reads.  The cluster
+//! declares every query and label, because the exporters, the label
+//! that holds a `Node`'s name, and the labels on alerts differ from one
+//! cluster to the next.
 //!
 //! `--prometheus` takes precedence over the source's `url`, and `url`
-//! takes precedence over its `service`.  The address in the `alerts`
-//! section works the same way with `--alertmanager`.  Without a source,
-//! transect sends no queries, and each page names the declaration that
-//! would show the figures.
+//! over its `service`.  `--alertmanager` takes precedence over the
+//! address in `alerts`.  Without a source, transect sends no queries,
+//! and each page says which declaration would show the figures.
 
 use serde::Deserialize;
 
@@ -98,7 +96,7 @@ pub fn parse(doc: DocId, value: serde_yaml::Value) -> Result<MetricsSource, Stri
         }
         let labels = [&used.labels.namespace, &used.labels.claim];
         if labels.iter().any(|label| label.trim().is_empty()) {
-            return Err("queries.volumeUsed.labels names an empty label".into());
+            return Err("queries.volumeUsed.labels has an empty label".into());
         }
     }
     let usage = usage::Queries::read(
@@ -272,6 +270,6 @@ mod tests {
     #[case::alerts_with_no_severity_label("{alerts: {namespace: namespace}}", "severity")]
     fn says_why_a_source_does_not_validate(#[case] spec: &str, #[case] says: &str) {
         let error = parse(DocId::default(), document(spec)).unwrap_err();
-        assert!(error.contains(says), "{error:?} does not say {says:?}");
+        assert!(error.contains(says), "{error:?}, want {says:?}");
     }
 }

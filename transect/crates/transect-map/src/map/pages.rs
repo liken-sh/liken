@@ -1,7 +1,5 @@
-//! Which objects have a page, from the objects in the stores, the
-//! ownership, kind knowledge's relations, and GitOps.  `links` builds
-//! each page's URL, and this module decides whether a link to it is
-//! drawn.
+//! Decides which objects have a page, so that the map links only to a
+//! page that exists. `links` builds the URL of each page.
 
 use std::collections::HashMap;
 
@@ -11,24 +9,24 @@ use transect_graph::links;
 use transect_resources::knowledge::Relation;
 use transect_supply::gitops::GitOps;
 
-/// What decides which objects have a page: a pod and a Node always
-/// have one, and so does every object a store holds, a workload, a
-/// custom resource of a kind with knowledge, and a GitOps object, each at
-/// the URL its kind gives it.
+/// The inputs that decide which objects have a page. Every Node and
+/// every Pod with a namespace has one. So does every object in a store,
+/// every workload, every custom resource of a kind that transect has
+/// knowledge of, and every GitOps object.
 #[derive(Clone, Copy)]
 pub struct Pages<'a> {
-    /// Every object a store holds that has a page.
-    pub held: &'a std::collections::HashSet<Object>,
+    /// The objects in the stores that have a page.
+    pub with_pages: &'a std::collections::HashSet<Object>,
     pub ownership: &'a Ownership,
-    /// The custom resources of kinds with knowledge, whose links open
-    /// their boards.
+    /// The custom resources of kinds that transect has knowledge of.
     pub relations: &'a HashMap<Object, Vec<Relation>>,
     pub gitops: &'a GitOps,
     pub plurals: &'a Plurals,
 }
 
 impl Pages<'_> {
-    /// The page `object` opens, or none when it has none.
+    /// The URL of the page of `object`, or `None` when it has no page.
+    /// Every Namespace gets a URL, even one that `has` returns false for.
     pub fn href(&self, object: &Object) -> Option<String> {
         match (object.group.as_str(), object.kind.as_str()) {
             ("", "Node") => Some(links::machine(&object.name)),
@@ -48,7 +46,7 @@ impl Pages<'_> {
             ("", "Pod") => object.namespace.is_some(),
             _ => {
                 let namespace = object.namespace.as_deref().unwrap_or_default();
-                self.held.contains(object)
+                self.with_pages.contains(object)
                     || self.ownership.workloads(namespace).any(|w| w == object)
                     || self.relations.contains_key(object)
                     || self.gitops.found(object).is_some()
@@ -121,7 +119,7 @@ mod tests {
         let (ownership, plurals) = (ownership(), plurals());
         let relations = HashMap::new();
         let gitops = GitOps::off(transect_supply::gitops::Off::NoKnowledge);
-        let held = std::collections::HashSet::from([
+        let with_pages = std::collections::HashSet::from([
             Object::new("", "Service", Some("shop"), "web"),
             Object::new("rbac.authorization.k8s.io", "ClusterRole", None, "view"),
             Object::new("", "PersistentVolume", None, "pv-1"),
@@ -134,7 +132,7 @@ mod tests {
             ),
         ]);
         let pages = Pages {
-            held: &held,
+            with_pages: &with_pages,
             ownership: &ownership,
             relations: &relations,
             gitops: &gitops,

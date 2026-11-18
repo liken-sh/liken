@@ -1,5 +1,4 @@
-//! The words the entry shows.  Everything else in it is a name, a
-//! host, a class, or a number from the cluster.
+//! The text of a workload page's `Service` and `Ingress` boxes.
 
 use super::Entry;
 use super::ingress::{IngressBox, Tls};
@@ -8,7 +7,6 @@ use transect_graph::edges::Object;
 use transect_graph::links::Reference;
 
 impl Entry {
-    /// "Service", or "Services" when more than one selects the workload.
     pub fn services_heading(&self) -> &'static str {
         match self.services.len() {
             1 => "Service",
@@ -18,8 +16,8 @@ impl Entry {
 }
 
 impl IngressBox {
-    /// The line under its hosts: "web · TLS from public", "web · TLS",
-    /// or "web · no TLS", without the class when it names none.
+    /// "web · TLS from public", "web · TLS", or "web · no TLS", where
+    /// `web` is the class and is left out when there is none.
     pub fn serving(&self) -> String {
         match self.issuer() {
             Some(issuer) => format!("{} {}", self.serving_words(), issuer.text),
@@ -27,8 +25,8 @@ impl IngressBox {
         }
     }
 
-    /// The line under its hosts up to its issuer's name, which a page
-    /// draws as a link after it: "web · TLS from".
+    /// `serving` without the issuer's name, so that a template can
+    /// write the name as a link after it: "web · TLS from".
     pub fn serving_words(&self) -> String {
         let tls = match &self.tls {
             Tls::None => "no TLS",
@@ -41,7 +39,6 @@ impl IngressBox {
         }
     }
 
-    /// The issuer of its certificate, when one is named.
     pub fn issuer(&self) -> Option<&Reference> {
         match &self.tls {
             Tls::Issuer(issuer) => Some(issuer),
@@ -49,7 +46,6 @@ impl IngressBox {
         }
     }
 
-    /// The `Ingress`'s own page.
     pub fn href(&self) -> Option<String> {
         let object = Object::new(
             "networking.k8s.io",
@@ -60,7 +56,7 @@ impl IngressBox {
         transect_graph::links::page(&object, &Default::default())
     }
 
-    /// A rule with no host, or none at all, answers for every host.
+    /// The hosts, or "any host" when no rule sets one.
     pub fn host_lines(&self) -> Vec<String> {
         if self.hosts.is_empty() {
             return vec!["any host".into()];
@@ -70,7 +66,6 @@ impl IngressBox {
 }
 
 impl ServiceBox {
-    /// The `Service`'s own page.
     pub fn href(&self) -> Option<String> {
         let object = Object::new("", "Service", Some(&self.namespace), &self.name);
         transect_graph::links::page(&object, &Default::default())
@@ -93,8 +88,8 @@ impl ServiceBox {
         }
     }
 
-    /// Whether some endpoint is not ready, or there are none to send
-    /// requests to.
+    /// True when the `Service` has no endpoints or some of them are not
+    /// ready.  The template marks such a box.
     pub fn short(&self) -> bool {
         self.endpoints.total == 0 || self.endpoints.ready < self.endpoints.total
     }
@@ -162,11 +157,11 @@ mod tests {
         let services = (0..count)
             .map(|_| service("ClusterIP", &[], 1, 1))
             .collect();
-        let door = Entry {
+        let entry = Entry {
             ingresses: vec![],
             services,
         };
-        assert_eq!(door.services_heading(), heading);
+        assert_eq!(entry.services_heading(), heading);
     }
 
     #[rstest]

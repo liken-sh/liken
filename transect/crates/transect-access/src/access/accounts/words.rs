@@ -1,14 +1,15 @@
-//! The sentences in a cell's title: where a binding grants the
-//! capability and through which binding and role, or the step that the
-//! capability follows by.
+//! The hover text of a matrix cell: where a binding grants the
+//! capability and through which binding and role, or how the capability
+//! follows from other capabilities.
 
 use super::super::account::{Account, AppliesAs, Hop, Via, Where};
 use super::super::{Access, Capability, Follow};
 use transect_graph::edges::Object;
 
-/// `binding` and `role` as a clause names them: ", through
-/// ClusterRoleBinding admins, to ClusterRole cluster-admin", after the
-/// group it names when it names one.
+/// The clause that says which binding and role give a grant, such as
+/// ", through ClusterRoleBinding admins, to ClusterRole cluster-admin".
+/// When the grant comes through a group, the clause starts with ", as a
+/// member of Group ...".
 fn through(via: &Via) -> String {
     let group = match &via.group {
         Some(group) => format!(", as a member of Group {group}"),
@@ -21,8 +22,8 @@ fn through(via: &Via) -> String {
     )
 }
 
-/// A binding or a role as `Kind namespace/name`, or as `Kind name` when
-/// it is in no namespace.
+/// An object as `Kind namespace/name`, or as `Kind name` when it has no
+/// namespace.
 pub fn named(object: &Object) -> String {
     match &object.namespace {
         Some(namespace) => format!("{} {namespace}/{}", object.kind, object.name),
@@ -30,14 +31,14 @@ pub fn named(object: &Object) -> String {
     }
 }
 
-/// A role as its binding names it: a Role by name alone, since it is in
-/// its binding's namespace.
+/// A role as `Kind name`, without a namespace, because a binding can
+/// reference a Role only in its own namespace.
 fn role(object: &Object) -> String {
     format!("{} {}", object.kind, object.name)
 }
 
-/// "May read Secrets in shop, for the object named api-token only,
-/// through …".
+/// The sentence for a grant, such as "May read Secrets in shop, for the
+/// object named api-token only, through …".
 pub fn granted(capability: Capability, at: &Where, via: &Via) -> String {
     let names = match via.names.as_slice() {
         [] => String::new(),
@@ -52,9 +53,9 @@ pub fn granted(capability: Capability, at: &Where, via: &Via) -> String {
     )
 }
 
-/// How `account` has `capability` at `at`, as a clause after its
-/// name: ", through …" for a grant, or ", which follows from its own
-/// grants" for a step.
+/// The clause after an account's name that says how `account` has
+/// `capability` at `at`: ", through …" for a grant that is not limited
+/// to named objects, or ", which follows from its own grants" otherwise.
 fn source(access: &Access, account: &Account, capability: Capability, at: &Where) -> String {
     let cell = access
         .of(account)
@@ -70,8 +71,11 @@ fn source(access: &Access, account: &Account, capability: Capability, at: &Where
     }
 }
 
+/// The sentence for a capability that follows by `follow.hop`, such as
 /// "It may run as ServiceAccount ops/admin: it may run pods in ops, …
-/// ServiceAccount ops/admin may grant roles in every namespace, …".
+/// ServiceAccount ops/admin may grant roles in every namespace, …".  It
+/// gives the capability that allows the step, and then what the target
+/// account may do.
 pub fn follows(
     access: &Access,
     account: &Account,
@@ -207,9 +211,9 @@ pub fn follows(
     }
 }
 
-/// The step in a few words, for the line under a row's roles: the
-/// words before the account it goes through, the account, and the
-/// words after it.
+/// A short description of `hop` for the line under a row's roles: the
+/// text before the account, the account the step goes through, if any,
+/// and the text after it.
 pub fn step(hop: &Hop) -> (&'static str, Option<&Account>, &'static str) {
     match hop {
         Hop::RunsAs { account, .. } => ("may run as ", Some(account), ""),
@@ -233,7 +237,7 @@ mod granted_tests {
     #[rstest]
     #[case::one_name(&["sources"], "May read Secrets in every namespace, for the object named sources only, through ClusterRoleBinding readers, to ClusterRole reader.")]
     #[case::two_names(&["a", "b"], "May read Secrets in every namespace, for the objects named a, b only, through ClusterRoleBinding readers, to ClusterRole reader.")]
-    fn says_a_grant_limited_by_name_as_a_limit(#[case] names: &[&str], #[case] said: &str) {
+    fn writes_the_names_a_grant_is_limited_to(#[case] names: &[&str], #[case] said: &str) {
         let via = Via {
             binding: Object::new(
                 "rbac.authorization.k8s.io",
