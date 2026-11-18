@@ -1,29 +1,14 @@
 package main
 
-// Writing to the radio. The rest of this operator only reads it.
+// The radio interface collects the D-Bus calls that change bluetoothd:
+// the pairing window, pairing, trust, aliases, connections, adapter
+// power, and bond removal. Tests replace it with fakeRadio, so they run
+// the controllers without a bus.
 //
-// Publishing a slice needs one question answered: which controllers
-// are paired, and which of them are connected. The pairing API needs
-// more. It opens a discovery window, it pairs a device a person
-// approved, it trusts that device so it reconnects on its own, it
-// renames a device and the radio itself, and it removes a bond. The
-// input recovery reconnects a controller, and powers the radio off and
-// on when bluetoothd does not disconnect one (inputrecovery.go). Every
-// one of those is a D-Bus call into bluetoothd, and one interface
-// collects them so that a test can drive the controllers above
-// without a bus.
-//
-// The window is short on purpose. An adapter that stays pairable and
-// discoverable is the exposure a window exists to bound, so the
-// operator sets BlueZ's own PairableTimeout and DiscoverableTimeout
-// to the window's length as well. If the operator dies mid-window,
-// bluetoothd closes the window on its own at that deadline.
-//
-// The agent is registered for the window and unregistered when the
-// window closes, for the same reason. It reports the NoInputNoOutput
-// capability, which pairs a game controller, and it accepts a service
-// authorization, so it must not stay registered while no window is
-// open.
+// Any device nearby can pair with an adapter that is pairable and
+// discoverable. So OpenWindow also sets BlueZ's PairableTimeout and
+// DiscoverableTimeout, and bluetoothd closes the window at that
+// deadline even when the operator has stopped.
 
 import (
 	"context"
@@ -42,55 +27,48 @@ const (
 	agentInterface        = "org.bluez.Agent1"
 	propertiesInterface   = "org.freedesktop.DBus.Properties"
 
-	// agentPath is the bus path of this operator's agent object. The
-	// path is the operator's own, not BlueZ's, because the agent is
-	// an object this program exports and bluetoothd calls back into.
+	// agentPath is the object that this program exports for bluetoothd
+	// to call during a pairing.
 	agentPath = dbus.ObjectPath("/sh/liken/bluetooth/agent")
 
-	// agentCapability states what the operator can do during a pairing.
-	// It has no display and no keypad, and that is the combination a
-	// game controller pairs with: BlueZ runs Just Works and asks the
-	// agent for nothing but an authorization. A device that needs a
-	// passkey shown and typed is out of scope for this API version.
+	// agentCapability tells BlueZ that the machine has no display and
+	// no keypad, so BlueZ pairs with the Just Works method. A game
+	// controller pairs that way. A device that needs a passkey cannot
+	// pair through this operator.
 	agentCapability = "NoInputNoOutput"
 )
 
 const (
-	// pairTimeout bounds a Device1.Pair call. The call does not return
-	// until the bond completes or bluetoothd's own timeout ends the
-	// attempt, and the reconcile loop is one goroutine, so an unbounded
-	// call would stall every other thing the loop does. bluetoothd's
-	// own bonding timeout is shorter than this on every path that
-	// reaches the radio link.
+	// pairTimeout bounds Device1.Pair, which returns when the bond
+	// completes or bluetoothd gives up. Pair runs on the reconcile
+	// loop's goroutine, so a call with no bound would stop every pass.
+	// bluetoothd's own bonding timeout is shorter than this on every
+	// path that reaches the radio link.
 	pairTimeout = 30 * time.Second
 
-	// connectTimeout bounds Device1.Connect, which returns only when
-	// the link is up or the page failed. A page at a speaker that is
-	// switched off takes several seconds. The call runs off the
-	// reconcile loop, so the bound is on the attempt and not on the
-	// pass.
+	// connectTimeout bounds Device1.Connect, which returns when the link
+	// is up or the page failed. Paging a speaker that is switched off
+	// takes several seconds. Connect runs outside the reconcile loop, so
+	// this bound delays one attempt and no pass.
 	connectTimeout = 30 * time.Second
 
-	// callTimeout bounds every other call. Each one is a local method
-	// call to a daemon in the same pod, so a call that takes seconds
-	// means the daemon has already failed.
+	// callTimeout bounds every other call. bluetoothd runs in the same
+	// pod, so a call that takes seconds means bluetoothd has failed.
 	callTimeout = 10 * time.Second
 )
 
-// ErrNoDevice reports that bluetoothd holds no device object for an
-// address. It is the ordinary result for a controller that is out of
-// range: BlueZ keeps a device object for a paired device, and drops
-// every object for a device it only detected when the scan's results
-// age out.
-var ErrNoDevice = errors.New("bluetoothd holds no object for that device")
+// ErrNoDevice reports that bluetoothd has no device object for an
+// address. That is the normal result for a device that was never paired
+// and is out of range, because BlueZ deletes an unpaired device's object
+// after its TemporaryTimeout. BlueZ keeps the object of a paired device.
+var ErrNoDevice = errors.New("bluetoothd has no object for the device")
 
-// adapterState is the radio itself, as bluetoothd reports it.
+// adapterState is the adapter's properties, as bluetoothd reports them.
 //
-// Connectable is whether the radio answers a page: the inbound
-// connection a bonded controller's reconnect button makes. The
-// operator pages a bonded speaker itself (connect.go), so the setting
-// covers the inbound direction only. It is separate from
-// Discoverable, which only controls the inquiry scan a pairing needs.
+// Connectable is the page scan. When it is false, the adapter refuses
+// incoming connections, so a bonded controller cannot reconnect when a
+// person presses its button. Discoverable is the inquiry scan, which
+// only a first pairing needs.
 type adapterState struct {
 	Address      bonds.Address
 	Alias        string
@@ -101,19 +79,16 @@ type adapterState struct {
 	Pairable     bool
 }
 
-// deviceState is one device object, as bluetoothd reports it. A device
-// object exists for every device the radio detected recently as well as
-// for every device it holds a bond with, and Paired is what separates
-// the two.
+// deviceState is one device object, as bluetoothd reports it.
+// bluetoothd has an object for each device that the adapter detected
+// recently and for each device that it has a bond with. Paired tells
+// them apart.
 //
-// UUIDs are the profile UUIDs from the SDP browse. classify.go decodes
-// them, so the pass tells an audio sink from an input device out of
-// the same snapshot it reads everything else from.
+// UUIDs are the profile UUIDs from the SDP browse. classify.go reads
+// them to tell an audio sink from an input device.
 //
-// AddressType is public or random, the one field that separates a Low
-// Energy device from a classic one. Battery is nil for a device that
-// reports no level, which is every device with no battery and every
-// battery device that is not connected.
+// AddressType is "public" or "random". Only a Low Energy device has a
+// random address. Battery is nil when the device reports no level.
 type deviceState struct {
 	Address     bonds.Address
 	Name        string
@@ -122,8 +97,8 @@ type deviceState struct {
 	AddressType string
 	Paired      bool
 
-	// Bonded is BlueZ's report that the link key is stored. Paired alone
-	// does not state that.
+	// Bonded is true when BlueZ has stored the link key. Paired alone
+	// does not guarantee that.
 	Bonded bool
 
 	Connected bool
@@ -134,24 +109,21 @@ type deviceState struct {
 
 // deviceBattery is one device's org.bluez.Battery1 interface.
 //
-// BlueZ fills Percentage from the GATT Battery Service on a Low Energy
-// device, from a HID battery report, and from any battery provider a
-// sound server registers. Source names which of those it read.
+// BlueZ takes Percentage from the GATT Battery Service of a Low Energy
+// device, from a HID battery report, or from a battery provider that a
+// sound server registers. Source records which of these it used.
 type deviceBattery struct {
 	Percentage int
 	Source     string
 }
 
-// radioSnapshot is one read of bluetoothd's whole object tree. Every
-// pass takes one and derives everything from it, the same way the
-// publisher re-reads the tree instead of keeping a cache built from
-// signal payloads.
+// radioSnapshot is one read of bluetoothd's whole object tree. Each
+// pass reads a new one, instead of keeping state from D-Bus signals.
 type radioSnapshot struct {
 	Adapter adapterState
 	Devices []deviceState
 }
 
-// device returns one device out of the snapshot.
 func (s radioSnapshot) device(address bonds.Address) (deviceState, bool) {
 	for _, device := range s.Devices {
 		if device.Address == address {
@@ -161,55 +133,48 @@ func (s radioSnapshot) device(address bonds.Address) (deviceState, bool) {
 	return deviceState{}, false
 }
 
-// radio is the interface the pairing controllers act on bluetoothd
-// through. The operator holds an implementation over D-Bus, and the
-// tests hold one that records the calls and replies from a fixture.
+// radio is how the controllers call bluetoothd. blueZRadio implements
+// it over D-Bus.
 type radio interface {
 	// Snapshot reads the adapter and every device object in one call.
-	// It returns ErrNoAdapter when bluetoothd published no adapter,
-	// which happens during startup and after the dongle departs.
+	// It returns ErrNoAdapter when bluetoothd has published no adapter,
+	// which happens during startup and after the adapter is unplugged.
 	Snapshot() (radioSnapshot, error)
 
 	SetAdapterAlias(alias string) error
 
-	// SetAdapterConnectable turns the page scan on or off. A fresh
-	// bluetoothd starts the adapter with it off, and a radio that is
-	// not connectable answers no bonded device, so the reconcile pass
-	// asserts it on.
 	SetAdapterConnectable(connectable bool) error
 
-	// SetAdapterPowered powers the radio on or off through bluetoothd.
-	// A power-off drops every link on the radio.
+	// SetAdapterPowered powers the adapter on or off. A power-off
+	// drops every connection.
 	SetAdapterPowered(powered bool) error
 
 	SetDeviceAlias(device bonds.Address, alias string) error
 	SetDeviceTrusted(device bonds.Address, trusted bool) error
 
-	// OpenWindow makes the radio pairable, discoverable, and scanning
-	// for the given length of time, with the operator's agent
-	// registered. CloseWindow undoes all of that.
+	// OpenWindow makes the adapter pairable, discoverable, and
+	// scanning for the given length of time, with the operator's agent
+	// registered. CloseWindow reverses all of that.
 	OpenWindow(window time.Duration) error
 	CloseWindow() error
 
 	Pair(device bonds.Address) error
 
-	// Connect pages a bonded device and returns when the link is up
-	// or when the page failed, so the caller runs it off the reconcile
-	// loop.
+	// Connect pages a bonded device and returns when the link is up or
+	// the page failed. The caller runs it outside the reconcile loop.
 	Connect(device bonds.Address) error
 
 	Disconnect(device bonds.Address) error
 	Remove(device bonds.Address) error
 }
 
-// blueZRadio is the radio, over the bus in this pod.
+// blueZRadio calls bluetoothd over the D-Bus connection in this pod.
 type blueZRadio struct {
 	conn *dbus.Conn
 
-	// agentExported records that the agent object is on the bus. The
-	// object is exported once and registered with BlueZ at each window,
-	// because an export is this process's own state and a registration
-	// is bluetoothd's.
+	// agentExported is true once the agent object is exported on the
+	// bus. The export lasts for the connection, and registerAgent
+	// registers the agent with BlueZ again for each window.
 	agentExported bool
 }
 
@@ -237,14 +202,12 @@ func (r *blueZRadio) Snapshot() (radioSnapshot, error) {
 	return snapshotFrom(objects)
 }
 
-// snapshotFrom reads the adapter and the devices out of one tree. It is
-// separate from the call so that the rules below are testable without a
-// bus.
+// snapshotFrom builds a snapshot from one object tree, without a bus,
+// so that tests can call it.
 //
-// It selects the adapter at the lowest object path, so that two reads
-// of the same tree select the same adapter. A map's iteration order
-// alone would not give that. A pod claims one adapter, so a second
-// one is not expected.
+// A pod claims one adapter. If the tree has more, snapshotFrom takes
+// the one with the lowest object path, so that every read of the same
+// tree returns the same adapter whatever the map order.
 func snapshotFrom(objects map[dbus.ObjectPath]map[string]map[string]dbus.Variant) (radioSnapshot, error) {
 	snapshot := radioSnapshot{}
 	chosen := ""
@@ -318,13 +281,10 @@ func snapshotFrom(objects map[dbus.ObjectPath]map[string]map[string]dbus.Variant
 	return snapshot, nil
 }
 
-// batteryFrom reads one device's charge out of the interfaces the same
-// managed-objects call returned.
-//
-// The level costs no second call, because BlueZ publishes Battery1
-// beside Device1 on the device object. A device with no battery has no
-// Battery1 interface at all, and neither does a battery device that is
-// not connected, so an absent interface is the ordinary case.
+// batteryFrom reads org.bluez.Battery1, which BlueZ publishes on the
+// device object beside Device1. A device with no battery has no
+// Battery1, and neither does a battery device that is not connected,
+// so nil is a normal result.
 func batteryFrom(interfaces map[string]map[string]dbus.Variant) *deviceBattery {
 	properties, ok := interfaces[batteryInterface]
 	if !ok {
@@ -338,12 +298,11 @@ func batteryFrom(interfaces map[string]map[string]dbus.Variant) *deviceBattery {
 	return &deviceBattery{Percentage: int(percentage), Source: source}
 }
 
-// adapterPath and devicePath find the object paths this operator calls
-// methods on. Every
-// actuation re-reads the tree rather than building a path from an
-// address, because a fresh read is also the check that the object is
-// still there, and a call against a path that went away is an error the
-// caller would have to tell apart from a real failure.
+// adapterPath and devicePath read the tree to find the object to call,
+// instead of building a path from an address. So a device that has no
+// object returns ErrNoDevice, which callers handle, instead of a D-Bus
+// error that looks like a failure. adapterPath returns the same
+// adapter that snapshotFrom chooses.
 func (r *blueZRadio) adapterPath() (dbus.ObjectPath, error) {
 	objects, err := readObjectTree(r.conn)
 	if err != nil {
@@ -383,18 +342,13 @@ func (r *blueZRadio) devicePath(device bonds.Address) (dbus.ObjectPath, error) {
 	return "", fmt.Errorf("%s: %w", device, ErrNoDevice)
 }
 
-// call runs one method with a bound on how long it may take. None of
-// the methods here returns a value, so the call's own error is the
-// whole result.
+// call runs a method that returns no value.
 func (r *blueZRadio) call(path dbus.ObjectPath, method string, timeout time.Duration, args ...any) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	return r.conn.Object(bluezService, path).CallWithContext(ctx, method, 0, args...).Err
 }
 
-// setProperty writes one property through the standard properties
-// interface. BlueZ exposes Pairable, Discoverable, the two timeouts,
-// Alias, and Trusted as writable properties rather than as methods.
 func (r *blueZRadio) setProperty(path dbus.ObjectPath, iface, name string, value any) error {
 	return r.call(path, propertiesInterface+".Set", callTimeout, iface, name, dbus.MakeVariant(value))
 }
@@ -439,14 +393,9 @@ func (r *blueZRadio) SetDeviceTrusted(device bonds.Address, trusted bool) error 
 	return r.setProperty(path, deviceInterface, "Trusted", trusted)
 }
 
-// OpenWindow puts the radio into the state a first pairing needs, and
-// gives bluetoothd the same deadline the request states.
-//
-// The order matters. The timeouts go on before the two flags, because
-// BlueZ starts counting a timeout when the flag turns on, and a
-// timeout written afterwards would restart the count. Discovery starts
-// last, because the scan fills status.seen and it is the part a person
-// waits on.
+// OpenWindow writes the timeouts before the Pairable and Discoverable
+// flags, because BlueZ starts counting a timeout when its flag turns
+// on, and a timeout written afterwards would restart the count.
 func (r *blueZRadio) OpenWindow(window time.Duration) error {
 	path, err := r.adapterPath()
 	if err != nil {
@@ -468,22 +417,18 @@ func (r *blueZRadio) OpenWindow(window time.Duration) error {
 	if err := r.setProperty(path, adapterInterface, "Discoverable", true); err != nil {
 		return err
 	}
-	// A discovery that is already running returns
-	// org.bluez.Error.InProgress, and the operator re-asserts the window
-	// on every pass, so that error is the ordinary case and not a
-	// failure.
+	// The operator calls OpenWindow on every pass of an open window, so
+	// discovery is often running already, and BlueZ then returns
+	// org.bluez.Error.InProgress.
 	if err := r.call(path, adapterInterface+".StartDiscovery", callTimeout); err != nil && !inProgress(err) {
 		return err
 	}
 	return nil
 }
 
-// CloseWindow returns the radio to its idle state: not scanning, not
-// discoverable, not pairable, and with no agent registered.
-//
-// Every step runs even when an earlier one failed, because each one
-// closes a different exposure and a failure to stop the scan is no
-// reason to leave the radio pairable.
+// CloseWindow runs every step even when an earlier step failed, so
+// that a failure to stop discovery does not leave the adapter pairable.
+// It returns the first error.
 func (r *blueZRadio) CloseWindow() error {
 	path, err := r.adapterPath()
 	if err != nil {
@@ -495,9 +440,8 @@ func (r *blueZRadio) CloseWindow() error {
 			failure = err
 		}
 	}
-	// A stop with no discovery running returns
-	// org.bluez.Error.Failed, which is the ordinary result after the
-	// adapter's own timeout already ended the scan.
+	// notRunning accepts the error that StopDiscovery returns when no
+	// discovery is running.
 	if err := r.call(path, adapterInterface+".StopDiscovery", callTimeout); err != nil && !notRunning(err) {
 		record(err)
 	}
@@ -526,8 +470,7 @@ func (r *blueZRadio) Connect(device bonds.Address) error {
 func (r *blueZRadio) Disconnect(device bonds.Address) error {
 	path, err := r.devicePath(device)
 	if errors.Is(err, ErrNoDevice) {
-		// With no device object there is no connection, so the
-		// disconnect's goal is already met.
+		// A device with no object has no connection to close.
 		return nil
 	}
 	if err != nil {
@@ -536,10 +479,8 @@ func (r *blueZRadio) Disconnect(device bonds.Address) error {
 	return r.call(path, deviceInterface+".Disconnect", callTimeout)
 }
 
-// Remove deletes the bond. bluetoothd removes the device's object, the
-// link key from the kernel, and the device's directory under
-// /var/lib/bluetooth, so the operator's next pass reads a tree with one
-// bond fewer.
+// Remove calls RemoveDevice, which deletes the device object and its
+// stored bond. A device with no object has no bond to delete.
 func (r *blueZRadio) Remove(device bonds.Address) error {
 	adapter, err := r.adapterPath()
 	if err != nil {

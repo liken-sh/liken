@@ -1,9 +1,9 @@
 package main
 
-// These tests cover the press the relay writes when a sleeping remote
-// connects, over the fake kernel in inputkernel_test.go. What they
-// assert is what a consumer of the remote's claim reads on the virtual
-// node: one press and one release of KEY_UNKNOWN, or nothing.
+// These tests run the relay against the fake kernel in
+// inputkernel_test.go and check what a consumer reads from the virtual
+// node when a sleeping remote reconnects: one press and release of
+// KEY_UNKNOWN, or nothing.
 
 import (
 	"bytes"
@@ -13,9 +13,10 @@ import (
 	"time"
 )
 
-// The remote's two evdev nodes. The first holds keyboard codes, and the
-// second holds consumer keys above BTN_MISC only, the way a gamepad's
-// buttons are.
+// The remote's evdev nodes. remoteKeys reports keyboard codes, and
+// remoteButtons reports only codes above BTN_MISC, like the buttons of a
+// gamepad. remoteKeysAgain is the keyboard node after a reconnect, which
+// the kernel registers under a new number.
 const (
 	remoteMAC        = "c2:11:22:33:44:55"
 	remoteKeys       = "/dev/input/event10"
@@ -25,19 +26,19 @@ const (
 	remoteButtonName = "T6-Remote Buttons"
 )
 
-// sleptAt is when the pass wrote Asleep for the remote.
+// sleptAt is the lastTransitionTime of the Asleep condition.
 var sleptAt = testNow.Add(-time.Hour)
 
-// asleep is the Connected condition a pass writes for a remote whose
-// link timed out at a given time.
+// asleep returns the Connected condition that a pass writes for a
+// remote whose link timed out at the given time.
 func asleep(at time.Time) Condition {
 	return Condition{Type: conditionConnected, Status: conditionFalse, Reason: reasonAsleep, LastTransitionTime: at}
 }
 
-// sleptRemote is a relay desk over a fake kernel that answers for the
-// remote's two nodes, with its clock at testNow and a prepared claim
-// that demands the classes given.
-func sleptRemote(t *testing.T, demand inputClasses) (*relays, *fakeKernel) {
+// sleptRemote returns relays on a fake kernel that has the remote's
+// nodes, with the clock at testNow. When classes is not zero, a
+// prepared claim requests those input classes.
+func sleptRemote(t *testing.T, classes inputClasses) (*relays, *fakeKernel) {
 	t.Helper()
 	kernel := newFakeKernel()
 	kernel.capabilities[remoteKeys] = evdevCapabilities{
@@ -45,25 +46,24 @@ func sleptRemote(t *testing.T, demand inputClasses) (*relays, *fakeKernel) {
 		ID:    evdevID{Bus: 0x0005},
 		Codes: map[string][]uint16{"EV_KEY": {0x67, 0x6c}, "EV_MSC": {0x04}},
 	}
-	// A reconnect registers the same node on a new number.
 	kernel.capabilities[remoteKeysAgain] = kernel.capabilities[remoteKeys]
 	kernel.capabilities[remoteButtons] = evdevCapabilities{
 		Name:  remoteButtonName,
 		ID:    evdevID{Bus: 0x0005},
 		Codes: map[string][]uint16{"EV_KEY": {0x130, 0x131}},
 	}
-	held := newRelays(kernel)
-	held.metrics = newMetrics()
-	held.now = func() time.Time { return testNow }
-	t.Cleanup(func() { held.stop(remoteMAC) })
-	if demand != 0 {
-		held.prepare(remoteMAC, "claim-1", delivery{classes: demand})
+	relay := newRelays(kernel)
+	relay.metrics = newMetrics()
+	relay.now = func() time.Time { return testNow }
+	t.Cleanup(func() { relay.stop(remoteMAC) })
+	if classes != 0 {
+		relay.prepare(remoteMAC, "claim-1", inputSettings{classes: classes})
 	}
-	return held, kernel
+	return relay, kernel
 }
 
-// wakePressRecords is what the relay writes for one wake: a press and a
-// release of KEY_UNKNOWN, each followed by SYN_REPORT.
+// wakePressRecords returns the bytes of one press and one release of
+// KEY_UNKNOWN, each followed by SYN_REPORT.
 func wakePressRecords() []byte {
 	return bytes.Join([][]byte{
 		rawEvent(evKey, keyUnknown, 1),
@@ -73,7 +73,8 @@ func wakePressRecords() []byte {
 	}, nil)
 }
 
-// virtualOf answers the virtual device the relay made for a node name.
+// virtualOf returns the virtual device that the relay created for the
+// node with the given name.
 func virtualOf(t *testing.T, kernel *fakeKernel, name string) *fakeVirtual {
 	t.Helper()
 	kernel.mu.Lock()
@@ -83,21 +84,22 @@ func virtualOf(t *testing.T, kernel *fakeKernel, name string) *fakeVirtual {
 			return device
 		}
 	}
-	t.Fatalf("the relay made no virtual device for %q", name)
+	t.Fatalf("the relay created no virtual device named %q, want one", name)
 	return nil
 }
 
-// An armed remote that slept for longer than 10 seconds gets one press
-// on its first keyboard node, and the node with no keyboard code gets
-// none. The press disarms the remote, so a node opened again gets none.
+// A remote that slept for longer than wakeAfter gets one press on
+// its keyboard node, and the node with no keyboard code gets none. The
+// press disarms the remote, so the node opened again after a reconnect
+// gets none.
 func TestAWakingRemoteGetsOnePressOnItsKeyboardNode(t *testing.T) {
-	held, kernel := sleptRemote(t, everyInputClass)
-	held.follow(remoteMAC, asleep(sleptAt))
+	relay, kernel := sleptRemote(t, everyInputClass)
+	relay.follow(remoteMAC, asleep(sleptAt))
 
-	held.ensure(remoteMAC, []string{remoteButtons, remoteKeys})
+	relay.ensure(remoteMAC, []string{remoteButtons, remoteKeys})
 	kernel.writer(t, remoteKeys).Close()
 	waitFor(t, "the relay to open the node again", func() bool {
-		held.ensure(remoteMAC, []string{remoteButtons, remoteKeysAgain})
+		relay.ensure(remoteMAC, []string{remoteButtons, remoteKeysAgain})
 		return kernel.opened() == 3
 	})
 
@@ -107,63 +109,63 @@ func TestAWakingRemoteGetsOnePressOnItsKeyboardNode(t *testing.T) {
 	if got := virtualOf(t, kernel, remoteButtonName).received(); len(got) != 0 {
 		t.Errorf("the node with no keyboard code received %x, want nothing", got)
 	}
-	if count, found := metricValue(t, held.metrics.registry,
+	if count, found := metricValue(t, relay.metrics.registry,
 		"bluetooth_wake_presses_total", map[string]string{"peripheral": "c2-11-22-33-44-55"}); !found || count != 1 {
 		t.Errorf("bluetooth_wake_presses_total = %v (found: %v), want 1", count, found)
 	}
 }
 
-// Each case opens the remote's keyboard node once, and the relay writes
-// nothing into it.
+// In each case the relay opens the remote's keyboard node and writes
+// nothing to it.
 func TestTheRelayWritesNoPress(t *testing.T) {
 	cases := []struct {
-		name   string
-		demand inputClasses
-		arm    func(*relays)
+		name    string
+		classes inputClasses
+		arm     func(*relays)
 	}{
 		{
-			name:   "a remote that is not armed",
-			demand: everyInputClass,
-			arm:    func(*relays) {},
+			name:    "a remote that is not armed",
+			classes: everyInputClass,
+			arm:     func(*relays) {},
 		},
 		{
-			name:   "a remote that connects within 10 seconds of the sleep",
-			demand: everyInputClass,
-			arm:    func(r *relays) { r.follow(remoteMAC, asleep(testNow.Add(-9*time.Second))) },
+			name:    "a remote that connects within 10 seconds of the sleep",
+			classes: everyInputClass,
+			arm:     func(r *relays) { r.follow(remoteMAC, asleep(testNow.Add(-9*time.Second))) },
 		},
 		{
-			name:   "a remote that a pass found connected",
-			demand: everyInputClass,
+			name:    "a remote that a pass found connected",
+			classes: everyInputClass,
 			arm: func(r *relays) {
 				r.follow(remoteMAC, asleep(sleptAt))
 				r.follow(remoteMAC, Condition{Type: conditionConnected, Status: conditionTrue, Reason: reasonLinkUp, LastTransitionTime: testNow})
 			},
 		},
 		{
-			name:   "a remote whose link the radio closed",
-			demand: everyInputClass,
+			name:    "a remote whose link the radio closed",
+			classes: everyInputClass,
 			arm: func(r *relays) {
 				r.follow(remoteMAC, asleep(sleptAt))
 				r.follow(remoteMAC, Condition{Type: conditionConnected, Status: conditionFalse, Reason: reasonClosedByRadio, LastTransitionTime: sleptAt})
 			},
 		},
 		{
-			name:   "a remote no claim holds",
-			demand: 0,
-			arm:    func(r *relays) { r.follow(remoteMAC, asleep(sleptAt)) },
+			name:    "a remote no claim holds",
+			classes: 0,
+			arm:     func(r *relays) { r.follow(remoteMAC, asleep(sleptAt)) },
 		},
 		{
-			name:   "a remote whose claim masks out EV_KEY",
-			demand: classSwitch,
-			arm:    func(r *relays) { r.follow(remoteMAC, asleep(sleptAt)) },
+			name:    "a remote whose claim masks out EV_KEY",
+			classes: classSwitch,
+			arm:     func(r *relays) { r.follow(remoteMAC, asleep(sleptAt)) },
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			held, kernel := sleptRemote(t, c.demand)
-			c.arm(held)
+			relay, kernel := sleptRemote(t, c.classes)
+			c.arm(relay)
 
-			held.ensure(remoteMAC, []string{remoteKeys})
+			relay.ensure(remoteMAC, []string{remoteKeys})
 
 			if got := virtualOf(t, kernel, remoteKeysName).received(); len(got) != 0 {
 				t.Errorf("the keyboard node received %x, want nothing", got)
@@ -172,18 +174,18 @@ func TestTheRelayWritesNoPress(t *testing.T) {
 	}
 }
 
-// A pass writes the same Asleep, with the same lastTransitionTime, on
-// each pass while the remote sleeps, and after the press. Arming again
-// from the same sleep gives no second press.
-func TestASleepGivesOnePressHoweverOftenAPassArmsIt(t *testing.T) {
-	held, kernel := sleptRemote(t, everyInputClass)
-	held.follow(remoteMAC, asleep(sleptAt))
-	held.ensure(remoteMAC, []string{remoteKeys})
+// Every pass while the remote sleeps, and after the press, reports the
+// same Asleep with the same lastTransitionTime. Arming again from the
+// same sleep writes no second press.
+func TestASleepGivesOnePressHoweverOftenAPassReportsIt(t *testing.T) {
+	relay, kernel := sleptRemote(t, everyInputClass)
+	relay.follow(remoteMAC, asleep(sleptAt))
+	relay.ensure(remoteMAC, []string{remoteKeys})
 	kernel.writer(t, remoteKeys).Close()
-	held.follow(remoteMAC, asleep(sleptAt))
+	relay.follow(remoteMAC, asleep(sleptAt))
 
 	waitFor(t, "the relay to open the node again", func() bool {
-		held.ensure(remoteMAC, []string{remoteKeysAgain})
+		relay.ensure(remoteMAC, []string{remoteKeysAgain})
 		return kernel.opened() == 2
 	})
 
@@ -193,9 +195,9 @@ func TestASleepGivesOnePressHoweverOftenAPassArmsIt(t *testing.T) {
 }
 
 // The kernel drops a key that a virtual device did not declare, and a
-// uinput device cannot declare one after it is created. So a node with
-// keyboard codes declares KEY_UNKNOWN, and a node with buttons only does
-// not.
+// uinput device cannot declare one after it is created. So the virtual
+// device of a node with keyboard codes declares KEY_UNKNOWN, and the
+// virtual device of a node with only buttons does not.
 func TestAVirtualDeviceWithKeyboardCodesDeclaresKeyUnknown(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -218,13 +220,13 @@ func TestAVirtualDeviceWithKeyboardCodesDeclaresKeyUnknown(t *testing.T) {
 	}
 }
 
-// The press changes nothing that is stored: the snapshot in the bond's
-// Secret still holds the codes the real node reports.
+// The snapshot in the bond's Secret has only the codes that the real
+// node reports, without the KEY_UNKNOWN that the virtual device adds.
 func TestThePressDeclaresNothingInTheStoredSnapshot(t *testing.T) {
-	held, _ := sleptRemote(t, everyInputClass)
-	held.ensure(remoteMAC, []string{remoteKeys})
+	relay, _ := sleptRemote(t, everyInputClass)
+	relay.ensure(remoteMAC, []string{remoteKeys})
 
-	if snapshot := string(held.snapshot(remoteMAC)); strings.Contains(snapshot, "240") {
-		t.Errorf("the snapshot holds KEY_UNKNOWN: %s", snapshot)
+	if snapshot := string(relay.snapshot(remoteMAC)); strings.Contains(snapshot, "240") {
+		t.Errorf("the snapshot is %s, want no KEY_UNKNOWN", snapshot)
 	}
 }

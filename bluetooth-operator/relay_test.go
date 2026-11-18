@@ -1,10 +1,8 @@
 package main
 
-// These tests drive the relay's policy over the fake kernel in
-// inputkernel_test.go, so they run with no /dev/uinput and no real
-// evdev node. What they assert is what a consumer of a claim sees:
-// which node the claim delivers, that it stays the same node across a
-// reconnect, and that presses on the real node arrive on it.
+// These tests run the relay against the fake kernel in
+// inputkernel_test.go, so they need no /dev/uinput and no real evdev
+// node.
 
 import (
 	"encoding/json"
@@ -20,9 +18,9 @@ import (
 	"github.com/liken-sh/liken/bluetooth-operator/bonds"
 )
 
-// waitFor runs a condition until it holds or the deadline passes. The
-// relay pumps events from its own goroutine, so a test waits for the
-// result instead of assuming the goroutine has run.
+// waitFor polls condition until it returns true, and fails the test
+// after 2 seconds. The relay copies events in its own goroutine, so a
+// test cannot assume the copy has happened when a write returns.
 func waitFor(t *testing.T, what string, condition func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -32,10 +30,10 @@ func waitFor(t *testing.T, what string, condition func() bool) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	t.Fatalf("timed out waiting for %s", what)
+	t.Fatalf("after 2 seconds, still waiting for %s", what)
 }
 
-// press is one event record, as the kernel lays it out.
+// press returns one input_event record whose last byte is value.
 func press(value byte) []byte {
 	event := make([]byte, inputEventSize)
 	event[inputEventSize-1] = value
@@ -44,12 +42,10 @@ func press(value byte) []byte {
 
 const testMAC = "a0:ab:51:33:b7:12"
 
-// relaysFor is a relay desk over a fake kernel that answers for every
-// evdev node these HID devices register. The tests of the pass need
-// each connected controller to have a virtual node, and the name a
-// node reports is derived from the HID device and the node's position
-// under it, so a node that moves to another number is still the same
-// device to the relay.
+// relaysFor returns relays over a fake kernel that has every evdev node
+// that the given HID devices register. A node's name comes from its HID
+// device and its position under that device, so the relay treats a node
+// that moves to another event number as the same device.
 func relaysFor(t *testing.T, devices ...fakeHID) *relays {
 	t.Helper()
 	kernel := newFakeKernel()
@@ -58,14 +54,14 @@ func relaysFor(t *testing.T, devices ...fakeHID) *relays {
 			kernel.register(node, device.Dir+" input"+strconv.Itoa(index))
 		}
 	}
-	held := newRelays(kernel)
-	t.Cleanup(func() { stopAll(held) })
-	return held
+	set := newRelays(kernel)
+	t.Cleanup(func() { stopAll(set) })
+	return set
 }
 
-// realNodes are the evdev nodes one fake HID device registers, as the
-// sysfs walk answers with them. joydev's own node is not one: the walk
-// keeps the DEVNAME values under input/event and nothing else.
+// realNodes returns the evdev nodes of one fake HID device, as the
+// sysfs walk returns them. The walk keeps only the DEVNAME values under
+// input/event, so joydev's node is left out.
 func realNodes(device fakeHID) []string {
 	var nodes []string
 	for _, node := range device.Nodes {
@@ -76,20 +72,20 @@ func realNodes(device fakeHID) []string {
 	return nodes
 }
 
-// stopAll ends every relay, so a test leaves no goroutine reading a
-// node that no longer matters.
-func stopAll(held *relays) {
-	held.mu.Lock()
-	macs := slices.Collect(maps.Keys(held.held))
-	held.mu.Unlock()
+// stopAll stops every relay, so no goroutine keeps reading a node after
+// the test ends.
+func stopAll(set *relays) {
+	set.mu.Lock()
+	macs := slices.Collect(maps.Keys(set.controllers))
+	set.mu.Unlock()
 	for _, mac := range macs {
-		held.stop(mac)
+		set.stop(mac)
 	}
 }
 
-// A DualSense registers three evdev nodes, and each one becomes its
-// own virtual device, because a consumer that opens the gamepad node
-// must not receive the touchpad's events.
+// A DualSense registers a gamepad, a motion sensor, and a touchpad
+// node. Each gets its own virtual device, so a consumer that opens the
+// gamepad node does not receive the touchpad's events.
 func TestEnsureCreatesOneVirtualDeviceForEachRealNode(t *testing.T) {
 	kernel := newFakeKernel()
 	kernel.register("/dev/input/event5", "Wireless Controller")
@@ -102,22 +98,19 @@ func TestEnsureCreatesOneVirtualDeviceForEachRealNode(t *testing.T) {
 
 	nodes := relays.virtualNodes(testMAC)
 	if len(nodes) != 3 {
-		t.Fatalf("virtual nodes = %v, want three", nodes)
+		t.Fatalf("the virtual nodes are %v, want three", nodes)
 	}
-	// The physical address names this operator and the controller, so a
-	// person reading the virtual device knows where its events come
-	// from.
 	for _, device := range kernel.virtual {
 		if device.phys != "bluetooth.liken.sh/a0:ab:51:33:b7:12" {
-			t.Errorf("phys = %q", device.phys)
+			t.Errorf("the virtual device has phys %q, want %q", device.phys, "bluetooth.liken.sh/a0:ab:51:33:b7:12")
 		}
 	}
 }
 
-// bluetooth_input_events_total counts the records the pump moves from
-// a controller's real node to its virtual one, keyed by the
-// Peripheral resource name and not by the address form the rest of
-// this file uses.
+// bluetooth_input_events_total counts the records the pump copies from
+// a controller's real node to its virtual one. Its peripheral label is
+// the Peripheral's resource name, not the colon-separated address that
+// the other tests use.
 func TestInputEventsAreCountedByPeripheral(t *testing.T) {
 	kernel := newFakeKernel()
 	kernel.register("/dev/input/event5", "Wireless Controller")
@@ -127,10 +120,10 @@ func TestInputEventsAreCountedByPeripheral(t *testing.T) {
 	relays.ensure(testMAC, []string{"/dev/input/event5"})
 
 	if _, err := kernel.writer(t, "/dev/input/event5").Write(press(1)); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing a press to the real node: %v", err)
 	}
 	if _, err := kernel.writer(t, "/dev/input/event5").Write(press(2)); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing a press to the real node: %v", err)
 	}
 
 	waitFor(t, "both presses to be counted", func() bool {
@@ -140,8 +133,8 @@ func TestInputEventsAreCountedByPeripheral(t *testing.T) {
 	})
 }
 
-// The relay is the whole delivery: what the controller sends must
-// arrive on the node the claim delivered.
+// Events written to the real node must arrive on the virtual node that
+// the claim delivers.
 func TestEventsFromARealNodeReachTheVirtualDevice(t *testing.T) {
 	kernel := newFakeKernel()
 	kernel.register("/dev/input/event5", "Wireless Controller")
@@ -150,7 +143,7 @@ func TestEventsFromARealNodeReachTheVirtualDevice(t *testing.T) {
 	relays.ensure(testMAC, []string{"/dev/input/event5"})
 
 	if _, err := kernel.writer(t, "/dev/input/event5").Write(press(1)); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing a press to the real node: %v", err)
 	}
 
 	virtual := kernel.virtual[0]
@@ -158,14 +151,14 @@ func TestEventsFromARealNodeReachTheVirtualDevice(t *testing.T) {
 		return len(virtual.received()) == inputEventSize
 	})
 	if !reflect.DeepEqual(virtual.received(), press(1)) {
-		t.Errorf("the virtual device received %v", virtual.received())
+		t.Errorf("the virtual device received %v, want %v", virtual.received(), press(1))
 	}
 }
 
-// A controller that sleeps takes its real node away and brings it back
-// on the next press, often as a different event number. The virtual
-// node must be the same node before and after, because the consumer's
-// container holds it open the whole time.
+// A sleeping controller loses its real node, and the node returns at
+// the next press, often with a different event number. The virtual node
+// must stay the same, because the consumer's container keeps it open
+// the whole time.
 func TestARelaySurvivesTheRealNodeVanishingAndReturning(t *testing.T) {
 	kernel := newFakeKernel()
 	kernel.register("/dev/input/event5", "Wireless Controller")
@@ -174,31 +167,30 @@ func TestARelaySurvivesTheRealNodeVanishingAndReturning(t *testing.T) {
 	relays.ensure(testMAC, []string{"/dev/input/event5"})
 	before := relays.virtualNodes(testMAC)
 
-	// The controller slept. The kernel removed the node, and the read
-	// on it fails.
+	// The controller sleeps. The kernel removes the node, so the read
+	// fails.
 	if err := kernel.writer(t, "/dev/input/event5").CloseWithError(fmt.Errorf("no such device")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("closing the real node: %v", err)
 	}
-	// Two passes with no node: the virtual device stays, and the relay
-	// does not open anything.
+	// A pass with no node keeps the virtual device and opens nothing.
 	relays.ensure(testMAC, nil)
 	relays.ensure(testMAC, nil)
 	if got := relays.virtualNodes(testMAC); !reflect.DeepEqual(got, before) {
-		t.Fatalf("virtual nodes = %v while the controller slept, want %v", got, before)
+		t.Fatalf("the virtual nodes are %v while the controller slept, want %v", got, before)
 	}
 
-	// The controller returned on a different event number.
+	// The controller returns with a different event number.
 	kernel.register("/dev/input/event9", "Wireless Controller")
 	waitFor(t, "the relay to release the node that vanished", func() bool {
 		relays.ensure(testMAC, []string{"/dev/input/event9"})
 		return kernel.opened() == 2
 	})
 	if got := relays.virtualNodes(testMAC); !reflect.DeepEqual(got, before) {
-		t.Fatalf("virtual nodes = %v after the reconnect, want %v", got, before)
+		t.Fatalf("the virtual nodes are %v after the reconnect, want %v", got, before)
 	}
 
 	if _, err := kernel.writer(t, "/dev/input/event9").Write(press(1)); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing a press to the real node: %v", err)
 	}
 	virtual := kernel.virtual[0]
 	waitFor(t, "the press to reach the same virtual device", func() bool {
@@ -209,10 +201,9 @@ func TestARelaySurvivesTheRealNodeVanishingAndReturning(t *testing.T) {
 	}
 }
 
-// The snapshot is what the bond's Secret holds, and it is enough to
-// create the virtual device before the controller has connected on
-// this boot. Without it, a claim on a controller that is asleep would
-// have nothing to deliver.
+// The snapshot in the bond's Secret is enough to create the virtual
+// device before the controller connects. Without it, a claim on a
+// sleeping controller would have no node to deliver.
 func TestRestoreCreatesAVirtualDeviceWithNoRealNode(t *testing.T) {
 	kernel := newFakeKernel()
 	kernel.register("/dev/input/event5", "Wireless Controller")
@@ -221,41 +212,40 @@ func TestRestoreCreatesAVirtualDeviceWithNoRealNode(t *testing.T) {
 	stored := first.snapshot(testMAC)
 	first.stop(testMAC)
 
-	// A new pod, with the controller asleep and no real node anywhere.
+	// A new pod, where the controller is asleep and has no real node.
 	restarted := newRelays(newFakeKernel())
 	t.Cleanup(func() { restarted.stop(testMAC) })
 	restarted.restore(testMAC, stored)
 
 	nodes := restarted.virtualNodes(testMAC)
 	if len(nodes) != 1 {
-		t.Fatalf("virtual nodes = %v, want one", nodes)
+		t.Fatalf("the virtual nodes are %v, want one", nodes)
 	}
 	var document evdevSnapshot
 	if err := json.Unmarshal(stored, &document); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the stored snapshot: %v", err)
 	}
 	if document.Version != snapshotVersion || len(document.Nodes) != 1 {
-		t.Fatalf("the stored document = %+v", document)
+		t.Fatalf("the stored document is %+v, want version %d and one node", document, snapshotVersion)
 	}
 	if document.Nodes[0].Name != "Wireless Controller" {
-		t.Errorf("the stored name = %q", document.Nodes[0].Name)
+		t.Errorf("the stored name is %q, want %q", document.Nodes[0].Name, "Wireless Controller")
 	}
 }
 
-// A snapshot from a version this operator does not recognize creates
-// nothing. The next connect reads the real nodes and writes a document
-// this operator does understand.
+// A snapshot with an unknown version creates nothing. The next connect
+// reads the real nodes and stores a snapshot with the current version.
 func TestRestoreRefusesAnUnknownVersion(t *testing.T) {
 	relays := newRelays(newFakeKernel())
 	relays.restore(testMAC, []byte(`{"version":99,"nodes":[{"name":"Wireless Controller"}]}`))
 	if nodes := relays.virtualNodes(testMAC); len(nodes) != 0 {
-		t.Errorf("virtual nodes = %v, want none", nodes)
+		t.Errorf("the virtual nodes are %v, want none", nodes)
 	}
 }
 
-// An unpair takes the virtual device with the bond. Nothing may
-// deliver a node for a controller this machine no longer holds keys
-// for.
+// An unpair closes the virtual device along with the bond. A claim must
+// not deliver a node for a controller whose keys this machine no longer
+// has.
 func TestStopTakesTheVirtualDeviceAway(t *testing.T) {
 	kernel := newFakeKernel()
 	kernel.register("/dev/input/event5", "Wireless Controller")
@@ -265,19 +255,19 @@ func TestStopTakesTheVirtualDeviceAway(t *testing.T) {
 	relays.stop(testMAC)
 
 	if nodes := relays.virtualNodes(testMAC); len(nodes) != 0 {
-		t.Errorf("virtual nodes = %v, want none", nodes)
+		t.Errorf("the virtual nodes are %v, want none", nodes)
 	}
 	if !kernel.virtual[0].closed() {
-		t.Error("the virtual device is still open")
+		t.Error("the virtual device is open after stop, want it closed")
 	}
-	// A teardown repeats a step whenever a pass fails, so stopping
-	// twice must answer the same way.
+	// An unpair repeats its steps after a failed pass, so stopping twice
+	// must succeed too.
 	relays.stop(testMAC)
 }
 
-// The relay's own devices are not on the HID bus, so the walk that
-// finds a controller's real nodes never finds a virtual one. A relay
-// that read its own output would repeat every press.
+// The sysfs walk that finds a controller's real nodes must never return
+// a virtual node, because a relay that read its own virtual device
+// would repeat every press.
 func TestTheSysfsWalkNeverReturnsAVirtualNode(t *testing.T) {
 	kernel := newFakeKernel()
 	kernel.register("/dev/input/event5", "Wireless Controller")
@@ -285,14 +275,14 @@ func TestTheSysfsWalkNeverReturnsAVirtualNode(t *testing.T) {
 	t.Cleanup(func() { relays.stop(testMAC) })
 	relays.ensure(testMAC, []string{"/dev/input/event5"})
 
-	// The virtual device is under /sys/devices/virtual/input, and the
-	// walk starts at /sys/bus/hid/devices.
+	// Virtual devices are under /sys/devices/virtual/input, and the walk
+	// starts at /sys/bus/hid/devices.
 	root := fakeSysfs(t, dualSense("0001", testMAC, "input/event5"))
 	walked := nodesByMAC(discoverHIDDevices(root, bonds.Address{}))
 	for _, virtual := range relays.virtualNodes(testMAC) {
 		for _, node := range walked[testMAC] {
 			if node == virtual {
-				t.Errorf("the walk returned the virtual node %s", virtual)
+				t.Errorf("the walk returned the virtual node %s, want only real nodes", virtual)
 			}
 		}
 	}

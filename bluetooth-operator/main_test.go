@@ -7,11 +7,12 @@ import (
 	"time"
 )
 
-// The settle tests run in synctest bubbles at the production window and
-// limit, so each one checks the exact moment that settle emits.
+// The settle tests run in synctest bubbles with the production window
+// and limit, so each test checks the exact moment that settle emits.
 
-// emitted answers whether settle has emitted, and takes the wake. A
-// test calls it after synctest.Wait, so a timer that is due has fired.
+// emitted reports whether settle has sent a wake, and receives it.
+// Call it after synctest.Wait, so that every timer that is due has
+// fired.
 func emitted(t *testing.T, out <-chan struct{}) bool {
 	t.Helper()
 	select {
@@ -25,9 +26,9 @@ func emitted(t *testing.T, out <-chan struct{}) bool {
 	}
 }
 
-// A controller connecting produces a burst of uevents and a burst of
-// D-Bus signals, and one write covers the whole burst. settle emits one
-// window after the last event of the burst.
+// A controller that connects causes a burst of uevents and D-Bus
+// signals. settle sends one wake, one window after the last event of
+// the burst.
 func TestSettleCollapsesABurst(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		in := make(chan struct{}, 16)
@@ -55,7 +56,7 @@ func TestSettleCollapsesABurst(t *testing.T) {
 	})
 }
 
-// One event emits one window later, and not before.
+// A single event produces a wake one window later, and not before.
 func TestSettleWaitsForQuiet(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		in := make(chan struct{}, 16)
@@ -75,9 +76,8 @@ func TestSettleWaitsForQuiet(t *testing.T) {
 	})
 }
 
-// A controller that reconnects faster than the quiet window would
-// restart the wait forever. The limit keeps the loop publishing: settle
-// emits at the limit after the first event.
+// Events that arrive faster than the window keep restarting it, so
+// settle sends a wake when the limit has passed since the first event.
 func TestSettleEmitsUnderAConstantFlap(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		in := make(chan struct{})
@@ -132,9 +132,9 @@ func TestSettleStopsWithItsContext(t *testing.T) {
 	})
 }
 
-// wakes merges five sources, and each of them closing must end the
-// merge. A source that closed and stayed in the select would spin the
-// loop on a channel that is always ready to receive.
+// When any source of wakes closes, wakes must close its output. A
+// closed channel that stayed in the select would always be ready, and
+// the goroutine would spin on it.
 func TestWakesEndsWhenAnySourceCloses(t *testing.T) {
 	sources := []string{"uevents", "bluez", "retries", "requests", "edits"}
 	for i, closing := range sources {
@@ -210,8 +210,8 @@ func TestWakesPassesEachSourceThrough(t *testing.T) {
 	})
 }
 
-// With no event, the backstop wakes the loop once each interval, and
-// not before.
+// With no events, wakes sends one wake at each backstop interval, and
+// none before it.
 func TestWakesRunsTheBackstopEachInterval(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		quiet := make(chan struct{})
@@ -230,9 +230,8 @@ func TestWakesRunsTheBackstopEachInterval(t *testing.T) {
 	})
 }
 
-// The loop prints what woke it. A HID event and an evdev node's add
-// name their controller, a power supply change names none, and a lost
-// datagram says so.
+// The log line for a uevent includes the controller's address when the
+// uevent has one.
 func TestKernelEventLine(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -257,13 +256,13 @@ func TestKernelEventLine(t *testing.T) {
 		{
 			name:  "a lost datagram",
 			event: kernelEvent{Lost: true},
-			want:  "kernel: uevents were lost; reading the whole state",
+			want:  "kernel: uevents were lost, so the operator reads the whole state",
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := kernelEventLine(c.event); got != c.want {
-				t.Errorf("line = %q, want %q", got, c.want)
+				t.Errorf("line is %q, want %q", got, c.want)
 			}
 		})
 	}

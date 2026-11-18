@@ -1,9 +1,5 @@
 package main
 
-// These tests prove three pure functions: reading an `axes` block,
-// uniting what several claims state, and recording the result for a
-// restart. None of them needs a kernel.
-
 import (
 	"encoding/json"
 	"reflect"
@@ -11,18 +7,18 @@ import (
 	"testing"
 )
 
-// axesBlock is the `axes` value of a claim's configuration, as the API
-// server carries it.
+// axesBlock decodes raw as the `axes` value of a claim's
+// configuration.
 func axesBlock(t *testing.T, raw string) map[string]json.RawMessage {
 	t.Helper()
 	var block map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(raw), &block); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the axes block %s: %v", raw, err)
 	}
 	return block
 }
 
-// tuned is one axis override written the way a test reads it.
+// tuned returns an axisOverride with both fields set.
 func tuned(fuzz, flat int32) axisOverride {
 	return axisOverride{Fuzz: &fuzz, Flat: &flat}
 }
@@ -50,9 +46,7 @@ func TestParseAxisOverrides(t *testing.T) {
 			want: axisOverrides{0x00: {Flat: ptr(int32(15))}},
 		},
 		{
-			// A block that states neither field changes nothing, and
-			// is not refused.
-			name: "an axis that states nothing",
+			name: "an axis with neither field",
 			raw:  `{"ABS_X": {}}`,
 			want: axisOverrides{0x00: {}},
 		},
@@ -87,8 +81,7 @@ func TestParseAxisOverrides(t *testing.T) {
 			problem: "negative",
 		},
 		{
-			// The kernel refuses a write to the slot count, because
-			// the number of contacts a device reserved cannot change.
+			// The kernel refuses EVIOCSABS on ABS_MT_SLOT.
 			name:    "the multi-touch slot",
 			raw:     `{"ABS_MT_SLOT": {"fuzz": 1}}`,
 			problem: "ABS_MT_SLOT",
@@ -102,19 +95,17 @@ func TestParseAxisOverrides(t *testing.T) {
 					t.Fatalf("parseAxisOverrides(%s) = %v, want a refusal", c.raw, got)
 				}
 				if !strings.Contains(err.Error(), c.problem) {
-					t.Errorf("the refusal does not say %s: %v", c.problem, err)
+					t.Errorf("the error is %q, want it to contain %q", err, c.problem)
 				}
-				// A refusal says what is accepted, so a person can fix
-				// the claim from the message alone.
 				for _, word := range []string{"fuzz", "flat"} {
 					if !strings.Contains(err.Error(), word) {
-						t.Errorf("the refusal does not name %s: %v", word, err)
+						t.Errorf("the error is %q, want it to name the field %q", err, word)
 					}
 				}
 				return
 			}
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("parseAxisOverrides(%s): %v", c.raw, err)
 			}
 			if !reflect.DeepEqual(got, c.want) {
 				t.Errorf("overrides = %v, want %v", got, c.want)
@@ -123,9 +114,6 @@ func TestParseAxisOverrides(t *testing.T) {
 	}
 }
 
-// Two claims on one controller both get what they asked for, so the
-// operator applies the largest value either one states, the same
-// union rule the input classes take.
 func TestAxisOverridesMergeTakesTheLargestOfEach(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -173,8 +161,6 @@ func TestAxisOverridesMergeTakesTheLargestOfEach(t *testing.T) {
 	}
 }
 
-// The applied values are recorded with the input classes, so a
-// restart of this operator applies the same values to the same axes.
 func TestAxisOverridesRecordRoundTrip(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -205,7 +191,7 @@ func TestAxisOverridesRecordRoundTrip(t *testing.T) {
 			}
 			back, err := parseRecordedAxes(c.recorded)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("parseRecordedAxes(%q): %v", c.recorded, err)
 			}
 			if !reflect.DeepEqual(back, c.overrides) {
 				t.Errorf("parseRecordedAxes(%q) = %v, want %v", c.recorded, back, c.overrides)
@@ -214,11 +200,7 @@ func TestAxisOverridesRecordRoundTrip(t *testing.T) {
 	}
 }
 
-// tunedAxis is the read-modify-write systemd's hwdb entries make: the
-// axis keeps everything the kernel reports, and takes the fuzz and
-// the flat the claims state. An axis no claim states any more takes
-// the values the device itself reported when it first connected.
-func TestTunedAxisChangesOnlyTheStatedFields(t *testing.T) {
+func TestTunedAxisChangesOnlyTheSetFields(t *testing.T) {
 	original := absAxis{Code: 0x03, Minimum: 0, Maximum: 255, Fuzz: 0, Flat: 0, Resolution: 0}
 	current := absInfo{Value: 128, Minimum: 0, Maximum: 255, Fuzz: 0, Flat: 0}
 
@@ -228,17 +210,17 @@ func TestTunedAxisChangesOnlyTheStatedFields(t *testing.T) {
 		want     absInfo
 	}{
 		{
-			name:     "no claim states this axis",
+			name:     "no claim sets this axis",
 			override: axisOverride{},
 			want:     current,
 		},
 		{
-			name:     "one claim states the fuzz",
+			name:     "one claim sets the fuzz",
 			override: axisOverride{Fuzz: ptr(int32(4))},
 			want:     absInfo{Value: 128, Minimum: 0, Maximum: 255, Fuzz: 4, Flat: 0},
 		},
 		{
-			name:     "one claim states both",
+			name:     "one claim sets both",
 			override: tuned(4, 15),
 			want:     absInfo{Value: 128, Minimum: 0, Maximum: 255, Fuzz: 4, Flat: 15},
 		},
@@ -252,12 +234,9 @@ func TestTunedAxisChangesOnlyTheStatedFields(t *testing.T) {
 	}
 }
 
-// The device's own values come back when the last claim that stated
-// one goes away, and the axis keeps the position the kernel reports
-// now.
 func TestTunedAxisRestoresTheDevicesOwnValues(t *testing.T) {
 	original := absAxis{Code: 0x03, Minimum: 0, Maximum: 255, Fuzz: 1, Flat: 2}
-	// The kernel currently carries what this operator wrote.
+	// The kernel reports the values this operator wrote earlier.
 	current := absInfo{Value: 200, Minimum: 0, Maximum: 255, Fuzz: 4, Flat: 15}
 
 	got := tunedAxis(original, current, axisOverride{})

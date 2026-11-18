@@ -1,46 +1,32 @@
 package main
 
-// A person edits an Adapter or a Peripheral with kubectl, and neither
-// the kernel nor bluetoothd reports that edit. So the operator watches
-// both kinds, and wakes the loop when an event carries an edit that
-// the pass must act on:
+// The operator must act when someone edits an Adapter or a Peripheral
+// with kubectl, so it watches both kinds. The watches wake the main
+// loop for a spec change, a deletion request, a new object, and a
+// removed object. When someone force-deletes a Peripheral before its
+// unpair finishes, the bond stays in bluetoothd, and the next pass
+// adopts it again.
 //
-//   - a change to the spec, such as an Adapter's spec.alias or a
-//     Peripheral's spec.trusted,
-//   - a deletion request, which starts the refusal of an Adapter's
-//     deletion or the unpair of a Peripheral,
-//   - a new object, and an object that the API server removed. A
-//     Peripheral that somebody removed by force before its unpair
-//     finished leaves a bond in bluetoothd, and the next pass adopts
-//     that bond again.
+// The operator writes status on these objects often, such as a
+// Peripheral's battery level. Those writes must not wake the loop, or
+// each pass would cause another. A status write does not change
+// metadata.generation, so the handlers compare only the generation,
+// the UID, and the deletion timestamp.
 //
-// The operator writes status on these objects on many passes: a
-// battery level, a Connected condition, the node that holds the radio.
-// A status write changes neither the spec nor the deletion mark, so
-// the watch of this operator's own write does not wake the loop.
-// metadata.generation is the API server's count of spec changes, and
-// the status subresource does not change it, so the watcher compares
-// the generation and the deletion mark and nothing else.
+// Each watch also wakes the loop when its first list completes. At
+// startup a pass can read an object before the watch lists it, and an
+// edit between the two reads shows up in the list but in no event.
 //
-// Each watch also wakes the loop once, when its first read of the
-// collection is done. At a start, the pass can read the objects before
-// the watch does, and an edit made between the two reads is in the
-// watch's read and in no event.
+// The Peripheral watch selects the Peripherals of this pod's radio by
+// the adapter label. Each pod writes the status of its own
+// Peripherals, so a watch with no selector would receive the battery
+// writes of every other node.
 //
-// Each watch is scoped to the objects this pod acts on:
-//
-//   - The Peripherals are listed and watched with the adapter's label,
-//     the same selector the pass lists them with. Every pod writes the
-//     status of its own Peripherals, and a watch of every Peripheral
-//     in the cluster would receive each other node's battery writes.
-//     The pass reports the address of the radio it holds, and the
-//     watch opens with that address, or opens again when it changes.
-//   - The Adapters are watched in the whole cluster, because the pass
-//     also releases a deleting Adapter whose radio left this node, and
-//     that Adapter carries another radio's label. A cluster has one
-//     Adapter for each radio, and an Adapter's status changes only when
-//     its radio moves or its power changes, so the watch receives few
-//     events. The watcher ignores an Adapter that another node holds.
+// The Adapter watch covers the whole cluster, because the pass also
+// releases a deleting Adapter whose radio left this node, and the
+// label of that Adapter names another radio. The operator writes an
+// Adapter's status only when it changes, so this watch receives few
+// events. The handlers ignore the Adapter of another node.
 
 import (
 	"context"
@@ -53,37 +39,39 @@ import (
 	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
-// editWatch holds the two watches and the channel that wakes the loop.
+// editWatch runs the Adapter and Peripheral watches and sends on one
+// channel to wake the main loop.
 type editWatch struct {
 	wake     chan struct{}
 	nodeName string
 
-	// adapterKey is the name of the Adapter for the radio this pod
-	// holds, which is also the value of every Peripheral's adapter
-	// label. It is empty until the first pass that reads the radio.
+	// adapterKey is the name of the Adapter for this pod's radio, which
+	// is also the value of the adapter label on each of its
+	// Peripherals. It is empty until a pass reads the radio.
 	mu         sync.Mutex
 	adapterKey string
 
-	// moved has one slot, and follow fills it when adapterKey changes.
-	// The Peripheral watch reads adapterKey again when the slot is
-	// full, so a second change before the read is not lost: the read
-	// returns the latest key.
-	moved chan struct{}
+	// follow sends on adapterKeyChanged when adapterKey changes. The
+	// buffer holds one send, and a second send before the Peripheral
+	// watch reads it is dropped. Nothing is lost, because the watch
+	// then reads the latest adapterKey.
+	adapterKeyChanged chan struct{}
 
-	// adapters and peripherals are the two watches' stores, which the
-	// pass reads in place of the API server (objectcache.go).
+	// adapters and peripherals are the stores of the two watches. The
+	// pass reads them instead of calling the API server (see
+	// objectcache.go).
 	adapters    informer.View
 	peripherals followedView
 }
 
-// watchEdits starts the Adapter watch at once and the Peripheral watch
-// at the first call to follow. The wake channel closes when the context
-// ends and both watches have stopped.
+// watchEdits starts the Adapter watch immediately and the Peripheral
+// watch at the first call to follow. The wake channel closes after the
+// context ends and both watches have stopped.
 func watchEdits(ctx context.Context, client dynamic.Interface, nodeName string) *editWatch {
 	w := &editWatch{
-		wake:     make(chan struct{}, 1),
-		nodeName: nodeName,
-		moved:    make(chan struct{}, 1),
+		wake:              make(chan struct{}, 1),
+		nodeName:          nodeName,
+		adapterKeyChanged: make(chan struct{}, 1),
 	}
 	handler := editHandler[Adapter]{what: "the Adapters", wake: w.signal, mark: w.adapterMark}
 	adapters := informer.Start(ctx, client, informer.Source{Resource: adapterResource}, informer.Options{Handler: handler.handler(), Synced: w.signal})
@@ -98,11 +86,11 @@ func watchEdits(ctx context.Context, client dynamic.Interface, nodeName string) 
 	return w
 }
 
-// wakes is the channel the loop reads.
 func (w *editWatch) wakes() <-chan struct{} { return w.wake }
 
-// cache answers the stores the pass reads, together with the store of
-// the PairingRequests, which another watch keeps.
+// cache returns the stores the pass reads: the Adapter and Peripheral
+// stores of this watch, and the PairingRequest store, which another
+// watch fills.
 func (w *editWatch) cache(requests informer.View) objectCache {
 	return objectCache{
 		adapters:           informer.Held{View: w.adapters, Versions: memo.New()},
@@ -112,9 +100,9 @@ func (w *editWatch) cache(requests informer.View) objectCache {
 	}
 }
 
-// follow names the radio this pod holds. The pass calls it on every
-// pass that reads the radio, and only a change of address moves the
-// Peripheral watch.
+// follow records the Adapter name of this pod's radio. The pass calls
+// it on every pass that reads the radio, and the Peripheral watch
+// restarts only when the name differs from the last call.
 func (w *editWatch) follow(adapterKey string) {
 	w.mu.Lock()
 	changed := w.adapterKey != adapterKey
@@ -124,7 +112,7 @@ func (w *editWatch) follow(adapterKey string) {
 		return
 	}
 	select {
-	case w.moved <- struct{}{}:
+	case w.adapterKeyChanged <- struct{}{}:
 	default:
 	}
 }
@@ -142,14 +130,11 @@ func (w *editWatch) signal() {
 	}
 }
 
-// followPeripherals runs one Peripheral watch for the radio this pod
-// holds. A label selector is fixed for the life of an informer, so when
-// the radio's address changes, this stops the informer for the old
-// address and waits until it has returned, and then starts a new one
-// for the new address. The Peripherals of the old radio stop waking
-// the loop, and two informers never run at once. The pass reads the
-// store of the new informer only for the new address, so it never
-// reads the old radio's Peripherals as its own.
+// followPeripherals runs one Peripheral informer for this pod's radio.
+// An informer's label selector cannot change, so when the radio's
+// address changes, this cancels the old informer, waits for it to
+// stop, and then starts one with the new selector, so that the
+// Peripherals of the old radio no longer wake the loop.
 func (w *editWatch) followPeripherals(ctx context.Context, client dynamic.Interface) {
 	watching := ""
 	stop := func() {}
@@ -158,15 +143,14 @@ func (w *editWatch) followPeripherals(ctx context.Context, client dynamic.Interf
 		case <-ctx.Done():
 			stop()
 			return
-		case <-w.moved:
+		case <-w.adapterKeyChanged:
 		}
 		key := w.followed()
 		if key == watching {
 			continue
 		}
-		// The old store stops following its radio once its informer
-		// stops, so the pass reads no store for any radio until the new
-		// one is set.
+		// Clear the store first, so that until the new informer starts,
+		// the pass reads no Peripherals instead of the old radio's.
 		w.peripherals.set("", informer.View{})
 		stop()
 		watching = key
@@ -182,30 +166,29 @@ func (w *editWatch) followPeripherals(ctx context.Context, client dynamic.Interf
 	}
 }
 
-// adapterMark reads the parts of an Adapter that an edit changes. An
-// Adapter matters to this pod when it names this pod's radio, when its
-// status names this node, and when no node has written its status yet.
+// adapterMark returns the editMark of an Adapter, and whether this pod
+// acts on it. That is true when the Adapter is this pod's radio, when
+// its status.node is this node, or when no node has written its
+// status yet.
 func (w *editWatch) adapterMark(adapter Adapter) (editMark, bool) {
 	node := adapter.Status.Node
 	ours := adapter.Metadata.Name == w.followed() || node == w.nodeName || node == ""
 	return markOf(adapter.Metadata), ours
 }
 
-// peripheralMark reads the parts of a Peripheral that an edit changes.
-// Every Peripheral the watch delivers carries this radio's label, so
-// every one matters.
+// peripheralMark returns the editMark of a Peripheral. The selector
+// admits only this radio's Peripherals, so this pod acts on all of
+// them.
 func peripheralMark(peripheral Peripheral) (editMark, bool) {
 	return markOf(peripheral.Metadata), true
 }
 
-// editMark is what an edit changes on an object: the generation, which
-// counts spec changes, and the deletion mark. The watcher compares the
-// deletion mark as well, so a deletion request wakes the loop whether
-// or not the API server raises the generation when it sets
-// deletionTimestamp. It compares the UID too. After a gap in the
-// watch, an object that somebody deleted and created again with the
-// same name reaches the handler as an update, and the new object can
-// have the same generation as the old one.
+// editMark holds the fields of an object that change on an edit. The
+// deleting flag makes a deletion request wake the loop even if the API
+// server does not increment the generation when it sets
+// deletionTimestamp. The UID is there because a watch that reconnects
+// after a gap can report an object that was deleted and created again
+// with the same name as an update, at the same generation.
 type editMark struct {
 	uid        string
 	generation int64
@@ -216,13 +199,12 @@ func markOf(meta ObjectMeta) editMark {
 	return editMark{uid: meta.UID, generation: meta.Generation, deleting: meta.deleting()}
 }
 
-// editHandler wakes the loop when a change from one watch carries an
-// edit. The informer hands an update both the copy it held and the new
-// copy, so the handler compares their marks and keeps no copy of its
-// own. After a gap in the watch, the informer reads the collection
-// again and reports each difference from what it held as an addition,
-// an update, or a deletion, so an edit made during the gap reaches the
-// handler as well.
+// editHandler wakes the loop for the events of one watch that are
+// edits. The informer passes an update both the cached copy and the new
+// copy, so the handler keeps no state. After a gap in the watch, the
+// informer lists the collection again and reports each difference from
+// its cache as an add, an update, or a delete, so an edit made during
+// the gap reaches the handler too.
 type editHandler[T any] struct {
 	what string
 	wake func()
@@ -237,7 +219,7 @@ func (h editHandler[T]) handler() cache.ResourceEventHandler {
 	}
 }
 
-// added takes a new object, and wakes the loop when it is this pod's.
+// added wakes the loop when the new object is one this pod acts on.
 func (h editHandler[T]) added(object any) {
 	item, err := informer.Convert[T](object)
 	if err != nil {
@@ -249,10 +231,10 @@ func (h editHandler[T]) added(object any) {
 	}
 }
 
-// removed takes an object the API server removed, and wakes the loop
-// when it is this pod's. A tombstone can hold no copy of the object,
-// and then nothing says whose it was, so the removal wakes the loop.
-// One extra pass costs less than a missed unpair.
+// removed wakes the loop when the removed object is one this pod acts
+// on. A tombstone can arrive with no copy of the object, and then the
+// handler wakes the loop anyway, because an extra pass costs less than
+// a missed unpair.
 func (h editHandler[T]) removed(object any) {
 	item, err := informer.Convert[T](object)
 	if err != nil {
@@ -265,9 +247,8 @@ func (h editHandler[T]) removed(object any) {
 	}
 }
 
-// updated takes a change to an object the informer held. Only a change
-// to the mark wakes the loop, so this operator's own status write does
-// not.
+// updated wakes the loop when the mark of an object this pod acts on
+// differs between the cached copy and the new one.
 func (h editHandler[T]) updated(before, after any) {
 	item, err := informer.Convert[T](after)
 	if err != nil {
@@ -275,8 +256,8 @@ func (h editHandler[T]) updated(before, after any) {
 		return
 	}
 	mark, ours := h.mark(item)
-	// A held copy that does not convert was logged when it arrived.
-	// Nothing says what it held, so the change counts as an edit.
+	// A cached copy that fails to convert was logged when it arrived.
+	// Its mark is unknown, so treat the update as an edit.
 	old, err := informer.Convert[T](before)
 	was, _ := h.mark(old)
 	if ours && (err != nil || was != mark) {

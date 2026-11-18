@@ -1,20 +1,16 @@
-# This is the coverage gate, enforced in CI (see
-# .github/workflows/ci.yaml).
+# The coverage gate that `make test-go` runs, on a workstation and in
+# CI. Each threshold is just under the coverage the tests measure.
+# Thresholds only go up: when a change raises coverage, raise the
+# threshold to keep the gain.
 #
-# The thresholds only rise over time. Each one is set just under what
-# the tests measure today. So a change that loses coverage fails the
-# check, and a change that gains coverage should raise the number
-# here to keep the gain.
+# The thresholds assume Go 1.27.2 or later. Go 1.27.1 and earlier
+# count a basic block once for each line that comments split it into
+# (golang/go#80974), so they report higher coverage.
 #
-# The numbers are measured with Go 1.27.2 and later, which count each basic
-# block once. Go 1.27.1 and earlier count a block once for each row
-# that comments split it into (golang/go#80974), and measure higher.
-#
-# The number is what CI measures, not what a developer's machine
-# measures. Four tests create a virtual input device through
-# /dev/uinput, and CI's runner does not permit that, so a machine
-# that does measures about one point higher. To measure what CI
-# measures, skip those four tests:
+# The thresholds match what CI measures. Some tests create a virtual
+# input device through /dev/uinput, which CI's runner does not allow,
+# so a machine that allows it measures higher coverage. To measure what
+# CI measures, skip those tests:
 #
 #   go test -race -covermode=atomic -skip 'TestCreateAVirtualDeviceOnTheRealKernel|TestReadBackTheCapabilitiesOfADeviceThisTestCreated|TestNarrowARealNodeOnTheRealKernel|TestTuneARealAxisOnTheRealKernel' -coverprofile=coverage.out ./...
 
@@ -24,29 +20,28 @@ threshold:
   total: 76
 
 override:
-  # The bluetoothd supervisor: what is testable is the argument
-  # building and the power-off over a fake management channel.
-  # Starting the daemon needs a real bus, and opening the channel
-  # needs a real adapter.
+  # The bluetoothd supervisor. The tests build the daemon's arguments
+  # and power off the adapter over a fake management channel. Starting
+  # the daemon needs a real D-Bus, and opening the channel needs a real
+  # adapter.
   - path: ^bluetoothd$
     threshold: 65
-  # The management channel: the commands and the replies are tested
+  # The management channel. The tests send commands and read replies
   # over a fake channel. Opening the socket needs a real kernel.
   - path: ^bluetoothd/mgmt$
     threshold: 58
-  # start-rescan: the watcher and the loop are tested against a fake
-  # monitor channel and a fake management channel. The sockets and
-  # main need a real kernel.
+  # start-rescan. The tests run against fake monitor and management
+  # channels. Opening the sockets and running main need a real kernel.
   - path: ^bluetoothd/rescan$
     threshold: 86
-  # start-btmon: the supervisor, the watch, and the child are tested.
-  # main and run name the real settings directory and the real btmon.
+  # start-btmon. main and run use the real settings directory and the
+  # real btmon, so the tests do not reach them.
   - path: ^bluetoothd/btmon$
     threshold: 79
-  # bondfetch: the fetch loop needs a real adapter; the parsing does
-  # not.
+  # bondfetch. main and run open an HCI socket, which needs a real
+  # adapter.
   - path: ^bondfetch$
     threshold: 55
-  # bonds: the on-disk bond format, which is pure byte layout.
+  # bonds. The package uses no hardware.
   - path: ^bonds$
     threshold: 92

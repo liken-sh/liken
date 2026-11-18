@@ -1,10 +1,5 @@
 package main
 
-// These tests cover what wakes the loop for a PairingRequest: a change
-// to a request that needs a pass, and the clock at the moment a
-// finished request's TTL is up. A finished request inside its TTL
-// wakes nothing.
-
 import (
 	"fmt"
 	"testing"
@@ -14,9 +9,8 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// The watcher wakes the loop for a request that is unfinished and for
-// one whose collection is due, and for nothing else. On an idle
-// cluster a change to a finished request must not trigger a pass.
+// A finished request inside its TTL needs no pass, so a cluster whose
+// requests have all finished causes no passes until a TTL expires.
 func TestRequestsNeedAPass(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -59,7 +53,7 @@ func TestRequestsNeedAPass(t *testing.T) {
 	}
 }
 
-func TestTheNextCollectionIsTheEarliestOneStillAhead(t *testing.T) {
+func TestTheNextExpiryIsTheEarliestOneStillAhead(t *testing.T) {
 	ttl := func(seconds int) *int { return &seconds }
 	finished := func(ago time.Duration, seconds int) PairingRequest {
 		return PairingRequest{
@@ -76,11 +70,11 @@ func TestTheNextCollectionIsTheEarliestOneStillAhead(t *testing.T) {
 			name: "no request",
 		},
 		{
-			name:     "an open window has no collection",
+			name:     "an open window has no expiry",
 			requests: []PairingRequest{{Status: PairingRequestStatus{Phase: phaseOpen}}},
 		},
 		{
-			name:     "a collection already due is the pass's work, not the clock's",
+			name:     "an expired TTL is the pass's work, not the timer's",
 			requests: []PairingRequest{finished(2*time.Hour, 3600)},
 		},
 		{
@@ -96,16 +90,14 @@ func TestTheNextCollectionIsTheEarliestOneStillAhead(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, _ := nextCollection(c.requests, testNow)
+			got, _ := nextExpiry(c.requests, testNow)
 			if !got.Equal(c.want) {
-				t.Fatalf("nextCollection = %s, want %s", got, c.want)
+				t.Fatalf("nextExpiry = %s, want %s", got, c.want)
 			}
 		})
 	}
 }
 
-// watchRequests runs the request watcher against a server until the
-// test ends.
 func watchRequests(t *testing.T, server *watchServer) <-chan struct{} {
 	t.Helper()
 	wakes, _ := watchPairingRequests(t.Context(), testWatcher(t, server.handler(t)), time.Now)
@@ -129,11 +121,11 @@ func TestANewRequestWakesTheLoopAtOnce(t *testing.T) {
 	})
 }
 
-// The clock fires at the moment the TTL is up, and not before.
 func TestAFinishedRequestWakesTheLoopWhenItsTTLIsUp(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		// The bubble's clock starts on a whole second, so the TTL is up
-		// exactly two seconds from now.
+		// timestamp drops fractions of a second, and the bubble's clock
+		// starts on a whole second, so the TTL expires exactly two seconds
+		// from now.
 		seconds := 60
 		request := *openRequest(testDevice)
 		request.Spec.TTLSecondsAfterFinished = &seconds
@@ -157,13 +149,12 @@ func TestAFinishedRequestWakesTheLoopWhenItsTTLIsUp(t *testing.T) {
 	})
 }
 
-// A deleted request can arrive as a tombstone that holds no copy of
-// it. The watcher forgets the request by the tombstone's key, so a
-// request that no longer exists does not wake the loop again.
+// A deleted request can arrive as a tombstone with no copy of the
+// request. The watcher forgets the request by the tombstone's key.
 func TestARequestDeletedWithNoCopyIsForgotten(t *testing.T) {
 	wakes := make(chan struct{}, 1)
 	request := *openRequest("")
-	watcher := &requestWatcher{now: time.Now, wake: wakes, held: map[string]PairingRequest{requestKey(request): request}}
+	watcher := &requestWatcher{now: time.Now, wake: wakes, requests: map[string]PairingRequest{requestKey(request): request}}
 
 	watcher.apply(cache.DeletedFinalStateUnknown{Key: requestKey(request)}, true)
 	watcher.fire()

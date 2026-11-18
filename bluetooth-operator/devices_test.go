@@ -1,9 +1,5 @@
 package main
 
-// These tests prove what one pass publishes for each paired
-// controller: the attributes a selector reads, and the taints that say
-// a device cannot serve a claim right now.
-
 import (
 	"reflect"
 	"strings"
@@ -20,37 +16,31 @@ func TestSliceDevicesPublishesPairedControllers(t *testing.T) {
 
 	devices := sliceDevices(controllers, nodes, nil, nil)
 	if len(devices) != 2 {
-		t.Fatalf("got %d devices, want 2", len(devices))
+		t.Fatalf("sliceDevices returned %d devices, want 2", len(devices))
 	}
-	// The list is sorted, so the same hardware always makes the same
-	// slice and the change detection reports real changes only.
+	// The devices are sorted by name, so the comparison with the
+	// published slice finds only real changes.
 	if devices[0].Name != "a0-ab-51-33-b7-12" || devices[1].Name != "b4-8c-9d-11-22-33" {
-		t.Fatalf("names = %q, %q", devices[0].Name, devices[1].Name)
+		t.Fatalf("device names are %q and %q, want a0-ab-51-33-b7-12 and b4-8c-9d-11-22-33", devices[0].Name, devices[1].Name)
 	}
 	if got := *devices[0].Attributes["address"].String; got != "A0:AB:51:33:B7:12" {
-		t.Errorf("address = %q", got)
+		t.Errorf("address attribute is %q, want A0:AB:51:33:B7:12", got)
 	}
 	if got := *devices[0].Attributes["name"].String; got != "Player One" {
-		t.Errorf("name = %q", got)
+		t.Errorf("name attribute is %q, want Player One", got)
 	}
 	if got := *devices[0].Attributes["connected"].Bool; !got {
-		t.Error("the connected controller published connected = false")
+		t.Error("the connected controller published connected = false, want true")
 	}
 	if len(devices[0].Taints) != 0 {
-		t.Errorf("the connected controller has taints: %+v", devices[0].Taints)
+		t.Errorf("the connected controller has taints %+v, want none", devices[0].Taints)
 	}
 }
 
-// The three taints answer three questions. NoExecute ends a session
-// that a controller left. NoSchedule keeps a session from starting
-// against a controller that is not there, and nobody tolerates it, so
-// a claim ahead of a connect parks instead of looping through
-// schedule, prepare-fail, and evict.
-//
-// The third taint ends a session whose container holds nodes that are
-// not the ones delivered now. It goes on beside the other two, because
-// a controller off the air can still have a consumer with stale nodes.
-func TestSliceDevicesDerivesTheTaints(t *testing.T) {
+// The node-moved taint is set together with the disconnected taint,
+// because a controller that is not connected can still have a consumer
+// with stale nodes.
+func TestSliceDevicesAppliesTheTaintsForEachCondition(t *testing.T) {
 	cases := []struct {
 		name      string
 		connected bool
@@ -113,14 +103,14 @@ func TestSliceDevicesDerivesTheTaints(t *testing.T) {
 				moved,
 			)
 			if !reflect.DeepEqual(devices[0].Taints, c.want) {
-				t.Fatalf("taints = %+v, want %+v", devices[0].Taints, c.want)
+				t.Fatalf("taints are %+v, want %+v", devices[0].Taints, c.want)
 			}
 		})
 	}
 }
 
 // publishedAttributes flattens one device's typed attributes into a
-// plain map, so a test states its expectation as one literal.
+// plain map, so a test can compare it with one literal.
 func publishedAttributes(device SliceDevice) map[string]any {
 	flat := map[string]any{}
 	for name, value := range device.Attributes {
@@ -136,11 +126,8 @@ func publishedAttributes(device SliceDevice) map[string]any {
 	return flat
 }
 
-// The controller here is a real device: a B06+ Bluetooth audio
-// receiver, publishing the exact class word and profile UUIDs it
-// reported when it paired. It exercises every layer at once: the
-// raw word, both unpacked class names, three service flags, and
-// five profile flags.
+// The controller is a B06+ Bluetooth audio receiver, with the class
+// word and profile UUIDs that it reported when it paired.
 func TestSliceDevicesPublishesTheClassAndProfileFacts(t *testing.T) {
 	devices := sliceDevices(map[string]controller{
 		"e3:28:e9:23:21:6f": {
@@ -176,15 +163,13 @@ func TestSliceDevicesPublishesTheClassAndProfileFacts(t *testing.T) {
 		"serialPort":       true,
 	}
 	if got := publishedAttributes(devices[0]); !reflect.DeepEqual(got, want) {
-		t.Fatalf("attributes = %+v, want %+v", got, want)
+		t.Fatalf("attributes are %+v, want %+v", got, want)
 	}
 }
 
-// A DualSense's class word sets no service flags at all, so a
-// gamepad proves the flags stay absent while the major and minor
-// still publish. Its input flag comes from the HID-over-GATT UUID,
-// the LE transport, which must land as the same input attribute the
-// classic UUID yields.
+// A DualSense's class word sets no service class flags. Its `input`
+// attribute comes from the HID-over-GATT UUID of Low Energy, and must
+// be the same attribute that the classic HID UUID produces.
 func TestSliceDevicesPublishesAGamepad(t *testing.T) {
 	devices := sliceDevices(map[string]controller{
 		"a0:ab:51:33:b7:12": {
@@ -207,20 +192,17 @@ func TestSliceDevicesPublishesAGamepad(t *testing.T) {
 		"majorClass":    "peripheral",
 		"minorClass":    "gamepad",
 		"input":         true,
-		// The three nodes a DualSense registers, as udev names them.
-		// A DeviceClass selects a gamepad on `joystick` rather than on
-		// the controller's name.
 		"joystick":      true,
 		"accelerometer": true,
 		"touchpad":      true,
 	}
 	if got := publishedAttributes(devices[0]); !reflect.DeepEqual(got, want) {
-		t.Fatalf("attributes = %+v, want %+v", got, want)
+		t.Fatalf("attributes are %+v, want %+v", got, want)
 	}
 }
 
-// Absent, never empty: a controller that reported no identity
-// facts publishes only the three attributes every device has.
+// A controller that BlueZ reported nothing about publishes only
+// `address` and `connected`, and no attribute with an empty value.
 func TestSliceDevicesPublishesNothingForAnUnreportedFact(t *testing.T) {
 	devices := sliceDevices(
 		map[string]controller{"a0:ab:51:33:b7:12": {Connected: true}},
@@ -234,13 +216,12 @@ func TestSliceDevicesPublishesNothingForAnUnreportedFact(t *testing.T) {
 		"connected": true,
 	}
 	if got := publishedAttributes(devices[0]); !reflect.DeepEqual(got, want) {
-		t.Fatalf("attributes = %+v, want %+v", got, want)
+		t.Fatalf("attributes are %+v, want %+v", got, want)
 	}
 }
 
-// Appearance is the LE counterpart of the class word, and an
-// LE-only device often reports it with no class at all, so it
-// publishes outside the class gate.
+// Appearance is the Low Energy counterpart of the class word. A Low
+// Energy device often reports an appearance and no class word.
 func TestSliceDevicesPublishesAppearance(t *testing.T) {
 	devices := sliceDevices(
 		map[string]controller{"a0:ab:51:33:b7:12": {Appearance: 0x03C4}},
@@ -249,13 +230,12 @@ func TestSliceDevicesPublishesAppearance(t *testing.T) {
 		nil,
 	)
 	if got := *devices[0].Attributes["appearance"].Int; got != 0x03C4 {
-		t.Fatalf("appearance = %d, want %d", got, 0x03C4)
+		t.Fatalf("appearance attribute is %d, want %d", got, 0x03C4)
 	}
 }
 
-// The API rejects an attribute string past 64 characters, and one
-// oversized value would fail the whole slice write, so a long
-// modalias takes the same cut the name takes.
+// The API rejects an attribute string longer than 64 bytes, and one
+// rejected value fails the whole slice write.
 func TestSliceDevicesTruncatesALongModalias(t *testing.T) {
 	devices := sliceDevices(
 		map[string]controller{"a0:ab:51:33:b7:12": {Modalias: strings.Repeat("x", 100)}},
@@ -264,7 +244,7 @@ func TestSliceDevicesTruncatesALongModalias(t *testing.T) {
 		nil,
 	)
 	if got := len(*devices[0].Attributes["modalias"].String); got != 64 {
-		t.Fatalf("modalias length = %d, want 64", got)
+		t.Fatalf("modalias is %d bytes, want 64", got)
 	}
 }
 
@@ -276,35 +256,32 @@ func TestSliceDevicesTruncatesALongName(t *testing.T) {
 		nil,
 	)
 	if got := len(*devices[0].Attributes["name"].String); got != 64 {
-		t.Fatalf("name length = %d, want 64", got)
+		t.Fatalf("name is %d bytes, want 64", got)
 	}
 }
 
-// A person can name a controller in any script. A cut through the
-// middle of a multi-byte rune is invalid UTF-8, which the API server
-// rejects, and the rejection fails the whole slice write.
+// A cut in the middle of a multi-byte rune is invalid UTF-8, which the
+// API server rejects.
 func TestAttributeStringCutsOnARuneBoundary(t *testing.T) {
 	cases := []string{
-		strings.Repeat("é", 40),       // two bytes each: 64 lands mid-rune
+		strings.Repeat("é", 40),       // two bytes each, so byte 64 is inside a rune
 		strings.Repeat("あ", 40),       // three bytes each
 		strings.Repeat("🎮", 40),       // four bytes each
-		strings.Repeat("x", 63) + "é", // the boundary case at exactly 64
+		strings.Repeat("x", 63) + "é", // exactly 64 bytes
 	}
 	for _, name := range cases {
 		truncated := attributeString(name)
 		if len(truncated) > 64 {
-			t.Errorf("%q truncated to %d bytes", name[:8], len(truncated))
+			t.Errorf("%q truncated to %d bytes, want at most 64", name[:8], len(truncated))
 		}
 		if !utf8.ValidString(truncated) {
-			t.Errorf("%q truncated to invalid UTF-8", name[:8])
+			t.Errorf("%q truncated to invalid UTF-8, want valid UTF-8", name[:8])
 		}
 	}
 }
 
-// Each input class a controller's nodes carry publishes as one
-// boolean attribute, named as udev names the class. A class the
-// controller does not carry publishes nothing, the way every other
-// absent fact does, so a selector on one guards its read.
+// A class that the controller does not have is not published, so a
+// selector must check with has() before it reads the attribute.
 func TestSliceDevicesPublishesOneAttributePerInputClass(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -343,22 +320,21 @@ func TestSliceDevicesPublishesOneAttributePerInputClass(t *testing.T) {
 			published := publishedAttributes(devices[0])
 			for _, class := range c.want {
 				if published[class] != true {
-					t.Errorf("the device does not publish %s", class)
+					t.Errorf("the device lacks the %s class, want it published", class)
 				}
 				delete(published, class)
 			}
 			for _, class := range inputClassNames {
 				if _, found := published[class.name]; found {
-					t.Errorf("the device publishes %s, which it does not carry", class.name)
+					t.Errorf("the device has the %s class, want it absent", class.name)
 				}
 			}
 		})
 	}
 }
 
-// A bond that has never connected has no node the relay could read,
-// so it carries the profile flag from its SDP browse and no class.
-// The no-input-node taint is what parks a claim on it.
+// A bond that has never connected has no node for the relay to read,
+// so it has the profile flag from its UUIDs and no input class.
 func TestSliceDevicesPublishesNoClassForABondThatHasNeverConnected(t *testing.T) {
 	devices := sliceDevices(
 		map[string]controller{"a0:ab:51:33:b7:12": {
@@ -376,6 +352,6 @@ func TestSliceDevicesPublishesNoClassForABondThatHasNeverConnected(t *testing.T)
 		"input":     true,
 	}
 	if got := publishedAttributes(devices[0]); !reflect.DeepEqual(got, want) {
-		t.Fatalf("attributes = %+v, want %+v", got, want)
+		t.Fatalf("attributes are %+v, want %+v", got, want)
 	}
 }

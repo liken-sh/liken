@@ -16,8 +16,8 @@ import (
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 )
 
-// stubLister records the parse it is asked with and returns a fixed set
-// of names, so a test drives completeArgs without a cluster.
+// stubLister returns a lister of fixed names, and a pointer to the
+// parse that its latest call received.
 func stubLister(names ...string) (peripheralLister, *completionParse) {
 	var seen completionParse
 	return func(parse completionParse) []string {
@@ -170,7 +170,7 @@ func TestLookupCompletionFlag(t *testing.T) {
 func TestRunCompleteWritesTheProtocol(t *testing.T) {
 	var stdout strings.Builder
 	if err := runComplete(context.Background(), []string{""}, &stdout); err != nil {
-		t.Fatalf("runComplete: %v", err)
+		t.Fatalf("running the completion: %v", err)
 	}
 	got := stdout.String()
 	if !strings.Contains(got, "pair\n") || !strings.Contains(got, "unpair\n") {
@@ -201,8 +201,8 @@ func TestCompletionScriptRejectsAnOtherShell(t *testing.T) {
 	}
 }
 
-// peripheral builds an unstructured Peripheral for the dynamic fake.
-// Peripheral is cluster-scoped, so the object carries no namespace.
+// peripheral returns an unstructured `Peripheral` for the fake dynamic
+// client. It has no namespace because `Peripheral` is cluster-scoped.
 func peripheral(name string) *unstructured.Unstructured {
 	object := &unstructured.Unstructured{}
 	object.SetGroupVersionKind(schema.GroupVersionKind{

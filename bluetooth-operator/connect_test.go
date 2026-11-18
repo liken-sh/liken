@@ -1,7 +1,7 @@
 package main
 
-// Which bonded devices the operator pages, how long it waits after a
-// failure, and that the call never runs on the reconcile loop.
+// Which bonded devices the operator connects, how long it waits after a
+// failed attempt, and that the call does not block the reconcile loop.
 
 import (
 	"errors"
@@ -11,9 +11,7 @@ import (
 	"github.com/liken-sh/liken/bluetooth-operator/bonds"
 )
 
-// testSpeaker is the A2DP speaker these tests page. It stays paired,
-// trusted, and disconnected after a power cycle, because it never
-// pages the radio itself.
+// testSpeaker is an A2DP speaker that never connects on its own.
 const testSpeaker = "E3:28:E9:23:21:6F"
 
 func speakerAddress(t *testing.T) bonds.Address {
@@ -21,7 +19,7 @@ func speakerAddress(t *testing.T) bonds.Address {
 	return testAddress(t, testSpeaker)
 }
 
-// bondedSpeaker is the speaker as bluetoothd reports it while it is
+// bondedSpeaker is the speaker as bluetoothd reports it when it is
 // powered on and not connected.
 func bondedSpeaker(t *testing.T) deviceState {
 	t.Helper()
@@ -49,8 +47,8 @@ func untrustedSpeaker(t *testing.T) deviceState {
 	return device
 }
 
-// seenSpeaker is the same hardware with no bond, which is what a
-// peripheral window reports before anybody approves it.
+// seenSpeaker is the same speaker with no bond, as bluetoothd reports
+// it during a pairing window before anyone approves it.
 func seenSpeaker(t *testing.T) deviceState {
 	t.Helper()
 	device := bondedSpeaker(t)
@@ -58,9 +56,7 @@ func seenSpeaker(t *testing.T) deviceState {
 	return device
 }
 
-// bondedController is a game controller, asleep until its own button
-// pages the radio. A page at it never succeeds and only wastes radio
-// time.
+// bondedController is a disconnected game controller.
 func bondedController(t *testing.T) deviceState {
 	t.Helper()
 	device := pairedDevice(t, testDevice)
@@ -69,14 +65,14 @@ func bondedController(t *testing.T) deviceState {
 	return device
 }
 
-// connectPass is the pass state the connector reads and writes: the
-// bonds a teardown holds, and how soon the loop must run again.
+// connectPass returns an empty pass: no unpairs in progress and no
+// request to run again.
 func connectPass() inventoryPass {
 	return inventoryPass{unpairing: map[bonds.Address]bool{}}
 }
 
-// testConnector reads its clock through a pointer the test moves, so
-// a wait runs out without any waiting.
+// testConnector returns a connector whose clock is *now, so a test can
+// move time forward by assigning to it.
 func testConnector(radio *fakeRadio, now *time.Time) *connector {
 	return newConnector(radio, func() time.Time { return *now })
 }
@@ -100,7 +96,7 @@ func TestConnectPagesOnlyABondedTrustedAudioSink(t *testing.T) {
 			connector := testConnector(radio, &now)
 			snapshot, err := radio.Snapshot()
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("reading the radio snapshot: %v", err)
 			}
 
 			pass := connectPass()
@@ -114,16 +110,17 @@ func TestConnectPagesOnlyABondedTrustedAudioSink(t *testing.T) {
 	}
 }
 
-// A teardown disconnects the device and removes the bond, so a page
-// in the middle of it would work against the unpair.
+// An unpair disconnects the device and removes the bond, so connecting
+// the device during it would undo the unpair.
 func TestConnectSkipsADeletingPeripheral(t *testing.T) {
 	fixture := newAPIFixture()
 	radio := testRadio(t, connectedSpeaker(t))
 	inventory := testInventory(t, fixture, radio)
 	inventory.reconcile()
 	deleteSpeakerPeripheral(t, fixture)
-	// The teardown's first step disconnects the speaker, which is the
-	// state a page would answer.
+	// The unpair disconnects the speaker first, so the speaker is now
+	// a disconnected, bonded, trusted sink that the connector would
+	// otherwise connect.
 	inventory.reconcile()
 
 	radio.calls = nil
@@ -131,13 +128,13 @@ func TestConnectSkipsADeletingPeripheral(t *testing.T) {
 	inventory.connects.attempts.Wait()
 
 	if radio.called("Connect") {
-		t.Fatalf("a device under teardown was paged: %v", radio.calls)
+		t.Fatalf("Connect ran for a device under teardown: %v, want no call", radio.calls)
 	}
 }
 
-// deleteSpeakerPeripheral marks the Peripheral the way a kubectl delete
-// does: the API server stamps a deletionTimestamp and keeps the
-// object, because the operator's finalizer is on it.
+// deleteSpeakerPeripheral deletes the speaker's Peripheral as kubectl
+// does. The operator's finalizer keeps the object, and the API server
+// sets its deletionTimestamp.
 func deleteSpeakerPeripheral(t *testing.T, fixture *apiFixture) {
 	t.Helper()
 	path := peripheralPath(speakerAddress(t).Key())
@@ -146,9 +143,8 @@ func deleteSpeakerPeripheral(t *testing.T, fixture *apiFixture) {
 	fixture.put(t, path, peripheral)
 }
 
-// A speaker that is switched off fails every page, and each page
-// holds the radio for the page timeout. A pass inside the wait asks
-// for the wake that ends the wait instead of calling again.
+// A pass during the backoff does not call Connect, and asks to run again
+// when the backoff ends.
 func TestAFailedConnectWaitsBeforeTheNextOne(t *testing.T) {
 	radio := testRadio(t, bondedSpeaker(t))
 	radio.connectErr = errors.New("org.bluez.Error.Failed: Host is down")
@@ -156,7 +152,7 @@ func TestAFailedConnectWaitsBeforeTheNextOne(t *testing.T) {
 	connector := testConnector(radio, &now)
 	snapshot, err := radio.Snapshot()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the radio snapshot: %v", err)
 	}
 
 	first := connectPass()
@@ -193,7 +189,7 @@ func TestTheConnectWaitDoublesToACeiling(t *testing.T) {
 	connector := testConnector(radio, &now)
 	snapshot, err := radio.Snapshot()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the radio snapshot: %v", err)
 	}
 
 	for _, c := range cases {
@@ -208,8 +204,8 @@ func TestTheConnectWaitDoublesToACeiling(t *testing.T) {
 	}
 }
 
-// The wait is per device, so a speaker that answers starts from the
-// first delay again the next time it is switched off.
+// The backoff is per device. A speaker that connects starts again from
+// firstConnectRetry the next time it fails.
 func TestASuccessResetsTheConnectWait(t *testing.T) {
 	radio := testRadio(t, bondedSpeaker(t))
 	radio.connectErr = errors.New("org.bluez.Error.Failed: Host is down")
@@ -217,13 +213,13 @@ func TestASuccessResetsTheConnectWait(t *testing.T) {
 	connector := testConnector(radio, &now)
 	failed, err := radio.Snapshot()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the radio snapshot: %v", err)
 	}
 	pass := connectPass()
 	connector.reconcile(failed, &pass)
 	connector.attempts.Wait()
 
-	// The speaker is switched on now, and the wait has run out.
+	// The speaker is switched on and the backoff has expired.
 	radio.connectErr = nil
 	now = now.Add(firstConnectRetry)
 	answered := connectPass()
@@ -238,8 +234,8 @@ func TestASuccessResetsTheConnectWait(t *testing.T) {
 	}
 }
 
-// bluetoothd reports a connection whatever made it, and a connected
-// device costs this operator nothing per pass.
+// A device that bluetoothd reports as connected, by this operator or by
+// itself, clears its backoff and asks for no further pass.
 func TestAConnectionResetsTheConnectWait(t *testing.T) {
 	radio := testRadio(t, bondedSpeaker(t))
 	radio.connectErr = errors.New("org.bluez.Error.Failed: Host is down")
@@ -247,7 +243,7 @@ func TestAConnectionResetsTheConnectWait(t *testing.T) {
 	connector := testConnector(radio, &now)
 	failed, err := radio.Snapshot()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the radio snapshot: %v", err)
 	}
 	pass := connectPass()
 	connector.reconcile(failed, &pass)
@@ -262,21 +258,19 @@ func TestAConnectionResetsTheConnectWait(t *testing.T) {
 		t.Fatalf("the wait after a connection is %s, want none", got)
 	}
 	if steady.again != 0 {
-		t.Fatalf("a connected device asked for another pass in %s", steady.again)
+		t.Fatalf("a connected device asked for another pass in %s, want none", steady.again)
 	}
 }
 
-// Device1.Connect returns only when the link is up or the page
-// failed, and the loop that calls it also publishes the slice and
-// writes the bonds, so the loop must not wait for it.
+// The reconcile pass returns while a Connect call is still in flight.
 func TestTheReconcilePassDoesNotWaitForAConnect(t *testing.T) {
 	radio := testRadio(t, bondedSpeaker(t))
-	radio.connectHolds = make(chan struct{})
+	radio.connectBlocks = make(chan struct{})
 	now := testNow
 	connector := testConnector(radio, &now)
 	snapshot, err := radio.Snapshot()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the radio snapshot: %v", err)
 	}
 
 	returned := make(chan struct{})
@@ -288,14 +282,14 @@ func TestTheReconcilePassDoesNotWaitForAConnect(t *testing.T) {
 	select {
 	case <-returned:
 	case <-time.After(5 * time.Second):
-		t.Fatal("the pass waited for the connect to finish")
+		t.Fatal("the pass did not return within 5 seconds, want it to return while Connect is in flight")
 	}
 
-	// One call at a time for a device: a pass that runs while the
-	// first is in flight starts nothing.
+	// A second pass while the first call is in flight starts no
+	// second call.
 	second := connectPass()
 	connector.reconcile(snapshot, &second)
-	close(radio.connectHolds)
+	close(radio.connectBlocks)
 	connector.attempts.Wait()
 
 	if got := radio.counted("Connect"); got != 1 {
@@ -303,8 +297,8 @@ func TestTheReconcilePassDoesNotWaitForAConnect(t *testing.T) {
 	}
 }
 
-// The goroutine that finishes a page is not the loop, so the state it
-// changed reaches the next pass only because it asks for one.
+// The goroutine that makes the call asks the reconcile loop for a pass
+// when the call returns, so the loop reads the new state.
 func TestAFinishedConnectWakesTheLoop(t *testing.T) {
 	radio := testRadio(t, bondedSpeaker(t))
 	now := testNow
@@ -313,7 +307,7 @@ func TestAFinishedConnectWakesTheLoop(t *testing.T) {
 	connector.wake = func() { woke <- struct{}{} }
 	snapshot, err := radio.Snapshot()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the radio snapshot: %v", err)
 	}
 
 	pass := connectPass()
@@ -322,6 +316,6 @@ func TestAFinishedConnectWakesTheLoop(t *testing.T) {
 	select {
 	case <-woke:
 	case <-time.After(5 * time.Second):
-		t.Fatal("the finished connect asked for no pass")
+		t.Fatal("no pass was requested within 5 seconds of Connect returning, want one")
 	}
 }

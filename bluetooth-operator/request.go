@@ -1,24 +1,18 @@
 package main
 
-// The PairingRequest: the act of pairing, and its discovery scan.
+// A PairingRequest makes the radio discoverable and pairable for a
+// limited time, lists the devices the radio sees in status.seen, and
+// pairs the device whose address a person writes into spec.device.
+// While spec.device is empty the request pairs nothing, because
+// pairing whichever device answers first could bond a stranger's
+// device.
 //
-// The scan and the pairing window are one radio session, so the
-// address a person approves is one the radio observed in this same
-// session. A request opens that session, reports the radio's
-// observations in status.seen, and pairs exactly the device whose
-// address somebody wrote into spec.device. An empty spec.device never
-// pairs anything: pairing whatever responds first is the one behavior
-// that can bond a stranger's device.
+// Writing spec.device is the approval. A custom resource has no
+// subresource for an approval, so anyone who can update a request can
+// approve it.
 //
-// Writing the spec is the approval, the same way editing a Deployment
-// approves a rollout. Custom resources have only the status and scale
-// subresources, so whoever may update a request may approve one, and
-// splitting the two would take a second object nobody needs yet.
-//
-// A request ends in exactly one of two states and never retries: the
-// device paired, or the window closed unapproved. The controller's own
-// pairing mode has timed out by then as well, so a retry would ask the
-// radio to pair with something that is no longer listening.
+// A request ends as Paired or Expired and is not reopened. By the time
+// the window closes, the device's own pairing mode has also timed out.
 
 import (
 	"errors"
@@ -32,8 +26,9 @@ import (
 	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
-// reconcileRequests runs every open window aimed at this radio, and
-// collects the finished requests whose time is up.
+// reconcileRequests advances each unfinished request for this radio
+// and deletes each finished request whose TTL has passed. When no
+// request keeps a window open, it closes the radio's window.
 func (i *inventory) reconcileRequests(adapter *Adapter, snapshot radioSnapshot, pass *inventoryPass) {
 	requests, err := i.listRequests()
 	if err != nil {
@@ -46,9 +41,7 @@ func (i *inventory) reconcileRequests(adapter *Adapter, snapshot radioSnapshot, 
 	for index := range requests {
 		request := &requests[index]
 		if request.Spec.Adapter != adapter.Metadata.Name || request.Metadata.deleting() {
-			// Another radio's request. The operator that holds that radio
-			// serves it, and this one must not open a window on a
-			// person's behalf against hardware they did not name.
+			// The operator on the named radio serves this request.
 			continue
 		}
 		if request.Status.finished() {
@@ -65,14 +58,13 @@ func (i *inventory) reconcileRequests(adapter *Adapter, snapshot radioSnapshot, 
 	}
 }
 
-// listRequests answers every PairingRequest, from the store once it
-// holds its first read, and from the API server before then
-// (informer.List).
+// listRequests returns every PairingRequest, from the informer's store
+// once it has its first list, and from the API server before then.
 func (i *inventory) listRequests() ([]PairingRequest, error) {
 	return informer.List[PairingRequest](i.client, i.cache.requests, pairingRequestsPath(), memo.NamespacedPath(pairingRequestPath))
 }
 
-// runWindow advances one unfinished request, and reports whether its
+// runWindow advances one unfinished request and reports whether its
 // window is still open at the end of the pass.
 func (i *inventory) runWindow(adapter *Adapter, request *PairingRequest, snapshot radioSnapshot, pass *inventoryPass) bool {
 	now := i.now()
@@ -82,43 +74,39 @@ func (i *inventory) runWindow(adapter *Adapter, request *PairingRequest, snapsho
 	if status.Phase == "" {
 		status.Phase = phaseOpen
 		status.WindowClosesAt = timestamp(now.Add(request.Spec.window()))
-		fmt.Printf("request %s: the window is open until %s\n", name, status.WindowClosesAt)
+		fmt.Printf("PairingRequest %s: the pairing window is open until %s\n", name, status.WindowClosesAt)
 	}
 	closesAt := parseTimestamp(status.WindowClosesAt)
 	if closesAt.IsZero() {
-		// A status somebody edited by hand, or a write that failed
-		// halfway. The window gets its full length from now, which is the
-		// same thing the first pass would have given it.
+		// A hand edit left status.windowClosesAt empty or unparsable.
 		closesAt = now.Add(request.Spec.window())
 		status.WindowClosesAt = timestamp(closesAt)
 	}
 
 	if !now.Before(closesAt) {
-		// The radio is put back by closeIdleWindow at the end of the
-		// pass, not here, because another request may still be holding a
-		// window open on the same radio.
+		// Leave the radio open. Another request may still need it, and
+		// closeIdleWindow closes it at the end of the pass if none does.
 		status.Phase = phaseExpired
 		status.FinishedAt = timestamp(now)
-		fmt.Printf("request %s: the window closed with no approval\n", name)
+		fmt.Printf("PairingRequest %s: the pairing window closed with no device approved\n", name)
 		i.writeRequestStatus(request, status, false, pass)
 		return false
 	}
 
-	// The radio's own timeouts are set to what is left of the window, so
-	// a window outlives this operator by no longer than one pass. The
-	// window is re-asserted on every pass because a bluetoothd that
-	// restarted, or an adapter that powered itself back on, holds none
-	// of this state.
+	// OpenWindow sets bluetoothd's own timeouts to the time left, so
+	// bluetoothd closes the radio at the deadline even if this operator
+	// stops. Every pass opens the window again, because a bluetoothd
+	// that restarted or an adapter that powered back on has lost it.
 	remaining := closesAt.Sub(now)
 	i.windowOpen = true
 	if err := i.radio.OpenWindow(remaining); err != nil {
-		fmt.Fprintf(os.Stderr, "request %s: opening the window: %v\n", name, err)
-		status.Message = fmt.Sprintf("the radio refused the window: %v", err)
+		fmt.Fprintf(os.Stderr, "PairingRequest %s: opening the pairing window: %v\n", name, err)
+		status.Message = fmt.Sprintf("The radio refused the pairing window: %v", err)
 		pass.ok = false
 		i.writeRequestStatus(request, status, false, pass)
-		// The loop retries a failed pass once, and no event reports that
-		// the radio would now accept the window. The follow-up pass asks
-		// again while the window lasts.
+		// The loop retries a failed pass only once, and no event tells
+		// when the radio would accept the window, so keep trying until
+		// the window's deadline.
 		pass.runAgainIn(followUpDelay)
 		return true
 	}
@@ -133,15 +121,12 @@ func (i *inventory) runWindow(adapter *Adapter, request *PairingRequest, snapsho
 	return !status.finished()
 }
 
-// approve pairs the one device a person named.
+// approve pairs the device in spec.device and creates its Peripheral.
+// A device that the radio has not seen yet is not in pairing mode, so
+// approve leaves the window open for the next pass to try again.
 //
-// A device that is not in the snapshot is one the radio has not
-// observed yet, which is the ordinary state before somebody holds the
-// controller's buttons. The window stays open and the next pass looks
-// again, until the window closes on its own.
-//
-// It answers true when bluetoothd refused the pairing, which the
-// request's message then reports.
+// It returns true when bluetoothd refused the pairing. The refusal is
+// in status.message, and the caller posts it as an Event.
 func (i *inventory) approve(adapter *Adapter, request *PairingRequest, status *PairingRequestStatus, snapshot radioSnapshot, pass *inventoryPass) bool {
 	name := request.Metadata.Namespace + "/" + request.Metadata.Name
 	address, err := bonds.ParseAddress(request.Spec.Device)
@@ -151,43 +136,39 @@ func (i *inventory) approve(adapter *Adapter, request *PairingRequest, status *P
 	}
 	device, present := snapshot.device(address)
 	if !present {
-		status.Message = fmt.Sprintf("waiting for %s to answer the scan", address)
+		status.Message = fmt.Sprintf("Waiting for %s to appear in the scan", address)
 		return false
 	}
 
 	if !device.Paired {
 		if err := i.radio.Pair(address); err != nil {
 			i.metrics.countPairAttempt(resultRefused)
-			status.Message = fmt.Sprintf("pairing with %s: %v", address, err)
-			fmt.Fprintf(os.Stderr, "request %s: %s\n", name, status.Message)
+			status.Message = fmt.Sprintf("bluetoothd did not pair with %s: %v", address, err)
+			fmt.Fprintf(os.Stderr, "PairingRequest %s: %s\n", name, status.Message)
 			return true
 		}
 		i.metrics.countPairAttempt(resultPaired)
-		fmt.Printf("request %s: paired with %s\n", name, address)
+		fmt.Printf("PairingRequest %s: paired with %s\n", name, address)
 	}
-	// Trusting the device lets it reconnect on its own afterwards.
-	// Without it BlueZ asks an agent to authorize each service on every
-	// connection, and no agent is registered outside a window.
+	// Without trust, BlueZ asks an agent to authorize each service on
+	// every connection, and no agent is registered outside a window.
 	if err := i.radio.SetDeviceTrusted(address, true); err != nil {
-		fmt.Fprintf(os.Stderr, "request %s: trusting %s: %v\n", name, address, err)
+		fmt.Fprintf(os.Stderr, "PairingRequest %s: trusting %s: %v\n", name, address, err)
 	}
 
-	// The bond now exists, so the device's state differs from the
-	// snapshot this pass read.
+	// The snapshot was read before the pairing.
 	device.Paired, device.Bonded, device.Trusted = true, true, true
 	peripheral, err := i.createPeripheral(adapter, device, name)
 	if err != nil {
-		status.Message = fmt.Sprintf("recording the pairing with %s: %v", address, err)
-		fmt.Fprintf(os.Stderr, "request %s: %s\n", name, status.Message)
+		status.Message = fmt.Sprintf("Paired with %s, and the Peripheral was not created: %v", address, err)
+		fmt.Fprintf(os.Stderr, "PairingRequest %s: %s\n", name, status.Message)
 		pass.ok = false
 		return false
 	}
 	i.recorder.Normal(peripheralReference(peripheral), reasonPaired,
-		fmt.Sprintf("paired with %s through PairingRequest %s", address, name))
-	// The device paired moments ago, and the kernel registers a power
-	// supply only after it connects, so there is no kernel reading to
-	// pass. It also holds no prepared claim yet: the pod that would
-	// hold one cannot exist before this Peripheral does.
+		fmt.Sprintf("Paired with %s through PairingRequest %s", address, name))
+	// The kernel registers the device's battery only after the device
+	// connects, and no claim can hold a Peripheral that this pass created.
 	i.writePeripheralStatus(peripheral, adapter, address, device, true, nil, false)
 	pass.owners[address] = OwnerReference{
 		APIVersion: pairingAPI,
@@ -203,30 +184,23 @@ func (i *inventory) approve(adapter *Adapter, request *PairingRequest, status *P
 	return false
 }
 
-// seenDevices merges the radio's current observations into the list a
-// person reads.
+// seenDevices adds the unpaired devices in the snapshot to
+// status.seen. A paired device is left out because it already has a
+// Peripheral.
 //
-// A device keeps the firstSeen it was given, because that value
-// records which of two controllers started responding first. The list
-// is capped and the names are cut, because it is written from radio
-// observations: a busy room would otherwise grow the object without
-// limit, and the limits are the same ones a ResourceSlice puts on a
-// string attribute.
-//
-// A device the radio already holds a bond with is left out. It has a
-// Peripheral of its own, and the list exists to name the devices that
-// do not.
-//
-// The second value is true when the cap stopped a device from reaching
-// the list. status.seenTruncated reports it, so the devices a busy room
-// kept off the list are visible on the request.
+// A device keeps its first firstSeen, so a person can tell which of
+// two controllers answered the scan first. A busy room can hold any
+// number of devices, so the list stops at maxSeenDevices and each name
+// is cut to maxSeenNameBytes, the limit that a ResourceSlice sets on a
+// string attribute. The second return value is true when the list was
+// full and a device was left out.
 func seenDevices(seen []SeenDevice, snapshot radioSnapshot, now time.Time) ([]SeenDevice, bool) {
 	first := make(map[string]string, len(seen))
 	for _, device := range seen {
 		first[device.Address] = device.FirstSeen
 	}
-	// The devices already in the list keep their order and their place,
-	// so an entry keeps its position while a person reads the list.
+	// Existing entries keep their order, so the list does not shuffle
+	// while a person reads it.
 	merged := append([]SeenDevice{}, seen...)
 	for _, device := range snapshot.Devices {
 		if device.Paired {
@@ -241,7 +215,7 @@ func seenDevices(seen []SeenDevice, snapshot radioSnapshot, now time.Time) ([]Se
 		}
 		merged = append(merged, SeenDevice{
 			Address:   address,
-			Name:      truncateRunes(deviceDisplayName(device), maxSeenNameBytes),
+			Name:      truncateToBytes(deviceDisplayName(device), maxSeenNameBytes),
 			FirstSeen: timestamp(now),
 		})
 		first[address] = timestamp(now)
@@ -249,123 +223,104 @@ func seenDevices(seen []SeenDevice, snapshot radioSnapshot, now time.Time) ([]Se
 	return merged, false
 }
 
-// collectRequest deletes a finished request once its time is up. A
-// finished request stays long enough to read the next morning. The
-// Peripheral's status records which request produced it, so that record
-// outlasts the deletion.
+// collectRequest deletes a finished request once its TTL has passed.
+// The Peripheral's status names the request that paired it, so that
+// record outlasts the request.
 func (i *inventory) collectRequest(request *PairingRequest, pass *inventoryPass) {
 	ttl := request.Spec.ttl()
 	finished := parseTimestamp(request.Status.FinishedAt)
 	if finished.IsZero() {
-		// A request that reached an end state with no time on it, which
-		// is a status somebody edited or a write that failed halfway.
-		// The time is written now, so the TTL has a start: without one,
-		// every pass would count from itself and the request would never
-		// be collected.
+		// Without a recorded start, each pass would count the TTL from
+		// its own time and never delete the request.
 		status := request.Status
 		status.FinishedAt = timestamp(i.now())
 		i.writeRequestStatus(request, status, false, pass)
 		return
 	}
-	// A request inside its TTL needs no follow-up pass. The request
-	// watcher sets a clock for the moment the TTL is up, and wakes the
-	// loop then.
+	// The request watcher wakes the loop when the TTL ends.
 	if i.now().Before(finished.Add(ttl)) {
 		return
 	}
 	path := pairingRequestPath(request.Metadata.Namespace, request.Metadata.Name)
 	if err := deleteObject(i.client, path); err != nil {
-		fmt.Fprintf(os.Stderr, "deleting the finished request %s/%s: %v\n",
+		fmt.Fprintf(os.Stderr, "deleting PairingRequest %s/%s: %v\n",
 			request.Metadata.Namespace, request.Metadata.Name, err)
 		pass.ok = false
 		return
 	}
 	i.cache.requests.Versions.Note(requestKey(*request), "")
-	fmt.Printf("request %s/%s: collected %s after it finished\n",
+	fmt.Printf("PairingRequest %s/%s: deleted after its time to live of %s\n",
 		request.Metadata.Namespace, request.Metadata.Name, ttl)
 }
 
-// closeIdleWindow returns the radio to idle when no request is
-// holding a window open.
-//
-// It runs on the two states that mean a window is open: one this
-// operator opened, which is the pass where a request paired or
-// expired, and one the radio reports, which covers an operator that
-// was restarted mid-window and an adapter that came back powered from
-// a USB reset. An idle adapter is not discoverable and not pairable,
-// and everything outside a window depends on that.
-//
-// bluetoothd's own timeouts end an open window as well, so this is
-// the second of two protections against the same exposure and not the
-// only one.
+// closeIdleWindow makes the radio not discoverable and not pairable,
+// and stops its scan, when no request needs a window. It also closes a
+// radio that reports a window this run did not open, such as one left
+// open by an operator that restarted mid-window or by an adapter that
+// powered back on after a USB reset.
 func (i *inventory) closeIdleWindow(snapshot radioSnapshot) {
-	standing := snapshot.Adapter.Discoverable || snapshot.Adapter.Pairable || snapshot.Adapter.Discovering
-	if !i.windowOpen && !standing {
+	radioOpen := snapshot.Adapter.Discoverable || snapshot.Adapter.Pairable || snapshot.Adapter.Discovering
+	if !i.windowOpen && !radioOpen {
 		return
 	}
 	if err := i.radio.CloseWindow(); err != nil {
-		fmt.Fprintf(os.Stderr, "closing the window on an idle radio: %v\n", err)
+		fmt.Fprintf(os.Stderr, "closing the pairing window of the idle radio: %v\n", err)
 		return
 	}
 	i.windowOpen = false
-	fmt.Printf("request: no window is open; the radio is no longer discoverable\n")
+	fmt.Printf("no PairingRequest needs a window, so the radio is no longer discoverable\n")
 }
 
-// writeRequestStatus writes a request's status when it differs from
-// what the object already has.
+// writeRequestStatus writes status when it differs from the request's
+// current status, and then posts its Events. refused is true when
+// bluetoothd refused the pairing on this pass.
 //
-// A copy from the store can be older than the API server's. The write
-// from it is refused, and the request is read again. When the fresh
-// copy holds the status this pass composed from, a spec edit made the
-// conflict, and the status is written onto the fresh copy. When the
-// fresh copy holds a newer status, that status is this operator's own
-// last write, and this pass composed from an older one: the pass
-// writes nothing, and the follow-up pass composes again from the newer
-// status. A window's status is not a pure function of the object, so it
-// cannot be composed again here: the pass pairs a device and opens the
-// radio's window while it composes.
+// The request can come from the informer's store and be older than
+// the API server's copy. After a conflict, SettleStatus reads the
+// request again and calls apply on the fresh copy. When the fresh copy
+// still has the status this pass started from, a spec edit caused the
+// conflict and the write goes ahead. When its status differs, this
+// pass computed from a stale status, so it writes nothing and runs
+// again. apply cannot compute the status again itself, because
+// computing it pairs a device and opens the radio.
 //
-// The Events of the request's changes are posted after the write
-// lands, so a refused write posts nothing, and the pass that composes
-// the same change again posts it then. refused reports that bluetoothd
-// refused the pairing on this pass.
+// A failed write posts no Event. The next pass computes the same
+// change and posts it then.
 func (i *inventory) writeRequestStatus(request *PairingRequest, status PairingRequestStatus, refused bool, pass *inventoryPass) {
-	published := request.Status
-	apply := func(held *PairingRequest) bool {
-		if !sameRequestStatus(held.Status, published) {
+	started := request.Status
+	apply := func(latest *PairingRequest) bool {
+		if !sameRequestStatus(latest.Status, started) {
 			pass.runAgainIn(followUpDelay)
 			return false
 		}
-		if sameRequestStatus(held.Status, status) {
+		if sameRequestStatus(latest.Status, status) {
 			return false
 		}
-		held.Status = status
-		held.APIVersion, held.Kind = pairingAPI, pairingRequestKind
+		latest.Status = status
+		latest.APIVersion, latest.Kind = pairingAPI, pairingRequestKind
 		return true
 	}
 	path := pairingRequestPath(request.Metadata.Namespace, request.Metadata.Name)
 	wrote, err := informer.SettleStatus(i.client, i.cache.requests.Versions, path, request, apply)
 	if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
-		// A request somebody deleted needs no status.
+		// A deleted request needs no status.
 		fmt.Fprintf(os.Stderr, "writing the status of %s/%s: %v\n",
 			request.Metadata.Namespace, request.Metadata.Name, err)
 		pass.ok = false
 	}
 	if wrote {
-		i.postRequestEvents(request, published, status, refused)
+		i.postRequestEvents(request, started, status, refused)
 	}
 }
 
-// postRequestEvents posts what one landed status write changed on a
-// request: the window opened, it expired, the device paired, or
-// bluetoothd refused the pairing. A refusal is posted when the message
-// that reports it is new, because the window tries the pairing again
-// on each pass, and the same refusal must not post each time.
+// postRequestEvents posts an Event for each change that one status
+// write made. A refusal posts only when its message is new, because
+// the window retries the pairing on every pass.
 func (i *inventory) postRequestEvents(request *PairingRequest, before, after PairingRequestStatus, refused bool) {
 	about := requestReference(request)
 	if before.Phase == "" && after.Phase != "" {
 		i.recorder.Normal(about, reasonPairingWindowOpened, fmt.Sprintf(
-			"the radio %s is discoverable and pairable until %s", request.Spec.Adapter, after.WindowClosesAt))
+			"The radio %s is discoverable and pairable until %s", request.Spec.Adapter, after.WindowClosesAt))
 	}
 	if refused && after.Message != before.Message {
 		i.recorder.Warning(about, reasonPairingRefused, after.Message)
@@ -376,16 +331,16 @@ func (i *inventory) postRequestEvents(request *PairingRequest, before, after Pai
 	switch after.Phase {
 	case phaseExpired:
 		i.recorder.Normal(about, reasonPairingWindowExpired, fmt.Sprintf(
-			"the window closed at %s with no device paired", after.WindowClosesAt))
+			"The pairing window closed at %s with no device paired", after.WindowClosesAt))
 	case phasePaired:
 		address, _ := bonds.ParseAddress(request.Spec.Device)
 		i.recorder.Normal(about, reasonPaired, fmt.Sprintf(
-			"paired with %s and created Peripheral %s", address, after.Peripheral))
+			"Paired with %s and created Peripheral %s", address, after.Peripheral))
 	}
 }
 
-// sameRequestStatus compares two statuses. The seen list is a slice, so
-// the comparison walks it rather than using an equality operator.
+// sameRequestStatus compares two statuses field by field, because the
+// struct has a slice and == does not compile on it.
 func sameRequestStatus(current, next PairingRequestStatus) bool {
 	if current.Phase != next.Phase ||
 		current.WindowClosesAt != next.WindowClosesAt ||

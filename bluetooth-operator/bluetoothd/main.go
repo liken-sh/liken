@@ -1,26 +1,17 @@
-// start-bluetoothd starts the pod's D-Bus system bus, waits for the
-// bus socket, powers the adapters off, and then becomes bluetoothd.
+// start-bluetoothd is the entrypoint of the bluetoothd container. It
+// starts a D-Bus system bus, writes bluetoothd's configuration, powers
+// every adapter off, and then replaces itself with bluetoothd.
 //
-// The bus belongs to this pod. bluetoothd's whole API is the D-Bus
-// system bus, and a pod has no host bus to join, so this image includes
-// dbus-daemon and starts a bus with one service and two clients on it:
-// bluetoothd owns org.bluez, and the operator's container and any
-// bluetoothctl session read it. This is also why liken's system image
-// needs no D-Bus: the bus exists only for this daemon and ships in the
-// image that holds the daemon.
+// bluetoothd serves its API only on the D-Bus system bus, and the
+// `liken` OS runs no D-Bus. So the image includes dbus-daemon, and this
+// program starts a system bus for this bluetoothd alone. The operator's
+// container and any bluetoothctl session connect to it as clients.
 //
-// This program is Go rather than a shell script because the image has
-// no shell. Three static binaries and their configuration are
-// the whole of it, and a shell would be a fourth binary added only to
-// run this program.
+// The image has no shell, so the entrypoint is a Go program.
 //
-// Before the exec, it powers every adapter off at the kernel, so that
-// bluetoothd starts with no connection that an earlier bluetoothd
-// left behind (poweroff.go).
-//
-// The exec at the end makes bluetoothd this container's process, so
-// the kubelet's TERM reaches bluetoothd directly and bluetoothd writes
-// its bonds out before it goes.
+// The exec makes bluetoothd the container's main process. The TERM that
+// the kubelet sends at pod shutdown then reaches bluetoothd, which
+// powers its adapters off before it exits (see poweroff.go).
 package main
 
 import (
@@ -38,22 +29,16 @@ import (
 )
 
 const (
-	// The bus is at a path of this operator's own, not at dbus's
-	// packaged /run/dbus, and every process here finds it through
-	// DBUS_SYSTEM_BUS_ADDRESS. bluetoothd and bluetoothctl read that
-	// variable through libdbus, and the operator reads it through
-	// godbus.
+	// The bus socket is in a directory that the pod mounts from the
+	// host into the bluetoothd and operator containers, so both reach
+	// the same bus. A consumer such as PipeWire gets a mount of the same
+	// directory through its claim's CDI spec (cdi.go in the operator).
+	// Each process finds the socket through DBUS_SYSTEM_BUS_ADDRESS,
+	// which libdbus and godbus both read.
 	//
-	// The path is a contract. The pod mounts one emptyDir here and
-	// gives both containers the same address, and a later capability
-	// that has to reach this bluetoothd over its bus, such as a
-	// PipeWire that handles Bluetooth audio, runs in this pod and
-	// mounts the same directory.
-	//
-	// The directory is the mount unit, never the socket file.
-	// dbus-daemon unlinks and recreates the socket at every start, so a
-	// mount of the file alone would pin the inode the daemon deleted,
-	// and whatever mounted it would hold a socket with no
+	// The mount is the directory and not the socket file, because
+	// dbus-daemon deletes and creates the socket again at every start.
+	// A mount of the file would keep the deleted socket, which has no
 	// listener.
 	busAddressVar     = "DBUS_SYSTEM_BUS_ADDRESS"
 	defaultBusAddress = "unix:path=/var/run/bluetooth.liken.sh/dbus/system_bus_socket"
@@ -65,24 +50,18 @@ const (
 	mainConfPath   = "/etc/bluetooth/main.conf"
 
 	// privacyPath is the file that bondfetch writes from the Adapter's
-	// spec.privacy before this container starts. The directory is the
-	// pod's settings volume, which the operator's container also
-	// mounts, so the operator reads the value that this bluetoothd
-	// started with.
+	// spec.privacy before this container starts. The operator's
+	// container mounts the same volume, so it can read the value that
+	// this bluetoothd started with.
 	privacyPath = "/var/run/bluetooth.liken.sh/settings/privacy"
 
 	classicBondedOnlyVar = "BLUETOOTH_CLASSIC_BONDED_ONLY"
 
-	// busTimeout bounds the wait for the bus socket. dbus-daemon forks
-	// to the background and the parent exits 0 whether the bus came up
-	// or not, so a failed start shows up here as a socket that never
-	// appears, and this is how long that takes to report.
 	busTimeout = 10 * time.Second
 
-	// busPoll is how often the wait looks for the socket. There is no
-	// event to wait on: the socket appears in a directory this program
-	// created, and an inotify watch for one file that arrives in
-	// milliseconds costs more than it saves.
+	// busPoll is the interval between checks for the socket. The socket
+	// normally appears within milliseconds, so a poll is simpler than an
+	// inotify watch.
 	busPoll = 100 * time.Millisecond
 )
 
@@ -102,10 +81,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	// bluetoothd inherits the address, so the pod may state it once and
-	// both containers agree.
+	// bluetoothd inherits the environment, so it gets the default
+	// address when the pod did not set one.
 	if err := os.Setenv(busAddressVar, address); err != nil {
-		return err
+		return fmt.Errorf("setting %s: %w", busAddressVar, err)
 	}
 
 	if err := writeInputConf(inputConfPath, os.Getenv(classicBondedOnlyVar)); err != nil {
@@ -118,20 +97,15 @@ func run() error {
 		return err
 	}
 
-	// --address overrides the listen address in dbus's own system.conf
-	// and leaves every policy rule in it, including the one BlueZ
-	// installs that lets root own org.bluez.
+	// --address replaces the listen address of dbus's system.conf and
+	// keeps its policy rules, including the rule from BlueZ that lets
+	// root own org.bluez. --nopidfile skips the pid file, which only an
+	// init system reads.
 	//
-	// --nopidfile drops the other thing system.conf asks for. The pid
-	// file exists so an init system can signal the bus, and this
-	// container has no init system: the bus runs only as long as the
-	// container that starts it.
-	//
-	// Run waits for the forking parent, which exits as soon as it has
-	// spawned the bus, so this returns in milliseconds and returns 0
-	// whether the bus came up or not. The wait below is the real check.
-	// The bus itself is left as a child of this process, which the exec
-	// at the end turns into bluetoothd.
+	// dbus-daemon forks, and the parent exits 0 whether or not the bus
+	// started. So a failed start shows only as a socket that never
+	// appears, and waitForSocket is the real check. The bus keeps
+	// running as a child of this process after the exec.
 	bus := exec.Command(dbusDaemonPath, "--system", "--nopidfile", "--address="+address)
 	bus.Stdout, bus.Stderr = os.Stdout, os.Stderr
 	if err := bus.Run(); err != nil {
@@ -141,16 +115,15 @@ func run() error {
 		return err
 	}
 
-	// The power-off comes last, after the bus is up, so that the
-	// adapters are off for the shortest time (poweroff.go).
+	// The adapters are powered off last, after the bus is up, so they
+	// stay off for as short a time as possible.
 	return becomeBluetoothd(mgmt.Open, os.Stdout, syscall.Exec)
 }
 
-// busSocket reads the socket path out of a D-Bus address. Only the
-// unix:path= form appears here, because this program creates the
-// directory the socket is in and then waits for the socket, and
-// neither is a thing it can do for an abstract socket or a TCP
-// address.
+// busSocket returns the socket path of a D-Bus address. It accepts only
+// the unix:path= form, because run creates the socket's directory and
+// waits for the socket file, and an abstract socket or a TCP address has
+// neither.
 func busSocket(address string) (string, error) {
 	path, found := strings.CutPrefix(address, unixAddressPrefix)
 	if !found || path == "" {
@@ -159,33 +132,29 @@ func busSocket(address string) (string, error) {
 	return path, nil
 }
 
-// writeInputConf writes BlueZ's ClassicBondedOnly setting at start
-// rather than baking it into the image, because the choice between its
-// two values is a security decision made at deploy time.
+// writeInputConf writes BlueZ's input.conf at container start, so a
+// deployment can change ClassicBondedOnly, a security setting, without
+// a new image.
 //
-// true, the default, is BlueZ's own default and the fix for
-// CVE-2023-45866: with it off, an attacker in radio range can open an
-// HID channel without any bond and inject keystrokes into the machine.
-// The operator's own pairing runs with it on, because the operator
-// pairs over D-Bus and the bond registers before any input channel
-// opens. false is the fallback for a controller that opens its HID
-// channel first: turn it off for that pairing, pair, and turn it back
-// on. The bonds persist on their volume, so the flip costs one restart
-// and nothing else.
+// An empty value means true, which is BlueZ's default and the fix for
+// CVE-2023-45866. With false, an attacker in radio range can open an
+// HID channel without a bond and inject keystrokes. The operator pairs
+// over D-Bus, which creates the bond before any input channel opens, so
+// its pairing works with true. A controller that opens its HID channel
+// before it bonds needs false: set false, pair, and set true again. The
+// bonds stay on their volume, so each change costs one restart.
 //
-// Any other value is a failure to start. BlueZ reads this file with
-// glib, and glib reads a value it does not recognize as false, so a
-// misspelled "yes" reads as false and disables the protection with no
-// error.
+// A value other than true or false is an error, because glib, which
+// BlueZ uses to read the file, reads an unknown value as false. A
+// misspelled "yes" would turn the protection off with no warning.
 //
-// UserspaceHID=false hands a classic HID connection to the kernel's
-// hidp module once bluetoothd has set it up. With BlueZ's default,
-// bluetoothd reads every input report from the L2CAP interrupt
-// channel and writes it to /dev/uhid, which wakes it for each report;
-// a DualSense sends about 400 a second. Over hidp the kernel owns
-// both channels and bluetoothd never wakes for a report. HID over
-// GATT, which Low Energy remotes use, is a different profile and
-// keeps going through uhid whatever this setting says.
+// UserspaceHID=false makes bluetoothd give a classic HID connection to
+// the kernel's hidp module after it sets the connection up. With
+// BlueZ's default, bluetoothd copies each input report from L2CAP to
+// /dev/uhid, so it wakes for every report. With hidp, the kernel reads
+// the reports. HID over
+// GATT, which Low Energy remotes use, is a different profile and still
+// goes through uhid.
 func writeInputConf(path, bondedOnly string) error {
 	switch bondedOnly {
 	case "":
@@ -198,9 +167,9 @@ func writeInputConf(path, bondedOnly string) error {
 	return os.WriteFile(path, []byte(contents), 0o644)
 }
 
-// privacyValues are the values of BlueZ's Privacy key, spelled as
-// parse_privacy in BlueZ's src/main.c reads them. The Adapter's
-// spec.privacy states the same five in its schema.
+// privacyValues are the values that parse_privacy in BlueZ's
+// src/main.c accepts for the Privacy key. The enum of the Adapter's
+// spec.privacy in deploy/crds.yaml lists the same values.
 var privacyValues = map[string]bool{
 	"off":             true,
 	"network":         true,
@@ -209,29 +178,23 @@ var privacyValues = map[string]bool{
 	"limited-device":  true,
 }
 
-// writeMainConf writes bluetoothd's main.conf at start, because the
-// Privacy key in it comes from the Adapter, and a person sets it for
-// one radio.
+// writeMainConf writes bluetoothd's main.conf, with the Privacy value
+// from the settings file.
 //
-// bluetoothd reads Privacy once, and sends it to the kernel when each
-// adapter starts. The kernel accepts the privacy command only while
-// the radio is powered off. So the value in this file is the value
-// for the life of this bluetoothd, and the operator deletes its pod to
-// apply a new one.
+// bluetoothd sends Privacy to the kernel when it sets up each adapter,
+// and the kernel accepts it only while the adapter is powered off. So a
+// new value takes effect only in a new bluetoothd, and the operator
+// deletes the pod to apply it.
 //
-// A missing settings file means privacy off, which is BlueZ's own
-// default. A pod with no settings volume then starts as BlueZ would
-// start with no Privacy key. Any value outside the five is a failure
-// to start. parse_privacy reads a value it does not recognize as off,
-// so a typing error would turn privacy off with no error.
+// When the settings file does not exist, Privacy is off, BlueZ's
+// default. A value that is not in privacyValues is an error, because
+// parse_privacy reads an unknown value as off, and a typing error would
+// turn privacy off with no warning.
 //
-// AutoEnable powers the adapter on when bluetoothd starts. bluetoothd
-// leaves an adapter down otherwise, so without this a machine that
-// reboots comes back with its radio off and its bonds unreachable, and
-// somebody has to run bluetoothctl to turn it on. This program also
-// powers every adapter off before bluetoothd starts (poweroff.go), so
-// AutoEnable is what powers each one on again after every start. No
-// deployment has a reason to turn it off, so it has no setting.
+// AutoEnable=true makes bluetoothd power each adapter on when it
+// starts. becomeBluetoothd powers every adapter off first, so without
+// AutoEnable the adapters would stay off until someone ran
+// bluetoothctl.
 func writeMainConf(path, settings string) error {
 	privacy := "off"
 	contents, err := os.ReadFile(settings)
@@ -242,16 +205,14 @@ func writeMainConf(path, settings string) error {
 		return fmt.Errorf("reading the privacy setting: %w", err)
 	}
 	if !privacyValues[privacy] {
-		return fmt.Errorf("%s must be off, network, device, limited-network, or limited-device, not %q", settings, privacy)
+		return fmt.Errorf("the privacy setting in %s must be off, network, device, limited-network, or limited-device, not %q", settings, privacy)
 	}
 	conf := fmt.Sprintf("[General]\nPrivacy=%s\n\n[Policy]\nAutoEnable=true\n", privacy)
 	return os.WriteFile(path, []byte(conf), 0o644)
 }
 
-// waitForSocket waits for dbus-daemon to bind the bus socket. It
-// checks that the path is a socket and not merely a name, because a
-// stale file at that path would otherwise read as a bus that is
-// listening.
+// waitForSocket polls until a socket exists at path, or returns an
+// error after busTimeout. A regular file at the path does not count.
 func waitForSocket(path string) error {
 	deadline := time.Now().Add(busTimeout)
 	for {
@@ -260,7 +221,7 @@ func waitForSocket(path string) error {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("dbus-daemon did not create %s within %s", path, busTimeout)
+			return fmt.Errorf("dbus-daemon created no socket at %s within %s", path, busTimeout)
 		}
 		time.Sleep(busPoll)
 	}

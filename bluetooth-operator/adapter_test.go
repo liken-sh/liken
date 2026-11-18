@@ -1,16 +1,10 @@
 package main
 
-// These tests cover the Adapter object's lifecycle: the operator
-// creates one for the radio it holds, adopts one that is already
-// there, writes spec.alias into the radio, refuses a deletion while
-// the radio is present, and lets a deletion through once the radio is
-// gone.
-
 import (
 	"testing"
 )
 
-func TestReconcileCreatesTheAdapterForTheRadioItHolds(t *testing.T) {
+func TestReconcileCreatesTheAdapterForTheRadioItUses(t *testing.T) {
 	fixture := newAPIFixture()
 	inventory := testInventory(t, fixture, testRadio(t))
 
@@ -20,22 +14,19 @@ func TestReconcileCreatesTheAdapterForTheRadioItHolds(t *testing.T) {
 		t.Fatal("the pass reported a failure")
 	}
 	adapter := read[Adapter](t, fixture, testAdapterObjectPath())
-	// The object is named for the radio, so it follows the radio and
-	// not the machine.
 	if adapter.Metadata.Name != testAdapterName {
-		t.Errorf("name = %q", adapter.Metadata.Name)
+		t.Errorf("the Adapter is named %q, want %q", adapter.Metadata.Name, testAdapterName)
 	}
-	if !adapter.Metadata.holds(adapterFinalizer) {
-		t.Errorf("finalizers = %v", adapter.Metadata.Finalizers)
+	if !adapter.Metadata.hasFinalizer(adapterFinalizer) {
+		t.Errorf("the finalizers are %v, want %s", adapter.Metadata.Finalizers, adapterFinalizer)
 	}
 	if adapter.Status.Address != testAdapter || adapter.Status.Node != "liken-1" || !adapter.Status.Powered {
-		t.Errorf("status = %+v", adapter.Status)
+		t.Errorf("the status is %+v, want address %s, node liken-1, and powered", adapter.Status, testAdapter)
 	}
-	// Nothing owns the Adapter. An owner reference binds to one UID,
-	// and a Node registered again after a reinstall has a new one,
-	// which would sweep every bond under this radio.
+	// A reinstall gives the Node a new UID, so garbage collection would
+	// delete an Adapter that the old Node owned.
 	if len(adapter.Metadata.OwnerReferences) != 0 {
-		t.Errorf("ownerReferences = %+v", adapter.Metadata.OwnerReferences)
+		t.Errorf("the ownerReferences are %+v, want none", adapter.Metadata.OwnerReferences)
 	}
 }
 
@@ -56,22 +47,21 @@ func TestReconcileAdoptsAnAdapterThatIsAlreadyThere(t *testing.T) {
 	}
 	for _, request := range fixture.requests {
 		if request == "POST "+adaptersPath() {
-			t.Errorf("an adapter that was already there was created again: %v", fixture.requests)
+			t.Errorf("the requests are %v, want no POST for an Adapter that already exists", fixture.requests)
 		}
 	}
-	// The radio moved to this machine, and status reports where the
-	// radio is now.
+	// The radio moved to this machine, so status.node follows it.
 	adapter := read[Adapter](t, fixture, testAdapterObjectPath())
 	if adapter.Status.Node != "liken-1" || !adapter.Status.Powered {
-		t.Errorf("status = %+v", adapter.Status)
+		t.Errorf("the status is %+v, want node liken-1 and powered", adapter.Status)
 	}
 }
 
-// An Adapter a person created by hand has no finalizer, so the pass
-// patches one on and then writes the status. Both writes are
-// conditional on the object's version, and the patch moves it, so the
-// status write has to include the version the patch produced.
-func TestReconcileHoldsAnAdapterThatCarriesNoFinalizer(t *testing.T) {
+// An Adapter created by hand has no finalizer, so the pass patches one
+// on and then writes the status. Both writes are conditional on the
+// resourceVersion, and the patch changes it, so the status write must
+// use the version that the patch returned.
+func TestReconcileAddsTheFinalizerToAnAdapterWithoutOne(t *testing.T) {
 	fixture := newAPIFixture()
 	fixture.put(t, testAdapterObjectPath(), &Adapter{
 		APIVersion: pairingAPI,
@@ -86,15 +76,15 @@ func TestReconcileHoldsAnAdapterThatCarriesNoFinalizer(t *testing.T) {
 		t.Fatal("the pass reported a failure")
 	}
 	adapter := read[Adapter](t, fixture, testAdapterObjectPath())
-	if !adapter.Metadata.holds(adapterFinalizer) {
-		t.Errorf("finalizers = %v", adapter.Metadata.Finalizers)
+	if !adapter.Metadata.hasFinalizer(adapterFinalizer) {
+		t.Errorf("the finalizers are %v, want %s", adapter.Metadata.Finalizers, adapterFinalizer)
 	}
 	if adapter.Status.Node != "liken-1" {
-		t.Errorf("status = %+v, want the status written after the patch", adapter.Status)
+		t.Errorf("the status is %+v, want node liken-1, written after the finalizer patch", adapter.Status)
 	}
 }
 
-func TestReconcileCarriesTheAliasIntoTheRadio(t *testing.T) {
+func TestReconcileWritesTheAliasToTheRadio(t *testing.T) {
 	fixture := newAPIFixture()
 	fixture.put(t, testAdapterObjectPath(), &Adapter{
 		APIVersion: pairingAPI,
@@ -108,20 +98,20 @@ func TestReconcileCarriesTheAliasIntoTheRadio(t *testing.T) {
 	inventory.reconcile()
 
 	if !radio.called("SetAdapterAlias liken-1-living-room") {
-		t.Fatalf("the alias never reached the radio: %v", radio.calls)
+		t.Fatalf("the radio calls are %v, want SetAdapterAlias liken-1-living-room", radio.calls)
 	}
-	// The radio has the alias now, so the next pass has nothing
-	// to write.
+	// The radio already has the alias, so the next pass does not write
+	// it.
 	radio.calls = nil
 	inventory.reconcile()
 	if radio.called("SetAdapterAlias") {
-		t.Errorf("the alias was written again: %v", radio.calls)
+		t.Errorf("the radio calls are %v, want no SetAdapterAlias because the radio already has the alias", radio.calls)
 	}
 }
 
-// A fresh bluetoothd starts the adapter with page scan off, and a
-// radio that is not connectable answers no bonded device's reconnect.
-// The pass asserts the setting on, and only when it diverges.
+// A new bluetoothd starts the adapter with page scan off, and a radio
+// that is not connectable ignores bonded devices that try to
+// reconnect. The pass sets Connectable to true only when it is false.
 func TestReconcileMakesTheAdapterConnectable(t *testing.T) {
 	fixture := newAPIFixture()
 	radio := testRadio(t)
@@ -131,20 +121,20 @@ func TestReconcileMakesTheAdapterConnectable(t *testing.T) {
 	inventory.reconcile()
 
 	if !radio.called("SetAdapterConnectable true") {
-		t.Fatalf("the radio was left unconnectable: %v", radio.calls)
+		t.Fatalf("the radio calls are %v, want SetAdapterConnectable true", radio.calls)
 	}
-	// The radio is connectable now, so the next pass writes nothing.
+	// The radio is connectable now, so the next pass does not write it.
 	radio.calls = nil
 	inventory.reconcile()
 	if radio.called("SetAdapterConnectable") {
-		t.Errorf("connectable was written again: %v", radio.calls)
+		t.Errorf("the radio calls are %v, want no SetAdapterConnectable because the radio is already connectable", radio.calls)
 	}
 }
 
-// An unpowered adapter takes no connectable write. bluetoothd refuses
-// property writes on a downed adapter, and AutoEnable is what powers
-// it, so the pass waits for that instead of writing into the refusal.
-func TestReconcileLeavesADownedAdapterAlone(t *testing.T) {
+// The pass does not set Connectable on an unpowered adapter, because
+// bluetoothd rejects property writes on a powered-off adapter. The
+// pass waits for AutoEnable to power it on.
+func TestReconcileLeavesAnUnpoweredAdapterAlone(t *testing.T) {
 	fixture := newAPIFixture()
 	radio := testRadio(t)
 	radio.snapshot.Adapter.Powered = false
@@ -154,13 +144,13 @@ func TestReconcileLeavesADownedAdapterAlone(t *testing.T) {
 	inventory.reconcile()
 
 	if radio.called("SetAdapterConnectable") {
-		t.Errorf("a downed adapter took a connectable write: %v", radio.calls)
+		t.Errorf("the radio calls are %v, want no SetAdapterConnectable on an adapter that is powered off", radio.calls)
 	}
 }
 
-// A delete against live hardware would cascade to every Peripheral
-// under this Adapter and to every bond Secret under those, which is a
-// mass unpair of controllers that are working.
+// Deleting the Adapter of a present radio would cascade to every
+// Peripheral under it and every bond Secret under those, which would
+// unpair working controllers.
 func TestReconcileRefusesToDeleteAnAdapterWhoseRadioIsPresent(t *testing.T) {
 	fixture := newAPIFixture()
 	fixture.put(t, testAdapterObjectPath(), &Adapter{
@@ -178,16 +168,16 @@ func TestReconcileRefusesToDeleteAnAdapterWhoseRadioIsPresent(t *testing.T) {
 	inventory.reconcile()
 
 	adapter := read[Adapter](t, fixture, testAdapterObjectPath())
-	if !adapter.Metadata.holds(adapterFinalizer) {
-		t.Fatal("the operator released an Adapter whose radio is present")
+	if !adapter.Metadata.hasFinalizer(adapterFinalizer) {
+		t.Fatal("the Adapter has lost its finalizer, want it kept because its radio is present")
 	}
 	if adapter.Status.DeletionRefused == "" {
-		t.Error("the refusal is not in the status, so nothing reports why the object stays")
+		t.Error("status.deletionRefused is empty, want the reason the Adapter stays")
 	}
 }
 
-// The radio is gone, which is the cleanup path: the Adapter's deletion
-// runs, and the cascade takes its Peripherals and their Secrets.
+// When the radio is gone, the pass removes the finalizer so that the
+// deletion completes and deletes the Peripherals and their Secrets.
 func TestReconcileReleasesAnAdapterWhoseRadioIsGone(t *testing.T) {
 	fixture := newAPIFixture()
 	fixture.put(t, testAdapterObjectPath(), &Adapter{
@@ -207,14 +197,14 @@ func TestReconcileReleasesAnAdapterWhoseRadioIsGone(t *testing.T) {
 	inventory.reconcile()
 
 	if _, found := fixture.objects[testAdapterObjectPath()]; found {
-		t.Fatalf("the Adapter for a radio that is gone kept its finalizer: %+v",
+		t.Fatalf("the Adapter of a radio that is gone still exists, want it deleted after its finalizer is removed: %+v",
 			read[Adapter](t, fixture, testAdapterObjectPath()).Metadata)
 	}
 }
 
-// Only the machine that last held the radio releases its Adapter. A
-// dongle carried to another machine is adopted there, and this one
-// must not release an object that the other machine now holds.
+// Only the machine in status.node releases an Adapter. A radio moved
+// to another machine is adopted there, and this operator must not
+// remove the finalizer from it.
 func TestReconcileLeavesAnotherMachinesAdapterAlone(t *testing.T) {
 	fixture := newAPIFixture()
 	path := adapterPath("04-4a-69-66-92-27")
@@ -233,6 +223,6 @@ func TestReconcileLeavesAnotherMachinesAdapterAlone(t *testing.T) {
 	inventory.reconcile()
 
 	if _, found := fixture.objects[path]; !found {
-		t.Fatal("this operator released another machine's Adapter")
+		t.Fatal("the Adapter is gone, want it kept because status.node names another machine")
 	}
 }

@@ -1,13 +1,13 @@
-# The operator itself: one pod per node, the claim that runs it only
-# where an adapter is, and the bonds that the pod restores before
+# The bluetooth-operator pod runs the operator, bluetoothd, and the
+# `btmon` and `rescan` sidecars. It starts only on a node with a
+# Bluetooth adapter, and an init container restores the bonds before
 # bluetoothd starts.
 ---
-# The adapter claim. A template rather than a plain claim, so each
-# node's pod allocates that node's own adapter. On a node with an
-# adapter the claim matches one device and the pod runs. On a node
-# with none the claim matches zero devices and the pod parks Pending,
-# which is how a DaemonSet runs a pod only where a radio is. Nobody
-# writes down which machine has the radio.
+# Each pod of the DaemonSet gets its own claim from this template, so
+# each pod allocates the adapter of its own node. One `ResourceClaim`
+# shared by every pod would allocate one adapter on one node. On a node
+# with no adapter, the claim cannot be allocated and the pod stays
+# Pending, so the DaemonSet needs no list of the nodes that have one.
 apiVersion: resource.k8s.io/v1
 kind: ResourceClaimTemplate
 metadata:
@@ -20,35 +20,27 @@ spec:
           exactly:
             deviceClassName: bluetooth-adapter
 ---
-# A DaemonSet, one pod per node. The claim on the pod matches an
-# adapter only on a node that has one, so a pod on a node with no
-# radio parks Pending and costs nothing, and a pod on a node with a
-# radio runs. This takes one adapter per node. Serving more than one
-# adapter on a node is a separate design, because the bond Secrets and
-# the discovery are both scoped to this operator's own adapter.
+# Each pod uses one adapter, even on a node that has more, because the
+# claim requests one device and the bond `Secret`s and discovery cover
+# only that adapter.
 #
-# Nothing in this pod is storage, so no StatefulSet. The bonds are in
-# one Secret for each bond, labelled with the adapter, and an init
-# container writes them into an emptyDir that goes when the pod goes.
-# The bus volume is a hostPath, but it holds a socket, not state. The
-# one thing a StatefulSet adds is a volume for each pod, and a link
-# key belongs to an adapter's address, not to a pod.
+# The pod keeps no state of its own, so this is not a StatefulSet. Each
+# bond is in a `Secret` labelled with the adapter, because a link key
+# belongs to the adapter's address and not to a pod.
 #
-# RollingUpdate with maxSurge 0, because an adapter allocates to one
-# claim at a time. A second pod that claimed the same adapter would
-# park Pending until the first released the radio, and an update that
-# started the new pod before the old one stopped would never finish.
-# maxSurge 0 stops the old pod on a node before it starts the new one,
-# so the radio is free for the pod that claims it next. maxUnavailable
-# 1 takes one node down at a time.
+# An adapter can be allocated to only one claim at a time. A new pod
+# that started before the old one stopped would stay Pending until the
+# old pod released the adapter, and the update would never finish. So
+# `maxSurge: 0` stops the old pod on a node before the new one starts,
+# and `maxUnavailable: 1` updates one node at a time.
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: bluetooth-operator
   labels:
-    # The base binary selects on this label to find the
-    # operator's DaemonSet, read its image version, and pull the
-    # matching -cli image.
+    # The `liken` command finds this DaemonSet by this label, reads the
+    # version of its image, and pulls the `-cli` image of the same
+    # version.
     cli.liken.sh/plugin: bluetooth
 spec:
   selector:
@@ -65,23 +57,19 @@ spec:
         app: bluetooth-operator
     spec:
       serviceAccountName: bluetooth-operator
-      # The operator is the machine's hardware layer: every pod that
-      # claims a device it publishes depends on it, and it holds
-      # the adapter and the bluetoothd that holds it. So it schedules ahead of
-      # ordinary pods onto a machine that is already full, preempting
-      # one if it must, and it is evicted last. It also runs whatever
-      # the machine is marked with, because liken taints a node while
-      # it starts, and the devices have to publish before anything
-      # can claim them.
+      # A pod that claims a controller cannot start until this operator
+      # publishes the controller. So the operator can preempt an ordinary
+      # pod on a full node, and it is evicted last. The toleration lets
+      # it run on a node with any taint, because `liken` taints a node
+      # while the node starts, and the devices must be published before
+      # a pod can claim them.
       priorityClassName: system-node-critical
-      # A node labeled bluetooth.liken.sh/bluetooth: none gets no pod. The
-      # claim alone leaves a pod on a node with no Bluetooth adapter Pending
-      # for good, so a person marks such a node with that one label.
-      # NotIn also matches a node with no such label, so with no
-      # label the DaemonSet makes a pod on every node, and the claim
-      # decides where it can start. A patch that sets its own node
-      # affinity replaces this list of terms, because the list is
-      # atomic.
+      # A node labeled `bluetooth.liken.sh/bluetooth: none` gets no pod.
+      # Put the label on a node with no adapter, where the pod would
+      # otherwise stay Pending forever. `NotIn` also matches a node with
+      # no such label, so by default every node gets a pod. A patch that
+      # sets its own node affinity replaces this list of terms, because
+      # the list is atomic.
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -92,62 +80,45 @@ spec:
                     values: ["none"]
       tolerations:
         - operator: Exists
-      # AF_BLUETOOTH sockets exist only in the host's network
-      # namespace. A socket call in a pod's own namespace fails with
-      # EAFNOSUPPORT, and no device node or mount changes that,
-      # because the Bluetooth stack's whole control surface is a
-      # socket family. It is a pod-level setting, so every container
-      # takes it.
+      # The kernel supports `AF_BLUETOOTH` sockets only in the host's
+      # network namespace. In a pod's own network namespace, `socket()`
+      # fails with `EAFNOSUPPORT`, and no device node or mount works
+      # around that.
       hostNetwork: true
-      # The kernel delivers uevents to the initial user namespace
-      # only. A pod in its own user namespace receives an empty
-      # stream, with no error to read, and no controller would ever
-      # appear. This is the default, and it is stated because the
-      # failure is silent.
+      # The kernel sends uevents only to the initial user namespace. A
+      # pod in its own user namespace receives no uevents and no error,
+      # so no controller ever appears. `true` is the default, and it is
+      # set here because the failure is silent.
       hostUsers: true
-      # The order of these two matters. A plain init container
-      # listed before a sidecar runs to completion before the sidecar
-      # starts. The same container listed after the sidecar runs
-      # beside it, and bluetoothd would read an empty directory,
-      # because BlueZ loads the bonds once at adapter registration and
-      # watches the tree for nothing afterwards. bondfetch therefore
-      # comes first.
+      # `bondfetch` is listed first, so it runs to completion before any
+      # sidecar starts. BlueZ reads the bond directory only when it
+      # registers the adapter, so the bonds must be in place before
+      # bluetoothd starts.
       initContainers:
-        # The bonds, restored into the volume that bluetoothd reads.
-        # bondfetch asks the kernel for the address of the adapter
-        # this pod claimed, reads the Secrets labelled with that
-        # address, writes BlueZ's tree, and exits. It also writes the
-        # radio's identity key back from its own Secret, and writes
-        # the Adapter's spec.privacy into the settings volume, because
-        # bluetoothd reads both only when it starts. It writes the
-        # Adapter's spec.btmon there too, so a radio with the trace
-        # on traces from the start of bluetoothd.
+        # `bondfetch` reads the address of the adapter that this pod
+        # claimed, writes BlueZ's directory tree from the `Secret`s
+        # labelled with that address, and exits. It also writes the
+        # radio's identity key from its own `Secret`, and writes the
+        # `Adapter`'s `spec.privacy` and `spec.btmon` into the settings
+        # volume. bluetoothd reads the identity key and the privacy
+        # setting only when it starts, and a trace must start before
+        # bluetoothd does.
         - name: bondfetch
           image: ghcr.io/liken-sh/bluetooth-bondfetch:latest
           env:
-            # The namespace that holds the Secrets. The operator
-            # writes them beside its own pod, and the downward API is
-            # where a pod reads which namespace that is.
+            # The operator writes the bond `Secret`s in its own namespace.
             - name: POD_NAMESPACE
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
           securityContext:
-            # No capabilities, no root, and no writable root
-            # filesystem. Reading the adapter's address takes none of
-            # the three: it works as uid 65534 with everything
-            # dropped. What it does take is the pod's hostNetwork
-            # above, because the address comes over an AF_BLUETOOTH
-            # socket and those exist only in the initial network
-            # namespace.
+            # Reading the adapter's address needs no capability, only
+            # the pod's `hostNetwork`. The container runs as root
+            # because BlueZ's tree is owned by root with mode 0700, and
+            # bluetoothd runs as root without `CAP_DAC_OVERRIDE`, so it
+            # cannot read a file that another user owns.
             capabilities:
               drop: ["ALL"]
-            # Root, and no capability at all. BlueZ writes its tree as
-            # root at mode 0700, and bluetoothd reads it back as root
-            # with CAP_DAC_OVERRIDE dropped, so it obeys those modes
-            # like any other user. Files this container leaves under a
-            # different owner are files the daemon beside it cannot
-            # read.
             runAsUser: 0
             runAsGroup: 0
             readOnlyRootFilesystem: true
@@ -159,10 +130,9 @@ spec:
               memory: 32Mi
             limits:
               memory: 64Mi
-            # The same adapter the bluetoothd container claims. A
-            # plain init container may name a pod's claim, and the
-            # kubelet allocates the claim before that container runs,
-            # so the address is there to read.
+            # The same claim as the bluetoothd container. The kubelet
+            # prepares a pod's claims before any of its containers
+            # start, init containers included.
             claims:
               - name: adapter
           volumeMounts:
@@ -170,58 +140,47 @@ spec:
               mountPath: /var/lib/bluetooth
             - name: settings
               mountPath: /var/run/bluetooth.liken.sh/settings
-        # btmon, as a sidecar that runs as long as the pod. While the
-        # Adapter's spec.btmon is true, it traces the HCI link, the
-        # layer under D-Bus and under bluetoothd, and writes each
-        # packet to the container log. A stall of a bonded controller
-        # can last for hours before a person sees it, and the fix is a
-        # roll of this pod, which ends every process that saw the
-        # stall. The trace is in the log before the roll, so the
-        # evidence stays after it.
+        # `btmon` traces the HCI link, below D-Bus and bluetoothd, and
+        # writes each packet to the container log while the `Adapter`'s
+        # `spec.btmon` is true. A bonded controller can stop responding
+        # for hours before a person notices and restarts this pod, and
+        # the restart ends every process that saw the fault. The trace
+        # in the log records what the link did before the restart.
         #
-        # The trace is off until a person turns it on, because btmon
-        # prints key material in plain text: the link keys, the long
-        # term keys, and the radio's identity key. Anybody who can
-        # read this pod's logs can read those keys. start-btmon reads
-        # the btmon file in the settings volume, and starts btmon
-        # while the file says true. A change starts or stops the trace
-        # in seconds, with no restart of the pod.
+        # The trace is off by default, because btmon prints the link
+        # keys, the long term keys, and the radio's identity key in
+        # plain text to anyone who can read this pod's logs.
+        # `start-btmon` watches the `btmon` file in the settings volume
+        # and starts or stops btmon when the file changes, with no pod
+        # restart.
         #
-        # The container starts before bluetoothd, because btmon
-        # reports only what happens after it binds the monitor
-        # channel. At adapter registration, bluetoothd tells the
-        # kernel which bonded devices may reconnect, and with the
-        # trace on those commands are in the trace. The trace stays
-        # nearly empty while no controller connects or sends, and a
-        # button press is about eight lines.
+        # btmon reports only what happens after it binds the monitor
+        # channel, so this container starts before bluetoothd. When
+        # bluetoothd registers the adapter, it tells the kernel which
+        # bonded devices may reconnect, and the trace records those
+        # commands. The trace is nearly empty while no controller is
+        # connected.
         #
-        # It needs no claim and no bus. The monitor channel reports
-        # every adapter on the machine, and a machine has one.
+        # The container needs no claim, because the monitor channel
+        # reports every adapter on the machine.
         - name: btmon
           image: ghcr.io/liken-sh/bluetoothd:latest
           restartPolicy: Always
-          # start-btmon runs btmon with the arguments that
-          # bluetoothd/btmon/child.go explains.
+          # `bluetoothd/btmon/child.go` explains the arguments that
+          # `start-btmon` gives btmon.
           command:
             - /start-btmon
-          # The terminal makes the C library write each line when
-          # btmon finishes it. With a pipe, the library holds the
-          # output until its buffer fills, and a rare line waits in
-          # the buffer for hours. btmon writes to this terminal
-          # through start-btmon.
+          # The C library writes each line as soon as btmon finishes it
+          # when the output is a terminal. To a pipe, it writes only when
+          # its buffer is full, so a line can wait for hours.
           tty: true
           securityContext:
-            # hci_sock_bind tests capable(CAP_NET_RAW) before it binds
-            # HCI_CHANNEL_MONITOR, and without the capability btmon
-            # prints "Failed to bind channel: Operation not
-            # permitted". The bind takes nothing more. The kubelet
-            # sets no ambient capabilities, so an added capability
-            # reaches only a process that runs as root. The container
-            # runs as root for that reason, and it writes nothing.
-            # btmon, the child of start-btmon, runs as root too, and
-            # the kernel gives a program that root starts each
-            # capability in the container's bounding set, NET_RAW
-            # among them.
+            # The kernel's `hci_sock_bind` checks `CAP_NET_RAW` before
+            # it binds `HCI_CHANNEL_MONITOR`. Without it, btmon prints
+            # "Failed to bind channel: Operation not permitted". The
+            # kubelet sets no ambient capabilities, so only a process
+            # that runs as root gets an added capability. That is why
+            # the container runs as root. It writes nothing.
             capabilities:
               drop: ["ALL"]
               add: ["NET_RAW"]
@@ -237,38 +196,33 @@ spec:
             limits:
               memory: 32Mi
           volumeMounts:
-            # The btmon file, which turns the trace on and off.
             - name: settings
               mountPath: /var/run/bluetooth.liken.sh/settings
               readOnly: true
-        # start-rescan, as a sidecar that runs as long as the pod. It
-        # works around two kernel bugs: after a failed connection to a
-        # bonded Low Energy remote, or after a link to it that the host
-        # ended and the controller closed late, Linux can leave the
-        # radio's passive scan off with no log line, and the remote
-        # then never reconnects. The program reads the HCI monitor
-        # channel, and when the kernel leaves the scan off after
-        # either one for a device that bluetoothd added for auto
-        # connect, it adds the device again, which starts the scan.
-        # bluetoothd/rescan/main.go explains the bug and the fix, and
+        # `rescan` works around kernel bugs that turn off the radio's
+        # passive scan with no log line, so a bonded Low Energy remote
+        # never reconnects. The kernel can do this after a failed
+        # connection to the remote, or after the host ended a link that
+        # the controller closed late. `start-rescan` reads the HCI
+        # monitor channel. When the scan stays off after either event
+        # for a device that bluetoothd added for auto connect, it adds
+        # the device again, which turns the scan on.
+        # `bluetoothd/rescan/main.go` explains the bugs, the fix, and
         # when to delete this container.
         #
-        # The container starts before bluetoothd, for the reason the
-        # btmon container does: the program learns which devices
-        # reconnect from the Add Device commands that bluetoothd sends
-        # when it registers the adapter, and it sees only the commands
-        # that come after it binds the monitor channel.
+        # This container starts before bluetoothd, like `btmon`, because
+        # it reads the devices to watch from the Add Device commands
+        # that bluetoothd sends when it registers the adapter.
         - name: rescan
           image: ghcr.io/liken-sh/bluetoothd:latest
           restartPolicy: Always
           command:
             - /start-rescan
           securityContext:
-            # NET_RAW for the bind of the monitor channel, the same
-            # test the btmon container passes, and NET_ADMIN for Add
-            # Device, the same test bluetoothd passes. The container
-            # runs as root because the kubelet sets no ambient
-            # capabilities, and it writes nothing.
+            # `NET_RAW` binds the monitor channel, as in `btmon`.
+            # `NET_ADMIN` sends Add Device on the management channel. The
+            # container runs as root because the kubelet sets no ambient
+            # capabilities. It writes nothing.
             capabilities:
               drop: ["ALL"]
               add: ["NET_RAW", "NET_ADMIN"]
@@ -283,40 +237,26 @@ spec:
               memory: 8Mi
             limits:
               memory: 32Mi
-        # bluetoothd, as a sidecar: an init container that restarts
-        # always, which the kubelet starts before the operator and
-        # stops after it. Both halves of that order matter. The bus
-        # this container serves is what the operator connects to, and
-        # on the way out the operator ends first, so an ordinary pod
-        # deletion is a clean exit rather than the operator reporting
-        # that bluetoothd left the bus.
-        #
-        # It has every capability in this pod except the one that
-        # btmon takes. bluetoothd is the Bluetooth stack, and the
-        # operator beside it only reads the daemon over D-Bus and
-        # writes to the API server.
+        # `bluetoothd` runs dbus-daemon and bluetoothd. As a sidecar, it
+        # starts before the operator container and stops after it. The
+        # operator connects to this container's bus, and when the pod is
+        # deleted, the operator exits first, so it does not report that
+        # bluetoothd left the bus.
         - name: bluetoothd
           image: ghcr.io/liken-sh/bluetoothd:latest
           restartPolicy: Always
           env:
-            # The address of the bus this container serves. It names
-            # the socket inside the directory the volume below
-            # mounts, and the operator's container states the same
-            # address.
             - name: DBUS_SYSTEM_BUS_ADDRESS
               value: unix:path=/var/run/bluetooth.liken.sh/dbus/system_bus_socket
           securityContext:
-            # NET_ADMIN is what the kernel checks: the Bluetooth
-            # management channel's privileged commands test for
-            # CAP_NET_ADMIN. bluetoothd uses no NET_RAW: it drives the
-            # management channel and seqpacket L2CAP sockets, never a
-            # raw HCI socket. The btmon container holds NET_RAW for
-            # the trace. NET_BIND_SERVICE is for
-            # bluetoothd's SDP and GATT servers, which bind L2CAP
-            # PSMs 1 and 31, both below the kernel's 0x1001 privilege
-            # line. dbus-daemon drops to its dbus user at
-            # start, and the drop itself takes CAP_SETUID and
-            # CAP_SETGID. Everything else drops.
+            # `NET_ADMIN`: the privileged commands of the Bluetooth
+            # management channel check `CAP_NET_ADMIN`. bluetoothd needs
+            # no `NET_RAW`, because it uses the management channel and
+            # seqpacket L2CAP sockets, never a raw HCI socket.
+            # `NET_BIND_SERVICE`: the SDP and GATT servers bind L2CAP
+            # PSMs 1 and 31, which are below the kernel's privileged
+            # limit of 0x1001. `SETUID` and `SETGID`: dbus-daemon changes
+            # to its `dbus` user when it starts.
             capabilities:
               drop: ["ALL"]
               add: ["NET_ADMIN", "NET_BIND_SERVICE", "SETUID", "SETGID"]
@@ -328,10 +268,8 @@ spec:
               memory: 32Mi
             limits:
               memory: 64Mi
-            # The adapter, claimed from liken. This is the placement:
-            # the scheduler puts the pod where the hardware is. The
-            # claim is named here, on the container that is the
-            # Bluetooth stack, rather than on the operator.
+            # The adapter that `liken` publishes. The scheduler places
+            # the pod on the node of the allocated adapter.
             claims:
               - name: adapter
           volumeMounts:
@@ -339,8 +277,8 @@ spec:
               mountPath: /var/run/bluetooth.liken.sh/dbus
             - name: bonds
               mountPath: /var/lib/bluetooth
-            # start-bluetoothd writes main.conf from the privacy file
-            # that bondfetch wrote here.
+            # `start-bluetoothd` writes `main.conf` from the `privacy`
+            # file that `bondfetch` wrote here.
             - name: settings
               mountPath: /var/run/bluetooth.liken.sh/settings
               readOnly: true
@@ -348,51 +286,42 @@ spec:
         - name: operator
           image: ghcr.io/liken-sh/bluetooth-operator:latest
           env:
-            # A ResourceSlice names the node whose hardware it
-            # describes, and the downward API is where a pod reads
-            # that.
+            # The operator's `ResourceSlice` names this node.
             - name: NODE_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
-            # The namespace whose Secrets hold the bonds. The same
-            # value bondfetch reads, for the same Secrets.
+            # The namespace of the bond `Secret`s.
             - name: POD_NAMESPACE
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            # This pod's own name. The operator deletes its pod by this
-            # name when the Adapter's spec.privacy differs from the
-            # value bluetoothd started with, because bluetoothd reads
-            # the setting only at start.
+            # When the `Adapter`'s `spec.privacy` differs from the value
+            # that bluetoothd started with, the operator deletes this
+            # pod by name, after a pass that stored every bond, because
+            # bluetoothd reads the setting only at start.
             - name: POD_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
-            # The same address the bluetoothd container states, for
-            # the same socket on the same volume.
             - name: DBUS_SYSTEM_BUS_ADDRESS
               value: unix:path=/var/run/bluetooth.liken.sh/dbus/system_bus_socket
-            # Every liken process serves metrics on 9200, but this pod
-            # runs on the host network and shares the node's port
-            # space with the machine operator, which holds 9200 there.
-            # So this one takes 9250, a port nobody else on the host
-            # holds. hostNetwork already exposes the port on the node,
-            # so the container needs no hostPort of its own.
+            # The pod is on the host network, where the machine operator
+            # listens on its default metrics port 9200, so this operator
+            # listens on 9250. The host network exposes the port on the
+            # node, so the container needs no `hostPort`.
             - name: BLUETOOTH_METRICS_ADDRESS
               value: ":9250"
           ports:
             - name: metrics
               containerPort: 9250
           securityContext:
-            # No capabilities at all. The operator reads bluetoothd
-            # over D-Bus, walks sysfs, writes CDI files, relays input
-            # events through /dev/uinput, and serves a socket to the
-            # kubelet, and none of that is privileged. Its uevent
-            # socket is not either: the kernel creates the uevent
-            # netlink socket with NL_CFG_F_NONROOT_RECV, so binding
-            # group 1 needs no capability, only the initial user
-            # namespace that hostUsers gives it.
+            # The operator needs no capability. It reads bluetoothd over
+            # D-Bus, reads sysfs, writes CDI files, relays input events
+            # through `/dev/uinput`, and serves a socket to the kubelet.
+            # The kernel creates the uevent netlink socket with
+            # `NL_CFG_F_NONROOT_RECV`, so binding group 1 needs only the
+            # initial user namespace that `hostUsers` gives.
             capabilities:
               drop: ["ALL"]
             privileged: false
@@ -403,51 +332,49 @@ spec:
               memory: 32Mi
             limits:
               memory: 64Mi
-            # The same adapter the bluetoothd container claims. The
-            # operator names it for what the claim delivers beside the
-            # radio: /dev/uinput, where the input relay creates one
-            # virtual device for each evdev node a controller
-            # registers, and /dev/input/event0 through event31, so a
-            # virtual device has a node in this container the moment
-            # the kernel registers it.
+            # The same claim as the bluetoothd container. It also gives
+            # this container `/dev/uinput`, where the input relay creates
+            # one virtual device for each evdev node of a controller, and
+            # `/dev/input/event0` through `event31`, so a virtual device
+            # has a node in this container as soon as the kernel
+            # registers it.
             claims:
               - name: adapter
           volumeMounts:
-            # The two mounts every DRA driver takes. The registry
-            # directory is where the kubelet discovers plugins, and
-            # the plugin's own directory holds the socket that serves
-            # the prepare calls. Both are writable, because serving a
-            # socket is the actuation.
+            # The kubelet finds DRA plugins through the registry
+            # directory and calls prepare over a socket in the plugin
+            # directory. The driver creates both sockets, so both mounts
+            # are writable.
             - name: kubelet-plugin
               mountPath: /var/lib/kubelet/plugins/bluetooth.liken.sh
             - name: kubelet-plugins-registry
               mountPath: /var/lib/kubelet/plugins_registry
-            # Where prepared claims become device-node grants for the
-            # container runtime to resolve. liken writes its own specs
-            # in this same directory, and the two drivers' file name
-            # prefixes keep them apart.
+            # The container runtime reads the CDI spec files here and
+            # applies them to each container with a prepared claim.
+            # `liken` writes its `liken.sh-<claimUID>.json` files in the
+            # same directory, and this driver reads and deletes only its
+            # own `bluetooth.liken.sh-<claimUID>.json` files.
             - name: cdi
               mountPath: /var/run/cdi
             - name: bus
               mountPath: /var/run/bluetooth.liken.sh/dbus
-            # The bonds bluetoothd wrote. The operator reads this tree
-            # to write a new pairing back into that bond's Secret,
-            # which is the other half of what bondfetch does at start.
+            # The operator reads the bonds that bluetoothd writes here
+            # and copies each new pairing to its `Secret`, the reverse
+            # of what `bondfetch` does at start.
             - name: bonds
               mountPath: /var/lib/bluetooth
-            # The privacy value that bluetoothd started with, which the
-            # operator compares with the Adapter's spec.privacy and
-            # reports in its status. The mount is writable because the
-            # operator writes the btmon file here when the Adapter's
-            # spec.btmon changes. It never writes the privacy file.
+            # The operator compares the `privacy` file with the
+            # `Adapter`'s `spec.privacy` and reports the result in
+            # status. The mount is writable because the operator writes
+            # the `btmon` file when `spec.btmon` changes.
             - name: settings
               mountPath: /var/run/bluetooth.liken.sh/settings
       resourceClaims:
         - name: adapter
           resourceClaimTemplateName: bluetooth-adapter
       volumes:
-        # DirectoryOrCreate on all four host paths, because a node
-        # that has never run a DRA driver has none of them.
+        # Each `hostPath` is `DirectoryOrCreate`, because a node that has
+        # never run a DRA driver has none of these directories.
         - name: kubelet-plugin
           hostPath:
             path: /var/lib/kubelet/plugins/bluetooth.liken.sh
@@ -460,41 +387,36 @@ spec:
           hostPath:
             path: /var/run/cdi
             type: DirectoryOrCreate
-        # The D-Bus socket every container of this pod shares, and the
-        # one a claim on the media bus mounts into a sound server's
-        # pod. dbus-daemon unlinks and recreates the socket at every
-        # start, which is why the directory is the mount and never the
-        # socket file: a mount of the file would pin the inode the
-        # daemon deleted.
+        # The D-Bus socket of bluetoothd. A claim on the media bus
+        # mounts the same directory into the consumer's container
+        # through CDI. dbus-daemon deletes and creates the socket each
+        # time it starts, so containers mount the directory. A mount of
+        # the socket file would keep the deleted inode.
         #
-        # A hostPath rather than an emptyDir, because the claim's CDI
-        # mount names a host path, and a prepared claim stays correct
-        # for the whole boot. An emptyDir lives under
-        # /var/lib/kubelet/pods/<uid>, so its host path changes with
-        # every restart of this pod, and every prepared claim would go
-        # stale with it.
+        # This is a `hostPath` because the CDI spec of a prepared claim
+        # names the host path, and a prepared claim must stay correct
+        # until the node reboots. The host path of an `emptyDir` is
+        # under `/var/lib/kubelet/pods/<uid>`, which changes with each
+        # new pod.
         - name: bus
           hostPath:
             path: /var/run/bluetooth.liken.sh/dbus
             type: DirectoryOrCreate
-        # The link keys and the device cache, which is kilobytes.
-        # bondfetch fills this directory from the adapter's bond
-        # Secrets before bluetoothd starts, and the operator writes
-        # changes back to the same Secrets, so the copy here is a
-        # working copy and it goes when the pod goes.
-        #
-        # The Secrets outlive the pod, and each one is labelled with
-        # the adapter. That is the identity BlueZ files a link key
-        # under, so the bonds follow the radio to whichever machine the
-        # radio moves to. Without them, a controller no longer
-        # reconnects with the PS button, and a person has to hold
-        # Create and PS and pair it again after every pod restart.
+        # The link keys and the device cache. `bondfetch` writes them
+        # from the adapter's bond `Secret`s before bluetoothd starts,
+        # and the operator writes changes back to the `Secret`s. The
+        # `Secret`s are labelled with the adapter's address, which is
+        # the identity BlueZ stores a link key under, so the bonds
+        # follow the radio to any machine it moves to. Without them, a
+        # person would pair every controller again after each pod
+        # restart.
         - name: bonds
           emptyDir: {}
-        # The settings that come from the Adapter. bondfetch writes two
-        # files here. start-bluetoothd and the operator read privacy.
-        # start-btmon reads btmon, and the operator writes it again when
-        # spec.btmon changes. An emptyDir, so each new pod starts from
-        # the Adapter's spec and not from the last pod's files.
+        # `bondfetch` writes the `privacy` and `btmon` files here from
+        # the `Adapter`. `start-bluetoothd` and the operator read
+        # `privacy`. `start-btmon` reads `btmon`, and the operator
+        # writes it again when `spec.btmon` changes. An `emptyDir` makes
+        # each new pod start from the `Adapter`'s spec, not from the
+        # last pod's files.
         - name: settings
           emptyDir: {}

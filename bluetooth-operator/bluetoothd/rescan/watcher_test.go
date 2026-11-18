@@ -1,11 +1,11 @@
 package main
 
-// start-rescan reads the monitor channel and adds a device again when
-// the kernel leaves its scan off after a failed connection. These
-// tests play the packets that the kernel copies to the monitor
+// start-rescan reads the monitor channel and sends Add Device again
+// when the kernel leaves its scan off after a failed connection. These
+// tests send the packets that the kernel copies to the monitor
 // channel, in the order and at the times the kernel sends them, and
-// check the Add Device commands that reach a fake of the Management
-// API, with the time each one arrived.
+// check the Add Device commands that arrive at a fake Management API,
+// with the time each arrived.
 
 import (
 	"context"
@@ -49,13 +49,12 @@ func (m *monitorChannel) Close() error {
 	return nil
 }
 
-// managementKernel answers Add Device the way net/bluetooth/mgmt.c
-// does, and keeps each command it received with the time it arrived.
+// managementKernel replies to Add Device like net/bluetooth/mgmt.c
+// does, and records each command with the time it arrived.
 type managementKernel struct {
 	start time.Time
 
-	// refuse answers every Add Device with this status when it is not
-	// zero.
+	// refuse, when it is not zero, is the status of every reply.
 	refuse uint8
 
 	mu   sync.Mutex
@@ -134,8 +133,9 @@ func monitorPacket(kind uint16, data ...byte) []byte {
 	return append(p, data...)
 }
 
-// managementCommand is a Management API command that a socket sent,
-// behind the cookie that names the socket.
+// managementCommand is the monitor packet of a Management API command
+// that a socket sent. Its data starts with the 4-byte cookie that
+// identifies the sending socket.
 func managementCommand(opcode uint16, params ...byte) []byte {
 	data := []byte{1, 0, 0, 0}
 	data = binary.LittleEndian.AppendUint16(data, opcode)
@@ -233,8 +233,9 @@ func attemptStarts(after time.Duration) []step {
 	)
 }
 
-// play runs start-rescan in a bubble, sends each step, waits a minute
-// more, and returns what the kernel received and the log.
+// play runs start-rescan in a synctest bubble, sends each step, waits
+// one more minute, and returns the commands the kernel received and
+// the log.
 func play(t *testing.T, kernel *managementKernel, steps ...[]step) ([]string, string) {
 	t.Helper()
 	var adds []string
@@ -256,7 +257,7 @@ func play(t *testing.T, kernel *managementKernel, steps ...[]step) ([]string, st
 		time.Sleep(time.Minute)
 		cancel()
 		if err := <-done; err != nil {
-			t.Fatalf("start-rescan ended with %v", err)
+			t.Fatalf("run returned %v, want nil", err)
 		}
 		adds = kernel.received()
 	})
@@ -323,14 +324,14 @@ func TestAFailedConnectionThatLeavesTheScanOffAddsTheDeviceAgain(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			got, log := play(t, &managementKernel{}, c.steps...)
 			if !slices.Equal(got, c.want) {
-				t.Fatalf("the kernel received %q, want %q; log:\n%s", got, c.want, log)
+				t.Fatalf("the kernel received %q, want %q. The log:\n%s", got, c.want, log)
 			}
 		})
 	}
 }
 
-// The program adds a device only when the kernel's scan stays off and
-// bluetoothd chose the device for auto connect.
+// The program adds a device again only when the kernel's scan stays
+// off and bluetoothd had set the device to auto connect.
 func TestTheDeviceIsNotAddedAgain(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -436,16 +437,16 @@ func TestTheDeviceIsNotAddedAgain(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			got, log := play(t, &managementKernel{}, c.steps...)
 			if len(got) != 0 {
-				t.Fatalf("the kernel received %q, want nothing; log:\n%s", got, log)
+				t.Fatalf("the kernel received %q, want nothing. The log:\n%s", got, log)
 			}
 		})
 	}
 }
 
-// Each Add Device writes one line that names the device, the HCI
-// status of the failed attempt, and the kernel's answer. A deadline
-// that passes after an Add Device with no scan writes one more line,
-// because the device then cannot reconnect.
+// The program logs one line for each repair, with the device, the HCI
+// status of the failed attempt, and the result of Add Device. When the
+// scan has still not started rescanSettle after the repair, it logs one
+// more line, because the device then cannot reconnect.
 func TestTheLogNamesEachRepair(t *testing.T) {
 	failure := [][]step{
 		registered(mgmt.AddressLEPublic),
@@ -464,7 +465,7 @@ func TestTheLogNamesEachRepair(t *testing.T) {
 			steps:  append(slices.Clone(failure), at(5*time.Second+time.Millisecond, setScanEnable(1), commandComplete(hciLESetScanEnable, 0))),
 			want: []string{
 				"start-rescan: reading the HCI monitor channel",
-				"start-rescan: hci0: a connection to 58:AB:4B:24:91:47 failed with HCI status 0x3e and the kernel did not scan again within 5s; added the device again, so the kernel scans for it",
+				"start-rescan: hci0: a connection to 58:AB:4B:24:91:47 failed with HCI status 0x3e and the kernel did not scan again within 5s, so start-rescan added the device again to make the kernel scan for it",
 			},
 		},
 		{
@@ -473,8 +474,8 @@ func TestTheLogNamesEachRepair(t *testing.T) {
 			steps:  failure,
 			want: []string{
 				"start-rescan: reading the HCI monitor channel",
-				"start-rescan: hci0: a connection to 58:AB:4B:24:91:47 failed with HCI status 0x3e and the kernel did not scan again within 5s; added the device again, so the kernel scans for it",
-				"start-rescan: hci0: the kernel did not scan within 5s after 58:AB:4B:24:91:47 was added again; the device cannot reconnect until the adapter powers off and on",
+				"start-rescan: hci0: a connection to 58:AB:4B:24:91:47 failed with HCI status 0x3e and the kernel did not scan again within 5s, so start-rescan added the device again to make the kernel scan for it",
+				"start-rescan: hci0: the kernel did not scan within 5s after 58:AB:4B:24:91:47 was added again, so the device cannot reconnect until the adapter powers off and on",
 			},
 		},
 		{
@@ -483,7 +484,7 @@ func TestTheLogNamesEachRepair(t *testing.T) {
 			steps:  failure,
 			want: []string{
 				"start-rescan: reading the HCI monitor channel",
-				"start-rescan: hci0: a connection to 58:AB:4B:24:91:47 failed with HCI status 0x3e and the kernel did not scan again within 5s; adding the device again failed: the kernel answered Busy (0x0a)",
+				"start-rescan: hci0: a connection to 58:AB:4B:24:91:47 failed with HCI status 0x3e and the kernel did not scan again within 5s, and adding the device again returned: the kernel replied with status Busy (0x0a)",
 			},
 		},
 	}
@@ -498,8 +499,8 @@ func TestTheLogNamesEachRepair(t *testing.T) {
 	}
 }
 
-// A failure to open the management channel is a line in the log, and
-// the program keeps reading.
+// When the management channel fails to open, the program logs a line
+// and keeps reading.
 func TestAManagementChannelThatDoesNotOpenIsLogged(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		monitor := newMonitorChannel()
@@ -525,18 +526,18 @@ func TestAManagementChannelThatDoesNotOpenIsLogged(t *testing.T) {
 		time.Sleep(time.Minute)
 		cancel()
 		if err := <-done; err != nil {
-			t.Fatal(err)
+			t.Fatalf("run returned %v, want nil", err)
 		}
-		want := "adding the device again failed: binding the HCI socket to the management channel: operation not permitted"
+		want := "adding the device again returned: binding the HCI socket to the management channel: operation not permitted"
 		if !strings.Contains(log.String(), want) {
-			t.Fatalf("the log has no %q:\n%s", want, log.String())
+			t.Fatalf("the log does not contain %q, want it to:\n%s", want, log.String())
 		}
 	})
 }
 
-// The program ends with the monitor channel's error, so the kubelet
-// restarts the container, and with the open's error when it never
-// reads at all.
+// The program exits with the monitor channel's error so that the
+// kubelet restarts the container. When the channel never opens, it
+// exits with the open's error.
 func TestTheProgramEndsWhenTheMonitorChannelFails(t *testing.T) {
 	cases := []struct {
 		name string
@@ -565,7 +566,7 @@ func TestTheProgramEndsWhenTheMonitorChannelFails(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				err := run(t.Context(), c.open, (&managementKernel{}).open, io.Discard)
 				if err == nil || err.Error() != c.want {
-					t.Fatalf("start-rescan ended with %v, want %q", err, c.want)
+					t.Fatalf("run returned %v, want %q", err, c.want)
 				}
 			})
 		})

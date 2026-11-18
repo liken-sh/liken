@@ -1,9 +1,5 @@
 package main
 
-// These tests prove two pure functions: the classes a claim asks for
-// follow from its allocation alone, and the mask the kernel receives
-// follows from that answer and the node's own classes.
-
 import (
 	"reflect"
 	"slices"
@@ -44,8 +40,7 @@ func TestParseInputClasses(t *testing.T) {
 				if !strings.Contains(err.Error(), c.problem) {
 					t.Errorf("the refusal does not say %s: %v", c.problem, err)
 				}
-				// A refusal lists every class, so a person can fix the
-				// claim from the message alone.
+				// The error lists every class, so a person can fix the claim.
 				for _, class := range inputClassNames {
 					if !strings.Contains(err.Error(), class.name) {
 						t.Errorf("the refusal does not name %s: %v", class.name, err)
@@ -54,7 +49,7 @@ func TestParseInputClasses(t *testing.T) {
 				return
 			}
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("parsing the input classes: %v", err)
 			}
 			if got != c.want {
 				t.Errorf("classes = %s, want %s", got, c.want)
@@ -63,13 +58,12 @@ func TestParseInputClasses(t *testing.T) {
 	}
 }
 
-// The names round trip, because a prepared claim's record on disk
-// holds them and a restart parses them back.
+// A restart parses the class names that the CDI spec file recorded.
 func TestInputClassNamesRoundTrip(t *testing.T) {
 	for _, want := range []inputClasses{classKey, classKey | classMouse, everyInputClass} {
 		got, err := parseInputClasses(want.names())
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("parsing the input classes: %v", err)
 		}
 		if got != want {
 			t.Errorf("parseInputClasses(%v) = %s, want %s", want.names(), got, want)
@@ -77,9 +71,8 @@ func TestInputClassNamesRoundTrip(t *testing.T) {
 	}
 }
 
-// deliveredTypes are the event types one node's masks let through. A
-// node with no mask delivers every type, which is what a nil answer
-// says.
+// deliveredTypes returns the event types that masks pass, and fails the
+// test unless masks is a single mask of type EV_SYN.
 func deliveredTypes(t *testing.T, masks []eventMask) []uint16 {
 	t.Helper()
 	if len(masks) != 1 || masks[0].event != evSyn {
@@ -97,44 +90,37 @@ func TestInputMasks(t *testing.T) {
 		whole bool
 	}{
 		{
-			// Every class the node carries is demanded, so the kernel
-			// filters nothing.
-			name:  "a gamepad with joystick demanded",
+			name:  "a gamepad with every class it has wanted",
 			caps:  dualSenseGamepad(),
 			want:  classJoystick | classKey,
 			whole: true,
 		},
 		{
-			// The whole node is the accelerometer, so a demand that
-			// names it delivers all of it.
-			name:  "the motion node with the accelerometer demanded",
+			name:  "the motion node with the accelerometer wanted",
 			caps:  dualSenseMotion(),
 			want:  classAccelerometer | classKey,
 			whole: true,
 		},
 		{
-			name:  "the motion node with the accelerometer not demanded",
+			name:  "the motion node with the accelerometer not wanted",
 			caps:  dualSenseMotion(),
 			want:  classJoystick | classKey,
 			types: nil,
 		},
 		{
-			name:  "a gamepad with nothing it carries demanded",
+			name:  "a gamepad with none of its classes wanted",
 			caps:  dualSenseGamepad(),
 			want:  classKeyboard,
 			types: nil,
 		},
 		{
-			// No prepared claim demands anything, so the kernel queues
-			// nothing on this fd.
-			name:  "nothing demanded at all",
+			name:  "no class wanted",
 			caps:  dualSenseGamepad(),
 			want:  0,
 			types: nil,
 		},
 		{
-			// An air mouse types and points on one node, so a claim on
-			// its keys narrows the node to the key events.
+			// An air mouse has keys and a pointer on one node.
 			name: "an air mouse narrowed to its keys",
 			caps: evdevCapabilities{
 				Codes: map[string][]uint16{
@@ -159,8 +145,6 @@ func TestInputMasks(t *testing.T) {
 			types: []uint16{evKey, evRel},
 		},
 		{
-			// A node that carries no class has nothing to select, so
-			// it is delivered whole.
 			name:  "a node with no class at all",
 			caps:  evdevCapabilities{Name: "Empty"},
 			want:  classKey,
@@ -183,8 +167,6 @@ func TestInputMasks(t *testing.T) {
 	}
 }
 
-// The mask that passes everything names every event type, so widening
-// a node's demand needs no record of what the fd carried before.
 func TestPassEverythingCoversEveryEventType(t *testing.T) {
 	types := deliveredTypes(t, passEverything())
 	if len(types) != eventTypeMax+1 || int(types[eventTypeMax]) != eventTypeMax {
@@ -192,7 +174,6 @@ func TestPassEverythingCoversEveryEventType(t *testing.T) {
 	}
 }
 
-// driverConfig is one opaque configuration block for this driver.
 func driverConfig(source string, parameters string, requests ...string) AllocatedConfig {
 	return AllocatedConfig{
 		Source:   source,
@@ -204,7 +185,7 @@ func driverConfig(source string, parameters string, requests ...string) Allocate
 	}
 }
 
-func TestClaimInputs(t *testing.T) {
+func TestRequestInputSettingsReadsTheInputs(t *testing.T) {
 	cases := []struct {
 		name    string
 		config  []AllocatedConfig
@@ -233,8 +214,6 @@ func TestClaimInputs(t *testing.T) {
 			want:    classJoystick,
 		},
 		{
-			// A claim block that says nothing about inputs leaves the
-			// class's block standing.
 			name: "a claim block with no inputs key",
 			config: []AllocatedConfig{
 				driverConfig("FromClass", `{"inputs":["key"]}`),
@@ -260,8 +239,6 @@ func TestClaimInputs(t *testing.T) {
 			want:    classKey,
 		},
 		{
-			// A request that a subrequest satisfied is still governed
-			// by a block that names the request itself.
 			name: "a block that names the parent of a subrequest",
 			config: []AllocatedConfig{
 				driverConfig("FromClaim", `{"inputs":["key"]}`, "controller"),
@@ -299,7 +276,7 @@ func TestClaimInputs(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := claimDelivery(c.config, c.request)
+			got, err := requestInputSettings(c.config, c.request)
 			if c.problem != "" {
 				if err == nil {
 					t.Fatalf("claimDelivery = %s, want a refusal", got.classes)
@@ -310,7 +287,7 @@ func TestClaimInputs(t *testing.T) {
 				return
 			}
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("parsing the input classes: %v", err)
 			}
 			if got.classes != c.want {
 				t.Errorf("classes = %s, want %s", got.classes, c.want)
@@ -319,9 +296,7 @@ func TestClaimInputs(t *testing.T) {
 	}
 }
 
-// A claim that receives every class records no list, so a spec file
-// written before this parameter existed restores as the default.
-func TestInputClassesRecordOnlyANarrowedDemand(t *testing.T) {
+func TestRecordedInputsOmitsTheListForEveryClass(t *testing.T) {
 	cases := []struct {
 		want     inputClasses
 		recorded []string
@@ -336,10 +311,8 @@ func TestInputClassesRecordOnlyANarrowedDemand(t *testing.T) {
 	}
 }
 
-// The axes resolve the same way the classes do, and on their own: a
-// class can carry the smoothing a pad needs while the claim states
-// which inputs it reads.
-func TestClaimDeliveryReadsTheAxesBesideTheInputs(t *testing.T) {
+// A DeviceClass can set the axes while a claim sets the input classes.
+func TestRequestInputSettingsReadsTheAxesBesideTheInputs(t *testing.T) {
 	cases := []struct {
 		name    string
 		config  []AllocatedConfig
@@ -385,7 +358,7 @@ func TestClaimDeliveryReadsTheAxesBesideTheInputs(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := claimDelivery(c.config, "controller")
+			got, err := requestInputSettings(c.config, "controller")
 			if c.problem != "" {
 				if err == nil {
 					t.Fatalf("claimDelivery = %+v, want a refusal", got)
@@ -396,7 +369,7 @@ func TestClaimDeliveryReadsTheAxesBesideTheInputs(t *testing.T) {
 				return
 			}
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("parsing the input classes: %v", err)
 			}
 			if got.classes != c.classes {
 				t.Errorf("classes = %s, want %s", got.classes, c.classes)

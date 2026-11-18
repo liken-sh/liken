@@ -7,11 +7,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// start-rescan binds the monitor channel, which takes CAP_NET_RAW, and
-// sends Add Device, which takes CAP_NET_ADMIN. The container holds
-// those two and nothing else, and it mounts nothing, because the
-// program reads and writes only the kernel's sockets.
-func TestTheRescanContainerHoldsTwoCapabilities(t *testing.T) {
+// start-rescan binds the HCI monitor channel, which needs CAP_NET_RAW,
+// and sends the Add Device command, which needs CAP_NET_ADMIN. It uses
+// only kernel sockets, so it mounts no volumes.
+func TestTheRescanContainerAddsOnlyNetRawAndNetAdmin(t *testing.T) {
 	daemonSet := daemonSetIn(t, "deploy/operator.yaml")
 	rescan := daemonSet.Spec.Template.Spec.InitContainers[2]
 	if rescan.Name != "rescan" {

@@ -1,9 +1,8 @@
 package main
 
-// These tests cover what wakes the loop for an Adapter or a Peripheral:
-// a spec edit, a deletion request, a new object, and a removed object
-// wake it. A status write, and an Adapter that another node holds, do
-// not. The Peripheral watch follows the radio the pass reports.
+// These tests check which events of the Adapter and Peripheral watches
+// wake the loop, and that the Peripheral watch follows the radio that
+// the pass reports.
 
 import (
 	"fmt"
@@ -38,8 +37,6 @@ func adapterOn(name, node string, generation int64) Adapter {
 	}
 }
 
-// The informer calls a handler in one of three ways. Each builds the
-// call for one case of a table.
 func updated(before, after any) func(cache.ResourceEventHandler) {
 	return func(h cache.ResourceEventHandler) { h.OnUpdate(before, after) }
 }
@@ -52,9 +49,9 @@ func removed(item any) func(cache.ResourceEventHandler) {
 	return func(h cache.ResourceEventHandler) { h.OnDelete(item) }
 }
 
-// Each update starts from a held copy at generation 1.
+// Each update starts from a cached copy at generation 1.
 func TestAChangeWakesTheLoopOnlyForAnEdit(t *testing.T) {
-	held := asObject(t, peripheralAt(1, false))
+	cached := asObject(t, peripheralAt(1, false))
 	recreated := peripheralAt(1, false)
 	recreated.Metadata.UID = "5f0c2a1e-8d3b-4c6f-9a7e-2b1d4e6f8a90"
 	cases := []struct {
@@ -62,23 +59,23 @@ func TestAChangeWakesTheLoopOnlyForAnEdit(t *testing.T) {
 		deliver func(cache.ResourceEventHandler)
 		want    bool
 	}{
-		{name: "a status write", deliver: updated(held, asObject(t, peripheralAt(1, false))), want: false},
-		{name: "a spec edit", deliver: updated(held, asObject(t, peripheralAt(2, false))), want: true},
-		{name: "a deletion request", deliver: updated(held, asObject(t, peripheralAt(1, true))), want: true},
+		{name: "a status write", deliver: updated(cached, asObject(t, peripheralAt(1, false))), want: false},
+		{name: "a spec edit", deliver: updated(cached, asObject(t, peripheralAt(2, false))), want: true},
+		{name: "a deletion request", deliver: updated(cached, asObject(t, peripheralAt(1, true))), want: true},
 		{name: "a removed object", deliver: removed(asObject(t, peripheralAt(1, true))), want: true},
 		{
 			name:    "an object removed while the watch was down",
-			deliver: removed(cache.DeletedFinalStateUnknown{Key: "a0-ab-51-33-b7-12", Obj: held}),
+			deliver: removed(cache.DeletedFinalStateUnknown{Key: "a0-ab-51-33-b7-12", Obj: cached}),
 			want:    true,
 		},
 		{name: "a new object", deliver: added(asObject(t, peripheralAt(1, false))), want: true},
-		{name: "an object deleted and created again with the same name", deliver: updated(held, asObject(t, recreated)), want: true},
+		{name: "an object deleted and created again with the same name", deliver: updated(cached, asObject(t, recreated)), want: true},
 		{
-			name:    "a removal whose tombstone holds no copy",
+			name:    "a removal whose tombstone has no copy",
 			deliver: removed(cache.DeletedFinalStateUnknown{Key: "a0-ab-51-33-b7-12"}),
 			want:    true,
 		},
-		{name: "a held copy that did not convert", deliver: updated("not an object", held), want: true},
+		{name: "a cached copy that does not convert", deliver: updated("not an object", cached), want: true},
 		{name: "an object that does not convert", deliver: added("not an object"), want: false},
 	}
 	for _, c := range cases {
@@ -93,24 +90,20 @@ func TestAChangeWakesTheLoopOnlyForAnEdit(t *testing.T) {
 	}
 }
 
-// The Adapter watch covers the whole cluster, and an Adapter wakes the
-// loop only when this pod acts on it: its radio is the one this pod
-// holds, its status names this node, or no node has written its status
-// yet.
 func TestAnAdapterEditWakesTheLoopOnlyOnItsNode(t *testing.T) {
 	cases := []struct {
 		name    string
 		adapter Adapter
 		want    bool
 	}{
-		{name: "the radio this pod holds", adapter: adapterOn(testAdapterName, "node-2", 2), want: true},
+		{name: "the radio this pod uses", adapter: adapterOn(testAdapterName, "node-2", 2), want: true},
 		{name: "another radio on this node", adapter: adapterOn("00-1a-7d-da-71-13", "node-1", 2), want: true},
-		{name: "a radio no node holds yet", adapter: adapterOn("00-1a-7d-da-71-13", "", 2), want: true},
+		{name: "a radio that no node has reported yet", adapter: adapterOn("00-1a-7d-da-71-13", "", 2), want: true},
 		{name: "a radio on another node", adapter: adapterOn("00-1a-7d-da-71-13", "node-2", 2), want: false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			watch := &editWatch{nodeName: "node-1", moved: make(chan struct{}, 1)}
+			watch := &editWatch{nodeName: "node-1", adapterKeyChanged: make(chan struct{}, 1)}
 			watch.follow(testAdapterName)
 			wakes := 0
 			handler := editHandler[Adapter]{what: "the Adapters", wake: func() { wakes++ }, mark: watch.adapterMark}
@@ -124,8 +117,8 @@ func TestAnAdapterEditWakesTheLoopOnlyOnItsNode(t *testing.T) {
 	}
 }
 
-// editServers answers the Adapter and the Peripheral collections, each
-// from its own scripted server.
+// editServers serves the Adapter and Peripheral collections, each from
+// its own scripted server.
 func editServers(t *testing.T, adapters, peripherals *watchServer) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle(adaptersPath(), adapters.handler(t))
@@ -150,11 +143,8 @@ func peripheralEvent(t *testing.T, version string, peripheral Peripheral) string
 	return fmt.Sprintf(`{"type":"MODIFIED","object":%s}`, encode(t, peripheral))
 }
 
-// The operator's own status write reaches the watch as an event, and
-// must not wake the loop, or every pass that writes a battery level
-// would run a second pass. A person's edit to the spec wakes it. The
-// server holds each event back until the test has read the wakes
-// before it.
+// The scripted server sends each event only after the test has read
+// the wakes that came before it.
 func TestAPeripheralEditWakesTheLoopAndAStatusWriteDoesNot(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		adapters := newWatchServer(adaptersPath(), "AdapterList", []string{"[]"})
@@ -184,10 +174,8 @@ func TestAPeripheralEditWakesTheLoopAndAStatusWriteDoesNot(t *testing.T) {
 	})
 }
 
-// Each watch wakes the loop once when its first read is done, even
-// when the read holds no object. At a start, the pass can read the
-// objects before the watch does, and an edit made between the two
-// reads is in the watch's read and in no event.
+// Each watch wakes the loop when its first list completes, even when
+// the list is empty.
 func TestAWatchWakesTheLoopWhenItsFirstReadIsDone(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		adapters := newWatchServer(adaptersPath(), "AdapterList", []string{"[]"})
@@ -206,10 +194,9 @@ func TestAWatchWakesTheLoopWhenItsFirstReadIsDone(t *testing.T) {
 	})
 }
 
-// A watch that closes at once makes the reflector read the collection
-// again after its backoff. The informer reports what changed between
-// the two reads, so an edit made while the watch was down wakes the
-// loop, and a status write made in the same time does not.
+// When a watch closes immediately, the reflector lists the collection
+// again after its backoff, and the informer reports what differs
+// between the two lists.
 func TestAChangeWhileTheWatchWasDownWakesTheLoopOnlyForAnEdit(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -232,7 +219,7 @@ func TestAChangeWhileTheWatchWasDownWakesTheLoopOnlyForAnEdit(t *testing.T) {
 					t.Fatal("the first Peripheral watch did not start and wake the loop")
 				}
 
-				// The reflector's backoff is less than a minute.
+				// Longer than the reflector's backoff.
 				time.Sleep(time.Minute)
 				synctest.Wait()
 				if peripherals.opened() != 2 {
@@ -246,9 +233,8 @@ func TestAChangeWhileTheWatchWasDownWakesTheLoopOnlyForAnEdit(t *testing.T) {
 	}
 }
 
-// The pass reports the radio it holds on every pass. The same address
-// keeps the Peripheral watch it has. A new address closes the watch for
-// the old one and opens a watch that selects the new radio's
+// A second report of the same radio keeps the Peripheral watch open,
+// and a new radio replaces it with a watch on the new radio's
 // Peripherals.
 func TestThePeripheralWatchFollowsTheRadio(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
@@ -264,15 +250,13 @@ func TestThePeripheralWatchFollowsTheRadio(t *testing.T) {
 		synctest.Wait()
 
 		want := fmt.Sprint([]string{adapterSelector(testAdapterName), adapterSelector(other)})
-		if holding, selectors := peripherals.held(); holding != 1 || fmt.Sprint(selectors) != want {
-			t.Fatalf("the server holds %d watches, and the requests selected %v; want 1 and %s", holding, selectors, want)
+		if open, selectors := peripherals.openWatches(); open != 1 || fmt.Sprint(selectors) != want {
+			t.Fatalf("the server has %d open Peripheral watches selecting %v, want 1 watch selecting %s", open, selectors, want)
 		}
 	})
 }
 
-// The pass reports the address of the radio it read, so the edit
-// watcher selects that radio's Peripherals.
-func TestAPassReportsTheRadioItHolds(t *testing.T) {
+func TestAPassReportsItsRadioToTheEditWatcher(t *testing.T) {
 	fixture := newAPIFixture()
 	inventory := testInventory(t, fixture, testRadio(t, pairedDevice(t, testDevice)))
 	var followed []string
@@ -285,9 +269,8 @@ func TestAPassReportsTheRadioItHolds(t *testing.T) {
 	}
 }
 
-// Through the reflector: the stores the pass reads fill from the two
-// watches. The Peripheral store answers only for the radio the watch
-// follows.
+// The Peripheral store returns its view only for the radio that the
+// watch follows.
 func TestTheEditWatchesFillTheStoresThePassReads(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		adapters := newWatchServer(adaptersPath(), "AdapterList", []string{"[" + encode(t, adapterOn(testAdapterName, "node-1", 1)) + "]"})
@@ -298,16 +281,16 @@ func TestTheEditWatchesFillTheStoresThePassReads(t *testing.T) {
 		synctest.Wait()
 
 		if !stores.adapters.View.Ready() || !stores.peripherals.of(testAdapterName).Ready() {
-			t.Fatal("the stores do not hold their first reads")
+			t.Fatal("the Adapter and Peripheral stores are not ready after their first reads, want both ready")
 		}
-		if held := informer.CachedList[Adapter](stores.adapters.View); len(held) != 1 || held[0].Metadata.Name != testAdapterName {
-			t.Errorf("the Adapter store holds %+v", held)
+		if listed := informer.CachedList[Adapter](stores.adapters.View); len(listed) != 1 || listed[0].Metadata.Name != testAdapterName {
+			t.Errorf("the Adapter store contains %+v, want one Adapter named %s", listed, testAdapterName)
 		}
-		if held := informer.CachedList[Peripheral](stores.peripherals.of(testAdapterName)); len(held) != 1 {
-			t.Errorf("the Peripheral store holds %+v", held)
+		if listed := informer.CachedList[Peripheral](stores.peripherals.of(testAdapterName)); len(listed) != 1 {
+			t.Errorf("the Peripheral store contains %+v, want one Peripheral", listed)
 		}
 		if stores.peripherals.of("00-1a-7d-da-71-13").Ready() {
-			t.Error("the Peripheral store answered for a radio the watch does not follow")
+			t.Error("the Peripheral store is ready for a radio that the watch does not follow, want not ready")
 		}
 	})
 }

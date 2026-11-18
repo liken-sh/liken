@@ -1,9 +1,5 @@
 package main
 
-// Which connected controllers the operator reconnects because the
-// kernel holds no HID device for them, how long it waits first, and how
-// long it waits between two reconnects that did not help.
-
 import (
 	"fmt"
 	"slices"
@@ -22,8 +18,8 @@ func remoteAddress(t *testing.T) bonds.Address {
 	return testAddress(t, testRemote)
 }
 
-// connectedRemote is the remote as bluetoothd reports it while its
-// link is up.
+// connectedRemote is the remote as bluetoothd reports it while its link
+// is up.
 func connectedRemote(t *testing.T) deviceState {
 	t.Helper()
 	return deviceState{
@@ -46,19 +42,19 @@ func sleepingRemote(t *testing.T) deviceState {
 	return device
 }
 
-// remoteRelays holds the remote's two virtual devices, restored from
-// the snapshot its bond's Secret stores. A controller has them once it
-// has connected with its input nodes at least once.
+// remoteRelays returns relays with the remote's virtual devices,
+// restored from the snapshot in its bond's Secret, as for a controller
+// that has had input nodes before.
 func remoteRelays(t *testing.T) *relays {
 	t.Helper()
-	held := newRelays(newFakeKernel())
+	set := newRelays(newFakeKernel())
 	stored := fmt.Sprintf(`{"version":%d,"nodes":[{"name":"T6-Remote Keyboard"},{"name":"T6-Remote Mouse"}]}`, snapshotVersion)
-	held.restore(normalizeMAC(testRemote), []byte(stored))
-	t.Cleanup(func() { stopAll(held) })
-	return held
+	set.restore(normalizeMAC(testRemote), []byte(stored))
+	t.Cleanup(func() { stopAll(set) })
+	return set
 }
 
-// remoteHID is the HID device the kernel registers for the remote when
+// remoteHID is the HID device the kernel registers for the remote once
 // bluetoothd attaches its input profile.
 func remoteHID() []hidDevice {
 	return []hidDevice{{
@@ -68,19 +64,19 @@ func remoteHID() []hidDevice {
 	}}
 }
 
-// testRecovery reads its clock through a pointer the test moves, so a
-// wait runs out without any waiting.
-func testRecovery(radio *fakeRadio, held *relays, now *time.Time) *inputRecovery {
-	return newInputRecovery(radio, held, func() time.Time { return *now })
+// testRecovery builds an inputRecovery whose clock reads the time that
+// now points to, so a test advances time by assigning to it.
+func testRecovery(radio *fakeRadio, set *relays, now *time.Time) *inputRecovery {
+	return newInputRecovery(radio, set, func() time.Time { return *now })
 }
 
-// recoveryPass runs one pass at the time now points to, and waits for
-// the reconnect it starts, if any.
+// recoveryPass runs one pass at the clock's current time and waits for
+// any reconnect the pass starts.
 func recoveryPass(t *testing.T, recovery *inputRecovery, radio *fakeRadio, kernel []hidDevice, unpairing map[bonds.Address]bool) inventoryPass {
 	t.Helper()
 	snapshot, err := radio.Snapshot()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the radio snapshot: %v", err)
 	}
 	pass := inventoryPass{unpairing: unpairing}
 	recovery.reconcile(snapshot, kernel, &pass)
@@ -88,15 +84,15 @@ func recoveryPass(t *testing.T, recovery *inputRecovery, radio *fakeRadio, kerne
 	return pass
 }
 
-// A connected controller that has delivered input before, and has no
-// HID device in the kernel once the grace has run out, is reconnected
-// through bluetoothd. Every other controller is left alone.
+// A controller that is connected, has delivered input before, and has
+// no kernel HID device after the grace period is reconnected through
+// bluetoothd. No other controller is.
 func TestRecoveryReconnectsOnlyAConnectedControllerWithNoHIDDevice(t *testing.T) {
 	reconnect := []string{"Disconnect " + remoteAddress(t).Key(), "Connect " + remoteAddress(t).Key()}
 	cases := []struct {
 		name      string
 		device    deviceState
-		held      func(*testing.T) *relays
+		set       func(*testing.T) *relays
 		kernel    []hidDevice
 		unpairing map[bonds.Address]bool
 		elapsed   time.Duration
@@ -105,39 +101,39 @@ func TestRecoveryReconnectsOnlyAConnectedControllerWithNoHIDDevice(t *testing.T)
 		{
 			name:    "connected with no HID device past the grace",
 			device:  connectedRemote(t),
-			held:    remoteRelays,
+			set:     remoteRelays,
 			elapsed: recoveryGrace,
 			want:    reconnect,
 		},
 		{
 			name:    "connected with no HID device inside the grace",
 			device:  connectedRemote(t),
-			held:    remoteRelays,
+			set:     remoteRelays,
 			elapsed: recoveryGrace - time.Second,
 		},
 		{
 			name:    "connected with its HID device",
 			device:  connectedRemote(t),
-			held:    remoteRelays,
+			set:     remoteRelays,
 			kernel:  remoteHID(),
 			elapsed: recoveryGrace,
 		},
 		{
 			name:    "asleep",
 			device:  sleepingRemote(t),
-			held:    remoteRelays,
+			set:     remoteRelays,
 			elapsed: recoveryGrace,
 		},
 		{
 			name:    "a device that has never delivered input, such as a speaker",
 			device:  connectedRemote(t),
-			held:    func(*testing.T) *relays { return newRelays(newFakeKernel()) },
+			set:     func(*testing.T) *relays { return newRelays(newFakeKernel()) },
 			elapsed: recoveryGrace,
 		},
 		{
 			name:      "a device under teardown",
 			device:    connectedRemote(t),
-			held:      remoteRelays,
+			set:       remoteRelays,
 			unpairing: map[bonds.Address]bool{remoteAddress(t): true},
 			elapsed:   recoveryGrace,
 		},
@@ -146,7 +142,7 @@ func TestRecoveryReconnectsOnlyAConnectedControllerWithNoHIDDevice(t *testing.T)
 		t.Run(c.name, func(t *testing.T) {
 			radio := testRadio(t, c.device)
 			now := testNow
-			recovery := testRecovery(radio, c.held(t), &now)
+			recovery := testRecovery(radio, c.set(t), &now)
 
 			recoveryPass(t, recovery, radio, c.kernel, c.unpairing)
 			now = now.Add(c.elapsed)
@@ -159,9 +155,9 @@ func TestRecoveryReconnectsOnlyAConnectedControllerWithNoHIDDevice(t *testing.T)
 	}
 }
 
-// The grace ends with no event to mark it, so a pass inside it asks
+// Nothing signals the end of the grace period, so a pass inside it asks
 // the loop to run again when it ends.
-func TestRecoveryAsksForAPassWhenTheGraceEnds(t *testing.T) {
+func TestRecoveryRequestsAnotherPassWhenTheGraceEnds(t *testing.T) {
 	radio := testRadio(t, connectedRemote(t))
 	now := testNow
 	recovery := testRecovery(radio, remoteRelays(t), &now)
@@ -176,9 +172,9 @@ func TestRecoveryAsksForAPassWhenTheGraceEnds(t *testing.T) {
 }
 
 // A reconnect that brings no HID device back is not repeated at once.
-// The wait doubles on each reconnect that does not help, up to a
-// ceiling, so a controller that never recovers costs a reconnect a
-// quarter of an hour and not one every pass.
+// The wait doubles after each failed reconnect up to a ceiling, so a
+// controller that never recovers is reconnected every 15 minutes and
+// not on every pass.
 func TestTheRecoveryWaitDoublesToACeiling(t *testing.T) {
 	cases := []struct {
 		attempt int
@@ -200,7 +196,7 @@ func TestTheRecoveryWaitDoublesToACeiling(t *testing.T) {
 	for _, c := range cases {
 		recoveryPass(t, recovery, radio, nil, nil)
 		if got := radio.counted("Disconnect"); got != c.attempt {
-			t.Fatalf("after %d waits Disconnect ran %d times: %v", c.attempt-1, got, radio.calls)
+			t.Fatalf("after %d waits, Disconnect ran %d times, want %d: %v", c.attempt-1, got, c.attempt, radio.calls)
 		}
 		early := recoveryPass(t, recovery, radio, nil, nil)
 		if early.again != c.want {
@@ -210,11 +206,10 @@ func TestTheRecoveryWaitDoublesToACeiling(t *testing.T) {
 	}
 }
 
-// The wait survives the moment the reconnect itself takes the link
-// down, because a pass can read the device disconnected between the
-// two calls. Otherwise every reconnect would start a fresh grace, and
-// a controller that never recovers would be reconnected every few
-// seconds.
+// The wait is kept while the reconnect itself disconnects the link,
+// because a pass can see the device disconnected between the two calls.
+// If that cleared the wait, a controller that never recovers would be
+// reconnected every recoveryGrace.
 func TestTheRecoveryWaitSurvivesTheReconnect(t *testing.T) {
 	radio := testRadio(t, connectedRemote(t))
 	now := testNow
@@ -235,9 +230,9 @@ func TestTheRecoveryWaitSurvivesTheReconnect(t *testing.T) {
 	}
 }
 
-// A HID device that appears ends the wait, so a remote that recovered
-// and is stuck again days later is reconnected after the grace and not
-// after a wait an old failure left behind.
+// A HID device that appears clears the wait, so a remote that recovered
+// and gets stuck again days later is reconnected after the grace period
+// and not after the wait left by an old failure.
 func TestAHIDDeviceResetsTheRecoveryWait(t *testing.T) {
 	radio := testRadio(t, connectedRemote(t))
 	now := testNow
@@ -256,9 +251,9 @@ func TestAHIDDeviceResetsTheRecoveryWait(t *testing.T) {
 	}
 }
 
-// The inventory pass runs the recovery against the HID devices sysfs
-// holds, so a remote whose link came up with no input node is
-// reconnected without a restart of this operator.
+// The inventory pass runs the recovery against the HID devices in
+// sysfs, so a remote whose link came up with no input node is
+// reconnected without restarting the operator.
 func TestTheInventoryPassReconnectsARemoteWithNoInputNode(t *testing.T) {
 	fixture := newAPIFixture()
 	radio := testRadio(t, connectedRemote(t))

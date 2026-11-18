@@ -1,18 +1,13 @@
 package main
 
-// These tests cover the publisher's four outcomes against a test API
-// server: create the slice when it is absent, leave a current slice
-// alone, replace a changed one with an increased pool generation, and
-// delete the slice only when the paired set is authoritatively empty.
-
 import (
 	"encoding/json"
 	"net/http"
 	"testing"
 )
 
-// slicePublishFixture is a small API server that holds at most one
-// ResourceSlice. It remembers the requests it received.
+// slicePublishFixture is a fake API server that stores at most one
+// ResourceSlice and records the requests it receives.
 type slicePublishFixture struct {
 	existing *ResourceSlice
 	requests []string
@@ -44,7 +39,7 @@ func (f *slicePublishFixture) handler(t *testing.T) http.Handler {
 			f.existing = nil
 			w.WriteHeader(http.StatusOK)
 		default:
-			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			t.Errorf("the fake API server got %s %s, which it does not serve", r.Method, r.URL.Path)
 		}
 	})
 }
@@ -53,7 +48,8 @@ func testOwner() OwnerReference {
 	return OwnerReference{APIVersion: "v1", Kind: "Node", Name: "liken-1", UID: "abc-123"}
 }
 
-// publishedDevice is one connected controller as the slice holds it.
+// publishedDevice is a connected controller as it appears in the
+// slice.
 func publishedDevice() SliceDevice {
 	return SliceDevice{
 		Name: "a0-ab-51-33-b7-12",
@@ -69,25 +65,25 @@ func TestEnsureCreatesTheSliceOnFirstPublish(t *testing.T) {
 	client := testClient(t, fixture.handler(t))
 
 	if err := EnsureResourceSlice(client, "liken-1", testOwner(), []SliceDevice{publishedDevice()}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publishing the ResourceSlice: %v", err)
 	}
 	slice := fixture.created
 	if slice == nil {
-		t.Fatal("no slice was created")
+		t.Fatal("the publisher did not create a ResourceSlice on the first publish")
 	}
-	// The driver name is the suffix, so this slice and liken's own
-	// slice for the same node cannot collide.
+	// The slice name ends with the driver name, so it differs from the
+	// slice that liken itself publishes for the same node.
 	if slice.Metadata.Name != "liken-1-bluetooth.liken.sh" {
-		t.Errorf("name = %q", slice.Metadata.Name)
+		t.Errorf("the ResourceSlice name is %q, want liken-1-bluetooth.liken.sh", slice.Metadata.Name)
 	}
 	if slice.Spec.Driver != DriverName || slice.Spec.NodeName != "liken-1" {
-		t.Errorf("spec = %+v", slice.Spec)
+		t.Errorf("the ResourceSlice has driver %q and node %q, want %q and liken-1", slice.Spec.Driver, slice.Spec.NodeName, DriverName)
 	}
 	if slice.Spec.Pool.Name != "liken-1" || slice.Spec.Pool.Generation != 1 || slice.Spec.Pool.ResourceSliceCount != 1 {
-		t.Errorf("pool = %+v", slice.Spec.Pool)
+		t.Errorf("the pool is %+v, want name liken-1, generation 1, and 1 slice", slice.Spec.Pool)
 	}
 	if len(slice.Metadata.OwnerReferences) != 1 || slice.Metadata.OwnerReferences[0].UID != "abc-123" {
-		t.Errorf("ownerReferences = %+v", slice.Metadata.OwnerReferences)
+		t.Errorf("the ownerReferences are %+v, want only the Node with UID abc-123", slice.Metadata.OwnerReferences)
 	}
 }
 
@@ -104,17 +100,18 @@ func TestEnsureWritesNothingWhenNothingMoved(t *testing.T) {
 	client := testClient(t, fixture.handler(t))
 
 	if err := EnsureResourceSlice(client, "liken-1", testOwner(), []SliceDevice{publishedDevice()}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publishing the ResourceSlice: %v", err)
 	}
 	if fixture.updated != nil || fixture.created != nil || fixture.deleted {
-		t.Fatalf("a steady machine wrote to the API: %v", fixture.requests)
+		t.Fatalf("the publisher wrote to the API with no change to publish: %v", fixture.requests)
 	}
 }
 
 func TestEnsureIgnoresTheServersTaintTimestamp(t *testing.T) {
-	// The API server fills TimeAdded in on every taint it stores. A
-	// publisher that read it would rewrite the slice on every pass,
-	// and every write wakes every DRA-pending pod in the cluster.
+	// The API server sets TimeAdded on every taint it stores. If the
+	// publisher compared it, the stored slice would never equal the
+	// new one, and every pass would rewrite it. Each slice write makes
+	// the scheduler retry every pod that waits on a claim.
 	stored := publishedDevice()
 	stored.Attributes["connected"] = AttrBool(false)
 	stored.Taints = []DeviceTaint{
@@ -139,10 +136,10 @@ func TestEnsureIgnoresTheServersTaintTimestamp(t *testing.T) {
 		nil,
 	)
 	if err := EnsureResourceSlice(client, "liken-1", testOwner(), fresh); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publishing the ResourceSlice: %v", err)
 	}
 	if fixture.updated != nil {
-		t.Fatalf("the stored timestamp caused a rewrite: %+v", fixture.updated.Spec.Devices)
+		t.Fatalf("the publisher rewrote the slice because of the stored taint timestamp: %+v", fixture.updated.Spec.Devices)
 	}
 }
 
@@ -158,28 +155,28 @@ func TestEnsureReplacesAChangedSliceAndBumpsTheGeneration(t *testing.T) {
 	}}
 	client := testClient(t, fixture.handler(t))
 
-	// The controller went off the air, so it takes both taints and
-	// stays in the slice.
+	// The controller is not connected, so it stays in the slice with
+	// both taints.
 	tainted := sliceDevices(map[string]controller{"a0:ab:51:33:b7:12": {}}, nil, nil, nil)
 	if err := EnsureResourceSlice(client, "liken-1", testOwner(), tainted); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publishing the ResourceSlice: %v", err)
 	}
 	if fixture.updated == nil {
-		t.Fatal("the changed slice was not written")
+		t.Fatal("the publisher did not write the changed ResourceSlice")
 	}
 	if fixture.updated.Spec.Pool.Generation != 4 {
-		t.Errorf("generation = %d, want 4", fixture.updated.Spec.Pool.Generation)
+		t.Errorf("the pool generation is %d, want 4", fixture.updated.Spec.Pool.Generation)
 	}
-	// The write includes the resourceVersion from the read, so a
-	// conflicting writer gets a 409 instead of losing its change.
+	// The write carries the resourceVersion from the read. A
+	// concurrent writer then gets a 409 and does not lose its change.
 	if fixture.updated.Metadata.ResourceVersion != "7" {
-		t.Errorf("resourceVersion = %q", fixture.updated.Metadata.ResourceVersion)
+		t.Errorf("the write has resourceVersion %q, want 7, the version it read", fixture.updated.Metadata.ResourceVersion)
 	}
 	if len(fixture.updated.Spec.Devices) != 1 {
-		t.Fatalf("devices = %+v", fixture.updated.Spec.Devices)
+		t.Fatalf("the slice has devices %+v, want 1 device", fixture.updated.Spec.Devices)
 	}
 	if len(fixture.updated.Spec.Devices[0].Taints) != 2 {
-		t.Errorf("taints = %+v", fixture.updated.Spec.Devices[0].Taints)
+		t.Errorf("the device has taints %+v, want 2", fixture.updated.Spec.Devices[0].Taints)
 	}
 }
 
@@ -191,33 +188,33 @@ func TestEnsureDeletesTheSliceWhenTheLastControllerIsUnpaired(t *testing.T) {
 	client := testClient(t, fixture.handler(t))
 
 	if err := EnsureResourceSlice(client, "liken-1", testOwner(), nil); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publishing the ResourceSlice: %v", err)
 	}
 	if !fixture.deleted {
-		t.Fatal("an empty paired set did not delete the slice")
+		t.Fatal("the publisher did not delete the ResourceSlice for an empty paired set")
 	}
 }
 
-// The next three tests read the line the publisher prints for each
-// outcome. A slice that nobody rewrites and a slice that an operator
-// died and left behind hold the same resourceVersion and the same pool
-// generation, so the log is the only place the two come apart.
+// The next four tests check the log line that the publisher prints for
+// each outcome. A publisher that finds nothing to change and one that
+// has stopped leave the same slice, with the same resourceVersion and
+// pool generation, so only the log line tells them apart.
 
 func TestEnsureLogsTheSliceItCreated(t *testing.T) {
 	capture := captureSliceLog(t)
 	fixture := &slicePublishFixture{}
 	client := testClient(t, fixture.handler(t))
 
-	// The controller is paired and switched off, so it publishes with
-	// both taints on it.
+	// The controller is paired and not connected, so it is published
+	// with both taints.
 	if err := EnsureResourceSlice(client, "liken-1", testOwner(),
 		sliceDevices(map[string]controller{"a0:ab:51:33:b7:12": {}}, nil, nil, nil)); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publishing the ResourceSlice: %v", err)
 	}
 	want := "slice: created generation 1, 1 device, 1 tainted: a0-ab-51-33-b7-12 has " +
 		disconnectedTaint + ", " + noInputNodeTaint
 	if got := capture.only(t); got != want {
-		t.Errorf("line = %q, want %q", got, want)
+		t.Errorf("the log line is %q, want %q", got, want)
 	}
 }
 
@@ -234,17 +231,16 @@ func TestEnsureLogsTheSliceItWrote(t *testing.T) {
 	}}
 	client := testClient(t, fixture.handler(t))
 
-	// The controller went off the air. The device count does not move,
-	// so the taints are the whole event, and they evict the pod that
-	// held the claim.
+	// The controller is not connected, so the only change is its two
+	// new taints.
 	tainted := sliceDevices(map[string]controller{"a0:ab:51:33:b7:12": {}}, nil, nil, nil)
 	if err := EnsureResourceSlice(client, "liken-1", testOwner(), tainted); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publishing the ResourceSlice: %v", err)
 	}
 	want := "slice: wrote generation 4, 1 device, 1 tainted: a0-ab-51-33-b7-12 gained " +
 		disconnectedTaint + ", " + noInputNodeTaint
 	if got := capture.only(t); got != want {
-		t.Errorf("line = %q, want %q", got, want)
+		t.Errorf("the log line is %q, want %q", got, want)
 	}
 }
 
@@ -262,14 +258,14 @@ func TestEnsureLogsThatNothingMoved(t *testing.T) {
 	client := testClient(t, fixture.handler(t))
 
 	if err := EnsureResourceSlice(client, "liken-1", testOwner(), []SliceDevice{publishedDevice()}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publishing the ResourceSlice: %v", err)
 	}
 	if fixture.updated != nil {
-		t.Fatalf("a steady machine wrote to the API: %v", fixture.requests)
+		t.Fatalf("the publisher wrote to the API with no change to publish: %v", fixture.requests)
 	}
 	want := "slice: unchanged at generation 3, 1 device, 0 tainted (1 pass)"
 	if got := capture.only(t); got != want {
-		t.Errorf("line = %q, want %q", got, want)
+		t.Errorf("the log line is %q, want %q", got, want)
 	}
 }
 
@@ -282,22 +278,21 @@ func TestEnsureLogsTheSliceItDeleted(t *testing.T) {
 	client := testClient(t, fixture.handler(t))
 
 	if err := EnsureResourceSlice(client, "liken-1", testOwner(), nil); err != nil {
-		t.Fatal(err)
+		t.Fatalf("publishing the ResourceSlice: %v", err)
 	}
-	want := "slice: deleted, no adapter answered and nothing is paired"
+	want := "slice: deleted the ResourceSlice, because the node has no device to publish"
 	if got := capture.only(t); got != want {
-		t.Errorf("line = %q, want %q", got, want)
+		t.Errorf("the log line is %q, want %q", got, want)
 	}
 }
 
-// TestReconcileNeverPublishesWithoutAnAdapter is the regression test
-// for the empty answer that is not an empty paired set. bluetoothd
-// publishes no device objects in the moments after it starts, and it
-// removes every device object when the adapter goes away. Either
-// answer reaching the publisher would delete a slice that a claim
-// still held.
-func TestReconcileNeverPublishesWithoutAnAdapter(t *testing.T) {
+// An object tree with no adapter must not look like an empty paired
+// set. bluetoothd has no device objects just after it starts, and it
+// removes them all when the adapter goes away. If the publisher took
+// either case as an empty paired set, it would delete a slice that a
+// claim still uses.
+func TestControllersFromATreeWithNoAdapterReturnsErrNoAdapter(t *testing.T) {
 	if _, err := controllersFrom(nil); err != ErrNoAdapter {
-		t.Fatalf("an empty object tree gave %v, want ErrNoAdapter", err)
+		t.Fatalf("controllersFrom(nil) returned %v, want ErrNoAdapter", err)
 	}
 }

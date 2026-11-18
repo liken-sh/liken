@@ -43,13 +43,13 @@
 // device off the list, and hci_disconn_complete_evt puts it back when
 // the link ends. When the host ends a link, hci_abort_conn_sync in
 // net/bluetooth/hci_sync.c sends HCI Disconnect and waits two seconds
-// for the controller's Disconnection Complete. A remote that stops
-// answering makes the controller take longer: in one trace, a remote
-// sent a directed advertisement and went quiet, the kernel ended the
-// link when its read of the remote's features timed out, and the
-// controller closed the link three seconds later with LL Response
-// Timeout. When the wait runs out, hci_abort_conn_sync ends the link
-// through hci_conn_failed. hci_connect_le_scan_cleanup looks for the
+// for the controller's Disconnection Complete. When the remote has
+// stopped answering, the controller can take longer. For example, a
+// remote can send a directed advertisement and go quiet. The kernel
+// ends the link when its read of the remote's features times out, and
+// the controller reports the link closed only later, with LL Response
+// Timeout. When the two seconds run out, hci_abort_conn_sync ends the
+// link through hci_conn_failed. hci_connect_le_scan_cleanup looks for the
 // device on the list, does not find it, and returns, so the device
 // stays off the list. The kernel deletes the connection, sends no
 // Device Disconnected event, and ignores the Disconnection Complete
@@ -71,8 +71,8 @@
 //
 // This program reads the HCI monitor channel, the kernel's copy of
 // every HCI command, HCI event, and Management API command on the
-// machine. btmon reads the same channel. The program keeps four
-// facts for each adapter:
+// machine. btmon reads the same channel. For each adapter, the program
+// tracks:
 //
 //   - the devices that bluetoothd added with the auto connect action
 //     and has not removed,
@@ -83,10 +83,11 @@
 //
 // When an attempt to an auto connect device fails, or the host sends
 // HCI Disconnect for a link to one, the program starts a deadline of
-// rescanSettle. The kernel starts the scan again within about two
-// seconds when it works, so a scan within the deadline cancels it,
-// and so does a new attempt. When the deadline passes with no scan,
-// the program sends Add Device for the device twice: first with the
+// rescanSettle. When the kernel starts the scan again by itself, it
+// does so within about two seconds, so a scan before the deadline
+// cancels it, and so does a new attempt. When the deadline passes with
+// no scan, the program sends a repair, which is Add Device for the
+// device twice: first with the
 // action that allows an incoming connection, then with the auto
 // connect action that bluetoothd sent. The kernel ignores an Add
 // Device that repeats the action it holds (hci_conn_params_set in
@@ -101,29 +102,29 @@
 // such a device, because the command would turn on auto connect for a
 // device that bluetoothd did not choose.
 //
-// bluetoothd does not handle the Device Added event that each command
-// causes, so bluetoothd keeps its own view of the device unchanged. A
-// Remove Device from bluetoothd, as an unpair sends, cancels a
-// deadline that waits for the device, so a repair never turns auto
-// connect on again for a device that bluetoothd removed.
+// bluetoothd ignores the Device Added event that each command causes,
+// so its own record of the device does not change. When bluetoothd
+// sends Remove Device, as it does on an unpair, the program cancels
+// the device's deadline, so a repair never turns auto connect on again
+// for a device that bluetoothd removed.
 //
 // # The order of the containers
 //
 // The program learns the auto connect devices from bluetoothd's own
 // Add Device commands, which bluetoothd sends when it registers an
-// adapter. The Management API has no command that lists them. So the
-// container starts before bluetoothd's, the same as the btmon
-// container and for the same reason. When this container restarts
-// alone, it knows only the devices that bluetoothd adds after the
+// adapter, and the Management API has no command that lists them. The
+// program receives only the commands sent after it opens the monitor
+// channel, so its container starts before bluetoothd's. When it restarts
+// alone, it tracks only the devices that bluetoothd adds after the
 // restart, until the pod restarts.
 //
 // # Where it runs
 //
 // The monitor channel needs CAP_NET_RAW, and Add Device needs
-// CAP_NET_ADMIN. The container holds those two and nothing else, so
-// the operator's container keeps no capability. The program writes
-// one log line for each repair it sends, with the device, the failed
-// attempt's status or the ended link, and the kernel's answer.
+// CAP_NET_ADMIN. This container has those two capabilities and no
+// others, so the operator's container needs none. The program logs
+// one line for each repair it sends, with the device, the failed
+// attempt's status or the ended link, and the kernel's response.
 package main
 
 import (
@@ -138,13 +139,13 @@ import (
 	"github.com/liken-sh/liken/bluetooth-operator/bluetoothd/mgmt"
 )
 
-// rescanSettle is how long the program waits after a failed attempt
-// for the kernel to start the scan by itself. The kernel's own rescan
-// takes milliseconds. When a failed connection lingers, the kernel
-// ends it with a Create Connection Cancel when its last reference
-// drops (hci_conn_drop and hci_conn_timeout), and that cancel starts
-// the wait again. A person pressing a remote that does not answer
-// waits about this long before the remote can reconnect.
+// rescanSettle is how long the program waits for the kernel to start
+// the scan by itself before it sends a repair. When a failed
+// connection still has references, the kernel sends LE Create
+// Connection Cancel only when the last one drops (hci_conn_drop and
+// hci_conn_timeout), and rescans after the cancel, so the program
+// starts the wait again at the cancel. A remote that stops answering
+// can wait about this long before it reconnects.
 const rescanSettle = 5 * time.Second
 
 func main() {
@@ -156,8 +157,7 @@ func main() {
 	}
 }
 
-// run reads the monitor channel until ctx ends or the channel fails,
-// and adds a device again each time the kernel leaves its scan off.
+// run reads the monitor channel until ctx ends or the channel fails.
 func run(ctx context.Context, open func() (io.ReadCloser, error), management func() (io.ReadWriteCloser, error), log io.Writer) error {
 	monitor, err := open()
 	if err != nil {

@@ -1,7 +1,7 @@
 package main
 
-// The supervisor: one btmon while the btmon file says true, and none
-// while it does not.
+// The supervisor runs btmon, the Bluetooth packet trace, while the
+// btmon setting file contains true and stops it otherwise.
 
 import (
 	"context"
@@ -13,14 +13,14 @@ import (
 	"time"
 )
 
-// restartDelay is how long the supervisor waits before it starts a
-// btmon that exited on its own, or one that failed to start. A btmon
-// that fails at once, such as one with no NET_RAW, would otherwise
-// start again in a tight loop and fill the log.
+// restartDelay is how long the supervisor waits before it starts btmon
+// again after an exit or a failed start. Without it, a btmon that
+// fails at once, such as one without the NET_RAW capability, would
+// restart in a tight loop and fill the log.
 const restartDelay = 5 * time.Second
 
-// trace is one running btmon. The supervisor starts it through a
-// startFunc, so a test runs a fake in its place.
+// trace is a running btmon. The supervisor starts it through a
+// startFunc, so a test can substitute a fake.
 type trace interface {
 	// done closes when the process has exited.
 	done() <-chan struct{}
@@ -31,21 +31,20 @@ type trace interface {
 
 type startFunc func() (trace, error)
 
-// supervisor runs one trace while the file at setting says true.
+// supervisor runs one trace while the file at setting contains true.
 type supervisor struct {
 	setting string
 	start   startFunc
 	delay   time.Duration
 }
 
-// run reads the setting once, then again on each change, and starts
-// or stops the trace to agree with it. It returns nil when ctx ends,
-// and the watch's error when the watch fails. It stops the trace
-// before it returns either way.
+// run reads the setting, then reads it again on each value received
+// from changes, and starts or stops the trace to match. It returns nil
+// when ctx ends, or the error received from failed. It stops the trace
+// before it returns.
 func (s *supervisor) run(ctx context.Context, changes <-chan struct{}, failed <-chan error) error {
 	var running trace
-	// retry fires when the delay after an exit or a failed start ends.
-	// It is nil while no restart waits.
+	// retry is nil when no restart is pending.
 	var retry <-chan time.Time
 	stop := func() {
 		if running != nil {
@@ -77,8 +76,6 @@ func (s *supervisor) run(ctx context.Context, changes <-chan struct{}, failed <-
 
 	apply()
 	for {
-		// A nil channel never receives, so the case waits only while a
-		// trace runs.
 		var exited <-chan struct{}
 		if running != nil {
 			exited = running.done()
@@ -101,11 +98,10 @@ func (s *supervisor) run(ctx context.Context, changes <-chan struct{}, failed <-
 	}
 }
 
-// readSetting answers whether the btmon file says true.
-//
-// A missing file is false, and so is any value other than true or
-// false, and any failure to read the file. Off is the safe answer,
-// because the trace prints keys in plain text.
+// readSetting reports whether the file at path contains true. A
+// missing file, an unreadable file, and any other value count as
+// false, because the trace prints keys in plain text and must be
+// enabled deliberately.
 func readSetting(path string) bool {
 	contents, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {

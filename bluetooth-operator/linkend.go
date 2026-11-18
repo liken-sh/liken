@@ -1,24 +1,21 @@
 package main
 
-// Why each link ended.
+// The reason a link ended tells a remote that went to sleep apart from
+// a link that this side ended. A sleeping remote stops answering, and
+// the radio reports a supervision timeout. When the radio powers off,
+// at a restart of bluetoothd or in the power cycle of the input
+// recovery, every link ends from this side. From version 5.83, BlueZ
+// emits org.bluez.Device1.Disconnected for each link that ends, with
+// the reason, before it sets Connected to false.
 //
-// The reason a link ended separates a remote that went to sleep from a
-// link that the cluster ended. A sleeping remote stops answering, and
-// the radio reports a supervision timeout. A radio that powers off, at
-// a restart of bluetoothd or at the power cycle of the input recovery,
-// ends each link from this side. From 5.83, BlueZ emits
-// org.bluez.Device1.Disconnected once for each link that ends, with the
-// reason, before it sets Connected to false.
-//
-// BlueZ keeps no property with the last reason, so the signal is the
-// only source. The signal reader (bluez.go) records the newest reason
-// for each device here, and the next pass writes it into the
-// Peripheral's Connected condition (connected.go). The pass forgets the
-// reason after its write lands, and when it finds the device connected
-// again. So this record holds nothing that the API server can supply.
-// A reason that a restart of this operator loses gives the condition
-// NotConnected, and NotConnected never arms the press that wakes the
-// room (wake.go).
+// BlueZ has no property for the last reason, so the operator must
+// record it from the signal. The signal reader (bluez.go) stores the
+// newest reason for each device in linkEnds, and the next pass writes
+// it into the Peripheral's Connected condition (connected.go). The pass
+// forgets the reason after its write succeeds, and when it finds the
+// device connected again. linkEnds is in memory only, so after the
+// operator restarts, the condition reports NotConnected. NotConnected
+// never makes the relay write the KEY_UNKNOWN press of wake.go.
 
 import (
 	"strings"
@@ -29,9 +26,9 @@ import (
 	"github.com/liken-sh/liken/bluetooth-operator/bonds"
 )
 
-// The reasons Disconnected carries (doc/org.bluez.Device.rst in BlueZ).
-// Suspend and Unknown are not named here, because the condition reads
-// them the same as no reason at all.
+// The reasons in the Disconnected signal (doc/org.bluez.Device.rst in
+// BlueZ). Suspend and Unknown have no constant here, because the
+// condition treats them as no reason.
 const (
 	blueZReasonTimeout        = "org.bluez.Reason.Timeout"
 	blueZReasonLocal          = "org.bluez.Reason.Local"
@@ -39,58 +36,58 @@ const (
 	blueZReasonAuthentication = "org.bluez.Reason.Authentication"
 )
 
-// disconnectedMember is the full name of the signal, as godbus reports
-// it in dbus.Signal.Name.
+// disconnectedMember is the signal's full name, as godbus sets it in
+// dbus.Signal.Name.
 const disconnectedMember = deviceInterface + ".Disconnected"
 
-// linkEnds holds the newest reason BlueZ gave for each device whose
-// link ended. The signal reader writes it from its own goroutine, and
-// the pass reads it on the loop's, so a lock covers the map.
+// linkEnds maps each device whose link ended to the newest reason BlueZ
+// gave. The signal reader writes it from its own goroutine and the pass
+// reads it from the loop's, so mu guards the map.
 type linkEnds struct {
-	mu   sync.Mutex
-	held map[bonds.Address]string
+	mu      sync.Mutex
+	reasons map[bonds.Address]string
 }
 
 func newLinkEnds() *linkEnds {
-	return &linkEnds{held: map[bonds.Address]string{}}
+	return &linkEnds{reasons: map[bonds.Address]string{}}
 }
 
-// record holds the reason one link ended. A newer reason replaces an
+// record stores the reason one link ended. A newer reason replaces an
 // older one, because the condition reports only the last link.
 func (e *linkEnds) record(device bonds.Address, reason string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.held[device] = reason
+	e.reasons[device] = reason
 }
 
-// reason answers the reason held for one device, and the empty string
-// when no signal arrived since the last pass wrote one.
+// reason returns the stored reason for one device, or the empty string
+// when no signal has arrived since a pass last forgot it.
 func (e *linkEnds) reason(device bonds.Address) string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.held[device]
+	return e.reasons[device]
 }
 
-// forget removes the reason a pass read, after the pass wrote it or
-// found the device connected. A reason that changed since the read
-// stays, because it belongs to a link that ended during the pass, and
-// the next pass writes it.
+// forget deletes the reason a pass read, after the pass wrote it or
+// found the device connected. When the stored reason differs from the
+// one the pass read, it stays, because it belongs to a link that ended
+// during the pass and the next pass writes it.
 func (e *linkEnds) forget(device bonds.Address, read string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.held[device] == read {
-		delete(e.held, device)
+	if e.reasons[device] == read {
+		delete(e.reasons, device)
 	}
 }
 
-// disconnectedFrom reads the device and the reason out of one
-// Disconnected signal. It answers false for every other signal, and for
-// a signal that does not name a device or a reason.
+// disconnectedFrom returns the device and the reason from one
+// Disconnected signal. It returns false for any other signal, and for a
+// signal whose path has no device address or whose reason is empty.
 //
-// The signal carries the device's object path and not its address.
-// BlueZ names each device object after the address, as
-// /org/bluez/hci0/dev_C2_11_22_33_44_55, so the address is read from
-// the path with no call to bluetoothd.
+// The signal has the device's object path and no address argument.
+// BlueZ builds each device's object path from its address, as in
+// /org/bluez/hci0/dev_C2_11_22_33_44_55, so the address comes from the
+// path without a call to bluetoothd.
 func disconnectedFrom(signal *dbus.Signal) (bonds.Address, string, bool) {
 	if signal.Name != disconnectedMember || len(signal.Body) == 0 {
 		return bonds.Address{}, "", false

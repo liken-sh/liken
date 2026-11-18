@@ -1,23 +1,19 @@
 package main
 
-// The btmon trace of the radio this pod holds.
+// The pod's btmon container writes a trace of the radio's HCI traffic
+// and management channel to its log, so the trace is still readable
+// after the pod is replaced. btmon prints key material in plain text, so
+// the trace stays off until a person sets the Adapter's spec.btmon.
 //
-// The pod's btmon container traces the radio's HCI link and the
-// management channel into its log, which keeps the evidence of a
-// stall after a roll of the pod. btmon prints key material in plain
-// text, so the trace is off until a person sets the Adapter's
-// spec.btmon.
+// start-btmon (bluetoothd/btmon) watches the pod's settings directory
+// and runs btmon while the btmon file there contains true. bondfetch
+// writes the file before the container starts, and a pass writes it
+// again when spec.btmon differs from it. So turning the trace on or off
+// restarts neither bluetoothd nor any controller's link.
 //
-// start-btmon in that container watches the btmon file in the pod's
-// settings volume, and runs btmon while the file says true
-// (bluetoothd/btmon). bondfetch writes the file before the container
-// starts. On each pass, the operator compares spec.btmon with the file
-// and writes the file when the two differ, so a change reaches the
-// container in seconds, and no controller disconnects.
-//
-// The operator writes only the btmon file. The privacy file in the
-// same volume records the value bluetoothd started with, and a new
-// value there takes a new pod (privacy.go).
+// The operator does not write the privacy file in the same directory.
+// That file records the value bluetoothd started with, and a new value
+// needs a new pod (privacy.go).
 
 import (
 	"errors"
@@ -29,12 +25,12 @@ import (
 	"strings"
 )
 
-// btmonFile is the file in the settings volume that holds the trace
-// setting, true or false.
+// btmonFile is the file in the settings volume that contains true or
+// false.
 const btmonFile = "btmon"
 
-// readBtmon answers the value in the btmon file. A missing file is
-// false, the same as start-btmon reads it.
+// readBtmon returns the value in the btmon file. A missing file reads as
+// false, as it does for start-btmon.
 func readBtmon(settings string) (bool, error) {
 	contents, err := os.ReadFile(filepath.Join(settings, btmonFile))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -46,11 +42,10 @@ func readBtmon(settings string) (bool, error) {
 	return strings.TrimSpace(string(contents)) == "true", nil
 }
 
-// writeBtmon writes value into the btmon file.
-//
-// It writes a new file and renames it over the old one. start-btmon
-// reads the file on each change in the directory, and a rename shows
-// it the whole value at once, never a file that is half written.
+// writeBtmon writes value to a new file and renames it over the btmon
+// file. start-btmon reads the file on each change in the directory, and
+// the rename makes it see the whole value at once, never a partly
+// written file.
 func writeBtmon(settings string, value bool) error {
 	path := filepath.Join(settings, btmonFile)
 	next := filepath.Join(settings, "."+btmonFile+".new")
@@ -61,12 +56,14 @@ func writeBtmon(settings string, value bool) error {
 }
 
 // applyBtmon writes the Adapter's spec.btmon into the btmon file when
-// they differ, posts one BtmonChanged Event for each write, and records
-// the file's value for status.btmon.
+// they differ, posts a BtmonChanged Event for each write, and records
+// the file's value for status.btmon. It records nil when it cannot read
+// the file, and keeps the old value when the write fails, so reconcile
+// marks the pass failed in both cases.
 func (i *inventory) applyBtmon(adapter *Adapter) {
 	current, err := readBtmon(i.settings)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "reading the btmon setting: %v\n", err)
+		fmt.Fprintf(os.Stderr, "reading the btmon file: %v\n", err)
 		i.btmon = nil
 		return
 	}
@@ -76,21 +73,21 @@ func (i *inventory) applyBtmon(adapter *Adapter) {
 		return
 	}
 	if err := writeBtmon(i.settings, wanted); err != nil {
-		fmt.Fprintf(os.Stderr, "writing the btmon setting %t: %v\n", wanted, err)
+		fmt.Fprintf(os.Stderr, "writing %t to the btmon file: %v\n", wanted, err)
 		return
 	}
 	i.btmon = &wanted
-	message := "btmon changes to false; the btmon container stops its trace"
+	message := "spec.btmon is now false, so the btmon container stops its trace"
 	if wanted {
-		message = "btmon changes to true; the btmon container traces this radio, and its log holds key material in plain text"
+		message = "spec.btmon is now true, so the btmon container traces this radio, and its log contains key material in plain text"
 	}
 	i.recorder.Normal(adapterReference(adapter), reasonBtmonChanged, message)
 	fmt.Printf("btmon: %s %s\n", adapter.Metadata.Name, message)
 }
 
-// reportedBtmon answers the value for status.btmon: the value in the
-// btmon file after this pass, or the value the status already has when
-// the pass could not read the file.
+// reportedBtmon returns the value in the btmon file after this pass, or
+// the value already in status.btmon when the pass could not read the
+// file.
 func (i *inventory) reportedBtmon(adapter *Adapter) *bool {
 	if i.btmon == nil {
 		return adapter.Status.Btmon

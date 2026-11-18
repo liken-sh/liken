@@ -21,11 +21,11 @@ shell on a node or in a pod.
 `liken plugins sync` installs the `kubectl liken bluetooth` plugin, as
 [Install the plugins](https://liken.sh/docs/reference/cli/#install-the-plugins)
 describes. `kubectl liken bluetooth pair` runs steps 1 through 3 from
-a laptop. It opens a window on the radio, lists the devices the radio reports as
-they appear, and approves the one you pick. It drives the same
-`PairingRequest` flow the numbered steps write by hand, and it reads
-your kubeconfig, so RBAC governs it like every other call. The steps
-below are the way to script the flow or to read each object it writes.
+a laptop. It opens a pairing window on the radio, lists the devices
+the radio finds as they appear, and approves the one you pick. It
+creates the same `PairingRequest` that the steps below write by hand,
+with the credentials of your kubeconfig. Follow the steps instead when
+you want to script pairing or see each object.
 
 The command takes these flags:
 
@@ -57,11 +57,11 @@ Then create a `PairingRequest` for it:
       windowSeconds: 180
     EOF
 
-The operator opens a window on that radio. It scans, and the radio
-stays pairable and discoverable, for `windowSeconds`. The default is
-180, and the range is 15 to 900. Between windows the radio is neither
-pairable nor discoverable, so nothing pairs with the cluster unless
-somebody asked for a window.
+The radio scans for devices, and is pairable and discoverable, for
+`windowSeconds` seconds. The default is 180, and the range is 15 to
+900. When no
+window is open, the radio is neither pairable nor discoverable, so no
+device can pair with the cluster unless somebody opened a window.
 
 ## 2. Put the controller in pairing mode and read what the radio reports
 
@@ -71,8 +71,8 @@ flashes. Then read the request:
     kubectl get pairingrequest new-gamepad -n liken-system -o yaml
 
 A device appears in `status.seen` when the scan finds it and the
-cluster holds no bond with it. The entry has its address, its name,
-and when the radio first observed it.
+cluster has no bond with it. Each entry gives the device's address,
+its name, and when the scan first found it.
 
 <a id="3-approve-the-device-you-meant"></a>
 
@@ -84,26 +84,25 @@ Approval is a write to the request's spec:
       --type merge -p '{"spec":{"device":"A0:AB:51:33:B7:12"}}'
 
 The operator pairs that device, trusts it, records the bond as a
-`Peripheral`, and closes the window. Trust lets a later connection run
-with no agent registered. It does not make the device connect. What
-starts the connection depends on the device. A controller connects
-when you press its own button. The operator connects a speaker
-itself, whenever the speaker is powered on and in range. It retries a
-failed attempt, and the wait between attempts doubles from 10 seconds
-up to two minutes.
+`Peripheral`, and closes the window. Trust lets the device connect
+later without a pairing agent, but it does not start a connection. A
+controller connects when you press its button. A speaker does not
+connect on its own, so the operator connects it whenever it is powered
+on and in range. When an attempt fails, the operator tries again, and
+the wait between attempts doubles from 10 seconds up to two minutes.
 
 The request's `status.phase` goes to `Paired`. When `bluetoothd`
 refuses the pairing, `status.message` gives its error, and
 `kubectl describe pairingrequest` shows a `PairingRefused` warning.
 The [install guide](https://liken.sh/bluetooth/docs/guides/install/#read-the-events) lists every
-`Event` the operator posts. A request nobody
-approves only scans. An empty `spec.device` never pairs anything, and
-the window expires on its own. The finished request is collected
-after `spec.ttlSecondsAfterFinished`, a day by default.
+`Event` the operator posts. While `spec.device` is empty, the request
+only scans, and the window closes when its time runs out. The operator
+deletes a finished request after `spec.ttlSecondsAfterFinished`, which
+is one day by default.
 
-To re-pair a device the cluster already records, set `spec.device`
-when you create the request. An address set at creation is an
-approval in advance.
+To pair a device again that the cluster already has a bond with, set
+`spec.device` when you create the request. The operator then pairs
+that address as soon as the window opens.
 
 ## 4. See the published device
 
@@ -162,11 +161,11 @@ that selects the controller by its address:
                   effect: NoExecute
                   tolerationSeconds: 30
 
-The toleration sets how long the radio may go silent before the
-eviction controller ends the pod. Tolerate
+`tolerationSeconds` sets how long the controller may stay
+disconnected before Kubernetes evicts the pod. Tolerate
 `bluetooth.liken.sh/disconnected` and nothing else.
 [Devices](https://liken.sh/bluetooth/docs/reference/devices/#the-taints) explains why the other
-taint must stay untolerated. Leave out the selector to claim any
+taints must stay untolerated. Leave out the selector to claim any
 paired controller.
 
 ## 6. Give the claim to a pod
@@ -187,23 +186,23 @@ paired controller.
             claims:
               - name: controller
 
-The container receives device nodes and nothing else:
-`/dev/input/event*` for the one controller the claim allocated, which
-on a DualSense is the gamepad and its motion sensors. No privilege,
-no host mount, no environment variable. The container's user must be
+The container receives the `/dev/input/event*` nodes of the
+controller that the claim allocated. On a DualSense, those are the
+gamepad and its motion sensors. The claim adds no privilege, no host
+mount, and no environment variable. The container's user must be
 able to open the nodes.
 
-If the controller is switched off, the pod parks `Unschedulable` and
-starts when somebody turns it on. If the controller disconnects while
-the pod runs, the eviction after `tolerationSeconds` ends the pod's
-session.
+If the controller is switched off, the pod stays `Pending` because the
+scheduler cannot allocate the claim. The pod starts after somebody
+turns the controller on. If the controller disconnects while the pod
+runs, Kubernetes evicts the pod after `tolerationSeconds`.
 
-In a `Deployment`, claim through a `ResourceClaimTemplate` instead of
-a standing `ResourceClaim`. A standing claim keeps its allocation
-across an eviction, so the `ReplicaSet`'s replacement pods would
-schedule onto a device that is gone and be evicted at once. A
-template gives each replacement pod a fresh claim. A fresh claim
-needs a new allocation, which the taints block.
+In a `Deployment`, use a `ResourceClaimTemplate` instead of a
+`ResourceClaim`. A `ResourceClaim` keeps its allocation after an
+eviction, so each replacement pod would schedule onto the
+disconnected controller and be evicted at once. A template creates a
+new claim for each pod, and the taints keep the scheduler from
+allocating a disconnected controller to it.
 
 <a id="when-a-connected-controller-sends-no-input"></a>
 
@@ -212,9 +211,9 @@ needs a new allocation, which the taints block.
 `bluetoothd` can bring a controller's link up and never create its
 HID device. The `Peripheral` then shows `Connected`, the device
 drops its `disconnected` taint, and the pod receives no presses. The
-operator finds this state. A paired controller that is connected, has
-delivered input before, and has no Bluetooth HID device in the
-kernel is stuck. After 15 seconds in that state, the operator calls
+operator treats a controller as stuck when it is connected, has sent
+input before, and the kernel has no Bluetooth HID device for it.
+After 15 seconds in that state, the operator calls
 `Disconnect` and then `Connect` on the controller through
 `bluetoothd`, which runs the input profile again.
 
@@ -222,9 +221,9 @@ kernel is stuck. After 15 seconds in that state, the operator calls
 Then the `Disconnect` fails or gets no reply, and a `Connect` would
 do nothing. So when the `Disconnect` fails, the operator powers the
 adapter off and on through `bluetoothd` instead. The power cycle
-drops every link on the adapter, not only the stuck one: each
-controller connects again on its next press, and the operator pages
-each speaker again. The operator posts an `AdapterPowerCycled`
+drops every link on the adapter, not only the stuck one. Each
+controller connects again on its next press, and the operator
+connects each speaker again. The operator posts an `AdapterPowerCycled`
 `Event` on the stuck controller's `Peripheral`. If `bluetoothd` does
 not power the adapter on again, the operator posts an
 `AdapterPowerOnFailed` Warning, and the adapter stays off until you
@@ -232,11 +231,11 @@ delete the operator's pod on that node.
 
 When a reconnect or a power cycle does not bring the HID device back,
 the operator waits a minute before the next one. The wait doubles
-after each one that does not help, up to 15 minutes. A device that
-has never delivered input, such as a speaker that lists a HID profile
-and never opens it, is never reconnected. The operator posts no
-`Event` for a reconnect. The `operator` container's log has a line
-when it starts a reconnect or a power cycle and when it finishes:
+after each one that does not help, up to 15 minutes. The operator
+never reconnects a device that has not sent input, such as a speaker
+that lists a HID profile and never opens it. The operator posts no
+`Event` for a reconnect, but the `operator` container logs a line
+when a reconnect or a power cycle starts and when it finishes:
 
     kubectl -n liken-system logs ds/bluetooth-operator -c operator
 
@@ -262,12 +261,12 @@ The reason comes from `bluetoothd`'s report of why the link ended:
 | `ClosedByRadio` | This radio ended the link, at an unpair or when the operator reconnected a controller that sent no input. |
 | `AuthenticationFailed` | The keys did not match. Delete the `Peripheral` and pair the device again. |
 | `NotConnected` | The operator received no reason. The link ended while the operator was not running, or `bluetoothd` restarted. |
-| `NotBonded` | `bluetoothd` holds no object for the device. |
+| `NotBonded` | `bluetoothd` has no object for the device. |
 
-The reason changes only when the link changes, so a restart of the
-operator keeps `Asleep` on a remote that sleeps. Each change posts an
-`Event` on the `Peripheral`, as the [install guide](https://liken.sh/bluetooth/docs/guides/install/#read-the-events)
-lists.
+The reason changes only when the link changes, so a remote that
+sleeps keeps `Asleep` when the operator restarts. The operator posts
+an `Event` on the `Peripheral` for each change, as the
+[install guide](https://liken.sh/bluetooth/docs/guides/install/#read-the-events) lists.
 
 <a id="when-a-remote-wakes-from-sleep"></a>
 
@@ -285,32 +284,31 @@ remotes differ in what they send for that press:
   link ended, the operator writes one `KEY_UNKNOWN` press into the
   remote's virtual node, and the operator's log has a line for it.
 
-Either way, one press of any button wakes the remote and the room. A
-sleeping screen wakes on the press. While nothing plays and the
-screen's panel is on, a press of a real button then acts on the
-screen too, so a press of down on an X6 wakes the screen and moves the
-focus. `KEY_UNKNOWN` means nothing to a screen, so a T6's first press
-only wakes it. The
+Either way, one press of any button wakes the remote and a sleeping
+screen. When nothing plays and the screen's panel is on, a real
+button press also acts on the screen, so a press of down on an X6
+wakes the screen and moves the focus. `KEY_UNKNOWN` has no action on
+a screen, so a T6's first press only wakes it. The
 [idle screen guide](https://liken.sh/media/docs/guides/handing-the-idle-screen-to-another-controller/#read-the-presses)
 in the `media-operator` manual gives the rules.
 
-The `KEY_UNKNOWN` press does not stand for the button you pressed.
-When a T6 remote fell asleep during a film, the first press, such as a
-pause, does nothing, and the second press pauses.
+If a T6 remote fell asleep during a film, your first press, such as
+pause, only wakes the remote, and the second press pauses.
 
-A remote that went out of range sleeps too. When it comes back into
-range, it can connect with no press, and the operator writes the
-press then. So a remote that comes back into range wakes the room
-although nobody pressed a button.
+A remote that went out of range also gets the reason `Asleep`. When
+it comes back into range, it can connect with no press, and the
+operator writes the `KEY_UNKNOWN` press then. So the screen can wake
+when a remote comes back into range, although nobody pressed a
+button.
 
 <a id="when-a-sleeping-remote-does-not-reconnect"></a>
 
 ### When a sleeping remote does not reconnect
 
 A Low Energy remote reconnects because the kernel scans for it while
-it sleeps, and connects when a press makes it advertise. Three bugs
-outside this project can stop that scan or that connection, with no
-log line, until the pod restarts. The pod works around all three.
+it sleeps, and connects when a press makes it advertise. Bugs in
+Linux and in BlueZ can stop that scan or that connection, with no
+log line, until the pod restarts. The pod works around each of them.
 
 - **The kernel leaves the scan off after a failed connection.** When
   a connection to the remote fails, for example because the remote
@@ -321,22 +319,21 @@ log line, until the pod restarts. The pod works around all three.
   the radio to close it. A remote that went quiet can make the radio
   take longer. Then Linux takes the remote off its list of devices to
   reconnect, and `bluetoothd` still reports the remote connected.
-
-  The pod's `rescan` container reads the kernel's HCI monitor channel
-  for both of these. When a connection to a device that `bluetoothd`
-  reconnects on its own fails, or the kernel ends a link to it, and
-  the kernel does not scan again within 5 seconds, the container adds the device
-  again, and the kernel starts the scan. No link drops. The
-  container's log has a line for each one:
-
-      kubectl -n liken-system logs ds/bluetooth-operator -c rescan
-
 - **BlueZ 5.87 turns off the reconnect after an authentication
   failure.** When the remote connects again within 4 seconds of a
   link that ended with an authentication failure, `bluetoothd` never
   turns the kernel's reconnect of the remote back on. The
-  `bluetoothd` image carries a patch for this. The image lists its
+  `bluetoothd` image includes a patch for this. The image lists its
   patches in `/usr/share/doc/liken/bluez-patches/`.
+
+The pod's `rescan` container watches for both kernel bugs on the
+kernel's HCI monitor channel. When a connection to a device that
+`bluetoothd` reconnects on its own fails, or the kernel ends a link
+to it, and the kernel does not start a scan within 5 seconds, the
+container adds the device to the kernel's list again, and the kernel
+starts the scan. No link drops. The container logs a line each time:
+
+    kubectl -n liken-system logs ds/bluetooth-operator -c rescan
 
 If the `rescan` log says the kernel did not scan after the device was
 added again, or a remote stops reconnecting with no line in that log,
@@ -347,14 +344,15 @@ also ends the state that the trace shows.
 
 ## Unpair
 
-Deleting the `Peripheral` is the unpair:
+To unpair a device, delete its `Peripheral`:
 
     kubectl delete peripheral a0-ab-51-33-b7-12
 
 `kubectl liken bluetooth unpair a0-ab-51-33-b7-12` deletes the same
-`Peripheral`. In bash it completes the paired device names.
+`Peripheral`. In bash, the plugin's completion completes the names
+of paired devices.
 
-The operator disconnects the controller, waits for any claim on it to
-release, retires the device from the slice, and removes the bond. The
-`Secret` with the keys is owned by the `Peripheral`, so it is
-collected with the object.
+The operator disconnects the controller, waits until no claim holds
+it, removes the device from the `ResourceSlice`, and deletes the bond
+from `bluetoothd`. The `Peripheral` owns the `Secret` that holds the
+keys, so Kubernetes deletes the `Secret` with it.

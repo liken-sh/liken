@@ -1,6 +1,6 @@
 package main
 
-// The btmon process itself.
+// This file starts and stops the btmon child process.
 
 import (
 	"errors"
@@ -14,41 +14,35 @@ import (
 // btmonPath is where the image installs btmon.
 const btmonPath = "/usr/bin/btmon"
 
-// btmonArgs are the arguments of the trace.
+// --no-time drops btmon's timestamps because the container log already
+// timestamps each line. --columns 160 widens the packet header lines,
+// which btmon truncates at 80 columns by default, and that cuts off
+// the names of management clients.
 //
-// --no-time leaves the timestamps to the container log, which records
-// the wall-clock time of each line. --columns sets the width for the
-// packet header lines, which btmon cuts to 80 characters by default
-// and so cuts the names of management clients.
-//
-// The container runs with a terminal, and btmon writes to it, because
-// the C library then writes each line when btmon finishes it. With a
-// pipe, the library holds the output until its buffer fills, and a
-// rare line waits in the buffer for hours. On a terminal btmon also
-// starts a pager and colors its output, and --no-pager and
-// --color never turn both off.
+// btmon writes to the container's terminal, because the C library
+// flushes output to a terminal at each newline. Output to a pipe waits
+// until the buffer fills, which can delay a rare line for hours. On a
+// terminal, btmon starts a pager and writes color codes, so --no-pager
+// and --color never turn those off.
 var btmonArgs = []string{"--no-pager", "--color", "never", "--no-time", "--columns", "160"}
 
-// stopTimeout bounds the wait for btmon to exit after TERM. btmon ends
-// its main loop on TERM, so the bound covers only a btmon that hangs,
-// and KILL ends that one.
+// stopTimeout is how long stop waits for btmon to exit after TERM
+// before it sends KILL.
 const stopTimeout = 5 * time.Second
 
-// startBtmon starts the trace.
 func startBtmon() (trace, error) {
 	return startProcess(btmonPath, btmonArgs...)
 }
 
-// process is one child of this program.
+// process is a running child. It implements trace.
 type process struct {
 	cmd    *exec.Cmd
 	exited chan struct{}
 }
 
 // startProcess starts path as a child that writes to this program's
-// own standard output and error. Those are the container's terminal,
-// so the child writes to the terminal, as the comment at btmonArgs
-// requires.
+// standard output and error. In the container, those are the terminal
+// that btmonArgs depends on.
 func startProcess(path string, args ...string) (trace, error) {
 	cmd := exec.Command(path, args...)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
@@ -58,7 +52,7 @@ func startProcess(path string, args ...string) (trace, error) {
 	p := &process{cmd: cmd, exited: make(chan struct{})}
 	go func() {
 		err := cmd.Wait()
-		fmt.Fprintf(os.Stderr, "start-btmon: btmon ended: %v\n", exitText(err))
+		fmt.Fprintf(os.Stderr, "start-btmon: btmon exited: %v\n", exitText(err))
 		close(p.exited)
 	}()
 	return p, nil
@@ -66,24 +60,25 @@ func startProcess(path string, args ...string) (trace, error) {
 
 func (p *process) done() <-chan struct{} { return p.exited }
 
-// stop signals the child through its process handle, which holds a
-// pidfd, so a signal after the child was reaped reaches no other
-// process.
+// stop sends TERM, waits up to stopTimeout, and then sends KILL. It
+// signals through the process handle, which holds a pidfd, so a signal
+// sent after the child was reaped cannot reach a process that reused
+// its PID.
 func (p *process) stop() {
 	if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil && !errors.Is(err, os.ErrProcessDone) {
-		fmt.Fprintf(os.Stderr, "start-btmon: signalling btmon: %v\n", err)
+		fmt.Fprintf(os.Stderr, "start-btmon: sending TERM to btmon: %v\n", err)
 	}
 	select {
 	case <-p.exited:
 		return
 	case <-time.After(stopTimeout):
 	}
-	fmt.Fprintf(os.Stderr, "start-btmon: btmon did not exit within %s of TERM; killing it\n", stopTimeout)
+	fmt.Fprintf(os.Stderr, "start-btmon: btmon did not exit within %s after TERM, so it is being killed\n", stopTimeout)
 	_ = p.cmd.Process.Kill()
 	<-p.exited
 }
 
-// exitText describes how a child ended.
+// exitText returns the text to log for the error from cmd.Wait.
 func exitText(err error) string {
 	if err == nil {
 		return "exit status 0"

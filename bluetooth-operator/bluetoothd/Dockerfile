@@ -1,57 +1,37 @@
-# The bluetoothd image: the static programs the pod runs (bluetoothd,
-# dbus-daemon, btmon, and the three Go entrypoints, start-bluetoothd,
-# start-btmon, and start-rescan), three more that a person runs with
-# kubectl exec (bluetoothctl, btmgmt, and dbus-send), their
-# configuration, and nothing else.
+# The image of the pod's Bluetooth stack: bluetoothd, dbus-daemon,
+# btmon, the Go entrypoints, and the tools a person runs with
+# kubectl exec. bluetoothd runs here and not in the read-only root of
+# the liken OS, so the OS image needs no Bluetooth stack.
 #
-# bluetoothd ships here, in a workload's image, and not in the
-# read-only root that every liken machine boots. That is why the
-# device operator pattern puts the daemon in a separate repository, and
-# it is why this image builds BlueZ rather than installing a
-# distribution's package: a package brings a package manager, a shell,
-# and a base filesystem, and this container runs three programs.
+# buildroot builds BlueZ and dbus as static binaries, from the
+# BR2_EXTERNAL tree in liken/userland and with the same buildroot.sh
+# that builds the OS's programs. A distribution's package would bring a
+# package manager, a shell, and a base filesystem that the container
+# does not use. bluetoothd.config in that tree selects the programs,
+# and bluetooth/bluez-static holds the BlueZ recipe and its patches.
+# The README.md beside the patches lists each patch and the bug it
+# fixes.
 #
-# buildroot builds BlueZ, dbus, and every library they link, from the
-# BR2_EXTERNAL tree in liken/userland, the same tree and the same
-# buildroot.sh that build the static programs of the OS.
-# bluetoothd.config in that tree selects the programs, and
-# bluetooth/bluez-static in it holds the BlueZ recipe and the patches
-# that the build applies to BlueZ. The README.md beside the patches
-# lists each one and the bug it fixes. buildroot checks every source
-# tarball against a .hash file, so this build reads no byte that a
-# commit did not name.
-#
-# The BlueZ shells have one limit in this image. BlueZ parses each
-# command's argument specification with wordexp(3), musl implements
-# wordexp by running /bin/sh, and this image has none, so the call
-# returns WRDE_SYNTAX and bluetoothctl and btmgmt refuse every
-# command that takes an argument ("Unable to parse mandatory
-# command arguments"). A command whose specification is empty skips
-# the call and works: bluetoothctl list, and btmgmt info, extinfo,
-# con, keys, and ltks. dbus-send parses with getopt and calls no
-# shell, so it reaches every org.bluez method and property the two
-# shells cannot.
-#
-# The binaries are statically linked against musl, so the image is the
-# programs and their configuration with no loader and no shared
-# objects under them. A distribution's bluetoothd loads six shared
-# libraries on Alpine and fifteen on Debian, and each one is a file
-# whose version has to agree with the binary that opens it. The static
-# binaries here open none, so no version can disagree. The build checks
-# each binary with file(1) and accepts "statically linked" or
-# "static-pie linked".
+# bluetoothctl and btmgmt cannot run a command that takes an argument
+# in this image. BlueZ parses the argument specification of each
+# command with wordexp(3), and musl implements wordexp by running
+# /bin/sh. This image has no /bin/sh, so wordexp returns WRDE_SYNTAX
+# and both programs fail with "Unable to parse mandatory command
+# arguments". A command with an empty specification skips the call and
+# works: bluetoothctl list, and btmgmt info, extinfo, con, keys, and
+# ltks. dbus-send parses its arguments with getopt and starts no
+# shell, so it can call every org.bluez method and read every property
+# that bluetoothctl and btmgmt cannot.
 
-# The compiler cache of the daemons stage is a cache mount, which
-# BuildKit keeps on one builder and never writes into the registry's
-# layer cache. A CI runner starts with an empty builder, so without
-# help every build that misses the layer cache compiles the
-# cross-compiler and every package cold. The two stages below copy a
-# directory into the cache mount and out of it, and CI runs them
-# around the image's build: cache-seed takes the build context
-# `cache`, which holds the compiler cache that CI restored, and
-# cache-export writes the cache mount's files as its result. The image
-# reads neither stage. Each one runs as uid 1000, br-user in the
-# buildroot image, which owns the cache mount.
+# BuildKit keeps a cache mount on one builder and never writes it into
+# the registry's layer cache. A CI runner starts with an empty builder,
+# so a build that misses the layer cache would compile the
+# cross-compiler and every package again. CI runs cache-seed before the
+# image's build, to copy the compiler cache that CI restored (the build
+# context `cache`) into the mount, and cache-export after it, to write
+# the mount's files out for CI to save. The image does not use either
+# stage. Both run as uid 1000, br-user in the buildroot image, which
+# owns the cache mount.
 FROM debian AS cache-seed
 USER 1000:1000
 RUN --mount=type=cache,target=/home/br-user/ccache,uid=1000,gid=1000 \
@@ -69,29 +49,23 @@ COPY --from=cache-files /tmp/ccache/ /
 FROM buildroot AS daemons
 
 # The buildroot commit and the digest of its tarball are the pin in
-# liken/userland/VERSION and liken/userland/fetch.sh, and
-# liken/userland/latest.sh --bump writes the two lines below with
-# them. `cd ci && go run . pins -root ..` fails when they disagree.
+# liken/userland/VERSION and liken/userland/fetch.sh.
+# liken/userland/latest.sh --bump writes the two lines below with them,
+# and `cd ci && go run . pins -root ..` fails when they differ.
 ARG BUILDROOT_COMMIT=c1490f289c129c12de1249074eac765dee1a5d9d
 ARG BUILDROOT_SHA256=34923d316a19c4acbffc8fffa2281a99e9f6666c43b3bfe1c06c2c491cdff262
 
-# The buildroot image runs as br-user, and buildroot writes its output
-# and its caches as that user. The download directory and the compiler
-# cache are cache mounts, so a rebuild on the same machine downloads
-# and compiles only what changed.
 WORKDIR /home/br-user
 ADD --chown=br-user:br-user --checksum=sha256:${BUILDROOT_SHA256} \
     https://github.com/buildroot/buildroot/archive/${BUILDROOT_COMMIT}.tar.gz buildroot.tar.gz
 RUN tar -xzf buildroot.tar.gz && mv "buildroot-${BUILDROOT_COMMIT}" buildroot && rm buildroot.tar.gz
 
-# The build copies only the files of the tree that buildroot reads for
-# bluetoothd.config. A build that misses the layer cache compiles a
-# cross-compiler before the daemons, so a change to a file that only
-# the OS's build reads, such as os.config, build.sh, or artifact.sh,
-# must not change these layers. Config.in and external.mk name the
-# recipes under iscsi/ too, so buildroot parses them in this build, and
-# patches/ is the directory that common.config names in
-# BR2_GLOBAL_PATCH_DIR.
+# Copy only the files of the userland tree that this build reads, so a
+# change to a file that only the OS build reads, such as os.config,
+# build.sh, or artifact.sh, does not invalidate these layers and
+# rebuild the cross-compiler. iscsi/ is copied because Config.in and
+# external.mk include its recipes, and patches/ because common.config
+# sets BR2_GLOBAL_PATCH_DIR to it.
 COPY --from=userland --chown=br-user:br-user \
     buildroot.sh common.config bluetoothd.config \
     Config.in external.desc external.mk versions.mk \
@@ -100,16 +74,13 @@ COPY --from=userland --chown=br-user:br-user bluetooth/ external/bluetooth/
 COPY --from=userland --chown=br-user:br-user iscsi/ external/iscsi/
 COPY --from=userland --chown=br-user:br-user patches/ external/patches/
 
-# The same step writes the package list that the SBOM step below reads,
-# and then deletes the cross-compiler, the build directories, and the
-# source tarballs that legal-info copied. The later steps read only the
-# target tree and legal-info's manifest and license files. The deleted
-# directories hold several gigabytes, and without the deletion they are
-# a layer of this step: the CI build compresses that layer into the
-# registry's layer cache, and a later build that reads the layer
-# downloads it again. CCACHE_MAXSIZE caps the compiler cache, which CI
-# saves between runners through the stages above, so the saved cache
-# does not grow with each build.
+# show-info writes the package list that the SBOM step below reads.
+# The step then deletes the cross-compiler, the build directories, and
+# the source tarballs that legal-info copied. Later steps read only the
+# target tree and legal-info's manifest and license files, and the
+# deleted directories take several gigabytes that CI would otherwise
+# push into the registry's layer cache. CCACHE_MAXSIZE keeps the
+# compiler cache that CI saves from growing with each build.
 RUN --mount=type=cache,target=/home/br-user/dl,uid=1000,gid=1000 \
     --mount=type=cache,target=/home/br-user/ccache,uid=1000,gid=1000 \
     set -eu; \
@@ -119,24 +90,17 @@ RUN --mount=type=cache,target=/home/br-user/dl,uid=1000,gid=1000 \
     cd /home/br-user/output; \
     rm -rf build host staging per-package images legal-info/sources legal-info/host-sources
 
-# buildroot's CycloneDX SBOM of the build, as liken/userland/build.sh
-# writes the OS's: `show-info` printed each package of the
-# configuration in the build step above, and generate-cyclonedx turns
-# the list into the SBOM. generate-cyclonedx reads the patches and the
-# .hash files of each package from the buildroot tree and the external
-# tree, not from the output directory.
-#
-# generate-cyclonedx reads the SPDX license list of the CycloneDX
-# version that it names, and downloads the list when its download
-# directory has none. So the build fetches the list by the version and
-# the digest that the spdx_schema_sha256 table of
-# liken/userland/fetch.sh pins, and the SBOM step reads no unpinned
-# byte. liken/userland/latest.sh --bump writes the two lines below, and
-# `cd ci && go run . pins -root ..` fails when they disagree with the
-# table. They follow the build of the packages, so a new list does not
-# rebuild them. The build stops when the pinned buildroot names another
-# CycloneDX version, because generate-cyclonedx would then download
-# that version's list.
+# generate-cyclonedx writes buildroot's SBOM of this build from the
+# package list, as liken/userland/build.sh does for the OS. It reads
+# the SPDX license list of its CycloneDX version, and downloads the
+# list when its download directory has none. So this step adds the list
+# by the version and digest in the spdx_schema_sha256 table of
+# liken/userland/fetch.sh. liken/userland/latest.sh --bump writes the
+# two ARG lines below, and `cd ci && go run . pins -root ..` fails when
+# they differ from the table. They come after the package build so that
+# a new list does not rebuild the packages. The `test` fails the build
+# when the pinned buildroot targets another CycloneDX version, because
+# generate-cyclonedx would then download that version's list unpinned.
 ARG SPDX_SCHEMA_VERSION=1.6.2
 ARG SPDX_SCHEMA_SHA256=c41917196639055e9f9670811bac23ef777732144f3ff5a2f39686f61580dbe6
 ADD --chown=br-user:br-user --checksum=sha256:${SPDX_SCHEMA_SHA256} \
@@ -148,33 +112,23 @@ RUN set -eu; \
     BR2_DL_DIR=/home/br-user/sbom-dl utils/generate-cyclonedx \
         </home/br-user/show-info.json >/home/br-user/output/sbom.cdx.json
 
-# Every file the image ships, named. install -D fails on a path that
-# moved, so a BlueZ or dbus release that relocates one of these stops
-# the build rather than shipping an image without it. buildroot strips
-# each binary in its target tree.
-#
-# The four tools each answer a question nothing else in the pod can.
-# btmgmt reads the kernel's management settings, and btmgmt info is
-# the only reading of Connectable, Discoverable, and the rest this
-# image can take. btmon traces the HCI link, the layer under D-Bus
-# and under the daemon, which is the only reading of what the
-# controller and the remote device exchanged. The pod's btmon
-# container runs it while a person has the trace turned on, and that
-# container holds the CAP_NET_RAW that btmon's bind tests. dbus-send
-# calls any method on org.bluez, so a person starts one connection or
-# reads one property with no shell.
+# Copy each file the image ships by name. `install -D` fails when a
+# path does not exist, so a BlueZ or dbus release that moves one of
+# these files fails the build. buildroot already strips the binaries in
+# its target tree.
 #
 # Each tool adds its whole static binary to every node that runs the
-# pod, so a tool goes in only when it answers one of those questions.
-# btmon is the largest of the three because its decoder tables name
-# every HCI command, event, and profile. dbus-monitor stays out
-# because it watches the same events btmon already reports, one layer
-# up. To see what each tool costs, build the image with
-# `docker buildx bake bluetoothd --load` at the top of the repository.
-# The image has no shell, so list its files from outside: `docker
-# create` a container of it, and `docker export` that container into
-# `tar -tv`, which prints each binary with its size. `docker image
-# inspect --format '{{.Size}}'` gives the size of the whole image.
+# pod, so the image ships a tool only when it shows something that
+# nothing else in the pod can. `btmgmt info` is the only way to read
+# the kernel's controller settings, such as Connectable and
+# Discoverable. btmon traces the HCI traffic between the controller and
+# the remote device, below D-Bus and bluetoothd. The pod's btmon
+# container runs it while a person has the trace turned on. dbus-send
+# calls any method on org.bluez. dbus-monitor is left out because btmon
+# already shows the same exchanges one layer lower.
+#
+# The image has no shell, so to see each file's size, `docker create`
+# a container from it and pipe `docker export` into `tar -tv`.
 RUN set -eu; \
     target=/home/br-user/output/target; \
     for binary in usr/libexec/bluetooth/bluetoothd usr/bin/bluetoothctl \
@@ -183,24 +137,22 @@ RUN set -eu; \
         install -D -m 0755 "$target/$binary" "/home/br-user/out/$binary"; \
     done
 
-# dbus's own system.conf, unchanged, and the policy file BlueZ
-# installs into it. system.conf denies every name and every method
-# call, and bluetooth.conf is the hole that lets root own org.bluez.
-# Writing a policy by hand here would mean re-deriving that pair.
+# Ship dbus's own system.conf and BlueZ's bluetooth.conf unchanged.
+# system.conf denies every name and every method call by default, and
+# bluetooth.conf allows root to own org.bluez.
 RUN set -eu; \
     target=/home/br-user/output/target; \
     install -D -m 0644 "$target/usr/share/dbus-1/system.conf" /home/br-user/out/usr/share/dbus-1/system.conf; \
     install -D -m 0644 "$(find "$target" -path '*/dbus-1/system.d/bluetooth.conf' | head -1)" \
         /home/br-user/out/usr/share/dbus-1/system.d/bluetooth.conf
 
-# The licenses of BlueZ, dbus, and the libraries they link ask that
-# their notices travel with the programs, and the GPL that BlueZ uses
-# also requires that the source of a static program be available, the
-# libraries it links included, and the changes made to it. So the
-# image carries buildroot's legal-info manifest, which names each
-# package, its version, its license, and where its source comes from,
-# the license files of every package, and the patches applied to
-# BlueZ.
+# The licenses of BlueZ, dbus, and the libraries they link require that
+# the notices ship with the programs. The GPL that BlueZ uses also
+# requires that the source of a static program, with the libraries it
+# links and the changes made to it, be available. So the image ships
+# buildroot's legal-info manifest, which lists each package with its
+# version, license, and source location, the license files of every
+# package, and the patches applied to BlueZ.
 RUN set -eu; \
     doc=/home/br-user/out/usr/share/doc/liken; \
     mkdir -p "$doc/bluez-patches"; \
@@ -208,40 +160,34 @@ RUN set -eu; \
     cp -r /home/br-user/output/legal-info/licenses "$doc/licenses"; \
     cp external/bluetooth/bluez-static/*.patch "$doc/bluez-patches/"
 
-# dbus-daemon drops to its user, dbus, as soon as it has bound the
-# socket, and it looks the name up in /etc/passwd. buildroot's dbus
-# recipe names that user in system.conf. musl resolves users from
-# those files directly, with no NSS modules to load, so these two
-# files are the whole of what the lookup reads. The shells name a path
-# that is not in the image, because nothing here ever starts one.
+# dbus-daemon switches to the user dbus, which buildroot's recipe sets
+# in system.conf, as soon as it binds the socket. musl looks the user
+# up in /etc/passwd and /etc/group with no NSS modules, so these two
+# files are enough. /sbin/nologin is not in the image, and nothing here
+# starts a login shell.
 RUN set -eu; \
     out=/home/br-user/out; \
     mkdir -p "$out/etc/bluetooth" "$out/var/lib/bluetooth"; \
     printf 'root:x:0:0:root:/root:/sbin/nologin\ndbus:x:100:100:D-Bus message bus:/:/sbin/nologin\n' > "$out/etc/passwd"; \
     printf 'root:x:0:\ndbus:x:100:\n' > "$out/etc/group"
 
-# The three entrypoints. They are built from this repository's own
-# module, which is also where the operator comes from, so the images
-# move together. start-btmon is the command of the pod's btmon
-# container, and it runs btmon while the Adapter's spec.btmon is true.
-# start-rescan is the command of the pod's rescan container, and it
-# works around a kernel bug that leaves the passive scan off after a
-# failed connection (bluetoothd/rescan/main.go).
+# The entrypoints are built from the operator's own module, so the
+# operator image and this image come from the same commit. start-btmon
+# runs btmon while the Adapter's spec.btmon is true. start-rescan works
+# around kernel bugs that leave the passive scan off after a failed
+# connection (bluetoothd/rescan/main.go).
 FROM golang AS entrypoint
-# proxy.golang.org sometimes drops a module download partway through
-# the stream. With the default comma, `go` tries the origin only when
-# the proxy answers 404 or 410, so a dropped stream fails the build.
-# With a pipe, `go` fetches the module from its origin after any proxy
-# error, with the git that this image includes. `GOSUMDB` keeps its
-# default, so the checksum database still verifies a module that `go`
-# fetched from its origin.
+# proxy.golang.org sometimes drops a module download partway through.
+# With the default comma, `go` falls back to the origin only when the
+# proxy responds 404 or 410, so a dropped download fails the build.
+# With a pipe, `go` falls back after any proxy error. The checksum
+# database still verifies a module fetched from its origin.
 ENV GOPROXY="https://proxy.golang.org|direct"
 WORKDIR /src
 COPY go.mod go.sum ./
-# go.mod replaces the shared kubernetes module with ../kubernetes, so
-# the module graph reads its go.mod from the second build context named
-# kubernetes. The entrypoints import none of its packages, so the
-# module file is all they need.
+# go.mod replaces the kubernetes module with ../kubernetes, so
+# `go mod download` needs that module's go.mod, from the build context
+# kubernetes. The entrypoints import none of its packages.
 COPY --from=kubernetes go.mod /kubernetes/
 RUN go mod download
 COPY bluetoothd/*.go ./bluetoothd/
@@ -252,16 +198,15 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /start-bluetoothd ./blu
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /start-btmon ./bluetoothd/btmon
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /start-rescan ./bluetoothd/rescan
 # The license files of the Go standard library and of each module that
-# the binaries link. notices/go.sh says why the image needs them.
+# the binaries link. See notices/go.sh for why the image needs them.
 COPY --from=notices go.sh /
 RUN CGO_ENABLED=0 sh /go.sh /notices ./bluetoothd ./bluetoothd/btmon ./bluetoothd/rescan
 
-# syft finds no package in a static C program, so the image carries a
-# CycloneDX record of the packages that buildroot built into its
-# daemons: image-sbom keeps the target packages of buildroot's SBOM,
-# with their CPEs and licenses, and leaves out the host tools that ran
-# during the build. syft copies the record's components into the
-# image's SBOM. The build context manifest is toolchains/manifest.
+# syft finds no package in a static C program, so the image ships a
+# CycloneDX record of the packages that buildroot built, and syft
+# copies its components into the image's SBOM. image-sbom, from the
+# build context manifest (toolchains/manifest), keeps the target
+# packages of buildroot's SBOM and leaves out the host tools.
 FROM golang AS record
 WORKDIR /src
 COPY --from=manifest . ./
@@ -270,11 +215,9 @@ COPY --from=daemons /home/br-user/output/sbom.cdx.json /buildroot.cdx.json
 RUN /image-sbom -out /bluetoothd.cdx.json -buildroot /buildroot.cdx.json
 
 FROM scratch
-# buildroot builds as br-user, so the tree it leaves is that user's.
-# The daemon's container runs as root with every capability dropped
-# but four, and without CAP_DAC_OVERRIDE root cannot write
-# /etc/bluetooth/input.conf into a directory that another user owns.
-# So the tree is root's in the image.
+# The daemon's container runs as root without CAP_DAC_OVERRIDE, so it
+# cannot write /etc/bluetooth/input.conf into a directory that br-user,
+# buildroot's build user, owns. The image's files belong to root.
 COPY --from=daemons --chown=0:0 /home/br-user/out/ /
 COPY --from=entrypoint /start-bluetoothd /start-bluetoothd
 COPY --from=entrypoint /start-btmon /start-btmon
@@ -282,16 +225,13 @@ COPY --from=entrypoint /start-rescan /start-rescan
 COPY --from=entrypoint /notices /
 COPY --from=record /bluetoothd.cdx.json /usr/share/doc/liken/bluetoothd.cdx.json
 
-# /etc/bluetooth holds no file in the image. The entrypoint writes
-# main.conf and input.conf at start: main.conf takes its Privacy key
-# from the Adapter, and input.conf takes ClassicBondedOnly from
-# BLUETOOTH_CLASSIC_BONDED_ONLY. Each one is a choice a person makes
-# at deploy time.
+# /etc/bluetooth is empty in the image. start-bluetoothd writes
+# main.conf and input.conf at start: Privacy from the Adapter's
+# spec.privacy, and ClassicBondedOnly from
+# BLUETOOTH_CLASSIC_BONDED_ONLY.
 
-# The image's own default for the bus address. The pod states the same
-# address on both containers, next to the volume that holds the
-# socket, and a bluetoothctl session started with kubectl exec reads
-# whichever of the two applies.
+# bluetoothctl and dbus-send read the system bus address from this
+# variable. The pod sets the same value in its containers.
 ENV DBUS_SYSTEM_BUS_ADDRESS=unix:path=/var/run/bluetooth.liken.sh/dbus/system_bus_socket
 
 ENTRYPOINT ["/start-bluetoothd"]

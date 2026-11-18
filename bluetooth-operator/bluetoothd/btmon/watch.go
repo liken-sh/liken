@@ -1,11 +1,10 @@
 package main
 
-// The inotify watch on the settings directory.
-//
-// The watch is on the directory, not on the file. The operator writes
-// a new copy of the file and renames it over the old one, so the old
-// file's inode, and any watch on it, goes away at each write. A watch
-// on the directory sees the rename, a write in place, and a removal.
+// The inotify watch is on the settings directory and not on the btmon
+// file, because the operator writes a new copy of the file and renames
+// it over the old one. Each rename replaces the file's inode, and a
+// watch on the old inode would see no later change. A watch on the
+// directory sees the rename, bondfetch's write in place, and a removal.
 
 import (
 	"encoding/binary"
@@ -14,32 +13,32 @@ import (
 	"syscall"
 )
 
-// watchMask names the events that change what the btmon file holds,
-// and the events that end the directory itself. The kernel sends
-// IN_IGNORED and IN_UNMOUNT whatever the mask says.
+// watchMask selects the events that change a file in the directory and
+// the events that end the directory. The kernel sends IN_IGNORED and
+// IN_UNMOUNT whatever the mask says.
 const watchMask = syscall.IN_CLOSE_WRITE | syscall.IN_MOVED_TO | syscall.IN_MOVED_FROM |
 	syscall.IN_DELETE | syscall.IN_DELETE_SELF | syscall.IN_MOVE_SELF
 
-// watchEnded are the events after which the watch reports nothing more
-// about the directory.
+// watchEnded is the set of events that make read fail: the directory
+// was deleted, moved, or unmounted, or the kernel removed the watch.
+// After a move, the writers' path no longer leads to this directory.
 const watchEnded = syscall.IN_IGNORED | syscall.IN_UNMOUNT | syscall.IN_DELETE_SELF | syscall.IN_MOVE_SELF
 
-// watch reports each change in one directory.
+// watch reports changes in one directory.
 type watch struct {
 	dir  string
 	file *os.File
 
-	// changes has one slot, so a burst of events makes one wake, and
-	// the supervisor reads the file once for the burst. failed has one
-	// slot and receives at most one error.
+	// changes has a buffer of one and read never blocks on it, so a
+	// burst of events wakes the supervisor once. failed receives at most
+	// one error.
 	changes chan struct{}
 	failed  chan error
 }
 
-// openWatch opens an inotify watch on dir.
-//
-// The descriptor is nonblocking, so os.NewFile hands it to Go's
-// poller. A read then waits in the poller, and close ends the read.
+// openWatch makes the descriptor nonblocking so that os.NewFile
+// registers it with Go's poller. A read then waits in the poller
+// instead of blocking a thread, and close ends a read that is waiting.
 func openWatch(dir string) (*watch, error) {
 	fd, err := syscall.InotifyInit1(syscall.IN_CLOEXEC | syscall.IN_NONBLOCK)
 	if err != nil {
@@ -61,12 +60,10 @@ func openWatch(dir string) (*watch, error) {
 
 func (w *watch) close() { _ = w.file.Close() }
 
-// read wakes the supervisor for each batch of events, and reports a
-// failure when a read fails or the directory goes away.
-//
-// An overflow of the kernel's queue also wakes the supervisor. The
-// supervisor reads the whole file on each wake, so a lost event loses
-// nothing.
+// read signals changes for each batch of events, and signals failed
+// when a read fails or an event in watchEnded arrives. An overflow of
+// the kernel's event queue also signals changes, and the supervisor
+// reads the whole file on each signal, so a lost event does no harm.
 func (w *watch) read() {
 	buf := make([]byte, 4096)
 	for {
@@ -76,8 +73,8 @@ func (w *watch) read() {
 			return
 		}
 		for offset := 0; offset+syscall.SizeofInotifyEvent <= n; {
-			// struct inotify_event: wd, mask, cookie, and len, each 32
-			// bits in the machine's own order, then len bytes of name.
+			// struct inotify_event: wd, mask, cookie, and len, each a
+			// 32-bit value in native byte order, then len bytes of name.
 			mask := binary.NativeEndian.Uint32(buf[offset+4:])
 			length := binary.NativeEndian.Uint32(buf[offset+12:])
 			if mask&watchEnded != 0 {

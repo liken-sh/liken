@@ -1,31 +1,30 @@
 package bonds
 
-// The adapter's own identity key, and the Secret that keeps it.
+// The adapter's identity key, and the Secret that stores it.
 //
-// With Low Energy privacy on, a radio advertises and connects from a
-// resolvable private address that it changes every few minutes. The
-// address comes from the radio's identity resolving key (IRK), and a
-// peer that paired with the radio holds a copy of that key, so the
-// peer resolves each new address back to the radio. bluetoothd keeps
-// the key in <adapter>/identity, under [General]
-// IdentityResolvingKey. load_irk in BlueZ's src/adapter.c reads it.
-// When the file has none, bluetoothd makes a key through the kernel's
-// AF_ALG socket, and fails on a machine that does not load that
-// socket's modules, so bondfetch writes a new key before bluetoothd
-// starts (NewIdentity).
+// When Low Energy privacy is on, the radio advertises and connects
+// from a resolvable private address that changes every few minutes.
+// The address is derived from the radio's identity resolving key
+// (IRK). A peer that paired with the radio keeps a copy of the key, and
+// uses it to resolve each new address back to the radio. bluetoothd
+// stores the key in <adapter>/identity, under [General]
+// IdentityResolvingKey, and load_irk in BlueZ's src/adapter.c reads it.
+// When the file has no key, bluetoothd generates one through the
+// kernel's AF_ALG socket, which fails on a machine that does not load
+// that socket's modules. So bondfetch writes a new key before
+// bluetoothd starts (NewIdentity).
 //
-// The pod's tree is an emptyDir, so without a stored copy each new pod
-// writes a new key, and every bonded peer then holds a key for an
-// identity the radio does not present. So the operator writes the
-// file into its own Secret, and bondfetch writes it back before
-// bluetoothd starts. A radio with privacy off has no file, because
-// bluetoothd reads the key only when privacy is on.
+// The pod's storage tree is an emptyDir. Without a stored copy, each
+// new pod would use a new key, and no bonded peer could resolve the
+// radio's addresses. So the operator copies the file into a Secret,
+// and bondfetch writes it back before bluetoothd starts. bondfetch
+// generates a key only when privacy is on, so a radio that has never
+// had privacy on has no identity file.
 //
-// The Secret carries no adapter label. bondfetch and the operator
-// gather a radio's bonds by that label, and this Secret holds no bond.
-// It has an identity label of its own, so a person can list the
-// identity Secrets, and its name states the radio, which is how both
-// programs read it.
+// bondfetch and the operator select a radio's bonds by AdapterLabel.
+// The identity Secret has IdentityLabel instead, so that a bond
+// selector never matches it. Both programs find it by its name, which
+// contains the radio's address.
 
 import (
 	"crypto/rand"
@@ -37,26 +36,23 @@ import (
 )
 
 const (
-	// identityFile is the adapter's own file that holds its IRK.
 	identityFile = "identity"
 
-	// IdentitySecretPrefix and the adapter's address name the Secret
-	// that holds one radio's identity file.
+	// IdentitySecretPrefix followed by the adapter's address is the
+	// name of a radio's identity Secret.
 	IdentitySecretPrefix = "bluetooth-identity-"
 
-	// IdentityLabel names the radio whose identity a Secret holds. It
-	// is a different key from AdapterLabel, so the bond selector never
-	// matches it.
+	// IdentityLabel is the label key whose value is the address of the
+	// radio that an identity Secret belongs to.
 	IdentityLabel = "bluetooth.liken.sh/identity"
 
-	// identityKey is the one key of the identity Secret. Its value is
-	// the identity file, byte for byte.
+	// identityKey is the key in the identity Secret's data whose value
+	// is the identity file's bytes, unchanged.
 	identityKey = "identity"
 )
 
-// ReadIdentity reads an adapter's identity file. An adapter with no
-// file answers nil and no error, which is the state of every radio
-// with privacy off.
+// ReadIdentity reads an adapter's identity file. It returns nil and no
+// error when the file does not exist.
 func ReadIdentity(root string, adapter Address) ([]byte, error) {
 	identity, err := os.ReadFile(filepath.Join(root, adapter.Directory(), identityFile))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -65,9 +61,9 @@ func ReadIdentity(root string, adapter Address) ([]byte, error) {
 	return identity, err
 }
 
-// NewIdentity answers an identity file with a new random key, in the
-// form load_irk reads: 32 hex digits under [General]
-// IdentityResolvingKey, in lowercase as BlueZ writes them.
+// NewIdentity returns the contents of an identity file with a new
+// random key, in the format that load_irk reads: 32 lowercase hex
+// digits under [General] IdentityResolvingKey, as BlueZ writes them.
 func NewIdentity() ([]byte, error) {
 	key := make([]byte, 16)
 	if _, err := rand.Read(key); err != nil {
@@ -77,7 +73,8 @@ func NewIdentity() ([]byte, error) {
 }
 
 // WriteIdentity writes an adapter's identity file into a BlueZ storage
-// tree, with the modes BlueZ gives a file that holds a key.
+// tree, with the file and directory modes that BlueZ uses for key
+// files.
 func WriteIdentity(root string, adapter Address, identity []byte) error {
 	directory := filepath.Join(root, adapter.Directory())
 	if err := os.MkdirAll(directory, bondDirMode); err != nil {
@@ -86,20 +83,17 @@ func WriteIdentity(root string, adapter Address, identity []byte) error {
 	return os.WriteFile(filepath.Join(directory, identityFile), identity, bondFileMode)
 }
 
-// IdentitySecretName is the name of the Secret that holds one radio's
-// identity file.
 func IdentitySecretName(adapter Address) string {
 	return IdentitySecretPrefix + adapter.Key()
 }
 
-// IdentitySecretPath is the API server's URL for one radio's identity
-// Secret.
 func IdentitySecretPath(namespace string, adapter Address) string {
 	return SecretsPath(namespace) + "/" + IdentitySecretName(adapter)
 }
 
-// NewIdentitySecret builds the object the operator writes for one
-// radio's identity file. The owner is the radio's Adapter.
+// NewIdentitySecret builds a radio's identity Secret. The owner is the
+// radio's Adapter, so deleting the Adapter deletes the Secret. An owner
+// with no UID adds no owner reference.
 func NewIdentitySecret(namespace string, adapter Address, identity []byte, owner Owner) *Secret {
 	secret := &Secret{
 		APIVersion: "v1",
@@ -121,7 +115,6 @@ func NewIdentitySecret(namespace string, adapter Address, identity []byte, owner
 	return secret
 }
 
-// Identity answers the identity file an identity Secret holds.
 func (s *Secret) Identity() []byte {
 	return s.Data[identityKey]
 }

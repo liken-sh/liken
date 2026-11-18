@@ -12,7 +12,7 @@ devices, and no other input device on the machine.
 
 What you can do:
 
-* **Pair a DualSense from your desk.** Create a `PairingRequest`, put
+* **Pair a DualSense with `kubectl`.** Create a `PairingRequest`, put
   the controller in pairing mode, and approve the address that the
   radio reports. Pairing is an API, so RBAC controls who can pair, and
   nobody needs a shell on a node or in a pod.
@@ -20,12 +20,12 @@ What you can do:
   the controller by its address and gets its `/dev/input/event*`
   nodes. No other pod gets that input, and the pod gets no other input
   device.
-* **Wait for a controller that's switched off.** A paired controller
-  stays published while it's off. A pod that claims it stays
-  `Unschedulable`, and starts when somebody turns the controller on.
-* **Keep the pairing across restarts.** The pairing keys are in
-  `Secrets`, so the controller can reconnect after a pod restart, an
-  upgrade, or a reboot.
+* **Claim a controller that is switched off.** The operator
+  publishes a paired controller while it is off. A pod that claims it
+  waits until you turn the controller on, and then starts.
+* **Keep the pairing across restarts.** The operator stores the
+  pairing keys in `Secrets`, so the controller can reconnect after a
+  pod restart, an upgrade, or a reboot.
 
 Start here:
 
@@ -38,14 +38,16 @@ Start here:
 
 `liken` publishes the machine's Bluetooth radio as a device. The
 operator's pod claims the radio and runs `bluetoothd` itself, so the
-`liken` system image has no BlueZ and no D-Bus. The operator
-publishes each paired controller as its own device under the
+`liken` system image contains no BlueZ and no D-Bus. The operator
+publishes each paired controller as a device under the
 [Dynamic Resource Allocation (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
 driver `bluetooth.liken.sh`.
 
-It also publishes the radio's media bus, which
-[`audio-operator`](https://liken.sh/audio/) claims to play sound to
-paired Bluetooth speakers.
+It also publishes the radio's
+[media bus](/docs/reference/devices/#the-media-bus), a D-Bus
+connection to `bluetoothd`, which
+[`audio-operator`](https://liken.sh/audio/) claims to play sound
+through Bluetooth speakers.
 
 `bluetooth-operator` is one of the extension operators for
 [claiming hardware](https://liken.sh/docs/concepts/claiming-hardware/).

@@ -1,39 +1,28 @@
 package main
 
-// Listening for the kernel's uevents.
+// The kernel broadcasts each device add, remove, and change on a
+// NETLINK_KOBJECT_UEVENT socket. This file wakes the loop for these:
 //
-// The kernel broadcasts every device add and remove on a netlink
-// socket, NETLINK_KOBJECT_UEVENT. Each datagram is "action@devpath"
-// followed by KEY=VALUE pairs, each part ending in a NUL byte. A HID
-// add tells this program that a controller connected, moments before
-// bluetoothd reports the connection over D-Bus. The HID driver then
-// registers the controller's evdev nodes, and the kernel sends an
-// input add for each one. The relay opens a node on its input add and
-// does not wait for the settle window, because the kernel keeps no
-// backlog for a reader that opens a node late.
+//   - A HID add or remove: a controller connected or disconnected. The
+//     add arrives before bluetoothd reports the connection on D-Bus.
+//   - An input add of an evdev node under a controller. The operator
+//     opens the node on this event without waiting for settleWindow,
+//     because the kernel discards a node's events until a reader opens
+//     it.
+//   - A power supply change: a controller's battery reported a new
+//     level or charging status.
 //
-// A power supply change tells the loop that a controller's battery
-// reported a new level or a new charging status, so the Peripheral
-// that reports it is rewritten on the pass that follows.
+// Two mistakes in opening the socket fail with no error:
 //
-// Two ways to open this socket fail silently:
-//
-//   - Bind group 1, never group 2. Group 1 carries the kernel's own
-//     broadcasts. Group 2 carries udev's re-broadcasts to libudev
-//     clients. On a machine with no udev the bind to group 2
-//     succeeds, the socket opens, and it delivers nothing forever,
-//     because nothing writes to that group.
-//   - Do not run in a non-init user namespace. The kernel delivers
-//     uevents to the initial user namespace only, and a process in
-//     its own user namespace receives an empty stream with no error
-//     to read. An unprivileged process in the initial namespace may
-//     receive group 1, because the kernel creates the uevent socket
-//     with NL_CFG_F_NONROOT_RECV.
-//
-// A remove event arrives after the sysfs directory is already gone,
-// so nothing can be read back from sysfs to name the controller that
-// left. The listener keeps a map from DEVPATH to MAC address,
-// populated at add time, and resolves a removal through it.
+//   - Binding multicast group 2 instead of group 1. Group 1 receives
+//     the kernel's broadcasts, and group 2 receives what udev sends
+//     again to libudev clients. On a machine with no udev, nothing
+//     sends to group 2.
+//   - Running in a user namespace other than the initial one. The
+//     kernel sends uevents only to the initial user namespace, so such
+//     a process receives nothing. The process does not need root,
+//     because the kernel creates the uevent socket with
+//     NL_CFG_F_NONROOT_RECV.
 
 import (
 	"bytes"
@@ -46,15 +35,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// kernelEvent reports one change the loop acts on: a Bluetooth HID
-// device that appeared or left, or an evdev node that appeared under
-// one, each with the peer address it resolved. It also reports a power
-// supply whose reading changed, which names no address because the
-// datagram carries none and the pass re-reads sysfs anyway.
-//
-// Lost marks the third kind: a receive that lost datagrams. It names
-// no subsystem, because the lost datagrams could be any of them, and
-// the pass that follows reads the whole state.
+// kernelEvent is one uevent the loop acts on, or, when Lost is true, a
+// report that datagrams were lost. MAC is set for a HID or input event
+// and is empty for a power supply change, whose datagram has no
+// address.
 type kernelEvent struct {
 	Subsystem string
 	Action    string
@@ -62,23 +46,16 @@ type kernelEvent struct {
 	Lost      bool
 }
 
-// The three subsystems this operator reads events from. hid carries a
-// controller's arrival and departure, input carries each evdev node the
-// controller registers, and power_supply carries a battery's change.
 const (
 	subsystemHID         = "hid"
 	subsystemInput       = "input"
 	subsystemPowerSupply = "power_supply"
 )
 
-// devpathMACs remembers which controller registered each HID device,
-// so a remove event can name the controller that left.
-//
-// A remove datagram does include HID_UNIQ on every kernel this program
-// has run against, and the map makes the answer certain rather than
-// probable. The lookup prefers the datagram's own value and falls
-// back to the map, so a kernel that drops the key from a remove event
-// still resolves.
+// devpathMACs maps the DEVPATH of each present HID device to its
+// controller's MAC address. A remove datagram can lack HID_UNIQ, and
+// the device's sysfs directory is already gone, so the map is the only
+// record of which controller left.
 type devpathMACs struct {
 	mutex sync.Mutex
 	macs  map[string]string
@@ -88,11 +65,11 @@ func newDevpathMACs() *devpathMACs {
 	return &devpathMACs{macs: map[string]string{}}
 }
 
-// resolve names the controller behind one event. It returns an empty
-// string when neither the datagram nor the map has a valid address,
-// which happens for every HID device that is not a Bluetooth
-// peripheral. A remove drops the DEVPATH from the map, because the
-// kernel reuses the path for the next device in that slot.
+// resolve returns the MAC address of a HID event's controller: uniq
+// when it is a valid address, otherwise the address recorded for
+// devpath. It returns an empty string when neither is valid, as for a
+// HID device that is not a Bluetooth peripheral. An add records the
+// address and a remove deletes it.
 func (d *devpathMACs) resolve(action, devpath, uniq string) string {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
@@ -114,11 +91,11 @@ func (d *devpathMACs) resolve(action, devpath, uniq string) string {
 	return mac
 }
 
-// under names the controller whose HID device holds a device below it
-// in sysfs, such as an evdev node. The node's own datagram carries no
-// HID_UNIQ, and the HID device's add came first, so the map holds the
-// address. It returns an empty string for a device under no controller.
-func (d *devpathMACs) under(devpath string) string {
+// macOfParent returns the MAC address recorded for the HID device that
+// devpath is under, or an empty string when there is none. An evdev
+// node's datagram has no HID_UNIQ, and the HID device's add arrives
+// before it.
+func (d *devpathMACs) macOfParent(devpath string) string {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
 	for parent, mac := range d.macs {
@@ -129,10 +106,9 @@ func (d *devpathMACs) under(devpath string) string {
 	return ""
 }
 
-// parseUevent splits one datagram into its action, its DEVPATH, and
-// its key-value pairs. A datagram that does not start with
-// "action@devpath" is a libudev message on the same socket, and the
-// second return value reports that.
+// parseUevent splits a datagram of the form "action@devpath", then
+// KEY=VALUE pairs, each part ending in a NUL byte. ok is false for any
+// other datagram, such as a libudev message.
 func parseUevent(datagram []byte) (action, devpath string, values map[string]string, ok bool) {
 	parts := bytes.Split(bytes.TrimRight(datagram, "\x00"), []byte{0})
 	if len(parts) == 0 {
@@ -152,16 +128,8 @@ func parseUevent(datagram []byte) (action, devpath string, values map[string]str
 	return string(head), string(path), values, true
 }
 
-// kernelEventFrom turns one datagram into an event, when the datagram
-// is one of the kinds the loop acts on, and reports false for every
-// other uevent the kernel sends.
-//
-// The tests drop every other subsystem's events, and every input
-// device that is not a controller's evdev node. A controller that
-// connects produces a HID add, an input add for each input device and
-// each node under it, and several more. The relay opens each node on
-// its own event (main.go), and the settle window collapses the burst
-// into one pass.
+// kernelEventFrom returns false for every uevent the loop does not act
+// on. A controller that connects sends many of them.
 func kernelEventFrom(datagram []byte, macs *devpathMACs) (kernelEvent, bool) {
 	action, devpath, values, ok := parseUevent(datagram)
 	if !ok {
@@ -178,21 +146,22 @@ func kernelEventFrom(datagram []byte, macs *devpathMACs) (kernelEvent, bool) {
 		}
 		return kernelEvent{Subsystem: subsystemHID, Action: action, MAC: mac}, true
 	case subsystemInput:
-		// The inputN device above a node and a joydev node are not
-		// nodes the relay opens, and a node that leaves ends the read
-		// of the relay's pump on its own.
+		// The relay opens only evdev nodes, so the inputN device and
+		// a joydev node are ignored. A remove needs no event, because
+		// the relay's read of the node fails when the kernel removes
+		// it.
 		if action != "add" || !strings.HasPrefix(values["DEVNAME"], "input/event") {
 			return kernelEvent{}, false
 		}
-		mac := macs.under(devpath)
+		mac := macs.macOfParent(devpath)
 		if mac == "" {
 			return kernelEvent{}, false
 		}
 		return kernelEvent{Subsystem: subsystemInput, Action: action, MAC: mac}, true
 	case subsystemPowerSupply:
-		// A battery reports a new level or a new charging status as a change
-		// on its power supply. An add is not a wake on its own, because the
-		// supply registers during the HID probe that already woke the loop.
+		// An add needs no event, because the power supply registers
+		// while the HID device is added, and the HID add already woke
+		// the loop.
 		if action != "change" {
 			return kernelEvent{}, false
 		}
@@ -201,17 +170,11 @@ func kernelEventFrom(datagram []byte, macs *devpathMACs) (kernelEvent, bool) {
 	return kernelEvent{}, false
 }
 
-// listenForUevents opens the kernel's uevent socket and returns a
-// channel of the events this operator acts on. The channel is
-// buffered, and a full channel drops the event: every consumer of this
-// channel re-reads the whole of sysfs, so the events say when to look,
-// never what is there.
-//
-// The socket is non-blocking. The reader waits for it in poll, not in
-// a read, so it can also watch a cancel pipe in the same poll and
-// stop the moment the context ends. This is liken's own arrangement,
-// for the reason liken states: closing a descriptor does not wake a
-// thread already blocked on a read of it.
+// listenForUevents opens the uevent socket and returns a channel of the
+// events the loop acts on. The reader polls the socket and a pipe, and
+// closing the pipe's write end when ctx ends wakes the poll. Closing
+// the socket from another goroutine would not wake a poll that waits
+// on it.
 func listenForUevents(ctx context.Context) (<-chan kernelEvent, error) {
 	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_DGRAM|unix.SOCK_CLOEXEC|unix.SOCK_NONBLOCK, unix.NETLINK_KOBJECT_UEVENT)
 	if err != nil {
@@ -235,10 +198,9 @@ func listenForUevents(ctx context.Context) (<-chan kernelEvent, error) {
 	return events, nil
 }
 
-// readUevents is the reader loop. It blocks in poll over the uevent
-// socket and the cancel pipe. A ready socket means a datagram to
-// read; a ready cancel pipe means the context is done and the loop
-// returns. It closes the descriptors it owns as it leaves.
+// readUevents sends the events of fd's datagrams to events until
+// cancelRead becomes readable. It closes both descriptors and the
+// channel on return.
 func readUevents(fd, cancelRead int, events chan<- kernelEvent) {
 	defer unix.Close(fd)
 	defer unix.Close(cancelRead)
@@ -263,10 +225,9 @@ func readUevents(fd, cancelRead int, events chan<- kernelEvent) {
 		}
 		size, _, err := unix.Recvfrom(fd, buf, 0)
 		if err != nil {
-			// A lost datagram can be a controller that connected or left,
-			// so the loop runs a pass now, and does not wait for the next
-			// uevent or the backstop tick. EAGAIN and EINTR lose nothing,
-			// so they wake nothing.
+			// A lost datagram can be a controller that connected or
+			// disconnected, so wake the loop now instead of at the next
+			// uevent or backstopInterval.
 			if recvErrorLostAUevent(err) {
 				sendEvent(events, kernelEvent{Lost: true})
 			}
@@ -280,19 +241,17 @@ func readUevents(fd, cancelRead int, events chan<- kernelEvent) {
 	}
 }
 
-// recvErrorLostAUevent reports whether a Recvfrom error on the uevent
-// socket lost datagrams. EAGAIN means poll woke with nothing queued,
-// and EINTR means a signal interrupted the call before it read
-// anything. Every other error loses datagrams, most often ENOBUFS: the
-// kernel's receive buffer overflowed, and the kernel dropped the
-// datagrams that did not fit.
+// recvErrorLostAUevent reports whether a Recvfrom error can mean lost
+// datagrams. EAGAIN and EINTR lose nothing. Every other error counts
+// as a loss. The usual one is ENOBUFS: the receive buffer was full and
+// the kernel dropped datagrams.
 func recvErrorLostAUevent(err error) bool {
 	return !errors.Is(err, unix.EAGAIN) && !errors.Is(err, unix.EINTR)
 }
 
-// sendEvent sends one event and drops it when the channel is full. A
-// full channel already holds a wake, and the pass that the wake starts
-// reads the whole state, so the dropped event loses nothing.
+// sendEvent drops event when the channel is full. The events already
+// in the channel wake the loop, and a pass reads the whole state, so
+// the dropped event loses nothing.
 func sendEvent(events chan<- kernelEvent, event kernelEvent) {
 	select {
 	case events <- event:

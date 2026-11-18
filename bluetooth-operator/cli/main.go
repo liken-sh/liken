@@ -1,9 +1,9 @@
 package main
 
-// Kubectl-liken-bluetooth is the bluetooth operator's CLI
-// plugin. kubectl finds it on PATH and runs "kubectl liken bluetooth
-// pair" as this binary with "pair". It owns the bluetooth verbs and
-// takes the cluster's identity from the standard kube flags.
+// kubectl-liken-bluetooth is the CLI plugin of the bluetooth operator.
+// kubectl finds it on PATH, so "kubectl liken bluetooth pair" runs
+// this binary with the argument "pair". It finds the cluster from
+// --kubeconfig and --context, as kubectl does.
 
 import (
 	"context"
@@ -16,12 +16,11 @@ import (
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 )
 
-// The release this binary was built from; the build
-// stamps it with -ldflags "-X main.version=...", the same way the
-// operator image is stamped, and every other build reports dev.
+// version is the release this binary was built from. The build sets it
+// with -ldflags "-X main.version=...", as it does for the operator
+// image. A binary built any other way reports "dev".
 var version = "dev"
 
-// The usage block and the one-line flag descriptions.
 const (
 	usageText = `kubectl liken bluetooth: pair and unpair Bluetooth devices
 
@@ -48,22 +47,20 @@ func main() {
 	}
 }
 
-// run parses the flags and dispatches the verb; it is
-// the whole of the binary's behavior, so a test drives it with its own
+// run parses the flags and runs the verb. Tests call it with their own
 // arguments and streams.
 func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	// The __complete verb answers the shell's completion request;
-	// it runs before the flag parse, because a request carries a partial
-	// flag and a trailing empty word the parser would reject>
+	// The shell sends a completion request as __complete followed by a
+	// partial flag and a trailing empty word. The flag parser would
+	// reject those, so this handles the request before parsing.
 	if len(args) > 0 && args[0] == "__complete" {
 		return runComplete(ctx, args[1:], stdout)
 	}
 
 	flags := pflag.NewFlagSet("kubectl-liken-bluetooth", pflag.ContinueOnError)
 	flags.SetOutput(stderr)
-	// The help prints the verbs and an example first, then the flags,
-	// so a reader learns what the command does before how to call it.
-	// pflag's own usage prints the flags alone, so it is silenced here.
+	// The help prints the verbs and an example before the flags.
+	// pflag's own usage prints only the flags, so this replaces it.
 	flags.Usage = func() {}
 	printHelp := func() {
 		fmt.Fprintln(stderr, usageText)
@@ -75,17 +72,16 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	window := flags.Int("window", 0, windowUsage)
 	force := flags.Bool("force", false, forceUsage)
 
-	// The standard kube flags come from cli-runtime,
-	// and this getter turns them into a REST config; only context,
-	// kubeconfig, and namespace are bound, so the help stays short.
+	// cli-runtime builds the REST config from these flags. Only
+	// kubeconfig, context, and namespace are bound, which keeps the
+	// help short.
 	config := genericclioptions.NewConfigFlags(true)
 	flags.StringVar(config.KubeConfig, "kubeconfig", *config.KubeConfig, kubeconfigUsage)
 	flags.StringVar(config.Context, "context", *config.Context, contextUsage)
 	flags.StringVarP(config.Namespace, "namespace", "n", *config.Namespace, namespaceUsage)
 
 	if err := flags.Parse(args); err != nil {
-		// --help is not a failure. printHelp writes the usage, so the
-		// branch returns no error.
+		// --help exits successfully after it prints the usage.
 		if errors.Is(err, pflag.ErrHelp) {
 			printHelp()
 			return nil
@@ -117,12 +113,12 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case "completion":
 		return completionScript(argAt(positional, 1), stdout)
 	default:
-		return fmt.Errorf("unknown verb %q", positional[0])
+		return fmt.Errorf("unknown verb %q, want pair, unpair, or completion", positional[0])
 	}
 }
 
-// argAt returns the positional argument at index, or an
-// empty string when the caller gave none.
+// argAt returns the positional argument at index, or an empty string
+// when there is none.
 func argAt(positional []string, index int) string {
 	if index < len(positional) {
 		return positional[index]
@@ -130,8 +126,8 @@ func argAt(positional []string, index int) string {
 	return ""
 }
 
-// pick returns the first non-empty of two values, so a
-// flag wins and a positional fills in when the flag is unset.
+// pick returns first, or second when first is empty. The caller
+// passes the flag first, so a flag overrides a positional argument.
 func pick(first, second string) string {
 	if first != "" {
 		return first

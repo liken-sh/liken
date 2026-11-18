@@ -1,20 +1,20 @@
 package main
 
-// The loop's wakes come from the kernel and from bluetoothd, and
-// neither of them reports that somebody created a PairingRequest or
-// approved a device in one. So the operator watches the requests in
-// every namespace, and wakes the loop when a change leaves a request
-// that needs a pass. A new request opens its window, and an approval
-// pairs its device, in the pass that follows the event.
+// Neither the kernel nor bluetoothd reports that someone created a
+// PairingRequest or approved a device in one. So the operator watches
+// the PairingRequests in every namespace, and after each change it
+// wakes the loop when any request needs a pass. The pass that follows
+// opens a new request's pairing window, or pairs an approved device.
 //
-// A finished request needs one more pass, when its TTL is up, and no
-// event marks that moment. So the watcher also keeps a clock, set to
-// the earliest TTL still ahead, and wakes the loop when the clock
-// fires. The clock is a deadline, not a poll: it reads nothing.
+// A finished request needs one more pass when its TTL expires, so the
+// pass can delete it, and no event marks that moment. So the watcher
+// also keeps a timer set to the earliest TTL expiry still in the
+// future. The timer is a deadline and reads nothing from the API
+// server.
 //
-// An open window needs no clock here. The pass that serves the window
-// asks for its own follow-up pass while the window is open, and that
-// pass closes the window at its deadline.
+// An open pairing window needs no timer here, because the pass that
+// serves the window schedules its own next pass until the window's
+// deadline.
 
 import (
 	"context"
@@ -27,13 +27,13 @@ import (
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
-// watchPairingRequests wakes the loop while a request needs attention.
-// The channel closes when the context ends. The store it answers holds
-// every request, and the pass reads it in place of the API server
-// (objectcache.go).
+// watchPairingRequests starts the watch on PairingRequests. It returns
+// the channel of wakes, which closes when the watch ends, and the
+// informer's cache of every request, which the pass reads in place of
+// the API server (objectcache.go).
 func watchPairingRequests(ctx context.Context, client dynamic.Interface, now func() time.Time) (<-chan struct{}, informer.View) {
 	wake := make(chan struct{}, 1)
-	watcher := &requestWatcher{now: now, wake: wake, held: map[string]PairingRequest{}}
+	watcher := &requestWatcher{now: now, wake: wake, requests: map[string]PairingRequest{}}
 	requests := informer.Start(ctx, client, informer.Source{Resource: pairingRequestResource}, informer.Options{Handler: watcher.handler()})
 	go func() {
 		defer close(wake)
@@ -43,22 +43,22 @@ func watchPairingRequests(ctx context.Context, client dynamic.Interface, now fun
 	return wake, requests.View()
 }
 
-// requestWatcher holds the requests the watch reported, and the clock
-// for the next collection. The watch and the clock run on different
-// goroutines, so both go through the lock.
+// requestWatcher keeps the PairingRequests the watch reported, keyed by
+// namespace/name, and the timer for the next TTL expiry. The watch
+// handlers and the timer callback run on different goroutines, so both
+// take mu.
 type requestWatcher struct {
-	mu      sync.Mutex
-	now     func() time.Time
-	wake    chan<- struct{}
-	held    map[string]PairingRequest
-	clock   *time.Timer
-	stopped bool
+	mu       sync.Mutex
+	now      func() time.Time
+	wake     chan<- struct{}
+	requests map[string]PairingRequest
+	timer    *time.Timer
+	stopped  bool
 }
 
-// handler sends each change the informer reports to apply. The
-// informer reports the first read as one addition for each object, and
-// a later read as the difference from what it held, so held follows
-// the collection through every gap in the watch.
+// handler passes each add, update, and delete to apply. After a relist,
+// the informer reports each request that changed or was deleted while
+// the watch was down, so requests stays equal to the collection.
 func (w *requestWatcher) handler() cache.ResourceEventHandler {
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(object any) { w.apply(object, false) },
@@ -67,7 +67,6 @@ func (w *requestWatcher) handler() cache.ResourceEventHandler {
 	}
 }
 
-// apply takes one change from the watch.
 func (w *requestWatcher) apply(object any, deleted bool) {
 	request, err := informer.Convert[PairingRequest](object)
 	if err != nil {
@@ -78,17 +77,18 @@ func (w *requestWatcher) apply(object any, deleted bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if deleted {
-		delete(w.held, requestKey(request))
+		delete(w.requests, requestKey(request))
 	} else {
-		w.held[requestKey(request)] = request
+		w.requests[requestKey(request)] = request
 	}
-	w.look()
+	w.evaluate()
 }
 
-// forget removes a deleted request that did not convert. A tombstone
-// can hold no copy of the request, but its key is namespace/name, the
-// same key held uses. Without this, a removed request would stay in
-// held, and keep waking the loop and setting the clock.
+// forget removes a deleted request that did not convert. A
+// DeletedFinalStateUnknown tombstone can lack the last copy of the
+// request, but its key is namespace/name, the same key as requests.
+// Without forget, a deleted request would stay in requests and keep
+// waking the loop and setting the timer.
 func (w *requestWatcher) forget(object any, deleted bool) {
 	tombstone, ok := object.(cache.DeletedFinalStateUnknown)
 	if !deleted || !ok {
@@ -96,37 +96,37 @@ func (w *requestWatcher) forget(object any, deleted bool) {
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	delete(w.held, tombstone.Key)
-	w.look()
+	delete(w.requests, tombstone.Key)
+	w.evaluate()
 }
 
-// fire is the clock's callback.
 func (w *requestWatcher) fire() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.look()
+	w.evaluate()
 }
 
-// stop ends the clock. The wake channel closes after this, and a clock
-// that fired after the close would send on a closed channel.
+// stop cancels the timer and marks the watcher stopped. The wake
+// channel closes after stop returns, and a timer that fired after the
+// close would panic when it sent on the channel.
 func (w *requestWatcher) stop() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.stopped = true
-	if w.clock != nil {
-		w.clock.Stop()
+	if w.timer != nil {
+		w.timer.Stop()
 	}
 }
 
-// look wakes the loop when a request needs a pass, and sets the clock
-// for the next collection. The caller holds the lock.
-func (w *requestWatcher) look() {
+// evaluate wakes the loop when a request needs a pass, and resets the
+// timer to the next TTL expiry. The caller holds mu.
+func (w *requestWatcher) evaluate() {
 	if w.stopped {
 		return
 	}
 	now := w.now()
-	requests := make([]PairingRequest, 0, len(w.held))
-	for _, request := range w.held {
+	requests := make([]PairingRequest, 0, len(w.requests))
+	for _, request := range w.requests {
 		requests = append(requests, request)
 	}
 	if requestsNeedAPass(requests, now) {
@@ -135,12 +135,12 @@ func (w *requestWatcher) look() {
 		default:
 		}
 	}
-	if w.clock != nil {
-		w.clock.Stop()
-		w.clock = nil
+	if w.timer != nil {
+		w.timer.Stop()
+		w.timer = nil
 	}
-	if due, ok := nextCollection(requests, now); ok {
-		w.clock = time.AfterFunc(due.Sub(now), w.fire)
+	if due, ok := nextExpiry(requests, now); ok {
+		w.timer = time.AfterFunc(due.Sub(now), w.fire)
 	}
 }
 
@@ -148,7 +148,10 @@ func requestKey(request PairingRequest) string {
 	return request.Metadata.Namespace + "/" + request.Metadata.Name
 }
 
-// requestsNeedAPass reports whether any request needs the loop to run.
+// requestsNeedAPass reports whether any request is unfinished, finished
+// with no status.finishedAt, or finished with an expired TTL. The pass
+// serves an unfinished request, writes the missing finish time, or
+// deletes the expired request.
 func requestsNeedAPass(requests []PairingRequest, now time.Time) bool {
 	for _, request := range requests {
 		if !request.Status.finished() {
@@ -162,11 +165,11 @@ func requestsNeedAPass(requests []PairingRequest, now time.Time) bool {
 	return false
 }
 
-// nextCollection answers the earliest moment a finished request's TTL
-// is up, among the moments still ahead of now. A request whose TTL is
-// already up is not counted: requestsNeedAPass wakes the loop for it,
-// and the pass deletes it.
-func nextCollection(requests []PairingRequest, now time.Time) (time.Time, bool) {
+// nextExpiry returns the earliest time after now at which a finished
+// request's TTL expires, and false when there is none. It skips a TTL
+// that has already expired, because requestsNeedAPass wakes the loop
+// for that request.
+func nextExpiry(requests []PairingRequest, now time.Time) (time.Time, bool) {
 	var next time.Time
 	for _, request := range requests {
 		finished := parseTimestamp(request.Status.FinishedAt)

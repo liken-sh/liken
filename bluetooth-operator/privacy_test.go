@@ -1,10 +1,5 @@
 package main
 
-// These tests cover Low Energy privacy on the operator's side: the
-// Adapter's status reports the value bluetoothd started with, and the
-// operator deletes its own pod once when spec.privacy differs from that
-// value, after the bonds are stored, with one PrivacyChanged Event.
-
 import (
 	"io"
 	"os"
@@ -18,19 +13,18 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events/eventstest"
 )
 
-// settingsHolding answers a settings directory whose privacy file holds
-// value, the way bondfetch leaves it.
+// settingsHolding returns a settings directory whose privacy file
+// contains value, as bondfetch writes it.
 func settingsHolding(t *testing.T, value string) string {
 	t.Helper()
 	settings := t.TempDir()
 	if err := os.WriteFile(filepath.Join(settings, "privacy"), []byte(value+"\n"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the privacy file: %v", err)
 	}
 	return settings
 }
 
-// status.privacy is the value in the settings file, and a pod with no
-// file started bluetoothd with privacy off.
+// A pod with no settings file started bluetoothd with privacy off.
 func TestReconcileReportsThePrivacyBluetoothdStartedWith(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -57,9 +51,9 @@ func TestReconcileReportsThePrivacyBluetoothdStartedWith(t *testing.T) {
 	}
 }
 
-// The pass hands on the Adapter and the value in the file, which the
-// restart and the identity store read.
-func TestReconcileHandsOnTheAdapterAndTheStartedPrivacy(t *testing.T) {
+// privacyRestart and the identity store read the Adapter and the
+// started value from the result of the pass.
+func TestReconcileReturnsTheAdapterAndTheStartedPrivacy(t *testing.T) {
 	fixture := newAPIFixture()
 	inventory := testInventory(t, fixture, testRadio(t))
 	inventory.settings = settingsHolding(t, "network")
@@ -67,22 +61,22 @@ func TestReconcileHandsOnTheAdapterAndTheStartedPrivacy(t *testing.T) {
 	pass := inventory.reconcile()
 
 	if pass.adapter == nil || pass.adapter.Metadata.Name != testAdapterName {
-		t.Errorf("adapter = %+v", pass.adapter)
+		t.Errorf("the pass read adapter %+v, want %s", pass.adapter, testAdapterName)
 	}
 	if pass.privacy != "network" {
 		t.Errorf("privacy = %q, want network", pass.privacy)
 	}
 }
 
-// testPod is the operator's own pod, which the restart deletes.
+// The operator's own pod, which privacyRestart deletes.
 const (
 	testPodName = "bluetooth-operator-x7k2p"
 	testPodPath = "/api/v1/namespaces/liken-system/pods/" + testPodName
 )
 
-// restartFixture wires a restart to the fake API server, which holds
-// the operator's pod, and to a fake of the events collection. The
-// caller runs in a synctest bubble.
+// restartFixture returns a privacyRestart connected to a fake API
+// server that holds the operator's pod, and a recorder of the Events
+// it posts. The caller runs in a synctest bubble.
 func restartFixture(t *testing.T) (*privacyRestart, *apiFixture, *eventstest.Events) {
 	t.Helper()
 	fixture := newAPIFixture()
@@ -99,7 +93,8 @@ func restartFixture(t *testing.T) (*privacyRestart, *apiFixture, *eventstest.Eve
 	return restart, fixture, recorded
 }
 
-// adapterWithPrivacy is the test radio's Adapter with spec.privacy set.
+// adapterWithPrivacy returns the test radio's Adapter with
+// spec.privacy set.
 func adapterWithPrivacy(privacy string) *Adapter {
 	return &Adapter{
 		APIVersion: pairingAPI,
@@ -109,7 +104,7 @@ func adapterWithPrivacy(privacy string) *Adapter {
 	}
 }
 
-// deletes counts the requests that deleted the operator's pod.
+// deletes counts the DELETE requests for the operator's pod.
 func deletes(fixture *apiFixture) int {
 	count := 0
 	for _, request := range fixture.requests {
@@ -120,9 +115,8 @@ func deletes(fixture *apiFixture) int {
 	return count
 }
 
-// A field that differs from the file deletes the pod once, with one
-// Event that names both values. A second pass before the pod ends
-// deletes nothing more and posts nothing more.
+// A second pass before the pod stops sends no delete and posts no
+// Event.
 func TestADifferentPrivacyDeletesThePodOnce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		restart, fixture, recorded := restartFixture(t)
@@ -135,13 +129,13 @@ func TestADifferentPrivacyDeletesThePodOnce(t *testing.T) {
 			t.Errorf("the pod was deleted %d times, want once: %v", got, fixture.requests)
 		}
 		assertPosted(t, postedAbout(recorded, adapterKind, testAdapterName),
-			posted{"Normal", reasonPrivacyChanged, "privacy changes from off to device; deleting pod " + testPodName + " so that bluetoothd starts with the new value"},
+			posted{"Normal", reasonPrivacyChanged, "spec.privacy changed from off to device, so the operator is deleting pod " + testPodName + " to start bluetoothd with the new value"},
 		)
 	})
 }
 
-// The restart waits for a pass that stored every bond, because the
-// bonds tree goes with the pod.
+// The bonds directory is deleted with the pod, so the delete waits for
+// a pass that stored every bond.
 func TestThePodStaysUntilTheBondsAreStored(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		restart, fixture, recorded := restartFixture(t)
@@ -149,16 +143,13 @@ func TestThePodStaysUntilTheBondsAreStored(t *testing.T) {
 		restart.apply(adapterWithPrivacy("device"), "off", false)
 
 		if got := deletes(fixture); got != 0 {
-			t.Errorf("the pod was deleted %d times before the bonds were stored", got)
+			t.Errorf("the pod was deleted %d times before the bonds were stored, want 0", got)
 		}
 		assertPosted(t, postedAbout(recorded, adapterKind, testAdapterName))
 	})
 }
 
-// Nothing happens when the field agrees with the file, when the file is
-// absent, or before the pass has read the Adapter. An empty field is
-// off.
-func TestAnAgreeingPrivacyLeavesThePodAlone(t *testing.T) {
+func TestAMatchingPrivacyLeavesThePodAlone(t *testing.T) {
 	cases := []struct {
 		name    string
 		adapter *Adapter
@@ -177,7 +168,7 @@ func TestAnAgreeingPrivacyLeavesThePodAlone(t *testing.T) {
 				restart.apply(c.adapter, c.started, true)
 
 				if got := deletes(fixture); got != 0 {
-					t.Errorf("the pod was deleted %d times", got)
+					t.Errorf("the pod was deleted %d times, want 0", got)
 				}
 				assertPosted(t, postedAbout(recorded, adapterKind, testAdapterName))
 			})
@@ -185,8 +176,6 @@ func TestAnAgreeingPrivacyLeavesThePodAlone(t *testing.T) {
 	}
 }
 
-// A delete that fails is sent again on the next pass, and the Event is
-// not posted again.
 func TestAFailedDeleteIsSentAgainWithNoSecondEvent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		restart, fixture, recorded := restartFixture(t)
@@ -199,10 +188,10 @@ func TestAFailedDeleteIsSentAgainWithNoSecondEvent(t *testing.T) {
 		restart.apply(adapter, "off", true)
 
 		if got := deletes(fixture); got != 2 {
-			t.Errorf("the pod was deleted %d times, want a failed delete and one that landed: %v", got, fixture.requests)
+			t.Errorf("the pod was deleted %d times, want a failed delete and then one that succeeded: %v", got, fixture.requests)
 		}
 		assertPosted(t, postedAbout(recorded, adapterKind, testAdapterName),
-			posted{"Normal", reasonPrivacyChanged, "privacy changes from off to network; deleting pod " + testPodName + " so that bluetoothd starts with the new value"},
+			posted{"Normal", reasonPrivacyChanged, "spec.privacy changed from off to network, so the operator is deleting pod " + testPodName + " to start bluetoothd with the new value"},
 		)
 	})
 }

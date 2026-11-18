@@ -3,15 +3,13 @@
 # Report the buildroot commit that the bluetoothd image builds its
 # static daemons with.
 #
-# bluetoothd/Dockerfile downloads buildroot at the commit in
-# BUILDROOT_COMMIT and checks the tarball against BUILDROOT_SHA256.
-# The two lines copy the pin of liken/userland, whose BR2_EXTERNAL tree
-# the build reads, so the image and the OS build with one buildroot.
-# liken/userland/latest.sh reports that pin and the BlueZ and dbus
-# releases against their upstreams, and its --bump writes both copies.
-# This row reads `behind` when the Dockerfile names another commit
-# than liken/userland/VERSION, and `cd ci && go run . pins -root ..`
-# fails in that case too.
+# `BUILDROOT_COMMIT` and `BUILDROOT_SHA256` in `bluetoothd/Dockerfile`
+# copy the buildroot pin of `liken/userland`, because the image build
+# reads the BR2_EXTERNAL tree of `liken/userland` and must use the same
+# buildroot as the OS. `liken/userland/latest.sh --bump` writes both
+# copies. This row reads `behind` when the Dockerfile's commit differs
+# from `liken/userland/VERSION`, and `cd ci && go run . pins -root ..`
+# fails then too.
 #
 # Usage:
 #   bluetoothd/latest.sh   report the buildroot commit of the image

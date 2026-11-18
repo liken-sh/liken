@@ -1,10 +1,7 @@
 package main
 
-// These tests cover the bond store's outcomes against a test API server
-// and a BlueZ storage tree on disk: create a bond's Secret at the first
-// pairing, update it when the bond changes, write nothing when the two
-// already agree, write nothing for a bond that has no Peripheral to own
-// its Secret, and leave a bond alone while its teardown runs.
+// These tests run the bond store against a fake API server and a BlueZ
+// storage tree on disk, and check which requests the store sends.
 
 import (
 	"encoding/json"
@@ -17,16 +14,15 @@ import (
 	"github.com/liken-sh/liken/bluetooth-operator/bonds"
 )
 
-// testAdapter is the radio these tests pair against. It is the adapter
-// the README's example Secret belongs to.
 const testAdapter = "14:B4:57:91:2F:C8"
 
-// The device these tests pair, and the paths of its Secret.
 const (
 	testDevice      = "A0:AB:51:33:B7:12"
 	testSecretPath  = "/api/v1/namespaces/liken-system/secrets/bluetooth-bond-a0-ab-51-33-b7-12"
 	testSecretsPath = "/api/v1/namespaces/liken-system/secrets"
-	testLegacyPath  = "/api/v1/namespaces/liken-system/secrets/bluetooth-bonds-14-b4-57-91-2f-c8"
+	// testOlderSecretPath is the per-adapter Secret that bondfetch also
+	// reads.
+	testOlderSecretPath = "/api/v1/namespaces/liken-system/secrets/bluetooth-bonds-14-b4-57-91-2f-c8"
 )
 
 func testAdapterAddress(t *testing.T) bonds.Address {
@@ -38,15 +34,16 @@ func testAddress(t *testing.T, literal string) bonds.Address {
 	t.Helper()
 	address, err := bonds.ParseAddress(literal)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the address %q: %v", literal, err)
 	}
 	return address
 }
 
-// bondSecretFixture is a small API server that holds the bond Secrets
-// by name. It remembers the requests it received, and writeStatus
-// makes every write fail. It refuses a create of a Secret it holds and
-// a write from an older version, with 409 Conflict.
+// bondSecretFixture is a fake API server for bond Secrets, keyed by
+// path, that records each request. When writeStatus is not zero, every
+// write fails with that status. It returns 409 Conflict for a create of
+// a Secret that exists and for an update whose resourceVersion differs
+// from the stored one.
 type bondSecretFixture struct {
 	existing    map[string]*bonds.Secret
 	created     *bonds.Secret
@@ -82,8 +79,6 @@ func (f *bondSecretFixture) handler(t *testing.T) http.Handler {
 		case http.MethodPut:
 			updated := &bonds.Secret{}
 			_ = json.NewDecoder(r.Body).Decode(updated)
-			// A write from a version older than the stored one is
-			// refused, the way the API server refuses it.
 			if stored, found := f.existing[r.URL.Path]; found &&
 				stored.Metadata.ResourceVersion != updated.Metadata.ResourceVersion {
 				w.WriteHeader(http.StatusConflict)
@@ -92,13 +87,13 @@ func (f *bondSecretFixture) handler(t *testing.T) http.Handler {
 			f.updated = updated
 			_ = json.NewEncoder(w).Encode(f.updated)
 		default:
-			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			t.Errorf("the fixture received %s %s, which it does not serve", r.Method, r.URL.Path)
 		}
 	})
 }
 
-// storedBond is one bond as the API server already holds it, with the
-// resourceVersion a read returns.
+// storedBond returns one bond's Secret, at resourceVersion 7, for the
+// fixture's existing map.
 func storedBond(t *testing.T, device string, files bonds.Files) map[string]*bonds.Secret {
 	t.Helper()
 	address := testAddress(t, device)
@@ -107,8 +102,6 @@ func storedBond(t *testing.T, device string, files bonds.Files) map[string]*bond
 	return map[string]*bonds.Secret{bonds.BondSecretPath("liken-system", address): secret}
 }
 
-// testTree builds one adapter's bonds out of device addresses and
-// their files.
 func testTree(t *testing.T, devices map[string]bonds.Files) bonds.Tree {
 	t.Helper()
 	tree := bonds.Tree{}
@@ -118,36 +111,31 @@ func testTree(t *testing.T, devices map[string]bonds.Files) bonds.Tree {
 	return tree
 }
 
-// bondTree writes a BlueZ storage tree for the test adapter under a
-// temporary root, and answers with that root. A nil device map still
-// creates the adapter's own directory, which is the state of an
-// adapter whose last device was unpaired.
+// bondTree writes a BlueZ storage tree for the test adapter into a
+// temporary directory. A nil map still creates the adapter's directory,
+// as BlueZ leaves it after the last device is unpaired.
 func bondTree(t *testing.T, devices map[string]bonds.Files) string {
 	t.Helper()
 	root := t.TempDir()
 	if err := bonds.WriteTree(root, testAdapterAddress(t), testTree(t, devices)); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the bond tree: %v", err)
 	}
 	return root
 }
 
-// testBondStore points a store at the fixture's API server and at a
-// storage tree the test owns. The legacy report is marked as already
-// made, because it is one line for a person and not a behavior these
-// tests drive.
+// testBondStore sets reportedOlderSecret so that the older Secret is
+// not looked up, except in the test that checks it.
 func testBondStore(t *testing.T, fixture *bondSecretFixture, root string) *bondStore {
 	t.Helper()
 	return &bondStore{
-		client:         testClient(t, fixture.handler(t)),
-		namespace:      "liken-system",
-		root:           root,
-		relays:         relaysFor(t),
-		reportedLegacy: true,
+		client:              testClient(t, fixture.handler(t)),
+		namespace:           "liken-system",
+		root:                root,
+		relays:              relaysFor(t),
+		reportedOlderSecret: true,
 	}
 }
 
-// testPeripheralOwner is the Peripheral that owns the test device's
-// Secret.
 func testPeripheralOwner() OwnerReference {
 	return OwnerReference{
 		APIVersion: pairingAPI,
@@ -157,8 +145,8 @@ func testPeripheralOwner() OwnerReference {
 	}
 }
 
-// ownedBy names the Peripheral for each of these devices, which is what
-// the inventory pass hands the store.
+// ownedBy returns the owners map for persist, with a Peripheral for
+// each device.
 func ownedBy(t *testing.T, devices ...string) map[bonds.Address]OwnerReference {
 	t.Helper()
 	owners := map[bonds.Address]OwnerReference{}
@@ -170,29 +158,23 @@ func ownedBy(t *testing.T, devices ...string) map[bonds.Address]OwnerReference {
 	return owners
 }
 
-// adapterIs answers with the test adapter, the way bluetoothd's
-// Adapter1 interface does once it has published its object tree.
 func adapterIs(t *testing.T) adapterAddressReader {
 	address := testAdapterAddress(t)
 	return func() (bonds.Address, error) { return address, nil }
 }
 
-// The two files BlueZ writes for a paired controller: the info file
-// under the device's own directory, and the cache entry that holds its
-// SDP records. Nothing here parses either, and these tests use short
-// ones for the same reason the operator does: the bytes travel and
-// their meaning does not.
+// oneBond has the info file and the cache entry, with its SDP records,
+// that BlueZ writes for a paired controller. The operator copies the
+// bytes without parsing them, so the contents are short.
 var oneBond = bonds.Files{
 	Info:  []byte("[General]\nName=DualSense Wireless Controller\nAddressType=public\n"),
 	Cache: []byte("[ServiceRecords]\n0x00010000=35760900000A00010000\n"),
 }
 
-// playerTwo is a second controller, paired and with no cache entry
-// yet. bluetoothd writes the cache entry when it resolves the device's
-// name, so a device holds a bond before it holds SDP records.
+// playerTwo is a second paired controller with no cache entry yet.
 var playerTwo = bonds.Files{Info: []byte("[General]\nName=Player Two\nAddressType=random\n")}
 
-func TestPersistCreatesTheSecretAtTheFirstPeripheral(t *testing.T) {
+func TestPersistCreatesTheSecretOfANewBond(t *testing.T) {
 	fixture := &bondSecretFixture{}
 	store := testBondStore(t, fixture, bondTree(t, map[string]bonds.Files{testDevice: oneBond}))
 
@@ -209,9 +191,6 @@ func TestPersistCreatesTheSecretAtTheFirstPeripheral(t *testing.T) {
 	if secret.Type != bonds.SecretType {
 		t.Errorf("type = %q", secret.Type)
 	}
-	// The label names the radio, which the init container lists by. The
-	// owner is the Peripheral, so deleting it collects the keys when
-	// somebody unpairs the controller.
 	if secret.Metadata.Labels[bonds.AdapterLabel] != "14-b4-57-91-2f-c8" {
 		t.Errorf("labels = %+v", secret.Metadata.Labels)
 	}
@@ -220,25 +199,19 @@ func TestPersistCreatesTheSecretAtTheFirstPeripheral(t *testing.T) {
 		secret.Metadata.OwnerReferences[0].Name != "a0-ab-51-33-b7-12" {
 		t.Errorf("ownerReferences = %+v", secret.Metadata.OwnerReferences)
 	}
-	// Both of the device's files travel, each under its own key. The
-	// cache entry holds the SDP records, and a BR/EDR HID device does
-	// not reconnect without them.
 	if got := string(secret.Data["a0-ab-51-33-b7-12.info"]); got != string(oneBond.Info) {
 		t.Errorf("the info file arrived as %q", got)
 	}
 	if got := string(secret.Data["a0-ab-51-33-b7-12.cache"]); got != string(oneBond.Cache) {
 		t.Errorf("the cache entry arrived as %q", got)
 	}
-	// A create names the collection and a read names the object.
 	want := []string{"GET " + testSecretPath, "POST " + testSecretsPath}
 	if len(fixture.requests) != 2 || fixture.requests[0] != want[0] || fixture.requests[1] != want[1] {
 		t.Errorf("requests = %v, want %v", fixture.requests, want)
 	}
 }
 
-func TestPersistCreatesNothingForAnAdapterThatPairedNothing(t *testing.T) {
-	// A machine that has paired nothing has no bonds to store, and an
-	// empty Secret says nothing that its absence does not.
+func TestPersistCreatesNothingForAnAdapterWithNoBonds(t *testing.T) {
 	fixture := &bondSecretFixture{}
 	store := testBondStore(t, fixture, bondTree(t, nil))
 
@@ -250,12 +223,11 @@ func TestPersistCreatesNothingForAnAdapterThatPairedNothing(t *testing.T) {
 	}
 }
 
-// A device pairs first and gets its cache entry when bluetoothd
-// resolves its name, so the two files can land on different passes.
-// The second file has to reach the Secret on its own: a BR/EDR HID
-// device restored from an info file alone connects and drops again,
-// because the input profile finds no HID SDP record.
-func TestPersistCarriesACacheEntryThatLandsAfterThePeripheral(t *testing.T) {
+// BlueZ writes the cache entry after the info file, so a later pass
+// must copy it with no other change to the bond. A BR/EDR HID device
+// restored from the info file alone connects and then drops, because
+// the input profile finds no HID SDP record.
+func TestPersistWritesACacheEntryThatAppearsAfterThePairing(t *testing.T) {
 	fixture := &bondSecretFixture{existing: storedBond(t, testDevice, bonds.Files{Info: oneBond.Info})}
 	store := testBondStore(t, fixture, bondTree(t, map[string]bonds.Files{testDevice: oneBond}))
 
@@ -268,22 +240,19 @@ func TestPersistCarriesACacheEntryThatLandsAfterThePeripheral(t *testing.T) {
 	if got := string(fixture.updated.Data["a0-ab-51-33-b7-12.cache"]); got != string(oneBond.Cache) {
 		t.Errorf("the cache entry arrived as %q", got)
 	}
-	// The write includes the resourceVersion from the read, so a second
-	// writer gets a conflict instead of losing the first writer's bond.
 	if fixture.updated.Metadata.ResourceVersion != "7" {
 		t.Errorf("resourceVersion = %q", fixture.updated.Metadata.ResourceVersion)
 	}
 }
 
-// The adapter's cache directory holds one entry for every device the
-// radio has resolved a name for, which in a home is the neighbours'
-// phones. A device with no directory of its own is not paired to this
-// adapter, and nothing about it may reach the API.
-func TestPersistCarriesNoCacheEntryForADeviceThatIsNotPaired(t *testing.T) {
+// The adapter's cache directory has an entry for every device whose
+// name the radio resolved, including nearby phones. Nothing about a
+// device with no directory of its own may reach the API server.
+func TestPersistWritesNoCacheEntryForAnUnpairedDevice(t *testing.T) {
 	root := bondTree(t, map[string]bonds.Files{testDevice: oneBond})
 	neighbour := filepath.Join(root, testAdapter, "cache", "E3:28:E9:23:21:6F")
 	if err := os.WriteFile(neighbour, []byte("[General]\nName=Somebody's Phone\n"), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the cache entry of the neighbour: %v", err)
 	}
 	fixture := &bondSecretFixture{}
 	store := testBondStore(t, fixture, root)
@@ -302,24 +271,21 @@ func TestPersistCarriesNoCacheEntryForADeviceThatIsNotPaired(t *testing.T) {
 }
 
 func TestPersistWritesNothingWhenTheBondMatchesTheSecret(t *testing.T) {
-	// bluetoothd rewrites its tree for reasons that change no key, and
-	// the loop passes once a minute with no event at all. A write on
-	// every pass would be a write to the API server on every pass.
+	// bluetoothd rewrites its tree without changing any key, and the
+	// backstop pass runs with no event, so a write on every pass would
+	// send a request each time.
 	fixture := &bondSecretFixture{existing: storedBond(t, testDevice, oneBond)}
 	store := testBondStore(t, fixture, bondTree(t, map[string]bonds.Files{testDevice: oneBond}))
 
 	if !store.persist(adapterIs(t), ownedBy(t, testDevice), nil) {
-		t.Fatal("a steady adapter reported a bond unstored")
+		t.Fatal("persist returned false for an adapter whose bonds match their Secrets, want true")
 	}
 	if fixture.created != nil || fixture.updated != nil {
-		t.Fatalf("a steady adapter wrote to the API: %v", fixture.requests)
+		t.Fatalf("persist wrote to the API for an adapter whose bonds match their Secrets: %v, want no write", fixture.requests)
 	}
 }
 
-// A bond whose Peripheral has not been created yet gets no Secret. An
-// owner reference cannot be added to a Secret that has none, so a
-// Secret written now would be one nothing ever collects.
-func TestPersistWaitsForTheBondToHaveAPeripheral(t *testing.T) {
+func TestPersistSkipsABondWithNoPeripheral(t *testing.T) {
 	fixture := &bondSecretFixture{}
 	store := testBondStore(t, fixture, bondTree(t, map[string]bonds.Files{testDevice: oneBond}))
 
@@ -331,24 +297,23 @@ func TestPersistWaitsForTheBondToHaveAPeripheral(t *testing.T) {
 	}
 }
 
-// A bond under teardown is on its way out. Its Secret is not rewritten,
-// and it is collected with the Peripheral that owns it.
-func TestPersistLeavesABondUnderTeardownAlone(t *testing.T) {
+// The Secret of a bond that is being unpaired is deleted with its
+// Peripheral, so it is not written again.
+func TestPersistLeavesABondBeingUnpairedAlone(t *testing.T) {
 	fixture := &bondSecretFixture{}
 	store := testBondStore(t, fixture, bondTree(t, map[string]bonds.Files{testDevice: oneBond}))
 	unpairing := map[bonds.Address]bool{testAddress(t, testDevice): true}
 
 	if !store.persist(adapterIs(t), ownedBy(t, testDevice), unpairing) {
-		t.Fatal("a teardown reported a bond unstored")
+		t.Fatal("a bond being unpaired reported a bond unstored")
 	}
 	if len(fixture.requests) != 0 {
-		t.Fatalf("a bond under teardown reached the API: %v", fixture.requests)
+		t.Fatalf("a bond being unpaired reached the API: %v", fixture.requests)
 	}
 }
 
-// An unpaired device's Secret is not emptied and not deleted here.
-// Deleting a Peripheral removes a bond, and the Secret goes with the
-// Peripheral through its owner reference.
+// persist does not empty or delete the Secret of a device that has left
+// the tree. The Secret is deleted with its Peripheral.
 func TestPersistWritesNothingForABondThatLeftTheTree(t *testing.T) {
 	fixture := &bondSecretFixture{existing: storedBond(t, testDevice, oneBond)}
 	store := testBondStore(t, fixture, bondTree(t, nil))
@@ -383,10 +348,6 @@ func TestPersistStoresEveryBondOnDisk(t *testing.T) {
 }
 
 func TestPersistReadsTheAdapterAddressOnce(t *testing.T) {
-	// The pod's bondfetch restored one radio's keys, and the operator
-	// persists that radio's tree for the life of the pod. A second read
-	// could answer with a different adapter, whose Secrets this pod
-	// never restored and whose tree is therefore not on this disk.
 	fixture := &bondSecretFixture{}
 	store := testBondStore(t, fixture, bondTree(t, map[string]bonds.Files{testDevice: oneBond}))
 	reads := 0
@@ -406,9 +367,8 @@ func TestPersistReadsTheAdapterAddressOnce(t *testing.T) {
 }
 
 func TestPersistWaitsForBlueZToPublishAnAdapter(t *testing.T) {
-	// bluetoothd publishes its object tree a moment after it claims its
-	// bus name. Until it does, the operator has no way to tell which
-	// radio the bonds on disk belong to.
+	// Until bluetoothd publishes its adapter, the store cannot tell
+	// which radio the bonds on disk belong to.
 	fixture := &bondSecretFixture{}
 	store := testBondStore(t, fixture, bondTree(t, map[string]bonds.Files{testDevice: oneBond}))
 	read := func() (bonds.Address, error) { return bonds.Address{}, ErrNoAdapter }
@@ -422,9 +382,6 @@ func TestPersistWaitsForBlueZToPublishAnAdapter(t *testing.T) {
 }
 
 func TestPersistReportsAFailedWrite(t *testing.T) {
-	// A failed write is logged and reported, and nothing else. The next
-	// trigger or the next backstop pass writes again, and the worst
-	// case is that somebody pairs a controller again.
 	fixture := &bondSecretFixture{writeStatus: http.StatusInternalServerError}
 	store := testBondStore(t, fixture, bondTree(t, map[string]bonds.Files{testDevice: oneBond}))
 
@@ -433,45 +390,40 @@ func TestPersistReportsAFailedWrite(t *testing.T) {
 	}
 }
 
-// The migration leaves the older per-adapter Secret in place and names
-// it once. bondfetch still reads it, so the bonds restore, and a
-// person deletes the object after a drill has shown the controllers
-// reconnecting from the per-bond Secrets.
+// The store logs the older per-adapter Secret once and does not
+// modify it.
 func TestPersistReportsTheOlderPerAdapterSecretAndKeepsIt(t *testing.T) {
 	fixture := &bondSecretFixture{existing: map[string]*bonds.Secret{
-		testLegacyPath: {Metadata: bonds.SecretMeta{Name: "bluetooth-bonds-14-b4-57-91-2f-c8"}},
+		testOlderSecretPath: {Metadata: bonds.SecretMeta{Name: "bluetooth-bonds-14-b4-57-91-2f-c8"}},
 	}}
 	store := testBondStore(t, fixture, bondTree(t, map[string]bonds.Files{testDevice: oneBond}))
-	store.reportedLegacy = false
+	store.reportedOlderSecret = false
 
 	if !store.persist(adapterIs(t), ownedBy(t, testDevice), nil) {
 		t.Fatal("the pass reported the bond unstored")
 	}
-	if !store.reportedLegacy {
+	if !store.reportedOlderSecret {
 		t.Error("the older Secret was not reported")
 	}
 	for _, request := range fixture.requests {
-		if strings.HasSuffix(request, testLegacyPath) && !strings.HasPrefix(request, "GET ") {
-			t.Errorf("the migration wrote to the older Secret: %v", fixture.requests)
+		if strings.HasSuffix(request, testOlderSecretPath) && !strings.HasPrefix(request, "GET ") {
+			t.Errorf("persist wrote to the older per-adapter Secret: %v, want it unchanged", fixture.requests)
 		}
 	}
 
-	// The second pass reads it no more, because the report is for a
-	// person and not a state to watch.
 	fixture.requests = nil
 	if !store.persist(adapterIs(t), ownedBy(t, testDevice), nil) {
 		t.Fatal("the second pass reported the bond unstored")
 	}
 	for _, request := range fixture.requests {
-		if strings.HasSuffix(request, testLegacyPath) {
+		if strings.HasSuffix(request, testOlderSecretPath) {
 			t.Errorf("the older Secret was read again: %v", fixture.requests)
 		}
 	}
 }
 
-// The snapshot travels with the bond. It is written on the pass after
-// the controller first connects, and the next pod creates the same
-// virtual nodes from it before the controller connects again.
+// The next pod creates the controller's virtual nodes from the stored
+// snapshot before the controller connects again.
 func TestPersistWritesTheEvdevSnapshot(t *testing.T) {
 	fixture := &bondSecretFixture{}
 	store := testBondStore(t, fixture, bondTree(t, map[string]bonds.Files{testDevice: oneBond}))
@@ -491,9 +443,8 @@ func TestPersistWritesTheEvdevSnapshot(t *testing.T) {
 	}
 }
 
-// A bond whose files and snapshot both agree with the Secret is not
-// written again. The loop wakes on every uevent, and a rewrite on each
-// one would be a write for every press.
+// The loop wakes on every uevent, so a rewrite of a bond that already
+// matches would send a request for every button press.
 func TestPersistWritesNothingWhenTheSnapshotAlreadyAgrees(t *testing.T) {
 	snapshot := storedCapabilities(t)
 	address := testAddress(t, testDevice)
@@ -514,17 +465,18 @@ func TestPersistWritesNothingWhenTheSnapshotAlreadyAgrees(t *testing.T) {
 	}
 }
 
-// At startup the stored snapshots create every bonded controller's
-// virtual devices, so a claim is prepared before anything connects.
+// The stored snapshots create the virtual devices of every bonded
+// controller at startup, so a claim can be prepared before any
+// controller connects.
 func TestRestoreCreatesTheVirtualDevicesFromTheStoredSnapshots(t *testing.T) {
 	list := bonds.SecretList{Items: []bonds.Secret{
 		*bonds.NewBondSecret("liken-system", testAdapterAddress(t), testAddress(t, testDevice),
 			oneBond, storedCapabilities(t), bondOwner(testPeripheralOwner())),
 	}}
-	asked := ""
+	requested := ""
 	store := &bondStore{
 		client: testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			asked = r.URL.Path + "?" + r.URL.RawQuery
+			requested = r.URL.Path + "?" + r.URL.RawQuery
 			writeJSON(t, w, list)
 		})),
 		namespace: "liken-system",
@@ -536,10 +488,10 @@ func TestRestoreCreatesTheVirtualDevicesFromTheStoredSnapshots(t *testing.T) {
 	if nodes := store.relays.virtualNodes("a0:ab:51:33:b7:12"); len(nodes) != 1 {
 		t.Fatalf("virtual nodes = %v, want one", nodes)
 	}
-	// The list is scoped by the label every bond Secret carries, so a
-	// second radio's bonds are not restored into this pod's relays.
+	// The adapter label keeps another radio's bonds out of this pod's
+	// relays.
 	want := testSecretsPath + "?labelSelector=bluetooth.liken.sh%2Fadapter%3D14-b4-57-91-2f-c8"
-	if asked != want {
-		t.Errorf("listed %q, want %q", asked, want)
+	if requested != want {
+		t.Errorf("listed %q, want %q", requested, want)
 	}
 }

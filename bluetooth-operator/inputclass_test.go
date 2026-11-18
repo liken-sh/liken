@@ -1,16 +1,11 @@
 package main
 
-// These tests prove that a node's classes are the ID_INPUT_*
-// properties udev would set on it. Each case is a real device's
-// bitmaps, and the expected classes are what `udevadm info` reports
-// for that device.
-
 import (
 	"testing"
 )
 
-// codeRange lists every code from first to last, which is how a
-// keyboard's block of KEY_* codes reads in a bitmap.
+// codeRange returns every code from first through last, as the bitmap
+// of a keyboard's block of KEY_* codes.
 func codeRange(first, last uint16) []uint16 {
 	codes := make([]uint16, 0, last-first+1)
 	for code := first; code <= last; code++ {
@@ -20,7 +15,7 @@ func codeRange(first, last uint16) []uint16 {
 }
 
 // The gamepad node of a DualSense as hid-playstation registers it:
-// fifteen buttons, two sticks, two triggers, and the hat.
+// buttons, two sticks, two triggers, and the hat.
 func dualSenseGamepad() evdevCapabilities {
 	return evdevCapabilities{
 		Name: "Wireless Controller",
@@ -33,8 +28,9 @@ func dualSenseGamepad() evdevCapabilities {
 	}
 }
 
-// The motion node of a DualSense. Its codes are the same ABS_X to
-// ABS_RZ a stick uses; the accelerometer property is what marks it.
+// The motion node of a DualSense. Its axis codes are the same ABS_X to
+// ABS_RZ that a stick uses, and the accelerometer property is what
+// identifies it.
 func dualSenseMotion() evdevCapabilities {
 	return evdevCapabilities{
 		Name:       "Wireless Controller Motion Sensors",
@@ -47,8 +43,8 @@ func dualSenseMotion() evdevCapabilities {
 	}
 }
 
-// The touchpad node of a DualSense: two contacts in the multi-touch
-// protocol, a click button, and the finger tool.
+// The touchpad node of a DualSense: multi-touch axes, a click button,
+// and the finger tool.
 func dualSenseTouchpad() evdevCapabilities {
 	return evdevCapabilities{
 		Name: "Wireless Controller Touchpad",
@@ -82,8 +78,7 @@ func TestNodeInputClasses(t *testing.T) {
 			want: classTouchpad,
 		},
 		{
-			// The first 32 key codes make a node a keyboard, and not
-			// only a node that carries some keys.
+			// Codes 1 through 31 make a node a keyboard.
 			name: "a keyboard",
 			caps: evdevCapabilities{
 				Name: "Bluetooth Keyboard",
@@ -107,8 +102,8 @@ func TestNodeInputClasses(t *testing.T) {
 			want: classMouse,
 		},
 		{
-			// One node that both types and points, which is what a
-			// remote with a gyroscopic cursor registers.
+			// One node that both types and points, as a remote with a
+			// gyroscopic cursor registers.
 			name: "an air mouse",
 			caps: evdevCapabilities{
 				Name: "Air Remote",
@@ -121,8 +116,8 @@ func TestNodeInputClasses(t *testing.T) {
 			want: classKey | classMouse,
 		},
 		{
-			// A touchscreen with one contact and no multi-touch
-			// protocol is a touchscreen.
+			// A single-touch screen with no multi-touch axes is still a
+			// touchscreen.
 			name: "a single-touch touchscreen",
 			caps: evdevCapabilities{
 				Name:       "Touchscreen",
@@ -146,8 +141,8 @@ func TestNodeInputClasses(t *testing.T) {
 			want: classTablet,
 		},
 		{
-			// A tablet's pad node: its own buttons and ring, beside
-			// the pen node of the same tablet.
+			// A tablet's pad node, which has its own buttons and ring and
+			// is separate from the tablet's pen node.
 			name: "a tablet pad",
 			caps: evdevCapabilities{
 				Name: "Graphics Tablet Pad",
@@ -167,8 +162,7 @@ func TestNodeInputClasses(t *testing.T) {
 			want: classSwitch,
 		},
 		{
-			// There is no mouse on the i2c bus, so udev reads one as
-			// the pointing stick between a laptop's keys.
+			// udev classes a mouse on the I2C bus as a pointing stick.
 			name: "a pointing stick",
 			caps: evdevCapabilities{
 				Name: "TrackPoint",
@@ -181,7 +175,6 @@ func TestNodeInputClasses(t *testing.T) {
 			want: classMouse | classPointingStick,
 		},
 		{
-			// A node that carries only a scroll wheel is a key device.
 			name: "a node with only a wheel",
 			caps: evdevCapabilities{
 				Name:  "Volume Wheel",
@@ -190,8 +183,8 @@ func TestNodeInputClasses(t *testing.T) {
 			want: classKey,
 		},
 		{
-			// Some keyboards set a stray joystick button; the
-			// well-known keys tell them apart.
+			// The well-known keyboard keys clear the stray joystick
+			// button.
 			name: "a keyboard with a stray joystick button",
 			caps: evdevCapabilities{
 				Name: "Media Keyboard",
@@ -202,8 +195,6 @@ func TestNodeInputClasses(t *testing.T) {
 			want: classKey | classKeyboard,
 		},
 		{
-			// A node with no capability this operator reads carries no
-			// class.
 			name: "a node with nothing on it",
 			caps: evdevCapabilities{Name: "Empty"},
 			want: 0,
@@ -212,7 +203,7 @@ func TestNodeInputClasses(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := nodeInputClasses(c.caps); got != c.want {
-				t.Errorf("classes = %s, want %s", got, c.want)
+				t.Errorf("nodeInputClasses is %s, want %s", got, c.want)
 			}
 		})
 	}

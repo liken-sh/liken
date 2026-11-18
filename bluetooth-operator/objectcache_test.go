@@ -1,9 +1,8 @@
 package main
 
-// These tests count the requests an inventory pass sends when it reads
-// the Adapters, the Peripherals, and the PairingRequests from the
-// watches' stores, and cover each write from a copy in a store that is
-// older than the API server's.
+// These tests count the requests that an inventory pass sends when it
+// reads from the watch stores, and check the writes that a pass makes
+// from a store copy older than the API server's.
 
 import (
 	"encoding/json"
@@ -18,10 +17,9 @@ import (
 	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
-// storeOf is a store that holds the fixture's objects of one kind as
-// they are now, the way a watch's store holds them once the watch has
-// delivered every write. The store holds copies, so a later write to
-// the fixture leaves the store older than the API server.
+// storeOf returns a ready store with copies of the fixture's objects of
+// one kind. A later write to the fixture leaves the store's copy older
+// than the API server's.
 func storeOf(t *testing.T, fixture *apiFixture, kind string) informer.View {
 	t.Helper()
 	store := cache.NewStore(cache.MetaNamespaceKeyFunc)
@@ -32,23 +30,23 @@ func storeOf(t *testing.T, fixture *apiFixture, kind string) informer.View {
 		}
 		raw, err := json.Marshal(object)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("encoding the %s object: %v", kind, err)
 		}
 		item := &unstructured.Unstructured{}
 		if err := item.UnmarshalJSON(raw); err != nil {
-			t.Fatal(err)
+			t.Fatalf("decoding the %s object: %v", kind, err)
 		}
 		if err := store.Add(item); err != nil {
-			t.Fatal(err)
+			t.Fatalf("adding the %s object to the store: %v", kind, err)
 		}
 	}
 	return informer.View{Store: store, Synced: func() bool { return true }}
 }
 
-// cacheOf is the three stores of an inventory, holding what the
-// fixture holds now. The Peripheral store is the one for radio. The
-// stores carry no memo, so every copy in them counts as current, the
-// way a copy that another writer changed since does.
+// cacheOf returns an objectCache whose stores hold the fixture's
+// objects as they are now, with the Peripheral store selected for radio.
+// It sets no memo, so the pass treats every store copy as current, even
+// after the fixture changes.
 func cacheOf(t *testing.T, fixture *apiFixture, radio string) objectCache {
 	t.Helper()
 	peripherals := &followedView{}
@@ -60,8 +58,8 @@ func cacheOf(t *testing.T, fixture *apiFixture, radio string) objectCache {
 	}
 }
 
-// sent answers the requests of one method among the requests the
-// fixture received, and forgets every request.
+// sent returns the requests of one method that the fixture received,
+// and clears the fixture's list of requests.
 func sent(fixture *apiFixture, method string) []string {
 	var matched []string
 	for _, request := range fixture.requests {
@@ -73,19 +71,19 @@ func sent(fixture *apiFixture, method string) []string {
 	return matched
 }
 
-// finishedRequest is a request that paired its device a moment ago, so
-// a pass lists it and has nothing to do with it.
+// finishedRequest returns a request that has paired its device, so a
+// pass lists it and takes no action on it.
 func finishedRequest() *PairingRequest {
 	request := openRequest(testDevice)
 	request.Status = PairingRequestStatus{Phase: phasePaired, FinishedAt: timestamp(testNow)}
 	return request
 }
 
-// A settled pass reads the Adapter, lists the Adapters, the
-// Peripherals, and the PairingRequests, and writes nothing. From the
-// API server that is four reads, and from the stores it is none. The
-// Peripheral store follows the radio, and a store that holds another
-// radio's Peripherals is not read.
+// A pass that changes nothing reads the Adapter and lists the Adapters,
+// the Peripherals, and the PairingRequests. That is four GET requests
+// against the API server and none against the stores. A Peripheral
+// store selected for another radio is not used, so the pass sends one
+// GET to list the Peripherals.
 func TestAPassFromTheStoresSendsNoRead(t *testing.T) {
 	for _, c := range []struct {
 		name  string
@@ -107,7 +105,7 @@ func TestAPassFromTheStoresSendsNoRead(t *testing.T) {
 			fixture.requests = nil
 
 			if pass := inventory.reconcile(); !pass.ok {
-				t.Fatal("the settled pass failed")
+				t.Fatal("the reconcile pass of settled state reported a failure")
 			}
 			if reads := sent(fixture, http.MethodGet); len(reads) != c.want {
 				t.Errorf("the pass sent %d reads, want %d: %v", len(reads), c.want, reads)
@@ -116,31 +114,32 @@ func TestAPassFromTheStoresSendsNoRead(t *testing.T) {
 	}
 }
 
-// A store's copy of an Adapter can be older than this operator's own
-// last status write. The write from it is refused, and the pass reads
-// the Adapter again and writes once more, so the status lands.
-func TestAnAdapterStatusFromAnOlderCopyReadsAgainAndLands(t *testing.T) {
+// When the store's Adapter is older than the API server's, the API
+// server refuses the status write with a conflict. The pass then reads
+// the Adapter again and writes the status to the fresh copy.
+func TestAnAdapterStatusFromAnOlderCopyIsWrittenAfterReadingAgain(t *testing.T) {
 	fixture := newAPIFixture()
 	radio := testRadio(t, pairedDevice(t, testDevice))
 	inventory := testInventory(t, fixture, radio)
 	inventory.reconcile()
 	inventory.cache = cacheOf(t, fixture, testAdapterName)
-	// A write the store has not delivered.
+	// Write the Adapter again to move its resourceVersion past the
+	// store's copy.
 	fixture.put(t, testAdapterObjectPath(), read[Adapter](t, fixture, testAdapterObjectPath()))
 	radio.snapshot.Adapter.Powered = false
 
 	if pass := inventory.reconcile(); !pass.ok {
-		t.Fatal("the pass failed")
+		t.Fatal("the reconcile pass reported a failure")
 	}
 	if adapter := read[Adapter](t, fixture, testAdapterObjectPath()); adapter.Status.Powered {
-		t.Error("the status that the radio powered off did not land")
+		t.Error("the Adapter status still shows powered, want unpowered after the radio powered off")
 	}
 }
 
-// The release reads a departed Adapter again after a conflict. It
-// leaves the Adapter when the fresh copy names another node, because
-// that node adopted the radio since the store's copy, and releases it
-// when the fresh copy is still this node's.
+// When removing a departed Adapter's finalizer fails with a conflict,
+// the pass reads the Adapter again. It removes the finalizer only when
+// the fresh copy still has this node in status.node, because another
+// node may have adopted the radio.
 func TestTheReleaseRechecksAnAdapterAfterAConflict(t *testing.T) {
 	const departed = "00-1a-7d-da-71-13"
 	for _, c := range []struct {
@@ -164,18 +163,18 @@ func TestTheReleaseRechecksAnAdapterAfterAConflict(t *testing.T) {
 
 			inventory.releaseDepartedAdapters(testAdapterAddress(t))
 
-			_, held := fixture.objects[adapterPath(departed)]
-			if released := !held; released != c.wantReleased {
+			_, exists := fixture.objects[adapterPath(departed)]
+			if released := !exists; released != c.wantReleased {
 				t.Errorf("the Adapter was released: %t, want %t", released, c.wantReleased)
 			}
 		})
 	}
 }
 
-// A store's copy of a Peripheral can be older than this operator's own
-// last status write. A drop the pass wrote from one copy is counted
-// once, and a later pass from the same older copy reads the Peripheral
-// again, finds the drop written, and counts nothing more.
+// The second pass writes the disconnect and counts it. The third pass
+// starts from the same store copy, which is now older than that write,
+// so its status write fails with a conflict. It reads the Peripheral
+// again, finds the disconnect already written, and does not count it.
 func TestAnOlderCopyNeverCountsADisconnectTwice(t *testing.T) {
 	fixture := newAPIFixture()
 	radio := testRadio(t, pairedDevice(t, testDevice))
@@ -194,14 +193,14 @@ func TestAnOlderCopyNeverCountsADisconnectTwice(t *testing.T) {
 	}
 	peripheral := read[Peripheral](t, fixture, testPeripheralPath())
 	if peripheral.Status.Bond.Connected {
-		t.Error("the drop did not land")
+		t.Error("the Peripheral status still shows connected, want disconnected after the radio dropped the connection")
 	}
 }
 
-// The teardown reads the Peripheral from the API server. The store can
-// still hold a Peripheral whose finalizer this operator released, and a
-// teardown from that copy would retire a device that no Peripheral
-// names.
+// The store can still hold a Peripheral after the operator removed its
+// finalizer. The teardown reads the Peripheral from the API server, so
+// it does not remove a device that no Peripheral refers to from the
+// slice.
 func TestATeardownFromTheCopyOfAReleasedPeripheralDoesNothing(t *testing.T) {
 	fixture := newAPIFixture()
 	device := pairedDevice(t, testDevice)
@@ -214,16 +213,16 @@ func TestATeardownFromTheCopyOfAReleasedPeripheralDoesNothing(t *testing.T) {
 
 	pass := inventory.reconcile()
 
-	if len(pass.keepOut) != 0 || len(pass.unpairing) != 0 {
-		t.Errorf("the pass tore down a Peripheral that is gone: keepOut %v, unpairing %v", pass.keepOut, pass.unpairing)
+	if len(pass.excluded) != 0 || len(pass.unpairing) != 0 {
+		t.Errorf("the pass tore down a Peripheral that is gone, want no teardown: keepOut %v, unpairing %v", pass.excluded, pass.unpairing)
 	}
 }
 
-// A request's status from an older copy is refused. When the API
-// server holds the status the pass composed from, a spec edit made the
-// conflict, and the status lands on the fresh copy. When it holds a
-// newer status, which is this operator's own last write, the pass
-// writes nothing, and the follow-up pass composes from the newer one.
+// A request status write from an older copy fails with a conflict.
+// When the API server's copy still has the status the pass started
+// from, a spec edit caused the conflict, and the pass writes its status
+// to the fresh copy. When the API server's copy has a different status,
+// the pass writes nothing and asks for another pass.
 func TestARequestStatusFromAnOlderCopy(t *testing.T) {
 	for _, c := range []struct {
 		name      string
@@ -250,18 +249,17 @@ func TestARequestStatusFromAnOlderCopy(t *testing.T) {
 				t.Errorf("the request's phase = %q, want %q", got, c.wantPhase)
 			}
 			if pass.again == 0 {
-				t.Error("the pass asked for no follow-up pass")
+				t.Error("the pass scheduled no follow-up pass, want one")
 			}
 		})
 	}
 }
 
-// A list before the PairingRequest watch finished its first read comes
-// from the API server. The store can then become ready at an older
-// copy, because the watch's first read can come from the API server's
-// watch cache. The next list must not answer that older copy: a pass
-// that read a finished request from the first list would read the copy
-// from before it finished, and open the pairing window again.
+// A list before the PairingRequest store is ready comes from the API
+// server. The store can then become ready with an older copy, because
+// the API server can serve the watch's first list from its watch cache.
+// If the next list returned that copy, a pass would see a finished
+// request as unfinished and open the pairing window again.
 func TestAListBeforeTheStoreIsReadyIsNeverReadOlder(t *testing.T) {
 	fixture := newAPIFixture()
 	fixture.put(t, testRequestPath(), openRequest(""))
@@ -283,11 +281,9 @@ func TestAListBeforeTheStoreIsReadyIsNeverReadOlder(t *testing.T) {
 	}
 }
 
-// The store can still hold a request as it was before this operator
-// paired its device. The operator remembers the version its own write
-// produced, reads the request from the API server instead of the
-// store's older copy, and does not open the pairing window again for a
-// request that is finished.
+// The memo records the version of the operator's own status write, so
+// the next pass reads the paired request from the API server instead of
+// the store's older copy, and does not open the pairing window again.
 func TestAPassDoesNotActOnACopyOlderThanItsOwnWrite(t *testing.T) {
 	fixture := newAPIFixture()
 	fixture.put(t, testRequestPath(), openRequest(testDevice))
@@ -297,7 +293,7 @@ func TestAPassDoesNotActOnACopyOlderThanItsOwnWrite(t *testing.T) {
 	inventory.cache.requests.Versions = memo.New()
 	inventory.reconcile()
 	if request := read[PairingRequest](t, fixture, testRequestPath()); request.Status.Phase != phasePaired {
-		t.Fatalf("the first pass left the request %q", request.Status.Phase)
+		t.Fatalf("after the first pass the request phase is %q, want %q", request.Status.Phase, phasePaired)
 	}
 
 	radio.calls = nil
@@ -305,7 +301,7 @@ func TestAPassDoesNotActOnACopyOlderThanItsOwnWrite(t *testing.T) {
 
 	for _, call := range radio.calls {
 		if strings.HasPrefix(call, "OpenWindow") {
-			t.Fatalf("the pass opened the window again for a paired request: %v", radio.calls)
+			t.Fatalf("the pass opened the pairing window again for a paired request: %v", radio.calls)
 		}
 	}
 }

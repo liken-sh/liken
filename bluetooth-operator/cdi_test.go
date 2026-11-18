@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// cdiTempDir points the CDI writer at a directory the test owns.
+// cdiTempDir sets cdiDir to a temporary directory for the test.
 func cdiTempDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -21,19 +21,18 @@ func readSpec(t *testing.T, path string) cdiSpec {
 	t.Helper()
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the spec file: %v", err)
 	}
 	var spec cdiSpec
 	if err := json.Unmarshal(raw, &spec); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the spec file: %v", err)
 	}
 	return spec
 }
 
-// prepareClaim writes the CDI spec file the DRA plugin writes when the
-// kubelet prepares a claim on a device. The file's presence records
-// that a consumer still holds the device, and the paths in it record
-// which nodes that consumer received.
+// prepareClaim writes the spec file that prepare writes for a claim,
+// so the code under test finds a consumer that holds the device
+// through these nodes.
 func prepareClaim(t *testing.T, claimUID, device string, nodes ...string) {
 	t.Helper()
 	spec := cdiSpec{Version: "0.6.0", Kind: cdiKind, Devices: []cdiDevice{{
@@ -42,10 +41,10 @@ func prepareClaim(t *testing.T, claimUID, device string, nodes ...string) {
 	}}}
 	raw, err := json.Marshal(&spec)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("encoding the spec file: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(cdiDir, cdiPrefix+claimUID+".json"), raw, 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the spec file: %v", err)
 	}
 }
 
@@ -58,30 +57,26 @@ func TestWriteAndRemoveCDISpec(t *testing.T) {
 		ContainerEdits: cdiEdits{DeviceNodes: deviceNodes([]string{"/dev/input/event5"})},
 	}})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the CDI spec: %v", err)
 	}
 
-	// The file name starts with this driver's prefix, so liken's own specs
-	// in the same directory never collide with these.
 	path := filepath.Join(dir, "bluetooth.liken.sh-"+uid+".json")
 	spec := readSpec(t, path)
 	if spec.Kind != "bluetooth.liken.sh/controller" {
-		t.Errorf("kind = %q", spec.Kind)
+		t.Errorf("the spec kind is %q, want bluetooth.liken.sh/controller", spec.Kind)
 	}
 	if spec.Devices[0].ContainerEdits.DeviceNodes[0].Path != "/dev/input/event5" {
-		t.Errorf("node = %+v", spec.Devices[0].ContainerEdits.DeviceNodes)
+		t.Errorf("the device nodes are %+v, want /dev/input/event5 first", spec.Devices[0].ContainerEdits.DeviceNodes)
 	}
 
 	if err := removeCDISpec(uid); err != nil {
-		t.Fatal(err)
+		t.Fatalf("removing the CDI spec: %v", err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatal("the spec file is still there")
+		t.Fatal("the spec file still exists after the remove, want it deleted")
 	}
-	// Unprepare must be idempotent: the kubelet repeats it whenever it
-	// has no record that the call succeeded.
 	if err := removeCDISpec(uid); err != nil {
-		t.Fatalf("a repeated remove failed: %v", err)
+		t.Fatalf("removing the CDI spec a second time: %v", err)
 	}
 }
 
@@ -99,21 +94,18 @@ func TestClaimUIDFromSpecName(t *testing.T) {
 	for _, c := range cases {
 		uid, ok := claimUIDFromSpecName(c.name)
 		if ok != c.ok || (ok && uid != c.uid) {
-			t.Errorf("claimUIDFromSpecName(%q) = %q, %v; want %q, %v", c.name, uid, ok, c.uid, c.ok)
+			t.Errorf("claimUIDFromSpecName(%q) = %q, %v, want %q, %v", c.name, uid, ok, c.uid, c.ok)
 		}
 	}
 }
 
-// The container runtime validates a spec file against the CDI schema
-// and refuses one with a field the schema does not name, which leaves
-// the consumer's pod unable to start. A device entry may carry only
-// the schema's own fields, with this driver's record under
-// annotations.
+// The container runtime rejects a spec with a field outside the CDI
+// schema, and then the consumer's pod cannot start.
 func TestADeviceEntryCarriesOnlyTheSchemasFields(t *testing.T) {
 	device := cdiDevice{
 		Name:           "claim-controller",
 		ContainerEdits: cdiEdits{DeviceNodes: deviceNodes([]string{"/dev/input/event8"})},
-		Annotations:    annotateDelivery([]string{"joystick", "key"}, "ABS_RX=4:"),
+		Annotations:    cdiAnnotations([]string{"joystick", "key"}, "ABS_RX=4:"),
 	}
 	encoded, err := json.Marshal(device)
 	if err != nil {
@@ -138,11 +130,8 @@ func TestADeviceEntryCarriesOnlyTheSchemasFields(t *testing.T) {
 	}
 }
 
-// A claim that asks for nothing beyond the default leaves the device
-// unannotated, so a spec file this driver wrote before these
-// parameters existed reads back the same way.
 func TestADeviceEntryCarriesNoAnnotationForTheDefault(t *testing.T) {
-	device := cdiDevice{Name: "claim-controller", Annotations: annotateDelivery(nil, "")}
+	device := cdiDevice{Name: "claim-controller", Annotations: cdiAnnotations(nil, "")}
 	if device.Annotations != nil {
 		t.Errorf("annotations = %v, want none", device.Annotations)
 	}

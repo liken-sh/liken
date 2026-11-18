@@ -1,12 +1,11 @@
 package main
 
-// The virtual input device, which is what a claim on a controller
-// delivers. The kernel's uinput interface creates an evdev node from a
-// description of what the device can do, and holds the node for as
-// long as the fd stays open. This file and evdev.go are the whole of
-// what the operator asks the kernel's input layer for, behind the
-// inputKernel interface, so the relay's policy is testable with no
-// /dev/uinput.
+// A claim on a controller gives the pod a virtual input device that
+// this operator creates through uinput. The kernel creates an evdev
+// node from the device's capabilities and removes it when the uinput fd
+// closes. This file and evdev.go make every call into the kernel's
+// input layer, behind the inputKernel interface, so the tests of
+// relay.go run without /dev/uinput.
 
 import (
 	"fmt"
@@ -18,51 +17,45 @@ import (
 	"unsafe"
 )
 
-// uinputPath is the kernel's uinput interface, and deliveredInputNodes
-// is how many evdev nodes liken's adapter claim creates in this
-// container: /dev/input/event0 through event31, char 13 minors 64
-// through 95. A virtual device that lands above that number has no
-// node inside the container.
+// The adapter claim of this operator's pod creates /dev/input/event0
+// through event31 in the container (deploy/operator.yaml).
+// containerInputNodes is the size of that range. A virtual device that
+// the kernel numbers above event31 has no node in the container.
 const (
 	uinputPath          = "/dev/uinput"
-	deliveredInputNodes = 32
+	containerInputNodes = 32
 )
 
-// inputKernel is every call this operator makes into the kernel's
-// input layer. relay.go holds the policy and takes one of these, so a
-// test drives the policy with no kernel at all.
+// inputKernel is implemented by linuxInput and by a fake in the tests.
 type inputKernel interface {
 	readCapabilities(path string) (evdevCapabilities, error)
 	open(path string) (realNode, error)
 	createVirtual(caps evdevCapabilities, phys string) (virtualDevice, error)
 }
 
-// realNode is one open evdev node of a controller. It carries the
-// narrowing as well as the read, because what a claim asks for is
-// actuated on the node's own fd and nowhere else.
+// realNode is one open evdev node of a controller. The mask and axis
+// calls are methods of the node because the kernel applies them to the
+// fd they are sent on.
 type realNode interface {
 	io.ReadCloser
-	narrow(masks []eventMask) error
+	setMasks(masks []eventMask) error
 	axisRange(code uint16) (absInfo, error)
 	setAxisRange(code uint16, info absInfo) error
 }
 
-// virtualDevice is one uinput device this operator holds open. The
-// node exists for as long as the fd does, which is the whole reason
-// the relay exists.
+// virtualDevice is one uinput device. The operator keeps its fd open
+// for as long as a pod needs the node.
 type virtualDevice interface {
 	node() string
 	write(events []byte) error
 	close() error
 }
 
-// uinputMaxNameSize is UINPUT_MAX_NAME_SIZE, the fixed field a
-// device's name goes in.
+// uinputMaxNameSize is UINPUT_MAX_NAME_SIZE, the size of the name field.
 const uinputMaxNameSize = 80
 
-// The two structures uinput takes, with the layout of their
-// counterparts in linux/uinput.h. UI_DEV_SETUP describes the device,
-// and UI_ABS_SETUP gives one absolute axis its range.
+// struct uinput_setup and struct uinput_abs_setup from linux/uinput.h,
+// the arguments of UI_DEV_SETUP and UI_ABS_SETUP.
 type (
 	uinputSetup struct {
 		ID           inputID
@@ -76,10 +69,9 @@ type (
 	}
 )
 
-// The uinput writes, in the order a device is built: declare the
-// capabilities, describe the axes, name the device, then create it.
-// UI_SET_PHYS takes a pointer to a C string, so its size is a
-// pointer's, which is what the kernel's own macro spells.
+// The uinput ioctl numbers from linux/uinput.h. UI_SET_PHYS takes a
+// pointer to a C string, so its size is the size of a pointer, as in
+// the kernel's macro.
 var (
 	uiDevCreate  = ioc(iocNone, 0, uinputLetter, 1)
 	uiDevDestroy = ioc(iocNone, 0, uinputLetter, 2)
@@ -98,28 +90,20 @@ var (
 	uiSetPhys = ioc(iocWrite, uint32(unsafe.Sizeof(uintptr(0))), uinputLetter, 108)
 )
 
-// uiSetBit builds one of the UI_SET_*BIT numbers. Every one of them
-// declares an int argument, and the kernel reads the value itself
-// rather than a pointer to it.
+// uiSetBit returns a UI_SET_*BIT number. The kernel reads the int
+// argument as a value, not as a pointer.
 func uiSetBit(number uint32) uint32 {
 	return ioc(iocWrite, uint32(unsafe.Sizeof(int32(0))), uinputLetter, number)
 }
 
 func uiGetSysname(size uint32) uint32 { return ioc(iocRead, size, uinputLetter, 44) }
 
-// linuxInput is the kernel itself.
 type linuxInput struct{}
 
-// createVirtual builds one uinput device from a capability snapshot
-// and holds it open.
-//
-// The order is the kernel's: declare each event type and each code
-// before UI_DEV_SETUP, because the ioctls that set a bit are refused
-// once the device is created. UI_SET_ABSBIT and UI_ABS_SETUP are both
-// needed: the setup call writes the range into the device's absinfo
-// and sets no bit. phys names this operator and the controller, so a
-// person reading /proc/bus/input/devices reads where the events come
-// from.
+// createVirtual creates a uinput device with the capabilities in caps
+// and returns it with its fd open. phys is shown in
+// /proc/bus/input/devices, so a person can tell which controller a
+// virtual device copies.
 func (linuxInput) createVirtual(caps evdevCapabilities, phys string) (virtualDevice, error) {
 	file, err := os.OpenFile(uinputPath, os.O_WRONLY, 0)
 	if err != nil {
@@ -133,7 +117,6 @@ func (linuxInput) createVirtual(caps evdevCapabilities, phys string) (virtualDev
 	return device, nil
 }
 
-// uinputDevice is one open uinput fd and the node the kernel gave it.
 type uinputDevice struct {
 	file *os.File
 	path string
@@ -141,24 +124,23 @@ type uinputDevice struct {
 
 func (d *uinputDevice) node() string { return d.path }
 
-// write hands one read from a real node straight to the kernel. The
-// record layout is the same on both sides, so nothing here decodes an
-// event.
+// write takes the bytes of one read from a real node unchanged,
+// because uinput accepts the same struct input_event records that
+// evdev returns.
 func (d *uinputDevice) write(events []byte) error {
 	_, err := d.file.Write(events)
 	return err
 }
 
-// close destroys the device and releases the fd. The node goes with
-// the fd whether or not the destroy call succeeds, and the destroy is
-// the orderly half.
+// close ignores the error of UI_DEV_DESTROY, because the kernel also
+// destroys the device when the fd closes.
 func (d *uinputDevice) close() error {
 	_ = ioctlInt(int(d.file.Fd()), uiDevDestroy, 0)
 	return d.file.Close()
 }
 
-// build declares the device's capabilities, creates it, and finds the
-// node the kernel gave it.
+// build sets every capability before UI_DEV_CREATE, because the kernel
+// refuses the UI_SET_*BIT calls once the device exists.
 func (d *uinputDevice) build(caps evdevCapabilities, phys string) error {
 	fd := int(d.file.Fd())
 	for _, property := range caps.Properties {
@@ -167,14 +149,14 @@ func (d *uinputDevice) build(caps evdevCapabilities, phys string) error {
 		}
 	}
 	for _, mirrored := range mirroredTypes {
-		// A node with a keyboard code also declares KEY_UNKNOWN, for the
-		// press that wakes the room (wake.go).
+		// declaredCodes adds KEY_UNKNOWN to a node that has keyboard
+		// codes, because wake.go writes it when a controller reconnects.
 		codes := declaredCodes(caps, mirrored.name)
 		if len(codes) == 0 {
 			continue
 		}
 		if err := ioctlInt(fd, uiSetEvBit, int(mirrored.event)); err != nil {
-			return fmt.Errorf("declaring %s: %w", mirrored.name, err)
+			return fmt.Errorf("declaring event type %s: %w", mirrored.name, err)
 		}
 		for _, code := range codes {
 			if err := ioctlInt(fd, mirrored.setBit, int(code)); err != nil {
@@ -225,10 +207,10 @@ func (d *uinputDevice) build(caps evdevCapabilities, phys string) error {
 	return nil
 }
 
-// virtualNode answers with the /dev path of the node the kernel just
-// created. UI_GET_SYSNAME names the input device in sysfs, and the
-// evdev child below it carries the node's DEVNAME, which is the same
-// read the controller walk makes.
+// virtualNode returns the /dev path of the evdev node of the uinput
+// device on fd. UI_GET_SYSNAME returns the device's directory name in
+// sysfs, and evdevNodes reads the node's DEVNAME there, as it does for
+// a real controller.
 func virtualNode(fd int) (string, error) {
 	sysname := make([]byte, uinputMaxNameSize)
 	if err := ioctlPtr(fd, uiGetSysname(uint32(len(sysname))), unsafe.Pointer(&sysname[0])); err != nil {
@@ -242,14 +224,12 @@ func virtualNode(fd int) (string, error) {
 	return nodes[0], nil
 }
 
-// withinDeliveredRange reports whether a node is one of the ones
-// liken's adapter claim created in this container. A node above the
-// range exists on the host and nowhere else, so a claim that named it
-// would fail every container creation.
-func withinDeliveredRange(node string) bool {
+// withinContainerNodes reports whether node is one of the /dev/input
+// nodes that exist in this container.
+func withinContainerNodes(node string) bool {
 	number, err := strconv.Atoi(strings.TrimPrefix(node, "/dev/input/event"))
 	if err != nil {
 		return false
 	}
-	return number < deliveredInputNodes
+	return number < containerInputNodes
 }

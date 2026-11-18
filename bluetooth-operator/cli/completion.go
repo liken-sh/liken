@@ -1,9 +1,11 @@
 package main
 
-// How the CLI completes a command line for the shell, same
-// contract as media-operator's completion.go: a kubectl_complete-liken-
-// bluetooth shim runs this binary's hidden __complete verb, which
-// answers in cobra's completion protocol>
+// Shell completion for the CLI. kubectl runs the
+// `kubectl_complete-liken-bluetooth` shim, which runs this binary's
+// hidden `__complete` verb. The verb prints cobra's completion
+// protocol, which kubectl reads: one candidate per line, then a last
+// line `:N` with the directive. The other operator CLIs complete the
+// same way.
 
 import (
 	"context"
@@ -16,17 +18,14 @@ import (
 	"k8s.io/client-go/dynamic"
 )
 
-// The ShellCompDirective bits this CLI emits; same numbering as
-// media-operator's completion.go>
+// The ShellCompDirective values that this CLI prints, numbered as in
+// cobra.
 const (
 	compDirectiveError      = 1
 	compDirectiveNoFileComp = 4
 	compDirectiveDefault    = 0
 )
 
-// The verbs completion answers for; pair's positional is an
-// optional adapter override, not a cluster object, so only unpair gets
-// object-name completion>
 const (
 	pairVerb   = "pair"
 	unpairVerb = "unpair"
@@ -34,14 +33,14 @@ const (
 
 var completionVerbs = []string{pairVerb, unpairVerb}
 
-// One flag the CLI accepts, and whether it reads a value from the
-// next word>
+// completionFlag is a flag the CLI accepts, and whether it takes the
+// next word as its value.
 type completionFlag struct {
 	name       string
 	takesValue bool
 }
 
-// Every flag run() binds, in the completion table's own form
+// completionFlags lists the flags that run binds.
 var completionFlags = []completionFlag{
 	{name: "--version"},
 	{name: "--adapter", takesValue: true},
@@ -53,9 +52,8 @@ var completionFlags = []completionFlag{
 	{name: "-n", takesValue: true},
 }
 
-// What the words before the cursor amount to; namespace parses
-// like the others even though the Peripheral lister ignores it, because
-// a flag after it on the line still needs the split done right>
+// completionParse is what completion reads from the words before the
+// cursor.
 type completionParse struct {
 	positionals      []string
 	namespace        string
@@ -64,12 +62,13 @@ type completionParse struct {
 	pendingValueFlag string
 }
 
-// A source of Peripheral names for the resolved context; the
-// real one queries the cluster, a test hands back a fixed list>
+// peripheralLister returns the names of the `Peripheral`s in the
+// cluster that the parsed flags select.
 type peripheralLister func(parse completionParse) []string
 
-// runComplete answers a __complete request and writes the
-// protocol to stdout; stays silent on failure>
+// runComplete prints the candidates and the directive of a `__complete`
+// request. A failure to list the `Peripheral`s prints no candidates and
+// returns no error, so the shell shows nothing instead of an error.
 func runComplete(ctx context.Context, args []string, stdout io.Writer) error {
 	candidates, directive := completeArgs(args, realPeripheralLister(ctx))
 	for _, candidate := range candidates {
@@ -79,9 +78,8 @@ func runComplete(ctx context.Context, args []string, stdout io.Writer) error {
 	return nil
 }
 
-// completeArgs reads the request words and returns the candidates;
-// the whole of the completion logic, so a test drives it with words and
-// a stub lister>
+// completeArgs returns the candidates and the directive for the words
+// of a request, where the last word is the one under the cursor.
 func completeArgs(args []string, lister peripheralLister) ([]string, int) {
 	if len(args) == 0 {
 		return completionVerbs, compDirectiveNoFileComp
@@ -89,20 +87,16 @@ func completeArgs(args []string, lister peripheralLister) ([]string, int) {
 	toComplete := args[len(args)-1]
 	parse := parseCompletionArgs(args[:len(args)-1])
 
-	// The word under the cursor is the value of a flag that
-	// reads one>
 	if parse.pendingValueFlag != "" {
 		return completeFlagValue(parse.pendingValueFlag, toComplete)
 	}
 
-	// The word under the cursor starts a flag
 	if strings.HasPrefix(toComplete, "-") {
 		return filterByPrefix(flagNames(), toComplete), compDirectiveNoFileComp
 	}
 
-	// The word is a positional: with none given yet it names a
-	// verb; after unpair it names the Peripheral to remove; pair's
-	// positional is an adapter override, so it completes nothing>
+	// The second positional after unpair is a `Peripheral` name. After
+	// pair it is an adapter name, which has no completion.
 	switch len(parse.positionals) {
 	case 0:
 		return filterByPrefix(completionVerbs, toComplete), compDirectiveNoFileComp
@@ -114,9 +108,10 @@ func completeArgs(args []string, lister peripheralLister) ([]string, int) {
 	return nil, compDirectiveNoFileComp
 }
 
-// parseCompletionArgs walks the words before the cursor into
-// their positionals and the cluster-selecting flag values, and marks a
-// flag left waiting for its value>
+// parseCompletionArgs splits the words before the cursor into
+// positionals and the values of the flags that select a cluster. When
+// the last word is a flag that still needs its value, it sets
+// pendingValueFlag.
 func parseCompletionArgs(prior []string) completionParse {
 	var parse completionParse
 	for i := 0; i < len(prior); i++ {
@@ -144,7 +139,6 @@ func parseCompletionArgs(prior []string) completionParse {
 	return parse
 }
 
-// record stores a flag value against the field it selects.
 func (parse *completionParse) record(name, value string) {
 	switch name {
 	case "--context":
@@ -156,8 +150,6 @@ func (parse *completionParse) record(name, value string) {
 	}
 }
 
-// splitFlag splits a "--name=value" word into its name and value, and
-// reports a bare "--name" as a name with no value.
 func splitFlag(token string) (name, value string, hasEquals bool) {
 	if equals := strings.IndexByte(token, '='); equals >= 0 {
 		return token[:equals], token[equals+1:], true
@@ -165,7 +157,6 @@ func splitFlag(token string) (name, value string, hasEquals bool) {
 	return token, "", false
 }
 
-// lookupCompletionFlag finds a flag by its exact name.
 func lookupCompletionFlag(name string) (completionFlag, bool) {
 	for _, flag := range completionFlags {
 		if flag.name == name {
@@ -175,7 +166,6 @@ func lookupCompletionFlag(name string) (completionFlag, bool) {
 	return completionFlag{}, false
 }
 
-// flagNames lists every flag name completion can offer.
 func flagNames() []string {
 	names := make([]string, 0, len(completionFlags))
 	for _, flag := range completionFlags {
@@ -184,9 +174,9 @@ func flagNames() []string {
 	return names
 }
 
-// completeFlagValue offers the values a flag accepts; kubeconfig
-// names a file so the shell completes a path, every other flag here
-// takes a free-form value>
+// completeFlagValue returns the default directive for `--kubeconfig`,
+// so the shell completes a file path, and no candidates for the other
+// flags.
 func completeFlagValue(flag, toComplete string) ([]string, int) {
 	switch flag {
 	case "--kubeconfig":
@@ -196,7 +186,6 @@ func completeFlagValue(flag, toComplete string) ([]string, int) {
 	}
 }
 
-// filterByPrefix keeps the candidates the cursor's word begins.
 func filterByPrefix(items []string, prefix string) []string {
 	var kept []string
 	for _, item := range items {
@@ -207,22 +196,18 @@ func filterByPrefix(items []string, prefix string) []string {
 	return kept
 }
 
-// A dynamic client built from a parse; the real factory reads
-// the standard kube flags, a test hands back a fake client; it resolves
-// a namespace alongside the client because other verbs on this CLI are
-// namespaced, even though the Peripheral lister never uses it>
+// clientFactory builds a dynamic client and a namespace from the parsed
+// flags. The lister does not use the namespace, because `Peripheral` is
+// cluster-scoped.
 type clientFactory func(parse completionParse) (dynamic.Interface, string, error)
 
-// realPeripheralLister queries the cluster for Peripheral names
-// over the standard kube flags; every failure yields no names>
 func realPeripheralLister(ctx context.Context) peripheralLister {
 	return newPeripheralLister(ctx, kubeClientFactory)
 }
 
-// newPeripheralLister lists Peripheral names through a client
-// the factory builds; it bounds the query so a completion gives up
-// quickly; Peripheral is cluster-scoped, so the namespace the factory
-// resolves plays no part in the list>
+// newPeripheralLister returns a lister that returns no names on any
+// failure. The list times out after 5 seconds, so a slow cluster does
+// not hang the shell.
 func newPeripheralLister(ctx context.Context, factory clientFactory) peripheralLister {
 	return func(parse completionParse) []string {
 		client, _, err := factory(parse)
@@ -239,9 +224,9 @@ func newPeripheralLister(ctx context.Context, factory clientFactory) peripheralL
 	}
 }
 
-// kubeClientFactory builds a dynamic client from the standard
-// kube flags, honoring the context, kubeconfig, and namespace the
-// completion words carry>
+// kubeClientFactory builds a dynamic client with kubectl's loading
+// rules and the context, kubeconfig, and namespace from the command
+// line.
 func kubeClientFactory(parse completionParse) (dynamic.Interface, string, error) {
 	flags := genericclioptions.NewConfigFlags(true)
 	if parse.context != "" {
@@ -269,20 +254,19 @@ func kubeClientFactory(parse completionParse) (dynamic.Interface, string, error)
 	return client, namespace, nil
 }
 
-// completionScript prints the bash script that completes a
-// direct invocation of the binary; kubectl instead runs the
-// kubectl_complete-liken-bluetooth shim, which runs the same verb>
+// completionScript prints the bash script that completes a direct call
+// of `kubectl-liken-bluetooth`. kubectl does not use it, because kubectl
+// runs the shim.
 func completionScript(shell string, stdout io.Writer) error {
 	if shell != "bash" {
-		return fmt.Errorf("completion supports bash, not %q", shell)
+		return fmt.Errorf("completion supports only bash, got shell %q", shell)
 	}
 	fmt.Fprint(stdout, bashCompletionScript)
 	return nil
 }
 
-// The bash completion for a direct kubectl-liken-bluetooth call;
-// a sibling CLI copies this text and changes only the binary name and
-// the two function names>
+// The other operator CLIs print the same script with their own binary
+// and function names.
 const bashCompletionScript = `# bash completion for kubectl-liken-bluetooth
 __kubectl_liken_bluetooth_complete()
 {

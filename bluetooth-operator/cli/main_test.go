@@ -25,7 +25,7 @@ func TestRunWithNoVerbPrintsUsage(t *testing.T) {
 		t.Fatalf("stderr = %q, want the usage text", stderr.String())
 	}
 	if stdout.Len() != 0 {
-		t.Fatalf("stdout carried %q", stdout.String())
+		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
 }
 
@@ -36,7 +36,7 @@ func TestRunRejectsAnUnknownVerb(t *testing.T) {
 		t.Fatal("run returned no error for an unknown verb")
 	}
 	if !strings.Contains(err.Error(), "frobnicate") {
-		t.Fatalf("error %q does not name the verb", err)
+		t.Fatalf("the error is %q, want it to name the verb frobnicate", err)
 	}
 }
 

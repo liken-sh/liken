@@ -51,7 +51,7 @@ func TestOperatorVersionReadsTheImageTag(t *testing.T) {
 	clientset := fake.NewSimpleClientset(labeledDaemonSet("ghcr.io/liken-sh/bluetooth-operator:2026.09.03-007"))
 	got, err := operatorVersion(context.Background(), clientset)
 	if err != nil {
-		t.Fatalf("operatorVersion: %v", err)
+		t.Fatalf("operatorVersion(): %v", err)
 	}
 	if got != "2026.09.03-007" {
 		t.Fatalf("operatorVersion = %q, want 2026.09.03-007", got)
@@ -61,7 +61,7 @@ func TestOperatorVersionReadsTheImageTag(t *testing.T) {
 func TestOperatorVersionWithoutADaemonSet(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	if _, err := operatorVersion(context.Background(), clientset); err == nil {
-		t.Fatal("operatorVersion returned no error with no labeled DaemonSet")
+		t.Fatal("operatorVersion returned no error with no labeled DaemonSet, want one")
 	}
 }
 
@@ -70,6 +70,6 @@ func TestOperatorVersionWithNoContainer(t *testing.T) {
 	set.Spec.Template.Spec.Containers = nil
 	clientset := fake.NewSimpleClientset(set)
 	if _, err := operatorVersion(context.Background(), clientset); err == nil {
-		t.Fatal("operatorVersion returned no error with no container")
+		t.Fatal("operatorVersion returned no error with no container, want one")
 	}
 }

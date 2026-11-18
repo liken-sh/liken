@@ -1,9 +1,9 @@
 package main
 
-// The pure half of the pairing flow: reading what the radio
-// reported out of a PairingRequest, drawing the live list of devices,
-// and resolving a person's pick to an address. Nothing here touches
-// the terminal or the cluster, so a test drives each part with values.
+// The parts of the pairing flow that need no terminal or cluster:
+// reading the devices, the phase, and the Peripheral from a
+// PairingRequest, rendering the list of devices, and resolving what a
+// person typed to an address.
 
 import (
 	"fmt"
@@ -13,24 +13,23 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-// One device the radio observed during a window, the
-// shape a person reads to find the address to approve.
+// seenDevice is one device from status.seen of a PairingRequest.
 type seenDevice struct {
 	Address   string
 	Name      string
 	FirstSeen string
 }
 
-// The phases a PairingRequest reports, mirrored from
-// the operator's own constants.
+// The values of status.phase of a PairingRequest. They are copies of
+// the operator's values, because the CLI does not import the operator.
 const (
 	phaseOpen    = "Open"
 	phasePaired  = "Paired"
 	phaseExpired = "Expired"
 )
 
-// seenFrom reads the observed devices, the phase, and
-// the produced Peripheral out of a PairingRequest object.
+// seenFrom returns status.seen, status.phase, and status.peripheral of
+// a PairingRequest.
 func seenFrom(object *unstructured.Unstructured) ([]seenDevice, string, string) {
 	phase, _, _ := unstructured.NestedString(object.Object, "status", "phase")
 	peripheral, _, _ := unstructured.NestedString(object.Object, "status", "peripheral")
@@ -50,15 +49,13 @@ func seenFrom(object *unstructured.Unstructured) ([]seenDevice, string, string) 
 	return devices, phase, peripheral
 }
 
-// stringField reads one string out of an unstructured
-// map, and returns an empty string for a missing or non-string value.
+// stringField returns fields[key], or "" when it is not a string.
 func stringField(fields map[string]any, key string) string {
 	value, _ := fields[key].(string)
 	return value
 }
 
-// renderSeen draws the live list. The wording is a
-// placeholder until the maintainer authors it.
+// renderSeen returns the numbered list of devices, one per line.
 func renderSeen(devices []seenDevice) string {
 	if len(devices) == 0 {
 		return "no devices yet\n"
@@ -74,14 +71,13 @@ func renderSeen(devices []seenDevice) string {
 	return builder.String()
 }
 
-// resolveSelection turns what a person typed into one
-// of the observed addresses. A number picks by position in the list,
-// and anything else is matched against an address as the list prints
-// it, so a person can paste the address instead of counting.
+// resolveSelection returns the address of the device that input picks.
+// A number picks by its position in the list, counting from 1. Any
+// other input must match an address in the list, ignoring case.
 func resolveSelection(input string, devices []seenDevice) (string, error) {
 	trimmed := strings.TrimSpace(input)
 	if trimmed == "" {
-		return "", fmt.Errorf("no selection")
+		return "", fmt.Errorf("the selection is empty")
 	}
 	if index, err := strconv.Atoi(trimmed); err == nil {
 		if index < 1 || index > len(devices) {
@@ -94,5 +90,5 @@ func resolveSelection(input string, devices []seenDevice) (string, error) {
 			return device.Address, nil
 		}
 	}
-	return "", fmt.Errorf("no device %q in the list", trimmed)
+	return "", fmt.Errorf("no device in the list has the address %q", trimmed)
 }

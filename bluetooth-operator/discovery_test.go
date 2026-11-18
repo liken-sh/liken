@@ -13,11 +13,9 @@ import (
 )
 
 // fakeHID describes one HID device to build into a fake sysfs tree.
-// Dir is the path below /devices, Uevent is the device's own uevent
+// Dir is the path below /devices, Uevent holds the device's uevent
 // file, and Nodes are the DEVNAME values of the input nodes below it.
-// Battery is the power supply the kernel registers under a device
-// that reports its charge, and is absent for a device that reports
-// none.
+// Battery is nil for a device that registers no power supply.
 type fakeHID struct {
 	Dir     string
 	Uevent  map[string]string
@@ -25,9 +23,9 @@ type fakeHID struct {
 	Battery *fakePowerSupply
 }
 
-// fakePowerSupply is one entry in the kernel's power supply class,
-// as it appears under a HID device: a directory named for the supply,
-// with the two files this operator reads.
+// fakePowerSupply is one power supply directory under a HID device.
+// Capacity and Status are the contents of its capacity and status
+// files, and an empty value leaves the file out.
 type fakePowerSupply struct {
 	Name     string
 	Capacity string
@@ -35,18 +33,17 @@ type fakePowerSupply struct {
 }
 
 // fakeSysfs builds a sysfs tree in a temporary directory and returns
-// its root. The tree mirrors the real one: each device is a real
-// directory under devices/, and bus/hid/devices holds a symlink to
-// it, so the walk resolves a link the same way it does on a machine.
+// its root. Like the real one, each device is a directory under
+// devices/ and bus/hid/devices has a symlink to it.
 func fakeSysfs(t *testing.T, devices ...fakeHID) string {
 	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("resolving the temporary directory: %v", err)
 	}
 	busDir := filepath.Join(root, "bus", "hid", "devices")
 	if err := os.MkdirAll(busDir, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating %s: %v", busDir, err)
 	}
 	for _, device := range devices {
 		addHID(t, root, device)
@@ -54,31 +51,30 @@ func fakeSysfs(t *testing.T, devices ...fakeHID) string {
 	return root
 }
 
-// addHID puts one device into a tree that fakeSysfs built, the way the
-// kernel registers a controller that connects.
+// addHID adds one device to a tree that fakeSysfs built.
 func addHID(t *testing.T, root string, device fakeHID) {
 	t.Helper()
 	dir := filepath.Join(root, "devices", device.Dir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the HID device directory: %v", err)
 	}
 	writeUevent(t, dir, device.Uevent)
 	for i, devname := range device.Nodes {
-		// The kernel puts an evdev node two levels below the HID
-		// device: input/inputN/eventM.
+		// An evdev node is two levels below its HID device:
+		// input/inputN/eventM.
 		nodeDir := filepath.Join(dir, "input", "input"+string(rune('0'+i)), filepath.Base(devname))
 		if err := os.MkdirAll(nodeDir, 0o755); err != nil {
-			t.Fatal(err)
+			t.Fatalf("creating the evdev node directory: %v", err)
 		}
 		if err := os.WriteFile(filepath.Join(nodeDir, "dev"), []byte("13:64\n"), 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the dev file of %s: %v", devname, err)
 		}
 		writeUevent(t, nodeDir, map[string]string{"DEVNAME": devname, "MAJOR": "13"})
 	}
 	if device.Battery != nil {
 		supply := filepath.Join(dir, "power_supply", device.Battery.Name)
 		if err := os.MkdirAll(supply, 0o755); err != nil {
-			t.Fatal(err)
+			t.Fatalf("creating the power supply directory: %v", err)
 		}
 		for file, value := range map[string]string{
 			"capacity": device.Battery.Capacity,
@@ -88,19 +84,19 @@ func addHID(t *testing.T, root string, device fakeHID) {
 				continue
 			}
 			if err := os.WriteFile(filepath.Join(supply, file), []byte(value+"\n"), 0o644); err != nil {
-				t.Fatal(err)
+				t.Fatalf("writing the power supply file %s: %v", file, err)
 			}
 		}
 	}
 	base := filepath.Base(device.Dir)
 	target := filepath.Join("..", "..", "..", "devices", device.Dir)
 	if err := os.Symlink(target, filepath.Join(root, "bus", "hid", "devices", base)); err != nil {
-		t.Fatal(err)
+		t.Fatalf("linking the HID device into bus/hid/devices: %v", err)
 	}
 }
 
-// sysfsFor points the walk at a tree this test owns, and puts the
-// fake devices in it.
+// sysfsFor builds a fake sysfs tree with the devices and points
+// draSysfsRoot at it for the test.
 func sysfsFor(t *testing.T, devices ...fakeHID) {
 	t.Helper()
 	previous := draSysfsRoot
@@ -117,14 +113,13 @@ func writeUevent(t *testing.T, dir string, values map[string]string) {
 	slices.Sort(lines)
 	body := strings.Join(lines, "\n") + "\n"
 	if err := os.WriteFile(filepath.Join(dir, "uevent"), []byte(body), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the uevent file: %v", err)
 	}
 }
 
-// dualSense is a DualSense over Bluetooth, as BlueZ 5.73 and later
-// present it: a uhid device with no ancestry to the adapter. HID_PHYS
-// is the test adapter, so the device reads as one on the operator's own
-// radio.
+// dualSense is a DualSense connected over Bluetooth, as BlueZ 5.73 and
+// later register it: a uhid device that is not under the adapter in
+// sysfs. Its HID_PHYS is the test adapter's address.
 func dualSense(instance string, mac string, nodes ...string) fakeHID {
 	return fakeHID{
 		Dir: "virtual/misc/uhid/0005:054C:0CE6." + instance,
@@ -138,9 +133,8 @@ func dualSense(instance string, mac string, nodes ...string) fakeHID {
 	}
 }
 
-// hidOn builds a HID device whose HID_PHYS is the given adapter
-// address. An empty phys removes HID_PHYS, which is the device the
-// filter keeps because it cannot place it on an adapter.
+// hidOn builds a HID device whose HID_PHYS is phys. An empty phys
+// leaves HID_PHYS out.
 func hidOn(instance, mac, phys string, nodes ...string) fakeHID {
 	device := dualSense(instance, mac, nodes...)
 	if phys == "" {
@@ -168,16 +162,16 @@ func TestDiscoverHIDDevicesKeepsBluetoothOnly(t *testing.T) {
 
 	devices := discoverHIDDevices(root, bonds.Address{})
 	if len(devices) != 1 {
-		t.Fatalf("got %d devices, want 1: %+v", len(devices), devices)
+		t.Fatalf("discovered %d devices, want 1: %+v", len(devices), devices)
 	}
 	if devices[0].MAC != "a0:ab:51:33:b7:12" {
-		t.Errorf("MAC = %q", devices[0].MAC)
+		t.Errorf("MAC = %q, want a0:ab:51:33:b7:12", devices[0].MAC)
 	}
 	want := "/devices/virtual/misc/uhid/0005:054C:0CE6.0001"
 	if devices[0].DevPath != want {
 		t.Errorf("DevPath = %q, want %q", devices[0].DevPath, want)
 	}
-	// joydev's node is left out: the delivery is evdev only.
+	// The joydev node input/js0 is not returned, only evdev nodes.
 	if !slices.Equal(devices[0].Nodes, []string{"/dev/input/event5"}) {
 		t.Errorf("Nodes = %v, want [/dev/input/event5]", devices[0].Nodes)
 	}
@@ -186,26 +180,24 @@ func TestDiscoverHIDDevicesKeepsBluetoothOnly(t *testing.T) {
 func TestDiscoverHIDDevicesSkipsDeviceWithoutAddress(t *testing.T) {
 	root := fakeSysfs(t, dualSense("0001", "", "input/event5"))
 	if devices := discoverHIDDevices(root, bonds.Address{}); len(devices) != 0 {
-		t.Fatalf("got %d devices, want 0: %+v", len(devices), devices)
+		t.Fatalf("discovered %d devices, want 0: %+v", len(devices), devices)
 	}
 }
 
 func TestDiscoverHIDDevicesWithoutHIDBus(t *testing.T) {
 	if devices := discoverHIDDevices(t.TempDir(), bonds.Address{}); devices != nil {
-		t.Fatalf("got %+v, want nil", devices)
+		t.Fatalf("discovered %+v, want nil", devices)
 	}
 }
 
-// The operator holds one adapter, and a machine with a second adapter
-// registers HID devices on it that belong to another operator. A device
-// whose HID_PHYS names a different adapter is left out. A device with no
-// HID_PHYS, or one that does not parse, is kept, so a single-adapter
-// machine never regresses.
+// A device whose HID_PHYS is another adapter's address belongs to
+// another operator pod and is left out. A device with no HID_PHYS, or one
+// that does not parse, is kept.
 func TestDiscoverHIDDevicesFiltersByAdapter(t *testing.T) {
 	ours := "14:b4:57:91:2f:c8"
 	adapter, err := bonds.ParseAddress(ours)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the adapter address: %v", err)
 	}
 	cases := []struct {
 		name string
@@ -238,13 +230,13 @@ func TestNodesByMACMergesOneControllersDevices(t *testing.T) {
 
 	nodes := nodesByMAC(discoverHIDDevices(root, bonds.Address{}))
 	if len(nodes) != 2 {
-		t.Fatalf("got %d controllers, want 2: %+v", len(nodes), nodes)
+		t.Fatalf("found nodes for %d controllers, want 2: %+v", len(nodes), nodes)
 	}
 	if !slices.Equal(nodes["a0:ab:51:33:b7:12"], []string{"/dev/input/event5", "/dev/input/event6"}) {
-		t.Errorf("nodes = %v", nodes["a0:ab:51:33:b7:12"])
+		t.Errorf("nodes of a0:ab:51:33:b7:12 = %v, want event5 and event6", nodes["a0:ab:51:33:b7:12"])
 	}
 	if !slices.Equal(nodes["b4:8c:9d:11:22:33"], []string{"/dev/input/event7"}) {
-		t.Errorf("nodes = %v", nodes["b4:8c:9d:11:22:33"])
+		t.Errorf("nodes of b4:8c:9d:11:22:33 = %v, want event7", nodes["b4:8c:9d:11:22:33"])
 	}
 }
 
@@ -253,15 +245,15 @@ func TestReadUeventFile(t *testing.T) {
 	writeUevent(t, dir, map[string]string{"HID_ID": "0005:0000054C:00000CE6", "HID_UNIQ": "a0:ab:51:33:b7:12"})
 	values := readUeventFile(filepath.Join(dir, "uevent"))
 	if values["HID_UNIQ"] != "a0:ab:51:33:b7:12" {
-		t.Errorf("HID_UNIQ = %q", values["HID_UNIQ"])
+		t.Errorf("HID_UNIQ = %q, want a0:ab:51:33:b7:12", values["HID_UNIQ"])
 	}
 	if missing := readUeventFile(filepath.Join(dir, "absent")); len(missing) != 0 {
 		t.Errorf("a missing file gave %v, want an empty map", missing)
 	}
 }
 
-// The controller battery the DualSense registers, as the kernel names
-// it: ps-controller-battery-<address>.
+// withBattery adds the power supply that hid-playstation registers for
+// a DualSense, named ps-controller-battery-<address>.
 func withBattery(device fakeHID, capacity, status string) fakeHID {
 	device.Battery = &fakePowerSupply{
 		Name:     "ps-controller-battery-" + device.Uevent["HID_UNIQ"],
@@ -271,8 +263,8 @@ func withBattery(device fakeHID, capacity, status string) fakeHID {
 	return device
 }
 
-// A controller that states its charge in its HID reports has no
-// Battery1 in BlueZ, so the walk is where its level is read.
+// A controller that reports its charge in HID reports has no Battery1
+// in BlueZ, so the level comes from the kernel's power supply.
 func TestDiscoverHIDDevicesReadsTheKernelBattery(t *testing.T) {
 	charging, discharging := true, false
 	cases := []struct {
@@ -329,7 +321,7 @@ func TestDiscoverHIDDevicesReadsTheKernelBattery(t *testing.T) {
 
 			devices := discoverHIDDevices(root, bonds.Address{})
 			if len(devices) != 1 {
-				t.Fatalf("got %d devices, want 1: %+v", len(devices), devices)
+				t.Fatalf("discovered %d devices, want 1: %+v", len(devices), devices)
 			}
 			got := devices[0].Battery
 			if c.want == nil {
@@ -339,7 +331,7 @@ func TestDiscoverHIDDevicesReadsTheKernelBattery(t *testing.T) {
 				return
 			}
 			if got == nil {
-				t.Fatal("the walk read no battery")
+				t.Fatal("the walk read no battery, want one")
 			}
 			c.want.Name = "ps-controller-battery-a0:ab:51:33:b7:12"
 			if got.Name != c.want.Name || got.Percentage != c.want.Percentage {
@@ -352,7 +344,7 @@ func TestDiscoverHIDDevicesReadsTheKernelBattery(t *testing.T) {
 	}
 }
 
-// show prints an optional flag for a failure message.
+// show formats an optional flag for a failure message.
 func show(flag *bool) string {
 	if flag == nil {
 		return "unstated"
@@ -360,22 +352,22 @@ func show(flag *bool) string {
 	return strconv.FormatBool(*flag)
 }
 
-// Most controllers register no power supply at all, and a level of
-// zero for them would read as an empty battery.
+// Most controllers register no power supply, and reporting a level of
+// zero for them would show an empty battery.
 func TestDiscoverHIDDevicesWithoutAPowerSupply(t *testing.T) {
 	root := fakeSysfs(t, dualSense("0001", "a0:ab:51:33:b7:12", "input/event5"))
 	devices := discoverHIDDevices(root, bonds.Address{})
 	if len(devices) != 1 {
-		t.Fatalf("got %d devices, want 1: %+v", len(devices), devices)
+		t.Fatalf("discovered %d devices, want 1: %+v", len(devices), devices)
 	}
 	if devices[0].Battery != nil {
 		t.Errorf("battery = %+v, want none", devices[0].Battery)
 	}
 }
 
-// A controller that registers more than one HID device carries its
-// battery under one of them, and the pass keys the level by the
-// controller.
+// A controller can register several HID devices with the battery under
+// only one of them, so kernelBatteries keys the batteries by the
+// controller's address.
 func TestKernelBatteriesKeysByAddress(t *testing.T) {
 	root := fakeSysfs(t,
 		dualSense("0001", "a0:ab:51:33:b7:12", "input/event5"),
@@ -385,10 +377,10 @@ func TestKernelBatteriesKeysByAddress(t *testing.T) {
 
 	batteries := kernelBatteries(discoverHIDDevices(root, bonds.Address{}))
 	if len(batteries) != 1 {
-		t.Fatalf("got %d batteries, want 1: %+v", len(batteries), batteries)
+		t.Fatalf("found %d batteries, want 1: %+v", len(batteries), batteries)
 	}
 	battery := batteries[testAddress(t, "a0:ab:51:33:b7:12")]
 	if battery == nil || battery.Percentage != 40 {
-		t.Errorf("battery = %+v", battery)
+		t.Errorf("battery = %+v, want 40 percent", battery)
 	}
 }

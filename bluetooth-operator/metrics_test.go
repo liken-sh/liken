@@ -1,11 +1,7 @@
 package main
 
-// The registry, the build_info gauge, and the listener. The facts
-// each domain file derives are tested beside that file:
-// inventory_test.go covers the reconcile loop's duration and errors,
-// the adapter's presence, and the BlueZ observation; peripheral_test.go
-// covers the per-Peripheral gauges and the disconnect counter; and
-// relay_test.go covers the input event counter.
+// These tests cover the registry, liken_build_info, and the listener.
+// The test of each other metric is beside the code that records it.
 
 import (
 	"context"
@@ -21,8 +17,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// scrape reads the registry's whole page, the way a Prometheus server
-// would, with no real listener in front of it.
+// scrape returns the body of a GET /metrics against the handler,
+// without a network listener.
 func scrape(t *testing.T, m *metrics) string {
 	t.Helper()
 	recorder := httptest.NewRecorder()
@@ -30,12 +26,10 @@ func scrape(t *testing.T, m *metrics) string {
 	return recorder.Body.String()
 }
 
-// metricValue reads one series of a metric family by its exact set of
-// labels, and reports whether the family carries that series at all.
-// Reading through Gather, rather than through a vector's
-// WithLabelValues, matters for an absence check: WithLabelValues
-// creates the series it does not find, and an absence check must not
-// create the thing it is checking for.
+// metricValue returns the value of the series with exactly these
+// labels, and whether that series exists. It reads through Gather
+// because a vector's WithLabelValues creates a missing series, which
+// would defeat a check that the series is absent.
 func metricValue(t *testing.T, registry *prometheus.Registry, name string, labels map[string]string) (float64, bool) {
 	t.Helper()
 	families, err := registry.Gather()
@@ -99,16 +93,16 @@ func TestBuildInfoReportsTheComponentAndVersion(t *testing.T) {
 func TestAnEmptyMetricsAddressServesNoListener(t *testing.T) {
 	listener, err := newMetrics().listen("")
 	if err != nil {
-		t.Fatalf("listen: %v", err)
+		t.Fatalf("opening the metrics listener: %v", err)
 	}
 	if listener != nil {
-		t.Errorf("listen answered %v, want no listener", listener)
+		t.Errorf("listen(\"\") returned the listener %v, want none", listener)
 	}
 }
 
 func TestAMetricsAddressTheKernelRefusesIsReported(t *testing.T) {
 	if _, err := newMetrics().listen("127.0.0.1:-1"); err == nil {
-		t.Error("listen answered no error, want one")
+		t.Error("listen(\"127.0.0.1:-1\") returned no error, want one")
 	}
 }
 
@@ -116,7 +110,7 @@ func TestTheListenerServesTheRegistryAtSlashMetrics(t *testing.T) {
 	m := newMetrics()
 	listener, err := m.listen("127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("listen: %v", err)
+		t.Fatalf("opening the metrics listener: %v", err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -124,15 +118,15 @@ func TestTheListenerServesTheRegistryAtSlashMetrics(t *testing.T) {
 
 	answer, err := http.Get("http://" + listener.Addr().String() + "/metrics")
 	if err != nil {
-		t.Fatalf("reading the metrics: %v", err)
+		t.Fatalf("requesting /metrics: %v", err)
 	}
 	defer answer.Body.Close()
 	body, err := io.ReadAll(answer.Body)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the /metrics response: %v", err)
 	}
 	if answer.StatusCode != http.StatusOK {
-		t.Errorf("status = %d, want 200", answer.StatusCode)
+		t.Errorf("the /metrics status is %d, want 200", answer.StatusCode)
 	}
 	if !strings.Contains(string(body), "liken_build_info") {
 		t.Errorf("the metrics are %s, want liken_build_info in them", body)
@@ -143,7 +137,7 @@ func TestTheMetricsListenerStopsWithTheRun(t *testing.T) {
 	m := newMetrics()
 	listener, err := m.listen("127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("listen: %v", err)
+		t.Fatalf("opening the metrics listener: %v", err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	stopped := make(chan struct{})
@@ -152,39 +146,34 @@ func TestTheMetricsListenerStopsWithTheRun(t *testing.T) {
 		close(stopped)
 	}()
 	if _, err := http.Get("http://" + listener.Addr().String() + "/metrics"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("requesting /metrics: %v", err)
 	}
 
 	cancel()
 	select {
 	case <-stopped:
 	case <-time.After(10 * time.Second):
-		t.Fatal("the metrics listener did not stop with the run")
+		t.Fatal("the metrics listener was still serving 10 seconds after the context ended, want it stopped")
 	}
 }
 
-// A listener that stops on its own, rather than through the context,
-// still reaches the log and not a panic.
+// When the listener fails while the context is still open, serveMetrics
+// logs the error and returns.
 func TestAListenerThatStopsOnItsOwnIsReported(t *testing.T) {
 	m := newMetrics()
 	listener, err := m.listen("127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("listen: %v", err)
+		t.Fatalf("opening the metrics listener: %v", err)
 	}
 	if err := listener.Close(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("closing the metrics listener: %v", err)
 	}
 	serveMetrics(t.Context(), listener, m)
 }
 
-// Repeated scrapes read the same registry and change nothing in it.
-// This is the whole shape of the promhttp handler, and the test
-// states the contract this operator relies on rather than trusting an
-// upstream library by assumption.
-// ownSeries keeps the lines the operator itself writes. The runtime's
-// go_* and process_* series move between two scrapes with no write in
-// between, because the collector reads the live process, so a test of
-// the operator's own registry leaves them out.
+// ownSeries removes the go_* and process_* lines from a scrape. Those
+// collectors read the live process, so their values change between two
+// scrapes with no write in between.
 func ownSeries(body string) string {
 	var kept []string
 	for _, line := range strings.Split(body, "\n") {
@@ -198,6 +187,8 @@ func ownSeries(body string) string {
 	return strings.Join(kept, "\n")
 }
 
+// A scrape only reads. Two scrapes with no write between them return
+// the same operator series.
 func TestRepeatedScrapesLeaveTheRegistryUnchanged(t *testing.T) {
 	m := newMetrics()
 	m.countReconcileError(peripheralKind)

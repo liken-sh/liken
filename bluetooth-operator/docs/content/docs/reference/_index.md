@@ -11,6 +11,6 @@ that drives it. [Adapters](/docs/reference/adapters/),
 [PairingRequests](/docs/reference/pairingrequests/) are the pairing
 API, one page per resource with every field.
 [Devices](/docs/reference/devices/) describes the device classes,
-the devices with their attributes and taints, and what a prepared
-claim delivers to a container. [Metrics](/docs/reference/metrics/)
+the devices with their attributes and taints, and what a container
+receives from a prepared claim. [Metrics](/docs/reference/metrics/)
 lists what the operator serves at `/metrics`.

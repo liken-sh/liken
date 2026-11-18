@@ -1,13 +1,5 @@
 package main
 
-// The fake kernel every test of the relay drives, which is the
-// inputKernel seam with no /dev/uinput and no real evdev node behind
-// it. It answers with the capabilities a test chose, hands out an
-// io.Pipe for each real node, and records what the relay asked the
-// kernel for: the virtual devices it created and what reached them,
-// the mask on each real node, and the absinfo it wrote to each axis.
-// So the relay's whole policy tests on any machine.
-
 import (
 	"fmt"
 	"io"
@@ -16,29 +8,31 @@ import (
 	"testing"
 )
 
-// fakeKernel stands in for /dev/uinput and the real evdev nodes.
+// fakeKernel implements inputKernel without /dev/uinput or real evdev
+// nodes, so the relay tests run on any machine. It opens each real node
+// as an io.Pipe and records what the relay does to each node.
 type fakeKernel struct {
 	mu sync.Mutex
 
-	// capabilities answers readCapabilities for each real node path.
+	// capabilities is what readCapabilities returns for each node path.
 	capabilities map[string]evdevCapabilities
 
-	// writers holds the write end of each opened real node, so a test
-	// can send events into the relay and can end the read.
+	// writers holds the write end of each opened node. A test writes
+	// events into the relay through it, and closes it to end the read.
 	writers map[string]*io.PipeWriter
 
-	// opens holds each opened real node, so a test can read back what
-	// the relay told the kernel to queue on it.
+	// opens holds each opened node, so a test can read back the masks
+	// and axis ranges that the relay set on it.
 	opens map[string]*fakeNode
 
 	// virtual is every device the relay created, newest last.
 	virtual []*fakeVirtual
 
-	// nextNode numbers the nodes this kernel hands out.
+	// nextNode is the number in the path of the next virtual device.
 	nextNode int
 
-	// createErr makes createVirtual fail, the way the kernel does when
-	// /dev/uinput refuses the container.
+	// createErr is the error createVirtual returns, as when the kernel
+	// refuses the container access to /dev/uinput.
 	createErr error
 }
 
@@ -50,7 +44,7 @@ func newFakeKernel() *fakeKernel {
 	}
 }
 
-// register declares what a real node reports for itself.
+// register makes path a node that reports the given name.
 func (k *fakeKernel) register(path, name string) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
@@ -66,7 +60,7 @@ func (k *fakeKernel) readCapabilities(path string) (evdevCapabilities, error) {
 	defer k.mu.Unlock()
 	caps, found := k.capabilities[path]
 	if !found {
-		return evdevCapabilities{}, fmt.Errorf("no such device %s", path)
+		return evdevCapabilities{}, fmt.Errorf("the fake kernel has no device %s", path)
 	}
 	return caps, nil
 }
@@ -75,12 +69,12 @@ func (k *fakeKernel) open(path string) (realNode, error) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	if _, found := k.capabilities[path]; !found {
-		return nil, fmt.Errorf("no such device %s", path)
+		return nil, fmt.Errorf("the fake kernel has no device %s", path)
 	}
 	reader, writer := io.Pipe()
 	k.writers[path] = writer
-	// The kernel reports each axis the way the device declares it, so
-	// a test sees this operator's own writes and nothing else.
+	// Each axis starts with the range the device declares, so a test
+	// can tell whether the relay changed it.
 	ranges := map[uint16]absInfo{}
 	for _, axis := range k.capabilities[path].Axes {
 		ranges[axis.Code] = absInfo{
@@ -96,48 +90,45 @@ func (k *fakeKernel) open(path string) (realNode, error) {
 	return node, nil
 }
 
-// node answers with one opened real node, so a test reads the mask
-// the relay set on it.
+// node returns the opened node at path, and fails the test if the relay
+// never opened it.
 func (k *fakeKernel) node(t *testing.T, path string) *fakeNode {
 	t.Helper()
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	node, found := k.opens[path]
 	if !found {
-		t.Fatalf("the relay never opened %s", path)
+		t.Fatalf("the relay opened no node at %s, want one", path)
 	}
 	return node
 }
 
-// fakeNode is one open real node: the read end of its pipe, and the
-// mask the relay last set on it. The kernel keeps a mask until
-// another one replaces it, and so does this.
+// fakeNode is one opened node. Each call to setMasks replaces the
+// masks of the previous call.
 type fakeNode struct {
 	io.ReadCloser
 	mu    sync.Mutex
 	masks []eventMask
 	calls int
 
-	// ranges is what the kernel reports for each absolute axis of this
-	// node, which is what this operator last wrote when it has written
-	// one.
+	// ranges is the current range of each absolute axis.
 	ranges map[uint16]absInfo
 
-	// written counts the axes this operator wrote, so a test can show
-	// that a node no claim tunes takes no write at all.
+	// written counts setAxisRange calls, so a test can check that a
+	// node with no tuning gets none.
 	written int
 }
 
-func (n *fakeNode) narrow(masks []eventMask) error {
+func (n *fakeNode) setMasks(masks []eventMask) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.masks, n.calls = masks, n.calls+1
 	return nil
 }
 
-// delivers reports whether the mask on this node lets one event type
-// through. A node with no mask delivers every type.
-func (n *fakeNode) delivers(event uint16) bool {
+// passes reports whether the first mask lets events of this type
+// through. A node with no mask lets every type through.
+func (n *fakeNode) passes(event uint16) bool {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if len(n.masks) == 0 {
@@ -146,8 +137,8 @@ func (n *fakeNode) delivers(event uint16) bool {
 	return slices.Contains(n.masks[0].codes, event)
 }
 
-// narrowings is how many masks the relay has set on this node.
-func (n *fakeNode) narrowings() int {
+// maskWrites returns how many masks the relay has set on this node.
+func (n *fakeNode) maskWrites() int {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	return n.calls
@@ -166,14 +157,14 @@ func (n *fakeNode) setAxisRange(code uint16, info absInfo) error {
 	return nil
 }
 
-// axis is what the kernel reports for one axis of this node now.
+// axis returns the current range of one axis.
 func (n *fakeNode) axis(code uint16) absInfo {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	return n.ranges[code]
 }
 
-// writes is how many axes this operator has written on this node.
+// writes returns how many axis ranges the relay has written.
 func (n *fakeNode) writes() int {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -192,26 +183,26 @@ func (k *fakeKernel) createVirtual(caps evdevCapabilities, phys string) (virtual
 	return device, nil
 }
 
-// opened is how many real nodes the relay has opened so far.
+// opened returns how many nodes the relay has opened.
 func (k *fakeKernel) opened() int {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	return len(k.writers)
 }
 
-// writer answers with the write end of one opened real node.
+// writer returns the write end of the pipe of the opened node at path.
 func (k *fakeKernel) writer(t *testing.T, path string) *io.PipeWriter {
 	t.Helper()
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	writer, found := k.writers[path]
 	if !found {
-		t.Fatalf("the relay never opened %s", path)
+		t.Fatalf("the relay opened no node at %s, want one", path)
 	}
 	return writer
 }
 
-// fakeVirtual is one virtual device, and the events that reached it.
+// fakeVirtual is a virtual device that records the events written to it.
 type fakeVirtual struct {
 	path  string
 	phys  string
@@ -227,7 +218,7 @@ func (d *fakeVirtual) write(events []byte) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.ended {
-		return fmt.Errorf("%s is closed", d.path)
+		return fmt.Errorf("the virtual device %s is closed", d.path)
 	}
 	d.got = append(d.got, events...)
 	return nil
@@ -240,7 +231,7 @@ func (d *fakeVirtual) close() error {
 	return nil
 }
 
-// closed reports whether the relay destroyed this device.
+// closed reports whether the relay closed this device.
 func (d *fakeVirtual) closed() bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()

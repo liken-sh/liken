@@ -1,10 +1,7 @@
 package main
 
-// These tests count the reads persist sends when it reads the bond
-// Secrets from the watch's store, and cover a write from a copy in the
-// store that is older than the API server's, and a Secret the store
-// has not delivered yet. The last test runs the Secret watch through
-// client-go's reflector.
+// These tests cover how persist reads the bond Secrets from the
+// informer store of the Secret watch instead of from the API server.
 
 import (
 	"bytes"
@@ -17,20 +14,20 @@ import (
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
-// secretStore is the watch's store, holding the Secrets given.
+// secretStore returns an informer view whose store holds secrets.
 func secretStore(t *testing.T, secrets map[string]*bonds.Secret) informer.View {
 	t.Helper()
 	store := cache.NewStore(cache.MetaNamespaceKeyFunc)
 	for _, secret := range secrets {
 		if err := store.Add(asObject(t, *secret)); err != nil {
-			t.Fatal(err)
+			t.Fatalf("adding the Secret to the store: %v", err)
 		}
 	}
 	return informer.View{Store: store, Synced: func() bool { return true }}
 }
 
-// storedBondAt is the test device's bond as the API server holds it,
-// at one resourceVersion.
+// storedBondAt returns the test device's bond Secrets as the API server
+// has them, at the given resourceVersion.
 func storedBondAt(t *testing.T, files bonds.Files, version string) map[string]*bonds.Secret {
 	t.Helper()
 	secrets := storedBond(t, testDevice, files)
@@ -41,8 +38,8 @@ func storedBondAt(t *testing.T, files bonds.Files, version string) map[string]*b
 	return secrets
 }
 
-// A settled bond costs one read of its Secret from the API server, and
-// none from the store.
+// When the bond is already stored, persist sends one GET when it has no
+// store, and no request when the store has the Secret.
 func TestPersistFromTheStoreSendsNoRead(t *testing.T) {
 	for _, c := range []struct {
 		name   string
@@ -60,7 +57,7 @@ func TestPersistFromTheStoreSendsNoRead(t *testing.T) {
 			}
 
 			if !store.persist(adapterIs(t), ownedBy(t, testDevice), nil) {
-				t.Fatal("a settled bond reported unstored")
+				t.Fatal("persist returned false for a bond that is already stored, want true")
 			}
 			if len(fixture.requests) != c.want {
 				t.Errorf("persist sent %v, want %d requests", fixture.requests, c.want)
@@ -69,64 +66,62 @@ func TestPersistFromTheStoreSendsNoRead(t *testing.T) {
 	}
 }
 
-// The store's copy can be older than this operator's own last write.
-// The write from it is refused, and persist reads the Secret again and
-// writes once more.
-func TestABondWriteFromAnOlderCopyReadsAgainAndLands(t *testing.T) {
+// When the store's copy is older than the API server's, the update
+// fails with a conflict. persist then reads the Secret from the API
+// server and updates it again.
+func TestABondWriteFromAnOlderCopyReadsAgainAndSucceeds(t *testing.T) {
 	fixture := &bondSecretFixture{existing: storedBondAt(t, bonds.Files{Info: oneBond.Info}, "8")}
 	store := testBondStore(t, fixture, bondTree(t, map[string]bonds.Files{testDevice: oneBond}))
 	store.secrets = secretStore(t, storedBondAt(t, bonds.Files{Info: oneBond.Info}, "7"))
 
 	if !store.persist(adapterIs(t), ownedBy(t, testDevice), nil) {
-		t.Fatal("the bond reported unstored")
+		t.Fatal("persist returned false, want true")
 	}
 	if fixture.updated == nil || !bytes.Equal(fixture.updated.Data["a0-ab-51-33-b7-12.cache"], oneBond.Cache) {
-		t.Fatalf("the cache entry did not land: %v", fixture.requests)
+		t.Fatalf("the update has no cache entry for the bond, requests were %v", fixture.requests)
 	}
 	if fixture.updated.Metadata.ResourceVersion != "8" {
-		t.Errorf("the write that landed stated version %q, want 8", fixture.updated.Metadata.ResourceVersion)
+		t.Errorf("the update has resourceVersion %q, want 8", fixture.updated.Metadata.ResourceVersion)
 	}
 }
 
-// A conflict that another writer caused can leave the API server's
-// copy already holding the bond on disk. persist compares that copy
-// and writes nothing more.
+// When the update conflicts and the API server's copy already has the
+// bond that is on disk, persist writes nothing more.
 func TestABondConflictWithACopyThatAlreadyMatchesWritesNothing(t *testing.T) {
 	fixture := &bondSecretFixture{existing: storedBondAt(t, oneBond, "8")}
 	store := testBondStore(t, fixture, bondTree(t, map[string]bonds.Files{testDevice: oneBond}))
 	store.secrets = secretStore(t, storedBondAt(t, bonds.Files{Info: oneBond.Info}, "7"))
 
 	if !store.persist(adapterIs(t), ownedBy(t, testDevice), nil) {
-		t.Fatal("the bond reported unstored")
+		t.Fatal("persist returned false, want true")
 	}
 	want := []string{"PUT " + testSecretPath, "GET " + testSecretPath}
 	if len(fixture.requests) != len(want) || fixture.requests[0] != want[0] || fixture.requests[1] != want[1] {
-		t.Errorf("requests = %v, want %v", fixture.requests, want)
+		t.Errorf("persist sent %v, want %v", fixture.requests, want)
 	}
 	if fixture.updated != nil {
-		t.Error("persist wrote a Secret that already held the bond")
+		t.Error("persist updated a Secret that already has the bond, want no update")
 	}
 }
 
-// A Secret that the store has not delivered, such as one this operator
-// created on the pass before, is read from the API server and compared,
-// not created twice.
-func TestABondTheStoreHasNotDeliveredIsComparedNotCreated(t *testing.T) {
+// When a Secret is not in the store yet, such as one the operator
+// created on the previous pass, persist reads it from the API server and
+// does not create it again.
+func TestABondMissingFromTheStoreIsReadNotCreated(t *testing.T) {
 	fixture := &bondSecretFixture{existing: storedBondAt(t, oneBond, "7")}
 	store := testBondStore(t, fixture, bondTree(t, map[string]bonds.Files{testDevice: oneBond}))
 	store.secrets = secretStore(t, nil)
 
 	if !store.persist(adapterIs(t), ownedBy(t, testDevice), nil) {
-		t.Fatal("the bond reported unstored")
+		t.Fatal("persist returned false, want true")
 	}
 	if len(fixture.requests) != 1 || fixture.requests[0] != "GET "+testSecretPath {
-		t.Errorf("requests = %v, want one read of the Secret", fixture.requests)
+		t.Errorf("persist sent %v, want one read of the Secret", fixture.requests)
 	}
 }
 
-// Through the reflector: the Secret watch selects one radio's Secrets
-// in the pod's namespace, and its store answers each Secret with the
-// bytes of its bond.
+// The Secret watch selects the bond Secrets of one adapter in the pod's
+// namespace, and its store returns each Secret's bond files.
 func TestTheSecretWatchHoldsTheRadiosBonds(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		secrets := storedBondAt(t, oneBond, "7")
@@ -141,14 +136,14 @@ func TestTheSecretWatchHoldsTheRadiosBonds(t *testing.T) {
 		synctest.Wait()
 
 		if !view.Ready() {
-			t.Fatal("the Secret watch did not finish its first read")
+			t.Fatal("the Secret watch is not ready after its first list, want ready")
 		}
-		held, ok := informer.Cached[bonds.Secret](view, "liken-system/bluetooth-bond-a0-ab-51-33-b7-12")
-		if !ok || !held.Tree()[testAddress(t, testDevice)].Equal(oneBond) {
-			t.Fatalf("the store answered %+v, %t; want the bond", held, ok)
+		cached, ok := informer.Cached[bonds.Secret](view, "liken-system/bluetooth-bond-a0-ab-51-33-b7-12")
+		if !ok || !cached.Tree()[testAddress(t, testDevice)].Equal(oneBond) {
+			t.Fatalf("the store returned %+v, %t, want the bond of the test device", cached, ok)
 		}
-		if _, selectors := server.held(); len(selectors) == 0 || selectors[0] != adapterSelector("14-b4-57-91-2f-c8") {
-			t.Errorf("the watch selected %v, want %s", selectors, adapterSelector("14-b4-57-91-2f-c8"))
+		if _, selectors := server.openWatches(); len(selectors) == 0 || selectors[0] != adapterSelector("14-b4-57-91-2f-c8") {
+			t.Errorf("the watch label selectors are %v, want %s", selectors, adapterSelector("14-b4-57-91-2f-c8"))
 		}
 	})
 }

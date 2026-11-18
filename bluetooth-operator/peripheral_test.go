@@ -1,14 +1,9 @@
 package main
 
-// These tests cover the Peripheral object: adoption of the bonds
-// bluetoothd already holds, the status that reports the radio's
-// state, and the spec that reconciles back into the device.
-
 import (
 	"testing"
 )
 
-// testPeripheralPath is the path of the test device's Peripheral.
 func testPeripheralPath() string { return peripheralPath("a0-ab-51-33-b7-12") }
 
 func TestReconcileAdoptsEveryBondAsAPeripheral(t *testing.T) {
@@ -18,21 +13,21 @@ func TestReconcileAdoptsEveryBondAsAPeripheral(t *testing.T) {
 	pass := inventory.reconcile()
 
 	if !pass.ok {
-		t.Fatal("the pass reported a failure")
+		t.Fatal("the pass reported a failure, want it to succeed")
 	}
 	peripheral := read[Peripheral](t, fixture, testPeripheralPath())
-	// The Adapter owns the Peripheral, so retiring a dead radio is one
-	// delete that collects every bond keyed to it.
+	// The Adapter owns the Peripheral, so deleting an Adapter whose radio
+	// is gone also deletes every Peripheral of that radio.
 	if len(peripheral.Metadata.OwnerReferences) != 1 ||
 		peripheral.Metadata.OwnerReferences[0].Kind != adapterKind ||
 		peripheral.Metadata.OwnerReferences[0].Name != testAdapterName {
-		t.Errorf("ownerReferences = %+v", peripheral.Metadata.OwnerReferences)
+		t.Errorf("ownerReferences = %+v, want one reference to the Adapter %s", peripheral.Metadata.OwnerReferences, testAdapterName)
 	}
-	if !peripheral.Metadata.holds(peripheralFinalizer) {
-		t.Errorf("finalizers = %v", peripheral.Metadata.Finalizers)
+	if !peripheral.Metadata.hasFinalizer(peripheralFinalizer) {
+		t.Errorf("finalizers = %v, want %s", peripheral.Metadata.Finalizers, peripheralFinalizer)
 	}
 	if peripheral.Status.Address != testDevice || peripheral.Status.Adapter != testAdapter {
-		t.Errorf("status = %+v", peripheral.Status)
+		t.Errorf("status = %+v, want address %s and adapter %s", peripheral.Status, testDevice, testAdapter)
 	}
 	if peripheral.Status.Node != "liken-1" {
 		t.Errorf("status.node = %q, want the adapter's node", peripheral.Status.Node)
@@ -41,27 +36,27 @@ func TestReconcileAdoptsEveryBondAsAPeripheral(t *testing.T) {
 		t.Errorf("status.name = %q, want the name the device reports", peripheral.Status.Name)
 	}
 	if !peripheral.Status.Bond.Held {
-		t.Errorf("status.bond = %+v", peripheral.Status.Bond)
+		t.Errorf("status.bond = %+v, want held", peripheral.Status.Bond)
 	}
 	if reason(peripheral, conditionConnected) != reasonLinkUp {
-		t.Errorf("conditions = %+v", peripheral.Status.Conditions)
+		t.Errorf("conditions = %+v, want Connected with the reason %s", peripheral.Status.Conditions, reasonLinkUp)
 	}
 	if peripheral.Status.Bond.Secret != "liken-system/bluetooth-bond-a0-ab-51-33-b7-12" {
-		t.Errorf("status.bond.secret = %q", peripheral.Status.Bond.Secret)
+		t.Errorf("status.bond.secret = %q, want liken-system/bluetooth-bond-a0-ab-51-33-b7-12", peripheral.Status.Bond.Secret)
 	}
 	if peripheral.Status.Bond.PairedAt != timestamp(testNow) {
-		t.Errorf("status.bond.pairedAt = %q", peripheral.Status.Bond.PairedAt)
+		t.Errorf("status.bond.pairedAt = %q, want %q", peripheral.Status.Bond.PairedAt, timestamp(testNow))
 	}
-	// The bond's Secret is owned by this Peripheral, and the bond store
-	// reads that from the pass.
+	// The bond store sets this Peripheral as the owner of the bond's
+	// Secret, and reads it from pass.owners.
 	owner, owned := pass.owners[testAddress(t, testDevice)]
 	if !owned || owner.Name != "a0-ab-51-33-b7-12" || owner.UID == "" {
-		t.Errorf("owners = %+v", pass.owners)
+		t.Errorf("owners = %+v, want one for a0-ab-51-33-b7-12 with a UID", pass.owners)
 	}
 }
 
-// A device the radio has only observed holds no link key, so this
-// machine must not publish it and it gets no Peripheral.
+// A device that the radio has only discovered has no bond, so the
+// operator creates no Peripheral for it.
 func TestReconcileAdoptsNothingForADeviceWithNoBond(t *testing.T) {
 	fixture := newAPIFixture()
 	inventory := testInventory(t, fixture, testRadio(t, seenDevice(t, testDevice, "Somebody's Phone")))
@@ -69,13 +64,13 @@ func TestReconcileAdoptsNothingForADeviceWithNoBond(t *testing.T) {
 	inventory.reconcile()
 
 	if _, found := fixture.objects[testPeripheralPath()]; found {
-		t.Fatal("a device with no bond got a Peripheral")
+		t.Fatal("a device with no bond got a Peripheral, want none")
 	}
 }
 
-// A Peripheral whose bond is gone from bluetoothd keeps its object. The
-// operator reports the gap, and a person decides, because deleting a
-// Peripheral is the unpair API.
+// A Peripheral whose bond is gone from bluetoothd stays, and its status
+// reports the missing bond, because deleting a Peripheral unpairs the
+// device.
 func TestReconcileReportsABondThatLeftBluetoothd(t *testing.T) {
 	fixture := newAPIFixture()
 	inventory := testInventory(t, fixture, testRadio(t, pairedDevice(t, testDevice)))
@@ -87,14 +82,14 @@ func TestReconcileReportsABondThatLeftBluetoothd(t *testing.T) {
 	peripheral := read[Peripheral](t, fixture, testPeripheralPath())
 	bond := peripheral.Status.Bond
 	if bond.Held || bond.Paired || bond.Bonded || bond.Trusted || bond.Connected {
-		t.Errorf("status.bond = %+v", bond)
+		t.Errorf("status.bond = %+v, want every flag false", bond)
 	}
 	if reason(peripheral, conditionConnected) != reasonNotBonded {
-		t.Errorf("conditions = %+v", peripheral.Status.Conditions)
+		t.Errorf("conditions = %+v, want Connected with the reason %s", peripheral.Status.Conditions, reasonNotBonded)
 	}
 }
 
-func TestReconcileCarriesTrustedAndAliasIntoTheDevice(t *testing.T) {
+func TestReconcileSetsTrustedAndAliasOnTheDevice(t *testing.T) {
 	fixture := newAPIFixture()
 	device := pairedDevice(t, testDevice)
 	device.Trusted = false
@@ -102,7 +97,7 @@ func TestReconcileCarriesTrustedAndAliasIntoTheDevice(t *testing.T) {
 	inventory := testInventory(t, fixture, radio)
 	inventory.reconcile()
 
-	// A person names the controller and asks for it to be trusted.
+	// A person sets an alias and asks for the controller to be trusted.
 	peripheral := read[Peripheral](t, fixture, testPeripheralPath())
 	trusted := true
 	peripheral.Spec = PeripheralSpec{Alias: "player-one-pad", Trusted: &trusted}
@@ -112,23 +107,22 @@ func TestReconcileCarriesTrustedAndAliasIntoTheDevice(t *testing.T) {
 	inventory.reconcile()
 
 	if !radio.called("SetDeviceTrusted a0-ab-51-33-b7-12 true") {
-		t.Errorf("trusted never reached the device: %v", radio.calls)
+		t.Errorf("radio calls are %v, want SetDeviceTrusted true", radio.calls)
 	}
 	if !radio.called("SetDeviceAlias a0-ab-51-33-b7-12 player-one-pad") {
-		t.Errorf("the alias never reached the device: %v", radio.calls)
+		t.Errorf("radio calls are %v, want SetDeviceAlias player-one-pad", radio.calls)
 	}
 
-	// The device holds both now, so a steady pass writes nothing.
+	// The device has both values now, so the next pass writes nothing.
 	radio.calls = nil
 	inventory.reconcile()
 	if radio.called("SetDevice") {
-		t.Errorf("a steady pass wrote to the device again: %v", radio.calls)
+		t.Errorf("a steady pass made the radio calls %v, want none", radio.calls)
 	}
 }
 
-// The pass runs on every bus signal and every kernel event, and an
-// unconditional status write would send a request to the API server
-// on each of them.
+// The pass runs on every bus signal and every kernel event, so writing
+// the status unconditionally would send an API request for each one.
 func TestReconcileWritesAPeripheralStatusOnlyWhenItChanges(t *testing.T) {
 	fixture := newAPIFixture()
 	inventory := testInventory(t, fixture, testRadio(t, pairedDevice(t, testDevice)))
@@ -139,15 +133,14 @@ func TestReconcileWritesAPeripheralStatusOnlyWhenItChanges(t *testing.T) {
 
 	for _, request := range fixture.requests {
 		if request == "PUT "+testPeripheralPath()+"/status" {
-			t.Fatalf("a steady pass rewrote the status: %v", fixture.requests)
+			t.Fatalf("a steady pass sent %v, want no status write", fixture.requests)
 		}
 	}
 }
 
-// spec.trusted starts from what bluetoothd already holds, so adoption
-// states the device's real state rather than asserting a default onto
-// hardware that is working.
-func TestAdoptionTakesTrustedFromTheDevice(t *testing.T) {
+// Adoption copies spec.trusted from the device and does not change the
+// device.
+func TestAdoptionCopiesTrustedFromTheDevice(t *testing.T) {
 	fixture := newAPIFixture()
 	device := pairedDevice(t, testDevice)
 	device.Trusted = false
@@ -161,12 +154,12 @@ func TestAdoptionTakesTrustedFromTheDevice(t *testing.T) {
 		t.Errorf("spec.trusted = %v, want the device's own false", peripheral.Spec.Trusted)
 	}
 	if radio.called("SetDeviceTrusted") {
-		t.Errorf("adoption changed the device: %v", radio.calls)
+		t.Errorf("adoption made the radio calls %v, want none", radio.calls)
 	}
 }
 
-// reason reads one condition's reason, or the empty string when the
-// status holds no such condition.
+// reason returns the reason of the status condition with the given
+// type, or "" when the status has no such condition.
 func reason(peripheral *Peripheral, conditionType string) string {
 	for _, condition := range peripheral.Status.Conditions {
 		if condition.Type == conditionType {
@@ -176,9 +169,8 @@ func reason(peripheral *Peripheral, conditionType string) string {
 	return ""
 }
 
-// The level and the icon come out of the managed-objects read the pass
-// already makes, so a charge BlueZ reports reaches the object with no
-// second call.
+// The battery level and the icon come from the GetManagedObjects read
+// that the pass already makes.
 func TestPeripheralStatusReportsTheBatteryAndTheIcon(t *testing.T) {
 	fixture := newAPIFixture()
 	device := pairedDevice(t, testDevice)
@@ -190,18 +182,18 @@ func TestPeripheralStatusReportsTheBatteryAndTheIcon(t *testing.T) {
 
 	peripheral := read[Peripheral](t, fixture, testPeripheralPath())
 	if peripheral.Status.Icon != "input-gaming" {
-		t.Errorf("status.icon = %q", peripheral.Status.Icon)
+		t.Errorf("status.icon = %q, want input-gaming", peripheral.Status.Icon)
 	}
 	if peripheral.Status.Battery == nil {
-		t.Fatalf("status.battery is absent for a device that reports a level: %+v", peripheral.Status)
+		t.Fatalf("status = %+v, want a battery for a device that reports a level", peripheral.Status)
 	}
 	if peripheral.Status.Battery.Percentage != 62 || peripheral.Status.Battery.Source != "HID" {
-		t.Errorf("status.battery = %+v", peripheral.Status.Battery)
+		t.Errorf("status.battery = %+v, want 62 percent from HID", peripheral.Status.Battery)
 	}
 }
 
-// The kernel's entry wins wherever both sources report a level, because
-// it also carries the charging state.
+// When the kernel and BlueZ both report a level, the kernel's is used,
+// because it also reports whether the battery is charging.
 func TestPeripheralStatusPrefersTheKernelBattery(t *testing.T) {
 	fixture := newAPIFixture()
 	device := pairedDevice(t, testDevice)
@@ -215,22 +207,22 @@ func TestPeripheralStatusPrefersTheKernelBattery(t *testing.T) {
 	peripheral := read[Peripheral](t, fixture, testPeripheralPath())
 	battery := peripheral.Status.Battery
 	if battery == nil {
-		t.Fatalf("status.battery is absent: %+v", peripheral.Status)
+		t.Fatalf("status = %+v, want a battery", peripheral.Status)
 	}
 	if battery.Percentage != 40 {
 		t.Errorf("status.battery.percentage = %d, want the kernel's 40", battery.Percentage)
 	}
 	if battery.Source != "ps-controller-battery-a0:ab:51:33:b7:12" {
-		t.Errorf("status.battery.source = %q", battery.Source)
+		t.Errorf("status.battery.source = %q, want the kernel power supply ps-controller-battery-a0:ab:51:33:b7:12", battery.Source)
 	}
 	if battery.Charging == nil || *battery.Charging {
 		t.Errorf("status.battery.charging = %v, want false", battery.Charging)
 	}
 }
 
-// BlueZ reads the level of a Low Energy device from its GATT battery
-// service, and the kernel registers no power supply for it, so Battery1
-// is the fallback.
+// BlueZ reads a Low Energy device's level from its GATT battery
+// service, and the kernel registers no power supply for it, so the
+// status uses Battery1.
 func TestPeripheralStatusFallsBackToBlueZ(t *testing.T) {
 	fixture := newAPIFixture()
 	device := pairedDevice(t, testDevice)
@@ -242,18 +234,18 @@ func TestPeripheralStatusFallsBackToBlueZ(t *testing.T) {
 
 	battery := read[Peripheral](t, fixture, testPeripheralPath()).Status.Battery
 	if battery == nil {
-		t.Fatalf("status.battery is absent for a device BlueZ reports a level for")
+		t.Fatal("status.battery is absent, want the level that BlueZ reports")
 	}
 	if battery.Percentage != 88 || battery.Source != "GATT Battery Service" {
-		t.Errorf("status.battery = %+v", battery)
+		t.Errorf("status.battery = %+v, want 88 percent from the GATT Battery Service", battery)
 	}
 	if battery.Charging != nil {
 		t.Errorf("status.battery.charging = %v, want none", *battery.Charging)
 	}
 }
 
-// Most controllers report no level at all, and a block that said zero
-// for them would read as an empty battery.
+// Most controllers report no level, and a status.battery of zero would
+// read as an empty battery.
 func TestPeripheralStatusOmitsTheBatteryWhenTheDeviceReportsNone(t *testing.T) {
 	fixture := newAPIFixture()
 	inventory := testInventory(t, fixture, testRadio(t, pairedDevice(t, testDevice)))
@@ -266,9 +258,9 @@ func TestPeripheralStatusOmitsTheBatteryWhenTheDeviceReportsNone(t *testing.T) {
 	}
 }
 
-// status.bond copies BlueZ's Paired, Bonded, Trusted, and Connected for
-// the device.
-func TestPeripheralBondReportsTheDevicePropertiesBlueZHolds(t *testing.T) {
+// status.bond copies the Paired, Bonded, Trusted, and Connected
+// properties of the device in BlueZ.
+func TestPeripheralBondCopiesTheDevicePropertiesFromBlueZ(t *testing.T) {
 	cases := []struct {
 		name   string
 		change func(*deviceState)

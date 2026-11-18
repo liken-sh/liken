@@ -1,29 +1,19 @@
 package main
 
-// The pairing API: three custom resources that let a person create,
-// read, and delete a bond with kubectl.
+// The Adapter, Peripheral, and PairingRequest types of the
+// bluetooth.liken.sh API. An Adapter is a radio and a Peripheral is a
+// bonded device. A person pairs a device by creating a PairingRequest
+// and unpairs it by deleting its Peripheral.
 //
-// One rule sets what becomes an object and what stays status. A
-// spec is desired state, a status is observed state, and a radio
-// session is never an object. So the Adapter and the Peripheral are the
-// durable inventory, the PairingRequest is the act of pairing, and
-// everything the radio reports about them goes in status.
+// Adapter and Peripheral are cluster-scoped, because a radio and its
+// bonds belong to a machine's hardware and not to a tenant.
+// PairingRequest is namespaced, so RBAC can let someone create
+// PairingRequests in one namespace without letting them exec into the
+// operator's pod.
 //
-// Adapter and Peripheral are cluster-scoped, because a radio and a bond
-// belong to a machine's hardware and not to a tenant, and because the
-// ResourceSlice that publishes the same controllers is cluster-scoped
-// for the same reason. PairingRequest is namespaced, so that RBAC can
-// grant "may create PairingRequests" in one namespace without granting
-// exec into the operator's pod. This API exists to make that narrower
-// grant possible.
-//
-// Like the ResourceSlice and Secret types in this repository, these
-// structs hold only the fields the operator reads or writes. The
-// objects also have annotations, generation, and everything else an
-// object has, and none of that changes what a pairing needs. The one
-// thing every write does include is the resourceVersion from its read,
-// so a second writer gets a conflict instead of losing the first
-// writer's change.
+// These structs have only the fields the operator reads or writes.
+// Every write sends the resourceVersion from its read, so a concurrent
+// writer gets a conflict and neither overwrites the other.
 
 import (
 	"encoding/json"
@@ -37,10 +27,8 @@ import (
 )
 
 const (
-	// The API group and version for these objects. The group is the
-	// driver's own name, so the objects sort beside the slices this
-	// operator publishes and no other operator's resources can collide
-	// with them.
+	// The API group is the DRA driver's name, so it cannot collide with
+	// another operator's group.
 	pairingGroup   = DriverName
 	pairingVersion = "v1alpha1"
 	pairingAPI     = pairingGroup + "/" + pairingVersion
@@ -52,26 +40,23 @@ const (
 )
 
 const (
-	// adapterFinalizer holds an Adapter object while the radio it names is
-	// present. Deleting an Adapter cascades to every Peripheral under it
-	// and to every bond Secret under those, so a delete against live
-	// hardware would be a mass unpair. With the finalizer, the delete
-	// stays pending instead, and the reason goes into the status.
+	// adapterFinalizer stays on an Adapter while its radio is present.
+	// Garbage collection of a deleted Adapter deletes its Peripherals and
+	// their bond Secrets, which would unpair every device of a radio
+	// that is still in use. While the finalizer stays, the Adapter is not
+	// removed, and status.deletionRefused gives the reason.
 	adapterFinalizer = DriverName + "/radio-present"
 
-	// peripheralFinalizer holds a Peripheral while its teardown runs.
-	// Deleting a Peripheral is the unpair API, and an unpair has an order:
-	// end the session, let the claim that holds the controller release it,
-	// retire the device from the slice, and only then remove the bond from
-	// bluetoothd.
+	// peripheralFinalizer keeps a deleted Peripheral until the unpair
+	// teardown in unpair.go has run.
 	peripheralFinalizer = DriverName + "/unpair"
 )
 
-// The phases a PairingRequest reports. A request is Open while its
-// window is running, and it reaches exactly one of the other two: it
-// paired the device a person approved, or the window closed with no
-// approval. The operator retries neither end state, because the
-// device's own pairing mode has timed out by then as well.
+// The phases of a PairingRequest. A request is Open while its window
+// runs. It becomes Paired when the approved device pairs, or Expired
+// when the window closes with no approval. The operator does not retry
+// a finished request, because by then the device's own pairing mode
+// has timed out too.
 const (
 	phaseOpen    = "Open"
 	phasePaired  = "Paired"
@@ -79,36 +64,27 @@ const (
 )
 
 const (
-	// defaultWindowSeconds is how long a window runs when the request
-	// states no length. Three minutes is long enough to hold the
-	// controller's buttons, read status.seen, and write the address back.
+	// defaultWindowSeconds gives a person time to put the controller in
+	// pairing mode, read status.seen, and write the address into
+	// spec.device.
 	defaultWindowSeconds = 180
 
-	// defaultTTLSeconds is how long a finished request stays before the
-	// operator deletes it. One day is the Job convention, and it is long
-	// enough to read the request the next morning. The Peripheral records
-	// which request produced it, so that record outlasts the deletion.
+	// defaultTTLSeconds keeps a finished request for one day, long
+	// enough to read it the next morning.
 	defaultTTLSeconds = 86400
 
-	// maxSeenDevices and maxSeenNameBytes bound status.seen. The list is
-	// written from radio observations, so a busy room would otherwise
-	// grow the object without limit. The name limit is the same 64 bytes
-	// the ResourceSlice puts on a string attribute.
+	// maxSeenDevices and maxSeenNameBytes limit the size of status.seen,
+	// because every device in radio range adds an entry. 64 bytes is
+	// the limit that the API server puts on a ResourceSlice string
+	// attribute, and attributeString cuts to the same length.
 	maxSeenDevices   = 16
 	maxSeenNameBytes = 64
 )
 
-// ObjectMeta is the identity every one of these objects has.
-//
-// Finalizers and DeletionTimestamp are here because both controllers
-// are finalizer controllers: an object that is deleting keeps its
-// deletionTimestamp and stays readable until the last finalizer is
-// removed, and that window is where the ordered teardown runs.
-//
-// Generation is the API server's count of changes to the spec. A write
-// to the status subresource does not change it, so the edit watcher
-// (editwatch.go) compares it to tell a person's edit from the
-// operator's own status write.
+// ObjectMeta has the metadata fields that the operator reads or writes.
+// A status write does not change Generation, so editwatch.go compares
+// it to tell a person's edit of a spec from the operator's own status
+// write.
 type ObjectMeta struct {
 	Name              string            `json:"name,omitempty"`
 	Namespace         string            `json:"namespace,omitempty"`
@@ -122,52 +98,47 @@ type ObjectMeta struct {
 	DeletionTimestamp string            `json:"deletionTimestamp,omitempty"`
 }
 
-// deleting reports whether somebody has requested this object's
-// deletion. The API server refuses to remove an object that has a
-// finalizer, and writes this field instead. A teardown starts when
-// this field is set.
+// deleting reports whether someone has deleted this object and the API
+// server keeps it only for its finalizers.
 func (m ObjectMeta) deleting() bool { return m.DeletionTimestamp != "" }
 
-// holds reports whether this object has the named finalizer.
-func (m ObjectMeta) holds(finalizer string) bool {
-	for _, held := range m.Finalizers {
-		if held == finalizer {
+// hasFinalizer reports whether the object has the finalizer.
+func (m ObjectMeta) hasFinalizer(finalizer string) bool {
+	for _, name := range m.Finalizers {
+		if name == finalizer {
 			return true
 		}
 	}
 	return false
 }
 
-// with returns the finalizer list with one added, and without returns
-// it with one removed. Both return a new slice, because the caller's
-// copy is the object it read and a patch that failed must leave that
-// copy as the server has it.
-func (m ObjectMeta) with(finalizer string) []string {
-	if m.holds(finalizer) {
+// withFinalizer returns the finalizer list with finalizer added.
+// Neither withFinalizer nor withoutFinalizer changes m.Finalizers, so
+// when the patch fails, the caller's copy still matches the server's.
+func (m ObjectMeta) withFinalizer(finalizer string) []string {
+	if m.hasFinalizer(finalizer) {
 		return m.Finalizers
 	}
 	return append(append([]string{}, m.Finalizers...), finalizer)
 }
 
-func (m ObjectMeta) without(finalizer string) []string {
+func (m ObjectMeta) withoutFinalizer(finalizer string) []string {
 	kept := []string{}
-	for _, held := range m.Finalizers {
-		if held != finalizer {
-			kept = append(kept, held)
+	for _, name := range m.Finalizers {
+		if name != finalizer {
+			kept = append(kept, name)
 		}
 	}
 	return kept
 }
 
-// Adapter is the cluster's record of one Bluetooth radio. The operator
-// creates it for the radio its pod claimed, and names it for that
-// radio's address in the form a Kubernetes name accepts.
+// Adapter is one Bluetooth radio. The operator creates it for the radio
+// that its pod claimed, and names it after the radio's address.
 //
-// The Adapter is the root of the ownership tree: Peripherals belong to
-// it, and each Peripheral owns its bond Secret. Nothing in that tree
-// names a machine, so a dongle carried to another machine keeps its
-// Adapter, its Peripherals, and their Secrets. The radio's current
-// location is reported in status.
+// The Adapter owns its Peripherals, and each Peripheral owns its bond
+// Secret. No name or spec field of these objects identifies a machine,
+// so a USB radio that moves to another machine keeps its Adapter,
+// Peripherals, and Secrets. status.node reports the machine it is on.
 type Adapter struct {
 	APIVersion string        `json:"apiVersion,omitempty"`
 	Kind       string        `json:"kind,omitempty"`
@@ -177,20 +148,18 @@ type Adapter struct {
 }
 
 type AdapterSpec struct {
-	// Alias reconciles into BlueZ's Adapter1.Alias, which is the name
-	// the radio broadcasts about itself.
+	// Alias is the value for BlueZ's Adapter1.Alias, the name the radio
+	// advertises for itself.
 	Alias string `json:"alias,omitempty"`
 
-	// Privacy is the value of BlueZ's Privacy key for this radio, and
-	// empty means off. bluetoothd reads the key only at start, so a
-	// change takes effect when the operator's pod starts again
-	// (privacy.go).
+	// Privacy is the value of bluetoothd's Privacy key for this radio.
+	// Empty means off. bluetoothd reads the key only when it starts, so
+	// the operator replaces its own pod to apply a change (privacy.go).
 	Privacy string `json:"privacy,omitempty"`
 
-	// Btmon turns on the btmon container's trace of this radio. The
-	// operator writes it into the pod's settings volume, and the
-	// container starts or stops btmon when the value changes
-	// (btmon.go).
+	// Btmon turns on a btmon trace of this radio. The operator writes
+	// the value into the pod's settings volume, and the btmon container
+	// starts or stops btmon when it changes (btmon.go).
 	Btmon bool `json:"btmon,omitempty"`
 }
 
@@ -200,31 +169,31 @@ type AdapterStatus struct {
 	Powered bool   `json:"powered"`
 
 	// Privacy is the value that the running bluetoothd started with,
-	// read from the pod's settings volume. It reports what bluetoothd
-	// was told, not what the kernel accepted.
+	// read from the pod's settings volume. It is what bluetoothd was
+	// given, not what the kernel accepted.
 	Privacy string `json:"privacy,omitempty"`
 
-	// Btmon is the value in the settings volume's btmon file, which
-	// the btmon container reads. It is a pointer so that a status an
-	// older operator wrote, with no btmon field, differs from false and
-	// gets written, and the printer column shows false and not an empty
-	// cell. It is not omitted when false for the same reason.
+	// Btmon is the value in the btmon file of the settings volume, which
+	// the btmon container reads. It is a pointer so that sameStatus finds
+	// a stored status with no btmon field different from false, and the
+	// operator writes the field. It has no omitempty, so the printer
+	// column shows false and not an empty cell.
 	Btmon *bool `json:"btmon"`
 
-	// DeletionRefused names why the operator kept its finalizer on an
-	// Adapter somebody deleted. It is empty at every other time.
+	// DeletionRefused is why the operator kept its finalizer on an
+	// Adapter that someone deleted. It is empty otherwise.
 	DeletionRefused string `json:"deletionRefused,omitempty"`
 }
 
-// Peripheral is the durable fact that one device holds a bond with one
-// adapter. The operator creates it when a pairing succeeds and when it
-// adopts a bond that bluetoothd already held, and it owns the Secret
-// that holds that one bond.
+// Peripheral is one device that has a bond with one adapter. The
+// operator creates it when a pairing succeeds, and when bluetoothd
+// already has a bond that no Peripheral records. It owns the Secret
+// that stores the bond's keys.
 //
-// Deleting a Peripheral is the unpair API. Nothing else deletes one: a
-// Peripheral whose bond disappeared from bluetoothd keeps its object
-// and reports the gap in status, because deletion means unpair and a
-// person decides that.
+// Deleting a Peripheral unpairs the device, so the operator never
+// deletes one on its own. When bluetoothd loses the bond, the
+// Peripheral stays and status.bond.held is false, and a person decides
+// whether to unpair.
 type Peripheral struct {
 	APIVersion string           `json:"apiVersion,omitempty"`
 	Kind       string           `json:"kind,omitempty"`
@@ -234,15 +203,14 @@ type Peripheral struct {
 }
 
 type PeripheralSpec struct {
-	// Alias reconciles into Device1.Alias. bluetoothd stores the alias
-	// in the bond's own info file, so the name is stored in the Secret
-	// with the keys.
+	// Alias is the value for Device1.Alias. bluetoothd stores the alias
+	// in the bond's info file, so the Secret holds it with the keys.
 	Alias string `json:"alias,omitempty"`
 
-	// Trusted reconciles into Device1.Trusted, which lets the device
-	// reconnect on its own. It is a pointer because the CRD
-	// defaults it to true, and a plain false would be indistinguishable
-	// from an unset field on the wire.
+	// Trusted is the value for Device1.Trusted, which lets the device
+	// connect without an agent's approval. It is a pointer because the
+	// CRD defaults it to true: a plain bool with omitempty would drop
+	// false from the JSON, and the API server would default it to true.
 	Trusted *bool `json:"trusted,omitempty"`
 }
 
@@ -250,8 +218,8 @@ type PeripheralStatus struct {
 	Address string `json:"address,omitempty"`
 
 	// Name is the name the device reports for itself, and Icon is the
-	// freedesktop icon name BlueZ derives for it. Both are empty for a
-	// device bluetoothd holds no object for.
+	// freedesktop icon name that BlueZ derives for it. Both are empty
+	// when bluetoothd has no object for the device.
 	Name string `json:"name,omitempty"`
 	Icon string `json:"icon,omitempty"`
 
@@ -261,25 +229,21 @@ type PeripheralStatus struct {
 	Bond BondStatus `json:"bond,omitempty"`
 
 	// Battery is nil when the device reports no level. Most controllers
-	// have no battery, and one that has a battery reports a level only
-	// while it is connected.
+	// have no battery, and a controller that has one reports a level
+	// only while it is connected.
 	Battery *BatteryStatus `json:"battery,omitempty"`
 
 	Conditions []Condition `json:"conditions,omitempty"`
 }
 
-// BondStatus is what the operator observes about the bond itself.
+// BondStatus is what the operator observes about the bond.
 type BondStatus struct {
-	// Held reports whether bluetoothd still holds the bond. It is false
-	// for a Peripheral whose bond is gone from the daemon. The operator
-	// reports that gap and never acts on it.
+	// Held is whether bluetoothd still has the bond.
 	Held bool `json:"held"`
 
-	// Paired, Bonded, Trusted, and Connected are BlueZ's own Device1
-	// properties for this device, read on every pass. When a remote will
-	// not pair or reconnect, this object states what bluetoothd holds for
-	// it, and a person reads that here rather than through bluetoothctl
-	// in the pod.
+	// Paired, Bonded, Trusted, and Connected are BlueZ's Device1
+	// properties, read on every pass, so a person can debug a device that
+	// does not pair or reconnect without running bluetoothctl in the pod.
 	Paired    bool `json:"paired"`
 	Bonded    bool `json:"bonded"`
 	Trusted   bool `json:"trusted"`
@@ -290,16 +254,18 @@ type BondStatus struct {
 	Request  string `json:"request,omitempty"`
 }
 
-// BatteryStatus is the charge the device reports, read from the
-// kernel's power supply class where the kernel registers one, and
-// from BlueZ's org.bluez.Battery1 interface where it does not.
+// BatteryStatus is the charge level the device reports. The operator
+// reads it from the kernel's power supply class when the kernel
+// registers one, and from BlueZ's org.bluez.Battery1 interface when it
+// does not.
 //
-// Source names where the level came from: the power supply's own name,
-// such as ps-controller-battery-<address>, for a kernel reading, and
-// BlueZ's own word, such as HID or a GATT service, for a BlueZ one.
+// Source is where the level came from. For a kernel reading it is the
+// power supply's name, such as ps-controller-battery-<address>. For a
+// BlueZ reading it is BlueZ's own source name, such as HID or a GATT
+// service.
 //
 // Charging is absent for a BlueZ reading, because Battery1 reports a
-// level and no direction, and for a kernel reading whose status is
+// level and not a direction, and for a kernel reading whose status is
 // Unknown.
 type BatteryStatus struct {
 	Percentage int    `json:"percentage"`
@@ -307,23 +273,14 @@ type BatteryStatus struct {
 	Charging   *bool  `json:"charging,omitempty"`
 }
 
-// Condition is the standard Kubernetes condition shape, the one every
-// liken component reports (kubernetes/conditions).
-//
-// The shape is the standard one, so a reader treats these the way it
-// treats a Pod's conditions. LastTransitionTime marks when Status last
-// changed, not when the operator last wrote the object, so a reader
-// measures from it how long a controller has been asleep.
+// Condition is the Kubernetes condition type from kubernetes/conditions,
+// which every liken component writes.
 type Condition = conditions.Condition
 
-// PairingRequest is the act of pairing, and it also runs the
-// discovery scan. The scan and the pairing window are one radio
-// session, so an address a person approves is one the radio observed
-// in this same session.
-//
-// An empty spec.device never pairs anything. Pairing whatever responds
-// first is the one behavior that can bond a stranger's device, so the
-// address a person writes into the spec is the approval.
+// PairingRequest runs discovery on one adapter for the length of its
+// window and pairs the device whose address a person writes into
+// spec.device. The operator never pairs a device on its own, because
+// the first device to respond could be a stranger's.
 type PairingRequest struct {
 	APIVersion string               `json:"apiVersion,omitempty"`
 	Kind       string               `json:"kind,omitempty"`
@@ -339,7 +296,6 @@ type PairingRequestSpec struct {
 	TTLSecondsAfterFinished *int   `json:"ttlSecondsAfterFinished,omitempty"`
 }
 
-// window is how long this request's radio session runs.
 func (s PairingRequestSpec) window() time.Duration {
 	seconds := s.WindowSeconds
 	if seconds <= 0 {
@@ -348,8 +304,6 @@ func (s PairingRequestSpec) window() time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
-// ttl is how long a finished request stays before the operator deletes
-// it.
 func (s PairingRequestSpec) ttl() time.Duration {
 	seconds := defaultTTLSeconds
 	if s.TTLSecondsAfterFinished != nil {
@@ -366,42 +320,34 @@ type PairingRequestStatus struct {
 	WindowClosesAt string       `json:"windowClosesAt,omitempty"`
 	Seen           []SeenDevice `json:"seen,omitempty"`
 
-	// SeenTruncated is true when this window's seen list was cut at
-	// maxSeenDevices. The radio observed more devices than the list
-	// holds, so the room was too busy to report in full.
+	// SeenTruncated is true when the radio observed more devices during
+	// this window than status.seen lists.
 	SeenTruncated bool `json:"seenTruncated"`
 
 	Peripheral string `json:"peripheral,omitempty"`
 
 	// FinishedAt is when the request reached Paired or Expired, and the
-	// TTL counts from it. Job has the same field for the same reason: a
-	// TTL needs a start, and the object's own creationTimestamp is the
-	// wrong one because a window can run for minutes.
+	// TTL counts from it.
 	FinishedAt string `json:"finishedAt,omitempty"`
 
-	// Message explains a request that did not do what was asked, for
-	// example a Pair call bluetoothd refused. It is empty when there is
-	// nothing to report.
+	// Message explains why a request did not do what was asked, for
+	// example when bluetoothd refused a Pair call. It is empty
+	// otherwise.
 	Message string `json:"message,omitempty"`
 }
 
-// finished reports whether this request has reached an end state. A
-// finished request runs no window and holds no radio state.
 func (s PairingRequestStatus) finished() bool {
 	return s.Phase == phasePaired || s.Phase == phaseExpired
 }
 
-// SeenDevice is one device the radio observed during the window. A
-// person reads the list to find the address to approve.
+// SeenDevice is a device that the radio observed during the window and
+// that a person can approve.
 type SeenDevice struct {
 	Address   string `json:"address"`
 	Name      string `json:"name,omitempty"`
 	FirstSeen string `json:"firstSeen,omitempty"`
 }
 
-// The paths for these objects. A cluster-scoped resource has one
-// collection, and a namespaced resource has one for each namespace and
-// one across all of them, which is the one a controller lists.
 func adaptersPath() string { return pairingBase + "/adapters" }
 
 func adapterPath(name string) string { return adaptersPath() + "/" + name }
@@ -410,30 +356,30 @@ func peripheralsPath() string { return pairingBase + "/peripherals" }
 
 func peripheralPath(name string) string { return peripheralsPath() + "/" + name }
 
+// pairingRequestsPath is the collection across all namespaces, because
+// the operator serves requests in every namespace.
 func pairingRequestsPath() string { return pairingBase + "/pairingrequests" }
 
 func pairingRequestPath(namespace, name string) string {
 	return pairingBase + "/namespaces/" + namespace + "/pairingrequests/" + name
 }
 
-// byAdapter narrows a list to the objects that belong to one radio. The
-// Peripherals and the bond Secrets both have the adapter's address as a
-// label, because a label is selectable and a name is not, and this
-// operator must never write another radio's objects.
+// byAdapter adds a label selector to path, so that a list returns only
+// the Peripherals or bond Secrets of one radio, and the operator never
+// writes another radio's objects. Both kinds carry the adapter in a
+// label, because a selector cannot match part of a name.
 func byAdapter(path, adapterKey string) string {
 	query := url.Values{}
 	query.Set("labelSelector", adapterSelector(adapterKey))
 	return path + "?" + query.Encode()
 }
 
-// adapterSelector is the label selector for the objects of one radio.
 func adapterSelector(adapterKey string) string {
 	return bonds.AdapterLabel + "=" + adapterKey
 }
 
-// createObject posts a new object to its collection and returns what
-// the server stored. The stored copy includes the UID that an owner
-// reference needs.
+// createObject posts object to collection and returns the copy that the
+// server stored. That copy has the UID that an owner reference needs.
 func createObject[T any](c *apiclient.Client, collection string, object *T) (*T, error) {
 	body, err := json.Marshal(object)
 	if err != nil {
@@ -446,9 +392,8 @@ func createObject[T any](c *apiclient.Client, collection string, object *T) (*T,
 	return created, nil
 }
 
-// deleteObject removes one object. An object that is already gone
-// counts as success, because every caller here needs the object to be
-// absent, not a report on one delete call.
+// deleteObject deletes the object at path, and returns no error when
+// the object is already gone.
 func deleteObject(c *apiclient.Client, path string) error {
 	err := c.RequestJSON(http.MethodDelete, path, nil, nil)
 	if err == apiclient.ErrNotFound {
@@ -457,23 +402,15 @@ func deleteObject(c *apiclient.Client, path string) error {
 	return err
 }
 
-// mergePatchType is the content type of a JSON merge patch, which is
-// how the operator edits a finalizer list.
-//
-// A merge patch and not a full replace, because a replace sends every
-// field this program models and drops every field it does not, and
-// that would drop a person's annotations on an Adapter. The patch
-// includes the resourceVersion, which makes the write conditional the
-// same way a replace is.
+// The operator edits a finalizer list with a JSON merge patch, because
+// a replace of the whole object would drop every field these structs
+// do not model, such as a person's annotations. The patch includes the
+// resourceVersion, so it fails with a conflict like a replace does.
 const mergePatchType = "application/merge-patch+json"
 
-// patchFinalizers replaces an object's finalizer list, and returns the
-// resourceVersion the write produced.
-//
-// The caller needs that version. A patch is a write like any other, so
-// it produces a new resourceVersion, and the server would refuse a
-// second write in the same pass that still stated the version from
-// before the patch.
+// patchFinalizers replaces an object's finalizer list and returns the
+// new resourceVersion, which a later write in the same pass must send
+// to avoid a conflict.
 func patchFinalizers(c *apiclient.Client, path, resourceVersion string, finalizers []string) (string, error) {
 	patch := map[string]any{
 		"metadata": map[string]any{
@@ -494,14 +431,14 @@ func patchFinalizers(c *apiclient.Client, path, resourceVersion string, finalize
 	return patched.Metadata.ResourceVersion, nil
 }
 
-// timestamp writes a time the way the API server writes one: seconds,
-// in UTC, in RFC 3339.
+// timestamp formats a time the way the API server does: RFC 3339, in
+// UTC, in whole seconds.
 func timestamp(at time.Time) string { return at.UTC().Format(time.RFC3339) }
 
-// parseTimestamp reads a time this operator or the API server wrote. A
-// value that does not parse returns the zero time, which every caller
-// treats as "no deadline yet", because a status field a person
-// hand-edited must not stall a controller.
+// parseTimestamp returns the zero time for text that does not parse.
+// Each caller then writes the field again from the current time, so a
+// status field that a person cleared or edited by hand cannot stall a
+// request.
 func parseTimestamp(text string) time.Time {
 	at, err := time.Parse(time.RFC3339, text)
 	if err != nil {

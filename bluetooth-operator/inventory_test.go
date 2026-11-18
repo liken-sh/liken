@@ -1,15 +1,14 @@
 package main
 
-// The fixture here is the API server that holds the custom resources
-// the way Kubernetes holds them. The fake radio the controllers are
-// driven through is in radio_test.go, beside the snapshot it answers
-// with.
+// This file has the fake API server that the operator's tests share,
+// and the tests of the pass's metrics. The fake radio is in
+// radio_test.go.
 //
-// The API fixture keeps the two behaviors these controllers depend on.
-// A delete against an object that has a finalizer stamps a
-// deletionTimestamp and keeps the object, and the object goes when the
-// last finalizer is patched off. A write to the status subresource
-// changes status and nothing else.
+// The fake API server copies two behaviors of the real one that the
+// operator depends on. A delete of an object that has a finalizer sets
+// deletionTimestamp and keeps the object, and the object is removed
+// when the last finalizer is patched off. A write to the status
+// subresource changes status and nothing else.
 
 import (
 	"encoding/json"
@@ -21,20 +20,20 @@ import (
 	"time"
 )
 
-// testNow is the clock every one of these tests runs on, so that a
-// test checks a window's deadline with arithmetic instead of waiting
-// for it.
+// testNow is the fixed time that tests give the inventory as its
+// clock, so a test can compute a window's deadline without waiting.
 var testNow = time.Date(2026, 8, 17, 17, 30, 0, 0, time.UTC)
 
-// apiFixture is a small API server that holds objects by the path they
-// are read from.
+// apiFixture is an in-memory API server that stores objects by their
+// request path.
 type apiFixture struct {
 	objects  map[string]map[string]any
 	requests []string
 	version  int
 
-	// failWrites makes every write return this status, the way an
-	// API server does when RBAC denies one.
+	// failWrites is an HTTP status that every non-GET request returns,
+	// such as 403 for a write that RBAC denies. Zero means writes
+	// succeed.
 	failWrites int
 }
 
@@ -61,14 +60,14 @@ func (f *apiFixture) handler(t *testing.T) http.Handler {
 		case http.MethodDelete:
 			f.serveDelete(w, r)
 		default:
-			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			t.Errorf("the fake API server got %s %s, which it does not serve", r.Method, r.URL.Path)
 		}
 	})
 }
 
-// collections names each list path and the kind it returns. A
-// namespaced resource is listed across every namespace, which is one
-// more path than the objects themselves are under.
+// collections maps each list path to the kind it returns. The paths
+// list a namespaced kind across all namespaces, so they are not the
+// paths the objects are stored under.
 var collections = map[string]string{
 	pairingBase + "/adapters":        adapterKind,
 	pairingBase + "/peripherals":     peripheralKind,
@@ -106,14 +105,13 @@ func (f *apiFixture) serveCreate(t *testing.T, w http.ResponseWriter, r *http.Re
 		w.WriteHeader(http.StatusConflict)
 		return
 	}
-	// The API server assigns these two, and both matter here: an owner
-	// reference names a UID, and a resourceVersion makes the next write
-	// conditional.
+	// The API server assigns both of these. Owner references point at
+	// the uid, and writes are conditional on the resourceVersion.
 	metadata["uid"] = "uid-" + name
 	f.version++
 	metadata["resourceVersion"] = strconv.Itoa(f.version)
-	// A resource with a status subresource drops any status a create
-	// stated.
+	// A create ignores status on a resource that has a status
+	// subresource.
 	delete(object, "status")
 	f.objects[path] = object
 	writeJSON(t, w, object)
@@ -128,8 +126,8 @@ func (f *apiFixture) serveReplace(t *testing.T, w http.ResponseWriter, r *http.R
 	}
 	object := decodeBody(t, r)
 	if !currentVersion(stored, object) {
-		// Optimistic concurrency, which every write here states: a
-		// version from before somebody else's write is refused.
+		// A write that carries a resourceVersion older than the stored
+		// one fails with 409, as in the real API server.
 		w.WriteHeader(http.StatusConflict)
 		return
 	}
@@ -148,9 +146,9 @@ func (f *apiFixture) serveReplace(t *testing.T, w http.ResponseWriter, r *http.R
 }
 
 // servePatch applies a merge patch to an object's metadata, which is
-// the only patch this operator sends. An object that is deleting and
-// has lost its last finalizer is removed, the way the API server
-// removes one.
+// the only kind of patch this operator sends. It removes an object
+// that has a deletionTimestamp when the patch takes off the last
+// finalizer.
 func (f *apiFixture) servePatch(t *testing.T, w http.ResponseWriter, r *http.Request) {
 	stored, found := f.objects[r.URL.Path]
 	if !found {
@@ -173,8 +171,8 @@ func (f *apiFixture) servePatch(t *testing.T, w http.ResponseWriter, r *http.Req
 	writeJSON(t, w, stored)
 }
 
-// serveDelete stamps a deletionTimestamp on an object that has a
-// finalizer, and removes one that does not.
+// serveDelete sets deletionTimestamp on an object that has a
+// finalizer, and removes an object that has none.
 func (f *apiFixture) serveDelete(w http.ResponseWriter, r *http.Request) {
 	stored, found := f.objects[r.URL.Path]
 	if !found {
@@ -190,17 +188,16 @@ func (f *apiFixture) serveDelete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// put stores an object the test wrote, at the path the operator reads
-// it from.
+// put stores an object at the path the operator reads it from.
 func (f *apiFixture) put(t *testing.T, path string, object any) {
 	t.Helper()
 	raw, err := json.Marshal(object)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("encoding the object for %s: %v", path, err)
 	}
 	stored := map[string]any{}
 	if err := json.Unmarshal(raw, &stored); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the object for %s: %v", path, err)
 	}
 	if meta(stored)["uid"] == nil {
 		meta(stored)["uid"] = "uid-" + fmt.Sprint(meta(stored)["name"])
@@ -210,28 +207,28 @@ func (f *apiFixture) put(t *testing.T, path string, object any) {
 	f.objects[path] = stored
 }
 
-// read decodes one stored object, and fails the test when the object
-// is not there.
+// read returns the stored object at path as a T, and fails the test
+// when there is none.
 func read[T any](t *testing.T, fixture *apiFixture, path string) *T {
 	t.Helper()
 	stored, found := fixture.objects[path]
 	if !found {
-		t.Fatalf("no object at %s; the fixture holds %v", path, sortedPaths(fixture.objects))
+		t.Fatalf("the fake API server has no object at %s, only %v", path, sortedPaths(fixture.objects))
 	}
 	raw, err := json.Marshal(stored)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("encoding the object at %s: %v", path, err)
 	}
 	object := new(T)
 	if err := json.Unmarshal(raw, object); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the object at %s: %v", path, err)
 	}
 	return object
 }
 
-// currentVersion reports whether a write states the version the
-// object holds now. A write with no version at all is accepted, which
-// is what the API server does.
+// currentVersion reports whether a write's resourceVersion matches the
+// stored object's. A write with no resourceVersion matches, as it does
+// in the API server.
 func currentVersion(stored, write map[string]any) bool {
 	version, stated := meta(write)["resourceVersion"].(string)
 	if !stated || version == "" {
@@ -250,8 +247,8 @@ func meta(object map[string]any) map[string]any {
 }
 
 func finalizers(object map[string]any) int {
-	held, _ := meta(object)["finalizers"].([]any)
-	return len(held)
+	finalizers, _ := meta(object)["finalizers"].([]any)
+	return len(finalizers)
 }
 
 func matchesSelector(object map[string]any, selector string) bool {
@@ -268,8 +265,8 @@ func sortedPaths(objects map[string]map[string]any) []string {
 	for path := range objects {
 		paths = append(paths, path)
 	}
-	// A list comes back in a stable order, so a test that reads the
-	// first item reads the same item every run.
+	// Sorting makes a list return its items in the same order on every
+	// run.
 	for i := 1; i < len(paths); i++ {
 		for j := i; j > 0 && paths[j] < paths[j-1]; j-- {
 			paths[j], paths[j-1] = paths[j-1], paths[j]
@@ -282,7 +279,7 @@ func decodeBody(t *testing.T, r *http.Request) map[string]any {
 	t.Helper()
 	object := map[string]any{}
 	if err := json.NewDecoder(r.Body).Decode(&object); err != nil {
-		t.Fatalf("decoding a %s to %s: %v", r.Method, r.URL.Path, err)
+		t.Fatalf("decoding the body of %s %s: %v", r.Method, r.URL.Path, err)
 	}
 	return object
 }
@@ -290,13 +287,13 @@ func decodeBody(t *testing.T, r *http.Request) map[string]any {
 func writeJSON(t *testing.T, w http.ResponseWriter, object any) {
 	t.Helper()
 	if err := json.NewEncoder(w).Encode(object); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the response: %v", err)
 	}
 }
 
-// testInventory wires an inventory to the fixtures, with the CDI
-// directory pointed at one the test owns so that no claim holds
-// anything unless the test writes one.
+// testInventory builds an inventory on the fake API server and the
+// given radio. The CDI directory is a temporary one, so no claim holds
+// a device unless the test writes a spec.
 func testInventory(t *testing.T, fixture *apiFixture, radio *fakeRadio) *inventory {
 	t.Helper()
 	cdiTempDir(t)
@@ -306,15 +303,14 @@ func testInventory(t *testing.T, fixture *apiFixture, radio *fakeRadio) *invento
 	return i
 }
 
-// testAdapterName is the Adapter object's name, which is the radio's
-// address in the form a Kubernetes name accepts.
+// testAdapterName is the name of the Adapter for the test radio: its
+// address in the form that a Kubernetes name allows.
 const testAdapterName = "14-b4-57-91-2f-c8"
 
 func testAdapterObjectPath() string { return adapterPath(testAdapterName) }
 
-// A pass that finishes reports one run on the duration histogram for
-// each of the three resource kinds it serves, and no error on any of
-// them.
+// A pass that finishes records one run in the duration histogram for
+// each of the three kinds, and no error for any of them.
 func TestReconcileTimesEachResourceKind(t *testing.T) {
 	fixture := newAPIFixture()
 	inventory := testInventory(t, fixture, testRadio(t, pairedDevice(t, testDevice)))
@@ -333,17 +329,16 @@ func TestReconcileTimesEachResourceKind(t *testing.T) {
 	}
 }
 
-// The Adapter phase fails when the write that records a new radio is
-// refused, and that failure never reaches the Peripheral or
-// PairingRequest phases, because reconcile returns as soon as
-// ensureAdapter does.
-func TestReconcileCountsAnAdapterPhaseError(t *testing.T) {
+// When the API server refuses the write that creates the Adapter,
+// reconcile counts one Adapter error and returns before the Peripheral
+// and PairingRequest parts run, so they record no duration.
+func TestReconcileCountsAnAdapterErrorAndStops(t *testing.T) {
 	fixture := newAPIFixture()
 	fixture.failWrites = http.StatusForbidden
 	inventory := testInventory(t, fixture, testRadio(t, pairedDevice(t, testDevice)))
 
 	if pass := inventory.reconcile(); pass.ok {
-		t.Fatal("a refused write reported a finished pass")
+		t.Fatal("reconcile finished the pass although the API server refused the write")
 	}
 
 	if errs, found := metricValue(t, inventory.metrics.registry,
@@ -353,13 +348,13 @@ func TestReconcileCountsAnAdapterPhaseError(t *testing.T) {
 	for _, kind := range []string{peripheralKind, pairingRequestKind} {
 		if _, found := metricValue(t, inventory.metrics.registry,
 			"bluetooth_reconcile_duration_seconds", map[string]string{"kind": kind}); found {
-			t.Errorf("bluetooth_reconcile_duration_seconds{kind=%q} ran, but the Adapter phase never returned", kind)
+			t.Errorf("bluetooth_reconcile_duration_seconds{kind=%q} has a sample, but the Adapter part of the pass never returned", kind)
 		}
 	}
 }
 
-// bluetooth_adapter_present reports bluetoothd's own answer: one while
-// it names an adapter, zero once it reports none.
+// bluetooth_adapter_present is 1 while bluetoothd reports an adapter
+// and 0 once it reports none.
 func TestAdapterPresentGaugeFollowsTheRadio(t *testing.T) {
 	fixture := newAPIFixture()
 	radio := testRadio(t, pairedDevice(t, testDevice))
@@ -373,15 +368,14 @@ func TestAdapterPresentGaugeFollowsTheRadio(t *testing.T) {
 	radio.err = ErrNoAdapter
 	inventory.reconcile()
 	if present, found := metricValue(t, inventory.metrics.registry, "bluetooth_adapter_present", nil); !found || present != 0 {
-		t.Errorf("bluetooth_adapter_present = %v (found: %v), want 0 once the radio departed", present, found)
+		t.Errorf("bluetooth_adapter_present = %v (found: %v), want 0 after bluetoothd stopped reporting the radio", present, found)
 	}
 }
 
-// A read that fails for a reason other than ErrNoAdapter says nothing
-// about whether the adapter is there, so the gauge keeps whatever a
-// valid read last reported, and bluetooth_observation_valid falls
-// instead.
-func TestAdapterPresentGaugeHoldsItsValueWhileTheObservationIsInvalid(t *testing.T) {
+// A read that fails with any error other than ErrNoAdapter does not
+// show whether the adapter is there. The gauge keeps the value from
+// the last valid read, and bluetooth_observation_valid drops to 0.
+func TestAdapterPresentGaugeKeepsItsValueWhenTheReadFails(t *testing.T) {
 	fixture := newAPIFixture()
 	radio := testRadio(t, pairedDevice(t, testDevice))
 	inventory := testInventory(t, fixture, radio)
@@ -399,12 +393,10 @@ func TestAdapterPresentGaugeHoldsItsValueWhileTheObservationIsInvalid(t *testing
 	}
 }
 
-// A read that answers, whatever it answers with, is a valid
-// observation, including the ordinary report of no adapter at all.
-// The success timestamp reports the observation's own clock, which is
-// the inventory's, so a test that runs the clock forward reads the
-// timestamp move with it.
-func TestObservationValidCoversAnOrdinaryNoAdapterAnswer(t *testing.T) {
+// A successful read counts as a valid observation even when it reports
+// no adapter. The success timestamp comes from the inventory's clock,
+// so it is testNow here.
+func TestObservationIsValidWhenTheRadioReportsNoAdapter(t *testing.T) {
 	fixture := newAPIFixture()
 	radio := testRadio(t, pairedDevice(t, testDevice))
 	radio.err = ErrNoAdapter
@@ -414,7 +406,7 @@ func TestObservationValidCoversAnOrdinaryNoAdapterAnswer(t *testing.T) {
 
 	if valid, found := metricValue(t, inventory.metrics.registry,
 		"bluetooth_observation_valid", map[string]string{"source": sourceBlueZ}); !found || valid != 1 {
-		t.Errorf("bluetooth_observation_valid{source=bluez} = %v (found: %v), want 1 for an ordinary no-adapter answer", valid, found)
+		t.Errorf("bluetooth_observation_valid{source=bluez} = %v (found: %v), want 1 because bluetoothd reported no adapter, which is a valid reading", valid, found)
 	}
 	success, found := metricValue(t, inventory.metrics.registry,
 		"bluetooth_observation_last_success_timestamp_seconds", map[string]string{"source": sourceBlueZ})

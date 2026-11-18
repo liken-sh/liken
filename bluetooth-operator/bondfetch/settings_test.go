@@ -8,13 +8,10 @@ import (
 	"testing"
 )
 
-// testAdapterPath is the test radio's Adapter, which bondfetch reads
-// for the settings.
 const testAdapterPath = "/apis/bluetooth.liken.sh/v1alpha1/adapters/04-4a-69-66-92-27"
 
-// apiObjects serves each object at its path, and answers 404 for any
-// other path, the way the API server answers for an object that does
-// not exist.
+// apiObjects serves each object as JSON at its path, and returns 404
+// for any other path, as the API server does for a missing object.
 func apiObjects(t *testing.T, objects map[string]any) http.Handler {
 	t.Helper()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -25,21 +22,18 @@ func apiObjects(t *testing.T, objects map[string]any) http.Handler {
 		}
 		body, err := json.Marshal(object)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("encoding the %s object: %v", r.URL.Path, err)
 		}
 		_, _ = w.Write(body)
 	})
 }
 
-// failingAPI answers every request with 500.
 func failingAPI() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	})
 }
 
-// readSetting answers one file bondfetch wrote into the settings
-// volume.
 func readSetting(t *testing.T, settings, name string) string {
 	t.Helper()
 	contents, err := os.ReadFile(filepath.Join(settings, name))
@@ -49,14 +43,13 @@ func readSetting(t *testing.T, settings, name string) string {
 	return string(contents)
 }
 
-// adapterWithSpec is the test radio's Adapter with spec.
 func adapterWithSpec(spec map[string]any) map[string]any {
 	return map[string]any{testAdapterPath: map[string]any{"spec": spec}}
 }
 
-// The privacy file holds the value of spec.privacy, and an empty field
-// is off. An Adapter that does not exist yet is off too, because the
-// operator creates it on its first pass.
+// The privacy file holds spec.privacy. An empty field means off, and so
+// does a missing Adapter, because the operator creates the Adapter on
+// its first pass.
 func TestWriteSettingsWritesThePrivacy(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -74,7 +67,7 @@ func TestWriteSettingsWritesThePrivacy(t *testing.T) {
 			settings := t.TempDir()
 
 			if _, err := writeSettings(api, testAddress, settings); err != nil {
-				t.Fatalf("writeSettings: %v", err)
+				t.Fatalf("writing the settings: %v", err)
 			}
 
 			if got := readSetting(t, settings, "privacy"); got != c.want {
@@ -84,9 +77,8 @@ func TestWriteSettingsWritesThePrivacy(t *testing.T) {
 	}
 }
 
-// The btmon file holds spec.btmon, and an empty field is false. An
-// Adapter that does not exist yet is false too, so a new radio starts
-// with the trace off.
+// The btmon file holds spec.btmon. An empty field means false, and so
+// does a missing Adapter, so a new radio starts with the trace off.
 func TestWriteSettingsWritesTheTraceSetting(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -104,7 +96,7 @@ func TestWriteSettingsWritesTheTraceSetting(t *testing.T) {
 			settings := t.TempDir()
 
 			if _, err := writeSettings(api, testAddress, settings); err != nil {
-				t.Fatalf("writeSettings: %v", err)
+				t.Fatalf("writing the settings: %v", err)
 			}
 
 			if got := readSetting(t, settings, "btmon"); got != c.want {
@@ -114,21 +106,21 @@ func TestWriteSettingsWritesTheTraceSetting(t *testing.T) {
 	}
 }
 
-// A read that fails is not an Adapter with every setting off.
-// bluetoothd must not start with a value that a person did not choose,
-// so bondfetch writes neither file.
+// A failed read is different from a missing Adapter. bondfetch writes
+// neither file and returns an error, so bluetoothd does not start with
+// a value that nobody chose.
 func TestWriteSettingsFailsWhenTheAdapterCannotBeRead(t *testing.T) {
 	api := testAPI(t, failingAPI())
 	settings := t.TempDir()
 
 	if _, err := writeSettings(api, testAddress, settings); err == nil {
-		t.Fatal("writeSettings reported success for an Adapter it could not read")
+		t.Fatal("writeSettings returned no error after the API server refused to return the Adapter, want an error")
 	}
 	entries, err := os.ReadDir(settings)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("listing the settings directory: %v", err)
 	}
 	if len(entries) != 0 {
-		t.Errorf("writeSettings wrote %v after a failed read", entries)
+		t.Errorf("the settings directory holds %v after the failed read, want no files", entries)
 	}
 }

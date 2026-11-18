@@ -1,31 +1,15 @@
 package main
 
-// The Prometheus registry this operator serves at /metrics, and the
-// listener that answers a scrape.
+// The Prometheus registry that the operator serves at /metrics, and the
+// HTTP listener that serves it. The code that reads a value records it
+// in the registry at that time, so a scrape only reads the registry and
+// never calls BlueZ, the kernel, or the API server.
 //
-// liken milestone 65 sets the contract every process in the
-// organization follows: a build_info gauge, a reconcile loop's
-// duration and errors by resource kind, and the domain's own facts
-// under a prefix of its own. This operator's prefix is bluetooth_, on
-// port 9250, and plans/completed/07-prometheus-metrics.md states which
-// facts.
-//
-// This file holds the registry and the two layers every process
-// shares. The domain layer is recorded where each fact is already
-// read: peripheral.go, relay.go, wake.go, and inventory.go each call one
-// narrow method here, so a scrape reads the same snapshot the
-// reconcile loop already took and never touches BlueZ, the kernel, or
-// the API server itself.
-//
-// bluetooth_watch_restarts_total is not here. Milestone 65 defines a
-// watch restart as the API server closing a Kubernetes watch that the
-// operator reopens. The operator holds four such watches: the
-// PairingRequests (requestwatch.go), the Adapters and the Peripherals
-// (editwatch.go), and the bond Secrets (bondstore.go). This registry
-// does not count their restarts. The operator's other wakes are D-Bus
-// signals and kernel uevents, and a lost signal channel ends the
-// process rather than reopening, so the pod's own restart is the fact
-// for those.
+// The operator exports no count of watch restarts. client-go's
+// reflector reopens a Kubernetes watch that the API server closes
+// (watch.go). When the D-Bus connection is lost, godbus closes the
+// signal channels and the process exits, so the pod's restart count
+// shows that failure.
 
 import (
 	"context"
@@ -40,43 +24,37 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// metricsDeadline bounds a scrape's headers and the listener's stop.
+// metricsDeadline is the longest the server waits for a scrape's
+// request headers.
 const metricsDeadline = 30 * time.Second
 
-// component names this process on liken_build_info. version is a
-// build-time stamp: the Dockerfile links it in with -ldflags, and a
-// binary built with no such argument reports "dev".
+// component and version are the labels of liken_build_info. The
+// Dockerfile sets version with -ldflags "-X main.version=...", and a
+// binary built without that flag reports "dev".
 const component = "bluetooth-operator"
 
 var version = "dev"
 
-// sourceBlueZ is the one source this operator's observation gauges
-// name. bluetoothd is the single point every fact in this file passes
-// through: the paired set, the connection state, and the BlueZ half
-// of the battery reading all come from one GetManagedObjects call, so
-// one source covers all of them. The kernel's power supply class is
-// the other battery source, but discoverHIDDevices treats a sysfs
-// read it cannot do the same as an empty result, so there is no
-// failure to distinguish it from an ordinary read, and this operator
-// reports no separate source for it.
+// sourceBlueZ is the only value of the source label. One
+// GetManagedObjects call reads the paired set, the connection state,
+// and the BlueZ battery level. The kernel's power_supply class also
+// reports battery levels, but discoverHIDDevices returns nil both when
+// the sysfs read fails and when there is no device, so the operator
+// cannot record whether that read succeeded.
 const sourceBlueZ = "bluez"
 
-// peripheralLabel names the Peripheral resource every layer 3
-// per-device metric carries.
+// peripheralLabel is the label set of the per-Peripheral metrics. Its
+// value is the Peripheral's name.
 var peripheralLabel = []string{"peripheral"}
 
-// resultPaired and resultRefused are the two results a Device1.Pair
-// call reaches, and the result label bluetooth_pair_attempts_total
-// counts under.
+// The values of the result label on bluetooth_pair_attempts_total.
 const (
 	resultPaired  = "paired"
 	resultRefused = "refused"
 )
 
-// metrics holds the registry and every collector this operator
-// writes to. A nil *metrics records nothing, which is what every
-// test that has no reason to check a metric constructs by leaving the
-// field unset.
+// Every method of metrics does nothing on a nil *metrics, so a test
+// that does not check metrics leaves the field unset.
 type metrics struct {
 	registry *prometheus.Registry
 
@@ -101,7 +79,7 @@ func newMetrics() *metrics {
 
 	buildInfo := prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "liken_build_info",
-		Help: "The release this process runs. Always 1; component and version carry the fact.",
+		Help: "The release this process was built from. Always 1.",
 	}, []string{"component", "version"})
 	buildInfo.WithLabelValues(component, version).Set(1)
 
@@ -116,7 +94,7 @@ func newMetrics() *metrics {
 
 	m.peripheralConnected = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "bluetooth_peripheral_connected",
-		Help: "One while a Peripheral holds a link to its adapter, zero while it does not.",
+		Help: "One while a Peripheral has a link with its adapter, zero while it does not.",
 	}, peripheralLabel)
 	m.peripheralClaimed = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "bluetooth_peripheral_claimed",
@@ -159,7 +137,6 @@ func newMetrics() *metrics {
 		Help: "When a read of a source last succeeded, in seconds since the epoch.",
 	}, []string{"source"})
 
-	// Layer 1 is the runtime's own numbers beside the build info.
 	m.registry.MustRegister(
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
@@ -170,8 +147,7 @@ func newMetrics() *metrics {
 	return m
 }
 
-// gauge carries a state as one or zero, the form every boolean gauge
-// in this file takes.
+// gauge converts a boolean to the 1 or 0 that a boolean gauge holds.
 func gauge(state bool) float64 {
 	if state {
 		return 1
@@ -179,9 +155,6 @@ func gauge(state bool) float64 {
 	return 0
 }
 
-// timeReconcile records how long one resource kind's slice of a pass
-// took. inventory.go calls it around each of the Adapter, Peripheral,
-// and PairingRequest phases of reconcile.
 func (m *metrics) timeReconcile(kind string, since, now time.Time) {
 	if m == nil {
 		return
@@ -189,10 +162,9 @@ func (m *metrics) timeReconcile(kind string, since, now time.Time) {
 	m.reconcileDuration.WithLabelValues(kind).Observe(now.Sub(since).Seconds())
 }
 
-// countReconcileError counts one resource kind's phase ending in an
-// error. A reconcile that changes nothing still counts as a run on
-// the duration histogram; this counts only the runs that did not
-// finish what they set out to do.
+// countReconcileError counts a reconcile of one resource kind that
+// ended in an error. bluetooth_reconcile_duration_seconds counts every
+// reconcile, failed or not.
 func (m *metrics) countReconcileError(kind string) {
 	if m == nil {
 		return
@@ -200,10 +172,10 @@ func (m *metrics) countReconcileError(kind string) {
 	m.reconcileErrors.WithLabelValues(kind).Inc()
 }
 
-// recordObservation records whether one read of a source succeeded,
-// and when it last did. While valid stays at zero, a reader knows the
-// connected and battery gauges carry a reading from before the source
-// went stale, and the timestamp says how stale.
+// recordObservation records whether the latest read of a source
+// succeeded, and the time of the latest success. After a failed read,
+// the connected and battery gauges keep the last good reading, and the
+// timestamp shows how old it is.
 func (m *metrics) recordObservation(source string, ok bool, now time.Time) {
 	if m == nil {
 		return
@@ -215,10 +187,8 @@ func (m *metrics) recordObservation(source string, ok bool, now time.Time) {
 }
 
 // setAdapterPresent records whether bluetoothd published this node's
-// adapter on the pass that just read it. The caller writes this only
-// when the read itself succeeded; a read that failed keeps the
-// last-known value, the same rule the hardware triple states for
-// every other gauge in the organization.
+// adapter. The caller calls it only after a read that succeeded, so
+// after a failed read the gauge keeps its previous value.
 func (m *metrics) setAdapterPresent(present bool) {
 	if m == nil {
 		return
@@ -226,7 +196,6 @@ func (m *metrics) setAdapterPresent(present bool) {
 	m.adapterPresent.Set(gauge(present))
 }
 
-// setPeripheralConnected records one Peripheral's link state.
 func (m *metrics) setPeripheralConnected(peripheral string, connected bool) {
 	if m == nil {
 		return
@@ -234,12 +203,10 @@ func (m *metrics) setPeripheralConnected(peripheral string, connected bool) {
 	m.peripheralConnected.WithLabelValues(peripheral).Set(gauge(connected))
 }
 
-// countDisconnect counts one disconnect: a status write that moved a
-// Peripheral's Connected condition from True to False, under the
-// condition's new reason. The caller does not count a Peripheral that
-// held no condition before, which is a creation and never a transition:
-// a disconnect measures an edge this operator watched happen, not the
-// gap between not knowing and knowing.
+// countDisconnect counts a status write that changed a Peripheral's
+// Connected condition from True to False, under the new reason. The
+// caller does not count the first Connected condition of a new
+// Peripheral, because the operator did not see that link go down.
 func (m *metrics) countDisconnect(peripheral, reason string) {
 	if m == nil {
 		return
@@ -247,9 +214,6 @@ func (m *metrics) countDisconnect(peripheral, reason string) {
 	m.disconnects.WithLabelValues(peripheral, reason).Inc()
 }
 
-// countWakePress counts one press the relay wrote into a Peripheral's
-// virtual device, because the controller connected after a sleep
-// (wake.go).
 func (m *metrics) countWakePress(peripheral string) {
 	if m == nil {
 		return
@@ -257,9 +221,6 @@ func (m *metrics) countWakePress(peripheral string) {
 	m.wakePresses.WithLabelValues(peripheral).Inc()
 }
 
-// setPeripheralBonded records whether BlueZ holds a link key for this
-// Peripheral, as of the pass that just read it. That is the same rule
-// the hardware triple states for every other gauge here.
 func (m *metrics) setPeripheralBonded(peripheral string, bonded bool) {
 	if m == nil {
 		return
@@ -267,8 +228,6 @@ func (m *metrics) setPeripheralBonded(peripheral string, bonded bool) {
 	m.peripheralBonded.WithLabelValues(peripheral).Set(gauge(bonded))
 }
 
-// countPairAttempt counts one Device1.Pair call under the result
-// bluetoothd gave it.
 func (m *metrics) countPairAttempt(result string) {
 	if m == nil {
 		return
@@ -276,11 +235,9 @@ func (m *metrics) countPairAttempt(result string) {
 	m.pairAttempts.WithLabelValues(result).Inc()
 }
 
-// setPeripheralBattery records the charge a Peripheral's status
-// reports, and clears the series for one that reports none. Deleting
-// the series rather than writing zero keeps an empty battery, which
-// is a real reading, distinct from a controller with no battery to
-// report at all.
+// setPeripheralBattery deletes the series when percentage is nil, so
+// that a battery at 0 percent differs from a controller that reports
+// no battery.
 func (m *metrics) setPeripheralBattery(peripheral string, percentage *int) {
 	if m == nil {
 		return
@@ -292,9 +249,6 @@ func (m *metrics) setPeripheralBattery(peripheral string, percentage *int) {
 	m.peripheralBattery.WithLabelValues(peripheral).Set(float64(*percentage))
 }
 
-// setPeripheralClaimed records whether a prepared claim holds this
-// Peripheral's controller right now, from the same CDI read the
-// unpair teardown already makes.
 func (m *metrics) setPeripheralClaimed(peripheral string, claimed bool) {
 	if m == nil {
 		return
@@ -302,8 +256,6 @@ func (m *metrics) setPeripheralClaimed(peripheral string, claimed bool) {
 	m.peripheralClaimed.WithLabelValues(peripheral).Set(gauge(claimed))
 }
 
-// countInputEvents counts events the relay forwarded from one
-// Peripheral's real node to its virtual one.
 func (m *metrics) countInputEvents(peripheral string, count int) {
 	if m == nil || count == 0 {
 		return
@@ -311,10 +263,9 @@ func (m *metrics) countInputEvents(peripheral string, count int) {
 	m.inputEvents.WithLabelValues(peripheral).Add(float64(count))
 }
 
-// forgetPeripheral takes a Peripheral off every per-device gauge and
-// counter, once its unpair has removed the object. A series for a
-// bond that no longer exists would read as a controller nobody can
-// see in the API, sitting at whatever value its last pass wrote.
+// forgetPeripheral deletes every series of a Peripheral when unpair
+// deletes the object. Without it, the series stay in the scrape at
+// their last values.
 func (m *metrics) forgetPeripheral(peripheral string) {
 	if m == nil {
 		return
@@ -323,16 +274,13 @@ func (m *metrics) forgetPeripheral(peripheral string) {
 	m.peripheralClaimed.DeleteLabelValues(peripheral)
 	m.peripheralBattery.DeleteLabelValues(peripheral)
 	m.peripheralBonded.DeleteLabelValues(peripheral)
-	// A disconnect carries a reason too, so its series for every reason
-	// go together.
 	m.disconnects.DeletePartialMatch(prometheus.Labels{"peripheral": peripheral})
 	m.wakePresses.DeleteLabelValues(peripheral)
 	m.inputEvents.DeleteLabelValues(peripheral)
 }
 
-// listen opens the address the operator's settings name. An empty
-// address serves no metrics, which is every test and a cluster owner
-// who runs no Prometheus.
+// listen returns no listener and no error for an empty address, which
+// turns metrics off.
 func (m *metrics) listen(address string) (net.Listener, error) {
 	if address == "" {
 		return nil, nil
@@ -340,19 +288,15 @@ func (m *metrics) listen(address string) (net.Listener, error) {
 	return net.Listen("tcp", address)
 }
 
-// handler serves the registry at /metrics and nothing else. A scrape
-// reads the in-memory registry this file's methods already wrote to;
-// it makes no BlueZ, kernel, or API call of its own.
 func (m *metrics) handler() http.Handler {
 	served := http.NewServeMux()
 	served.Handle("/metrics", promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{}))
 	return served
 }
 
-// serveMetrics answers scrapes on the listener until the run ends. A
-// failure here reaches the log and stops nothing else: pairing, bond
-// restoration, and the input relay do not depend on a scrape
-// succeeding.
+// serveMetrics serves scrapes until ctx ends. When the listener fails,
+// it logs the error and returns, and the rest of the operator keeps
+// running.
 func serveMetrics(ctx context.Context, listener net.Listener, m *metrics) {
 	serving := &http.Server{
 		Handler:           m.handler(),

@@ -1,26 +1,14 @@
 package main
 
-// The pass that makes the operator's objects agree with the radio.
+// The inventory pass makes the Adapter, Peripheral, and
+// PairingRequest objects match the radio. It reads bluetoothd's object
+// tree once, then reconciles the Adapter, the Peripherals, and the
+// PairingRequests in that order. The Adapter comes first because it
+// owns every Peripheral, and a PairingRequest that pairs a device
+// creates the device's Peripheral under the Adapter.
 //
-// It runs beside the slice publish and the bond persist, on the same
-// wakes and through the same settle window, and it takes one read of
-// bluetoothd's object tree for the whole pass. The three parts run in
-// order, because each one depends on what the one before it wrote: the
-// Adapter is the owner every Peripheral needs, a Peripheral is the
-// owner every bond Secret needs, and a PairingRequest that pairs a
-// device creates a Peripheral under the same Adapter.
-//
-// Every pass reads the Adapter, lists the Adapters, the Peripherals for
-// this radio, and the PairingRequests, and acts on what it read. The
-// reads come from the watches' stores (objectcache.go), which hold what
-// the API server sent last, and the pass keeps no copy of its own. A
-// copy older than the pass's own last write, a store that has not
-// finished its first read, and a Peripheral whose unpair runs are read
-// from the API server instead. The
-// one piece of state that does survive a pass is which devices the
-// publisher has already dropped from the slice, because that is a fact
-// about a write this program made and cannot read back from the
-// objects.
+// The pass reads the objects from the watches' stores (objectcache.go).
+// main.go runs it before the slice publisher and the bond store.
 
 import (
 	"errors"
@@ -34,203 +22,201 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events"
 )
 
-// followUpDelay is how soon the loop runs again while the pass has
-// work in flight: a window that is open, or a teardown between two of
-// its steps. It is short because each of those is a person waiting,
-// and it is bounded because the pass asks for exactly one follow-up.
+// followUpDelay is how long the loop waits before the next pass while
+// a pairing window is open or an unpair is between two of its steps.
+// A person is waiting in both cases, so the delay is much shorter than
+// backstopInterval (main.go).
 const followUpDelay = 2 * time.Second
 
 // inventory reconciles the Adapter, its Peripherals, and the
-// PairingRequests aimed at it.
+// PairingRequests for this node's radio.
 type inventory struct {
 	client    *apiclient.Client
 	radio     radio
 	nodeName  string
 	namespace string
 
-	// cache is the watches' stores, which the pass reads in place of
-	// the API server (objectcache.go). The zero value reads the API
-	// server.
+	// cache holds the watches' stores (objectcache.go). The zero value
+	// reads the API server every time.
 	cache objectCache
 
-	// now is the clock. It is a field so that a test can run a window
-	// out without waiting for it.
+	// now is the clock. A test replaces it to run a pairing window out
+	// without waiting.
 	now func() time.Time
 
-	// retired names the devices the publisher has already left out of
-	// the slice. A teardown removes a bond from bluetoothd only after
-	// the device is out of the published inventory, and the slice
-	// holds no record of a device that is not in it, so this is the
-	// only account of that step.
-	retired map[bonds.Address]bool
+	// removed is the set of devices that the publisher has removed from
+	// the slice for an unpair. The unpair removes the bond from
+	// bluetoothd only after that. The slice has no entry that shows a
+	// device was removed, so this set is the only record of it.
+	removed map[bonds.Address]bool
 
-	// retiring names the devices this pass asked the publisher to drop.
-	// They become retired when the publisher reports that it wrote the
-	// slice.
-	retiring map[bonds.Address]bool
+	// removing is the set of devices this pass asked the publisher to
+	// remove. They move to removed when the publisher reports that it
+	// wrote the slice.
+	removing map[bonds.Address]bool
 
-	// connects pages the bonded audio devices that are not connected,
-	// and holds the backoff each device carries between passes.
+	// connects connects each bonded audio device that is not connected,
+	// and keeps each device's retry backoff between passes.
 	connects *connector
 
-	// inputs reconnects a controller whose link is up with no HID device
-	// behind it (inputrecovery.go).
+	// inputs reconnects a controller whose link is up but that has no
+	// HID device (inputrecovery.go).
 	inputs *inputRecovery
 
-	// relays holds each bonded controller's virtual input devices. A
-	// teardown stops one, in the step that takes the device out of the
-	// published inventory, and each status write arms or disarms the
-	// press that wakes the room (wake.go).
+	// relays holds each bonded controller's virtual input devices. An
+	// unpair stops the controller's relay when it removes the device
+	// from the slice. Each Peripheral status write passes the Connected
+	// condition to the relay, which then sends a key press for a remote
+	// that went to sleep (wake.go).
 	relays *relays
 
-	// ends holds why each link ended, from BlueZ's signal until a status
-	// write carries it (linkend.go).
+	// ends records the reason BlueZ gave when each link ended, until a
+	// status write reports it (linkend.go).
 	ends *linkEnds
 
-	// windowOpen records that this operator has the radio discoverable
-	// and pairable for a request. The radio's own report of that state
-	// lags a pass, because the pass reads the tree before it opens
-	// anything, so the pass that closes a window reads this instead.
+	// windowOpen is true while this operator has made the radio
+	// discoverable and pairable for a request. The pass reads the
+	// object tree before it opens a window, so the tree does not show
+	// the window until the next pass. The pass that closes the window
+	// checks this field instead.
 	windowOpen bool
 
-	// follow reports the radio this pod holds to the edit watcher
-	// (editwatch.go), which watches that radio's Peripherals. It does
-	// nothing until main sets it.
+	// follow tells the edit watcher (editwatch.go) which radio to watch
+	// Peripherals for. It does nothing until main sets it.
 	follow func(adapterKey string)
 
 	// metrics is this operator's Prometheus registry. A nil value
-	// records nothing, which is what every test that has no reason to
-	// check a metric gets by leaving the field unset.
+	// records nothing, so a test that checks no metric leaves it unset.
 	metrics *metrics
 
 	// recorder posts the Events (events.go). A nil recorder posts
-	// nothing, which is what a test that checks no Event gets.
+	// nothing, so a test that checks no Event leaves it unset.
 	recorder *events.Recorder
 
-	// node is the Node this pod runs on. The radio's arrival and
-	// departure are posted on it, because the Adapter can be gone by
-	// the time the radio is.
+	// node is the Node this pod runs on. RadioClaimed and RadioLost are
+	// posted on the Node, because the Adapter may already be deleted
+	// when the radio goes away.
 	node events.ObjectReference
 
-	// radioHeld is the radio the last valid read of bluetoothd
-	// reported, and the zero address when it reported none. A change
-	// of it posts RadioClaimed or RadioLost.
-	radioHeld bonds.Address
+	// lastRadio is the address of the radio in the last valid read of
+	// bluetoothd, or the zero address when that read had none.
+	lastRadio bonds.Address
 
-	// settings is the pod's settings volume. Its privacy file holds
-	// the value bluetoothd started with (privacy.go), and its btmon
-	// file holds the trace setting (btmon.go).
+	// settings is the directory of the pod's settings volume. It has
+	// a privacy file with the value bluetoothd started with
+	// (privacy.go) and a btmon file with the trace setting (btmon.go).
 	settings string
 
 	// btmon is the value in the btmon file after this pass, which the
-	// Adapter's status.btmon reports. It is nil when the pass could not
-	// read the file, and the status then keeps the value it has.
+	// pass writes to the Adapter's status.btmon. It is nil when the pass could
+	// not read the file, and status.btmon then keeps its current value.
 	btmon *bool
 
-	// privacy is the value this pass reports in the Adapter's
+	// privacy is the value this pass writes to the Adapter's
 	// status.privacy. It is empty when the pass could not read the
-	// settings file, and the status then keeps the value it has.
+	// settings file, and status.privacy then keeps its current value.
 	privacy string
 }
 
-func newInventory(client *apiclient.Client, radio radio, held *relays, nodeName, namespace string, readings *metrics) *inventory {
+func newInventory(client *apiclient.Client, radio radio, inputRelays *relays, nodeName, namespace string, readings *metrics) *inventory {
 	i := &inventory{
 		client:    client,
 		radio:     radio,
-		relays:    held,
+		relays:    inputRelays,
 		nodeName:  nodeName,
 		namespace: namespace,
 		now:       time.Now,
-		retired:   map[bonds.Address]bool{},
-		retiring:  map[bonds.Address]bool{},
+		removed:   map[bonds.Address]bool{},
+		removing:  map[bonds.Address]bool{},
 		ends:      newLinkEnds(),
 		follow:    func(string) {},
 		metrics:   readings,
 		settings:  settingsRoot,
 	}
-	// The connector reads the clock through a closure, because the
-	// inventory's clock is a field a test replaces after construction,
-	// and both must run on the same time.
+	// The closures read i.now when they are called, so a test that
+	// replaces the field after construction moves the clocks of the
+	// connector and the input recovery too.
 	i.connects = newConnector(radio, func() time.Time { return i.now() })
-	i.inputs = newInputRecovery(radio, held, func() time.Time { return i.now() })
+	i.inputs = newInputRecovery(radio, inputRelays, func() time.Time { return i.now() })
 	return i
 }
 
-// inventoryPass holds one pass's results for the rest of the loop.
+// inventoryPass is the result of one pass, which the loop in main.go
+// passes to the slice publisher and the bond store.
 type inventoryPass struct {
-	// keepOut names the controllers the slice must not publish, keyed
-	// the way the paired set is keyed. A device under teardown leaves
-	// the inventory before its bond is removed, so no new claim can be
-	// allocated to it in the moment between the two.
-	keepOut map[string]bool
+	// excluded is the set of controllers the slice must not publish,
+	// keyed by MAC address as the paired set is. An unpair removes the
+	// device from the slice before it removes the bond, so that the
+	// scheduler cannot allocate a new claim to the device in between.
+	excluded map[string]bool
 
-	// owners names each bond's Peripheral, which is the owner reference on
-	// its Secret. A bond with no Peripheral yet gets no Secret this
-	// pass, and the next pass writes it.
+	// owners maps each bond to the owner reference of its Peripheral,
+	// which goes on the bond's Secret. A bond with no Peripheral yet
+	// gets no Secret on this pass, and the next pass writes it.
 	owners map[bonds.Address]OwnerReference
 
-	// unpairing names the bonds a teardown is working through. Their
-	// Secrets are not rewritten, because the teardown removes each bond
-	// and garbage collection takes each Secret with its Peripheral.
+	// unpairing is the set of bonds that an unpair is removing. Their
+	// Secrets are not rewritten, because the unpair removes the bond
+	// and garbage collection deletes the Secret with its Peripheral.
 	unpairing map[bonds.Address]bool
 
-	// adapter is the Adapter this pass reconciled, and nil when the
-	// pass did not read one. It owns the identity Secret, and its
-	// spec.privacy decides whether the pod restarts.
+	// adapter is the Adapter this pass reconciled, or nil when the pass
+	// failed before it read or created one. It owns the identity
+	// Secret, and a change to its spec.privacy restarts the pod.
 	adapter *Adapter
 
-	// privacy is the value in the settings file, which bluetoothd
-	// started with. It is empty when the pod has no settings file or
-	// the pass could not read it, and the pod then never restarts for
-	// privacy.
+	// privacy is the value in the settings file, which is the value
+	// bluetoothd started with. It is empty when the pod has no settings
+	// file or the pass could not read it, and the pod then does not
+	// restart for a privacy change.
 	privacy string
 
-	// again is how long until the loop must run this pass again, and
-	// zero means no follow-up is needed.
+	// again is how long the loop waits before it runs another pass.
+	// Zero means no follow-up pass is needed.
 	again time.Duration
 
-	// ok reports whether the pass finished everything it set out to do.
+	// ok is false when any part of the pass failed, and the loop then
+	// schedules a retry.
 	ok bool
 }
 
-// noteRadio posts the change of radio that one valid read of
-// bluetoothd shows. A read that reports no radio before any radio was
-// reported is the ordinary start of a pod, before bluetoothd publishes
-// its tree, and posts nothing.
+// noteRadio posts an Event when the radio in a valid read of
+// bluetoothd differs from the radio in the last one. When the pod
+// starts, bluetoothd has not published its tree yet, so a first read
+// with no radio is not a change and posts nothing.
 func (i *inventory) noteRadio(address bonds.Address) {
-	held := i.radioHeld
-	if address == held {
+	previous := i.lastRadio
+	if address == previous {
 		return
 	}
-	i.radioHeld = address
-	if held != (bonds.Address{}) {
-		i.recorder.Warning(i.node, reasonRadioLost, fmt.Sprintf("the radio at %s is gone from bluetoothd", held))
+	i.lastRadio = address
+	if previous != (bonds.Address{}) {
+		i.recorder.Warning(i.node, reasonRadioLost, fmt.Sprintf("bluetoothd no longer reports the radio at %s", previous))
 	}
 	if address != (bonds.Address{}) {
-		i.recorder.Normal(i.node, reasonRadioClaimed, fmt.Sprintf("bluetoothd holds the radio at %s", address))
+		i.recorder.Normal(i.node, reasonRadioClaimed, fmt.Sprintf("bluetoothd reports the radio at %s", address))
 	}
 }
 
-// reconcile runs one pass over the three objects.
+// reconcile runs one pass over the Adapter, the Peripherals, and the
+// PairingRequests.
 func (i *inventory) reconcile() inventoryPass {
 	pass := inventoryPass{
-		keepOut:   map[string]bool{},
+		excluded:  map[string]bool{},
 		owners:    map[bonds.Address]OwnerReference{},
 		unpairing: map[bonds.Address]bool{},
 		ok:        true,
 	}
 
 	snapshot, err := i.radio.Snapshot()
-	// The read either answers or it does not, whatever it answers with.
-	// A missing adapter is still bluetoothd's own report, over a call
-	// that worked, so it is a valid observation like any other; only an
-	// error from the call itself, such as the bus going away, is not.
+	// A reply that reports no adapter is still a successful read
+	// of bluetoothd, so it counts as a valid observation. Only a failed
+	// call, such as the D-Bus connection going away, does not.
 	i.metrics.recordObservation(sourceBlueZ, err == nil || errors.Is(err, ErrNoAdapter), i.now())
 	if errors.Is(err, ErrNoAdapter) {
-		// bluetoothd has not published its tree yet, or the radio has
-		// departed. Either way this operator holds no radio right now,
-		// and the one thing it can still do is release an Adapter for a
-		// radio that this machine no longer has.
+		// Either bluetoothd has not published its tree yet or the radio
+		// is gone. With no radio, the only work left is to release an
+		// Adapter object for a radio that this machine no longer has.
 		i.metrics.setAdapterPresent(false)
 		i.noteRadio(bonds.Address{})
 		i.releaseDepartedAdapters(bonds.Address{})
@@ -238,10 +224,10 @@ func (i *inventory) reconcile() inventoryPass {
 		return pass
 	}
 	if err != nil {
-		// The read itself failed, so nothing here says whether the
-		// adapter is still there. The gauge keeps the value the last
-		// valid read left it at, the rule the hardware triple states
-		// for every reading behind an observation_valid gauge.
+		// The call failed, so the read does not show whether the adapter
+		// is still there. The adapter-present gauge keeps its value from
+		// the last valid read, and bluetooth_observation_valid reports
+		// that this reading is stale.
 		fmt.Fprintf(os.Stderr, "reading the radio: %v\n", err)
 		pass.ok = false
 		return pass
@@ -252,16 +238,13 @@ func (i *inventory) reconcile() inventoryPass {
 	i.releaseDepartedAdapters(snapshot.Adapter.Address)
 	i.follow(snapshot.Adapter.Address.Key())
 
-	// A radio that is not connectable answers no bonded device: page
-	// scan is off, so a controller's reconnect button reaches nothing,
-	// and no error appears anywhere. The outbound direction is this
-	// operator's own: connect.go pages a bonded speaker instead of
-	// waiting for one to page the radio. A fresh bluetoothd starts the
-	// adapter with page scan off, so every pass
-	// asserts the setting instead of trusting the startup state, the
-	// same write-on-divergence rule the rest of the reconcile follows.
-	// It runs before the API-server writes below, because the radio's
-	// health must not wait on them.
+	// The adapter's Connectable property turns page scan on. With page
+	// scan off, the radio ignores a bonded controller that tries to
+	// reconnect, and nothing reports an error. A new bluetoothd starts
+	// the adapter with page scan off, so each pass sets Connectable.
+	// This runs before the API server writes, because a failed write
+	// returns from the pass. connect.go handles connections in the
+	// other direction, from this radio to a bonded speaker.
 	if snapshot.Adapter.Powered && !snapshot.Adapter.Connectable {
 		if err := i.radio.SetAdapterConnectable(true); err != nil {
 			fmt.Fprintf(os.Stderr, "making the adapter connectable: %v\n", err)
@@ -269,9 +252,9 @@ func (i *inventory) reconcile() inventoryPass {
 		}
 	}
 
-	// The settings file is read on each pass, before the Adapter's
-	// status is written. A missing file is a pod whose bluetoothd
-	// started with privacy off.
+	// ensureAdapter writes i.privacy to status.privacy, so read the
+	// settings file first. A pod with no privacy file started
+	// bluetoothd with privacy off.
 	started, err := readStartedPrivacy(i.settings)
 	switch {
 	case err != nil:
@@ -296,24 +279,22 @@ func (i *inventory) reconcile() inventoryPass {
 	}
 	pass.adapter = adapter
 	if i.btmon == nil || *i.btmon != adapter.Spec.Btmon {
-		// The pass could not read or write the btmon file. The retry
-		// pass tries again.
+		// The btmon file could not be read or written, so spec.btmon is
+		// not applied yet and the pass must run again.
 		pass.ok = false
 	}
 
-	// One walk of sysfs answers the battery of every device this pass
-	// writes, before any status write, so each Peripheral reads the level
-	// the kernel reports now. The same walk says which connected
-	// controllers have a HID device. claimedDevices answers from the same
-	// CDI read the unpair teardown already makes, so the Peripheral phase
-	// costs no second read of its own for the claimed gauge.
+	// Walk sysfs once for the whole pass. reconcilePeripherals writes
+	// each controller's battery level from it, and the input recovery
+	// reads which connected controllers have a HID device.
+	// claimedDevices reads the CDI specs once for all Peripherals too.
 	peripheralStart, wasOK := i.now(), pass.ok
 	kernel := discoverHIDDevices(draSysfsRoot, snapshot.Adapter.Address)
 	i.reconcilePeripherals(adapter, snapshot, kernelBatteries(kernel), claimedDevices(), &pass)
-	// The connects and the reconnects run after the Peripherals, because
-	// the Peripheral pass marks the bonds a teardown works through, and a
-	// device under teardown must not be paged. All three act on
-	// Peripherals, so all three fall under one phase.
+	// Connecting and input recovery run after reconcilePeripherals
+	// because it fills pass.unpairing, and a device that is being
+	// unpaired must not be connected. They are timed and counted
+	// together with the Peripheral part.
 	i.connects.reconcile(snapshot, &pass)
 	i.inputs.reconcile(snapshot, kernel, &pass)
 	i.metrics.timeReconcile(peripheralKind, peripheralStart, i.now())
@@ -330,27 +311,26 @@ func (i *inventory) reconcile() inventoryPass {
 	return pass
 }
 
-// published moves the devices this pass asked to drop into the set the
-// teardown treats as retired. The caller calls it after the publisher
-// reports that the slice was written, because a write that failed
-// leaves the device in the inventory and the bond must stay until the
-// device is really out of the slice.
+// published moves the devices in removing to removed. The
+// caller calls it only after the publisher reports that it wrote the
+// slice. When the write fails, the device is still in the slice and
+// the bond must stay.
 func (i *inventory) published() {
-	for device := range i.retiring {
-		i.retired[device] = true
+	for device := range i.removing {
+		i.removed[device] = true
 	}
-	i.retiring = map[bonds.Address]bool{}
+	i.removing = map[bonds.Address]bool{}
 }
 
-// retire asks the publisher to leave a device out of the slice on this
-// pass.
-func (i *inventory) retire(device bonds.Address, pass *inventoryPass) {
-	i.retiring[device] = true
-	pass.keepOut[macFromDeviceName(device.Key())] = true
+// removeFromSlice tells the publisher to leave a device out of the
+// slice on this pass.
+func (i *inventory) removeFromSlice(device bonds.Address, pass *inventoryPass) {
+	i.removing[device] = true
+	pass.excluded[macFromDeviceName(device.Key())] = true
 }
 
-// runAgainIn records how soon the loop must run this pass again, and
-// keeps the soonest value when several parts of the pass supply one.
+// runAgainIn asks for another pass after the given delay. When several
+// parts of the pass ask, the shortest delay wins.
 func (pass *inventoryPass) runAgainIn(after time.Duration) {
 	if after <= 0 {
 		return
@@ -360,14 +340,11 @@ func (pass *inventoryPass) runAgainIn(after time.Duration) {
 	}
 }
 
-// truncateRunes cuts a free-text value to a byte limit, moving the cut
-// back to a rune boundary.
-//
-// A person can name a controller in any script, the limits here count
-// bytes, and a cut through the middle of a multi-byte rune produces a
-// string the API server rejects as invalid UTF-8. That would fail the
-// whole status write, not only the one name.
-func truncateRunes(s string, limit int) string {
+// truncateToBytes cuts s to at most limit bytes, backing up to a rune
+// boundary. A name can be in any script, and the API server rejects a
+// string that ends in the middle of a multi-byte rune as invalid
+// UTF-8, which would fail the whole write and not just the name.
+func truncateToBytes(s string, limit int) string {
 	if len(s) <= limit {
 		return s
 	}

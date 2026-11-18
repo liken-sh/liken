@@ -1,11 +1,10 @@
 package main
 
-// The pairing API as the CLI reaches it. The CLI shares no code
-// with the operator, so it names the group, the resources, and the
-// fields it reads and writes here, and talks to them through the
-// dynamic client. A pairing is three calls a person makes with
-// kubectl: create a PairingRequest, patch its spec.device to approve a
-// device, and delete a Peripheral to unpair one. This file names each.
+// The CLI does not import the operator, so this file copies the API
+// group, the resources, and the objects that the CLI sends through the
+// dynamic client. Each step also works with kubectl: create a
+// PairingRequest, patch its spec.device to approve a device, and delete
+// a Peripheral to unpair it.
 
 import (
 	"context"
@@ -18,16 +17,14 @@ import (
 )
 
 const (
-	// The driver's own API group and version, the same
-	// the operator publishes its objects under.
+	// The API group and version of the operator's objects.
 	driverGroup   = "bluetooth.liken.sh"
 	driverVersion = "v1alpha1"
 
 	pairingRequestKind = "PairingRequest"
 )
 
-// The three resources the pairing verbs touch. The
-// PairingRequest is namespaced; the Adapter and the Peripheral are
+// PairingRequest is namespaced. Adapter and Peripheral are
 // cluster-scoped, because a radio and a bond belong to a machine.
 var (
 	pairingRequestGVR = schema.GroupVersionResource{Group: driverGroup, Version: driverVersion, Resource: "pairingrequests"}
@@ -35,9 +32,7 @@ var (
 	adapterGVR        = schema.GroupVersionResource{Group: driverGroup, Version: driverVersion, Resource: "adapters"}
 )
 
-// listPeripherals lists the Peripheral names through a dynamic
-// client; Peripheral is cluster-scoped, so the list carries no
-// namespace>
+// listPeripherals returns the names of all Peripherals.
 func listPeripherals(ctx context.Context, client dynamic.Interface) ([]string, error) {
 	list, err := client.Resource(peripheralGVR).List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -50,9 +45,10 @@ func listPeripherals(ctx context.Context, client dynamic.Interface) ([]string, e
 	return names, nil
 }
 
-// newPairingRequest builds the object the CLI posts to
-// open a window. An empty spec.device pairs nothing, so the window
-// only scans until a person approves a device by name.
+// newPairingRequest returns a PairingRequest for the adapter. It leaves
+// spec.device empty, so the operator lists the devices it sees and pairs
+// none until a person approves one. A windowSeconds of 0 leaves
+// spec.windowSeconds unset.
 func newPairingRequest(namespace, name, adapter string, windowSeconds int) *unstructured.Unstructured {
 	spec := map[string]any{"adapter": adapter}
 	if windowSeconds > 0 {
@@ -69,9 +65,8 @@ func newPairingRequest(namespace, name, adapter string, windowSeconds int) *unst
 	}}
 }
 
-// approvalPatch is the merge patch that approves one
-// device. Writing the address into spec.device is the approval, the
-// same write a person makes with kubectl patch.
+// approvalPatch returns the merge patch that approves a device by
+// setting spec.device to its address.
 func approvalPatch(address string) ([]byte, error) {
 	return json.Marshal(map[string]any{
 		"spec": map[string]any{"device": address},

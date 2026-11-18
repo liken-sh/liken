@@ -1,36 +1,28 @@
-// bondfetch writes an adapter's stored bonds into the directory
-// bluetoothd reads, and then exits. It also restores the adapter's
-// identity key and writes the Adapter's privacy and btmon settings,
-// because each must be in place before bluetoothd starts (privacy.go
-// and settings.go).
+// bondfetch is the init container of the pod that runs bluetoothd. It
+// reads the bonds of the pod's adapter from Kubernetes `Secret`s and
+// writes them into the directory tree that bluetoothd reads, an
+// `emptyDir` that the bluetoothd container mounts. It also restores the
+// adapter's identity key and writes the privacy and btmon settings of
+// the `Adapter` (privacy.go and settings.go), because bluetoothd must
+// find all of these in place when it starts.
 //
-// It is a plain init container. The pod's bonds are in Kubernetes
-// Secrets, one for each bond, each labelled with the adapter it
-// belongs to (see the bonds package), and bluetoothd reads them from a
-// directory tree. The pod's bluetoothd container mounts an emptyDir at
-// that tree, this program fills it before bluetoothd starts, and the
-// operator writes each Secret back whenever the tree changes.
+// The operator stores each bond in its own `Secret`, labelled with the
+// adapter (see the `bonds` package), and writes the `Secret` again when
+// bluetoothd changes the tree. bluetoothd is not running yet, so this
+// program has no list of paired devices and selects the `Secret`s by
+// the adapter label alone. A per-adapter `Secret` that holds every bond
+// of the adapter has the same label, so this program reads it too.
 //
-// A label selector gathers them. This program runs before bluetoothd,
-// so nothing here has the list of paired devices, and the adapter's
-// own address is the only identity it has. An older layout put every
-// bond in one Secret named for the adapter, and that object has the
-// same label, so a machine that has not paired anything since the
-// change still reads its keys and needs no migration step of its own.
+// The adapter's address comes from the kernel through an HCI socket
+// ioctl. The ioctl works because the pod runs in the host network
+// namespace.
 //
-// The address comes from the kernel, because bluetoothd is not running
-// yet and no other source in the pod holds the address of the radio
-// the kubelet delivered. The pod runs in the host's network namespace,
-// which is the whole of what the ioctl needs.
-//
-// Every failure here exits nonzero, and one case is not a failure: an
-// adapter with no Secrets at all. The two cases need different
-// handling. bluetoothd starts with whatever tree it finds, so an empty
-// tree is correct for an adapter that has paired nothing, and wrong
-// for an adapter whose keys this program could not read. In the second
-// case the paired controllers would not connect. A nonzero exit holds
-// the pod in Init, leaves the Secrets alone, and shows in kubectl. The
-// kubelet's restart is the retry.
+// The program exits nonzero on every failure, and an adapter with no
+// `Secret`s is not a failure. bluetoothd starts with whatever tree it
+// finds, so a bluetoothd that started after a failed read would leave
+// the paired controllers unable to connect. A nonzero exit keeps the pod
+// in Init, where `kubectl` shows it, leaves the `Secret`s unchanged, and
+// the kubelet restarts the container.
 package main
 
 import (
@@ -44,28 +36,23 @@ import (
 )
 
 const (
-	// namespaceVar names the operator's own namespace, which the pod
-	// spec supplies through the downward API. Each Secret is in the same
-	// namespace as the pod that made it, and a pod cannot read its own
-	// namespace from anywhere else without asking the API server.
+	// namespaceVar holds the pod's namespace, which the pod spec sets
+	// through the downward API. The `Secret`s are in that namespace.
 	namespaceVar = "POD_NAMESPACE"
 
-	// rootVar overrides the directory the bonds are written into. The
-	// default is where BlueZ reads, and the variable exists so a test
-	// or a deployment that mounts the tree elsewhere states it once.
+	// rootVar overrides the directory of the bond tree, for a test or a
+	// deployment that mounts it somewhere other than BlueZ's default.
 	rootVar     = "BLUETOOTH_BONDS_ROOT"
 	defaultRoot = "/var/lib/bluetooth"
 
-	// adapterTimeout bounds the wait for an adapter that reports a real
-	// address. A USB dongle takes about a second from enumeration, and
-	// this leaves room for a machine that enumerates its hardware
-	// slowly at a cold boot.
+	// adapterTimeout is how long the program waits for the kernel to
+	// report an adapter with a non-zero address, which takes longest on
+	// a machine that enumerates its hardware slowly at a cold boot.
 	adapterTimeout = 30 * time.Second
 
-	// adapterPoll is how often the wait asks the kernel again. There is
-	// no event to wait on: the kernel offers no netlink notice for an
-	// adapter that has finished powering on, and an HCI monitor socket
-	// would be a second protocol for a wait that lasts a second.
+	// The wait polls because the kernel sends no netlink notification
+	// when an adapter finishes powering on, and an HCI monitor socket
+	// would add a second protocol for a short wait.
 	adapterPoll = 250 * time.Millisecond
 )
 
@@ -79,7 +66,7 @@ func main() {
 func run() error {
 	namespace := os.Getenv(namespaceVar)
 	if namespace == "" {
-		return fmt.Errorf("%s is unset; the pod spec must supply it from metadata.namespace", namespaceVar)
+		return fmt.Errorf("%s is unset, and the pod spec must set it from metadata.namespace", namespaceVar)
 	}
 	root := os.Getenv(rootVar)
 	if root == "" {
@@ -100,7 +87,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("bondfetch: %s is the adapter at %s\n", adapter.Name, adapter.Address)
+	fmt.Printf("bondfetch: found adapter %s at address %s\n", adapter.Name, adapter.Address)
 
 	client, err := apiclient.InCluster(apiclient.InClusterOptions{})
 	if err != nil {
@@ -116,14 +103,13 @@ func run() error {
 	return restoreIdentity(client, namespace, adapter.Address, root, privacy)
 }
 
-// materialize writes one adapter's stored bonds into the tree
-// bluetoothd reads. It is separate from run so that a test drives it
-// against an httptest server, with no adapter and no cluster.
+// materialize writes the stored bonds of one adapter into the tree that
+// bluetoothd reads.
 //
-// The older per-adapter Secret is read first and the per-bond Secrets
-// second, so a device that is in both takes the copy the operator
-// keeps current. The operator does not delete the older object, so
-// both can be there for as long as a person leaves them.
+// It merges the per-adapter `Secret` first and the per-bond `Secret`s
+// after it, so when a device is in both, the per-bond copy wins. The
+// operator keeps the per-bond copy current and does not delete the
+// per-adapter `Secret`, so both can exist.
 func materialize(api *apiclient.Client, namespace string, adapter bonds.Address, root string) error {
 	path := bonds.SecretsPath(namespace) + "?labelSelector=" + url.QueryEscape(bonds.AdapterSelector(adapter))
 	list, err := apiclient.Get[bonds.SecretList](api, path)
@@ -143,17 +129,16 @@ func materialize(api *apiclient.Client, namespace string, adapter bonds.Address,
 		}
 	}
 	if len(tree) == 0 {
-		// The first start of a machine whose adapter has paired nothing.
-		// bluetoothd creates the tree itself at the first pairing, and
-		// the operator writes the Secret from it.
-		fmt.Printf("bondfetch: no stored bonds for %s\n", adapter)
+		// bluetoothd creates the tree at the first pairing, and the
+		// operator then writes a `Secret` from it.
+		fmt.Printf("bondfetch: no stored bonds for adapter %s\n", adapter)
 		return nil
 	}
 
 	if err := bonds.WriteTree(root, adapter, tree); err != nil {
 		return fmt.Errorf("writing the bonds under %s: %w", root, err)
 	}
-	fmt.Printf("bondfetch: wrote %d bonds for %s under %s, from %d Secrets\n",
+	fmt.Printf("bondfetch: wrote %d bonds for adapter %s under %s, from %d Secrets\n",
 		len(tree), adapter, root, len(list.Items))
 	return nil
 }

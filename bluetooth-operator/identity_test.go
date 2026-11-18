@@ -1,10 +1,5 @@
 package main
 
-// These tests cover the store of the radio's identity file: the store
-// pass writes the identity Secret when the file appears and when it
-// changes, writes nothing while the two agree, and keeps the Secret
-// when the file is gone.
-
 import (
 	"testing"
 
@@ -17,35 +12,31 @@ const (
 	newIdentity      = "[General]\nIdentityResolvingKey=FEDCBA9876543210FEDCBA9876543210\n"
 )
 
-// testAdapterObject is the test radio's Adapter as the pass hands it
-// on, with the UID the identity Secret's owner reference needs.
+// testAdapterObject has the UID for the Secret's owner reference.
 func testAdapterObject() *Adapter {
 	return &Adapter{Metadata: ObjectMeta{Name: testAdapterName, UID: "uid-" + testAdapterName}}
 }
 
-// identityTree answers a storage tree whose adapter holds an identity
-// file with these contents.
+// identityTree returns the root of a BlueZ storage tree whose adapter
+// has an identity file with these contents.
 func identityTree(t *testing.T, identity string) string {
 	t.Helper()
 	root := bondTree(t, nil)
 	if err := bonds.WriteIdentity(root, testAdapterAddress(t), []byte(identity)); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the identity file: %v", err)
 	}
 	return root
 }
 
-// identityStore points a store at the fixture and at a tree, with the
-// radio already learned, as it is after the bond pass of the same
-// pass.
+// identityStore returns a store that already has the adapter address,
+// which persist reads earlier in the same pass.
 func identityStore(t *testing.T, fixture *bondSecretFixture, root string) *bondStore {
 	t.Helper()
 	store := testBondStore(t, fixture, root)
-	store.learn(testAdapterAddress(t))
+	store.useAdapter(testAdapterAddress(t))
 	return store
 }
 
-// The first pass after bluetoothd writes the file creates the Secret,
-// owned by the Adapter.
 func TestPersistIdentityCreatesTheSecretWhenTheFileAppears(t *testing.T) {
 	fixture := &bondSecretFixture{}
 	store := identityStore(t, fixture, identityTree(t, testIdentity))
@@ -58,19 +49,19 @@ func TestPersistIdentityCreatesTheSecretWhenTheFileAppears(t *testing.T) {
 		t.Fatalf("no Secret was created: %v", fixture.requests)
 	}
 	if fixture.created.Metadata.Name != "bluetooth-identity-14-b4-57-91-2f-c8" {
-		t.Errorf("name = %q", fixture.created.Metadata.Name)
+		t.Errorf("the Secret name is %q, want bluetooth-identity-14-b4-57-91-2f-c8", fixture.created.Metadata.Name)
 	}
 	if string(fixture.created.Identity()) != testIdentity {
-		t.Errorf("identity = %q", fixture.created.Identity())
+		t.Errorf("the Secret holds the identity %q, want %q", fixture.created.Identity(), testIdentity)
 	}
 	owners := fixture.created.Metadata.OwnerReferences
 	if len(owners) != 1 || owners[0].Kind != adapterKind || owners[0].UID != "uid-"+testAdapterName {
-		t.Errorf("ownerReferences = %+v", owners)
+		t.Errorf("ownerReferences are %+v, want one reference to the Adapter", owners)
 	}
 }
 
-// storedIdentity is the identity Secret as the API server already holds
-// it.
+// storedIdentity returns the fixture's existing Secrets: an identity
+// Secret with these contents.
 func storedIdentity(t *testing.T, identity string) map[string]*bonds.Secret {
 	t.Helper()
 	secret := bonds.NewIdentitySecret("liken-system", testAdapterAddress(t), []byte(identity), bonds.Owner{})
@@ -78,7 +69,6 @@ func storedIdentity(t *testing.T, identity string) map[string]*bonds.Secret {
 	return map[string]*bonds.Secret{testIdentityPath: secret}
 }
 
-// A file that differs from the Secret replaces the Secret's copy.
 func TestPersistIdentityUpdatesTheSecretWhenTheFileChanges(t *testing.T) {
 	fixture := &bondSecretFixture{existing: storedIdentity(t, testIdentity)}
 	store := identityStore(t, fixture, identityTree(t, newIdentity))
@@ -95,9 +85,9 @@ func TestPersistIdentityUpdatesTheSecretWhenTheFileChanges(t *testing.T) {
 	}
 }
 
-// A file that agrees with the Secret writes nothing, and the passes
-// after the first send no request at all.
-func TestPersistIdentityWritesNothingWhileTheTwoAgree(t *testing.T) {
+// Only the first pass reads the Secret. Later passes compare the file
+// with the cached contents and send no request.
+func TestPersistIdentityWritesNothingWhileTheFileMatches(t *testing.T) {
 	fixture := &bondSecretFixture{existing: storedIdentity(t, testIdentity)}
 	store := identityStore(t, fixture, identityTree(t, testIdentity))
 
@@ -110,8 +100,8 @@ func TestPersistIdentityWritesNothingWhileTheTwoAgree(t *testing.T) {
 	}
 }
 
-// A radio with privacy off has no file. The store sends nothing, and a
-// Secret from an earlier time with privacy on stays.
+// With no identity file in the tree, the store sends no request and
+// keeps the Secret.
 func TestPersistIdentityLeavesTheSecretWithNoFile(t *testing.T) {
 	fixture := &bondSecretFixture{existing: storedIdentity(t, testIdentity)}
 	store := identityStore(t, fixture, bondTree(t, nil))
@@ -125,9 +115,8 @@ func TestPersistIdentityLeavesTheSecretWithNoFile(t *testing.T) {
 	}
 }
 
-// A file with no Adapter to own its Secret waits for a pass that has
-// one, and reports that the key is not stored yet.
-func TestPersistIdentityWaitsForTheAdapter(t *testing.T) {
+// persistIdentity returns false so that a later pass retries.
+func TestPersistIdentityWritesNothingWithoutAnAdapterObject(t *testing.T) {
 	fixture := &bondSecretFixture{}
 	store := identityStore(t, fixture, identityTree(t, testIdentity))
 
@@ -139,8 +128,6 @@ func TestPersistIdentityWaitsForTheAdapter(t *testing.T) {
 	}
 }
 
-// A write that fails reports the failure, and the next pass sends it
-// again.
 func TestPersistIdentityReportsAFailedWrite(t *testing.T) {
 	fixture := &bondSecretFixture{writeStatus: 500}
 	store := identityStore(t, fixture, identityTree(t, testIdentity))

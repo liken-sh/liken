@@ -1,14 +1,11 @@
-# Scrapes the operator's own pod on the metrics port its container
-# names. The port is a name, not a number, so a scrape config survives
-# operator.yaml changing which number 9250 the pod template states.
+# Scrapes the operator's pod on its container port named metrics, so
+# a change to the port number in operator.yaml needs no change here.
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
   name: bluetooth-operator
-  # The component that lists this resource sets no namespace of its
-  # own, because that would also move the dashboard ConfigMap into
-  # liken-system. This PodMonitor states the namespace it needs
-  # directly: the same one the base puts the operator's pod in.
+  # The namespace of the operator's pod. kustomization.yaml explains why
+  # the component does not set it.
   namespace: liken-system
 spec:
   selector:
@@ -16,10 +13,9 @@ spec:
       app: bluetooth-operator
   podMetricsEndpoints:
     - port: metrics
-      # This pod runs on the host network, one per node, so a scrape
-      # is a fact about the machine, and the fleet dashboard selects
-      # by the node it ran on rather than by a pod name that changes
-      # on every restart.
+      # A DaemonSet pod on the host network reports on its machine, so
+      # the dashboard selects by node. The node label stays the same
+      # when the pod is replaced, and the pod name does not.
       relabelings:
         - sourceLabels: [__meta_kubernetes_pod_node_name]
           targetLabel: node

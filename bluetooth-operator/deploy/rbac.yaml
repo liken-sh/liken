@@ -1,22 +1,11 @@
-# The operator's identity in the cluster, and deliberately nothing
-# more. The pod is powerful on the machine it runs on, because a
-# Bluetooth stack has to be, and correspondingly narrow here: it
-# writes one ResourceSlice, reads the claims the kubelet asks it to
-# prepare, reads its own Node, keeps the three objects of the pairing
-# API, reads and writes the Secrets that hold its adapter's bonds and
-# identity key, posts Events about its objects and its Node, and
-# deletes its own pod to apply a new privacy setting.
+# The pod has wide privileges on its machine, because a Bluetooth
+# stack needs them, so its permissions in the cluster are kept narrow.
 #
-# One ServiceAccount serves the whole pod. A ServiceAccount is a
-# pod-level field, and the ServiceAccount admission controller mounts
-# the projected token into the init containers as well as the
-# containers, so bondfetch reads the Secrets and its Adapter through
-# this identity and there is no second one to give it. The two halves
-# do not need the same verbs, because bondfetch reads Secrets and its
-# Adapter and never writes one. Splitting the verbs would take a
-# second pod, and both halves have to hold the same adapter. So
-# bondfetch's read of its Adapter needs no rule of its own: the get
-# on adapters below covers it.
+# The ServiceAccount is set for the whole pod, so bondfetch, an init
+# container, reads the Secrets and its Adapter with the same identity
+# as the operator container. bondfetch needs only reads, but a
+# separate identity would need a second pod, and both containers work
+# on the same adapter.
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -28,63 +17,49 @@ kind: ClusterRole
 metadata:
   name: bluetooth-operator
 rules:
-  # The device inventory (slices.go): this node's ResourceSlice under
-  # bluetooth.liken.sh. The verbs cover the collection, because RBAC
-  # cannot say "only the slice named for your node": resourceNames
-  # cannot be templated per pod. The program only ever writes its own,
-  # whose name it builds from NODE_NAME. No list and no watch: the
-  # name is deterministic, and reading anyone else's inventory is the
-  # scheduler's job.
+  # This node's ResourceSlice (slices.go). resourceNames cannot differ
+  # per pod, so the grant covers every slice, and the program writes
+  # only the slice whose name it builds from NODE_NAME. It reads that
+  # slice by name, so it needs no list or watch.
   - apiGroups: [resource.k8s.io]
     resources: [resourceslices]
     verbs: [get, create, update, delete]
-  # The DRA plugin (dra.go): when the kubelet asks this driver to
-  # prepare a claim, the request names the claim and nothing more. The
-  # allocation is on the claim's status, so the driver reads it
-  # back. This is read-only across every namespace, because claims
-  # belong to workloads and the driver serves whichever namespace
-  # claims a controller. Still no list and no watch: prepare calls
-  # arrive with exact names.
+  # The DRA plugin (dra.go). The kubelet's prepare request has only the
+  # claim's name, so the driver gets the claim to read its allocation.
+  # Claims belong to workloads in any namespace, so the grant is
+  # cluster-wide.
   - apiGroups: [resource.k8s.io]
     resources: [resourceclaims]
     verbs: [get]
-  # This node, read once at startup for the UID that the slice's owner
-  # reference needs. The Node owns the slice, so a Node that leaves
-  # the cluster takes the slice with it. The garbage collector does
-  # that removal, so the operator runs no cleanup code at exit.
+  # This node, read for the UID of the slice's owner reference. The
+  # Node owns the slice, so the garbage collector deletes the slice
+  # when the Node is deleted.
   - apiGroups: [""]
     resources: [nodes]
     verbs: [get]
-  # The pairing API (crd.go). The operator owns all three objects: it
-  # creates an Adapter for the radio it holds and a Peripheral for each
-  # bond, it watches the PairingRequests a person creates, and it
-  # deletes a finished request when its TTL is up. patch is for the
-  # finalizer lists alone, which are edited as a merge patch so that a
-  # person's own fields on the object survive the write.
+  # The pairing API (crd.go). The operator creates an Adapter for its
+  # radio and a Peripheral for each bond, watches PairingRequests, and
+  # deletes a finished request when its TTL has passed. bondfetch gets
+  # the Adapter for its spec.privacy. patch is only for finalizers,
+  # which the operator edits with a merge patch so that a person's
+  # concurrent edits to the object are kept.
   #
-  # bondfetch gets the Adapter for its radio before bluetoothd starts,
-  # and writes its spec.privacy into the pod's settings volume.
-  #
-  # This is a ClusterRole and not a Role. Adapters and Peripherals are
-  # cluster-scoped, and a PairingRequest may be created in any
-  # namespace, which is the grant the whole design exists to make
-  # possible: a person who may create requests in their own namespace
-  # needs no exec into liken-system.
+  # Adapters and Peripherals are cluster-scoped, and a PairingRequest
+  # can be in any namespace. So a person who can create requests in
+  # their own namespace can pair a device without exec access to
+  # liken-system.
   - apiGroups: [bluetooth.liken.sh]
     resources: [adapters, peripherals, pairingrequests]
     verbs: [get, list, watch, create, update, patch, delete]
-  # The status halves, which the operator writes through the status
-  # subresource so that a status write can never overwrite a spec a
-  # person edited in the same moment.
+  # A write to the status subresource cannot overwrite a spec that a
+  # person edited at the same time.
   - apiGroups: [bluetooth.liken.sh]
     resources: [adapters/status, peripherals/status, pairingrequests/status]
     verbs: [get, update]
-  # The Events (events.go): a pairing window, a pairing, a lost bond, a
-  # refused relay, and the radio's arrival and departure. An Event about
-  # a Peripheral or the Node is in default, because both are
-  # cluster-scoped, and an Event about a PairingRequest is in the
-  # request's own namespace, which can be any namespace. patch updates
-  # the count of an Event that repeats within ten minutes.
+  # Events (events.go). An Event about a cluster-scoped object goes in
+  # the default namespace, and an Event about a PairingRequest goes in
+  # the request's namespace. kubernetes/events patches an Event to
+  # count a repeat.
   - apiGroups: [""]
     resources: [events]
     verbs: [create, patch]
@@ -102,31 +77,18 @@ subjects:
     name: bluetooth-operator
     namespace: liken-system
 ---
-# The bonds: one Secret for each bond, holding that one device's link
-# keys and labelled with the adapter it belongs to. The radio's own
-# identity key is in one more Secret, named for the radio, which
-# bondfetch gets by that name and the operator creates and updates.
-# bondfetch lists the bond Secrets by that label before bluetoothd
-# starts, and the operator creates
-# each one at its pairing and updates it whenever the keys change. The
-# operator also watches them by that label, so each pass compares the
-# bonds on disk with the watch's copies instead of reading every Secret
-# (bondstore.go). So the verbs are get, list, watch, create, and
-# update.
+# The Secrets of the bonds and of the adapter's identity key, all in
+# the operator's namespace (bondstore.go, identity.go). bondfetch lists
+# the bond Secrets by their adapter label and gets the identity Secret
+# by name. The operator creates and updates them, and watches the bond
+# Secrets so that a pass compares the bonds on disk with its cached
+# copies. A Role keeps the grant away from other workloads' Secrets.
 #
-# No delete. A bond's Secret is owned by that bond's Peripheral, so
-# deleting the Peripheral collects the Secret through ordinary garbage
-# collection, and the operator never removes one itself. The identity
-# Secret is owned by the Adapter in the same way.
-#
-# A Role and not a ClusterRole, because these Secrets are in the
-# operator's own namespace alone and a namespaced grant is the
-# narrower of the two. A ClusterRole on secrets would reach every
-# other workload's credentials in every namespace.
-#
-# resourceNames cannot narrow it further. A Secret's name comes from a
-# device's address, and no name exists until the radio reports that
-# address.
+# There is no delete. Each bond's Peripheral owns its Secret, and the
+# Adapter owns the identity Secret, so the garbage collector deletes
+# them. resourceNames cannot narrow the grant, because a bond Secret's
+# name comes from a device address that is unknown until the device
+# pairs.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -135,15 +97,11 @@ rules:
   - apiGroups: [""]
     resources: [secrets]
     verbs: [get, list, watch, create, update]
-  # The operator's own pod. bluetoothd reads its privacy setting only
-  # when it starts, so the operator deletes its pod when the Adapter's
-  # spec.privacy differs from the value bluetoothd started with, and
-  # the DaemonSet creates a new pod with the new value (privacy.go).
-  #
-  # The grant reaches every pod in the operator's namespace, not only
-  # this one. resourceNames cannot narrow it, because the pod's name
-  # changes with each pod the DaemonSet creates. The program deletes
-  # only the pod named in POD_NAME, which the downward API gives it.
+  # bluetoothd reads its privacy setting only at start, so the operator
+  # deletes its own pod, named in POD_NAME, when the Adapter's
+  # spec.privacy differs from the value bluetoothd started with
+  # (privacy.go). The DaemonSet gives each pod a new name, so
+  # resourceNames cannot narrow the grant.
   - apiGroups: [""]
     resources: [pods]
     verbs: [delete]

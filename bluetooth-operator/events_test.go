@@ -1,11 +1,8 @@
 package main
 
-// These tests cover the Events the operator posts: the life of a
-// pairing window, a pairing, a pairing the radio refused, a bond that
-// left bluetoothd, the radio itself, and a relay that could not be
-// made. Each one runs in a synctest bubble, because the recorder writes
-// from its own goroutine, and the bubble's synctest.Wait returns when
-// that goroutine has written everything it holds.
+// Each test runs in a synctest bubble because the recorder writes from
+// its own goroutine, and synctest.Wait returns once that goroutine has
+// written every queued Event.
 
 import (
 	"errors"
@@ -23,10 +20,9 @@ import (
 // testNode is the Node the tests' operator runs on.
 var testNode = events.ObjectReference{APIVersion: "v1", Kind: "Node", Name: "liken-1", UID: "uid-liken-1"}
 
-// eventInventory wires an inventory to the fixtures the way
-// testInventory does, over the in-memory connections of apiservertest,
-// with a recorder that writes to a fake of the events collection. The
-// caller runs in a synctest bubble.
+// eventInventory builds an inventory like testInventory does, on the
+// in-memory connections of apiservertest, with a recorder that writes
+// to a fake events collection. The caller runs in a synctest bubble.
 func eventInventory(t *testing.T, fixture *apiFixture, radio *fakeRadio) (*inventory, *eventstest.Events) {
 	t.Helper()
 	cdiTempDir(t)
@@ -47,8 +43,8 @@ type posted struct {
 	Type, Reason, Message string
 }
 
-// postedAbout answers the Events about one object, after the recorder
-// has written everything it holds.
+// postedAbout returns the Events about one object, after the recorder
+// has written every queued Event.
 func postedAbout(recorded *eventstest.Events, kind, name string) []posted {
 	synctest.Wait()
 	var out []posted
@@ -71,8 +67,8 @@ func assertPosted(t *testing.T, got []posted, want ...posted) {
 }
 
 // One pass that opens a window and pairs the approved device posts the
-// window's opening and the pairing on the request, and the pairing on
-// the new Peripheral.
+// window opening and the pairing on the request, and the pairing on the
+// new Peripheral.
 func TestAPairingPostsTheWindowAndThePairing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture()
@@ -83,11 +79,11 @@ func TestAPairingPostsTheWindowAndThePairing(t *testing.T) {
 		inventory.reconcile()
 
 		assertPosted(t, postedAbout(recorded, pairingRequestKind, testRequestName),
-			posted{"Normal", reasonPairingWindowOpened, "the radio 14-b4-57-91-2f-c8 is discoverable and pairable until 2026-08-17T17:33:00Z"},
-			posted{"Normal", reasonPaired, "paired with A0:AB:51:33:B7:12 and created Peripheral a0-ab-51-33-b7-12"},
+			posted{"Normal", reasonPairingWindowOpened, "The radio 14-b4-57-91-2f-c8 is discoverable and pairable until 2026-08-17T17:33:00Z"},
+			posted{"Normal", reasonPaired, "Paired with A0:AB:51:33:B7:12 and created Peripheral a0-ab-51-33-b7-12"},
 		)
 		assertPosted(t, postedAbout(recorded, peripheralKind, "a0-ab-51-33-b7-12"),
-			posted{"Normal", reasonPaired, "paired with A0:AB:51:33:B7:12 through PairingRequest liken-system/new-gamepad"},
+			posted{"Normal", reasonPaired, "Paired with A0:AB:51:33:B7:12 through PairingRequest liken-system/new-gamepad"},
 			posted{"Normal", reasonNotConnected, connectedMessages[reasonNotConnected]},
 		)
 	})
@@ -107,13 +103,13 @@ func TestAWindowThatClosesUnapprovedPostsItsExpiry(t *testing.T) {
 		inventory.reconcile()
 
 		assertPosted(t, postedAbout(recorded, pairingRequestKind, testRequestName),
-			posted{"Normal", reasonPairingWindowExpired, "the window closed at 2026-08-17T17:29:59Z with no device paired"},
+			posted{"Normal", reasonPairingWindowExpired, "The pairing window closed at 2026-08-17T17:29:59Z with no device paired"},
 		)
 	})
 }
 
-// The window tries a refused pairing again on each pass, and the
-// refusal is posted once, when the request's message first reports it.
+// The window retries a refused pairing on each pass, and the refusal is
+// posted once, when the request's message first reports it.
 func TestARefusedPairingPostsOneWarning(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture()
@@ -126,8 +122,8 @@ func TestARefusedPairingPostsOneWarning(t *testing.T) {
 		inventory.reconcile()
 
 		assertPosted(t, postedAbout(recorded, pairingRequestKind, testRequestName),
-			posted{"Normal", reasonPairingWindowOpened, "the radio 14-b4-57-91-2f-c8 is discoverable and pairable until 2026-08-17T17:33:00Z"},
-			posted{"Warning", reasonPairingRefused, "pairing with A0:AB:51:33:B7:12: org.bluez.Error.AuthenticationFailed"},
+			posted{"Normal", reasonPairingWindowOpened, "The radio 14-b4-57-91-2f-c8 is discoverable and pairable until 2026-08-17T17:33:00Z"},
+			posted{"Warning", reasonPairingRefused, "bluetoothd did not pair with A0:AB:51:33:B7:12: org.bluez.Error.AuthenticationFailed"},
 		)
 		for _, event := range recorded.About(pairingRequestKind, testRequestName) {
 			if event.Count != 1 {
@@ -137,9 +133,9 @@ func TestARefusedPairingPostsOneWarning(t *testing.T) {
 	})
 }
 
-// A bond removed by another route posts one Warning, and the
-// adoption that created the Peripheral posts nothing, because no
-// pairing happened.
+// A bond removed outside the operator posts one Warning. Adopting an
+// existing bond into a Peripheral posts nothing, because no pairing
+// happened.
 func TestABondThatLeftBluetoothdPostsBondLost(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture()
@@ -153,15 +149,15 @@ func TestABondThatLeftBluetoothdPostsBondLost(t *testing.T) {
 		assertPosted(t, postedAbout(recorded, peripheralKind, "a0-ab-51-33-b7-12"),
 			posted{"Normal", reasonLinkUp, connectedMessages[reasonLinkUp]},
 			posted{"Normal", reasonNotBonded, connectedMessages[reasonNotBonded]},
-			posted{"Warning", reasonBondLost, "bluetoothd holds no bond with A0:AB:51:33:B7:12; delete the Peripheral to unpair it, or pair the device again"},
+			posted{"Warning", reasonBondLost, "bluetoothd has no bond with A0:AB:51:33:B7:12. Delete the Peripheral to unpair it, or pair the device again"},
 		)
 	})
 }
 
 // Each transition of the Connected condition posts an Event with its
 // reason: a remote that sleeps and wakes, and a link whose keys did not
-// match, which is the one that needs a person. A pass that finds the
-// same state again posts nothing.
+// match, which needs a person to pair again. A pass that finds the same
+// state again posts nothing.
 func TestEachTransitionOfTheLinkPostsItsReason(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		radio := testRadio(t, connectedRemote(t))
@@ -191,7 +187,7 @@ func TestEachTransitionOfTheLinkPostsItsReason(t *testing.T) {
 }
 
 // The radio's arrival and departure are posted on the Node, because the
-// Adapter can be gone by the time the radio is.
+// Adapter may already be gone when the radio is lost.
 func TestTheRadioPostsItsClaimAndItsLossOnTheNode(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture()
@@ -199,8 +195,8 @@ func TestTheRadioPostsItsClaimAndItsLossOnTheNode(t *testing.T) {
 		radio.err = ErrNoAdapter
 		inventory, recorded := eventInventory(t, fixture, radio)
 
-		// bluetoothd has published no radio yet, which is the ordinary
-		// start of a pod and no loss.
+		// bluetoothd has not reported a radio yet. That is normal at pod
+		// start, so it posts no loss.
 		inventory.reconcile()
 		radio.err = nil
 		inventory.reconcile()
@@ -209,15 +205,15 @@ func TestTheRadioPostsItsClaimAndItsLossOnTheNode(t *testing.T) {
 		inventory.reconcile()
 
 		assertPosted(t, postedAbout(recorded, "Node", "liken-1"),
-			posted{"Normal", reasonRadioClaimed, "bluetoothd holds the radio at 14:B4:57:91:2F:C8"},
-			posted{"Warning", reasonRadioLost, "the radio at 14:B4:57:91:2F:C8 is gone from bluetoothd"},
+			posted{"Normal", reasonRadioClaimed, "bluetoothd reports the radio at 14:B4:57:91:2F:C8"},
+			posted{"Warning", reasonRadioLost, "bluetoothd no longer reports the radio at 14:B4:57:91:2F:C8"},
 		)
 	})
 }
 
-// A relay the kernel refused is posted once on the controller's
-// Peripheral, although each pass tries again, and posted again only
-// after a relay was made.
+// A relay the kernel refused posts one Warning on the controller's
+// Peripheral although each pass retries it. The Warning is posted again
+// only after a relay was created in between.
 func TestARefusedRelayPostsOneWarning(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		recorded := &eventstest.Events{}
@@ -226,15 +222,15 @@ func TestARefusedRelayPostsOneWarning(t *testing.T) {
 		kernel := newFakeKernel()
 		kernel.register("/dev/input/event5", "Wireless Controller")
 		kernel.createErr = errors.New("open /dev/uinput: permission denied")
-		held := newRelays(kernel)
-		held.recorder = events.New(t.Context(), client, component, events.Options{Log: io.Discard})
-		t.Cleanup(func() { held.stop(testMAC) })
+		inputRelays := newRelays(kernel)
+		inputRelays.recorder = events.New(t.Context(), client, component, events.Options{Log: io.Discard})
+		t.Cleanup(func() { inputRelays.stop(testMAC) })
 
-		held.ensure(testMAC, []string{"/dev/input/event5"})
-		held.ensure(testMAC, []string{"/dev/input/event5"})
+		inputRelays.ensure(testMAC, []string{"/dev/input/event5"})
+		inputRelays.ensure(testMAC, []string{"/dev/input/event5"})
 
 		assertPosted(t, postedAbout(recorded, peripheralKind, "a0-ab-51-33-b7-12"),
-			posted{"Warning", reasonInputRelayFailed, "creating a virtual input device for A0:AB:51:33:B7:12: open /dev/uinput: permission denied"},
+			posted{"Warning", reasonInputRelayFailed, "The operator cannot create the virtual input device of A0:AB:51:33:B7:12: open /dev/uinput: permission denied"},
 		)
 	})
 }

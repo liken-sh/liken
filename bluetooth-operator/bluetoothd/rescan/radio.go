@@ -1,12 +1,10 @@
 package main
 
-// What the program reads from the monitor channel for one adapter.
-//
-// A radio holds the facts that main.go names: the auto connect
-// devices, the connection attempt in progress, the links that are up,
-// and the repairs that wait for their deadline. observe updates them
-// from one packet. It reads only the packets below, and skips every
-// other packet.
+// A radio is the state of one adapter that the program builds from the
+// packets of the monitor channel: the auto connect devices, the
+// connection attempt in progress, the links that are up, and the
+// repairs scheduled for devices whose scan has not started again.
+// main.go explains the kernel bugs that this state detects.
 
 import (
 	"encoding/binary"
@@ -16,8 +14,8 @@ import (
 	"github.com/liken-sh/liken/bluetooth-operator/bluetoothd/mgmt"
 )
 
-// The HCI commands and events the program reads, from the Bluetooth
-// Core Specification, Volume 4, Part E. Every field is little-endian.
+// The HCI commands and events that radio reads, from the Bluetooth
+// Core Specification, Volume 4, Part E. All fields are little-endian.
 const (
 	hciDisconnect               = 0x0406
 	hciLESetScanEnable          = 0x200c
@@ -31,17 +29,17 @@ const (
 	hciEvCommandStatus      = 0x0f
 	hciEvLEMeta             = 0x3e
 
-	// The LE Meta subevents that end a connection attempt. The kernel
-	// unmasks the enhanced ones when the controller supports them, and
-	// the controller then sends those in place of the first.
+	// The LE Meta subevents that end a connection attempt. When the
+	// controller supports the enhanced subevents, the kernel enables
+	// them and the controller sends them instead of the first one.
 	hciLEConnectionComplete           = 0x01
 	hciLEEnhancedConnectionComplete   = 0x0a
 	hciLEEnhancedConnectionCompleteV2 = 0x29
 )
 
-// device names a Low Energy device the way the Management API does:
-// its address, most significant byte first, and its address type,
-// mgmt.AddressLEPublic or mgmt.AddressLERandom.
+// device identifies a Low Energy device as the Management API does:
+// an address with the most significant byte first, and an address type
+// of mgmt.AddressLEPublic or mgmt.AddressLERandom.
 type device struct {
 	address [6]byte
 	kind    uint8
@@ -52,8 +50,8 @@ func (d device) String() string {
 	return fmt.Sprintf("%02X:%02X:%02X:%02X:%02X:%02X", a[0], a[1], a[2], a[3], a[4], a[5])
 }
 
-// readDevice reads an address in the kernel's order, least significant
-// byte first, with the Management API's address type.
+// readDevice builds a device from an address in HCI byte order, least
+// significant byte first, and a Management API address type.
 func readDevice(raw []byte, kind uint8) device {
 	var d device
 	for i := range d.address {
@@ -63,9 +61,9 @@ func readDevice(raw []byte, kind uint8) device {
 	return d
 }
 
-// hciDeviceKind maps an HCI peer address type to the Management API's.
-// Types 0x02 and 0x03 are the identity addresses that a controller
-// resolved, public and random.
+// hciDeviceKind maps an HCI peer address type to a Management API
+// address type. HCI types 0x02 and 0x03 are resolved identity
+// addresses, public and random, so the low bit selects the type.
 func hciDeviceKind(peerType uint8) uint8 {
 	if peerType&0x01 == 0 {
 		return mgmt.AddressLEPublic
@@ -73,54 +71,54 @@ func hciDeviceKind(peerType uint8) uint8 {
 	return mgmt.AddressLERandom
 }
 
-// failure is a connection attempt that ended without a connection.
+// failure is a connection attempt that ended with a nonzero HCI
+// status.
 type failure struct {
 	device device
 	status uint8
 }
 
-// repair is an Add Device that waits for its deadline. cause says what
-// left the scan off, for the log line.
+// repair is a scheduled repair. At due, unless a scan has started
+// first, the watcher sends Add Device for the device. cause is the
+// event that stopped the scan, for the log.
 type repair struct {
 	due   time.Time
 	cause string
 }
 
-// radio is what the program knows about one adapter.
+// radio is the state of one adapter.
 type radio struct {
-	// autoConnect holds each device that an Add Device with the auto
-	// connect action named, until a Remove Device names it.
+	// autoConnect is the set of devices that an Add Device command
+	// with the auto connect action added, until a Remove Device
+	// command removes them.
 	autoConnect map[device]bool
 
 	// attempting is true from LE Create Connection until the attempt
-	// ends. target is the device the attempt is for. It is nil for an
-	// attempt that connects to whichever device on the accept list
-	// advertises first.
+	// ends. target is the device being connected to. It is nil when the
+	// attempt uses the accept list and connects to the first listed
+	// device that advertises.
 	attempting bool
 	target     *device
 
-	// lastFailure is the last attempt that ended without a connection.
-	// A Create Connection Cancel that completes after it starts that
-	// device's wait again.
+	// lastFailure is the last attempt that failed. A Create Connection
+	// Cancel that completes after the failure reschedules its repair.
 	lastFailure *failure
 
-	// links holds the device at the other end of each link that is
-	// up, by its connection handle, so a Disconnect, which names only
-	// the handle, names the device.
+	// links maps the connection handle of each link that is up to its
+	// device. An HCI Disconnect command carries only the handle, so
+	// this map finds the device.
 	links map[uint16]device
 
-	// scanEnable holds the value that the last scan enable command of
-	// each opcode sent, so its Command Complete says which way the scan
-	// went.
+	// scanEnable is the Scan Enable value of the last scan command of
+	// each opcode. Command Complete does not repeat the value, so
+	// commandComplete reads it here to tell whether the scan turned on.
 	scanEnable map[uint16]uint8
 
-	// repairs holds the devices that wait for their deadline.
 	repairs map[device]repair
 
-	// checks holds the devices that this program added again, until
-	// the kernel scans or the deadline passes. A deadline that passes
-	// with no scan means the Add Device did not start the scan, and the
-	// log says so.
+	// checks maps each device that the program sent a repair for to a
+	// deadline. When the deadline passes with no scan, the repair did
+	// not start the scan, and the watcher logs that.
 	checks map[device]time.Time
 }
 
@@ -134,7 +132,7 @@ func newRadio() *radio {
 	}
 }
 
-// observe updates the radio from one packet that arrived at now.
+// observe updates the radio from one packet received at now.
 func (r *radio) observe(p packet, now time.Time) {
 	switch p.kind {
 	case monitorCtrlCommand:
@@ -144,8 +142,9 @@ func (r *radio) observe(p packet, now time.Time) {
 	case monitorEvent:
 		r.hciEvent(p.data, now)
 	case monitorCloseIndex:
-		// The adapter powered off. Power-on starts the scan by itself
-		// (mgmt_power_on), so nothing that waits still applies.
+		// The adapter powered off. The kernel starts the scan again at
+		// power on (mgmt_power_on), so the scheduled repairs are not
+		// needed.
 		r.attempting, r.target, r.lastFailure = false, nil, nil
 		clear(r.links)
 		clear(r.repairs)
@@ -153,8 +152,9 @@ func (r *radio) observe(p packet, now time.Time) {
 	}
 }
 
-// managementCommand reads an Add Device or a Remove Device: a cookie
-// that names the sending socket, the opcode, and the parameters.
+// managementCommand reads an Add Device or Remove Device command. The
+// data holds a 4-byte cookie that identifies the sending socket, the
+// 2-byte opcode, and the parameters.
 func (r *radio) managementCommand(data []byte) {
 	if len(data) < 6 {
 		return
@@ -171,29 +171,31 @@ func (r *radio) managementCommand(data []byte) {
 		if action == mgmt.ActionAutoConnect {
 			r.autoConnect[d] = true
 		} else {
-			// The repair sends this action first and auto connect
-			// right after it, so the device is back in the map by the
-			// time the next packet arrives.
+			// A repair sends this action first and auto connect right
+			// after, so the device returns to the map with the next
+			// packet.
 			delete(r.autoConnect, d)
 		}
 	case opcode == mgmt.OpRemoveDevice && len(params) >= 7:
 		d := readDevice(params, params[6])
 		// The zero address removes every device. bluetoothd sends it
-		// when it registers an adapter, before it adds the bonded ones.
+		// when it registers an adapter, before it adds the bonded
+		// devices.
 		if d.address == [6]byte{} {
 			clear(r.autoConnect)
 			clear(r.repairs)
 			return
 		}
-		// A device that bluetoothd removed, as an unpair does, must not
-		// come back on auto connect from a repair that waits.
+		// Delete the pending repair too. Otherwise the repair would add
+		// back a device that bluetoothd removed, as it does on unpair.
 		delete(r.autoConnect, d)
 		delete(r.repairs, d)
 	}
 }
 
-// hciCommand reads a command that the kernel sent to the controller:
-// the opcode, the length of the parameters, and the parameters.
+// hciCommand reads a command that the kernel sent to the controller.
+// The data holds a 2-byte opcode, a 1-byte parameter length, and the
+// parameters.
 func (r *radio) hciCommand(data []byte, now time.Time) {
 	if len(data) < 3 {
 		return
@@ -212,9 +214,10 @@ func (r *radio) hciCommand(data []byte, now time.Time) {
 		// Type, Peer Address.
 		r.startAttempt(params[0], params[2], params[3:9])
 	case opcode == hciDisconnect && len(params) >= 2:
-		// Connection Handle, Reason. The kernel waits two seconds for
-		// the Disconnection Complete and rescans when it arrives, so a
-		// scan within rescanSettle cancels the wait.
+		// Connection Handle, Reason. When Disconnection Complete
+		// arrives late, the kernel leaves the device off its list of
+		// devices to reconnect, so schedule a repair. A scan before
+		// the repair is due cancels it.
 		handle := binary.LittleEndian.Uint16(params) & 0x0fff
 		if d, up := r.links[handle]; up {
 			r.arm(d, fmt.Sprintf("the host ended the link to %s", d), now)
@@ -222,21 +225,23 @@ func (r *radio) hciCommand(data []byte, now time.Time) {
 	}
 }
 
-// startAttempt records an attempt. A filter policy of zero connects to
-// the peer address, and any other connects to the accept list.
+// startAttempt records the start of a connection attempt. An initiator
+// filter policy of zero connects to the given peer address. Any other
+// policy connects to the accept list, so there is no single target.
 func (r *radio) startAttempt(filterPolicy, peerType uint8, address []byte) {
 	r.attempting, r.target = true, nil
 	if filterPolicy == 0 {
 		d := readDevice(address, hciDeviceKind(peerType))
 		r.target = &d
 	}
-	// The kernel is connecting, so it decides about the scan when this
-	// attempt ends, and that end starts its own wait.
+	// The kernel stopped the scan to make this attempt. If the attempt
+	// fails, endAttempt schedules a new repair, so the repairs
+	// scheduled before it are dropped.
 	clear(r.repairs)
 }
 
-// hciEvent reads an event that the controller sent: the event code,
-// the length of the parameters, and the parameters.
+// hciEvent reads an event that the controller sent. The data holds a
+// 1-byte event code, a 1-byte parameter length, and the parameters.
 func (r *radio) hciEvent(data []byte, now time.Time) {
 	if len(data) < 2 {
 		return
@@ -254,9 +259,9 @@ func (r *radio) hciEvent(data []byte, now time.Time) {
 			r.endAttempt(status, now)
 		}
 	case code == hciEvDisconnectComplete && len(params) >= 3:
-		// Status, Connection Handle, Reason. The event does not cancel
-		// a repair: when it arrives after the kernel stopped waiting
-		// for it, the kernel ignores it and does not rescan.
+		// Status, Connection Handle, Reason. This event does not cancel
+		// a repair, because the kernel stops waiting for it after two
+		// seconds and then ignores it without rescanning.
 		if params[0] == 0 {
 			delete(r.links, binary.LittleEndian.Uint16(params[1:])&0x0fff)
 		}
@@ -271,8 +276,8 @@ func (r *radio) hciEvent(data []byte, now time.Time) {
 	}
 }
 
-// linkUp records the device of a connection that completed with
-// success. The three subevents start with the same fields: Status,
+// linkUp records the device of a successful connection. The three
+// connection complete subevents start with the same fields: Status,
 // Connection Handle, Role, Peer Address Type, and Peer Address.
 func (r *radio) linkUp(params []byte) {
 	if len(params) < 12 || params[1] != 0 {
@@ -286,15 +291,17 @@ func (r *radio) commandComplete(opcode uint16, status uint8, now time.Time) {
 	switch opcode {
 	case hciLESetScanEnable, hciLESetExtScanEnable:
 		if status == 0 && r.scanEnable[opcode] == 1 {
-			// The kernel scans, so no device waits for a repair.
+			// The kernel is scanning, so no repair is needed.
 			clear(r.repairs)
 			clear(r.checks)
 		}
 	case hciLECreateConnectionCancel:
-		// The kernel cancelled an attempt. When the attempt had already
-		// failed, the cancel is the kernel ending the failed connection,
-		// and its rescan may follow now. When the attempt was still in
-		// progress, the cancel ends it.
+		// If the attempt is still in progress, the cancel ends it, and
+		// the controller reports the cancelled attempt with status
+		// 0x02, Unknown Connection Identifier. If the attempt already
+		// failed, the cancel is the kernel's cleanup of the failed
+		// connection, and the kernel can rescan after it, so the
+		// repair is scheduled again from now.
 		if r.attempting {
 			r.endAttempt(0x02, now)
 			return
@@ -305,8 +312,8 @@ func (r *radio) commandComplete(opcode uint16, status uint8, now time.Time) {
 	}
 }
 
-// endAttempt ends the attempt in progress with status. Status zero is
-// a connection, which needs no repair.
+// endAttempt ends the attempt in progress with an HCI status. Status
+// zero means the device connected, so no repair is needed.
 func (r *radio) endAttempt(status uint8, now time.Time) {
 	target := r.target
 	r.attempting, r.target = false, nil
@@ -327,8 +334,9 @@ func (r *radio) armFailure(f failure, now time.Time) {
 	r.arm(f.device, fmt.Sprintf("a connection to %s failed with HCI status 0x%02x", f.device, f.status), now)
 }
 
-// arm starts the wait for one device, when bluetoothd added it for
-// auto connect.
+// arm schedules a repair for d, but only when bluetoothd added d with
+// the auto connect action. For any other device, the kernel's cleanup
+// of a failed attempt starts the scan again by itself.
 func (r *radio) arm(d device, cause string, now time.Time) {
 	if !r.autoConnect[d] {
 		return
@@ -336,7 +344,8 @@ func (r *radio) arm(d device, cause string, now time.Time) {
 	r.repairs[d] = repair{due: now.Add(rescanSettle), cause: cause}
 }
 
-// next returns the earliest deadline of a repair or a check.
+// next returns the earliest deadline of any repair or check, and false
+// when there are none.
 func (r *radio) next() (time.Time, bool) {
 	var earliest time.Time
 	for _, each := range r.repairs {

@@ -1,19 +1,12 @@
 package main
 
-// The Peripheral object: the durable fact that one device holds a bond
-// with one adapter.
-//
-// Adoption runs on every pass, in both directions. A bond in bluetoothd
-// with no Peripheral gets one created, owned by the Adapter. A
-// Peripheral whose bond is gone from bluetoothd keeps its object and
-// reports the gap in status, because deleting a Peripheral means
-// unpair, and that is a person's decision and not an operator's.
-//
-// The same code handles the migration. A machine that paired its
-// controllers before this API existed holds bonds in bluetoothd and no
-// objects at all, and the first pass of the new operator creates a
-// Peripheral for each one and a Secret under each Peripheral. There is
-// no separate migration path to keep working.
+// A Peripheral records one device's bond with one adapter. Each pass
+// creates a Peripheral, owned by the Adapter, for every bond in
+// bluetoothd that has none, whether this operator paired the device or
+// found the bond already there. When a bond disappears from bluetoothd,
+// its Peripheral stays and the status reports the missing bond. The
+// operator does not delete the Peripheral, because deleting it unpairs
+// the device, and only a person should decide that.
 
 import (
 	"errors"
@@ -27,15 +20,14 @@ import (
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
-// reconcilePeripherals makes the Peripherals under one Adapter agree
-// with the bonds bluetoothd holds. claimed names the controllers a
-// prepared claim holds right now, by the Peripheral resource name
-// each one is published under.
+// reconcilePeripherals makes the Peripherals of one Adapter match the
+// bonds in bluetoothd. claimed is keyed by Peripheral name and is true
+// for each controller that a prepared claim holds.
 func (i *inventory) reconcilePeripherals(adapter *Adapter, snapshot radioSnapshot, batteries map[bonds.Address]*hidBattery, claimed map[string]bool, pass *inventoryPass) {
 	adapterKey := adapter.Metadata.Name
 	peripherals, err := i.listPeripherals(adapterKey)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing the Peripherals for %s: %v\n", adapterKey, err)
+		fmt.Fprintf(os.Stderr, "listing the Peripherals of Adapter %s: %v\n", adapterKey, err)
 		pass.ok = false
 		return
 	}
@@ -45,16 +37,13 @@ func (i *inventory) reconcilePeripherals(adapter *Adapter, snapshot radioSnapsho
 		peripheral := &peripherals[index]
 		address, err := bonds.ParseAddress(peripheral.Metadata.Name)
 		if err != nil {
-			// A Peripheral this operator did not name. Its bond, if it has
-			// one, is not addressable, so there is nothing to reconcile it
-			// against.
+			// The name is not a device address, so this operator did not
+			// create the Peripheral and has no bond to match it with.
 			continue
 		}
 		known[address] = peripheral
 	}
 
-	// Adoption. Every bond bluetoothd holds gets a Peripheral, whether
-	// this operator made the bond or found it.
 	for _, device := range snapshot.Devices {
 		if !device.Paired {
 			continue
@@ -64,7 +53,7 @@ func (i *inventory) reconcilePeripherals(adapter *Adapter, snapshot radioSnapsho
 		}
 		peripheral, err := i.createPeripheral(adapter, device, "")
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "adopting the bond with %s: %v\n", device.Address, err)
+			fmt.Fprintf(os.Stderr, "adopting the bond with device %s: %v\n", device.Address, err)
 			pass.ok = false
 			continue
 		}
@@ -90,27 +79,27 @@ func (i *inventory) reconcilePeripherals(adapter *Adapter, snapshot radioSnapsho
 	}
 }
 
-// listPeripherals answers the Peripherals of one radio, from the store
-// once the watch for that radio holds its first read.
+// listPeripherals returns the Peripherals of one adapter. It reads the
+// watch's cache once the watch has completed its first list, and the
+// API server before that.
 func (i *inventory) listPeripherals(adapterKey string) ([]Peripheral, error) {
 	return informer.List[Peripheral](i.client, i.cache.peripheralsOf(adapterKey), byAdapter(peripheralsPath(), adapterKey), peripheralPath)
 }
 
-// createPeripheral records a bond in the API. request names the
-// PairingRequest that produced the bond, and is empty for a bond the
-// operator adopted.
+// createPeripheral creates the Peripheral for a bond. request is the
+// name of the PairingRequest that made the bond, and is empty for a
+// bond that already existed.
 //
-// spec.trusted starts from what bluetoothd already holds, so adoption
-// states the device's real state rather than asserting a default onto
-// hardware that is working. A device the operator paired itself was
-// trusted during the peripheral, so its value here is true.
+// spec.trusted starts as the device's current Trusted property, so
+// adopting a bond does not change the device. The pairing sets Trusted
+// on a device that this operator paired, so its Peripheral starts with
+// true.
 func (i *inventory) createPeripheral(adapter *Adapter, device deviceState, request string) (*Peripheral, error) {
-	// The owner reference names the Adapter by its UID. The pass's copy
-	// can come from the store, and the store can still hold an Adapter
-	// that somebody deleted and this operator created again, whose UID
-	// is gone. Garbage collection would then take the new Peripheral and
-	// start its unpair. A new Peripheral is rare, so its owner is read
-	// from the API server.
+	// The owner reference needs the Adapter's current UID. The cache can
+	// still hold an Adapter that was deleted and created again, with its
+	// old UID, and the garbage collector deletes a Peripheral whose owner
+	// UID does not exist, which unpairs the device. Creating a Peripheral
+	// is rare, so read the Adapter from the API server.
 	owner, err := informer.ReadFresh[Adapter](i.client, i.cache.adapters.Versions, adapter.Metadata.Name, adapterPath(adapter.Metadata.Name))
 	if err != nil {
 		return nil, fmt.Errorf("reading the Adapter that owns the bond: %w", err)
@@ -141,65 +130,57 @@ func (i *inventory) createPeripheral(adapter *Adapter, device deviceState, reque
 		return nil, err
 	}
 	i.cache.peripheralVersions.Note(name, created.Metadata.ResourceVersion)
-	// pairedAt is when the operator first observed the bond. For a bond it
-	// made itself that is the pairing; for one it adopted it is the
-	// adoption, because bluetoothd's own storage records no time.
+	// bluetoothd does not record when a bond was made, so pairedAt is the
+	// time this operator first saw the bond: the pairing time for a
+	// device it paired, and the adoption time for any other.
 	created.Status.Bond.PairedAt = timestamp(i.now())
 	created.Status.Bond.Request = request
-	fmt.Printf("peripheral: created %s for the bond with %s\n", name, device.Address)
+	fmt.Printf("peripheral: created Peripheral %s for the bond with device %s\n", name, device.Address)
 	return created, nil
 }
 
-// reconcileDeviceSpec writes a Peripheral's spec into bluetoothd.
+// reconcileDeviceSpec sets the device's Trusted and Alias properties in
+// bluetoothd to the values in the Peripheral's spec.
 //
-// spec.trusted lets the device reconnect on its own: without it BlueZ
-// asks an agent to authorize each service on every connection, and no
-// agent is registered outside a pairing window. spec.alias is stored
-// by bluetoothd in the bond's own info file, so the name is stored in
-// the Secret with the keys.
+// A device must be trusted to reconnect on its own, because BlueZ asks
+// an agent to authorize each service of an untrusted device on every
+// connection, and no agent is registered outside a pairing window.
+// bluetoothd writes the alias into the bond's info file, and the bond's
+// Secret stores that file, so the alias is restored with the keys.
 func (i *inventory) reconcileDeviceSpec(peripheral *Peripheral, device deviceState) {
 	if peripheral.Spec.Trusted != nil && *peripheral.Spec.Trusted != device.Trusted {
 		if err := i.radio.SetDeviceTrusted(device.Address, *peripheral.Spec.Trusted); err != nil {
-			fmt.Fprintf(os.Stderr, "setting Trusted on %s: %v\n", device.Address, err)
+			fmt.Fprintf(os.Stderr, "setting Trusted on device %s: %v\n", device.Address, err)
 		} else {
-			fmt.Printf("peripheral: %s is now trusted=%t\n", peripheral.Metadata.Name, *peripheral.Spec.Trusted)
+			fmt.Printf("peripheral: set Trusted of %s to %t\n", peripheral.Metadata.Name, *peripheral.Spec.Trusted)
 		}
 	}
 	if peripheral.Spec.Alias != "" && peripheral.Spec.Alias != device.Alias {
 		if err := i.radio.SetDeviceAlias(device.Address, peripheral.Spec.Alias); err != nil {
-			fmt.Fprintf(os.Stderr, "naming %s %q: %v\n", device.Address, peripheral.Spec.Alias, err)
+			fmt.Fprintf(os.Stderr, "setting the alias of device %s to %q: %v\n", device.Address, peripheral.Spec.Alias, err)
 		} else {
-			fmt.Printf("peripheral: %s now answers to %q\n", peripheral.Metadata.Name, peripheral.Spec.Alias)
+			fmt.Printf("peripheral: set the alias of %s to %q\n", peripheral.Metadata.Name, peripheral.Spec.Alias)
 		}
 	}
 }
 
-// writePeripheralStatus reports the radio's state for one bond.
+// writePeripheralStatus writes one Peripheral's status from the state
+// of its device in bluetoothd, sets the Peripheral's metrics, and posts
+// an Event for each change of the Connected condition and for a lost
+// bond. kernel is the battery reading from the kernel's power supply
+// class, or nil when there is none. claimed is true when a prepared
+// claim holds this controller.
 //
-// status.bond.held reports a gap this operator never acts on: a
-// Peripheral whose device object is gone from bluetoothd, or is there
-// with no bond, is a bond somebody removed by another route. The object
-// stays, because deleting it is the unpair API and that is a person's
-// act.
-//
-// pairedAt and bond.request carry over from the object, because the
-// radio reports neither. Every other field is this pass's own reading.
-//
-// kernel is the level the kernel's power supply class reports for this
-// device, and nil when it reports none. claimed reports whether a
-// prepared claim holds this controller right now.
-//
-// The reason the device's last link ended is read once, before the
-// first composition, so every composition in this call gives the same
-// condition. It is forgotten only after the status is settled: a write
-// that fails keeps it for the next pass.
+// The reason the device's last link ended is read once, so a status
+// built again after a conflict gets the same condition. It is cleared
+// only when the write succeeds or the status is already current, so a
+// failed write leaves it for the next pass.
 func (i *inventory) writePeripheralStatus(peripheral *Peripheral, adapter *Adapter, address bonds.Address, device deviceState, present bool, kernel *hidBattery, claimed bool) {
 	ended := i.ends.reason(address)
 	status := i.peripheralStatus(peripheral.Status, adapter, address, device, present, kernel, ended)
 
-	// The metrics report this pass's reading whether or not it changes
-	// what the object holds, because a scrape must see the current
-	// state and not only the passes that happened to write it.
+	// Set the metrics on every pass, even when the status write is
+	// skipped, so a scrape always shows the current state.
 	name := peripheral.Metadata.Name
 	i.metrics.setPeripheralConnected(name, status.Conditions[0].Status == conditionTrue)
 	i.metrics.setPeripheralClaimed(name, claimed)
@@ -210,49 +191,48 @@ func (i *inventory) writePeripheralStatus(peripheral *Peripheral, adapter *Adapt
 		i.metrics.setPeripheralBattery(name, nil)
 	}
 
-	// replaced is the status the last write went against. A copy from
-	// the store can be older than the API server's, so the disconnect,
-	// the condition's transition, and the lost bond are reported from
-	// the copy that a landed write replaced, and a stale copy never
-	// reports the same change twice. settled is the status the object
-	// holds after this call, whether or not it wrote.
+	// The cached copy can be older than the API server's copy, and can
+	// still show a change that an earlier write already reported. So the
+	// disconnect count and the Events compare the new status against
+	// replaced, the status that the successful write overwrote, and not
+	// against the cached copy. settled is the status the object has
+	// after this call, whether or not the call wrote it.
 	var replaced, settled PeripheralStatus
-	apply := func(held *Peripheral) bool {
-		next := i.peripheralStatus(held.Status, adapter, address, device, present, kernel, ended)
+	apply := func(current *Peripheral) bool {
+		next := i.peripheralStatus(current.Status, adapter, address, device, present, kernel, ended)
 		settled = next
-		// The status holds a pointer and a slice, so the comparison is
-		// deep.
-		if reflect.DeepEqual(held.Status, next) {
+		// Status contains a pointer and a slice, so == does not work.
+		if reflect.DeepEqual(current.Status, next) {
 			return false
 		}
-		replaced = held.Status
-		held.Status = next
-		held.APIVersion, held.Kind = pairingAPI, peripheralKind
+		replaced = current.Status
+		current.Status = next
+		current.APIVersion, current.Kind = pairingAPI, peripheralKind
 		return true
 	}
 	wrote, err := informer.SettleStatus(i.client, i.cache.peripheralVersions, peripheralPath(name), peripheral, apply)
 	if err != nil {
-		// A Peripheral that is gone needs no status. Its delete event
-		// wakes the pass that adopts the bond again.
+		// A deleted Peripheral needs no status. The watch event of the
+		// delete starts a pass, which creates the Peripheral again if
+		// the bond is still in bluetoothd.
 		if !errors.Is(err, apiclient.ErrNotFound) {
-			fmt.Fprintf(os.Stderr, "writing the status of %s: %v\n", name, err)
+			fmt.Fprintf(os.Stderr, "writing the status of Peripheral %s: %v\n", name, err)
 		}
 		return
 	}
 	i.ends.forget(address, ended)
-	// The relay follows the condition the object holds now: Asleep arms
-	// the press that wakes the room, and every other reason disarms it
-	// (wake.go). It follows a status that settled, so the first pass
-	// after a restart arms a remote whose Peripheral still holds Asleep.
+	// The relay schedules the wake press from the Connected condition
+	// (wake.go). It gets the settled condition even when this call wrote
+	// nothing, so the first pass after an operator restart schedules the
+	// press for a remote whose Peripheral already has the reason Asleep.
 	connection := settled.Conditions[0]
 	i.relays.follow(macFromDeviceName(address.Key()), connection)
 	if !wrote {
 		return
 	}
-	// A Peripheral that held no Connected condition before this write is
-	// a creation or an adoption. Its first condition posts an Event, and
-	// counts no disconnect, because a disconnect measures an edge this
-	// operator watched happen.
+	// A new Peripheral has no Connected condition before this write. Its
+	// first condition posts an Event and is not counted as a disconnect,
+	// because the operator did not see the link go down.
 	previous, had := conditions.Find(replaced.Conditions, conditionConnected)
 	if had && previous.Status == conditionTrue && connection.Status == conditionFalse {
 		i.metrics.countDisconnect(name, connection.Reason)
@@ -261,15 +241,17 @@ func (i *inventory) writePeripheralStatus(peripheral *Peripheral, adapter *Adapt
 		i.recorder.Transition(peripheralReference(peripheral), connection, connectedWarning(connection.Reason))
 	}
 	if replaced.Bond.Held && !status.Bond.Held {
-		fmt.Fprintf(os.Stderr, "peripheral: %s reports no bond in bluetoothd; the object stays until somebody deletes it\n", name)
+		fmt.Fprintf(os.Stderr, "peripheral: bluetoothd has no bond for %s, and the Peripheral stays until a person deletes it\n", name)
 		i.recorder.Warning(peripheralReference(peripheral), reasonBondLost, fmt.Sprintf(
-			"bluetoothd holds no bond with %s; delete the Peripheral to unpair it, or pair the device again", address))
+			"bluetoothd has no bond with %s. Delete the Peripheral to unpair it, or pair the device again", address))
 	}
 }
 
-// peripheralStatus composes one Peripheral's status from this pass's
-// reading, the reason the device's last link ended, and the status the
-// object publishes now.
+// peripheralStatus builds a Peripheral's status from the device's
+// current state and the reason its last link ended. published is the
+// object's current status, and supplies the fields that bluetoothd does
+// not report: pairedAt, bond.request, and the condition's
+// lastTransitionTime.
 func (i *inventory) peripheralStatus(published PeripheralStatus, adapter *Adapter, address bonds.Address, device deviceState, present bool, kernel *hidBattery, ended string) PeripheralStatus {
 	status := PeripheralStatus{
 		Address: address.Directory(),
@@ -294,11 +276,11 @@ func (i *inventory) peripheralStatus(published PeripheralStatus, adapter *Adapte
 	if status.Bond.PairedAt == "" {
 		status.Bond.PairedAt = timestamp(i.now())
 	}
-	// The kernel's reading comes first. A controller that states its charge
-	// in its HID reports has a power supply and no Battery1, a Low Energy
-	// device with a GATT battery service has Battery1 and no power supply,
-	// and a device with both is read once, from the kernel, because that
-	// reading also carries the charging state.
+	// A controller that reports its charge in HID reports gets a kernel
+	// power supply and no BlueZ Battery1. A Low Energy device with a GATT
+	// battery service gets Battery1 and no power supply. When a device
+	// has both, the kernel's reading wins, because it also reports
+	// whether the battery is charging.
 	switch {
 	case kernel != nil:
 		status.Battery = &BatteryStatus{
@@ -315,11 +297,9 @@ func (i *inventory) peripheralStatus(published PeripheralStatus, adapter *Adapte
 	return status
 }
 
-// deviceDisplayName is the name a person recognizes the controller by.
-// BlueZ's Name is the device's own broadcast name, and Alias is that
-// name until somebody renames the device, so Alias is the better
-// choice when the two differ and Name is the fallback for a device
-// that has published no name yet.
+// deviceDisplayName returns the name to show a person. BlueZ returns
+// the device's own Name as Alias until someone sets an alias, so Alias
+// is the better choice when it is set.
 func deviceDisplayName(device deviceState) string {
 	if device.Alias != "" {
 		return device.Alias
@@ -327,12 +307,11 @@ func deviceDisplayName(device deviceState) string {
 	return device.Name
 }
 
-// deviceReportedName is the name the controller reports for itself,
-// which is what status.name promises. Alias is only the
-// fallback, for a device that has published no name, where BlueZ
-// derives an alias from the address. Without this split, a person who
-// sets spec.alias would see their own name in both columns and lose
-// the device's.
+// deviceReportedName returns the name for status.name: the name the
+// controller reports for itself. It prefers Name over Alias, because
+// spec.alias sets the alias, and the device's own name would otherwise
+// appear nowhere. A device that has reported no name gets Alias, which
+// BlueZ then derives from the address.
 func deviceReportedName(device deviceState) string {
 	if device.Name != "" {
 		return device.Name

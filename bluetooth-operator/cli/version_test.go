@@ -55,7 +55,7 @@ func TestDecideVersionAction(t *testing.T) {
 				t.Fatalf("decideVersionAction(%q, %q, %q) = %d, want %d", tc.cli, tc.operator, tc.minimumCLI, got, tc.want)
 			}
 			if (got == actionRun) != (message == "") {
-				t.Fatalf("a run carries no message and a warn or refuse carries one; got action %d with message %q", got, message)
+				t.Fatalf("action %d has the message %q, want a message only for a warning or a refusal", got, message)
 			}
 		})
 	}

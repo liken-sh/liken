@@ -1,9 +1,12 @@
 package main
 
-// These tests cover how the pass arms the relay: the Asleep a status
-// write settles on arms the remote, and the next open of its keyboard
-// node writes the press. They run the real pass over the fake radio and
-// the fake API server, and the relay over the fake kernel.
+// These tests cover the wake press through a whole reconcile pass. When
+// a pass sets the reason of a Peripheral's Connected condition to
+// Asleep, the relay schedules a wake press. The next time the relay opens the remote's
+// keyboard node, at least wakeAfter after the link ended, it writes one
+// press and release of KEY_UNKNOWN. The tests run the real pass against
+// the fake radio and the fake API server, and the real relays against
+// the fake kernel.
 
 import (
 	"bytes"
@@ -11,21 +14,22 @@ import (
 	"time"
 )
 
-// remotePass is an inventory over a radio that holds the sample remote,
-// connected, and the relay desk of sleptRemote. Its clock is testNow.
+// remotePass returns an inventory whose fake radio has the sample remote
+// connected, with the relays and the fake kernel from sleptRemote. Its
+// clock reads testNow.
 func remotePass(t *testing.T, fixture *apiFixture) (*inventory, *fakeRadio, *relays, *fakeKernel) {
 	t.Helper()
 	device := connectedRemote(t)
 	device.Address = testAddress(t, sampleRemote)
 	radio := testRadio(t, device)
 	inventory := testInventory(t, fixture, radio)
-	held, kernel := sleptRemote(t, everyInputClass)
-	inventory.relays = held
-	return inventory, radio, held, kernel
+	relay, kernel := sleptRemote(t, everyInputClass)
+	inventory.relays = relay
+	return inventory, radio, relay, kernel
 }
 
-// sleep takes the remote's link down with a timeout, as BlueZ reports a
-// remote that went to sleep, and runs the pass.
+// sleep disconnects the remote with a timeout reason, which is how BlueZ
+// reports a remote that went to sleep, and runs a pass.
 func sleep(t *testing.T, inventory *inventory, radio *fakeRadio) {
 	t.Helper()
 	radio.update(testAddress(t, sampleRemote), func(d *deviceState) { d.Connected = false })
@@ -33,44 +37,44 @@ func sleep(t *testing.T, inventory *inventory, radio *fakeRadio) {
 	inventory.reconcile()
 }
 
-// A pass that writes Asleep arms the remote, and its next connect an
-// hour later writes the press.
-func TestAPassThatWritesAsleepArmsThePress(t *testing.T) {
-	inventory, radio, held, kernel := remotePass(t, newAPIFixture())
+// After a pass writes Asleep, the remote's next connect writes the press.
+func TestAPassThatWritesAsleepSchedulesThePress(t *testing.T) {
+	inventory, radio, relay, kernel := remotePass(t, newAPIFixture())
 	inventory.reconcile()
 	sleep(t, inventory, radio)
 
-	held.now = func() time.Time { return testNow.Add(time.Hour) }
-	held.ensure(remoteMAC, []string{remoteKeys})
+	// An hour later is past wakeAfter.
+	relay.now = func() time.Time { return testNow.Add(time.Hour) }
+	relay.ensure(remoteMAC, []string{remoteKeys})
 
 	if got := virtualOf(t, kernel, remoteKeysName).received(); !bytes.Equal(got, wakePressRecords()) {
 		t.Errorf("the keyboard node received %x, want one press and release of KEY_UNKNOWN", got)
 	}
 }
 
-// A restart of the operator keeps Asleep on a sleeping remote, and the
-// first pass of the new process arms the remote from the Peripheral.
-func TestTheFirstPassAfterARestartArmsFromThePeripheral(t *testing.T) {
+// Asleep stays in the Peripheral status across an operator restart, so
+// the first pass of the new process schedules the press from it.
+func TestTheFirstPassAfterARestartSchedulesThePressFromThePeripheral(t *testing.T) {
 	fixture := newAPIFixture()
 	before, radio, _, _ := remotePass(t, fixture)
 	before.reconcile()
 	sleep(t, before, radio)
 
-	after, _, held, kernel := remotePass(t, fixture)
+	after, _, relay, kernel := remotePass(t, fixture)
 	after.radio = radio
 	after.reconcile()
-	held.now = func() time.Time { return testNow.Add(time.Hour) }
-	held.ensure(remoteMAC, []string{remoteKeys})
+	relay.now = func() time.Time { return testNow.Add(time.Hour) }
+	relay.ensure(remoteMAC, []string{remoteKeys})
 
 	if got := virtualOf(t, kernel, remoteKeysName).received(); !bytes.Equal(got, wakePressRecords()) {
 		t.Errorf("the keyboard node received %x, want one press and release of KEY_UNKNOWN", got)
 	}
 }
 
-// A reason that arrives for a link that is up again by the time of the
-// pass belongs to a link the pass never saw end. The pass writes LinkUp
-// and forgets the reason, so a later disconnect with no signal does not
-// read it as its own.
+// A Disconnected signal can arrive when the link is already up again. A
+// pass that finds the remote connected writes LinkUp and deletes the
+// stored reason, so a later disconnect with no signal reports
+// NotConnected and not this old Timeout.
 func TestAPassThatFindsTheRemoteConnectedForgetsTheReason(t *testing.T) {
 	fixture := newAPIFixture()
 	inventory, radio, _, _ := remotePass(t, fixture)

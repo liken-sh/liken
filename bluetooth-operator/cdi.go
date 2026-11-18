@@ -1,36 +1,25 @@
 package main
 
-// Writing CDI specs: how a prepared claim becomes evdev nodes, or the
-// bus socket of this pod's bluetoothd, in a consumer's container.
+// The CDI (Container Device Interface) spec files that give a
+// consumer's container what a prepared claim grants: the evdev nodes
+// of a controller, or a mount of bluetoothd's bus socket for the media
+// bus.
 //
-// The Container Device Interface connects two things: which device to
-// use, and what appears inside the container. A JSON file in a
-// well-known directory names devices and the edits that grant one to
-// a container. A controller's edits are device nodes only, because a
-// program reads a gamepad by opening /dev/input/eventN, and nothing
-// about the device is configuration. The media bus takes the other
-// two kinds of edit and no device node: a mount of the bus directory,
-// and DBUS_SYSTEM_BUS_ADDRESS, the variable a sound server reads to
-// find the bus.
+// The container runtime reads the files in cdiDir and applies a file's
+// edits to a container that requests one of its devices. Each claim has
+// one file, bluetooth.liken.sh-<claimUID>.json. liken writes its own
+// liken.sh-<claimUID>.json files in the same directory, and each driver
+// reads and deletes only the files with its own prefix. The name uses
+// the claim's UID, not its namespace and name, so a claim that is
+// deleted and created again under the same name does not get the old
+// claim's file.
 //
-// The file name starts with this driver's own prefix,
-// bluetooth.liken.sh-<claimUID>.json. liken writes
-// liken.sh-<claimUID>.json in the same directory and reads back only
-// the files whose names start with its own prefix, so the two drivers
-// never read or overwrite each other's specs.
-//
-// Each claim gets one file, named by the claim's UID rather than by
-// its namespace and name. A claim that is deleted and recreated under
-// the same name is a different grant, and its file must not collide
-// with a stale one.
-//
-// A file stays correct for the whole boot, and nothing rewrites one.
-// The kubelet prepares a claim once and reuses the answer for every
-// later pod that names it. What a controller's claim delivers is the
-// virtual node its relay holds open, and the kernel keeps that node's
-// number for as long as the operator holds the uinput fd, so a
-// controller that reconnects on a different eventN changes nothing
-// here.
+// The operator writes a file once, at prepare, and never rewrites it,
+// because the kubelet prepares a claim once and reuses the result for
+// every pod that references it. A controller's claim grants the relay's
+// virtual input node. That node keeps its number while the operator
+// holds the uinput fd, so a controller that reconnects as a different
+// eventN does not make the file wrong.
 
 import (
 	"encoding/json"
@@ -40,78 +29,67 @@ import (
 	"sync"
 )
 
-// cdiWrites serializes the writes to these files. The kubelet's
-// prepare calls and the reconcile pass both write them, and both
-// stage a write through the same temporary path.
+// cdiWrites serializes writes to the spec files. The DRA prepare and
+// unprepare calls and the reconcile pass can run at the same time, and
+// writes of one file share one temporary path.
 var cdiWrites sync.Mutex
 
-// cdiDir is the directory where the container runtime looks for CDI
-// specs. It is a variable so the tests can change it.
+// cdiDir is the directory where the container runtime reads CDI
+// specs. Tests change it.
 var cdiDir = "/var/run/cdi"
 
-// cdiKind identifies this driver's CDI devices, the same way the
-// driver name identifies its slices. A CDI device ID has the form
-// "<kind>=<name>".
-//
-// The media bus takes the same kind. A CDI kind namespaces one
-// writer's device IDs. It is not a taxonomy of the devices, and a
-// second kind would rename every ID this driver has already written.
+// cdiKind is the CDI kind of every device this driver writes. A CDI
+// device ID has the form "<kind>=<name>". The kind is only a namespace
+// for one writer's device names, so the media bus uses the same kind
+// as a controller.
 const cdiKind = DriverName + "/controller"
 
-// busDir is the directory that holds bluetoothd's bus socket, on the
-// host and inside every container that mounts it. The one constant is
-// both ends of the claim holder's mount, because the pod's own bus
-// volume is a hostPath at this same path. A CDI mount names a host
-// path, which is why that volume is not an emptyDir.
+// busDir is the directory of bluetoothd's bus socket, at the same path
+// on the host and in every container that mounts it. The pod mounts it
+// as a hostPath volume, not an emptyDir, because a CDI mount needs a
+// fixed host path and the kubelet chooses the host path of an emptyDir.
 const busDir = "/var/run/bluetooth.liken.sh/dbus"
 
-// The address a sound server dials, and the environment variable it
-// reads the address from. DBUS_SYSTEM_BUS_ADDRESS is D-Bus's own
-// standard variable, so PipeWire finds this bus with no configuration
-// of its own.
+// A consumer's container gets busAddress in DBUS_SYSTEM_BUS_ADDRESS, so
+// PipeWire connects to this bluetoothd with no other configuration.
 const (
 	busVariable = "DBUS_SYSTEM_BUS_ADDRESS"
 	busAddress  = "unix:path=" + busDir + "/system_bus_socket"
 )
 
-// cdiPrefix separates this driver's spec files from liken's in the
-// shared directory.
+// cdiPrefix starts the name of each spec file this driver writes.
 const cdiPrefix = DriverName + "-"
 
-// cdiSpec holds the part of the CDI spec schema that this operator
-// writes: device nodes for a controller, a mount and an environment
-// variable for the media bus. Each field is omitted when a device
-// grants nothing of its kind.
+// cdiSpec is the part of the CDI spec schema that this driver writes.
 type cdiSpec struct {
 	Version string      `json:"cdiVersion"`
 	Kind    string      `json:"kind"`
 	Devices []cdiDevice `json:"devices"`
 }
 
-// cdiDevice is one allocated device's grant. Its annotations are the
-// one place the CDI schema leaves for a driver's own record, and the
-// container runtime refuses a spec with any other extra field. This
-// driver records what the claim asked for there, so a restart rebuilds
-// each pump's demand from the same files that record which nodes the
-// consumer holds. A claim that asked for nothing beyond the default
-// writes no annotation, so a file written before these parameters
-// existed reads back as the default.
+// cdiDevice is the grant for one allocated device. Its annotations
+// record the input classes and axis values that the claim asked for,
+// so after a restart eachDeliveredDevice reads them back from the same
+// file that lists the consumer's nodes. The container runtime rejects
+// a spec with a field outside the CDI schema, so this data cannot go
+// in fields of its own. A claim that asks for the defaults writes no
+// annotations.
 type cdiDevice struct {
 	Name           string            `json:"name"`
 	ContainerEdits cdiEdits          `json:"containerEdits"`
 	Annotations    map[string]string `json:"annotations,omitempty"`
 }
 
-// The two annotations this driver writes: the input classes the claim
-// asked for, as a comma-separated list of their names, and the axis
-// values it applied, in the form axes.go records.
+// inputsAnnotation holds the requested input classes as a
+// comma-separated list, and axesAnnotation holds the applied axis
+// values in the format that axes.go writes.
 const (
 	inputsAnnotation = DriverName + "/inputs"
 	axesAnnotation   = DriverName + "/axes"
 )
 
-// inputs reads the recorded classes back, and none for a device
-// recorded without the annotation.
+// inputs returns the recorded input classes, or nil when the device
+// has no annotation.
 func (d cdiDevice) inputs() []string {
 	recorded, found := d.Annotations[inputsAnnotation]
 	if !found {
@@ -120,16 +98,15 @@ func (d cdiDevice) inputs() []string {
 	return strings.Split(recorded, ",")
 }
 
-// axes reads the recorded axis values back, and an empty string for a
-// device recorded without the annotation.
+// axes returns the recorded axis values, or "" when the device has no
+// annotation.
 func (d cdiDevice) axes() string {
 	return d.Annotations[axesAnnotation]
 }
 
-// annotateDelivery records what a claim asked for on one device. A
-// claim that takes every class and tunes no axis leaves the device
-// unannotated.
-func annotateDelivery(inputs []string, axes string) map[string]string {
+// cdiAnnotations returns nil for a claim that wants every input
+// class and sets no axis.
+func cdiAnnotations(inputs []string, axes string) map[string]string {
 	annotations := map[string]string{}
 	if len(inputs) > 0 {
 		annotations[inputsAnnotation] = strings.Join(inputs, ",")
@@ -159,17 +136,10 @@ type cdiMount struct {
 	Options       []string `json:"options,omitempty"`
 }
 
-// busEdits builds what an allocated media bus grants a container: the
-// directory that holds bluetoothd's socket, and the address of the
-// socket inside it.
-//
-// The mount is read-only. Connecting to a Unix socket needs write
-// permission on the socket itself, not on the file system that holds
-// it, so a read-only mount still connects, and the holder has no
-// reason to create anything in this directory.
-//
-// The edits are the same on every pass, because the socket's path is
-// fixed.
+// busEdits mounts busDir read-only. Connecting to a Unix socket needs
+// write permission on the socket file, which a read-only mount does
+// not remove, and the container has no reason to create files in the
+// directory.
 func busEdits() cdiEdits {
 	return cdiEdits{
 		Env: []string{busVariable + "=" + busAddress},
@@ -181,8 +151,6 @@ func busEdits() cdiEdits {
 	}
 }
 
-// deviceNodes turns the paths one controller delivers into the
-// container edits that grant them.
 func deviceNodes(paths []string) []cdiDeviceNode {
 	nodes := make([]cdiDeviceNode, 0, len(paths))
 	for _, path := range paths {
@@ -191,18 +159,16 @@ func deviceNodes(paths []string) []cdiDeviceNode {
 	return nodes
 }
 
-// writeCDISpec writes one claim's devices where the runtime finds
-// them.
 func writeCDISpec(claimUID string, devices []cdiDevice) error {
 	cdiWrites.Lock()
 	defer cdiWrites.Unlock()
 	return writeSpecFile(claimUID, devices)
 }
 
-// writeSpecFile is the write itself, with the lock already held. It
-// is atomic. The runtime may list the directory at any moment, and a
-// half-written spec would fail every container creation that read it
-// at that moment.
+// writeSpecFile needs the caller to hold cdiWrites. It writes a
+// temporary file and renames it, because the runtime can read the
+// directory at any time, and a partly written spec fails the creation
+// of the container that reads it.
 func writeSpecFile(claimUID string, devices []cdiDevice) error {
 	if err := os.MkdirAll(cdiDir, 0o755); err != nil {
 		return err
@@ -220,10 +186,9 @@ func writeSpecFile(claimUID string, devices []cdiDevice) error {
 	return os.Rename(tmp, path)
 }
 
-// removeCDISpec deletes a claim's spec file. An already absent file
-// counts as success, because unprepare must be idempotent: the
-// kubelet repeats it whenever it has no record that the call
-// succeeded.
+// removeCDISpec deletes a claim's spec file. A file that is already
+// gone is not an error, because the kubelet repeats unprepare when it
+// has no record that an earlier call succeeded.
 func removeCDISpec(claimUID string) error {
 	cdiWrites.Lock()
 	defer cdiWrites.Unlock()
@@ -238,11 +203,9 @@ func cdiSpecPath(claimUID string) string {
 	return filepath.Join(cdiDir, cdiPrefix+claimUID+".json")
 }
 
-// claimUIDFromSpecName reads a claim's UID back out of a spec file
-// name. A name without this driver's prefix belongs to liken or to
-// another writer, and a name that is a temporary file mid-rename ends
-// in .json.tmp, so both fall out of the pattern and the refresh
-// leaves them alone.
+// claimUIDFromSpecName returns false for a name without cdiPrefix,
+// which another driver wrote, and for a name without the .json suffix,
+// such as the temporary file of a write in progress.
 func claimUIDFromSpecName(name string) (string, bool) {
 	uid, ok := strings.CutPrefix(name, cdiPrefix)
 	if !ok {

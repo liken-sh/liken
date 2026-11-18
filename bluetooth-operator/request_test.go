@@ -1,11 +1,5 @@
 package main
 
-// These tests cover the PairingRequest's state machine: the window
-// opens and reports what the radio observes, an approval pairs exactly the
-// device a person named, an empty spec.device pairs nothing at all,
-// the window expires unapproved, and a finished request is collected
-// after its TTL.
-
 import (
 	"errors"
 	"strings"
@@ -17,8 +11,7 @@ const testRequestName = "new-gamepad"
 
 func testRequestPath() string { return pairingRequestPath("liken-system", testRequestName) }
 
-// openRequest is a request a person has just created, with no status
-// on it yet.
+// openRequest returns a new request with no status.
 func openRequest(device string) *PairingRequest {
 	return &PairingRequest{
 		APIVersion: pairingAPI,
@@ -41,14 +34,14 @@ func TestRequestOpensAWindowAndReportsWhatTheRadioSees(t *testing.T) {
 	pass := inventory.reconcile()
 
 	if !radio.called("OpenWindow 3m0s") {
-		t.Fatalf("the window never reached the radio: %v", radio.calls)
+		t.Fatalf("the radio calls are %v, want OpenWindow 3m0s", radio.calls)
 	}
 	request := read[PairingRequest](t, fixture, testRequestPath())
 	if request.Status.Phase != phaseOpen {
-		t.Errorf("phase = %q", request.Status.Phase)
+		t.Errorf("status.phase is %q, want %q", request.Status.Phase, phaseOpen)
 	}
 	if request.Status.WindowClosesAt != timestamp(testNow.Add(3*time.Minute)) {
-		t.Errorf("windowClosesAt = %q", request.Status.WindowClosesAt)
+		t.Errorf("status.windowClosesAt is %q, want 3 minutes after the pass", request.Status.WindowClosesAt)
 	}
 	if len(request.Status.Seen) != 1 {
 		t.Fatalf("seen = %+v, want the one device the radio can see", request.Status.Seen)
@@ -56,19 +49,16 @@ func TestRequestOpensAWindowAndReportsWhatTheRadioSees(t *testing.T) {
 	if request.Status.Seen[0].Address != testDevice ||
 		request.Status.Seen[0].Name != "DualSense Wireless Controller" ||
 		request.Status.Seen[0].FirstSeen != timestamp(testNow) {
-		t.Errorf("seen[0] = %+v", request.Status.Seen[0])
+		t.Errorf("status.seen[0] is %+v, want the device with its name and first sighting", request.Status.Seen[0])
 	}
-	// An open window means a person is waiting, so the loop runs again
-	// sooner than its backstop tick.
+	// A person is waiting on the window, so the next pass must come
+	// soon.
 	if pass.again == 0 {
 		t.Error("an open window asked for no follow-up pass")
 	}
 }
 
-// A radio that refuses the window is asked again while the window
-// lasts. No event reports that the radio would now accept it, and the
-// loop's retry after a failure runs once.
-func TestARefusedWindowAsksForAnotherPass(t *testing.T) {
+func TestARefusedWindowSchedulesAnotherPass(t *testing.T) {
 	fixture := newAPIFixture()
 	fixture.put(t, testRequestPath(), openRequest(""))
 	radio := testRadio(t)
@@ -86,8 +76,8 @@ func TestARefusedWindowAsksForAnotherPass(t *testing.T) {
 	}
 }
 
-// Pairing whatever responds first is the one behavior that can bond a
-// stranger's device, so an unapproved window pairs nothing.
+// Pairing whichever device answers first could bond a stranger's
+// device, so a window with no approval pairs nothing.
 func TestRequestNeverPairsWithoutAnApproval(t *testing.T) {
 	fixture := newAPIFixture()
 	fixture.put(t, testRequestPath(), openRequest(""))
@@ -115,20 +105,17 @@ func TestRequestPairsTheDeviceAPersonApproved(t *testing.T) {
 	if !radio.called("Pair a0-ab-51-33-b7-12") {
 		t.Fatalf("the approved device was not paired: %v", radio.calls)
 	}
-	// Trusting it lets the controller reconnect on its own, with no
-	// agent registered.
+	// A trusted controller can reconnect with no agent registered.
 	if !radio.called("SetDeviceTrusted a0-ab-51-33-b7-12 true") {
-		t.Errorf("the device was not trusted: %v", radio.calls)
+		t.Errorf("the radio calls are %v, want SetDeviceTrusted for the device", radio.calls)
 	}
 	request := read[PairingRequest](t, fixture, testRequestPath())
 	if request.Status.Phase != phasePaired || request.Status.Peripheral != "a0-ab-51-33-b7-12" {
 		t.Errorf("status = %+v", request.Status)
 	}
 	if request.Status.FinishedAt != timestamp(testNow) {
-		t.Errorf("status.finishedAt = %q", request.Status.FinishedAt)
+		t.Errorf("status.finishedAt is %q, want the time of the pairing", request.Status.FinishedAt)
 	}
-	// The Peripheral records the request that produced it, so that record
-	// outlasts the request's collection.
 	peripheral := read[Peripheral](t, fixture, testPeripheralPath())
 	if peripheral.Status.Bond.Request != "liken-system/"+testRequestName {
 		t.Errorf("the Peripheral does not name the request: %+v", peripheral.Status)
@@ -136,21 +123,19 @@ func TestRequestPairsTheDeviceAPersonApproved(t *testing.T) {
 	if peripheral.Spec.Trusted == nil || !*peripheral.Spec.Trusted {
 		t.Errorf("spec.trusted = %v, want true", peripheral.Spec.Trusted)
 	}
-	// The bond's Secret follows on the same pass, because the Peripheral
-	// that owns it exists now.
+	// pass.owners lets the bond store write the bond's Secret in this
+	// same pass.
 	if _, owned := pass.owners[testAddress(t, testDevice)]; !owned {
 		t.Errorf("owners = %+v, want the new bond", pass.owners)
 	}
-	// The window is not left open after the bond is made.
 	if !radio.called("CloseWindow") {
 		t.Errorf("the window stayed open after the pairing: %v", radio.calls)
 	}
 }
 
-// The controller is not responding to the scan yet, which is the
-// ordinary state before somebody holds its buttons. The window stays
-// open.
-func TestRequestWaitsForAnApprovedDeviceToAnswer(t *testing.T) {
+// A controller that is not in pairing mode yet is missing from the
+// scan, and the window stays open for it.
+func TestRequestWaitsForAnApprovedDeviceToAppearInTheScan(t *testing.T) {
 	fixture := newAPIFixture()
 	fixture.put(t, testRequestPath(), openRequest(testDevice))
 	radio := testRadio(t)
@@ -167,10 +152,9 @@ func TestRequestWaitsForAnApprovedDeviceToAnswer(t *testing.T) {
 	}
 }
 
-// A pairing bluetoothd refused is reported and left for the window to
-// try again, because the controller's own pairing mode may still be
-// running.
-func TestRequestReportsAPeripheralTheRadioRefused(t *testing.T) {
+// The window stays open after a refused pairing, because the
+// controller may still be in pairing mode.
+func TestRequestReportsAPairingTheRadioRefused(t *testing.T) {
 	fixture := newAPIFixture()
 	fixture.put(t, testRequestPath(), openRequest(testDevice))
 	radio := testRadio(t, seenDevice(t, testDevice, "DualSense Wireless Controller"))
@@ -207,18 +191,15 @@ func TestRequestExpiresWhenItsWindowCloses(t *testing.T) {
 
 	expired := read[PairingRequest](t, fixture, testRequestPath())
 	if expired.Status.Phase != phaseExpired || expired.Status.FinishedAt != timestamp(testNow) {
-		t.Errorf("status = %+v", expired.Status)
+		t.Errorf("status is %+v, want phase Expired and finishedAt set", expired.Status)
 	}
-	// The radio goes back to not discoverable and not pairable, and
-	// everything outside a window depends on that.
 	if !radio.called("CloseWindow") {
 		t.Fatalf("the radio was left in a window: %v", radio.calls)
 	}
 }
 
-// A request names one adapter. The operator that holds that radio
-// serves it, and no other operator opens a window on hardware a
-// person did not name.
+// No operator opens a window on a radio that the request does not
+// name.
 func TestRequestForAnotherRadioIsLeftAlone(t *testing.T) {
 	fixture := newAPIFixture()
 	request := openRequest("")
@@ -234,7 +215,7 @@ func TestRequestForAnotherRadioIsLeftAlone(t *testing.T) {
 	}
 	untouched := read[PairingRequest](t, fixture, testRequestPath())
 	if untouched.Status.Phase != "" {
-		t.Errorf("status = %+v", untouched.Status)
+		t.Errorf("status is %+v, want a request for another radio left untouched", untouched.Status)
 	}
 }
 
@@ -273,10 +254,8 @@ func TestFinishedRequestStaysUntilItsTTL(t *testing.T) {
 	}
 }
 
-// A TTL needs a start. A finished request with no time on it gets one
-// written, because a pass that counted from itself would never collect
-// the request and the watcher would wake the loop on every change to
-// any request.
+// Without status.finishedAt, each pass would count the TTL from its
+// own time and never delete the request.
 func TestFinishedRequestWithNoTimeGetsOne(t *testing.T) {
 	fixture := newAPIFixture()
 	request := openRequest("")
@@ -288,12 +267,11 @@ func TestFinishedRequestWithNoTimeGetsOne(t *testing.T) {
 
 	stamped := read[PairingRequest](t, fixture, testRequestPath())
 	if stamped.Status.FinishedAt != timestamp(testNow) {
-		t.Fatalf("status.finishedAt = %q", stamped.Status.FinishedAt)
+		t.Fatalf("status.finishedAt is %q, want the time of the pass", stamped.Status.FinishedAt)
 	}
 }
 
-// The seen list is written from radio observations, so a busy room
-// must not grow the object without limit.
+// A busy room must not grow the request without limit.
 func TestSeenListIsCappedAndItsNamesAreCut(t *testing.T) {
 	snapshot := radioSnapshot{}
 	long := ""
@@ -317,13 +295,11 @@ func TestSeenListIsCappedAndItsNamesAreCut(t *testing.T) {
 	}
 	for _, device := range seen {
 		if len(device.Name) > maxSeenNameBytes {
-			t.Errorf("name is %d bytes: %q", len(device.Name), device.Name)
+			t.Errorf("a name is %d bytes, want at most maxSeenNameBytes: %q", len(device.Name), device.Name)
 		}
 	}
 }
 
-// A device keeps the firstSeen it was given, because that value
-// records which of two controllers started responding first.
 func TestSeenListKeepsTheFirstSighting(t *testing.T) {
 	earlier := timestamp(testNow.Add(-time.Minute))
 	seen := []SeenDevice{{Address: testDevice, Name: "DualSense Wireless Controller", FirstSeen: earlier}}
@@ -336,8 +312,6 @@ func TestSeenListKeepsTheFirstSighting(t *testing.T) {
 	}
 }
 
-// A device the radio already holds a bond with has a Peripheral of its
-// own, and the list exists to name the devices that do not.
 func TestSeenListLeavesOutTheDevicesAlreadyPaired(t *testing.T) {
 	snapshot := radioSnapshot{Devices: []deviceState{pairedDevice(t, testDevice)}}
 
@@ -346,15 +320,12 @@ func TestSeenListLeavesOutTheDevicesAlreadyPaired(t *testing.T) {
 	}
 }
 
-// bondsAddress builds distinct addresses for a test that needs many of
-// them.
 func bondsAddress(t *testing.T, index int) (address [6]byte) {
 	t.Helper()
 	address[5] = byte(index)
 	return address
 }
 
-// Every Pair call counts once, under the result bluetoothd gave.
 func TestPairAttemptsCountUnderTheirResult(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -383,8 +354,8 @@ func TestPairAttemptsCountUnderTheirResult(t *testing.T) {
 	}
 }
 
-// crowdedRadio is one adapter and the number of unpaired devices a
-// test names, each on an address of its own.
+// crowdedRadio returns a radio that sees the given number of unpaired
+// devices.
 func crowdedRadio(t *testing.T, devices int) *fakeRadio {
 	t.Helper()
 	radio := testRadio(t)
@@ -397,14 +368,13 @@ func crowdedRadio(t *testing.T, devices int) *fakeRadio {
 	return radio
 }
 
-// The request reports whether its own seen list was cut at the cap.
 func TestTheRequestReportsACutSeenList(t *testing.T) {
 	cases := []struct {
 		name    string
 		devices int
 		want    bool
 	}{
-		{name: "a room the list holds", devices: 3, want: false},
+		{name: "a list with space left", devices: 3, want: false},
 		{name: "a room larger than the cap", devices: maxSeenDevices + 4, want: true},
 	}
 	for _, c := range cases {
@@ -423,9 +393,9 @@ func TestTheRequestReportsACutSeenList(t *testing.T) {
 	}
 }
 
-// The mark stays on the request that closed, so a person who reads it
-// afterwards sees that the room was too busy.
-func TestACutSeenListStandsOnAClosedRequest(t *testing.T) {
+// A person who reads the request after the window closes can still
+// see that the list was cut.
+func TestACutSeenListStaysSetOnAnExpiredRequest(t *testing.T) {
 	fixture := newAPIFixture()
 	fixture.put(t, testRequestPath(), openRequest(""))
 	inventory := testInventory(t, fixture, crowdedRadio(t, maxSeenDevices+4))

@@ -1,37 +1,24 @@
 package main
 
-// The DRA driver's kubelet half: the plugin the kubelet calls before
-// it starts a pod that holds a claim on a controller or on the
-// adapter's media bus.
+// The kubelet side of the DRA driver. The kubelet calls it before it
+// starts a pod whose claim holds a controller or the media bus.
 //
-// The wire arrangement is the opposite of what the word "plugin"
-// suggests. The driver runs two gRPC servers and the kubelet is the
-// only client of both. The first is registration: the kubelet watches
-// a well-known directory for sockets, dials each one, and calls
-// GetInfo to read what is there. The second is the DRA plugin API
-// itself, on a socket of the driver's own, whose path GetInfo
-// announces. Unix sockets are the whole transport, and file
-// permissions on the kubelet's directories are the authentication.
+// The driver serves two gRPC services on Unix sockets. The kubelet
+// finds the registration socket in its plugins_registry directory and
+// calls GetInfo, which returns the path of the socket that serves the
+// DRA plugin API.
 //
-// The prepare protocol tells the driver almost nothing: a claim's
-// namespace, name, and UID. What was allocated is on the claim's
-// status in the API server, so the driver reads that back and hands
-// the claim what the named device grants: the virtual input nodes the
-// controller's relay holds open, or the bus mount and its address
-// variable. A call signals that something happened, and the driver
-// acts on the durable record instead of on data carried in the call.
+// A prepare call has only the claim's namespace, name, and UID. The
+// driver reads the claim's allocation from the API server and writes a
+// CDI spec file for the container runtime. For a controller, the spec
+// grants the relay's virtual input nodes, which keep their numbers
+// while the controller sleeps and reconnects (relay.go), so a pod can
+// start while its controller sleeps. For the media bus, the spec adds
+// a mount and the bus address variable.
 //
-// A controller's node never moves, because the relay holds the uinput
-// fd open for the life of the process and the kernel keeps the node
-// while it does. So a spec file this driver wrote is correct for the
-// whole boot, and a pod that starts while the controller sleeps gets a
-// node that reads nothing until the next press.
-//
-// Failures are per-claim strings inside the response, not gRPC
-// errors. The kubelet holds the affected pod in ContainerCreating and
-// retries, which is the correct behavior for a bond that has never
-// connected: the pod waits, visibly, and a describe of the pod says
-// why.
+// A failure is returned as the claim's error string, not as a gRPC
+// error. The kubelet keeps the pod in ContainerCreating, retries, and
+// shows the error in the pod's events.
 
 import (
 	"context"
@@ -49,25 +36,23 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// The kubelet's plugin directories. The registry is where the kubelet
-// discovers plugins, and the plugin's own directory holds the socket
-// that answers the prepare calls. These are variables so the tests can
-// substitute them.
+// The kubelet's directory of registration sockets, and this driver's
+// directory for its plugin socket. Tests point them at a temporary
+// directory.
 var (
 	draRegistryDir = "/var/lib/kubelet/plugins_registry"
 	draPluginDir   = "/var/lib/kubelet/plugins/" + DriverName
 )
 
-// draPlugin answers the kubelet's DRA calls. It reads the claim from
-// the API server on each call, and takes the nodes it delivers from
-// the relay the reconcile loop keeps.
+// draPlugin serves the kubelet's DRA calls. It reads each claim from
+// the API server and reads the virtual input nodes from the relays.
 type draPlugin struct {
 	drav1.UnimplementedDRAPluginServer
 	client *apiclient.Client
 	relays *relays
 }
 
-// draRegistrar answers the kubelet's plugin-watcher handshake.
+// draRegistrar serves the kubelet's plugin registration calls.
 type draRegistrar struct {
 	regv1.UnimplementedRegistrationServer
 	endpoint string
@@ -78,12 +63,10 @@ func (r *draRegistrar) GetInfo(ctx context.Context, req *regv1.InfoRequest) (*re
 		Type:     regv1.DRAPlugin,
 		Name:     DriverName,
 		Endpoint: r.endpoint,
-		// These strings name gRPC services, not semantic versions. The
-		// kubelet picks the newest version it also supports, and this
-		// driver serves exactly the v1 API.
-		// The list names no health service, so the kubelet opens no
-		// device-health stream. This operator reports health through
-		// the device taints, which evict a pod when a controller goes quiet.
+		// The kubelet reads these as gRPC service names and uses the
+		// newest one it supports. The list has no health service, so the
+		// kubelet opens no device health stream. This operator reports
+		// device health with device taints.
 		SupportedVersions: []string{drav1.DRAPluginService},
 	}, nil
 }
@@ -95,14 +78,13 @@ func (r *draRegistrar) NotifyRegistrationStatus(ctx context.Context, status *reg
 	return &regv1.RegistrationStatusResponse{}, nil
 }
 
-// serveDRAPlugin starts both servers and blocks until the context
-// ends or a server fails. The order matters: the plugin socket must
-// already be listening before the registration socket exists, because
-// the kubelet dials the announced endpoint as soon as it reads the
-// registration. The function removes stale sockets from a previous
-// pod first, because a bind to an orphaned socket file fails even
-// when nothing is listening on it.
-func serveDRAPlugin(ctx context.Context, client *apiclient.Client, held *relays) error {
+// serveDRAPlugin runs both gRPC servers until the context ends or one
+// of them fails. The plugin socket listens before the registration
+// socket is created, because the kubelet dials the plugin socket as
+// soon as it finds the registration socket. A socket file left by a
+// previous run is removed first, because listen fails on a path that
+// exists even when no process listens on it.
+func serveDRAPlugin(ctx context.Context, client *apiclient.Client, inputRelays *relays) error {
 	if err := os.MkdirAll(draPluginDir, 0o755); err != nil {
 		return err
 	}
@@ -110,16 +92,16 @@ func serveDRAPlugin(ctx context.Context, client *apiclient.Client, held *relays)
 	_ = os.Remove(pluginSocket)
 	pluginListener, err := net.Listen("unix", pluginSocket)
 	if err != nil {
-		return fmt.Errorf("the plugin socket: %w", err)
+		return fmt.Errorf("listening on the plugin socket: %w", err)
 	}
 	pluginServer := grpc.NewServer()
-	drav1.RegisterDRAPluginServer(pluginServer, &draPlugin{client: client, relays: held})
+	drav1.RegisterDRAPluginServer(pluginServer, &draPlugin{client: client, relays: inputRelays})
 
 	registrationSocket := filepath.Join(draRegistryDir, DriverName+"-reg.sock")
 	_ = os.Remove(registrationSocket)
 	registrationListener, err := net.Listen("unix", registrationSocket)
 	if err != nil {
-		return fmt.Errorf("the registration socket: %w", err)
+		return fmt.Errorf("listening on the registration socket: %w", err)
 	}
 	registrationServer := grpc.NewServer()
 	regv1.RegisterRegistrationServer(registrationServer, &draRegistrar{endpoint: pluginSocket})
@@ -137,11 +119,9 @@ func serveDRAPlugin(ctx context.Context, client *apiclient.Client, held *relays)
 	}
 }
 
-// NodePrepareResources prepares every claim in the request. The
-// response must include one entry for each claim, because the kubelet
-// treats a missing entry as a failure to retry. Each entry is
-// independent, so trouble with one claim never blocks another claim's
-// pod.
+// NodePrepareResources returns an entry for every claim in the
+// request, because the kubelet treats a missing entry as a failure and
+// retries. A claim that fails does not fail the other claims.
 func (p *draPlugin) NodePrepareResources(ctx context.Context, req *drav1.NodePrepareResourcesRequest) (*drav1.NodePrepareResourcesResponse, error) {
 	resp := &drav1.NodePrepareResourcesResponse{Claims: map[string]*drav1.NodePrepareResourceResponse{}}
 	for _, claim := range req.Claims {
@@ -162,9 +142,8 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 		return fail("reading the claim: %v", err)
 	}
 	if allocated.Metadata.UID != claim.Uid {
-		// The named claim was deleted and recreated after the kubelet
-		// asked. Whatever this new claim holds, it is not the grant
-		// this pod was scheduled against.
+		// The claim was deleted and created again under the same name,
+		// so this allocation is not the one the pod was scheduled with.
 		return fail("the claim's UID changed (%s became %s)", claim.Uid, allocated.Metadata.UID)
 	}
 	if allocated.Status.Allocation == nil {
@@ -173,21 +152,18 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 
 	var specDevices []cdiDevice
 	var devices []*drav1.Device
-	// The demand each allocated controller takes on. It is recorded
-	// after the spec file is written, so the record on disk and the
-	// record in memory never disagree.
-	demand := map[string]delivery{}
+	// The input classes and axis settings that this claim requests,
+	// for each controller by MAC address.
+	settings := map[string]inputSettings{}
 	for _, result := range allocated.Status.Allocation.Devices.Results {
 		if result.Driver != DriverName {
-			// This is another driver's allocation in the same claim.
-			// That driver's own plugin prepares it.
+			// The kubelet prepares another driver's devices through
+			// that driver's plugin.
 			continue
 		}
-		// The allocated name is all the prepare call carries, and the
-		// -media suffix is the whole distinction between the media bus
-		// and a paired controller. The bus grants a mount and a
-		// variable, it registers no evdev node, and it is ready
-		// whenever bluetoothd serves, so no relay stands behind it.
+		// The media bus has no input nodes and no relay, and it is ready
+		// whenever bluetoothd runs. Every other device is a paired
+		// controller.
 		var edits cdiEdits
 		var inputs []string
 		var axes string
@@ -197,22 +173,19 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 			mac := macFromDeviceName(result.Device)
 			current := p.relays.virtualNodes(mac)
 			if len(current) == 0 {
-				// The bond has never connected, so the relay has never read
-				// the controller's capabilities and holds no virtual device
-				// for it. The pod waits in ContainerCreating, and the
-				// device's NoSchedule taint holds the next one back until
-				// somebody switches the controller on once.
-				return fail("controller %s has no input relay yet; it has not connected since it was paired", publishedMAC(mac))
+				// The controller has not connected since it was paired, so
+				// no capabilities were read or stored, and the relay has no
+				// virtual device for it. The device's NoSchedule taint keeps
+				// other pods off it until the controller connects once.
+				return fail("controller %s has no input relay yet, because it has not connected since it was paired", publishedMAC(mac))
 			}
-			// A configuration this driver cannot read fails the
-			// prepare, so a claim that misnames a class reports it in
-			// the pod's events, and does not receive everything by
-			// accident.
-			want, err := claimDelivery(allocated.Status.Allocation.Devices.Config, result.Request)
+			// A claim that misspells a class fails here, so it does not
+			// receive every class without an error.
+			want, err := requestInputSettings(allocated.Status.Allocation.Devices.Config, result.Request)
 			if err != nil {
-				return fail("the configuration of device %s: %v", result.Device, err)
+				return fail("reading the configuration of device %s: %v", result.Device, err)
 			}
-			demand[mac] = want
+			settings[mac] = want
 			inputs, axes = recordedInputs(want.classes), want.axes.record()
 			edits = cdiEdits{DeviceNodes: deviceNodes(current)}
 		}
@@ -220,7 +193,7 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 		specDevices = append(specDevices, cdiDevice{
 			Name:           name,
 			ContainerEdits: edits,
-			Annotations:    annotateDelivery(inputs, axes),
+			Annotations:    cdiAnnotations(inputs, axes),
 		})
 		devices = append(devices, &drav1.Device{
 			PoolName:     result.Pool,
@@ -234,22 +207,20 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 			return fail("writing the CDI spec: %v", err)
 		}
 	}
-	// The file is written first, because a restart rebuilds the
-	// demand from it. A pump narrowed for a claim that has no file
-	// would never widen again.
-	for mac, want := range demand {
+	// The relays record a claim's settings only after its spec file is
+	// written, because they rebuild the settings from the spec files
+	// when the operator restarts. A claim recorded without a file would
+	// be lost at the next restart.
+	for mac, want := range settings {
 		p.relays.prepare(mac, claim.Uid, want)
 	}
 	return &drav1.NodePrepareResourceResponse{Devices: devices}
 }
 
-// NodeUnprepareResources removes each claim's CDI spec and withdraws
-// its demand. As with prepare, every claim gets an answer and
-// failures stay specific to each claim. The virtual node is not given
-// back: the relay holds a controller's node whether or not a claim
-// names it, and the next claim delivers the same node. What is given
-// back is the claim's share of the demand, so a node no remaining
-// claim asks for stops being read.
+// NodeUnprepareResources deletes each claim's CDI spec and removes the
+// claim's settings from the relays, so the relays stop copying input
+// that only this claim requested. The virtual nodes stay, because the
+// relay keeps them whether or not a claim holds the controller.
 func (p *draPlugin) NodeUnprepareResources(ctx context.Context, req *drav1.NodeUnprepareResourcesRequest) (*drav1.NodeUnprepareResourcesResponse, error) {
 	resp := &drav1.NodeUnprepareResourcesResponse{Claims: map[string]*drav1.NodeUnprepareResourceResponse{}}
 	for _, claim := range req.Claims {
@@ -263,10 +234,7 @@ func (p *draPlugin) NodeUnprepareResources(ctx context.Context, req *drav1.NodeU
 	return resp, nil
 }
 
-// ResourceClaim holds the part of a claim that the driver reads:
-// which devices were allocated, from which driver's pools. This
-// operator never writes a claim. Workloads create them and the
-// scheduler allocates them.
+// ResourceClaim is the part of a ResourceClaim that the driver reads.
 type ResourceClaim struct {
 	Metadata struct {
 		Name      string `json:"name"`
@@ -283,28 +251,25 @@ type ResourceClaim struct {
 	} `json:"status"`
 }
 
-// AllocatedConfig is one block of configuration the allocation
-// carries. Source says where the block came from, FromClass for a
-// DeviceClass's own block and FromClaim for the claim's, and Requests
-// scopes it to some of the claim's requests rather than all of them.
+// AllocatedConfig is one configuration block of an allocation. Source
+// is FromClass for a block from the DeviceClass and FromClaim for a
+// block from the claim. An empty Requests means the block applies to
+// every request of the claim.
 type AllocatedConfig struct {
 	Source   string        `json:"source"`
 	Requests []string      `json:"requests"`
 	Opaque   *OpaqueConfig `json:"opaque"`
 }
 
-// OpaqueConfig is one driver's own parameters. The API server carries
-// them without reading them, and Driver says whose they are, so a
-// claim can configure several drivers at once.
+// OpaqueConfig holds parameters for the driver named in Driver. The
+// API server does not read them.
 type OpaqueConfig struct {
 	Driver     string          `json:"driver"`
 	Parameters json.RawMessage `json:"parameters"`
 }
 
-// AllocatedDevice is one allocation result. The scheduler chose
-// Device from Pool, published by Driver, to satisfy the claim's named
-// Request. Driver matters because one claim can mix devices from
-// several drivers.
+// AllocatedDevice is one allocation result: the device that the
+// scheduler chose for one of the claim's requests.
 type AllocatedDevice struct {
 	Request string `json:"request"`
 	Driver  string `json:"driver"`
@@ -312,8 +277,6 @@ type AllocatedDevice struct {
 	Device  string `json:"device"`
 }
 
-// GetResourceClaim reads one claim. Claims are namespaced, because a
-// claim belongs to the workload that created it.
 func GetResourceClaim(c *apiclient.Client, namespace, name string) (*ResourceClaim, error) {
 	path := "/apis/resource.k8s.io/v1/namespaces/" + namespace + "/resourceclaims/" + name
 	claim := &ResourceClaim{}

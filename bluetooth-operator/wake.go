@@ -1,43 +1,34 @@
 package main
 
-// The press that wakes the room when a sleeping remote connects.
+// A Bluetooth LE remote drops its link when it has been idle, and the
+// next button press reconnects it. What happens to that press depends
+// on how the remote dropped the link:
 //
-// A Bluetooth LE remote drops its link after an idle time, and a press
-// wakes it and connects it again. Remotes drop the link in two ways, and
-// they differ in the press that wakes them:
+//   - A T6 remote stops responding, so the link times out and the
+//     Peripheral's Connected condition gets the reason Asleep. The
+//     relay opens the remote's input node before the link is
+//     encrypted, and the report of the waking press is lost. The first
+//     report the relay receives is for the next press.
+//   - An X6 air-mouse remote closes the link itself, so the reason is
+//     ClosedByDevice. The remote sends the waking press after the link
+//     is encrypted, and it reaches the claim like any other press.
 //
-//   - A T6 remote stops answering, so the link times out, and the
-//     Peripheral's Connected condition holds Asleep. The remote sends no
-//     report for the press that wakes it: the relay opens the remote's
-//     node before the link is encrypted, and the first report the remote
-//     sends is the one for the next press.
-//   - An X6 air-mouse remote ends the link itself, so the condition
-//     holds ClosedByDevice. The remote sends the press that wakes it
-//     once the link is encrypted, and that press reaches the claim like
-//     any other.
+// For the Asleep case, the relay writes one press and one release of
+// KEY_UNKNOWN into the remote's virtual device when it reconnects,
+// before it forwards any event from the real node. The relay cannot
+// tell which button was pressed, and KEY_UNKNOWN is the kernel's code
+// for a key with no name. A consumer with no binding for it treats it
+// as a plain press, so media-screen turns a sleeping screen on and
+// media-operator selects the Player's input on the receiver. The press
+// is not KEY_WAKEUP, because media-operator reads KEY_WAKEUP as the
+// Power On key of a TV remote (media-operator/powerkeys.go).
 //
-// So without this file, a person presses a T6 once to wake the remote
-// and again to wake the room. This file covers the first kind alone.
-//
-// When a remote connects after a sleep, the relay writes one press and
-// one release of KEY_UNKNOWN into the remote's virtual device, before it
-// starts to move the real node's events. The relay cannot tell which
-// button was pressed, and KEY_UNKNOWN is the kernel's code for a key
-// with no name. A consumer with no binding for it treats it as a press
-// and nothing more. A sleeping media-screen wakes the screen. Over a lit
-// panel it hands the press to the screen client, which binds nothing to
-// it. Over a dark panel it states the on desire and hands the client
-// nothing. media-operator asks the receiver for the unit's input either
-// way. KEY_WAKEUP is not used, because media-operator and
-// media-screen read it as the TV remote's own Power On, which sends no
-// input ask.
-//
-// The pass arms a controller when the Peripheral's Connected condition
-// holds Asleep, with the condition's lastTransitionTime, and disarms it
-// for every other reason (peripheral.go). The relay decides at the open
-// from the arming alone. It reads no Peripheral and makes no API call,
-// so a pass that wrote LinkUp a moment before the open cannot stop the
-// press, and the lock the relay holds never waits on the API server.
+// Each status write passes the Connected condition to follow, which
+// records the time of an Asleep reason in asleepSince and clears it for
+// any other reason. When the relay opens a node, it reads only
+// asleepSince, so it makes no API call while it holds its lock. A pass
+// that writes LinkUp before the relay opens the remote's node clears
+// asleepSince, and no press is written.
 
 import (
 	"encoding/binary"
@@ -47,27 +38,26 @@ import (
 	"time"
 )
 
-// keyUnknown is KEY_UNKNOWN, and synReport is SYN_REPORT, the event
-// that ends each frame.
+// keyUnknown is the evdev code KEY_UNKNOWN. synReport is SYN_REPORT, the
+// event that ends each frame of events.
 const (
 	keyUnknown = 240
 	synReport  = 0
 )
 
 // wakeAfter is how long a remote's link must have been down before its
-// connect writes a press. A remote that lost its link while it was
-// awake, to interference or to a stream of audio on the same radio,
-// also reports a timeout, and it connects again on its own within
-// seconds. A person rarely presses a button within 10 seconds of the
-// moment the remote went to sleep, which on a T6 is an idle hour after
-// the last press.
+// reconnect gets a press. A remote that loses its link while awake, from
+// interference or from audio traffic on the same radio, also reports a
+// timeout, and it reconnects by itself within seconds, with no button
+// pressed. A remote sleeps only after it has been idle, so a person is
+// unlikely to press a button within 10 seconds of the sleep.
 const wakeAfter = 10 * time.Second
 
-// follow arms or disarms one controller from the Connected condition a
-// status write settled on. Asleep arms it with the time the link ended,
-// and every other reason disarms it. A pass writes the same Asleep, with
-// the same time, on each pass while the remote sleeps, so a time that
-// already gave a press arms nothing: each sleep gives one press.
+// follow sets or clears asleepSince of one controller from its
+// Connected condition. Asleep sets it to the condition's
+// lastTransitionTime, and any other reason clears it. Every pass while
+// the remote sleeps reports the same Asleep with the same time, so a
+// time that already produced a press does not set asleepSince again.
 func (r *relays) follow(mac string, connection Condition) {
 	if r == nil {
 		return
@@ -75,54 +65,54 @@ func (r *relays) follow(mac string, connection Condition) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if connection.Reason != reasonAsleep {
-		if held := r.held[mac]; held != nil {
-			held.armed = time.Time{}
+		if controller := r.controllers[mac]; controller != nil {
+			controller.asleepSince = time.Time{}
 		}
 		return
 	}
-	held := r.controller(mac)
-	if connection.LastTransitionTime.Equal(held.pressed) {
+	controller := r.controller(mac)
+	if connection.LastTransitionTime.Equal(controller.wakePressedFor) {
 		return
 	}
-	held.armed = connection.LastTransitionTime
+	controller.asleepSince = connection.LastTransitionTime
 }
 
-// pressToWake writes the press into one node that the relay has just
-// opened, when the controller is armed and slept long enough, and then
-// disarms it. A remote opens two nodes, and an HID device can be removed
-// and added again on one link, so the disarm keeps each sleep to one
-// press. The caller holds the lock.
+// pressToWake writes the wake press into a node that the relay has just
+// opened, when asleepSince is set and the link was down for at least
+// wakeAfter, and then clears asleepSince. A remote can have several
+// input nodes, and the kernel can remove and add its HID device again
+// on one link, so clearing it limits each sleep to one press. The
+// caller holds the lock.
 //
-// The node must hold a keyboard code, a key below BTN_MISC, so a
-// gamepad's node gets nothing. It must also deliver EV_KEY to a claim.
-// The press goes into the virtual device and does not pass through the
-// mask on the real node, so the relay asks the same inputMasks that set
-// that mask whether a key would reach the claim.
-func (r *relays) pressToWake(mac string, held *controllerRelay, relay *nodeRelay, want inputClasses) {
-	if held.armed.IsZero() || r.now().Sub(held.armed) < wakeAfter {
+// Only a node with a keyboard code gets the press, so a gamepad's node
+// gets none. The press goes straight into the virtual device and skips
+// the event mask on the real node, so deliversKeys checks the mask that
+// inputMasks would set, to find whether a claim receives EV_KEY.
+func (r *relays) pressToWake(mac string, controller *controllerRelay, relay *nodeRelay, want inputClasses) {
+	if controller.asleepSince.IsZero() || r.now().Sub(controller.asleepSince) < wakeAfter {
 		return
 	}
-	if !holdsKeyboardCode(relay.caps) || !deliversKeys(relay.caps, want) {
+	if !hasKeyboardCode(relay.caps) || !deliversKeys(relay.caps, want) {
 		return
 	}
 	if err := relay.device.write(wakePress()); err != nil {
 		fmt.Fprintf(os.Stderr, "relay: writing the wake press to %s: %v\n", relay.device.node(), err)
 		return
 	}
-	held.pressed, held.armed = held.armed, time.Time{}
+	controller.wakePressedFor, controller.asleepSince = controller.asleepSince, time.Time{}
 	r.metrics.countWakePress(deviceName(mac))
-	fmt.Printf("relay: controller %s woke from sleep, so the relay wrote KEY_UNKNOWN to %s\n", publishedMAC(mac), relay.device.node())
+	fmt.Printf("relay: controller %s reconnected after sleeping, so the relay wrote KEY_UNKNOWN to %s\n", publishedMAC(mac), relay.device.node())
 }
 
-// holdsKeyboardCode reports whether a node reports a key below BTN_MISC,
-// the codes of a keyboard.
-func holdsKeyboardCode(caps evdevCapabilities) bool {
+// hasKeyboardCode reports whether the node reports an EV_KEY code below
+// BTN_MISC, the range of the keyboard keys.
+func hasKeyboardCode(caps evdevCapabilities) bool {
 	return anyInRange(caps.Codes["EV_KEY"], 0, btnMisc)
 }
 
-// deliversKeys reports whether a node passes EV_KEY to the claims that
-// demand want. A node no claim demands delivers nothing, and a nil mask
-// delivers every event type.
+// deliversKeys reports whether the node passes EV_KEY events to the
+// claims that request the input classes in want. A nil mask from
+// inputMasks means that every event type passes.
 func deliversKeys(caps evdevCapabilities, want inputClasses) bool {
 	if want == 0 {
 		return false
@@ -131,24 +121,24 @@ func deliversKeys(caps evdevCapabilities, want inputClasses) bool {
 	return masks == nil || slices.Contains(masks[0].codes, evKey)
 }
 
-// declaredCodes is the codes a virtual device declares for one event
-// type: the codes the real node reports, and KEY_UNKNOWN on a node with
-// a keyboard code. The kernel drops a key that the device did not
-// declare, with no error, and a uinput device cannot declare a code
-// after it is created. The code is not added to the stored
+// declaredCodes returns the codes that the virtual device declares for
+// one event type: the codes the real node reports, plus KEY_UNKNOWN for
+// a node that has a keyboard code. The kernel drops an event whose code
+// the device did not declare, and a uinput device cannot declare more
+// codes after it is created. KEY_UNKNOWN is not added to the stored
 // capabilities, so the snapshot in the bond's Secret, the input
 // classes, and the ResourceSlice do not change.
 func declaredCodes(caps evdevCapabilities, eventType string) []uint16 {
 	codes := caps.Codes[eventType]
-	if eventType != "EV_KEY" || !holdsKeyboardCode(caps) || slices.Contains(codes, keyUnknown) {
+	if eventType != "EV_KEY" || !hasKeyboardCode(caps) || slices.Contains(codes, keyUnknown) {
 		return codes
 	}
 	return append(slices.Clone(codes), keyUnknown)
 }
 
-// wakePress is one press and one release of KEY_UNKNOWN, each in its
-// own frame. The kernel stamps the time of an event written to uinput,
-// so the time fields stay zero.
+// wakePress returns the events for one press and one release of
+// KEY_UNKNOWN, each followed by SYN_REPORT. The kernel sets the time of
+// an event written to uinput, so the time fields stay zero.
 func wakePress() []byte {
 	var events []byte
 	for _, value := range []int32{1, 0} {
@@ -158,8 +148,9 @@ func wakePress() []byte {
 	return events
 }
 
-// inputRecord lays out one struct input_event: two time words, then the
-// type, the code, and the value, in the machine's own byte order.
+// inputRecord encodes one struct input_event of a 64-bit kernel in the
+// machine's byte order: two 8-byte time fields, then the type, the
+// code, and the value.
 func inputRecord(eventType, code uint16, value int32) []byte {
 	record := make([]byte, inputEventSize)
 	binary.NativeEndian.PutUint16(record[16:], eventType)

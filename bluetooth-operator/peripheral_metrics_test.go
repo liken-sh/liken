@@ -1,16 +1,16 @@
 package main
 
-// The Peripheral facts under bluetooth_: the link, the battery, and
-// whether a claim holds the controller. peripheral_test.go covers the
-// object itself; this file covers what writePeripheralStatus reports
-// to metrics.go beside it.
+// These tests cover the bluetooth_peripheral_* metrics and
+// bluetooth_disconnects_total, which the reconcile pass writes from
+// each Peripheral.
 
 import (
 	"strings"
 	"testing"
 )
 
-// The gauge follows the Connected condition it is read beside.
+// bluetooth_peripheral_connected is 1 while the link is up and 0 after
+// it drops.
 func TestPeripheralConnectedGaugeFollowsTheLink(t *testing.T) {
 	fixture := newAPIFixture()
 	radio := testRadio(t, pairedDevice(t, testDevice))
@@ -30,9 +30,9 @@ func TestPeripheralConnectedGaugeFollowsTheLink(t *testing.T) {
 	}
 }
 
-// Adopting a bond that is already disconnected is not a disconnect:
-// this operator never watched a link go down, it only learned that
-// one is down.
+// A bond that is already disconnected when the operator first sees it
+// does not count as a disconnect, because the operator did not see the
+// link drop.
 func TestFirstObservationNeverCountsAsADisconnect(t *testing.T) {
 	fixture := newAPIFixture()
 	device := pairedDevice(t, testDevice)
@@ -47,9 +47,8 @@ func TestFirstObservationNeverCountsAsADisconnect(t *testing.T) {
 	}
 }
 
-// A link that drops after a pass reported it connected is one
-// disconnect, and a pass that reports the same drop again is not a
-// second one: the counter measures the edge, not the level.
+// A link that drops after a pass saw it connected counts once. Later
+// passes that still see it disconnected do not count again.
 func TestDisconnectsCountOnlyTheObservedTransition(t *testing.T) {
 	fixture := newAPIFixture()
 	radio := testRadio(t, pairedDevice(t, testDevice))
@@ -63,12 +62,13 @@ func TestDisconnectsCountOnlyTheObservedTransition(t *testing.T) {
 	count, found := metricValue(t, inventory.metrics.registry,
 		"bluetooth_disconnects_total", map[string]string{"peripheral": "a0-ab-51-33-b7-12", "reason": reasonNotConnected})
 	if !found || count != 1 {
-		t.Errorf("bluetooth_disconnects_total = %v (found: %v), want 1 for one observed drop held over two passes", count, found)
+		t.Errorf("bluetooth_disconnects_total = %v (found: %v), want 1 for one observed drop seen over two passes", count, found)
 	}
 }
 
-// The counter carries the reason the Connected condition took, so a
-// remote that sleeps counts apart from a link that the radio closed.
+// The counter's reason label is the reason of the Connected condition,
+// so a sleeping remote and a link that the radio closed are separate
+// series.
 func TestDisconnectsCountUnderTheConditionsReason(t *testing.T) {
 	cases := []struct {
 		ended  string
@@ -98,9 +98,8 @@ func TestDisconnectsCountUnderTheConditionsReason(t *testing.T) {
 	}
 }
 
-// Most controllers report no battery at all, and the gauge carries no
-// series for one, rather than a zero that would read as an observed
-// empty battery.
+// A device that reports no battery has no series on the gauge. A zero
+// would read as an empty battery.
 func TestPeripheralBatteryGaugeIsAbsentWithNoSource(t *testing.T) {
 	fixture := newAPIFixture()
 	inventory := testInventory(t, fixture, testRadio(t, pairedDevice(t, testDevice)))
@@ -109,12 +108,11 @@ func TestPeripheralBatteryGaugeIsAbsentWithNoSource(t *testing.T) {
 
 	if _, found := metricValue(t, inventory.metrics.registry,
 		"bluetooth_peripheral_battery_percent", map[string]string{"peripheral": "a0-ab-51-33-b7-12"}); found {
-		t.Error("bluetooth_peripheral_battery_percent carries a series for a device with no battery source")
+		t.Error("bluetooth_peripheral_battery_percent has a series for a device with no battery source, want none")
 	}
 }
 
-// A reported charge of zero is a real, observed empty battery, and it
-// reads on the gauge like any other level.
+// A reported charge of 0 percent is a real reading, so the gauge shows 0.
 func TestPeripheralBatteryGaugeReportsAnObservedZero(t *testing.T) {
 	fixture := newAPIFixture()
 	device := pairedDevice(t, testDevice)
@@ -130,8 +128,8 @@ func TestPeripheralBatteryGaugeReportsAnObservedZero(t *testing.T) {
 	}
 }
 
-// The gauge follows status.battery off the object, so a level from the
-// kernel and a level that later goes silent both reach it.
+// The gauge follows status.battery, so its series is removed when the
+// kernel stops reporting a battery level.
 func TestPeripheralBatteryGaugeClearsWhenTheSourceGoesSilent(t *testing.T) {
 	fixture := newAPIFixture()
 	device := pairedDevice(t, testDevice)
@@ -148,13 +146,13 @@ func TestPeripheralBatteryGaugeClearsWhenTheSourceGoesSilent(t *testing.T) {
 	inventory.reconcile()
 	if _, found := metricValue(t, inventory.metrics.registry,
 		"bluetooth_peripheral_battery_percent", map[string]string{"peripheral": "a0-ab-51-33-b7-12"}); found {
-		t.Error("bluetooth_peripheral_battery_percent still carries a series once the source went silent")
+		t.Error("bluetooth_peripheral_battery_percent still has a series after the battery source went silent, want none")
 	}
 }
 
-// The claimed gauge answers from the same CDI read the unpair
-// teardown already makes: one while a prepared claim holds the
-// controller, zero once the kubelet unprepares it.
+// bluetooth_peripheral_claimed is 1 while a prepared claim holds the
+// controller, which the operator reads from the CDI spec files, and 0
+// once the kubelet unprepares the claim.
 func TestPeripheralClaimedGaugeFollowsAPreparedClaim(t *testing.T) {
 	fixture := newAPIFixture()
 	inventory := testInventory(t, fixture, testRadio(t, pairedDevice(t, testDevice)))
@@ -168,7 +166,7 @@ func TestPeripheralClaimedGaugeFollowsAPreparedClaim(t *testing.T) {
 	}
 
 	if err := removeCDISpec(claimUID); err != nil {
-		t.Fatal(err)
+		t.Fatalf("removing the CDI spec: %v", err)
 	}
 	inventory.reconcile()
 	if claimed, found := metricValue(t, inventory.metrics.registry,
@@ -177,8 +175,8 @@ func TestPeripheralClaimedGaugeFollowsAPreparedClaim(t *testing.T) {
 	}
 }
 
-// The bonded gauge follows status.bond.bonded, which is what BlueZ
-// reports about the stored link key.
+// bluetooth_peripheral_bonded follows status.bond.bonded, which copies
+// the Bonded property of the BlueZ device.
 func TestPeripheralBondedGaugeFollowsTheStoredKeys(t *testing.T) {
 	fixture := newAPIFixture()
 	radio := testRadio(t, pairedDevice(t, testDevice))
@@ -198,8 +196,8 @@ func TestPeripheralBondedGaugeFollowsTheStoredKeys(t *testing.T) {
 	}
 }
 
-// An unpair takes the Peripheral off every series, the disconnects of
-// every reason and the wake presses among them.
+// forgetPeripheral removes every series of the Peripheral, including
+// its disconnects of each reason and its wake presses.
 func TestForgettingAPeripheralClearsEverySeries(t *testing.T) {
 	readings := newMetrics()
 	readings.countDisconnect("c2-11-22-33-44-55", reasonAsleep)
@@ -210,6 +208,6 @@ func TestForgettingAPeripheralClearsEverySeries(t *testing.T) {
 
 	page := scrape(t, readings)
 	if strings.Contains(page, "c2-11-22-33-44-55") {
-		t.Errorf("the registry still carries the Peripheral after it was forgotten:\n%s", page)
+		t.Errorf("the registry still has the Peripheral after it was forgotten, want none:\n%s", page)
 	}
 }

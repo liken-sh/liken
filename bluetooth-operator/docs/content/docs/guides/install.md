@@ -8,49 +8,47 @@ description: "Install bluetooth-operator on a liken cluster and verify that it c
 
 # Install and verify the operator
 
-This guide installs `bluetooth-operator` on a
-[`liken`](https://liken.sh/docs/) cluster and verifies that its pod
-claims the radio. The operator is an ordinary workload. Everything it
-needs is in one `kustomize` base, and nothing here touches a machine
-over SSH.
+At the end of this guide, `bluetooth-operator` runs on your
+[`liken`](https://liken.sh/docs/) cluster and its pod has a claim on
+the machine's Bluetooth radio. The operator is an ordinary workload in one
+`kustomize` base, so you need no SSH access to any machine.
 
 ## What you need
 
 * A `liken` cluster. The operator claims the Bluetooth adapter from
   `liken`'s own [Dynamic Resource Allocation
   (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
-  driver, so the cluster's operating system publishes the raw
-  hardware. [Devices](https://liken.sh/docs/reference/devices/)
-  describes that inventory.
-* A machine with a USB Bluetooth adapter. The operator selects on the
-  `btusb` kernel driver, which covers the plug-in dongles and the
-  radios built into a board. You do not have to say which machine has
-  the radio: the claim places the pod where the radio is.
+  driver, which publishes the machine's hardware as devices.
+  [Devices](https://liken.sh/docs/reference/devices/) lists them.
+* A machine with a Bluetooth adapter that uses the `btusb` kernel
+  driver, as USB dongles and most radios built into a board do. You
+  do not say which machine has the radio, because the scheduler puts
+  the pod on a machine that has one.
 
 <a id="the-device-classes"></a>
 
 ## Create the device classes
 
 A [`DeviceClass`](https://kubernetes.io/docs/reference/kubernetes-api/resource/device-class-v1/)
-is cluster-scoped policy, the same convention a `StorageClass`
-follows: the cluster owner names and curates the classes workloads
-may ask for. The classes split by owner. If the DRA objects are new
-to you, read
+is a cluster-scoped object, like a `StorageClass`. It selects a kind
+of device, and the cluster owner decides which classes exist. If DRA
+is new to you, read
 [How a claim reaches your pod](/docs/concepts/how-the-pieces-fit/) first.
 
-* `bluetooth-adapter` is wiring, and the base ships it, served at
-  [`deviceclasses.yaml`](/deploy/deviceclasses.yaml). The
-  operator's own pod claims the raw radio through it, and its
-  selector picks the `btusb` adapter that `liken` publishes. The
-  claim template in [`operator.yaml`](/deploy/operator.yaml) names
-  it literally, so the operator cannot start without it. Do not
-  delete it.
-* The class your workloads claim through is yours to create,
-  because it is your cluster's vocabulary, and the base ships no
-  policy. `bluetooth-input` is the one to start with. Its selector
-  covers the paired input devices and only them, because the driver
-  also publishes devices no workload should hold, such as a paired
-  speaker's bond record:
+* `bluetooth-adapter` selects the radio itself. The base ships it in
+  [`deviceclasses.yaml`](/deploy/deviceclasses.yaml). Its selector
+  matches the `btusb` adapter that `liken` publishes, and the
+  operator's own pod claims the radio through it. The claim template
+  in [`operator.yaml`](/deploy/operator.yaml) names this class, so
+  the operator cannot start without it. Do not delete it.
+* The class that your workloads claim through is the one you
+  create. The base does not ship it, because which controllers a
+  workload may claim is a decision for the cluster owner.
+  Start with `bluetooth-input`. Its selector requires the `input`
+  attribute, which only a paired controller has, so the class does
+  not match the
+  [media bus](/docs/reference/devices/#the-media-bus) that the driver
+  also publishes:
 
         apiVersion: resource.k8s.io/v1
         kind: DeviceClass
@@ -64,20 +62,16 @@ to you, read
                   has(device.attributes["bluetooth.liken.sh"].input) &&
                   device.attributes["bluetooth.liken.sh"].input
 
-The guard on the `input` attribute also keeps the adapter's [media
-bus](/docs/reference/devices/#the-media-bus) out of this class. The
-bus is the audio operator's to claim, through a class of its own that
-names the shared `sound.liken.sh/supportsSound` attribute.
+`audio-operator` claims the media bus through a class of its own that
+selects on the `sound.liken.sh/supportsSound` attribute.
 
 ### Generic or specific
 
-A class is the cluster's vocabulary for a kind of device, and you
-choose its grain. A generic class such as `bluetooth-input`
-matches every paired input device: the class list stays short, and
-each claim picks its controller with a CEL selector. A specific
-class holds the selector itself. This one matches exactly one
-controller. A claim then names the class and writes no CEL, and you
-make the choice once, in cluster policy you control:
+A class can match every paired controller, or only one. With a
+general class such as `bluetooth-input`, each claim picks its
+controller with a CEL selector of its own. A specific class puts that
+selector in the class, so a claim names the class and needs no CEL.
+This class matches one controller:
 
     apiVersion: resource.k8s.io/v1
     kind: DeviceClass
@@ -90,16 +84,16 @@ make the choice once, in cluster policy you control:
               device.driver == "bluetooth.liken.sh" &&
               device.attributes["bluetooth.liken.sh"].address == "A0:AB:51:33:B7:12"
 
-Start generic. When several workloads repeat the same selector, or
-when you want the choice in cluster policy rather than in each
-workload's manifest, create a specific class.
+Create a specific class when several workloads repeat the same
+selector, or when the cluster owner, and not each workload's
+manifest, should choose the controller.
 
 ## Apply the manifests
 
 This site serves the repository's manifests as raw YAML under
 [/deploy/](/deploy/kustomization.yaml), so you can install from here
-without a clone. Apply the four files into `liken-system`, the
-namespace a `liken` cluster already has:
+without a clone. Apply the files into `liken-system`, the namespace
+that every `liken` cluster has:
 
     kubectl apply -n liken-system \
       -f https://liken.sh/bluetooth/deploy/deviceclasses.yaml \
@@ -119,13 +113,12 @@ Or point your own GitOps at the same files with a `Kustomization`:
       - https://liken.sh/bluetooth/deploy/operator.yaml
 
 The site serves the manifests of the current `main`, and the images
-in `operator.yaml` name `:latest`. To pin a release instead,
-reference the operator's `kustomize` base at the operator's version,
-which is the release tag that last published it. The
-[GitHub release](https://github.com/liken-sh/liken/releases) for each
-tag lists every component and its version. One tag versions the
-manifests and the three images together, so pin all four to the same
-version:
+in `operator.yaml` use the tag `:latest`. To pin a release, reference
+the `kustomize` base at the release tag that last published the
+operator. The
+[GitHub release](https://github.com/liken-sh/liken/releases) of each
+tag lists every component and its version. The manifests and the
+images have the same version, so pin each of them to it:
 
     apiVersion: kustomize.config.k8s.io/v1beta1
     kind: Kustomization
@@ -139,27 +132,24 @@ version:
       - name: ghcr.io/liken-sh/bluetooth-bondfetch
         newTag: 2026.09.29-002
 
-Whichever path you take, the manifests contain:
+The manifests contain:
 
-* The `bluetooth-adapter` `DeviceClass`, the wiring the operator's
-  own claim names. Your consumer class, such as `bluetooth-input`
-  above, is not in the manifests: you create it.
-* The three `CustomResourceDefinitions` of the pairing API:
-  `Adapter`, `Peripheral`, and `PairingRequest`. The operator records
-  every bond as a `Peripheral` and stores its keys in a `Secret` that
-  the `Peripheral` owns, so install the CRDs with the workload.
+* The `bluetooth-adapter` `DeviceClass`.
+* The `CustomResourceDefinitions` of `Adapter`, `Peripheral`, and
+  `PairingRequest`. The operator creates a `Peripheral` for every
+  bond and stores the bond's keys in a `Secret` that the `Peripheral`
+  owns.
 * The operator's `ServiceAccount` and its RBAC.
-* A `DaemonSet` and the `ResourceClaimTemplate` its pods claim the
-  adapter through.
+* A `DaemonSet`, and the `ResourceClaimTemplate` through which its
+  pods claim the adapter.
 
 ## Keep the pods off nodes with no Bluetooth adapter
 
-The `DaemonSet` makes a pod on every node. On a node with no
-Bluetooth adapter, the claim matches no device, and the pod stays `Pending`. To make no
-pod on such a node, label the node `bluetooth.liken.sh/bluetooth: none`.
-
-The `DaemonSet` in the base carries this node affinity, so no patch is
-needed:
+The `DaemonSet` creates a pod on every node. On a node with no
+Bluetooth adapter, the pod's claim matches no device and the pod stays
+`Pending`. To keep the pod off such a node, label the node
+`bluetooth.liken.sh/bluetooth: none`. The `DaemonSet` in the base has
+this node affinity, so you need no patch:
 
 ```yaml
 affinity:
@@ -172,61 +162,58 @@ affinity:
               values: ["none"]
 ```
 
-`NotIn` matches a node whose label has a different value, and also a
-node that has no such label. The Kubernetes page on
+`NotIn` also matches a node that has no such label, as the Kubernetes
+page on
 [set-based requirements](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#set-based-requirement)
-gives this rule. So with no label the `DaemonSet` makes a pod on every
-node, and a node labeled `none` gets no pod. When a label changes, the
+describes, so a node with no label gets a pod. When a label changes, the
 [`DaemonSet`](https://kubernetes.io/docs/concepts/workloads/controllers/daemonset/)
-controller deletes the pod from a node that no longer matches, and
-adds one to a node that matches again.
+controller deletes the pod from a node that no longer matches and
+creates one on a node that matches again.
 
-Declare the label in the node's `Machine`, so the label is part of
-the record of the machine:
+Declare the label in the node's `Machine`, so that it stays with the
+machine's declaration:
 
     spec:
       nodeLabels:
         bluetooth.liken.sh/bluetooth: none
 
 A `Machine` accepts a key in a `liken.sh` subdomain from `liken`
-2026.09.28-002 on, and an older release refuses it, so on an older
-release use the `kubectl label` way below.
+2026.09.28-002 on. On an older release, label the node with
+`kubectl` as shown below.
 
-The `liken` machine operator applies the label to the running node. A
-machine that is demoted or installed again registers a new Node, and
-the Node has the label from registration. To run the pod on that
-node again, remove the key from `spec.nodeLabels`, and `liken`
-removes the label from the node. `liken` also removes a label that
-you set with `kubectl` before the `Machine` declared it, when the key
-leaves the spec.
+The `liken` machine operator applies the label to the node, and
+applies it to the new `Node` when the machine is demoted or installed
+again.
+To run the pod on the node again, remove the key from
+`spec.nodeLabels`. `liken` then removes the label from the node, also
+when you first set it with `kubectl`.
 
-You can also label the node with `kubectl`:
+To label the node with `kubectl` instead:
 
     kubectl label node node-1 bluetooth.liken.sh/bluetooth=none
 
-The label stays on the node across reboots. `liken` leaves it in
-place, because `liken` removes only the labels that a `Machine`
-declared. The label goes with the Node object: a machine that is
-demoted or installed again registers a new Node, and you label it
-again. To run the pod on that node again, remove the label:
+The label stays on the node across reboots, because `liken` removes
+only the labels that a `Machine` declared. A machine that is demoted
+or installed again registers a new `Node`, which you must label again.
+To run the pod on the node again, remove the label:
 
     kubectl label node node-1 bluetooth.liken.sh/bluetooth-
 
-A patch of your own that sets a node affinity on this `DaemonSet`
-replaces the list of terms in the base, and the `none` term with it.
-Copy the `none` requirement into each term of your patch.
+A patch that sets a node affinity on this `DaemonSet` replaces the
+base's list of terms, with the `none` requirement in it. Copy that
+requirement into each term of your patch.
 
 ## Running a development build
 
 A push to `main` that changes the operator publishes a development
-build of it. Its version is the most recent release tag plus a suffix:
-`2026.09.03-007-dev-003-abcdef01` is three commits past release
-`2026.09.03-007`, at commit `abcdef01`. Every image of the operator
-has the same version, and `:latest` still names the most recent
-release.
+build of it. Its version is the most recent release tag plus a suffix.
+For example, `2026.09.03-007-dev-003-abcdef01` is the build of commit
+`abcdef01`, which is three commits after release `2026.09.03-007`.
+Every image of the operator has the same version, and `:latest` still
+points to the most recent release.
 
-A development build has no git tag, so the manifests pin to the
-commit's full sha, and the image pins to the version:
+A development build has no git tag, so reference the manifests by the
+commit's full SHA and the images by the version:
 
     resources:
       - https://github.com/liken-sh/liken//bluetooth-operator/deploy?ref=<full 40-character sha>
@@ -238,46 +225,37 @@ commit's full sha, and the image pins to the version:
       - name: ghcr.io/liken-sh/bluetooth-bondfetch
         newTag: 2026.09.03-007-dev-003-abcdef01
 
-A git fetch by sha needs all forty characters; the eight in the
-version are not enough. The summary of the CI run for that commit
-gives the version.
+A git fetch by SHA needs all forty characters, so the eight in the
+version are not enough. The summary of the commit's CI run shows the
+version.
 
 The same build publishes the manifests as the OCI artifact
 `oci://ghcr.io/liken-sh/bluetooth-operator-deploy:<version>`, with each
 image of the operator set to that version. A Flux `OCIRepository`
-can pull that artifact by the version, with no sha.
+can pull that artifact by version, with no SHA.
 
 ## How the pod finds the radio
 
-The `DaemonSet` puts a pod on every node, and each pod claims one
-`bluetooth-adapter` device. On a node with an adapter the claim
-matches and the pod runs. On a node with no adapter the claim matches
-nothing, so the pod parks `Pending` and costs nothing. A node labeled
-`bluetooth.liken.sh/bluetooth: none` gets no pod, as
-[Keep the pods off nodes with no Bluetooth adapter](#keep-the-pods-off-nodes-with-no-bluetooth-adapter)
-describes. Nobody writes
-down which machine has the radio, and a dongle moved to another
-machine works there on the next pod start.
-
-The claim also makes the pod the only Bluetooth stack on that radio,
-because `liken` publishes the adapter as a device that allocates
-once. The kernel arbitrates nothing between two stacks on one
-adapter.
+Each pod claims one `bluetooth-adapter` device, so the pod runs on a
+node that has an adapter, and a dongle that you move to another
+machine works there when the pod on that machine starts. The claim
+also makes the pod the only Bluetooth stack on the radio, because
+only one claim can hold the adapter. The kernel does not stop two
+Bluetooth stacks from using one adapter.
 
 When the `bluetoothd` container starts, it powers every adapter off
-at the kernel before `bluetoothd` runs, and `bluetoothd` then powers
-each adapter on. A `bluetoothd` that was killed or crashed leaves its
-links up, and a new `bluetoothd` that inherits such a link marks the
-device connected but never opens its input, so the controller sends
-nothing. The power-off ends those links. Each controller connects
-again on its next press, the same as after any restart of the pod.
-The `bluetoothd` container's log has a line for each adapter:
+before `bluetoothd` runs, and `bluetoothd` then powers each adapter
+on. This ends the links that a killed or crashed `bluetoothd` left
+up. A new `bluetoothd` that inherits such a link marks the device
+connected but never opens its input, so the controller sends nothing.
+Each controller connects again when you next press its button. The
+`bluetoothd` container logs a line for each adapter:
 
     kubectl -n liken-system logs ds/bluetooth-operator -c bluetoothd
 
-The `bluetoothd` image builds BlueZ from its release with patches
-for bugs that stop a controller from reconnecting, and the `rescan`
-container works around two kernel bugs with the same effect.
+The `bluetoothd` image builds BlueZ from a release, with patches for
+bugs that stop a controller from reconnecting. The `rescan` container
+works around kernel bugs that have the same effect.
 [When a sleeping remote does not reconnect](/docs/guides/pair-a-controller/#when-a-sleeping-remote-does-not-reconnect)
 describes each one.
 
@@ -286,30 +264,28 @@ describes each one.
     kubectl get pods -n liken-system -l app=bluetooth-operator
 
 A healthy install has one `Running` pod on each machine with an
-adapter. Each machine without one has a `Pending` pod, or no pod when
-its node is labeled `bluetooth.liken.sh/bluetooth: none`. Then read
-the radio the operator holds:
+adapter. A machine without one has a `Pending` pod, or no pod when
+its node is labeled `bluetooth.liken.sh/bluetooth: none`. Then list
+the radios that the operator found:
 
     $ kubectl get adapters
     NAME                ALIAS   ADDRESS             NODE      POWERED   PRIVACY   BTMON   AGE
     04-4a-69-66-92-27           04:4A:69:66:92:27   liken-1   true      off       false   1m
 
-The operator creates an `Adapter` object for the radio its pod
-claimed, named for the radio's address. The `ResourceSlice` of paired
-controllers appears when the first controller is paired:
-[Pair a controller and give it to a pod](/docs/guides/pair-a-controller/) is
-the next step.
+The operator creates an `Adapter` for the radio that its pod
+claimed, and names it for the radio's address.
+[Pair a controller and give it to a pod](/docs/guides/pair-a-controller/)
+is the next step.
 
 ## Read the Events
 
-The operator posts a Kubernetes `Event` when a window opens or
-closes, a device pairs, a link comes up or ends, a bond, a relay, or
-the radio fails, the operator powers the adapter off and on to
-recover a controller, a change of privacy restarts the pod, or the
-trace turns on or off.
-Read them with `kubectl describe` on the object. A `Peripheral`, an `Adapter`, and a `Node` are
-cluster-scoped, so their `Event`s are in `default`, and
-`kubectl events --for` finds them only with `-n default` or `-A`:
+The operator posts a Kubernetes `Event` for each change in pairing,
+in a controller's link, and in the radio, and for each action it
+takes to recover a controller. The table below lists each reason.
+Read the `Event`s with `kubectl describe` on the object. A `Peripheral`, an
+`Adapter`, and a `Node` are cluster-scoped, so their `Event`s are in
+the `default` namespace, and `kubectl events --for` finds them only
+with `-n default` or `-A`:
 
     kubectl describe pairingrequest new-gamepad -n liken-system
     kubectl events -n default --for peripheral/a0-ab-51-33-b7-12
@@ -319,16 +295,16 @@ cluster-scoped, so their `Event`s are in `default`, and
 | `PairingWindowOpened` | Normal | `PairingRequest` | The radio is discoverable and pairable until the window closes. |
 | `PairingWindowExpired` | Normal | `PairingRequest` | The window closed with no device paired. |
 | `PairingRefused` | Warning | `PairingRequest` | `bluetoothd` refused to pair the approved device. The window tries again, and the `Event` repeats only when the refusal changes. |
-| `Paired` | Normal | `PairingRequest`, `Peripheral` | The device holds a bond, and the operator created its `Peripheral`. |
-| `BondLost` | Warning | `Peripheral` | `bluetoothd` holds no bond with the device any more. The `Peripheral` stays until you delete it. |
+| `Paired` | Normal | `PairingRequest`, `Peripheral` | The device paired, and the operator created its `Peripheral`. |
+| `BondLost` | Warning | `Peripheral` | `bluetoothd` has no bond with the device any more. The `Peripheral` stays until you delete it. |
 | `LinkUp` | Normal | `Peripheral` | The device connected. |
 | `Asleep` | Normal | `Peripheral` | The link timed out on a device that sleeps between sessions, such as a T6 remote after an idle hour. |
 | `LinkLost` | Normal | `Peripheral` | The link timed out on a device that does not sleep: it went out of range, or its battery ran out. |
 | `ClosedByDevice` | Normal | `Peripheral` | The device ended the link: it was switched off, or it disconnected, as an X6 air-mouse remote does after an idle time. |
-| `ClosedByRadio` | Normal | `Peripheral` | This radio ended the link, at an unpair or at the input recovery. |
+| `ClosedByRadio` | Normal | `Peripheral` | This radio ended the link, at an unpair or when the operator reconnected a controller that sent no input. |
 | `AuthenticationFailed` | Warning | `Peripheral` | The link ended because the keys did not match. Delete the `Peripheral` and pair the device again. |
 | `NotConnected` | Normal | `Peripheral` | The link ended, and the operator received no reason from `bluetoothd`. |
-| `NotBonded` | Normal | `Peripheral` | `bluetoothd` holds no object for the device. `BondLost` follows when it held a bond before. |
+| `NotBonded` | Normal | `Peripheral` | `bluetoothd` has no object for the device. `BondLost` follows when it had a bond before. |
 | `InputRelayFailed` | Warning | `Peripheral` | The operator could not make the virtual input device that a claim on the controller receives. |
 | `AdapterPowerCycled` | Normal | `Peripheral` | `bluetoothd` did not disconnect a controller that has a link and no input, so the operator powered the adapter off and on. Every link on the adapter dropped. |
 | `AdapterPowerOnFailed` | Warning | `Peripheral` | The operator powered the adapter off to recover the controller, and `bluetoothd` did not power it on again. Delete the operator's pod on that node to power the adapter on. |
@@ -340,100 +316,109 @@ cluster-scoped, so their `Event`s are in `default`, and
 The reasons from `LinkUp` to `NotBonded` are the reasons of the
 `Peripheral`'s `Connected` condition, and each change of the condition
 posts one `Event`. A Low Energy remote ends its link after an idle
-time, so a remote posts about two `Event`s for each session. The
-`bluetooth_disconnects_total` metric counts the same changes by
-reason. A reconnect of a controller that holds a link with no input
-posts no `Event`, and the `operator` container's log records it. A power cycle of the adapter for the same controller posts
-`AdapterPowerCycled`, as [Pair a controller](/docs/guides/pair-a-controller/#when-a-connected-controller-sends-no-input)
-describes. The API server deletes an `Event` an hour after its last
-write. The status and the pod's log keep each fact longer.
+time, so each session of a remote posts one `Event` when it connects
+and one when it disconnects. The `bluetooth_disconnects_total` metric
+counts the disconnects by reason.
+
+When a controller has a link but sends no input, the operator
+reconnects it with a disconnect and a connect through `bluetoothd`.
+The reconnect posts no `Event`, and the `operator` container logs it.
+When `bluetoothd` fails the disconnect, the operator powers the
+adapter off and on and posts `AdapterPowerCycled`, as
+[Pair a controller](/docs/guides/pair-a-controller/#when-a-connected-controller-sends-no-input)
+describes.
+
+The API server deletes an `Event` an hour after its last write, so
+read the object's status and the pod's log for older facts.
 
 <a id="look-inside-the-stack"></a>
 
 ## Inspect the Bluetooth stack
 
-The `bluetoothd` image holds three tools for a person. Each runs as
-a direct `kubectl exec`, with no shell between, and every one of
-them needs the `-i` flag. BlueZ's shells attach to their standard
-input. With stdin closed the attach fails, and the command never
-runs and prints nothing.
+The `bluetoothd` image has `btmgmt`, `dbus-send`, and `bluetoothctl`.
+Run each with `kubectl exec` directly, with no shell, and always pass
+`-i`, because BlueZ's tools read standard input and, when it is
+closed, exit without running the command or printing anything.
 
-`btmgmt info` prints the adapter's management settings, and its
-`current settings` line is where `Connectable`, `Discoverable`, and
-`Bondable` read. `dbus-send` calls any method on `org.bluez`.
-`bluetoothctl list` names what the daemon holds.
+`btmgmt info` prints the adapter's management settings. Its
+`current settings` line shows whether the adapter is `Connectable`,
+`Discoverable`, and `Bondable`. `dbus-send` calls any method on
+`org.bluez`. `bluetoothctl list` lists the adapters that `bluetoothd`
+manages.
 
     kubectl -n liken-system exec -i ds/bluetooth-operator -c bluetoothd -- btmgmt info
     kubectl -n liken-system exec -i ds/bluetooth-operator -c bluetoothd -- bluetoothctl list
 
-One limit: the image has no shell, and BlueZ's argument parser
-runs one, so `bluetoothctl` and `btmgmt` refuse every command that
-takes an argument ("Unable to parse mandatory command arguments").
-Only their no-argument commands work: `bluetoothctl list`, and
-`btmgmt info`, `extinfo`, `con`, `keys`, and `ltks`. `dbus-send`
-has no such limit, so use it to reach anything else. To connect one
-device by hand:
+The image has no shell, and BlueZ's argument parser starts one, so
+`bluetoothctl` and `btmgmt` refuse every command that takes an
+argument with "Unable to parse mandatory command arguments". Only
+their commands without arguments work: `bluetoothctl list`, and
+`btmgmt info`, `extinfo`, `con`, `keys`, and `ltks`. `dbus-send` has
+no such limit, so use it for anything else. To connect one device by
+hand:
 
     kubectl -n liken-system exec -i ds/bluetooth-operator -c bluetoothd -- \
       dbus-send --system --print-reply --dest=org.bluez \
       /org/bluez/hci0/dev_A0_AB_51_33_B7_12 org.bluez.Device1.Connect
 
-The pod's `btmon` container can trace the HCI link, the layer under
-D-Bus and under `bluetoothd`. The trace shows a disconnect reason or a
-retransmission that no higher layer reports. The trace is the
-container's log, so it stays readable after a roll of the pod
-replaces the processes that saw a fault.
-
-The trace is off until you turn it on, because `btmon` prints key
-material in plain text: the link keys, the long term keys, and the
-radio's identity key. Anybody who can read the operator pod's logs can
-read those keys. Turn it on for one radio while you diagnose a fault,
-with `spec.btmon` on its `Adapter`:
+The pod's `btmon` container can trace the HCI link, the layer below
+`bluetoothd`, which shows a disconnect reason or a retransmission
+that no higher layer reports. The trace goes to the container's log,
+so you can read it after the pod restarts. It is off by default,
+because `btmon` prints the link keys, the long term keys, and the
+radio's identity key in plain text, and anyone who can read the pod's
+logs can read them. Turn the trace on for one radio while you
+diagnose a fault, with `spec.btmon` on its `Adapter`:
 
     kubectl patch adapter <adapter> --type merge -p '{"spec":{"btmon":true}}'
 
-The trace starts within seconds, and the pod does not restart, so no
-controller disconnects. A radio whose `Adapter` has `spec.btmon: true`
-when its pod starts is traced from the start of `bluetoothd`, so the
-trace also shows the commands where `bluetoothd` tells the kernel which
-bonded devices may reconnect. Read the trace on one machine:
+The trace starts within seconds. The pod does not restart, so no
+controller disconnects. When a pod starts for an `Adapter` that
+already has `spec.btmon: true`, the trace begins before `bluetoothd`
+starts, so it also shows the commands where `bluetoothd` tells the
+kernel which bonded devices may reconnect. Read the trace on one
+machine:
 
     kubectl -n liken-system logs -c btmon --timestamps \
       $(kubectl -n liken-system get pods -l app=bluetooth-operator \
           --field-selector spec.nodeName=<node> -o name)
 
-Turn it off when you have what you need, with `false` in place of
-`true`. The lines already in the log stay there until the kubelet
-rotates the log or the pod goes away.
+Turn the trace off with the same patch and `false` in place of
+`true`. The lines already in the log stay until the kubelet rotates
+the log or the pod is deleted.
 
-## The privilege it takes
+## The privileges of the pod
 
-The pod is five containers, and the privilege is confined to three of
-them. The `bluetoothd` container takes four capabilities
-(`NET_ADMIN`, `NET_BIND_SERVICE`, `SETUID`, `SETGID`), because it is
-the Bluetooth stack. The `btmon` container takes only `NET_RAW`,
-because it binds the kernel's HCI monitor channel, and that bind
-tests `CAP_NET_RAW`. The `rescan` container takes `NET_RAW` for the
-same bind and `NET_ADMIN` for the one management command it sends,
-as [When a sleeping remote does not reconnect](/docs/guides/pair-a-controller/#when-a-sleeping-remote-does-not-reconnect)
-explains. Every container shares the pod's `hostNetwork`.
-The `operator` and `bondfetch` containers drop every capability. The comments in
-[`deploy/operator.yaml`](/deploy/operator.yaml) state the kernel or
-daemon check behind each grant.
+The `bluetoothd` container adds `NET_ADMIN`, `NET_BIND_SERVICE`,
+`SETUID`, and `SETGID`, because it is the Bluetooth stack. The
+`btmon` container adds only `NET_RAW`, because it binds the kernel's
+HCI monitor channel and that bind requires `CAP_NET_RAW`. The
+`rescan` container adds `NET_RAW` for the same bind and `NET_ADMIN`
+for the one management command it sends, as
+[When a sleeping remote does not reconnect](/docs/guides/pair-a-controller/#when-a-sleeping-remote-does-not-reconnect)
+explains. The `operator` and `bondfetch` containers drop every
+capability. Every container uses the pod's `hostNetwork`, because
+Bluetooth sockets exist only in the host's network namespace. The
+comments in [`deploy/operator.yaml`](/deploy/operator.yaml) give the
+kernel or daemon check behind each capability.
 
-The pod mounts four host paths: the two kubelet plugin directories
-every DRA driver takes, `/var/run/cdi`, and
-`/var/run/bluetooth.liken.sh/dbus`, which holds the D-Bus socket a
-claim on the [media bus](/docs/reference/devices/#the-media-bus)
-delivers. The bus directory is a host path so that a prepared claim
-names the same socket across a restart of this pod.
+The pod mounts the kubelet plugin directories that every DRA driver
+mounts, `/var/run/cdi`, and `/var/run/bluetooth.liken.sh/dbus` from
+the host. The last holds the D-Bus socket that a claim on the
+[media bus](/docs/reference/devices/#the-media-bus) gives to a
+workload. It is a host path so that a claim that was already prepared
+points to the same socket after this pod restarts.
 
 ## Uninstall
 
-Delete the workload. The published `ResourceSlice` stays, because the
-operator does not retract it on shutdown. Its pod restarts for
-ordinary reasons while consumers hold prepared claims. The `Node` owns
-the slice, so a node that leaves the cluster takes it along. To
-remove it now:
+Delete the workload:
+
+    kubectl delete -n liken-system -f https://liken.sh/bluetooth/deploy/operator.yaml
+
+The operator's `ResourceSlice` remains, because the operator does not
+delete it when its pod stops. A pod restart is ordinary, and the
+workloads keep their claims on the controllers across it. The `Node`
+owns the slice, so the slice is deleted when the node leaves the
+cluster. To delete the slice now:
 
     kubectl delete resourceslice <node>-bluetooth.liken.sh

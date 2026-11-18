@@ -28,29 +28,29 @@ func TestSeenFrom(t *testing.T) {
 	})
 	devices, phase, peripheral := seenFrom(object)
 	if phase != "Open" || peripheral != "" {
-		t.Fatalf("phase, peripheral = %q, %q", phase, peripheral)
+		t.Fatalf("status.phase and status.peripheral are %q and %q, want Open and empty", phase, peripheral)
 	}
 	if len(devices) != 2 {
-		t.Fatalf("devices = %d, want 2", len(devices))
+		t.Fatalf("seenFrom returned %d devices, want 2", len(devices))
 	}
 	if devices[0].Address != "A0:AB:51:33:B7:12" || devices[0].Name != "DualSense" {
-		t.Fatalf("first device = %+v", devices[0])
+		t.Fatalf("the first device is %+v, want address A0:AB:51:33:B7:12 and name DualSense", devices[0])
 	}
 	if devices[1].Name != "" {
-		t.Fatalf("second device name = %q, want empty", devices[1].Name)
+		t.Fatalf("the name of the second device is %q, want empty", devices[1].Name)
 	}
 }
 
 func TestSeenFromWithNoStatus(t *testing.T) {
 	devices, phase, peripheral := seenFrom(&unstructured.Unstructured{Object: map[string]any{}})
 	if len(devices) != 0 || phase != "" || peripheral != "" {
-		t.Fatalf("empty object read as %v, %q, %q", devices, phase, peripheral)
+		t.Fatalf("an object with no status gave devices %v, phase %q, and peripheral %q, want none of them", devices, phase, peripheral)
 	}
 }
 
 func TestRenderSeen(t *testing.T) {
 	if got := renderSeen(nil); !strings.Contains(got, "no devices") {
-		t.Fatalf("empty render = %q", got)
+		t.Fatalf("renderSeen(nil) = %q, want text that says there are no devices", got)
 	}
 	got := renderSeen([]seenDevice{
 		{Address: "A0:AB:51:33:B7:12", Name: "DualSense"},
@@ -90,12 +90,12 @@ func TestResolveSelection(t *testing.T) {
 			got, err := resolveSelection(tc.input, devices)
 			if tc.wantErr {
 				if err == nil {
-					t.Fatalf("resolveSelection(%q) returned no error", tc.input)
+					t.Fatalf("resolveSelection(%q) returned no error, want one", tc.input)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("resolveSelection(%q): %v", tc.input, err)
+				t.Fatalf("resolveSelection(%q) returned the error %v, want %q", tc.input, err, tc.want)
 			}
 			if got != tc.want {
 				t.Fatalf("resolveSelection(%q) = %q, want %q", tc.input, got, tc.want)

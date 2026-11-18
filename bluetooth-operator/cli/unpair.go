@@ -1,10 +1,9 @@
 package main
 
-// The unpair verb. Deleting the Peripheral is the unpair: the
-// operator disconnects the device, waits for any claim on it to
-// release, retires it from the slice, and removes the bond. The Secret
-// with the keys is owned by the Peripheral, so it goes with the
-// object. This verb makes that one delete.
+// The unpair command only deletes the Peripheral. The operator then
+// disconnects the device, waits until no claim holds it, removes it
+// from the ResourceSlice, and removes the bond. The Peripheral owns the
+// Secret with the keys, so garbage collection deletes the Secret.
 
 import (
 	"context"
@@ -17,18 +16,15 @@ import (
 	"k8s.io/client-go/dynamic"
 )
 
-// The unpair verb's one positional argument, the
-// device to unpair, as an address or as the Peripheral's own name.
 type unpairOptions struct {
+	// Device is an address or the name of a Peripheral.
 	Device string
 }
 
-// runUnpair deletes one Peripheral. It takes the
-// device as the address a person reads off the controller or as the
-// Peripheral's name, and names one form to the API.
+// runUnpair deletes the Peripheral for opts.Device.
 func runUnpair(ctx context.Context, getter genericclioptions.RESTClientGetter, opts unpairOptions, stderr io.Writer) error {
 	if opts.Device == "" {
-		return fmt.Errorf("unpair needs a device")
+		return fmt.Errorf("unpair needs the address or the name of a Peripheral")
 	}
 	config, err := getter.ToRESTConfig()
 	if err != nil {
@@ -41,16 +37,15 @@ func runUnpair(ctx context.Context, getter genericclioptions.RESTClientGetter, o
 	return deletePeripheral(ctx, client, peripheralName(opts.Device))
 }
 
-// deletePeripheral removes one Peripheral by name. A
-// Peripheral already gone is reported, because a person who asked to
-// unpair a device that is not there should hear so.
+// deletePeripheral returns the API's not-found error unchanged, so a
+// person who unpairs a device that is not paired sees it.
 func deletePeripheral(ctx context.Context, client dynamic.Interface, name string) error {
 	return client.Resource(peripheralGVR).Delete(ctx, name, metav1.DeleteOptions{})
 }
 
-// peripheralName turns an address into the Peripheral
-// name the operator uses: lowercase, with dashes in place of colons. A
-// name already in that form passes through.
+// peripheralName returns the Peripheral name for a device: the address
+// in lowercase with dashes instead of colons. A name in that form is
+// returned unchanged.
 func peripheralName(device string) string {
 	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(device)), ":", "-")
 }

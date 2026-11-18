@@ -1,11 +1,10 @@
 package main
 
-// The pair verb, an interactive pairing window over the
-// PairingRequest API. It opens a window, which starts the radio's
-// discovery, draws the devices the radio reports as they appear, reads
-// the one a person approves, and writes that address back the way an
-// operator approval does. Ctrl-C closes the window so the radio does
-// not scan on with nobody watching.
+// The pair verb creates a PairingRequest on one adapter, lists the
+// devices that the radio reports as they appear, and writes the address
+// of the device the person picks into spec.device, the same write a
+// person can make with kubectl. Ctrl-C deletes the request, so the
+// radio does not keep scanning with nobody watching.
 
 import (
 	"bufio"
@@ -26,8 +25,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-// The pair verb's flags and its one positional
-// argument, the adapter to open the window on.
+// pairOptions are the flags of the pair verb, and in Adapter its
+// positional argument.
 type pairOptions struct {
 	Namespace string
 	Adapter   string
@@ -35,10 +34,9 @@ type pairOptions struct {
 	Force     bool
 }
 
-// runPair wires the terminal and the cluster to the
-// flow. It reads the operator version and warns or refuses on drift,
-// resolves the adapter, and runs the flow with stdin feeding the
-// picker and Ctrl-C closing the window.
+// runPair checks the operator's version against the CLI's, picks the
+// only adapter when the person names none, and runs pairFlow with the
+// lines of stdin as selections. Ctrl-C cancels pairFlow's context.
 func runPair(ctx context.Context, getter genericclioptions.RESTClientGetter, opts pairOptions, stdin io.Reader, stdout, stderr io.Writer) error {
 	config, err := getter.ToRESTConfig()
 	if err != nil {
@@ -86,22 +84,19 @@ func runPair(ctx context.Context, getter genericclioptions.RESTClientGetter, opt
 	return err
 }
 
-// soleAdapter picks the adapter when a person names
-// none. A cluster with one radio needs no name; a cluster with more
-// makes the person choose.
+// soleAdapter returns the name of the only Adapter in the cluster, and
+// fails when the cluster has none or more than one.
 func soleAdapter(ctx context.Context, client dynamic.Interface) (string, error) {
 	list, err := client.Resource(adapterGVR).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("listing Adapters: %w", err)
 	}
 	if len(list.Items) != 1 {
-		return "", fmt.Errorf("name an adapter; the cluster has %d", len(list.Items))
+		return "", fmt.Errorf("the cluster has %d Adapters, want exactly 1: name one with --adapter", len(list.Items))
 	}
 	return list.Items[0].GetName(), nil
 }
 
-// readSelections turns stdin lines into picks the flow
-// reads, and stops when the context ends.
 func readSelections(ctx context.Context, stdin io.Reader, selections chan<- string) {
 	scanner := bufio.NewScanner(stdin)
 	for scanner.Scan() {
@@ -113,31 +108,30 @@ func readSelections(ctx context.Context, stdin io.Reader, selections chan<- stri
 	}
 }
 
-// pairFlow is the testable core. It opens the window,
-// redraws the list on every radio report, approves the first device a
-// person picks, and returns the Peripheral name when the pairing
-// finishes. A cancelled context deletes the request, which closes the
-// window. watching, when it is not nil, is closed once the watch is
-// established, so a test can drive events with no race.
+// pairFlow creates a PairingRequest, prints the list of seen devices on
+// every update to it, and approves the first valid selection. It
+// returns the name of the Peripheral when the request reaches Paired,
+// and deletes the request when ctx is cancelled. When watching is not
+// nil, pairFlow closes it once the watch is open, so a test can update
+// the request after that without a race.
 func pairFlow(ctx context.Context, client dynamic.Interface, opts pairOptions, selections <-chan string, out io.Writer, watching chan<- struct{}) (string, error) {
 	requests := client.Resource(pairingRequestGVR).Namespace(opts.Namespace)
 
 	created, err := requests.Create(ctx, newPairingRequest(opts.Namespace, requestName(), opts.Adapter, opts.Window), metav1.CreateOptions{})
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("creating the PairingRequest: %w", err)
 	}
 	name := created.GetName()
 
-	// The watch selects this request alone and starts at the version
-	// the create returned, so the API server sends only the changes
-	// made after the create. With no version, the watch would first
-	// send every request in the namespace as it is now.
+	// Watch from the create's resourceVersion, so the API server sends
+	// only later changes. With no version, the watch would first send
+	// the current state of every object it selects.
 	watcher, err := requests.Watch(ctx, metav1.ListOptions{
 		FieldSelector:   fields.OneTermEqualSelector("metadata.name", name).String(),
 		ResourceVersion: created.GetResourceVersion(),
 	})
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("watching the PairingRequest %s: %w", name, err)
 	}
 	defer watcher.Stop()
 	if watching != nil {
@@ -155,7 +149,7 @@ func pairFlow(ctx context.Context, client dynamic.Interface, opts pairOptions, s
 			return "", ctx.Err()
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
-				return "", fmt.Errorf("the pairing window closed early")
+				return "", fmt.Errorf("the watch on the PairingRequest %s closed before the pairing window ended", name)
 			}
 			object, ok := event.Object.(*unstructured.Unstructured)
 			if !ok || object.GetName() != name {
@@ -167,7 +161,7 @@ func pairFlow(ctx context.Context, client dynamic.Interface, opts pairOptions, s
 				fmt.Fprintf(out, "paired %s\n", peripheral)
 				return peripheral, nil
 			case phaseExpired:
-				return "", fmt.Errorf("the pairing window expired")
+				return "", fmt.Errorf("the pairing window expired with no device paired")
 			}
 			if !approved {
 				devices = seen
@@ -190,26 +184,29 @@ func pairFlow(ctx context.Context, client dynamic.Interface, opts pairOptions, s
 	}
 }
 
-// approve writes the chosen address into the request's
-// spec.device, the merge patch that stands for a person's approval.
+// approve writes address to the request's spec.device, which tells the
+// operator to pair that device.
 func approve(ctx context.Context, requests dynamic.ResourceInterface, name, address string) error {
 	patch, err := approvalPatch(address)
 	if err != nil {
 		return err
 	}
-	_, err = requests.Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{})
-	return err
+	if _, err = requests.Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
+		return fmt.Errorf("setting spec.device of the PairingRequest %s: %w", name, err)
+	}
+	return nil
 }
 
-// closeWindow deletes the request, which ends the
-// radio session. A request already gone is no error, because the goal
-// is an absent request.
+// closeWindow deletes the request, so the operator stops discovery
+// unless another request needs the radio. It ignores
+// errors, because the request may already be gone. It uses a new
+// context because the caller's context is already cancelled.
 func closeWindow(client dynamic.Interface, namespace, name string) {
 	_ = client.Resource(pairingRequestGVR).Namespace(namespace).Delete(context.Background(), name, metav1.DeleteOptions{})
 }
 
-// requestName names a window's request. A random
-// suffix keeps two windows on one cluster from colliding.
+// requestName returns a name with a random suffix, so that two people
+// pairing at once do not collide.
 func requestName() string {
 	buffer := make([]byte, 4)
 	_, _ = rand.Read(buffer)

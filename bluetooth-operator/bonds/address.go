@@ -1,21 +1,17 @@
 package bonds
 
-// The two forms a Bluetooth address takes here, and why there are two.
+// This file defines Address, which converts between the two text forms
+// of a Bluetooth address.
 //
-// BlueZ writes its storage tree with the address uppercase and
-// separated by colons, as /var/lib/bluetooth/04:4A:69:66:92:27. That
-// is also how the label on the hardware reads and how bluetoothctl
-// prints it.
+// BlueZ names the directories of its storage tree in uppercase with
+// colons, as /var/lib/bluetooth/04:4A:69:66:92:27. bluetoothctl and
+// the label on the hardware use the same form. A Kubernetes object
+// name allows no uppercase letters or colons, and a Secret key allows
+// no colons, so the operator writes lowercase with dashes on the API
+// side, as 04-4a-69-66-92-27. Its DRA device names use the same form.
 //
-// A Kubernetes object name and a Secret key accept neither an
-// uppercase letter nor a colon, so the API side spells the same
-// address lowercase and separated by dashes, as 04-4a-69-66-92-27.
-// This is the convention the operator's DRA device names already
-// follow.
-//
-// Address holds the octets themselves rather than either string, so
-// that a value from the kernel, a value from a directory name, and a
-// value from a Secret key all compare and hash as the same address.
+// Address stores the six octets, so the same address parsed from the
+// kernel, a directory name, or a Secret key compares equal.
 
 import (
 	"fmt"
@@ -23,16 +19,16 @@ import (
 	"strings"
 )
 
-// Address is one Bluetooth address: six octets in the order a person
-// reads them, most significant first. The kernel reports the same
-// octets in the opposite order, so a caller that reads one out of a
-// kernel structure reverses them first.
+// Address is a Bluetooth address as six octets, most significant first,
+// which is the order a person reads them. The kernel stores the octets
+// in the opposite order, so a caller that reads one from a kernel
+// structure must reverse them first.
 type Address [6]byte
 
-// ParseAddress reads an address in either of the two forms, in either
-// case. Anything that is not six hexadecimal octets is an error, which
-// is what lets a caller walk BlueZ's tree and skip the entries that
-// are not devices: cache and settings both fail here.
+// ParseAddress parses an address in either text form, in either case.
+// It returns an error for anything that is not six two-digit
+// hexadecimal octets, so a caller that walks BlueZ's storage tree can
+// skip entries such as cache and settings.
 func ParseAddress(text string) (Address, error) {
 	var address Address
 	octets := strings.Split(strings.ReplaceAll(text, "-", ":"), ":")
@@ -40,9 +36,9 @@ func ParseAddress(text string) (Address, error) {
 		return Address{}, fmt.Errorf("%q is not a Bluetooth address: it has %d octets, not %d", text, len(octets), len(address))
 	}
 	for i, octet := range octets {
-		// The length check comes first because strconv accepts a single
-		// digit, and an address with a one-digit octet is a name this
-		// package must not turn into a different address.
+		// ParseUint accepts one digit. Without this check,
+		// "4:4A:69:66:92:27" would parse, and its Directory would not
+		// match the name it came from.
 		if len(octet) != 2 {
 			return Address{}, fmt.Errorf("%q is not a Bluetooth address: %q is not two hexadecimal digits", text, octet)
 		}
@@ -55,28 +51,27 @@ func ParseAddress(text string) (Address, error) {
 	return address, nil
 }
 
-// Directory returns the name BlueZ gives this address in its storage
-// tree: uppercase, separated by colons.
+// Directory returns the directory name BlueZ uses for this address in
+// its storage tree: uppercase with colons.
 func (a Address) Directory() string {
 	return strings.ToUpper(a.format(":"))
 }
 
-// Key returns the form a Kubernetes name and a Secret key use:
-// lowercase, separated by dashes.
+// Key returns the form that a Kubernetes name and a Secret key use:
+// lowercase with dashes.
 func (a Address) Key() string {
 	return a.format("-")
 }
 
-// String prints the address the way BlueZ prints it and the way the
-// label on the hardware reads, so a message about an adapter names it
-// the way a person already has it written down.
+// String returns the Directory form, the one a person reads on the
+// label and in bluetoothctl.
 func (a Address) String() string {
 	return a.Directory()
 }
 
-// IsZero reports whether every octet is zero. The kernel answers with
-// this address between the moment it registers an adapter and the
-// moment its queued power-on work reads the real address out of the
+// IsZero reports whether every octet is zero. The kernel reports the
+// all-zero address for an adapter after it registers the adapter and
+// before its queued power-on work reads the real address from the
 // controller.
 func (a Address) IsZero() bool {
 	return a == Address{}

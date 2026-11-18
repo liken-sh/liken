@@ -56,8 +56,7 @@ func TestMinorClassNames(t *testing.T) {
 		{"toy game", 0x000800 | 0x05<<2, "game"},
 		{"health heart-rate", 0x000900 | 0x06<<2, "heart-rate"},
 		{"health blood-pressure", 0x000900 | 0x01<<2, "blood-pressure"},
-		// Imaging spreads its minor across independent flag bits, so
-		// no single name applies and the decode stays silent.
+		// Imaging's minor bits are independent flags with no one name.
 		{"imaging", 0x000600 | 0x10<<2, ""},
 		{"an unknown minor under a known major", 0x000400 | 0x3F<<2, ""},
 		{"a peripheral with neither half set", 0x000500, ""},
@@ -88,8 +87,6 @@ func TestServiceClassFlags(t *testing.T) {
 		{"audio", 1 << 21, []string{"serviceAudio"}},
 		{"telephony", 1 << 22, []string{"serviceTelephony"}},
 		{"information", 1 << 23, []string{"serviceInformation"}},
-		// Bit 13 is set only during a pairing window and bit 14 has
-		// no named use yet, so neither publishes a flag.
 		{"limited discoverable and LE audio", 1<<13 | 1<<14, nil},
 		{
 			name:  "the headphone word",
@@ -106,7 +103,7 @@ func TestServiceClassFlags(t *testing.T) {
 	}
 }
 
-// fullUUID builds the 128-bit form BlueZ reports for a 16-bit
+// fullUUID returns the 128-bit UUID that BlueZ reports for a 16-bit
 // assigned number.
 func fullUUID(short string) string {
 	return "0000" + short + "-0000-1000-8000-00805f9b34fb"
@@ -164,9 +161,8 @@ func TestProfileFlags(t *testing.T) {
 	}
 }
 
-// The published flags must not depend on the order the browse
-// returned the UUIDs, or a reordered answer would rewrite the slice
-// with no real change.
+// A browse that returns the same UUIDs in another order must not
+// rewrite the ResourceSlice.
 func TestProfileFlagsAreOrdered(t *testing.T) {
 	forward := profileFlags([]string{
 		fullUUID("110b"), fullUUID("110a"), fullUUID("110c"), fullUUID("110f"), fullUUID("1101"),
@@ -175,6 +171,6 @@ func TestProfileFlagsAreOrdered(t *testing.T) {
 		fullUUID("1101"), fullUUID("110f"), fullUUID("110c"), fullUUID("110a"), fullUUID("110b"),
 	})
 	if !reflect.DeepEqual(forward, backward) {
-		t.Fatalf("forward = %v, backward = %v", forward, backward)
+		t.Fatalf("profileFlags gives %v in one order and %v in the reverse, want the same flags", forward, backward)
 	}
 }

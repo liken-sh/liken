@@ -1,24 +1,20 @@
 package main
 
-// The pass reads the Adapters, the Peripherals of its radio, the
-// PairingRequests, and the bond Secrets from the watches' stores, not
-// from the API server. Each store holds the same selection that the
-// pass would list, so a settled pass sends the API server no read of
-// these four kinds. The shared informer package holds the rules of that
-// read: an object a store does not hold, and a store's copy older than
-// this operator's own last write, are read from the API server, and a
-// list comes from a store only after the store holds the whole first
-// read.
+// The inventory pass reads Adapters, Peripherals, and PairingRequests
+// from the stores of the operator's watches, so a pass that changes
+// nothing sends the API server no read for them.
 //
-// The Peripheral watch follows the radio the pass reads, so on the
-// first pass for a radio its store is not ready, and the pass lists the
+// A store's copy can be older than the operator's last write, and a
+// pass that acted on it would repeat a change, such as opening the
+// pairing window again for a request it already paired. So each kind
+// has a memo of the resourceVersion the operator last wrote or read, and
+// the informer package reads the object from the API server when the
+// store's copy has a different version. kubernetes/informer/cache.go
+// gives the other cases that read from the API server.
+//
+// The Peripheral watch selects the Peripherals of one radio and starts
+// only after a pass has read the radio. Until then the pass lists
 // Peripherals from the API server.
-//
-// A copy older than this operator's own write matters here because a
-// pass that acted on it would act again on a change it already made,
-// such as opening the pairing window for a request it already paired.
-// The memo of each kind records the version of the newest copy this
-// operator wrote or read.
 
 import (
 	"sync"
@@ -27,8 +23,7 @@ import (
 	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
-// The three getters are the metadata the shared cache reads from each
-// of this operator's kinds.
+// The informer package reads an object's metadata through these methods.
 func (m *ObjectMeta) GetName() string            { return m.Name }
 func (m *ObjectMeta) GetNamespace() string       { return m.Namespace }
 func (m *ObjectMeta) GetResourceVersion() string { return m.ResourceVersion }
@@ -37,10 +32,10 @@ func (a *Adapter) GetObjectMeta() informer.Meta        { return &a.Metadata }
 func (p *Peripheral) GetObjectMeta() informer.Meta     { return &p.Metadata }
 func (r *PairingRequest) GetObjectMeta() informer.Meta { return &r.Metadata }
 
-// followedView is the store of a watch whose selector follows one
-// radio, and the radio the store is for. A reader asks for the store
-// of the radio it holds, and gets nothing while the watch for that
-// radio has not started.
+// followedView holds the store of the Peripheral watch and the Adapter
+// key that the watch selects on. The watch restarts with a new selector
+// when the radio changes, so a reader passes the key it expects and gets
+// the zero View while the watch is for another radio or has not started.
 type followedView struct {
 	mu   sync.Mutex
 	key  string
@@ -53,8 +48,8 @@ func (f *followedView) set(key string, view informer.View) {
 	f.key, f.view = key, view
 }
 
-// of answers the store for one radio, or the zero view when the watch
-// holds another radio's objects.
+// of also returns the zero View on a nil followedView, which the zero
+// objectCache has.
 func (f *followedView) of(key string) informer.View {
 	if f == nil {
 		return informer.View{}
@@ -67,21 +62,20 @@ func (f *followedView) of(key string) informer.View {
 	return f.view
 }
 
-// objectCache is the stores the inventory pass reads, and the memos of
-// the copies it wrote or read. The zero value holds nothing, and every
-// read goes to the API server.
+// objectCache is the stores that the inventory pass reads and the memos
+// of the versions it wrote or read. The zero value has no stores, so
+// every read goes to the API server.
 type objectCache struct {
 	adapters    informer.Held
 	requests    informer.Held
 	peripherals *followedView
 
-	// peripheralVersions is the memo for the Peripherals, which
-	// outlives the watch of any one radio.
+	// peripheralVersions is the memo for the Peripherals. It is not
+	// part of followedView, so it stays when the Peripheral watch moves
+	// to another radio.
 	peripheralVersions *memo.Versions
 }
 
-// peripheralsOf answers the Peripheral store for one radio, with its
-// memo.
 func (c objectCache) peripheralsOf(adapterKey string) informer.Held {
 	return informer.Held{View: c.peripherals.of(adapterKey), Versions: c.peripheralVersions}
 }

@@ -1,10 +1,7 @@
 package main
 
-// These tests cover the supervisor: it runs one btmon while the btmon
-// file says true, stops it when the file says false or goes away, and
-// starts it again after it exits on its own. The child is a fake, so
-// no btmon runs, and each test runs in a synctest bubble, so the
-// restart delay takes no real time.
+// The child btmon is a fake, and each test runs in a synctest bubble,
+// so the restart delay takes no real time.
 
 import (
 	"context"
@@ -17,9 +14,9 @@ import (
 	"time"
 )
 
-// fakeTrace is one btmon the fake starter started. It exits when the
-// supervisor stops it, or when the test ends it with exit. mu is the
-// fixture's, and it guards stopped.
+// fakeTrace is a btmon that the fixture started. It exits when the
+// supervisor stops it or when the test calls exit. mu is the fixture's
+// mutex and guards stopped.
 type fakeTrace struct {
 	mu      *sync.Mutex
 	exited  chan struct{}
@@ -35,7 +32,7 @@ func (f *fakeTrace) stop() {
 	f.exit()
 }
 
-// exit ends the fake the way a btmon that fails ends.
+// exit makes the fake exit, as a btmon that crashes does.
 func (f *fakeTrace) exit() {
 	select {
 	case <-f.exited:
@@ -45,11 +42,11 @@ func (f *fakeTrace) exit() {
 }
 
 // traceFixture is a settings directory, the supervisor that reads it,
-// and the channels that stand in for the inotify watch.
+// and the channels that replace the inotify watch.
 //
-// The supervisor starts a fake from its own goroutine, and a timer in
-// the bubble wakes it, which gives the race detector no order between
-// that goroutine and the test. mu gives the order.
+// The supervisor starts fakes from its own goroutine, and the race
+// detector sees no ordering between that goroutine and the test. mu
+// provides the ordering.
 type traceFixture struct {
 	t        *testing.T
 	settings string
@@ -62,8 +59,8 @@ type traceFixture struct {
 	refuse  error
 }
 
-// newTraceFixture answers an empty settings directory and the channels
-// of a watch. The caller runs in a synctest bubble.
+// newTraceFixture returns a fixture with an empty settings directory.
+// The caller must run in a synctest bubble.
 func newTraceFixture(t *testing.T) *traceFixture {
 	t.Helper()
 	return &traceFixture{
@@ -75,8 +72,8 @@ func newTraceFixture(t *testing.T) *traceFixture {
 	}
 }
 
-// run starts the supervisor with ctx. The file the test wrote before
-// the call is the first read.
+// run starts the supervisor with ctx. The supervisor's first read sees
+// any file that the test wrote before this call.
 func (f *traceFixture) run(ctx context.Context) {
 	s := &supervisor{
 		setting: filepath.Join(f.settings, "btmon"),
@@ -98,7 +95,7 @@ func (f *traceFixture) start() (trace, error) {
 	return child, nil
 }
 
-// refuseStarts makes each start fail with err, and nil lets them
+// refuseStarts makes later starts fail with err. A nil err makes them
 // succeed.
 func (f *traceFixture) refuseStarts(err error) {
 	f.mu.Lock()
@@ -106,14 +103,13 @@ func (f *traceFixture) refuseStarts(err error) {
 	f.refuse = err
 }
 
-// starts counts the fakes the supervisor started.
 func (f *traceFixture) starts() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.started)
 }
 
-// child answers the nth fake the supervisor started.
+// child returns the nth fake that the supervisor started.
 func (f *traceFixture) child(n int) *fakeTrace {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -127,28 +123,28 @@ func (f *traceFixture) stopped(n int) bool {
 	return f.started[n].stopped
 }
 
-// put writes value into the btmon file, the way bondfetch leaves it
-// before the container starts.
+// put writes value to the btmon file without notifying the supervisor,
+// as bondfetch does before the container starts.
 func (f *traceFixture) put(value string) {
 	f.t.Helper()
 	if err := os.WriteFile(filepath.Join(f.settings, "btmon"), []byte(value+"\n"), 0o644); err != nil {
-		f.t.Fatal(err)
+		f.t.Fatalf("writing the btmon file: %v", err)
 	}
 }
 
-// write puts value in the btmon file and tells the supervisor, the way
-// the inotify watch does.
+// write writes value to the btmon file and sends a change to the
+// supervisor, as the inotify watch does.
 func (f *traceFixture) write(value string) {
 	f.t.Helper()
 	f.put(value)
 	f.changed()
 }
 
-// remove deletes the btmon file and tells the supervisor.
+// remove deletes the btmon file and sends a change to the supervisor.
 func (f *traceFixture) remove() {
 	f.t.Helper()
 	if err := os.Remove(filepath.Join(f.settings, "btmon")); err != nil {
-		f.t.Fatal(err)
+		f.t.Fatalf("removing the btmon file: %v", err)
 	}
 	f.changed()
 }
@@ -158,7 +154,6 @@ func (f *traceFixture) changed() {
 	synctest.Wait()
 }
 
-// running counts the fakes that have not exited.
 func (f *traceFixture) running() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -173,8 +168,6 @@ func (f *traceFixture) running() int {
 	return count
 }
 
-// The first read decides whether a trace runs: true starts one, and
-// false, a missing file, and a value that is not true start none.
 func TestTheFirstReadStartsATraceOnlyForTrue(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -184,7 +177,7 @@ func TestTheFirstReadStartsATraceOnlyForTrue(t *testing.T) {
 		{name: "true", write: func(f *traceFixture) { f.put("true") }, want: 1},
 		{name: "false", write: func(f *traceFixture) { f.put("false") }, want: 0},
 		{name: "no file", write: func(f *traceFixture) {}, want: 0},
-		{name: "a typing error", write: func(f *traceFixture) { f.put("yes") }, want: 0},
+		{name: "a value that is not true or false", write: func(f *traceFixture) { f.put("yes") }, want: 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -202,8 +195,6 @@ func TestTheFirstReadStartsATraceOnlyForTrue(t *testing.T) {
 	}
 }
 
-// A change to false stops the trace, and a change back to true starts
-// a new one.
 func TestAChangeStopsAndStartsTheTrace(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := newTraceFixture(t)
@@ -220,7 +211,6 @@ func TestAChangeStopsAndStartsTheTrace(t *testing.T) {
 	})
 }
 
-// A file that goes away is false.
 func TestARemovedFileStopsTheTrace(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := newTraceFixture(t)
@@ -235,7 +225,6 @@ func TestARemovedFileStopsTheTrace(t *testing.T) {
 	})
 }
 
-// A second true while a trace runs starts no second trace.
 func TestARepeatedTrueKeepsOneTrace(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := newTraceFixture(t)
@@ -250,8 +239,6 @@ func TestARepeatedTrueKeepsOneTrace(t *testing.T) {
 	})
 }
 
-// A trace that exits on its own while the file says true starts again
-// after the delay, and not before it.
 func TestATraceThatExitsStartsAgainAfterTheDelay(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := newTraceFixture(t)
@@ -272,7 +259,6 @@ func TestATraceThatExitsStartsAgainAfterTheDelay(t *testing.T) {
 	})
 }
 
-// A change to false during the delay cancels the restart.
 func TestFalseDuringTheDelayCancelsTheRestart(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := newTraceFixture(t)
@@ -290,8 +276,6 @@ func TestFalseDuringTheDelayCancelsTheRestart(t *testing.T) {
 	})
 }
 
-// A start that fails is tried again after the delay, the same as a
-// trace that exits at once.
 func TestAFailedStartIsTriedAgainAfterTheDelay(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := newTraceFixture(t)
@@ -309,9 +293,9 @@ func TestAFailedStartIsTriedAgainAfterTheDelay(t *testing.T) {
 	})
 }
 
-// A watch that fails ends the supervisor with the watch's error, and
-// stops the trace, so the kubelet starts the container again and the
-// new container reads the file again.
+// When the watch fails, the supervisor stops the trace and returns the
+// error, so the container exits and the kubelet restarts it with a
+// fresh read of the file.
 func TestAFailedWatchStopsTheTraceAndEnds(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := newTraceFixture(t)
@@ -330,8 +314,8 @@ func TestAFailedWatchStopsTheTraceAndEnds(t *testing.T) {
 	})
 }
 
-// The kubelet's TERM ends the supervisor with no error, and stops the
-// trace first.
+// When the context ends, as it does on the kubelet's SIGTERM, the
+// supervisor stops the trace and returns no error.
 func TestTheEndOfTheContextStopsTheTrace(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := newTraceFixture(t)

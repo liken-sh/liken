@@ -1,13 +1,10 @@
 package main
 
-// These tests hold the kernel interface to two promises. The first is
-// arithmetic: an ioctl request number this file computes must equal the
-// number linux/input.h and linux/uinput.h define, because a wrong
-// number reaches a different driver call or none. The second needs a
-// kernel: the real-kernel tests create a uinput device, read back the
-// node the kernel gave it, and hold the kernel to what a mask on that
-// node filters. They skip where /dev/uinput is not openable, which is
-// CI.
+// Some of these tests compare each ioctl number that the code computes
+// with the number that a C program compiled against linux/input.h or
+// linux/uinput.h sends, because a wrong number calls a different driver
+// function or none. The others create a uinput device on the real
+// kernel, and skip when /dev/uinput cannot be opened, as in CI.
 
 import (
 	"encoding/binary"
@@ -17,9 +14,6 @@ import (
 	"time"
 )
 
-// The request numbers as the kernel's headers define them. Each one is
-// the value a C program compiled against linux/input.h or
-// linux/uinput.h sends.
 func TestIoctlRequestNumbersMatchTheKernelHeaders(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -50,15 +44,16 @@ func TestIoctlRequestNumbersMatchTheKernelHeaders(t *testing.T) {
 	}
 }
 
-// One struct input_event is 24 bytes on a 64-bit kernel, and the relay
-// truncates a partial read to a multiple of that.
+// A struct input_event is 24 bytes on a 64-bit kernel. The relay
+// writes only whole records and keeps a partial record for the next
+// read, so a wrong size would split events.
 func TestOneEventRecordIsTwentyFourBytes(t *testing.T) {
 	if inputEventSize != 24 {
 		t.Errorf("inputEventSize = %d, want 24", inputEventSize)
 	}
 }
 
-func TestWithinDeliveredRange(t *testing.T) {
+func TestWithinContainerNodes(t *testing.T) {
 	cases := []struct {
 		node string
 		want bool
@@ -70,14 +65,14 @@ func TestWithinDeliveredRange(t *testing.T) {
 		{node: "/dev/input/js0", want: false},
 	}
 	for _, c := range cases {
-		if got := withinDeliveredRange(c.node); got != c.want {
+		if got := withinContainerNodes(c.node); got != c.want {
 			t.Errorf("withinDeliveredRange(%q) = %v, want %v", c.node, got, c.want)
 		}
 	}
 }
 
-// testCapabilities is a small gamepad: one button, one stick axis, and
-// a name the relay matches a real node to its virtual device by.
+// testCapabilities is a small gamepad with one button and one stick
+// axis.
 func testCapabilities() evdevCapabilities {
 	return evdevCapabilities{
 		Name: "Wireless Controller",
@@ -86,15 +81,14 @@ func testCapabilities() evdevCapabilities {
 			"EV_KEY": {0x130},
 			"EV_ABS": {0x00},
 		},
-		// The fuzz and the flat travel with the axis, so a consumer
-		// reading the virtual node sees the same smoothing the real one
-		// reports.
+		// Fuzz and flat are set so the read-back test checks that the
+		// virtual axis copies them.
 		Axes: []absAxis{{Code: 0x00, Minimum: 0, Maximum: 255, Fuzz: 3, Flat: 15}},
 	}
 }
 
-// The kernel itself creates the device, gives it a node, and takes the
-// node away when the fd closes.
+// The kernel creates the device and its node, and removes the node
+// when the fd closes.
 func TestCreateAVirtualDeviceOnTheRealKernel(t *testing.T) {
 	file, err := os.OpenFile(uinputPath, os.O_WRONLY, 0)
 	if err != nil {
@@ -104,30 +98,29 @@ func TestCreateAVirtualDeviceOnTheRealKernel(t *testing.T) {
 
 	device, err := linuxInput{}.createVirtual(testCapabilities(), "bluetooth.liken.sh/a0:ab:51:33:b7:12")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the virtual device: %v", err)
 	}
 	node := device.node()
 	if _, err := os.Stat(node); err != nil {
-		t.Fatalf("the kernel reported node %s: %v", node, err)
+		t.Fatalf("the node %s that the kernel reported does not exist: %v", node, err)
 	}
-	// The relay moves whole records and reads none of them, so a write
-	// of one record is the whole contract with the kernel.
+	// The relay copies whole records without decoding them, so one
+	// record is a sufficient write.
 	if err := device.write(make([]byte, inputEventSize)); err != nil {
 		t.Errorf("writing one event: %v", err)
 	}
 
 	if err := device.close(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("closing the virtual device: %v", err)
 	}
 	if _, err := os.Stat(node); !os.IsNotExist(err) {
-		t.Errorf("%s is still there after the fd closed: %v", node, err)
+		t.Errorf("after the device closed, stat %s = %v, want it absent", node, err)
 	}
 }
 
-// The capabilities the kernel reports for a device this test created
-// are the capabilities it was created with. This is the round trip the
-// relay makes on every reconnect: read a real node, build a virtual
-// one that matches it.
+// The relay reads a real node's capabilities and creates a virtual
+// device from them, so the kernel must report back the capabilities
+// that the device was created with.
 func TestReadBackTheCapabilitiesOfADeviceThisTestCreated(t *testing.T) {
 	file, err := os.OpenFile(uinputPath, os.O_WRONLY, 0)
 	if err != nil {
@@ -137,7 +130,7 @@ func TestReadBackTheCapabilitiesOfADeviceThisTestCreated(t *testing.T) {
 
 	device, err := linuxInput{}.createVirtual(testCapabilities(), "bluetooth.liken.sh/a0:ab:51:33:b7:12")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the virtual device: %v", err)
 	}
 	t.Cleanup(func() { _ = device.close() })
 
@@ -150,16 +143,15 @@ func TestReadBackTheCapabilitiesOfADeviceThisTestCreated(t *testing.T) {
 		t.Errorf("name and id = %q %+v, want %q %+v", caps.Name, caps.ID, want.Name, want.ID)
 	}
 	if len(caps.Codes["EV_KEY"]) != 1 || caps.Codes["EV_KEY"][0] != 0x130 {
-		t.Errorf("EV_KEY codes = %v", caps.Codes["EV_KEY"])
+		t.Errorf("EV_KEY codes = %v, want [0x130]", caps.Codes["EV_KEY"])
 	}
 	if len(caps.Axes) != 1 || caps.Axes[0] != want.Axes[0] {
 		t.Errorf("axes = %+v, want %+v", caps.Axes, want.Axes)
 	}
 }
 
-// rawEvent is one struct input_event as the kernel lays it out: two
-// timestamp words this program leaves at zero, then the type, the
-// code, and the value.
+// rawEvent returns one struct input_event: two timestamp words, left at
+// zero, then the type, the code, and the value.
 func rawEvent(eventType, code uint16, value int32) []byte {
 	record := make([]byte, inputEventSize)
 	binary.NativeEndian.PutUint16(record[16:], eventType)
@@ -168,23 +160,20 @@ func rawEvent(eventType, code uint16, value int32) []byte {
 	return record
 }
 
-// deliveredEventTypes reads one batch from a real node and answers
-// with the type of each record in it. A read that never returns is a
-// mask that filtered more than the test asked it to, so the wait is
-// bounded and a timeout fails the test.
-func deliveredEventTypes(t *testing.T, node realNode) []uint16 {
+// readEventTypes returns the type of each record in one read from node.
+func readEventTypes(t *testing.T, node realNode) []uint16 {
 	t.Helper()
 	var types []uint16
-	for at, got := 0, deliveredEventRecords(t, node); at+inputEventSize <= len(got); at += inputEventSize {
+	for at, got := 0, readEventRecords(t, node); at+inputEventSize <= len(got); at += inputEventSize {
 		types = append(types, binary.NativeEndian.Uint16(got[at+16:]))
 	}
 	return types
 }
 
-// deliveredEventRecords reads one batch from a real node. A read that
-// never returns is a mask or an axis that filtered more than the test
-// asked it to, so the wait is bounded and a timeout fails the test.
-func deliveredEventRecords(t *testing.T, node realNode) []byte {
+// readEventRecords returns the bytes of one read from node. A read
+// that never returns means a mask or an axis dropped more than the test
+// intended, so the test fails after two seconds.
+func readEventRecords(t *testing.T, node realNode) []byte {
 	t.Helper()
 	records := make(chan []byte, 1)
 	go func() {
@@ -205,11 +194,10 @@ func deliveredEventRecords(t *testing.T, node realNode) []byte {
 	}
 }
 
-// The kernel filters what it queues on a node this operator narrowed.
-// This is the whole mechanism by which a class no claim asked for
-// costs nothing: the events are dropped before they reach the fd, so
-// the pump never wakes for them.
-func TestNarrowARealNodeOnTheRealKernel(t *testing.T) {
+// The kernel drops events that a mask excludes before it queues them,
+// so an event type that no claim asked for never wakes the relay's
+// read loop.
+func TestMaskARealNodeOnTheRealKernel(t *testing.T) {
 	file, err := os.OpenFile(uinputPath, os.O_WRONLY, 0)
 	if err != nil {
 		t.Skipf("this machine does not permit %s: %v", uinputPath, err)
@@ -218,39 +206,40 @@ func TestNarrowARealNodeOnTheRealKernel(t *testing.T) {
 
 	device, err := linuxInput{}.createVirtual(testCapabilities(), "bluetooth.liken.sh/a0:ab:51:33:b7:12")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the virtual device: %v", err)
 	}
 	t.Cleanup(func() { _ = device.close() })
 	node, err := linuxInput{}.open(device.node())
 	if err != nil {
-		// The operator opens a controller's node as root, and a
-		// workstation user is not in the group that owns one.
+		// The operator opens controller nodes as root. A workstation
+		// user is usually not in the group that owns them.
 		t.Skipf("this machine does not permit reading %s: %v", device.node(), err)
 	}
 	t.Cleanup(func() { _ = node.Close() })
 
-	// With no mask the node delivers every type the device declares.
+	// Without a mask, the node returns every event type that the device
+	// declares.
 	frame := append(rawEvent(evAbs, 0x00, 100), rawEvent(evSyn, 0, 0)...)
 	if err := device.write(frame); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the frame to the virtual device: %v", err)
 	}
-	if types := deliveredEventTypes(t, node); !slices.Contains(types, uint16(evAbs)) {
+	if types := readEventTypes(t, node); !slices.Contains(types, uint16(evAbs)) {
 		t.Fatalf("the unmasked node delivered types %v, want an absolute event", types)
 	}
 
-	if err := node.narrow([]eventMask{{event: evSyn, max: eventTypeMax, codes: []uint16{evKey}}}); err != nil {
-		t.Fatal(err)
+	if err := node.setMasks([]eventMask{{event: evSyn, max: eventTypeMax, codes: []uint16{evKey}}}); err != nil {
+		t.Fatalf("narrowing the node: %v", err)
 	}
 
-	// The absolute frame is dropped whole, because the kernel drops the
-	// frame marker of a frame it emptied.
+	// The kernel also drops the SYN_REPORT of a frame that the mask
+	// emptied, so the absolute frame disappears completely.
 	frame = append(rawEvent(evAbs, 0x00, 200), rawEvent(evSyn, 0, 0)...)
 	frame = append(frame, rawEvent(evKey, 0x130, 1)...)
 	frame = append(frame, rawEvent(evSyn, 0, 0)...)
 	if err := device.write(frame); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the frame to the virtual device: %v", err)
 	}
-	types := deliveredEventTypes(t, node)
+	types := readEventTypes(t, node)
 	if slices.Contains(types, uint16(evAbs)) {
 		t.Errorf("the narrowed node delivered types %v, want no absolute event", types)
 	}
@@ -259,8 +248,8 @@ func TestNarrowARealNodeOnTheRealKernel(t *testing.T) {
 	}
 }
 
-// steadyAxis is one axis with no smoothing at all, which is a stick
-// that reports every step of its position noise.
+// steadyAxis has one axis with no fuzz or flat, so the kernel passes
+// every change of position, however small.
 func steadyAxis() evdevCapabilities {
 	return evdevCapabilities{
 		Name:  "Wireless Controller",
@@ -270,12 +259,12 @@ func steadyAxis() evdevCapabilities {
 	}
 }
 
-// deliveredAxisValues reads one batch from a real node and answers
-// with the value of each absolute event in it.
-func deliveredAxisValues(t *testing.T, node realNode) []int32 {
+// readAxisValues returns the value of each EV_ABS record in one read
+// from node.
+func readAxisValues(t *testing.T, node realNode) []int32 {
 	t.Helper()
 	var values []int32
-	for at, got := 0, deliveredEventRecords(t, node); at+inputEventSize <= len(got); at += inputEventSize {
+	for at, got := 0, readEventRecords(t, node); at+inputEventSize <= len(got); at += inputEventSize {
 		if binary.NativeEndian.Uint16(got[at+16:]) != evAbs {
 			continue
 		}
@@ -285,9 +274,8 @@ func deliveredAxisValues(t *testing.T, node realNode) []int32 {
 }
 
 // The kernel drops a position change smaller than half the axis fuzz
-// before any handler sees it. This is the whole mechanism by which a
-// stick's noise at rest costs nothing: the events never reach the fd,
-// so the pump never wakes for them.
+// before it queues the event, so a stick that jitters at rest does not
+// wake the relay's read loop.
 func TestTuneARealAxisOnTheRealKernel(t *testing.T) {
 	file, err := os.OpenFile(uinputPath, os.O_WRONLY, 0)
 	if err != nil {
@@ -297,41 +285,38 @@ func TestTuneARealAxisOnTheRealKernel(t *testing.T) {
 
 	device, err := linuxInput{}.createVirtual(steadyAxis(), "bluetooth.liken.sh/a0:ab:51:33:b7:12")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the virtual device: %v", err)
 	}
 	t.Cleanup(func() { _ = device.close() })
 	node, err := linuxInput{}.open(device.node())
 	if err != nil {
-		// The operator opens a controller's node as root, and a
-		// workstation user is not in the group that owns one.
 		t.Skipf("this machine does not permit reading %s: %v", device.node(), err)
 	}
 	t.Cleanup(func() { _ = node.Close() })
 
-	// The axis settles at 100 with no smoothing, and one step of noise
-	// reaches the reader.
+	// With no fuzz, a change of one step reaches the reader.
 	writeFrames(t, device, [][2]int32{{evAbs, 100}, {evAbs, 101}})
-	if got := deliveredAxisValues(t, node); !slices.Contains(got, 101) {
+	if got := readAxisValues(t, node); !slices.Contains(got, 101) {
 		t.Fatalf("the untuned axis delivered %v, want the one-step change", got)
 	}
 
 	current, err := node.axisRange(0x00)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the axis range: %v", err)
 	}
 	tuned := tunedAxis(absAxis{Code: 0x00}, current, axisOverride{Fuzz: ptr(int32(4))})
 	if err := node.setAxisRange(0x00, tuned); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the axis range: %v", err)
 	}
 	if back, err := node.axisRange(0x00); err != nil || back.Fuzz != 4 {
-		t.Fatalf("the axis reports fuzz %d after the write: %v", back.Fuzz, err)
+		t.Fatalf("after the write, the axis has fuzz %d and error %v, want fuzz 4", back.Fuzz, err)
 	}
 
-	// One step of noise is now smaller than half the fuzz, so the
-	// kernel drops it and drops the frame it emptied. A real move
-	// still arrives.
+	// After the fuzz is set, a change of one step is below half the
+	// fuzz, so the kernel drops it and its frame. A larger move still
+	// arrives.
 	writeFrames(t, device, [][2]int32{{evAbs, 102}, {evAbs, 150}})
-	got := deliveredAxisValues(t, node)
+	got := readAxisValues(t, node)
 	if slices.Contains(got, 102) {
 		t.Errorf("the tuned axis delivered %v, want the one-step change dropped", got)
 	}
@@ -340,8 +325,8 @@ func TestTuneARealAxisOnTheRealKernel(t *testing.T) {
 	}
 }
 
-// writeFrames injects one event and a frame marker for each pair, the
-// way a device reports a position change.
+// writeFrames writes one event and a SYN_REPORT for each pair of
+// type and value in frames, as a device reports a position change.
 func writeFrames(t *testing.T, device virtualDevice, frames [][2]int32) {
 	t.Helper()
 	var records []byte
@@ -350,6 +335,6 @@ func writeFrames(t *testing.T, device virtualDevice, frames [][2]int32) {
 		records = append(records, rawEvent(evSyn, 0, 0)...)
 	}
 	if err := device.write(records); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the frames to the virtual device: %v", err)
 	}
 }

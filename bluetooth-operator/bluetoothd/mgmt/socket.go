@@ -8,16 +8,15 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// socket is the kernel's management channel. Each read returns one
-// whole packet.
+// socket is a raw HCI socket on the kernel's Bluetooth management
+// channel. Each Read returns one whole packet.
 type socket struct {
 	fd int
 }
 
-// Open opens an HCI socket and binds it to the control channel. The
-// kernel's SO_RCVTIMEO ends a read that waits longer than Timeout, so
-// a kernel that does not answer delays the caller by that long and no
-// more.
+// Open opens an HCI socket and binds it to the management (control)
+// channel. It sets SO_RCVTIMEO to Timeout, so a Read that gets no
+// reply fails after Timeout and does not block forever.
 func Open() (io.ReadWriteCloser, error) {
 	fd, err := unix.Socket(unix.AF_BLUETOOTH, unix.SOCK_RAW|unix.SOCK_CLOEXEC, unix.BTPROTO_HCI)
 	if err != nil {

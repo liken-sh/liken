@@ -1,26 +1,22 @@
 package main
 
-// The radio's privacy setting and its identity key, which bluetoothd
-// reads once at start.
+// bondfetch sets up an adapter's Low Energy privacy before bluetoothd
+// starts, because bluetoothd reads both the setting and the identity
+// key only at start.
 //
-// A person turns Low Energy privacy on for one radio with the
-// Adapter's spec.privacy. bluetoothd reads the Privacy key from its
-// main.conf and sends it to the kernel when the adapter starts, and the
-// kernel accepts it only while the radio is powered off. So the value
-// has to be in place before bluetoothd starts, and this program is the
-// part of the pod that runs then and holds an API client and the
-// radio's address. It writes the value into the pod's settings volume
-// (settings.go), and start-bluetoothd writes main.conf from it.
+// spec.privacy on the Adapter becomes the Privacy key of bluetoothd's
+// main.conf. bluetoothd sends it to the kernel when it starts the
+// adapter, and the kernel accepts it only while the adapter is powered
+// off. bondfetch runs before bluetoothd, writes spec.privacy into the
+// pod's settings volume (settings.go), and start-bluetoothd writes
+// main.conf from that file. The file also records the value that
+// bluetoothd started with. When spec.privacy changes, the operator
+// deletes its own pod, so bondfetch runs again with the new value.
 //
-// The settings file also tells the operator which value bluetoothd
-// started with. The operator compares it with spec.privacy on each
-// pass, and deletes its own pod when the two differ, so this program
-// runs again and writes the new value.
-//
-// With privacy on, bluetoothd derives the radio's rotating address
-// from the key in <adapter>/identity. This program writes that file
-// back from its Secret, so the radio keeps the identity its bonded
-// peers know (bonds/identity.go).
+// With privacy on, bluetoothd derives the adapter's rotating address
+// from the key in <adapter>/identity. bondfetch restores that file from
+// its Secret, so the adapter keeps the identity that its bonded peers
+// have stored (bonds/identity.go).
 
 import (
 	"errors"
@@ -30,26 +26,26 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// privacyOff is BlueZ's default, and the value of an empty
-// spec.privacy.
+// privacyOff is the value for an empty spec.privacy, and BlueZ's
+// default.
 const privacyOff = "off"
 
-// restoreIdentity writes the radio's identity file into the tree
-// bluetoothd reads: the stored file when the radio has one, and a new
-// random key when privacy is on and nothing is stored.
+// restoreIdentity writes the adapter's identity file into the tree that
+// bluetoothd reads. It writes the stored key when the Secret has one,
+// and a new random key when privacy is on and no key is stored. With
+// privacy off and no stored key, it writes nothing.
 //
-// bluetoothd makes a missing key itself (generate_and_write_irk in
-// BlueZ's src/adapter.c), but it draws the random bytes through the
-// kernel's AF_ALG socket. Ubuntu's kernel builds that socket's support
-// as modules, and on a machine that does not load them bluetoothd logs
-// "Failed to open crypto" and starts with privacy off. A key that this
-// program writes needs no kernel crypto, and the operator stores it in
-// the identity Secret on its first pass.
+// bluetoothd creates a missing key itself (generate_and_write_irk in
+// BlueZ's src/adapter.c), but it reads the random bytes from the
+// kernel's AF_ALG socket. Ubuntu's kernel builds that support as
+// modules, and on a machine that does not load them, bluetoothd logs
+// "Failed to open crypto" and starts with privacy off. A key generated
+// here needs no kernel crypto, and the operator copies it into the
+// identity Secret on its first pass.
 //
-// A radio with privacy off and no stored file gets no file, because
-// bluetoothd reads the key only when privacy is on. Any failure to
-// read the Secret is an error, because a new key would replace the one
-// that the radio's bonded peers hold.
+// An error other than not found from reading the Secret fails the
+// restore, because a new key would replace the one that the bonded
+// peers have.
 func restoreIdentity(api *apiclient.Client, namespace string, adapter bonds.Address, root, privacy string) error {
 	secret, err := apiclient.Get[bonds.Secret](api, bonds.IdentitySecretPath(namespace, adapter))
 	if err != nil && !errors.Is(err, apiclient.ErrNotFound) {

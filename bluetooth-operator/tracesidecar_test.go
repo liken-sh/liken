@@ -7,7 +7,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// initContainerNames lists the names of the pod's init containers, in the
+// initContainerNames returns the names of the init containers, in the
 // order the kubelet starts them.
 func initContainerNames(containers []corev1.Container) []string {
 	names := make([]string, 0, len(containers))
@@ -17,12 +17,12 @@ func initContainerNames(containers []corev1.Container) []string {
 	return names
 }
 
-// btmon and start-rescan read only what happens after they bind the
-// monitor channel, so both start before bluetoothd. The commands that
-// bluetoothd sends at adapter registration, which tell the kernel
-// which bonded devices may reconnect, are then in the trace, and
-// start-rescan learns from them which devices to add again. bondfetch
-// runs to completion first, as the comment on the pod explains.
+// When bluetoothd registers the adapter, it sends the kernel the list
+// of bonded devices that may reconnect, and rescan reads those commands
+// from the monitor channel to learn which devices to add again. btmon
+// and rescan receive only the traffic after they bind the channel, so
+// both must start before bluetoothd. bondfetch runs to completion first,
+// for the reason given in deploy/operator.yaml.
 func TestTheMonitorReadersStartBeforeBluetoothd(t *testing.T) {
 	daemonSet := daemonSetIn(t, "deploy/operator.yaml")
 	got := initContainerNames(daemonSet.Spec.Template.Spec.InitContainers)
@@ -32,9 +32,9 @@ func TestTheMonitorReadersStartBeforeBluetoothd(t *testing.T) {
 	}
 }
 
-// btmon buffers its output fully when stdout is a pipe, and the
-// container log is a pipe. A terminal makes the C library flush each
-// line, so a line reaches the log when btmon writes it.
+// btmon buffers its output in full when stdout is a pipe, and the
+// container log is a pipe. With a TTY, the C library flushes each line,
+// so every line reaches the log as btmon writes it.
 func TestTheTraceWritesToATerminal(t *testing.T) {
 	daemonSet := daemonSetIn(t, "deploy/operator.yaml")
 	trace := daemonSet.Spec.Template.Spec.InitContainers[1]
@@ -43,8 +43,8 @@ func TestTheTraceWritesToATerminal(t *testing.T) {
 	}
 }
 
-// settingsMount answers the mount of the settings volume in one
-// container, and fails the test when the container has none.
+// settingsMount returns the container's mount of the settings volume,
+// and fails the test when the container has none.
 func settingsMount(t *testing.T, container corev1.Container) corev1.VolumeMount {
 	t.Helper()
 	for _, mount := range container.VolumeMounts {
@@ -56,9 +56,9 @@ func settingsMount(t *testing.T, container corev1.Container) corev1.VolumeMount 
 	return corev1.VolumeMount{}
 }
 
-// start-btmon runs the trace, and reads its setting from the settings
-// volume. The operator writes that setting, so its own mount is
-// writable, and the trace's mount is not.
+// start-btmon reads the trace setting from the settings volume. The
+// operator writes that setting, so it mounts the volume writable, and
+// the btmon container mounts it read-only.
 func TestTheTraceReadsItsSettingFromTheSettingsVolume(t *testing.T) {
 	daemonSet := daemonSetIn(t, "deploy/operator.yaml")
 	trace := daemonSet.Spec.Template.Spec.InitContainers[1]

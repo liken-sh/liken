@@ -9,9 +9,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// datagram builds one uevent datagram the way the kernel frames it:
-// "action@devpath", then KEY=VALUE pairs, with a NUL byte after every
-// part.
+// datagram frames a uevent the way the kernel does.
 func datagram(header string, pairs ...string) []byte {
 	return []byte(header + "\x00" + strings.Join(pairs, "\x00") + "\x00")
 }
@@ -24,27 +22,27 @@ func TestParseUevent(t *testing.T) {
 		"HID_UNIQ=a0:ab:51:33:b7:12",
 	))
 	if !ok {
-		t.Fatal("the datagram did not parse")
+		t.Fatal("parseUevent rejected a well-formed datagram, want it parsed")
 	}
 	if action != "add" {
-		t.Errorf("action = %q", action)
+		t.Errorf("action is %q, want add", action)
 	}
 	if devpath != "/devices/virtual/misc/uhid/0005:054C:0CE6.0001" {
-		t.Errorf("devpath = %q", devpath)
+		t.Errorf("devpath is %q, want the uhid device path", devpath)
 	}
 	if values["SUBSYSTEM"] != "hid" || values["HID_UNIQ"] != "a0:ab:51:33:b7:12" {
-		t.Errorf("values = %v", values)
+		t.Errorf("values are %v, want SUBSYSTEM=hid and HID_UNIQ=a0:ab:51:33:b7:12", values)
 	}
 }
 
 func TestParseUeventRejectsLibudevMessage(t *testing.T) {
-	// libudev's own messages share the socket and start with a magic
+	// libudev's messages share the socket and start with a magic
 	// prefix instead of "action@devpath".
 	if _, _, _, ok := parseUevent([]byte("libudev\x00\xfe\xed\xca\xfe")); ok {
-		t.Fatal("a libudev message parsed as a uevent")
+		t.Fatal("parseUevent accepted a libudev message, want it rejected")
 	}
 	if _, _, _, ok := parseUevent(nil); ok {
-		t.Fatal("an empty datagram parsed as a uevent")
+		t.Fatal("parseUevent accepted an empty datagram, want it rejected")
 	}
 }
 
@@ -98,10 +96,10 @@ func TestHIDEventFrom(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			event, ok := kernelEventFrom(c.datagram, newDevpathMACs())
 			if ok != c.wantOK {
-				t.Fatalf("ok = %v, want %v", ok, c.wantOK)
+				t.Fatalf("ok is %v, want %v", ok, c.wantOK)
 			}
 			if ok && event != c.want {
-				t.Fatalf("event = %+v, want %+v", event, c.want)
+				t.Fatalf("event is %+v, want %+v", event, c.want)
 			}
 		})
 	}
@@ -113,31 +111,26 @@ func TestHIDRemoveResolvesThroughTheMap(t *testing.T) {
 	macs := newDevpathMACs()
 
 	if _, ok := kernelEventFrom(datagram("add@"+devpath, "SUBSYSTEM=hid", "HID_UNIQ="+mac), macs); !ok {
-		t.Fatal("the add did not produce an event")
+		t.Fatal("the add datagram produced no event, want one")
 	}
-	// A remove arrives after sysfs is gone. This one also drops
-	// HID_UNIQ, so the map is the only record of which controller
-	// left.
+	// This remove has no HID_UNIQ.
 	event, ok := kernelEventFrom(datagram("remove@"+devpath, "SUBSYSTEM=hid"), macs)
 	if !ok {
-		t.Fatal("the remove did not produce an event")
+		t.Fatal("the remove datagram produced no event, want one")
 	}
 	if event != (kernelEvent{Subsystem: "hid", Action: "remove", MAC: mac}) {
-		t.Fatalf("event = %+v", event)
+		t.Fatalf("event is %+v, want the remove with the MAC recorded by the add", event)
 	}
-	// The kernel reuses a DEVPATH for the next device in that slot, so
-	// the removal clears the entry.
+	// The remove deleted the entry, so a second remove finds no
+	// address.
 	if _, ok := kernelEventFrom(datagram("remove@"+devpath, "SUBSYSTEM=hid"), macs); ok {
-		t.Fatal("a second remove still resolved to a controller")
+		t.Fatal("a second remove still produced an event, want none because the first remove deleted the entry")
 	}
 }
 
-// An evdev node's uevent carries no HID_UNIQ. It names its controller
-// through the HID device it registers under, whose add came first, so
-// the relay can open the node before the settle window ends. An input
-// device that is not an evdev node, such as the inputN parent or a
-// joydev node, is not one the relay opens.
-func TestAnEvdevNodeNamesItsController(t *testing.T) {
+// An evdev node's uevent has no HID_UNIQ, so its controller comes from
+// the HID device the node is under.
+func TestInputEventFromResolvesControllerFromParentHIDDevice(t *testing.T) {
 	const hid = "/devices/virtual/misc/uhid/0005:054C:0CE6.0001"
 	const mac = "a0:ab:51:33:b7:12"
 
@@ -186,37 +179,34 @@ func TestAnEvdevNodeNamesItsController(t *testing.T) {
 			macs.resolve("add", hid, mac)
 			event, ok := kernelEventFrom(c.datagram, macs)
 			if ok != c.wantOK {
-				t.Fatalf("ok = %v, want %v", ok, c.wantOK)
+				t.Fatalf("ok is %v, want %v", ok, c.wantOK)
 			}
 			if ok && event != c.want {
-				t.Fatalf("event = %+v, want %+v", event, c.want)
+				t.Fatalf("event is %+v, want %+v", event, c.want)
 			}
 		})
 	}
 }
 
-func TestDevpathMACsPrefersTheDatagram(t *testing.T) {
+func TestDevpathMACsPrefersTheDatagramToTheMap(t *testing.T) {
 	const devpath = "/devices/virtual/misc/uhid/0005:054C:0CE6.0001"
 	macs := newDevpathMACs()
-	// An earlier add stored one controller's address for this path.
+	// An earlier add recorded one controller's address for this path.
 	macs.resolve("add", devpath, "A0:AB:51:33:B7:12")
 
-	// The same sysfs path now holds a different controller, and the
-	// datagram says so.
+	// A different controller now registers at the same path, and its
+	// datagram carries its own address.
 	if got := macs.resolve("add", devpath, "B4:8C:9D:11:22:33"); got != "b4:8c:9d:11:22:33" {
-		t.Fatalf("resolve = %q, want b4:8c:9d:11:22:33", got)
+		t.Fatalf("resolve of the add is %q, want b4:8c:9d:11:22:33", got)
 	}
 	if got := macs.resolve("remove", devpath, ""); got != "b4:8c:9d:11:22:33" {
-		t.Fatalf("resolve = %q, want the recorded address", got)
+		t.Fatalf("resolve of the remove is %q, want b4:8c:9d:11:22:33", got)
 	}
 }
 
-// EAGAIN and EINTR leave nothing unread. ENOBUFS is the case the check
-// exists for: the kernel's receive buffer overflowed, and it dropped
-// datagrams. Every other error gets the same answer as ENOBUFS, because
-// poll reported the socket ready and the call returned no datagram. The
-// wrapped case proves the check reads through %w.
-func TestRecvErrorLostAUevent(t *testing.T) {
+// Any error other than EAGAIN and EINTR counts as a loss, because poll
+// reported the socket ready and the receive still returned no datagram.
+func TestRecvErrorLostAUeventReportsLossForAllButEAGAINAndEINTR(t *testing.T) {
 	cases := []struct {
 		name string
 		err  error
@@ -237,17 +227,15 @@ func TestRecvErrorLostAUevent(t *testing.T) {
 	}
 }
 
-// The reader wakes the loop when a receive loses a datagram. The test
-// uses a descriptor number the process never opened, not one it
-// closed: the runtime can reuse a closed number before the reader
-// polls it. poll reports the never-opened number ready with POLLNVAL,
-// and Recvfrom on it fails with EBADF, which takes the same path as
-// ENOBUFS.
-func TestReadUeventsWakesOnALostDatagram(t *testing.T) {
+// The test passes a descriptor number the process never opened, because
+// the runtime can reuse the number of a closed descriptor before the
+// reader polls it. poll reports the unopened number with POLLNVAL, and
+// Recvfrom on it fails with EBADF.
+func TestReadUeventsSendsLostEventWhenReceiveFails(t *testing.T) {
 	const neverOpened = 1 << 20
 	var pipe [2]int
 	if err := unix.Pipe2(pipe[:], unix.O_CLOEXEC|unix.O_NONBLOCK); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the cancel pipe: %v", err)
 	}
 	events := make(chan kernelEvent, 1)
 	go readUevents(neverOpened, pipe[0], events)
@@ -255,10 +243,10 @@ func TestReadUeventsWakesOnALostDatagram(t *testing.T) {
 	select {
 	case event := <-events:
 		if !event.Lost {
-			t.Errorf("event = %+v, want a lost datagram", event)
+			t.Errorf("event is %+v, want Lost set", event)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("a lost datagram did not wake the loop")
+		t.Fatal("no event with Lost set arrived within 5 seconds of a failed receive")
 	}
 	unix.Close(pipe[1])
 	for range events {

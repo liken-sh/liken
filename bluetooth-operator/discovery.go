@@ -1,44 +1,30 @@
 package main
 
-// Finding a connected controller's evdev nodes in sysfs.
+// discoverHIDDevices finds the evdev nodes of the connected Bluetooth
+// controllers in sysfs. When a paired controller connects, the kernel
+// creates a HID device for it, and that HID device registers the input
+// nodes that a claiming pod receives. The walk lists /sys/bus/hid/devices
+// and keeps the devices whose bus type is 0005 (BUS_BLUETOOTH).
 //
-// A paired controller becomes a HID device when it connects, and the
-// HID device registers the input nodes that a consumer's pod
-// receives. The walk starts at /sys/bus/hid/devices, which lists
-// every HID device the kernel has, and keeps the ones whose bus type
-// is 0005, BUS_BLUETOOTH.
+// The walk does not require a device to be below the adapter in sysfs.
+// BlueZ 5.73 and later run the input plugin in uhid mode by default, and
+// the parent of a uhid device is /sys/devices/virtual/misc/uhid, not hci0.
 //
-// The walk must not filter by sysfs ancestry to the adapter. BlueZ
-// 5.73 and later run the input plugin in uhid mode by default, and a
-// uhid device's parent is /sys/devices/virtual/misc/uhid, which has
-// no ancestry to hci0 at all. An ancestry filter finds nothing on a
-// current BlueZ, and it finds everything on an older one, so the bus
-// type is the test that works under both arrangements.
+// HID_UNIQ in a device's uevent file is the controller's MAC address,
+// which the ResourceSlice publishes as the device's identity. HID_PHYS is
+// the address of the local adapter that the controller connected through.
+// A device on another adapter belongs to the operator pod that claims
+// that adapter, so the walk drops it.
 //
-// HID_UNIQ in the device's uevent file holds the peer MAC address,
-// which is the identity the ResourceSlice publishes. HID_PHYS holds
-// the local adapter address the controller connects through, and the
-// walk keeps a device only when HID_PHYS names the adapter this
-// operator holds. A machine with a second adapter registers HID
-// devices on it too, and those belong to another operator. A device
-// with no HID_PHYS, or one that does not parse, is kept, so a
-// single-adapter machine never regresses.
+// The walk also reads the battery level from the kernel's power supply
+// class. A driver such as hid-playstation decodes the charge from the HID
+// reports and registers a power supply. bluetoothd passes those reports to
+// the kernel without decoding them, so BlueZ publishes no Battery1 for
+// such a device.
 //
-// The same walk reads a controller's battery. A HID device that states
-// its charge in its reports gets an entry in the kernel's power supply
-// class, under the HID device's own directory, and a driver such as
-// hid-playstation registers one for the controllers it knows. bluetoothd
-// forwards the HID reports to the kernel and does not decode them, so
-// BlueZ publishes no Battery1 for such a device, and this walk is the
-// one place the level can be read.
-//
-// The node paths come from DEVNAME, the same way liken's own delivery
-// walk reads them. DEVNAME for an evdev node is input/eventN, so the
-// node is /dev/input/eventN. joydev registers input/jsN through the
-// same subsystem, and the DEVNAME prefix leaves it out: the
-// kernel's own documentation calls joydev legacy, liken's kernel may
-// not enable CONFIG_INPUT_JOYDEV at all, and joydev publishes a
-// DualSense's motion sensors as a second jsN device.
+// The walk returns only input/eventN nodes. It skips the input/jsN nodes
+// of joydev, which the kernel documents as legacy, and which exposes a
+// DualSense's motion sensors as a second joystick.
 
 import (
 	"io/fs"
@@ -51,24 +37,18 @@ import (
 	"github.com/liken-sh/liken/bluetooth-operator/bonds"
 )
 
-// draSysfsRoot is the sysfs mount this driver reads: this walk reads
-// it for a controller's real nodes, and uinput.go reads it for the
-// node the kernel gave a virtual device. The pod runs in the host's
-// network namespace and reads the host's own sysfs. It is a variable
-// so the tests can point it at a tree they built.
+// draSysfsRoot is the sysfs mount that the operator reads. It is a
+// variable so that a test can point it at a tree that the test builds.
 var draSysfsRoot = "/sys"
 
-// busBluetooth is BUS_BLUETOOTH from the kernel's input.h, as the
-// first field of HID_ID spells it.
+// busBluetooth is BUS_BLUETOOTH from the kernel's input.h, in the form
+// of the first field of HID_ID.
 const busBluetooth = "0005"
 
-// hidDevice is one Bluetooth HID device as sysfs shows it now.
-// DevPath is the path below sysfs, the same string a uevent carries
-// as DEVPATH, so an add event and a walk name the same device the
-// same way.
-//
-// Battery is the level the kernel reports for this device, and nil
-// when the kernel registers no power supply under it.
+// hidDevice is one Bluetooth HID device found in sysfs. DevPath has the
+// form of a uevent's DEVPATH, so a device from a uevent and the same
+// device from a walk compare equal. Battery is nil when the device has no
+// power supply.
 type hidDevice struct {
 	MAC     string
 	DevPath string
@@ -77,39 +57,28 @@ type hidDevice struct {
 }
 
 // hidBattery is one entry of the kernel's power supply class. Name is
-// the entry's own directory name, which the Peripheral reports as the
-// source. Charging is nil when the kernel reports the status Unknown.
+// the entry's directory name, which the Peripheral reports as the source
+// of the level. Charging is nil when the status is not one that
+// chargingFrom recognizes.
 type hidBattery struct {
 	Name       string
 	Percentage int
 	Charging   *bool
 }
 
-// discoverHIDDevices lists the Bluetooth HID devices on the operator's
-// own adapter, with the evdev nodes each one registers. The result is
-// sorted by DevPath, so the same hardware always produces the same list
-// and the slice comparison reports real changes only.
-//
-// adapter is the address of the radio this operator holds. A device on
-// another adapter is left out. A zero adapter turns the filter off, so
-// a caller that has no adapter address keeps every device, which is the
-// single-adapter machine's behavior.
-//
-// A HID device with no valid HID_UNIQ is skipped. Bluetooth HID
-// always has one, and a device without it has no identity that a
-// claim could name.
+// discoverHIDDevices returns the Bluetooth HID devices on adapter, with
+// their evdev nodes, sorted by DevPath so that two walks of the same
+// hardware compare equal. A zero adapter returns the devices on every
+// adapter. A device whose HID_UNIQ is not a MAC address is skipped,
+// because a claim selects a device by its address.
 func discoverHIDDevices(sysRoot string, adapter bonds.Address) []hidDevice {
 	entries, err := os.ReadDir(filepath.Join(sysRoot, "bus", "hid", "devices"))
 	if err != nil {
-		// No HID bus means no controller has ever connected on this
-		// boot. That is an ordinary state, not a failure.
+		// bus/hid does not exist until the first HID device registers.
 		return nil
 	}
 	var devices []hidDevice
 	for _, entry := range entries {
-		// The bus entry is a symlink into the devices tree. The walk
-		// needs the real directory, so that its children are also real
-		// directories.
 		resolved, err := filepath.EvalSymlinks(filepath.Join(sysRoot, "bus", "hid", "devices", entry.Name()))
 		if err != nil {
 			continue
@@ -139,13 +108,9 @@ func discoverHIDDevices(sysRoot string, adapter bonds.Address) []hidDevice {
 	return devices
 }
 
-// onOperatorAdapter reports whether a HID device's HID_PHYS names the
-// adapter this operator holds. A zero adapter turns the test off, and a
-// HID_PHYS that is absent or does not parse passes it, so the filter
-// only ever removes a device it can place on a different adapter. Both
-// sides parse into a bonds.Address, so the comparison ignores case and
-// the colon or dash form, the same way an address comparison does
-// everywhere else.
+// onOperatorAdapter reports whether phys, a device's HID_PHYS, is
+// adapter. It returns true when adapter is zero or phys does not parse,
+// so a machine with one adapter keeps a device that reports no HID_PHYS.
 func onOperatorAdapter(phys string, adapter bonds.Address) bool {
 	if adapter.IsZero() {
 		return true
@@ -157,11 +122,10 @@ func onOperatorAdapter(phys string, adapter bonds.Address) bool {
 	return local == adapter
 }
 
-// nodesByMAC collects the evdev nodes of every HID device, keyed by
-// the controller that registered them. One controller can register
-// more than one HID device, and a DualSense registers a second input
-// device for its motion sensors, so a claim on one controller
-// receives every node under that address.
+// nodesByMAC returns the evdev nodes of the devices, keyed by MAC
+// address. A controller can register more than one HID device, and a
+// DualSense registers a second one for its motion sensors, so a claim on
+// a controller gets the nodes of all of them.
 func nodesByMAC(devices []hidDevice) map[string][]string {
 	nodes := map[string][]string{}
 	for _, device := range devices {
@@ -174,9 +138,8 @@ func nodesByMAC(devices []hidDevice) map[string][]string {
 	return nodes
 }
 
-// kernelBatteries keys the level of each Bluetooth HID device from one
-// walk by the peer address, so the Peripheral pass looks each device up
-// in one map.
+// kernelBatteries returns the battery of each device that has one,
+// keyed by the device's address.
 func kernelBatteries(devices []hidDevice) map[bonds.Address]*hidBattery {
 	batteries := map[bonds.Address]*hidBattery{}
 	for _, device := range devices {
@@ -192,10 +155,10 @@ func kernelBatteries(devices []hidDevice) map[bonds.Address]*hidBattery {
 	return batteries
 }
 
-// powerSupply reads the first power supply the kernel registered under
-// one HID device. A capacity that does not parse, or falls outside 0 to
-// 100, yields no battery, because the CRD bounds the field and the API
-// server would refuse the whole status write.
+// powerSupply returns the first power supply under a HID device whose
+// capacity is from 0 to 100. The CRD limits the percentage to that
+// range, and the API server rejects a status write with a value outside
+// it.
 func powerSupply(dir string) *hidBattery {
 	supplies := filepath.Join(dir, "power_supply")
 	entries, err := os.ReadDir(supplies)
@@ -216,9 +179,8 @@ func powerSupply(dir string) *hidBattery {
 	return nil
 }
 
-// chargingFrom reads the power supply class's status word. Charging and
-// Full mean the device draws power now, Discharging and Not charging
-// mean it does not, and Unknown means the kernel cannot say.
+// chargingFrom converts the status file of a power supply. It returns
+// nil for Unknown and for any other value it does not recognize.
 func chargingFrom(status string) *bool {
 	charging, discharging := true, false
 	switch status {
@@ -230,8 +192,6 @@ func chargingFrom(status string) *bool {
 	return nil
 }
 
-// readSysfsValue reads one single-value sysfs file. A missing file
-// reads as empty, which every caller treats as no value.
 func readSysfsValue(path string) string {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -240,9 +200,9 @@ func readSysfsValue(path string) string {
 	return strings.TrimSpace(string(raw))
 }
 
-// evdevNodes walks one HID device's subtree and returns the evdev
-// nodes below it. A directory that holds a `dev` file registers a
-// node, and its uevent file names the node's path under /dev.
+// evdevNodes returns the sorted /dev paths of the evdev nodes below a
+// HID device's directory. A directory with a dev file is a device node,
+// and DEVNAME in its uevent file is its path under /dev.
 func evdevNodes(dir string) []string {
 	var nodes []string
 	_ = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
@@ -263,9 +223,8 @@ func evdevNodes(dir string) []string {
 	return nodes
 }
 
-// devPath returns a resolved sysfs directory as the kernel spells it
-// in a uevent's DEVPATH: the path below the sysfs mount point, with a
-// leading slash.
+// devPath returns a sysfs directory in the form of a uevent's DEVPATH:
+// the path below the sysfs mount, with a leading slash.
 func devPath(sysRoot, resolved string) string {
 	relative, err := filepath.Rel(sysRoot, resolved)
 	if err != nil {
@@ -274,8 +233,8 @@ func devPath(sysRoot, resolved string) string {
 	return "/" + relative
 }
 
-// readUeventFile reads a sysfs uevent file, whose lines are KEY=VALUE.
-// A missing file gives an empty map, because a device can disappear
+// readUeventFile parses a uevent file of KEY=VALUE lines. It returns an
+// empty map when the file is missing, because a device can disappear
 // between the directory listing and this read.
 func readUeventFile(path string) map[string]string {
 	raw, err := os.ReadFile(path)

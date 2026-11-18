@@ -7,49 +7,48 @@ import (
 	"testing"
 )
 
-func TestBondSecretNameCarriesTheDevice(t *testing.T) {
-	// One Secret per bond, named after the device and not after the
-	// node or the pod, so the keys follow the hardware they belong to.
+func TestBondSecretNameContainsTheDeviceAddress(t *testing.T) {
+	// The name has no node or pod name in it, so the bond does not
+	// depend on which machine the radio is plugged into.
 	if got := BondSecretName(address(t, testDevice)); got != "bluetooth-bond-7c-66-ef-22-e7-80" {
-		t.Errorf("BondSecretName = %q", got)
+		t.Errorf("BondSecretName = %q, want bluetooth-bond-7c-66-ef-22-e7-80", got)
 	}
 }
 
-func TestSecretNameStillReadsTheOlderPerAdapterName(t *testing.T) {
-	// Nothing writes this name now. The operator reports the object so
-	// that a person deletes it, which takes the name.
+func TestSecretNameIsTheOlderPerAdapterName(t *testing.T) {
+	// The operator never creates this Secret. It reads the name only to
+	// report a leftover one.
 	if got := SecretName(address(t, testAdapter)); got != "bluetooth-bonds-04-4a-69-66-92-27" {
-		t.Errorf("SecretName = %q", got)
+		t.Errorf("SecretName = %q, want bluetooth-bonds-04-4a-69-66-92-27", got)
 	}
 }
 
-func TestBondSecretPathNamesTheOperatorsNamespace(t *testing.T) {
+func TestBondSecretPathIsInTheGivenNamespace(t *testing.T) {
 	want := "/api/v1/namespaces/bluetooth/secrets/bluetooth-bond-7c-66-ef-22-e7-80"
 	if got := BondSecretPath("bluetooth", address(t, testDevice)); got != want {
 		t.Errorf("BondSecretPath = %q, want %q", got, want)
 	}
 }
 
-// The label gathers one radio's bonds, because the init container
-// runs before bluetoothd and has no list of device addresses.
-func TestAdapterSelectorNamesTheRadio(t *testing.T) {
+// The init container runs before bluetoothd, so it has no list of
+// device addresses and lists the bonds by the adapter's label.
+func TestAdapterSelectorMatchesTheAdapterLabel(t *testing.T) {
 	want := "bluetooth.liken.sh/adapter=04-4a-69-66-92-27"
 	if got := AdapterSelector(address(t, testAdapter)); got != want {
 		t.Errorf("AdapterSelector = %q, want %q", got, want)
 	}
 }
 
-// A Secret that holds one bond and one that holds a whole adapter are
-// told apart by name, so the init container can apply the older
-// layout first and let the current one win.
-func TestOneBondReadsTheLayoutFromTheName(t *testing.T) {
+// OneBond tells the layouts apart by name, so the init container can
+// merge the older layout first and let the current one win.
+func TestOneBondDependsOnTheSecretName(t *testing.T) {
 	perBond := Secret{Metadata: SecretMeta{Name: BondSecretName(address(t, testDevice))}}
 	perAdapter := Secret{Metadata: SecretMeta{Name: SecretName(address(t, testAdapter))}}
 	if !perBond.OneBond() {
-		t.Errorf("%q did not read as one bond", perBond.Metadata.Name)
+		t.Errorf("OneBond is false for %q, want true", perBond.Metadata.Name)
 	}
 	if perAdapter.OneBond() {
-		t.Errorf("%q read as one bond", perAdapter.Metadata.Name)
+		t.Errorf("OneBond is true for %q, want false", perAdapter.Metadata.Name)
 	}
 }
 
@@ -58,13 +57,13 @@ func TestNewBondSecretHoldsTheDevicesFiles(t *testing.T) {
 		files(testInfo, testCache), nil, testOwner)
 
 	if secret.Metadata.Name != "bluetooth-bond-7c-66-ef-22-e7-80" {
-		t.Errorf("name = %q", secret.Metadata.Name)
+		t.Errorf("name = %q, want bluetooth-bond-7c-66-ef-22-e7-80", secret.Metadata.Name)
 	}
 	if secret.Metadata.Namespace != "bluetooth" {
-		t.Errorf("namespace = %q", secret.Metadata.Namespace)
+		t.Errorf("namespace = %q, want bluetooth", secret.Metadata.Namespace)
 	}
 	if secret.Type != "Opaque" {
-		t.Errorf("type = %q", secret.Type)
+		t.Errorf("type = %q, want Opaque", secret.Type)
 	}
 	want := map[string]string{
 		"app.kubernetes.io/name":     "bluetooth-operator",
@@ -73,25 +72,23 @@ func TestNewBondSecretHoldsTheDevicesFiles(t *testing.T) {
 	if !reflect.DeepEqual(secret.Metadata.Labels, want) {
 		t.Errorf("labels = %v, want %v", secret.Metadata.Labels, want)
 	}
-	// The Peripheral owns the Secret, so deleting the Peripheral collects
-	// the keys and no bond outlives the object that names it.
+	// The owner reference makes the garbage collector delete the Secret
+	// with its Peripheral.
 	if !reflect.DeepEqual(secret.Metadata.OwnerReferences, []Owner{testOwner}) {
-		t.Errorf("ownerReferences = %+v", secret.Metadata.OwnerReferences)
+		t.Errorf("ownerReferences = %+v, want %+v", secret.Metadata.OwnerReferences, []Owner{testOwner})
 	}
-	// Each key is the device's address in the one form a Secret key
-	// accepts, a colon is not legal in one, and the suffix names which
-	// of the device's two files the value holds.
+	// Each key is the device address with dashes, because a colon is not
+	// valid in a Secret key, plus a suffix for the file it holds.
 	if got := string(secret.Data["7c-66-ef-22-e7-80.info"]); got != testInfo {
-		t.Errorf("data[7c-66-ef-22-e7-80.info] = %q", got)
+		t.Errorf("data[7c-66-ef-22-e7-80.info] = %q, want %q", got, testInfo)
 	}
 	if got := string(secret.Data["7c-66-ef-22-e7-80.cache"]); got != testCache {
-		t.Errorf("data[7c-66-ef-22-e7-80.cache] = %q", got)
+		t.Errorf("data[7c-66-ef-22-e7-80.cache] = %q, want %q", got, testCache)
 	}
 }
 
-// A device paired before its cache entry was written has one file, and
-// the Secret holds one key for it. An empty value would restore an
-// empty cache file, which is not the same as no cache file.
+// A device with no cache file gets only the info key, because an empty
+// cache value would restore an empty cache file.
 func TestNewBondSecretWritesNoCacheKeyWithoutOne(t *testing.T) {
 	secret := NewBondSecret("bluetooth", address(t, testAdapter), address(t, testDevice),
 		files(testInfo, ""), nil, testOwner)
@@ -101,46 +98,45 @@ func TestNewBondSecretWritesNoCacheKeyWithoutOne(t *testing.T) {
 	}
 }
 
-// A Secret's data is base64 on the wire. encoding/json does that for
-// []byte, so an info file with any byte in it survives the round trip.
+// The API sends Secret data as base64, which encoding/json does for
+// []byte, so an info file with any bytes survives the round trip.
 func TestSecretDataIsBase64OnTheWire(t *testing.T) {
 	secret := NewBondSecret("bluetooth", address(t, testAdapter), address(t, testDevice),
 		files(testInfo, testCache), nil, testOwner)
 
 	body, err := json.Marshal(secret)
 	if err != nil {
-		t.Fatalf("marshalling: %v", err)
+		t.Fatalf("marshalling the Secret: %v", err)
 	}
 	var wire struct {
 		Data map[string]string `json:"data"`
 	}
 	if err := json.Unmarshal(body, &wire); err != nil {
-		t.Fatalf("unmarshalling: %v", err)
+		t.Fatalf("unmarshalling the wire form: %v", err)
 	}
 	decoded, err := base64.StdEncoding.DecodeString(wire.Data["7c-66-ef-22-e7-80.info"])
 	if err != nil {
 		t.Fatalf("the value is not base64: %v", err)
 	}
 	if string(decoded) != testInfo {
-		t.Errorf("decoded = %q", decoded)
+		t.Errorf("decoded info = %q, want %q", decoded, testInfo)
 	}
 
 	var read Secret
 	if err := json.Unmarshal(body, &read); err != nil {
-		t.Fatalf("reading it back: %v", err)
+		t.Fatalf("unmarshalling the Secret: %v", err)
 	}
 	device := read.Tree()[address(t, testDevice)]
 	if string(device.Info) != testInfo {
-		t.Errorf("info = %q", device.Info)
+		t.Errorf("info = %q, want %q", device.Info, testInfo)
 	}
 	if string(device.Cache) != testCache {
-		t.Errorf("cache = %q", device.Cache)
+		t.Errorf("cache = %q, want %q", device.Cache, testCache)
 	}
 }
 
-// A key that is not an address does not name a device. Skipping it lets
-// bluetoothd start with the bonds that are readable, where failing the
-// whole read would start it with none.
+// A key that is not a device's file is skipped, so bluetoothd starts
+// with the readable bonds.
 func TestSecretTreeSkipsKeysThatAreNotAddresses(t *testing.T) {
 	secret := Secret{Data: map[string][]byte{
 		"7c-66-ef-22-e7-80.info": []byte(testInfo),
@@ -152,17 +148,15 @@ func TestSecretTreeSkipsKeysThatAreNotAddresses(t *testing.T) {
 
 	tree := secret.Tree()
 	if len(tree) != 1 {
-		t.Fatalf("got %d bonds, want 1: %v", len(tree), tree)
+		t.Fatalf("the tree has %d bonds, want 1: %v", len(tree), tree)
 	}
 	if got := string(tree[address(t, testDevice)].Info); got != testInfo {
-		t.Errorf("info = %q", got)
+		t.Errorf("info = %q, want %q", got, testInfo)
 	}
 }
 
-// Some Secrets in the field hold one key for each device, the bare
-// address, holding the info file. Reading that layout costs a few
-// lines here; the alternative is a person who recreates the Secret by
-// pairing the controller again.
+// Some existing Secrets store each device's info file under its bare
+// address. Reading them saves pairing the controller again.
 func TestSecretTreeReadsTheBareAddressLayout(t *testing.T) {
 	secret := Secret{Data: map[string][]byte{
 		"7c-66-ef-22-e7-80": []byte(testInfo),
@@ -170,22 +164,20 @@ func TestSecretTreeReadsTheBareAddressLayout(t *testing.T) {
 
 	tree := secret.Tree()
 	if len(tree) != 1 {
-		t.Fatalf("got %d bonds, want 1: %v", len(tree), tree)
+		t.Fatalf("the tree has %d bonds, want 1: %v", len(tree), tree)
 	}
 	device := tree[address(t, testDevice)]
 	if string(device.Info) != testInfo {
-		t.Errorf("info = %q", device.Info)
+		t.Errorf("info = %q, want %q", device.Info, testInfo)
 	}
-	// The bare-address layout stored no cache file, so the restored
-	// device has none, and bluetoothd writes one at the next discovery.
+	// The bare-address layout has no cache file, so the restored device
+	// has none and bluetoothd writes one at its next discovery.
 	if len(device.Cache) != 0 {
 		t.Errorf("cache = %q, want none", device.Cache)
 	}
 }
 
-// The operator rewrites the Secret on the first pass that finds a
-// difference, and the write replaces the whole object, so both layouts
-// coexist only until then, and the current keys win while they do.
+// When a Secret has both key forms for a device, the suffixed key wins.
 func TestSecretTreeTakesTheCurrentLayoutOverTheBareAddress(t *testing.T) {
 	secret := Secret{Data: map[string][]byte{
 		"7c-66-ef-22-e7-80":       []byte("[LinkKey]\nKey=FF\n"),
@@ -195,20 +187,20 @@ func TestSecretTreeTakesTheCurrentLayoutOverTheBareAddress(t *testing.T) {
 
 	tree := secret.Tree()
 	if len(tree) != 1 {
-		t.Fatalf("got %d bonds, want 1: %v", len(tree), tree)
+		t.Fatalf("the tree has %d bonds, want 1: %v", len(tree), tree)
 	}
 	device := tree[address(t, testDevice)]
 	if string(device.Info) != testInfo {
-		t.Errorf("info = %q", device.Info)
+		t.Errorf("info = %q, want %q", device.Info, testInfo)
 	}
 	if string(device.Cache) != testCache {
-		t.Errorf("cache = %q", device.Cache)
+		t.Errorf("cache = %q, want %q", device.Cache, testCache)
 	}
 }
 
-// A cache key with no info key beside it names a device this adapter
-// holds no bond with. Restoring it would put an entry into BlueZ's
-// cache directory for hardware the machine has no claim on.
+// A cache key with no info key is not a bond. Restoring it would put
+// an entry in BlueZ's cache directory for a device that this adapter
+// is not paired with.
 func TestSecretTreeSkipsACacheKeyWithNoBond(t *testing.T) {
 	secret := Secret{Data: map[string][]byte{
 		"7c-66-ef-22-e7-80.info":  []byte(testInfo),
@@ -217,27 +209,28 @@ func TestSecretTreeSkipsACacheKeyWithNoBond(t *testing.T) {
 
 	tree := secret.Tree()
 	if len(tree) != 1 {
-		t.Fatalf("got %d bonds, want 1: %v", len(tree), tree)
+		t.Fatalf("the tree has %d bonds, want 1: %v", len(tree), tree)
 	}
 	if _, found := tree[address(t, testNeighbour)]; found {
-		t.Errorf("a device with no info file reached the tree: %v", tree)
+		t.Errorf("the tree has an entry for a device with no info file: %v, want none", tree)
 	}
 }
 
-// One round trip through the API, so that what the operator reads off
-// one machine is what the init container writes on the next.
+// A tree stored in a Secret and read back is unchanged, so the tree
+// that the operator stores from one machine is the tree that the init
+// container writes on the next.
 func TestSecretTreeReturnsWhatNewBondSecretStored(t *testing.T) {
 	tree := Tree{address(t, testDevice): files(testInfo, testCache)}
 
 	secret := NewBondSecret("bluetooth", address(t, testAdapter), address(t, testDevice),
 		tree[address(t, testDevice)], nil, testOwner)
 	if again := secret.Tree(); !equalTrees(tree, again) {
-		t.Fatalf("the tree changed on the way through a Secret: %v, want %v", again, tree)
+		t.Fatalf("the tree read back from the Secret is %v, want %v", again, tree)
 	}
 }
 
-// The init container gathers one radio's bonds out of several Secrets,
-// so the merge is what rebuilds the tree bluetoothd reads.
+// The init container reads one radio's bonds from several Secrets and
+// merges them into the tree that bluetoothd reads.
 func TestMergeGathersEveryBond(t *testing.T) {
 	one := Tree{address(t, testDevice): files(testInfo, testCache)}
 	two := Tree{address(t, testNeighbour): files(testInfo, "")}
@@ -245,7 +238,7 @@ func TestMergeGathersEveryBond(t *testing.T) {
 	one.Merge(two)
 
 	if len(one) != 2 {
-		t.Fatalf("got %d bonds, want 2: %v", len(one), one)
+		t.Fatalf("the tree has %d bonds, want 2: %v", len(one), one)
 	}
 }
 
@@ -257,31 +250,30 @@ var testOwner = Owner{
 	UID:        "8f0f0b32-0000-4000-8000-000000000001",
 }
 
-// The snapshot travels in the same Secret as the bond, under its own
-// key. The tree the init container writes ignores it: it is this
-// operator's own document, not one of BlueZ's files, and BlueZ owns
-// the tree.
+// The snapshot is stored in the bond's Secret under its own key. Tree
+// ignores it, because it is not a BlueZ file and the tree that the init
+// container writes belongs to BlueZ.
 func TestNewBondSecretHoldsTheEvdevSnapshot(t *testing.T) {
 	snapshot := []byte(`{"version":1,"nodes":[{"name":"Wireless Controller"}]}`)
 	secret := NewBondSecret("bluetooth", address(t, testAdapter), address(t, testDevice),
 		files(testInfo, testCache), snapshot, testOwner)
 
 	if got := string(secret.Data["7c-66-ef-22-e7-80.evdev"]); got != string(snapshot) {
-		t.Errorf("data[7c-66-ef-22-e7-80.evdev] = %q", got)
+		t.Errorf("data[7c-66-ef-22-e7-80.evdev] = %q, want %q", got, snapshot)
 	}
 	if got := string(secret.Snapshot(address(t, testDevice))); got != string(snapshot) {
-		t.Errorf("Snapshot = %q", got)
+		t.Errorf("Snapshot = %q, want %q", got, snapshot)
 	}
 	if got := string(secret.Snapshots()[address(t, testDevice)]); got != string(snapshot) {
-		t.Errorf("Snapshots = %q", got)
+		t.Errorf("Snapshots = %q, want %q", got, snapshot)
 	}
 	if got := secret.Tree()[address(t, testDevice)]; !got.Equal(files(testInfo, testCache)) {
-		t.Errorf("the tree read back %+v", got)
+		t.Errorf("the tree read back is %+v, want the info and cache files", got)
 	}
 }
 
-// A controller that has never connected has no snapshot, and the key
-// is absent rather than empty, so the two states stay apart.
+// A controller that has never connected has no snapshot, and its key
+// is absent and not empty.
 func TestNewBondSecretWritesNoEvdevKeyWithoutASnapshot(t *testing.T) {
 	secret := NewBondSecret("bluetooth", address(t, testAdapter), address(t, testDevice),
 		files(testInfo, testCache), nil, testOwner)

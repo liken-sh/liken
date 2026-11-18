@@ -6,12 +6,12 @@ toc: true
 
 # Devices
 
-This page describes what the operator publishes and what a claim on
-it delivers: the devices, their attributes and taints, the two device
-classes, and the objects of the pairing API. The operator is a
+`bluetooth-operator` publishes each paired controller as a device that
+a pod can claim, and [Pair a controller and give it to a
+pod](/docs/guides/pair-a-controller/) uses them. The operator is a
 [Dynamic Resource Allocation (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
-driver named `bluetooth.liken.sh`, and it publishes beside
-[`liken`](https://liken.sh/docs/)'s own driver on the same node.
+driver named `bluetooth.liken.sh`. It publishes its devices on the
+same node as [`liken`](https://liken.sh/docs/)'s own driver, `liken.sh`.
 
 ## The slice
 
@@ -45,182 +45,162 @@ per node, named `<node>-bluetooth.liken.sh`, beside `liken`'s own
             kind: {string: mediaBus}
             sound.liken.sh/supportsSound: {bool: true}
 
-The slice holds two kinds of device: one for each paired controller,
-and one [media bus](#the-media-bus) for the adapter itself.
+The slice has a device for each paired controller and a
+[media bus](#the-media-bus) device for the adapter.
 
-The controller list
-follows the paired set, whether or not each controller is connected.
-A paired controller that is switched off still publishes, so a pod
-can claim it and start when somebody turns it on.
-A controller leaves the slice only when it is unpaired, which is a
-`kubectl delete peripheral`.
+Every paired controller is in the slice, connected or not. A
+controller that is switched off stays in the slice, so a pod can claim
+it and start when someone turns it on. A controller leaves the slice
+only when you unpair it with `kubectl delete peripheral`.
 
-The media bus publishes as soon as `bluetoothd` names the adapter, so
-the slice exists on a machine with a radio and nothing paired to it.
-The whole slice is deleted only while no adapter has answered and
+The media bus appears as soon as `bluetoothd` reports the adapter, so
+a machine with a radio and no paired controller still has a slice. The
+operator deletes the slice only while no adapter has reported and
 nothing is paired.
 
-The device name is the controller's MAC in lowercase with dashes,
-because a DRA device name must be a DNS label. The media bus takes
-the adapter's own MAC in the same form, with a `-media` suffix. The
-MAC is the only
-identity on the machine that survives a reboot: the HID instance
-suffix in sysfs counts up from zero each boot, and the `hci0:N`
-handle changes on every reconnect, so a claim against either would
-allocate different hardware after a reboot.
+A device's name is the controller's MAC address in lowercase with
+dashes, because a DRA device name must be a DNS label. The media bus
+uses the adapter's MAC address in the same form, with a `-media`
+suffix. The operator names devices by MAC address because it is the
+only identity of a controller that survives a reboot. The HID instance
+number in sysfs starts again from zero at each boot, and the `hci0:N`
+connection handle changes at each reconnect, so a claim on either one
+could allocate a different device after a reboot.
 
 ## The attributes
 
-This section covers the paired controllers. [The media
-bus](#the-media-bus) carries its own three attributes, listed in its
-section.
+The attributes below belong to the controllers. [The media
+bus](#the-media-bus) has its own.
 
-A selector reads these as
+A selector reads an attribute as
 `device.attributes["bluetooth.liken.sh"].<name>`.
 
-Two attributes are on every controller this operator publishes, in
-every state, the departed-adapter republish included:
+Every controller always has these attributes, even after the adapter
+is unplugged:
 
 | Attribute | Type | What it is |
 |---|---|---|
 | `address` | string | the controller's MAC, uppercase with colons: `A0:AB:51:33:B7:12` |
-| `connected` | bool | whether `bluetoothd` holds a connection to it now |
+| `connected` | bool | whether `bluetoothd` is connected to it now |
 
-Every other attribute is present only when BlueZ reports the fact.
-The identity facts publish in two layers: the raw code, and the
-names and flags unpacked from it, so a selector never does bit
+The operator sets each of the other attributes only when BlueZ reports
+a value. The controller's class appears both as the raw code and as
+names and flags decoded from it, so a selector needs no bit
 arithmetic:
 
 | Attribute | Type | What it is |
 |---|---|---|
-| `name` | string | the controller's alias in BlueZ, cut to 64 characters |
+| `name` | string | the controller's alias in BlueZ, cut to 64 bytes |
 | `classOfDevice` | int | the raw 24-bit class word from the inquiry response |
-| `appearance` | int | the LE appearance value; an LE-only device often reports this and no class word |
-| `modalias` | string | the PnP vendor and product, as in `bluetooth:v000ApFFFFdFFFF`, cut to 64 characters |
-| `icon` | string | BlueZ's own class-to-icon name, such as `audio-headphones` or `input-gaming` |
+| `appearance` | int | the LE appearance value. A device that supports only LE often reports this and no class word |
+| `modalias` | string | the PnP vendor and product, as in `bluetooth:v000ApFFFFdFFFF`, cut to 64 bytes |
+| `icon` | string | the icon name that BlueZ derives from the class, such as `audio-headphones` or `input-gaming` |
 | `addressType` | string | `public` or `random` |
 | `majorClass` | string | class bits 12 to 8 as a name: `audio-video`, `peripheral`, `phone`, and the other assigned majors |
 | `minorClass` | string | class bits 7 to 2, read under the major: `headphones`, `gamepad`, `smartphone` |
 | `servicePositioning`, `serviceNetworking`, `serviceRendering`, `serviceCapturing`, `serviceObjectTransfer`, `serviceAudio`, `serviceTelephony`, `serviceInformation` | bool | one flag per service bit the class word sets, bits 16 to 23 |
 
-The profile flags come from the service UUIDs the device advertised
-when it paired. Each one is `true` when the profile is advertised
-and absent otherwise, and a UUID outside this vocabulary publishes
-nothing:
+The profile flags come from the service UUIDs that the device
+advertised when it paired. A flag is `true` when the device advertises
+the profile, and absent otherwise. The operator ignores any UUID that
+is not in this table:
 
 | Attribute | The profile |
 |---|---|
 | `audioSink` | A2DP sink: the device plays audio |
 | `audioSource` | A2DP source: the device sends audio |
-| `avrcpTarget` | the device takes play, pause, and volume |
-| `avrcpController` | the device sends play, pause, and volume |
+| `avrcpTarget` | the device accepts play, pause, and volume commands |
+| `avrcpController` | the device sends play, pause, and volume commands |
 | `handsfree` | HFP, the hands-free microphone profile |
 | `headset` | HSP, the headset microphone profile |
 | `input` | HID, classic or over GATT: the device is an input device |
 | `battery` | the device reports a battery level |
 | `serialPort` | raw RFCOMM serial |
 
-The input classes come from the evdev nodes the controller
-registered, not from Bluetooth. Each one is `true` when any of the
-controller's nodes carries the class and absent otherwise.
-
-The names are `udev`'s own `ID_INPUT_*` properties in lower case.
-The operator applies the rules of `systemd`'s `input_id` builtin to
-the bitmaps the kernel reports for each node, so a controller carries
-the classes `udevadm info` would print for it on any Linux machine.
-[The `inputs` parameter](#the-inputs-parameter) uses the same words
-to say which of them a claim receives.
-
-| Attribute | The class |
-|---|---|
-| `key` | the node carries `KEY_*` codes, or only a scroll wheel |
-| `keyboard` | the node carries every one of the first 31 key codes |
-| `mouse` | the node has a `BTN_MOUSE` button and relative axes |
-| `pointingstick` | the node is the stick between the keys |
-| `touchpad` | the node reports a finger and no pen, and is not direct |
-| `touchscreen` | the node reports touch on the display itself |
-| `tablet` | the node reports a stylus or a pen |
-| `tablet_pad` | the node is a tablet's own buttons and ring |
-| `joystick` | the node has joystick buttons or joystick axes |
-| `accelerometer` | the node reports motion |
-| `switch` | the node carries `EV_SW` codes |
+The input classes come from the kernel's evdev nodes for the
+controller, not from Bluetooth. They are `udev`'s `ID_INPUT_*`
+properties in lower case: `key`, `keyboard`, `mouse`, `pointingstick`,
+`touchpad`, `touchscreen`, `tablet`, `tablet_pad`, `joystick`,
+`accelerometer`, and `switch`. A class is `true` when any of the
+controller's nodes has it, and absent otherwise. [The `inputs`
+parameter](#the-inputs-parameter) has a table of what puts a node in
+each class.
 
 The operator reads a controller's capabilities the first time it
-connects and keeps them in the bond's `Secret`, so the classes stay
-published while the controller sleeps. A bond that has never
-connected carries `input` and no class, because the operator has not
-read a node for it yet.
+connects and stores them in the bond's `Secret`, so the classes stay in
+the slice while the controller sleeps. A bond that has never connected
+has `input` and no class, because the operator has not read its nodes
+yet.
 
-The split between always and absent is a contract. The operator
-omits an attribute it has no value for, rather than publishing it
-empty. A selector's read of an absent attribute does not evaluate to
-false; it fails, and the failure can abort the allocation instead of
-skipping the device. So a selector on anything past `address` and
-`connected` must guard the read:
+A CEL selector that reads a missing attribute does not evaluate to
+false. The read fails, and the failure can stop the allocation instead
+of skipping the device. So a selector that reads any attribute other
+than `address` and `connected` must test for it first:
 
     has(device.attributes["bluetooth.liken.sh"].name) &&
     device.attributes["bluetooth.liken.sh"].name.startsWith("DualSense")
 
-A selector that reads only `address` or `connected` needs no guard,
-because the `bluetooth-input` class already limits the candidates
-to this driver's paired input devices, and both attributes are always
-on them. Outside that class, the media bus carries `address` and no
-`connected`, so `connected` takes a guard like any other attribute.
+Through the `bluetooth-input` class, a selector can read `address` or
+`connected` with no test, because that class matches only paired input
+devices of this driver, and each of them has both attributes. Outside
+that class a selector must test `connected` too, because the media bus
+has `address` and no `connected`.
 
 ## The taints
 
-Three taints go on a controller, and they answer three different
-questions. The first two say the controller cannot serve a claim. The
-third says the claim it already serves holds the wrong nodes:
+A controller can have the taints in this table. `disconnected` and
+`no-input-node` mean that the controller cannot serve a claim now.
+`node-moved` means that a claim the controller already serves has the
+wrong device nodes:
 
 | Taint | Effect | When |
 |---|---|---|
-| `bluetooth.liken.sh/disconnected` | `NoExecute` | `bluetoothd` reports the controller disconnected, or the adapter itself has departed |
-| `bluetooth.liken.sh/no-input-node` | `NoSchedule` | the operator holds no virtual input node for the controller, which is a bond that has never connected since it was made |
-| `bluetooth.liken.sh/node-moved` | `NoExecute` | a prepared claim delivered nodes that are not the nodes the operator delivers for this controller now, which an operator restart can leave behind |
+| `bluetooth.liken.sh/disconnected` | `NoExecute` | `bluetoothd` reports the controller disconnected, or the adapter is unplugged |
+| `bluetooth.liken.sh/no-input-node` | `NoSchedule` | the operator has no virtual input node for the controller. This is true of a bond that has not connected since it was created |
+| `bluetooth.liken.sh/node-moved` | `NoExecute` | a prepared claim has device nodes that differ from the nodes the operator would give it now. This can happen after the operator restarts |
 
-The media bus takes one taint, and only when the adapter has
-departed:
+The media bus has a taint only when the adapter is unplugged:
 
 | Taint | Effect | When |
 |---|---|---|
-| `bluetooth.liken.sh/disconnected` | `NoSchedule` | the adapter has departed, so nothing answers on the bus |
+| `bluetooth.liken.sh/disconnected` | `NoSchedule` | the adapter is unplugged |
 
-The effect differs from the controllers' `NoExecute` on purpose. The
-pod that holds the bus is the machine's one sound server, so an
-eviction would end its other playback too, and that playback does not
-need the radio. `NoSchedule` parks the next claim and leaves the
-running holder alone.
+On the media bus the effect is `NoSchedule` and not `NoExecute`,
+because the pod that holds the bus is the machine's sound server. An
+eviction would also stop the sound that it plays through the machine's
+own sound hardware, which does not need the radio. `NoSchedule` keeps
+a new claim from allocating the bus, and leaves the running pod alone.
 
-**Tolerate `/disconnected` only.** The `NoExecute` taint evicts a
-claim holder after its `tolerationSeconds`, so tolerating it sets how
-long a radio may be silent before the pod ends. The `NoSchedule`
-taint must stay untolerated, because it parks a claim on a controller
-that has never connected as `Unschedulable`. Tolerate both and the
-scheduler allocates a controller the operator has no node for,
-`NodePrepareResources` fails, and the pod churns between
-`ContainerCreating` and eviction until somebody switches the
-controller on.
+**Tolerate `/disconnected` only.** The `NoExecute` taint evicts the pod
+that holds the claim after `tolerationSeconds`, so the toleration sets
+how long the controller can be disconnected before the pod is evicted.
+Do not tolerate `/no-input-node`. Without that toleration, a claim on a
+controller that has never connected waits until it can be scheduled.
+With it, the scheduler allocates a controller that the operator has no
+node for, `NodePrepareResources` fails, and the pod goes between
+`ContainerCreating` and eviction until someone switches the controller
+on.
 
-No consumer tolerates `/node-moved`. The pod holds device nodes that
-belong to another controller now, so its eviction is the repair: the
-kubelet unprepares the claim, and the container that replaces the
-evicted one is prepared with the nodes the operator delivers now.
+Do not tolerate `/node-moved` either. The pod has device nodes that now
+belong to another controller, and the eviction fixes that: the kubelet
+unprepares the claim, and the replacement container gets the current
+nodes.
 
 ## The media bus
 
-The media bus is one device per adapter: the claimable permission to
-connect to this pod's `bluetoothd` over its private D-Bus. A
+The media bus is a device for each adapter. A claim on it lets a pod
+connect to the operator pod's `bluetoothd` over a private D-Bus. A
 Bluetooth speaker creates no kernel device. Its audio exists only
-while a sound server holds this bus and keeps a media endpoint
-registered, and BlueZ advertises no A2DP until an endpoint registers.
+while a sound server is connected to this bus and has registered a
+media endpoint, because BlueZ does not advertise A2DP until an endpoint
+registers.
 
-The audio operator claims the bus through
-`sound.liken.sh/supportsSound`, the attribute `liken` also stamps on
-each sound card it publishes. That operator's class names the
-attribute and no driver, so one claim collects every device on a node
-that can serve a sound server. This operator ships no class for the
-bus and runs no sound server itself.
+`audio-operator` claims the bus through the attribute
+`sound.liken.sh/supportsSound`, which `liken` also sets on each sound
+card it publishes. The `DeviceClass` of `audio-operator` selects on
+that attribute and names no driver, so one claim can match any device
+on a node that a sound server can use. `bluetooth-operator` has no
+device class for the bus and runs no sound server.
 
 | Attribute | Type | What it is |
 |---|---|---|
@@ -228,54 +208,52 @@ bus and runs no sound server itself.
 | `kind` | string | `mediaBus` |
 | `sound.liken.sh/supportsSound` | bool | always `true` |
 
-`sound.liken.sh/supportsSound` is the one qualified name in this
-driver's attributes. It uses a domain neither driver owns, so a
-selector reads it as
-`device.attributes["sound.liken.sh"].supportsSound`, where every
-other attribute here reads under `bluetooth.liken.sh`.
+`sound.liken.sh/supportsSound` is in its own domain, so a selector
+reads it as `device.attributes["sound.liken.sh"].supportsSound`. Every
+other attribute of this driver is under `bluetooth.liken.sh`.
 
-The bus never carries `input`, so the `bluetooth-input` class, which
-guards on that attribute, never matches it.
+The bus never has the `input` attribute, so the `bluetooth-input`
+class never matches it.
 
-The device is exclusive, which is `resource.k8s.io/v1`'s default: one
-radio serves one sound server, because two media endpoints registered
-on one `bluetoothd` have no contract over the streams.
+The device is exclusive, which is the default in `resource.k8s.io/v1`.
+A radio serves one sound server, because the behavior of the streams
+is not defined when two media endpoints register with one `bluetoothd`.
 
-A claim on the bus delivers a read-only mount of
-`/var/run/bluetooth.liken.sh/dbus` at the same path inside the
-container, and one environment variable that names the socket in it.
-No device node, no privilege, and no other host path.
+A claim on the bus gives the container a read-only mount of
+`/var/run/bluetooth.liken.sh/dbus` at the same path, and this
+environment variable, which names the socket in that directory:
 
     DBUS_SYSTEM_BUS_ADDRESS=unix:path=/var/run/bluetooth.liken.sh/dbus/system_bus_socket
 
+It gives the container no device node, no privilege, and no other host
+path.
+
 ## The device classes
 
-The operator takes two
-[`DeviceClasses`](https://kubernetes.io/docs/reference/kubernetes-api/resource/device-class-v1/),
-and they split by owner:
+Your workloads and the operator's own pod claim devices through these
+[`DeviceClasses`](https://kubernetes.io/docs/reference/kubernetes-api/resource/device-class-v1/):
 
 | `DeviceClass` | Selector | Who claims it |
 |---|---|---|
-| `bluetooth-input` | `device.driver == "bluetooth.liken.sh"` and the `input` attribute, guarded | your workloads, one paired input device each |
-| `bluetooth-adapter` | `device.driver == "liken.sh" && has(device.attributes["liken.sh"].driver) && device.attributes["liken.sh"].driver == "btusb"` | the operator's own pod, for the raw radio |
+| `bluetooth-input` | `device.driver == "bluetooth.liken.sh"` and the `input` attribute, guarded | your workloads, for one paired input device each |
+| `bluetooth-adapter` | `device.driver == "liken.sh" && has(device.attributes["liken.sh"].driver) && device.attributes["liken.sh"].driver == "btusb"` | the operator's own pod, for the device that `liken` publishes for the radio's `btusb` driver |
 
-`bluetooth-adapter` ships with the deploy base, because the
-operator's own claim template names it and the pod cannot start
-without it. `bluetooth-input` is yours to create, because a class a
-workload claims through is cluster policy, and
-[Install the operator](/docs/guides/install/) gives its YAML. A class
-of your own can also carry a default [`inputs`
-block](#the-inputs-parameter). It
-selects the `input` attribute rather than the whole driver, because
-the driver publishes more than input devices: a paired speaker
-publishes as its bond record, no workload should hold one, and the
-media bus belongs to the machine's sound server.
+`bluetooth-adapter` is in the deploy base, because the operator's own
+claim template uses it and the pod cannot start without it. You create
+`bluetooth-input` yourself, because which devices your workloads may
+claim is a policy of your cluster. [Install the
+operator](/docs/guides/install/) has its YAML. A class of your own can
+also set a default [`inputs` block](#the-inputs-parameter). The class
+selects on the `input` attribute and not on the whole driver, because
+the driver also publishes devices that no workload should claim: a
+paired speaker, which has no `input` attribute, and the media bus,
+which belongs to the machine's sound server.
 
 ## The claim
 
 A [`ResourceClaim`](https://kubernetes.io/docs/reference/kubernetes-api/resource/resource-claim-v1/)
-against `bluetooth-input` alone allocates any paired input device.
-To name one, add a selector on its address:
+that names only `bluetooth-input` can allocate any paired input
+device. To choose one controller, add a selector on its address:
 
     spec:
       devices:
@@ -294,20 +272,19 @@ To name one, add a selector on its address:
                   tolerationSeconds: 30
 
 [Pair a controller and give it to a pod](/docs/guides/pair-a-controller/)
-gives the whole flow, with the pod that takes the claim. In a
-`Deployment`, claim through a `ResourceClaimTemplate` rather than a
-standing `ResourceClaim`, because a standing claim keeps its
-allocation across an eviction.
+covers the whole procedure, including the pod that uses the claim. In
+a `Deployment`, use a `ResourceClaimTemplate` and not a separate
+`ResourceClaim`, because a separate claim keeps its allocation after
+a pod is evicted.
 
 ## The inputs parameter
 
-A controller publishes every capability it has, and a claim states
-which classes of input the container receives. The two are separate
-because a consumer rarely wants everything. A DualSense at rest
-reports about 2400 motion events a second on its accelerometer node,
-and a pod that reads its buttons would drop every one of them. With
-`inputs`, a class nobody asked for is delivered to nobody, and its
-events never leave the kernel.
+A claim's `inputs` parameter chooses which input classes reach the
+container. Most consumers want only some of them. A DualSense sends a
+steady stream of motion events from its accelerometer, and a pod that
+reads only the buttons would have to discard them all. When a claim
+sets `inputs`, the operator does not pass the events of the other
+classes to the container.
 
     spec:
       devices:
@@ -323,14 +300,14 @@ events never leave the kernel.
                 inputs: [joystick]
 
 A claim with no configuration block, or with a block that has no
-`inputs` key, receives every class. An empty list is refused when the
-claim is prepared, and the pod stays in `ContainerCreating` with the
-refusal in its events. A name outside the table below is refused the
-same way, and the message lists the names.
+`inputs` key, receives every class. The operator rejects an empty list
+or a name that is not in the table below when it prepares the claim.
+The pod then stays in `ContainerCreating`, and its events show the
+error, which lists the valid names.
 
-The classes are `udev`'s `ID_INPUT_*` properties in lower case, and
-the rules that assign them are a port of `systemd`'s `input_id`
-builtin. `udevadm info` on any input device prints the same words.
+The operator assigns the classes with a port of the rules in
+`systemd`'s `input_id` builtin, so `udevadm info` on any input device
+prints the same names:
 
 | Class | The `udev` property | What qualifies |
 |---|---|---|
@@ -346,21 +323,21 @@ builtin. `udevadm info` on any input device prints the same words.
 | `accelerometer` | `ID_INPUT_ACCELEROMETER` | the `INPUT_PROP_ACCELEROMETER` property, or three absolute axes and no keys |
 | `switch` | `ID_INPUT_SWITCH` | any `EV_SW` code |
 
-A node can carry several classes, the way `udev` sets several
-properties on one node: a remote with a gyroscopic cursor is `key`
-and `mouse` at once. The operator meets the demand per node. A node
-no prepared claim asks for is never read. A node that carries a class
-the claim asked for and one it did not is narrowed to the event types
-of the classes it asked for, so that remote claimed with
-`inputs: [key]` delivers its keys and none of its pointer motion.
+A node can be in several classes, just as `udev` can set several
+properties on one node. A remote with a gyroscopic cursor is both `key`
+and `mouse`. The operator does not read a node that no prepared claim
+asks for. When a node is in a class that the claim asked for and in one
+that it did not, the operator passes on only the event types of the
+classes that the claim asked for. So a claim with `inputs: [key]` on
+that remote receives its keys and none of its pointer motion.
 
-Two claims on one controller each receive what they asked for. The
-operator delivers the union of what the prepared claims demand, and
-narrows again when one of them ends.
+When two claims use one controller, each receives the classes it asked
+for. The operator passes on the union of the classes that the prepared
+claims ask for, and passes on fewer when a claim ends.
 
-A default belongs on a `DeviceClass`. A class of your own may carry
-an `inputs` block, and every claim through that class receives it. A
-claim's own block wins over the class's.
+To set a default, put `inputs` in a `DeviceClass` of your own. Every
+claim through that class receives it, and a claim's own `inputs` block
+overrides the class's.
 
     apiVersion: resource.k8s.io/v1
     kind: DeviceClass
@@ -378,23 +355,23 @@ claim's own block wins over the class's.
             parameters:
               inputs: [joystick]
 
-The selector and the `inputs` block are two separate statements: the
-selector picks which devices the claim may allocate, and `inputs`
-decides which events reach the container once one is allocated.
+The selector chooses which devices the claim can allocate, and
+`inputs` chooses which events reach the container after the device is
+allocated.
 
-The `bluetooth-input` class that [Install the
-operator](/docs/guides/install/) gives carries no `inputs` block, so a
-claim through it receives every class. A class can carry [an `axes`
-block](#the-axes-parameter) the same way.
+The `bluetooth-input` class in [Install the
+operator](/docs/guides/install/) has no `inputs` block, so a claim
+through it receives every class. A class can also set [an `axes`
+block](#the-axes-parameter).
 
 ## The axes parameter
 
-A stick reports position noise while it rests. A DualSense's right
-stick moves one step on `ABS_RX` and `ABS_RY` about 270 times a second
-per axis with nobody touching it, so its node emits about a thousand
-events a second, and every reader of the node pays for each one. The
-kernel's answer to a noisy axis is the axis's fuzz, and `axes` is
-where a claim sets it.
+An analog stick at rest reports small changes of position from noise.
+A DualSense's right stick does this all the time on `ABS_RX` and
+`ABS_RY`, so its node sends a steady stream of events, and every
+program that reads the node must process each one. The kernel filters
+a noisy axis with the axis's `fuzz` value, and the `axes` parameter
+sets that value for a claim:
 
     spec:
       devices:
@@ -412,154 +389,162 @@ where a claim sets it.
                   ABS_RX: {fuzz: 4}
                   ABS_RY: {fuzz: 4}
 
-The input core drops a position change smaller than half the axis's
-fuzz and smooths one smaller than the fuzz before any handler sees
-it, and it reports a position within the flat of the axis centre as
-the centre.
+Before any program reads an event, the kernel's input core drops a
+change of position that is smaller than half the axis's `fuzz`, and
+smooths a change that is smaller than `fuzz`. It reports any position
+within `flat` of the centre as the centre.
 
-This is what `systemd`'s hwdb does for known devices: its `EVDEV_ABS_`
-entries in `60-evdev.hwdb` set the same two fields with the same
-`EVIOCSABS` ioctl. The operator carries no hardware database, and the
-claim holder knows the pad, so the claim states them instead.
+On other Linux machines, `systemd`'s hwdb sets the same two values for
+known devices, through the `EVDEV_ABS_` entries in `60-evdev.hwdb` and
+the same `EVIOCSABS` ioctl. The operator has no hardware database, so
+the claim sets the values.
 
-The keys are the kernel's own `ABS_*` code names, from
-`linux/input-event-codes.h`. Each one takes `fuzz`, `flat`, or both,
+The keys are the kernel's `ABS_*` code names from
+`linux/input-event-codes.h`. Each key takes `fuzz`, `flat`, or both,
 and no other field:
 
 | Field | What it is |
 |---|---|
-| `fuzz` | the noise of the axis, in steps of its own range |
-| `flat` | the dead zone around the axis centre, in the same steps |
+| `fuzz` | the size of the noise to filter out, in units of the axis's own range |
+| `flat` | the size of the dead zone around the centre, in the same units |
 
-A code name outside the kernel's list, a field beside those two, or a
-negative value is refused when the claim is prepared. The pod stays
-in `ContainerCreating`, and the message names what is accepted.
-`ABS_MT_SLOT` is refused too, because the kernel does not change the
-number of contacts a device reserved.
+When it prepares the claim, the operator rejects a code name that is
+not in the kernel's list, any other field, and a negative value. The
+pod stays in `ContainerCreating`, and the error lists what the
+operator accepts. The operator also rejects `ABS_MT_SLOT`, because the
+kernel does not let a program change the number of contacts that a
+device reports.
 
-An axis takes the largest `fuzz` and the largest `flat` any prepared
-claim on the controller states, so each claim receives at least the
-smoothing it asked for. An axis no remaining claim states goes back
-to the values the device reported when it first connected, which the
-operator keeps in the bond's `Secret`.
+For each axis, the operator uses the largest `fuzz` and the largest
+`flat` among the prepared claims on the controller, so each claim gets
+at least the filtering it asked for. When no remaining claim sets
+values for an axis, the axis goes back to the values that the device
+reported when it first connected. The operator stores those values in
+the bond's `Secret`.
 
-The operator writes the values to the controller's real node when the
-claim is prepared, and again each time the controller reconnects,
-because a reconnect is a new kernel device that carries none of them.
+The operator writes the values to the controller's kernel node when it
+prepares the claim, and again each time the controller reconnects,
+because a reconnect creates a new kernel device with the device's own
+values.
 
 ## What a claim delivers
 
-What a claim delivers depends on the device it allocated. Both kinds
-arrive the same way, through the Container Device Interface (CDI) at
-container creation, and neither delivers any privilege.
+The kubelet passes what a claim grants to the container runtime
+through the Container Device Interface (CDI) when it creates the
+container. Neither kind of claim gives the container extra privilege.
 
-A claim on a controller delivers device nodes, and nothing else:
-`/dev/input/event*`, one for each evdev node the controller
-registers. No host mount, no environment variable. The container's
-user must be able to open the nodes. Every node is delivered whatever
-the claim asked for, and [the `inputs`
-parameter](#the-inputs-parameter) decides which events arrive on
-each. A claim on the media bus delivers the mount and the variable
-that [The media bus](#the-media-bus) lists, and no device node.
+A claim on a controller gives the container device nodes and nothing
+else: a `/dev/input/event*` for each evdev node of the controller. The
+container's user must have permission to open the nodes. The container
+gets every node whatever the claim's `inputs` are, and [the `inputs`
+parameter](#the-inputs-parameter) chooses which events arrive on each
+node. A claim on the media bus gives the mount and the environment
+variable that [The media bus](#the-media-bus) describes, and no
+device node.
 
-The legacy `/dev/input/jsN` interface stays out. `liken`'s kernel may
-not enable `CONFIG_INPUT_JOYDEV` at all, and joydev publishes a
-DualSense's motion sensors as a wrong second `jsN` device.
+The operator does not give a container the legacy `/dev/input/jsN`
+nodes of joydev, because the kernel documents joydev as legacy, and
+joydev publishes a DualSense's motion sensors as a second joystick.
 
-The nodes a claim delivers are not the kernel's own nodes for the
-controller. The operator creates one virtual input device for each
-node the controller registers, with the kernel's `uinput` interface,
-and moves the controller's events into it whenever the controller is
-on the air. A virtual node keeps its number for as long as the
-operator holds it open, so a controller that sleeps and returns as a
-different `eventN` changes nothing a pod holds. A pod that tolerates
-`/disconnected` and starts while the controller sleeps gets a node
-that reads nothing until the next press.
+The device nodes in the container are not the kernel's nodes for the
+controller. For each of the controller's nodes, the operator creates a
+virtual input device through the kernel's `uinput` interface, and
+copies the controller's events into it while the controller is
+connected. A virtual node keeps its number for as long as the operator
+keeps it open. So when a controller sleeps and comes back as a
+different `eventN`, the nodes in the pod do not change. A pod that
+tolerates `/disconnected` and starts while the controller sleeps gets
+a node that reads nothing until the next press.
 
-The operator reads a controller's capabilities from its real node the
-first time it connects, and stores them in that bond's `Secret`. On a
-later start it creates the virtual devices from the stored snapshot,
-before anything connects. So a controller has to connect once after
-it is paired, and its claims stop parking from then on.
+The first time a controller connects, the operator reads its
+capabilities from its kernel node and stores them in the bond's
+`Secret`. When the operator starts later, it creates the virtual
+devices from the stored capabilities before any controller connects.
+So a controller must connect once after you pair it. Until it does,
+the controller has the `no-input-node` taint and its claims cannot be
+scheduled.
 
-Events go one way. A gamepad's rumble is a write into the real node,
-and the relay does not carry it back.
+Events go only from the controller to the container. A gamepad's
+rumble is a write to the node, and the operator does not send it back
+to the controller.
 
 Some Bluetooth LE remotes send no key for the press that wakes them.
-An X6 air-mouse remote ends its own link and sends the press that
-wakes it, so a claim receives that press with no help. A T6 remote
-lets its link time out and sends no report for that press. So when a
-remote connects after a sleep, the operator writes one press and one
-release of `KEY_UNKNOWN` (code 240) into its virtual node, before the
-remote's own events. A consumer that binds nothing to `KEY_UNKNOWN`
-reads it as a press with no meaning, and a sleeping screen wakes on
-it. The press arrives only under all of these conditions:
+An X6 air-mouse remote ends its own link when it sleeps, and sends the
+press that wakes it, so a claim receives that press. A T6 remote lets
+its link time out, and sends nothing for the press that wakes it. So
+when a remote connects again after a sleep, the operator writes one
+press and one release of `KEY_UNKNOWN` (code 240) into its virtual
+node, before the remote's own events. A consumer that has no binding
+for `KEY_UNKNOWN` treats it as a press that does nothing, and a
+sleeping screen wakes on it. The operator writes the press only when
+all of these are true:
 
-* The `Peripheral`'s `Connected` condition held `Asleep`: the link
-  timed out on a device that sleeps between sessions.
+* The `Peripheral`'s `Connected` condition had the reason `Asleep`,
+  which means that the link timed out on a device that sleeps between
+  sessions.
 * The link was down for at least 10 seconds. A remote that lost its
   link while it was awake connects again within seconds, and gets no
   press.
-* The node reports a keyboard key, a code below `BTN_MISC`. A
-  gamepad's node gets no press.
-* A claim on the controller receives `EV_KEY` from that node.
+* The node reports a keyboard key, which is a code below `BTN_MISC`.
+  A gamepad's node gets no press.
+* A claim on the controller receives `EV_KEY` events from that node.
 
-Each sleep gives one press, on the first node that meets these
-conditions. Each virtual node with a keyboard key declares
-`KEY_UNKNOWN`, although the controller's own node may not. The stored
-capabilities, the input classes, and the slice do not include it.
+The operator writes one press for each sleep, on the first node that
+meets these conditions. Every virtual node that has a keyboard key
+declares `KEY_UNKNOWN`, even when the controller's own node does not.
+The stored capabilities, the input classes, and the slice do not list
+it.
 
 ## Lifecycle
 
-* **A disconnected controller is tainted, never deleted.** The device
-  stays in the slice with both taints, and a return clears them.
-  Deleting a device a claim still names would strand the claim: the
-  kubelet retries `NodePrepareResources` against a device in no
-  slice, with no bound on the retry.
-* **A departed adapter taints everything.** When the radio itself is
-  unplugged, the operator republishes the last paired set fully
-  tainted and `connected: false`, so no allocation is stranded. The
-  media bus republishes on the same pass with its own `NoSchedule`
-  taint. The slice is deleted only while no adapter has answered and
-  nothing is paired, which is the window before `bluetoothd` starts.
-  Unpairing the last controller empties the paired set, not the
-  slice: the media bus stays in it.
-* **The operator's pod can restart under a live claim.** The prepared
-  CDI files survive on the host, so a running consumer keeps the
-  device node it was given. The replacement pod creates each virtual
-  device again, from the snapshot in the bond's `Secret`, and the
-  kernel numbers it from the free minors, which now include the
-  numbers the controllers' own nodes hold. A consumer whose nodes are
-  not the ones the operator delivers after that takes the
-  `/node-moved` taint, and its eviction is what repairs it. The bus
-  socket's directory is a host
-  path for a related reason: a claim prepared against it names the
-  same directory after the restart, where an emptyDir's host path is
-  under `/var/lib/kubelet/pods/`, keyed by the pod's UID, and changes
-  with the replacement pod.
+* **A disconnected controller keeps its device.** The device stays in
+  the slice with the `disconnected` taint, and the operator removes the
+  taint when the controller connects again. The operator keeps the
+  device because, if it deleted a device that a claim still uses, the
+  kubelet would retry `NodePrepareResources` for a device that is in
+  no slice, with no limit.
+* **When the adapter is unplugged, every device gets a taint.** The
+  operator publishes the last known set of paired controllers again,
+  each with `connected: false` and the `disconnected` taint, so every
+  allocation still has its device. In the same write it publishes the
+  media bus with its `NoSchedule` taint. When you unpair the last
+  controller, the slice keeps the media bus.
+* **The operator's pod can restart while a claim is in use.** The CDI
+  files are in `/var/run/cdi` on the host, so a running consumer keeps
+  its device nodes. The new operator pod creates each virtual device
+  again from the capabilities stored in the bond's `Secret`. The
+  kernel gives the new devices free numbers, which can now include the
+  numbers that the controllers' own nodes use. A consumer whose nodes
+  differ from the nodes that the operator would give it now gets the
+  `/node-moved` taint, and its eviction fixes it. The directory of the
+  bus socket is a host path for the same reason: a claim prepared with
+  that path still points at the right directory after the restart. An
+  `emptyDir` would not work, because its host path is under
+  `/var/lib/kubelet/pods/` and contains the pod's UID, so it changes
+  when the pod is replaced.
 
 ## The pairing API
 
-Three `CustomResourceDefinitions`, group `bluetooth.liken.sh/v1alpha1`,
-each with its own reference page: an
-[Adapter](/docs/reference/adapters/) is one radio, a
-[Peripheral](/docs/reference/peripherals/) is one bonded device, and
-a [PairingRequest](/docs/reference/pairingrequests/) is one pairing
-window. A person creates a `PairingRequest`, edits a `Peripheral`'s
-spec, and deletes a `Peripheral` to unpair; the operator creates and
-reconciles everything else.
+The API group `bluetooth.liken.sh/v1alpha1` has three
+`CustomResourceDefinitions`, each with a reference page. An
+[Adapter](/docs/reference/adapters/) is one radio. A
+[Peripheral](/docs/reference/peripherals/) is one bonded device. A
+[PairingRequest](/docs/reference/pairingrequests/) is one pairing
+window. You create a `PairingRequest`, edit the spec of a
+`Peripheral`, and delete a `Peripheral` to unpair it. The operator
+creates and updates every other object.
 
 ## Where the bonds are stored
 
-One `Secret` for each bond, in the operator's namespace, named
-`bluetooth-bond-<device>` after the controller's MAC. Each `Secret`
-holds the two files BlueZ keeps for the bond, byte for byte, and a
-`bluetooth.liken.sh/adapter` label naming the radio the bond is keyed
-to. The bonds follow the radio: a dongle carried to another machine
-takes its bonds with it, because the pod that claims it there lists
-the same `Secrets`.
+The operator stores each bond in its own `Secret` in the operator's
+namespace, named `bluetooth-bond-<device>` after the controller's MAC
+address. The `Secret` has an exact copy of the two files that BlueZ
+keeps for the bond, and a `bluetooth.liken.sh/adapter` label with the
+name of the radio that the bond belongs to. A bond belongs to a radio,
+not to a machine. When you move a USB radio to another machine, its
+bonds move with it, because the operator pod that claims the radio
+there reads the same `Secrets`.
 
-The keys are in the cluster datastore. Whether they are encrypted at
-rest is a property of the cluster, not of this operator. Without
-encryption at rest the keys are base64 in the datastore and its
-backups.
+The pairing keys are in the cluster's datastore. Encryption at rest is
+a setting of the cluster, not of this operator. Without it, the
+datastore and its backups have the keys in base64.

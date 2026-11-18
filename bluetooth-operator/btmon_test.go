@@ -1,10 +1,5 @@
 package main
 
-// These tests cover the trace setting on the operator's side: a pass
-// writes the btmon file when the Adapter's spec.btmon differs from it,
-// with one BtmonChanged Event, writes nothing when they agree, and
-// reports the file's value in status.btmon.
-
 import (
 	"os"
 	"path/filepath"
@@ -23,8 +18,8 @@ func adapterWithTrace(btmon bool) *Adapter {
 	}
 }
 
-// traceSettings answers a settings directory whose btmon file holds
-// value, the way bondfetch leaves it. An empty value writes no file.
+// traceSettings returns a settings directory whose btmon file contains
+// value, as bondfetch writes it. An empty value writes no file.
 func traceSettings(t *testing.T, value string) string {
 	t.Helper()
 	settings := t.TempDir()
@@ -32,13 +27,11 @@ func traceSettings(t *testing.T, value string) string {
 		return settings
 	}
 	if err := os.WriteFile(filepath.Join(settings, "btmon"), []byte(value+"\n"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the btmon file: %v", err)
 	}
 	return settings
 }
 
-// traceFile answers what the btmon file holds, and "" when there is
-// no file.
 func traceFile(t *testing.T, settings string) string {
 	t.Helper()
 	contents, err := os.ReadFile(filepath.Join(settings, "btmon"))
@@ -46,14 +39,14 @@ func traceFile(t *testing.T, settings string) string {
 		return ""
 	}
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the btmon file: %v", err)
 	}
 	return string(contents)
 }
 
-// A field that differs from the file writes the field's value into the
-// file, posts one Event that names it, and reports it in status. A
-// missing file is false.
+// When spec.btmon differs from the file, the pass writes spec.btmon into
+// the file, posts one Event, and reports the value in status. A missing
+// file reads as false.
 func TestADifferentTraceSettingWritesTheFile(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -62,9 +55,9 @@ func TestADifferentTraceSettingWritesTheFile(t *testing.T) {
 		want    string
 		message string
 	}{
-		{name: "on", spec: true, file: "false", want: "true\n", message: "btmon changes to true; the btmon container traces this radio, and its log holds key material in plain text"},
-		{name: "on with no file", spec: true, file: "", want: "true\n", message: "btmon changes to true; the btmon container traces this radio, and its log holds key material in plain text"},
-		{name: "off", spec: false, file: "true", want: "false\n", message: "btmon changes to false; the btmon container stops its trace"},
+		{name: "on", spec: true, file: "false", want: "true\n", message: "spec.btmon is now true, so the btmon container traces this radio, and its log contains key material in plain text"},
+		{name: "on with no file", spec: true, file: "", want: "true\n", message: "spec.btmon is now true, so the btmon container traces this radio, and its log contains key material in plain text"},
+		{name: "off", spec: false, file: "true", want: "false\n", message: "spec.btmon is now false, so the btmon container stops its trace"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -93,9 +86,9 @@ func TestADifferentTraceSettingWritesTheFile(t *testing.T) {
 	}
 }
 
-// traceInode answers the inode of the btmon file, and 0 when there is
-// no file. The operator writes the file by renaming a new copy over
-// it, so a write changes the inode.
+// traceInode returns the inode of the btmon file, and 0 when there is
+// no file. writeBtmon renames a new file over the old one, so each
+// write changes the inode.
 func traceInode(t *testing.T, settings string) uint64 {
 	t.Helper()
 	info, err := os.Stat(filepath.Join(settings, "btmon"))
@@ -103,13 +96,13 @@ func traceInode(t *testing.T, settings string) uint64 {
 		return 0
 	}
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the status of the btmon file: %v", err)
 	}
 	return info.Sys().(*syscall.Stat_t).Ino
 }
 
-// A second pass finds the file in agreement, and writes and posts
-// nothing more.
+// A second pass finds the file equal to spec.btmon, so it writes nothing
+// and posts no second Event.
 func TestATraceSettingIsWrittenOnce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture()
@@ -130,9 +123,9 @@ func TestATraceSettingIsWrittenOnce(t *testing.T) {
 	})
 }
 
-// A field that agrees with the file leaves the file as it is, posts
-// nothing, and reports the file's value. An empty field and a missing
-// file agree.
+// When spec.btmon equals the file, the pass leaves the file alone, posts
+// nothing, and reports the file's value. A false spec.btmon equals a
+// missing file.
 func TestAnAgreeingTraceSettingWritesNothing(t *testing.T) {
 	cases := []struct {
 		name string
@@ -166,8 +159,8 @@ func TestAnAgreeingTraceSettingWritesNothing(t *testing.T) {
 	}
 }
 
-// The operator writes only the btmon file. The privacy file records
-// the value bluetoothd started with, and stays as bondfetch left it.
+// The privacy file records the value bluetoothd started with, so a
+// change to spec.privacy leaves it as bondfetch wrote it.
 func TestTheTraceSettingLeavesThePrivacyFileAlone(t *testing.T) {
 	fixture := newAPIFixture()
 	adapter := adapterWithTrace(true)
@@ -180,15 +173,15 @@ func TestTheTraceSettingLeavesThePrivacyFileAlone(t *testing.T) {
 
 	contents, err := os.ReadFile(filepath.Join(inventory.settings, "privacy"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the privacy file: %v", err)
 	}
 	if string(contents) != "off\n" {
 		t.Errorf("the privacy file holds %q, want the value bondfetch wrote", contents)
 	}
 }
 
-// A write that fails posts nothing, and the pass reports the failure,
-// so the loop runs a pass again.
+// A write that fails posts nothing, and the pass reports the failure so
+// that the loop retries.
 func TestAFailedTraceWriteIsAFailedPass(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture()
@@ -202,15 +195,16 @@ func TestAFailedTraceWriteIsAFailedPass(t *testing.T) {
 			t.Error("the pass reported success with no btmon file written")
 		}
 		if adapter := read[Adapter](t, fixture, testAdapterObjectPath()); adapter.Status.Btmon != nil && *adapter.Status.Btmon {
-			t.Error("status.btmon = true, want the false that the volume holds")
+			t.Error("status.btmon = true, want false, the value in the btmon file")
 		}
 		assertPosted(t, postedAbout(recorded, adapterKind, testAdapterName))
 	})
 }
 
-// An off trace shows in status as false, not as an absent field, so
-// the printer column reads false on a radio whose trace was never on,
-// including a radio whose status an older operator wrote.
+// status.btmon is false, not absent, when the trace is off, so the
+// printer column shows false for a radio whose trace was never on. The
+// test also removes the field from a written status, and the next pass
+// writes it again.
 func TestAnOffTraceShowsInStatus(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture()
@@ -219,7 +213,6 @@ func TestAnOffTraceShowsInStatus(t *testing.T) {
 		inventory.settings = traceSettings(t, "false")
 		inventory.reconcile()
 
-		// The status an older operator wrote, with no btmon field.
 		written := read[map[string]any](t, fixture, testAdapterObjectPath())
 		delete((*written)["status"].(map[string]any), "btmon")
 		fixture.put(t, testAdapterObjectPath(), written)

@@ -17,8 +17,8 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 )
 
-// fakeDynamic builds a dynamic client registered with this operator's
-// three resource types, so List and Watch return the right list kinds.
+// fakeDynamic returns a fake dynamic client that can list Adapters,
+// Peripherals, and PairingRequests.
 func fakeDynamic(objects ...runtime.Object) *dynamicfake.FakeDynamicClient {
 	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
 		map[schema.GroupVersionResource]string{
@@ -28,8 +28,8 @@ func fakeDynamic(objects ...runtime.Object) *dynamicfake.FakeDynamicClient {
 		}, objects...)
 }
 
-// syncBuffer is a writer a test goroutine writes and the test reads, so
-// the two never race on the rendered output.
+// syncBuffer is a writer that pairFlow's goroutine writes while the test
+// reads it.
 type syncBuffer struct {
 	mu      sync.Mutex
 	builder strings.Builder
@@ -59,10 +59,10 @@ func TestSoleAdapter(t *testing.T) {
 	client := fakeDynamic(adapterObject("04-4a-69-66-92-27"))
 	name, err := soleAdapter(context.Background(), client)
 	if err != nil {
-		t.Fatalf("soleAdapter: %v", err)
+		t.Fatalf("soleAdapter returned an error: %v", err)
 	}
 	if name != "04-4a-69-66-92-27" {
-		t.Fatalf("soleAdapter = %q", name)
+		t.Fatalf("soleAdapter = %q, want 04-4a-69-66-92-27", name)
 	}
 }
 
@@ -72,13 +72,13 @@ func TestSoleAdapterRefusesWhenNotExactlyOne(t *testing.T) {
 		fakeDynamic(adapterObject("one"), adapterObject("two")),
 	} {
 		if _, err := soleAdapter(context.Background(), client); err == nil {
-			t.Fatal("soleAdapter named an adapter when the count was not one")
+			t.Fatal("soleAdapter returned no error, want one when the cluster has 0 or 2 Adapters")
 		}
 	}
 }
 
-// theRequest reads back the one PairingRequest the flow created, so the
-// test can drive its status the way the operator would.
+// theRequest returns the only PairingRequest in namespace, the one that
+// pairFlow created.
 func theRequest(t *testing.T, client dynamic.Interface, namespace string) *unstructured.Unstructured {
 	t.Helper()
 	list, err := client.Resource(pairingRequestGVR).Namespace(namespace).List(context.Background(), metav1.ListOptions{})
@@ -86,13 +86,13 @@ func theRequest(t *testing.T, client dynamic.Interface, namespace string) *unstr
 		t.Fatalf("listing requests: %v", err)
 	}
 	if len(list.Items) != 1 {
-		t.Fatalf("requests = %d, want 1", len(list.Items))
+		t.Fatalf("the namespace has %d PairingRequests, want 1", len(list.Items))
 	}
 	return &list.Items[0]
 }
 
-// setStatus writes a request's status the way the operator does, which
-// fires the watch event the flow reads.
+// setStatus writes a request's status as the operator would, which
+// sends pairFlow a watch event.
 func setStatus(t *testing.T, client dynamic.Interface, namespace string, request *unstructured.Unstructured, status map[string]any) {
 	t.Helper()
 	request = request.DeepCopy()
@@ -113,7 +113,7 @@ func waitFor(t *testing.T, condition func() bool) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatal("the condition never held")
+	t.Fatal("the condition was still false after 2 seconds")
 }
 
 func TestPairFlowApprovesAPickedDevice(t *testing.T) {
@@ -163,10 +163,10 @@ func TestPairFlowApprovesAPickedDevice(t *testing.T) {
 
 	got := <-done
 	if got.err != nil {
-		t.Fatalf("pairFlow: %v", got.err)
+		t.Fatalf("pairFlow returned an error: %v", got.err)
 	}
 	if got.peripheral != "a0-ab-51-33-b7-12" {
-		t.Fatalf("peripheral = %q", got.peripheral)
+		t.Fatalf("peripheral = %q, want a0-ab-51-33-b7-12", got.peripheral)
 	}
 }
 
@@ -174,10 +174,10 @@ func TestReadSelections(t *testing.T) {
 	selections := make(chan string, 2)
 	readSelections(context.Background(), strings.NewReader("1\ntwo\n"), selections)
 	if got := <-selections; got != "1" {
-		t.Fatalf("first line = %q", got)
+		t.Fatalf("first line = %q, want 1", got)
 	}
 	if got := <-selections; got != "two" {
-		t.Fatalf("second line = %q", got)
+		t.Fatalf("second line = %q, want two", got)
 	}
 }
 
@@ -187,7 +187,7 @@ func TestRequestName(t *testing.T) {
 		t.Fatalf("requestName = %q, want a pair- prefix", name)
 	}
 	if name == requestName() {
-		t.Fatal("two request names collided")
+		t.Fatal("two calls of requestName returned the same name, want different names")
 	}
 }
 
@@ -232,7 +232,7 @@ func TestPairFlowRejectsABadSelectionAndKeepsGoing(t *testing.T) {
 		"peripheral": "a0-ab-51-33-b7-12",
 	})
 	if got := <-done; got != "a0-ab-51-33-b7-12" {
-		t.Fatalf("peripheral = %q", got)
+		t.Fatalf("peripheral = %q, want a0-ab-51-33-b7-12", got)
 	}
 }
 
@@ -253,7 +253,7 @@ func TestPairFlowReportsAnExpiredWindow(t *testing.T) {
 	setStatus(t, client, namespace, theRequest(t, client, namespace), map[string]any{"phase": phaseExpired})
 
 	if err := <-done; err == nil {
-		t.Fatal("pairFlow returned no error for an expired window")
+		t.Fatal("pairFlow returned no error after the request expired, want one")
 	}
 }
 
@@ -275,7 +275,7 @@ func TestPairFlowCancelClosesTheWindow(t *testing.T) {
 	cancel()
 
 	if err := <-done; err == nil {
-		t.Fatal("pairFlow returned no error after its context was cancelled")
+		t.Fatal("pairFlow returned no error after its context was cancelled, want one")
 	}
 	waitFor(t, func() bool {
 		list, err := client.Resource(pairingRequestGVR).Namespace(namespace).List(context.Background(), metav1.ListOptions{})
@@ -283,10 +283,6 @@ func TestPairFlowCancelClosesTheWindow(t *testing.T) {
 	})
 }
 
-// The flow watches only its own request, from the version its create
-// returned. A watch with no resourceVersion first sends every request
-// in the namespace as it is now, which costs as much as a list, and a
-// watch from the create's version sends only the changes after it.
 func TestPairFlowWatchesItsRequestFromTheCreate(t *testing.T) {
 	const namespace = "liken-system"
 	client := fakeDynamic()
@@ -318,6 +314,6 @@ func TestPairFlowWatchesItsRequestFromTheCreate(t *testing.T) {
 		t.Errorf("the watch opened from version %q, want the create's 41", restrictions.ResourceVersion)
 	}
 	if name, ok := restrictions.Fields.RequiresExactMatch("metadata.name"); !ok || !strings.HasPrefix(name, "pair-") {
-		t.Errorf("the watch selected %q, want the request's own name", restrictions.Fields)
+		t.Errorf("the watch selected %q, want metadata.name of the request, which starts with pair-", restrictions.Fields)
 	}
 }

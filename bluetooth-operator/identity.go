@@ -1,25 +1,21 @@
 package main
 
-// Writing the radio's identity file into its own Secret.
-//
 // With privacy on, bluetoothd derives the radio's rotating address from
 // the identity resolving key in <adapter>/identity, and every bonded
-// peer holds a copy of that key. The pod's tree is an emptyDir, so the
-// store pass writes the file into the Secret
-// bluetooth-identity-<adapter>, and bondfetch writes it back before the
-// next bluetoothd starts (bonds/identity.go). A reinstall or a radio
-// moved to another machine then keeps the identity its peers know.
+// peer has a copy of that key. The pod's BlueZ tree is an emptyDir, so
+// persistIdentity copies the file into the Secret
+// bluetooth-identity-<adapter>, and bondfetch writes it back before
+// bluetoothd starts (bondfetch/privacy.go). After a reinstall, or when
+// the radio moves to another machine, its peers still recognize it.
 //
-// bluetoothd writes the file once, the first time it starts with
-// privacy on and finds no key. So the Secret is written about once in
-// the radio's life. The store keeps the copy it last wrote or read, and
-// compares the file with that copy on each pass. A pass that finds no
-// change sends no request, and the Secret needs no watch.
+// bondfetch writes a new key only when privacy is on and no key is
+// stored, so the Secret changes rarely. The store caches the contents
+// it last wrote or read and compares the file with them on each pass,
+// and sends no request while they match. So the Secret needs no watch.
 //
-// The Adapter owns the Secret, so deleting the Adapter collects the
-// key with the bonds. The store never deletes the Secret. A radio with
-// privacy off has no use for the key, and keeps it, so a radio that
-// turns privacy on again presents the identity its peers already know.
+// The Adapter owns the Secret, and the Secret is deleted with it. The
+// store never deletes the Secret, so a radio that turns privacy off and
+// then on again keeps the identity that its peers have stored.
 
 import (
 	"bytes"
@@ -33,14 +29,14 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// persistIdentity writes the adapter's identity file into its Secret
-// when the two differ. It reports whether the key is stored, or the
-// radio has none. adapter is the Adapter this pass reconciled, and nil
-// when the pass did not read one.
+// persistIdentity writes the identity file into the Secret when the
+// contents differ. It returns false when the write must be tried again.
+// adapter is the Adapter that this pass reconciled, or nil when the pass
+// did not read one.
 func (s *bondStore) persistIdentity(adapter *Adapter) bool {
 	if s.adapter.IsZero() {
-		// The bond pass of the same pass learns the radio, and it reports
-		// the failure when it cannot.
+		// persist reads the adapter address earlier in the same pass,
+		// and returns false when it cannot.
 		return true
 	}
 	identity, err := bonds.ReadIdentity(s.root, s.adapter)
@@ -52,7 +48,7 @@ func (s *bondStore) persistIdentity(adapter *Adapter) bool {
 		return true
 	}
 	if adapter == nil {
-		// The Secret needs its owner's UID, and a later pass has it.
+		// The Secret's owner reference needs the Adapter's UID.
 		return false
 	}
 
@@ -67,27 +63,28 @@ func (s *bondStore) persistIdentity(adapter *Adapter) bool {
 	case errors.Is(err, apiclient.ErrNotFound):
 		method, target = http.MethodPost, bonds.SecretsPath(s.namespace)
 	case err != nil:
-		fmt.Fprintf(os.Stderr, "reading %s: %v\n", name, err)
+		fmt.Fprintf(os.Stderr, "reading the Secret %s: %v\n", name, err)
 		return false
 	case bytes.Equal(current.Identity(), identity):
 		s.identity = identity
 		return true
 	default:
-		// The write states the version it read, so a second writer gets
-		// a conflict, and the next pass reads the Secret again.
+		// With the resourceVersion that was read, a concurrent write
+		// makes this update fail with a conflict, and the next pass
+		// reads the Secret again.
 		secret.Metadata.ResourceVersion = current.Metadata.ResourceVersion
 	}
 
 	body, err := json.Marshal(secret)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "encoding %s: %v\n", name, err)
+		fmt.Fprintf(os.Stderr, "encoding the Secret %s: %v\n", name, err)
 		return false
 	}
 	if err := s.client.RequestJSON(method, target, body, nil); err != nil {
-		fmt.Fprintf(os.Stderr, "writing %s: %v\n", name, err)
+		fmt.Fprintf(os.Stderr, "writing the Secret %s: %v\n", name, err)
 		return false
 	}
 	s.identity = identity
-	fmt.Printf("bonds: wrote %s for the identity of %s\n", name, s.adapter)
+	fmt.Printf("bonds: wrote the Secret %s for the identity of %s\n", name, s.adapter)
 	return true
 }

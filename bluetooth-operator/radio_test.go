@@ -1,9 +1,5 @@
 package main
 
-// The read of one snapshot out of a managed-object tree, which is the
-// one place the pairing controllers depend on BlueZ's own shape, and
-// the fake radio every other test drives the controllers through.
-
 import (
 	"fmt"
 	"slices"
@@ -17,9 +13,8 @@ import (
 	"github.com/liken-sh/liken/bluetooth-operator/bonds"
 )
 
-// windowState adds the properties an adapter has while a pairing
-// window is open. The tree helper in bluez_test.go writes the two
-// every reader needs, and these are the rest.
+// window sets the adapter properties that a pairing window changes.
+// The adapter helper in bluez_test.go sets the rest.
 func (m managedObjects) window(path string, discoverable, pairable, discovering bool) managedObjects {
 	properties := m[dbus.ObjectPath(path)][adapterInterface]
 	properties["Alias"] = dbus.MakeVariant("liken-1")
@@ -50,52 +45,45 @@ func TestSnapshotReadsTheAdapterAndItsDevices(t *testing.T) {
 
 	snapshot, err := snapshotFrom(objects)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the snapshot from the object tree: %v", err)
 	}
 
 	if snapshot.Adapter.Address.Directory() != "00:1A:7D:DA:71:13" || !snapshot.Adapter.Powered {
-		t.Errorf("adapter = %+v", snapshot.Adapter)
+		t.Errorf("the adapter is %+v, want address 00:1A:7D:DA:71:13 and powered", snapshot.Adapter)
 	}
-	// The window's three flags separate an idle radio from one that is
-	// still advertising itself.
+	// These flags tell an idle adapter from one with an open window.
 	if !snapshot.Adapter.Discoverable || !snapshot.Adapter.Pairable || !snapshot.Adapter.Discovering {
-		t.Errorf("adapter = %+v", snapshot.Adapter)
+		t.Errorf("the adapter is %+v, want discoverable, pairable, and discovering", snapshot.Adapter)
 	}
 	if len(snapshot.Devices) != 2 {
-		t.Fatalf("devices = %+v", snapshot.Devices)
+		t.Fatalf("the snapshot has devices %+v, want 2", snapshot.Devices)
 	}
 
-	// A device the radio has only observed and one it holds a bond with
-	// both appear, because a pairing window reports the first kind and
-	// the inventory is built from the second.
+	// The snapshot has both the bonded device, which the inventory
+	// reads, and the detected one, which a pairing window reports.
 	paired, found := snapshot.device(testAddress(t, "A0:AB:51:33:B7:12"))
 	if !found {
 		t.Fatalf("the paired device is not in the snapshot: %+v", snapshot.Devices)
 	}
 	if !paired.Paired || !paired.Bonded || !paired.Connected || !paired.Trusted {
-		t.Errorf("device = %+v", paired)
+		t.Errorf("the paired device is %+v, want paired, bonded, connected, and trusted", paired)
 	}
 	if paired.Name != "DualSense Wireless Controller" || paired.Alias != "player-one-pad" {
-		t.Errorf("device = %+v", paired)
+		t.Errorf("the paired device is %+v, want name DualSense Wireless Controller and alias player-one-pad", paired)
 	}
-	// The browsed UUIDs come along in the snapshot, because the pass
-	// reads them to tell an audio sink the operator pages from an
-	// input device it leaves alone.
+	// The pass reads the UUIDs to tell an audio sink, which the
+	// operator connects to, from an input device.
 	if isAudioSink(paired) || len(paired.UUIDs) != 1 {
-		t.Errorf("device = %+v", paired)
+		t.Errorf("the paired device is %+v, want no audio sink and 1 UUID", paired)
 	}
 	seen, found := snapshot.device(testAddress(t, "CC:CC:CC:CC:CC:CC"))
 	if !found || seen.Paired {
-		t.Errorf("the device with no bond was read as %+v", seen)
+		t.Errorf("the device with no bond is %+v, want found and not paired", seen)
 	}
 }
 
-// A tree with no adapter in it occurs in two cases: bluetoothd has
-// not published its object tree yet, and the radio has gone away.
-// Neither case reports anything about which devices are paired.
-// The level and the icon arrive in the same managed-objects read as
-// everything else, because BlueZ publishes org.bluez.Battery1 beside
-// org.bluez.Device1 on the device object.
+// BlueZ publishes org.bluez.Battery1 beside org.bluez.Device1 on the
+// device object, so one read of the tree gives the battery level too.
 func TestSnapshotReadsTheBatteryTheIconAndTheAddressType(t *testing.T) {
 	objects := managedObjects{}.
 		adapter("/org/bluez/hci0").
@@ -113,68 +101,69 @@ func TestSnapshotReadsTheBatteryTheIconAndTheAddressType(t *testing.T) {
 
 	snapshot, err := snapshotFrom(objects)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the snapshot from the object tree: %v", err)
 	}
 
 	charged, _ := snapshot.device(testAddress(t, "A0:AB:51:33:B7:12"))
 	if charged.Icon != "input-gaming" || charged.AddressType != "random" {
-		t.Errorf("device = %+v", charged)
+		t.Errorf("the device is %+v, want icon input-gaming and address type random", charged)
 	}
 	if charged.Battery == nil {
-		t.Fatalf("the device reports a level and the snapshot holds none: %+v", charged)
+		t.Fatalf("the device is %+v, want a battery because BlueZ publishes org.bluez.Battery1 for it", charged)
 	}
 	if charged.Battery.Percentage != 62 || charged.Battery.Source != "HID" {
-		t.Errorf("battery = %+v", charged.Battery)
+		t.Errorf("the battery is %+v, want 62 percent from HID", charged.Battery)
 	}
-	// A device with no battery has no Battery1 interface at all, which is
-	// the ordinary case.
 	flat, _ := snapshot.device(testAddress(t, "CC:CC:CC:CC:CC:CC"))
 	if flat.Battery != nil {
-		t.Errorf("battery = %+v, want none", flat.Battery)
+		t.Errorf("the battery is %+v, want none", flat.Battery)
 	}
 }
 
+// bluetoothd returns a tree with no adapter before it publishes its
+// objects and after the adapter is unplugged. snapshotFrom returns
+// ErrNoAdapter, not an empty device list, so that a caller does not
+// read the tree as a radio with no bonds.
 func TestSnapshotReportsNoAdapter(t *testing.T) {
 	if _, err := snapshotFrom(nil); err != ErrNoAdapter {
-		t.Fatalf("an empty tree gave %v, want ErrNoAdapter", err)
+		t.Fatalf("snapshotFrom(nil) returned %v, want ErrNoAdapter", err)
 	}
 }
 
-// fakeRadio returns a snapshot the test supplies, and records
-// every call the controllers make into bluetoothd.
+// fakeRadio returns the snapshot that the test sets, records every call,
+// and changes the snapshot as bluetoothd would.
 type fakeRadio struct {
 	snapshot radioSnapshot
 	err      error
 	calls    []string
 
-	// pairErr makes Pair fail, the way bluetoothd does for a controller
-	// that stopped answering mid-pairing.
+	// pairErr makes Pair fail, as it does when a controller stops
+	// responding during a pairing.
 	pairErr error
 
-	// windowErr makes OpenWindow fail, the way bluetoothd does for an
-	// adapter that is powered off.
+	// windowErr makes OpenWindow fail, as it does when the adapter is
+	// powered off.
 	windowErr error
 
-	// connectErr makes Connect fail the way bluetoothd does for a
-	// speaker that is switched off or out of range.
+	// connectErr makes Connect fail, as it does when the speaker is
+	// switched off or out of range.
 	connectErr error
 
-	// connectHolds holds a call in flight until the test closes it. A
-	// nil channel is a call that returns at once.
-	connectHolds chan struct{}
+	// connectBlocks blocks Connect until the test closes the channel. A
+	// nil channel makes Connect return at once.
+	connectBlocks chan struct{}
 
 	// disconnectErr makes Disconnect fail and leave the device
-	// connected, the way a call fails when bluetoothd sends no reply
-	// before the call's timeout.
+	// connected, as it does when bluetoothd does not reply in time.
 	disconnectErr error
 
-	// powerOffErr and powerOnErr make SetAdapterPowered fail for one
-	// value and leave the adapter as it was.
+	// powerOffErr and powerOnErr make SetAdapterPowered fail, with the
+	// adapter unchanged, when it powers the adapter off or on.
 	powerOffErr error
 	powerOnErr  error
 
-	// mu covers the fields above, because Connect runs on its own
-	// goroutine while the pass reads the snapshot on the loop's.
+	// mu guards the fields above, because Connect runs on its own
+	// goroutine while the pass reads the snapshot.
 	mu sync.Mutex
 }
 
@@ -184,9 +173,8 @@ func (r *fakeRadio) record(format string, args ...any) {
 	r.calls = append(r.calls, fmt.Sprintf(format, args...))
 }
 
-// called reports whether this call was recorded, matched by prefix,
-// so a test names the call and not its arguments when the arguments
-// do not matter.
+// called reports whether a recorded call starts with prefix, so that a
+// test can match a call without its arguments.
 func (r *fakeRadio) called(prefix string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -198,8 +186,7 @@ func (r *fakeRadio) called(prefix string) bool {
 	return false
 }
 
-// counted answers how many recorded calls start with a prefix, which
-// is what a test asks when one call is right and two are wrong.
+// counted returns how many recorded calls start with prefix.
 func (r *fakeRadio) counted(prefix string) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -212,8 +199,8 @@ func (r *fakeRadio) counted(prefix string) int {
 	return count
 }
 
-// Snapshot copies the device list, because a Connect in flight writes
-// into it while the caller reads what the call returned.
+// Snapshot copies the device list, because a Connect that is still
+// running can change the list while the caller reads it.
 func (r *fakeRadio) Snapshot() (radioSnapshot, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -280,7 +267,7 @@ func (r *fakeRadio) Pair(device bonds.Address) error {
 func (r *fakeRadio) Connect(device bonds.Address) error {
 	r.record("Connect %s", device.Key())
 	r.mu.Lock()
-	holds, err := r.connectHolds, r.connectErr
+	holds, err := r.connectBlocks, r.connectErr
 	r.mu.Unlock()
 	if holds != nil {
 		<-holds
@@ -304,8 +291,8 @@ func (r *fakeRadio) Disconnect(device bonds.Address) error {
 	return nil
 }
 
-// SetAdapterPowered drops every link when it powers the adapter off,
-// the way bluetoothd's adapter_stop removes every connection it holds.
+// SetAdapterPowered disconnects every device on a power-off, as
+// bluetoothd does.
 func (r *fakeRadio) SetAdapterPowered(powered bool) error {
 	r.record("SetAdapterPowered %t", powered)
 	r.mu.Lock()
@@ -346,7 +333,7 @@ func (r *fakeRadio) update(device bonds.Address, change func(*deviceState)) {
 	}
 }
 
-// testRadio is one adapter with the devices a test names.
+// testRadio returns a fake with a powered adapter and the given devices.
 func testRadio(t *testing.T, devices ...deviceState) *fakeRadio {
 	t.Helper()
 	return &fakeRadio{snapshot: radioSnapshot{
@@ -355,7 +342,7 @@ func testRadio(t *testing.T, devices ...deviceState) *fakeRadio {
 	}}
 }
 
-// pairedDevice is a controller with a bond, as bluetoothd reports it.
+// pairedDevice returns a connected controller that has a bond.
 func pairedDevice(t *testing.T, address string) deviceState {
 	t.Helper()
 	return deviceState{
@@ -369,8 +356,8 @@ func pairedDevice(t *testing.T, address string) deviceState {
 	}
 }
 
-// seenDevice is a controller the radio has observed and holds no bond
-// with, which is the kind of device a pairing window reports.
+// seenDevice returns a controller that the adapter detected and has no
+// bond with, which is the kind of device a pairing window reports.
 func seenDevice(t *testing.T, address, name string) deviceState {
 	t.Helper()
 	return deviceState{Address: testAddress(t, address), Name: name, Alias: name}

@@ -9,9 +9,9 @@ components = ["kubernetes", "notices", "toolchains", "trust", "userland"]
 [docs]
 prefix = "bluetooth"
 
-# gofmt, vet, a tidy check of go.mod, and one run of the tests that
-# checks for races and writes the coverage profile, then the coverage
-# gate on that profile. .testcoverage.yml holds the floor.
+# Runs gofmt, go vet, and a tidy check of go.mod, then the tests with
+# the race detector and the coverage profile, then the coverage gate
+# that .testcoverage.yml sets.
 [[jobs]]
 name = "go"
 toolchain = "go"
@@ -26,20 +26,18 @@ toolchain = "hugo"
 module = "docs"
 run = "make test-docs"
 
-# The hooks in .pre-commit-config.yaml: the formatters, the linters,
-# and the hygiene checks. The jobs above run the tests and the
-# coverage gates.
+# Runs the hooks in .pre-commit-config.yaml.
 [[jobs]]
 name = "prek"
 toolchain = "prek"
-# The go job runs the same checks as these hooks.
+# The go job already runs these three checks.
 skip = ["gofmt", "go-vet", "go-mod-tidy"]
 
 [outputs]
 deploy = "deploy"
 
-# Every image that builds from this module's go.mod takes the shared
-# kubernetes module as a build context, because go.mod replaces it with
+# Every image built from this module's go.mod needs the kubernetes
+# module as a build context, because go.mod replaces it with
 # ../kubernetes.
 [[outputs.images]]
 name = "bluetooth-operator"
@@ -57,22 +55,22 @@ contexts = { kubernetes = "kubernetes", notices = "notices" }
 name = "bluetoothd"
 description = "BlueZ's bluetoothd, dbus-daemon, and btmon as static programs, with the entrypoints that bluetooth-operator's pod runs."
 file = "bluetoothd/Dockerfile"
-# userland is the BR2_EXTERNAL tree whose buildroot build makes the
-# image's static daemons, and manifest is toolchains/manifest, for
-# image-sbom, which writes the image's SBOM record of the packages
-# that buildroot built.
+# userland is the BR2_EXTERNAL tree that buildroot builds the image's
+# static daemons from. manifest is toolchains/manifest, which provides
+# image-sbom, the tool that records the packages buildroot built in
+# the image's SBOM.
 contexts = { kubernetes = "kubernetes", notices = "notices", userland = "liken/userland", manifest = "toolchains/manifest" }
-# A build whose layer cache misses compiles buildroot's cross-compiler,
-# glib, dbus, and BlueZ from source, which takes longer than the
-# default limit of the images and publish jobs.
+# When the layer cache misses, the build compiles buildroot's
+# cross-compiler, glib, dbus, and BlueZ from source. That takes longer
+# than the default timeout of the images and publish jobs.
 timeout = 120
-# The same build reads its compiler cache from a cache mount, and CI
-# saves the mount between runners, so a build after a buildroot bump
-# compiles only what the bump changed.
+# The build keeps its compiler cache in a cache mount, and CI saves
+# the mount between runs, so a build after a buildroot bump recompiles
+# only what the bump changed.
 cache-mount = true
 
-# The CLI image carries the same version as the operator, so the base
-# binary pulls a CLI that never drifts from the operator it faces. It is
+# The CLI image has the same version as the operator, so the plugin
+# that the liken toolkit pulls always matches the operator. It is
 # built for linux/amd64 only.
 [[outputs.images]]
 name = "bluetooth-operator-cli"

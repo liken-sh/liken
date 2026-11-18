@@ -1,8 +1,7 @@
 package main
 
-// start-bluetoothd powers every adapter off at the kernel before it
-// becomes bluetoothd. These tests run it against a fake of the
-// kernel's management channel, and check what the kernel holds at the
+// These tests run start-bluetoothd against a fake of the kernel's
+// management channel, and check the state of each adapter at the
 // moment of the exec.
 
 import (
@@ -17,24 +16,24 @@ import (
 	"github.com/liken-sh/liken/bluetooth-operator/bluetoothd/mgmt"
 )
 
-// fakeManagement answers the two management commands the way the
-// kernel's net/bluetooth/mgmt.c does, for the adapters it holds. Each
-// Read returns one whole packet, as a read of the real socket does.
+// fakeManagement replies to READ_INDEX_LIST and SET_POWERED as the
+// kernel's net/bluetooth/mgmt.c does. Each Read returns one whole
+// packet, as a read of the real socket does.
 type fakeManagement struct {
-	// powered holds each adapter by its index.
+	// powered is the power state of each adapter, by index.
 	powered map[uint16]bool
 
-	// refuse answers SET_POWERED for an index with this status, the
-	// way the kernel refuses a socket opened with no CAP_NET_ADMIN.
+	// refuse makes SET_POWERED for an index fail with this status, as
+	// the kernel does for a socket opened without CAP_NET_ADMIN.
 	refuse map[uint16]byte
 
-	// announce sends the New Settings event before each reply. The
+	// announce sends a New Settings event before each reply. The
 	// kernel sends it to every management socket when an adapter's
-	// settings change, so a reader must skip it.
+	// settings change, so a reader has to skip it.
 	announce bool
 
-	// silent sends no reply, the way the real socket's read timeout
-	// ends a wait for a kernel that does not answer.
+	// silent sends no reply, so Read fails as the real socket's read
+	// does when it times out.
 	silent bool
 
 	replies [][]byte
@@ -100,8 +99,8 @@ func (m *fakeManagement) Close() error {
 	return nil
 }
 
-// startWith runs the start against one fake kernel, and returns what
-// the kernel held when the exec ran, and the log.
+// startWith runs the start against one fake kernel and returns the
+// power state of each adapter at the exec, and the log.
 func startWith(t *testing.T, kernel *fakeManagement, openErr error) (map[uint16]bool, string) {
 	t.Helper()
 	open := func() (io.ReadWriteCloser, error) { return kernel, openErr }
@@ -112,18 +111,16 @@ func startWith(t *testing.T, kernel *fakeManagement, openErr error) (map[uint16]
 	}
 	var log strings.Builder
 	if err := becomeBluetoothd(open, &log, exec); err != nil {
-		t.Fatal(err)
+		t.Fatalf("starting bluetoothd: %v", err)
 	}
 	if atExec == nil {
-		t.Fatalf("bluetoothd never started; log:\n%s", log.String())
+		t.Fatalf("bluetoothd did not start, log:\n%s", log.String())
 	}
 	return atExec, log.String()
 }
 
-// bluetoothd reads the kernel's connections only on an adapter that is
-// already powered, so every adapter must be off when it starts. A
-// failure to power one off still starts bluetoothd, on the adapter as
-// it is.
+// When powering an adapter off fails, bluetoothd still starts, with
+// that adapter unchanged.
 func TestEveryAdapterIsOffWhenBluetoothdStarts(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -184,15 +181,15 @@ func TestEveryAdapterIsOffWhenBluetoothdStarts(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			got, log := startWith(t, c.kernel(), c.openErr)
 			if !maps.Equal(got, c.want) {
-				t.Fatalf("at the exec the adapters were %v, want %v; log:\n%s", got, c.want, log)
+				t.Fatalf("at the exec the adapters were %v, want %v, log:\n%s", got, c.want, log)
 			}
 		})
 	}
 }
 
-// Each failure names the kernel's answer, so a person reads from the
-// container's log why bluetoothd started on a powered adapter.
-func TestTheLogNamesWhatThePowerOffDid(t *testing.T) {
+// Each failure logs the kernel's error, so the container's log shows
+// why bluetoothd started on a powered adapter.
+func TestTheLogRecordsEachPowerOffResult(t *testing.T) {
 	refusing := newFakeManagement(map[uint16]bool{0: true, 1: true})
 	refusing.refuse[0] = 0x14
 	silent := newFakeManagement(map[uint16]bool{0: true})
@@ -207,20 +204,20 @@ func TestTheLogNamesWhatThePowerOffDid(t *testing.T) {
 			name:   "a refusal and a success",
 			kernel: refusing,
 			want: []string{
-				"start-bluetoothd: powering hci0 off failed: the kernel answered Permission Denied (0x14)",
+				"start-bluetoothd: powering hci0 off: the kernel replied with status Permission Denied (0x14)",
 				"start-bluetoothd: powered hci1 off, so bluetoothd starts it with no connection",
 			},
 		},
 		{
 			name:   "no answer",
 			kernel: silent,
-			want:   []string{"start-bluetoothd: listing the adapters failed: the kernel sent no reply within 10s"},
+			want:   []string{"start-bluetoothd: listing the adapters: the kernel sent no reply within 10s"},
 		},
 		{
 			name:    "no channel",
 			kernel:  newFakeManagement(map[uint16]bool{0: true}),
 			openErr: errors.New("address family not supported by protocol"),
-			want:    []string{"start-bluetoothd: address family not supported by protocol"},
+			want:    []string{"start-bluetoothd: opening the management channel: address family not supported by protocol"},
 		},
 	}
 	for _, c := range cases {
@@ -228,15 +225,15 @@ func TestTheLogNamesWhatThePowerOffDid(t *testing.T) {
 			_, log := startWith(t, c.kernel, c.openErr)
 			for _, line := range c.want {
 				if !strings.Contains(log, line) {
-					t.Errorf("the log has no line %q:\n%s", line, log)
+					t.Errorf("the log does not contain %q, want it to:\n%s", line, log)
 				}
 			}
 		})
 	}
 }
 
-// The channel closes before the exec, so bluetoothd inherits no
-// management socket of this program's.
+// The channel closes before the exec, so bluetoothd does not inherit
+// this program's management socket.
 func TestTheChannelClosesBeforeTheExec(t *testing.T) {
 	kernel := newFakeManagement(map[uint16]bool{0: true})
 	closedAtExec := false
@@ -246,9 +243,9 @@ func TestTheChannelClosesBeforeTheExec(t *testing.T) {
 	}
 	open := func() (io.ReadWriteCloser, error) { return kernel, nil }
 	if err := becomeBluetoothd(open, io.Discard, exec); err != nil {
-		t.Fatal(err)
+		t.Fatalf("starting bluetoothd: %v", err)
 	}
 	if !closedAtExec {
-		t.Fatal("the management channel was open at the exec")
+		t.Fatal("the management channel is open at the exec, want it closed")
 	}
 }

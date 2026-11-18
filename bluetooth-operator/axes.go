@@ -2,14 +2,13 @@ package main
 
 // The `axes` parameter of a claim on a controller.
 //
-// A stick reports position noise while it rests, one step up and one
-// step down, many times a second. The input core's answer is the
-// axis's fuzz: it drops a change smaller than half the fuzz before any
-// handler sees it. systemd's hwdb sets fuzz and flat on known devices
-// with the same EVIOCSABS ioctl, through its EVDEV_ABS_ entries. This
-// driver takes the same two fields from the claim instead, because
-// the operator carries no hardware database and the claim holder
-// knows the pad.
+// A resting analog stick reports noise of a step or two around its
+// center. Two fields of the axis's struct input_absinfo filter it. The
+// input core drops or averages a change smaller than a few times the
+// fuzz, and joydev and userspace libraries such as SDL report a
+// position within flat of the center as the center. systemd's hwdb
+// sets both values for known controllers with the EVIOCSABS ioctl.
+// This operator has no hardware database, so a claim sets them.
 
 import (
 	"encoding/json"
@@ -20,10 +19,9 @@ import (
 	"strings"
 )
 
-// absCodes names every absolute axis the kernel defines, so a claim
-// spells an axis the way linux/input-event-codes.h spells it and this
-// operator never publishes a number for a person to look up. ABS_MAX
-// is the limit of the range and not an axis, so it is not here.
+// absCodes maps each absolute axis name in linux/input-event-codes.h
+// to its code, so a claim names an axis and not a number. ABS_MAX
+// marks the end of the range and is not an axis, so it is left out.
 var absCodes = map[string]uint16{
 	"ABS_X":              0x00,
 	"ABS_Y":              0x01,
@@ -71,30 +69,23 @@ var absCodes = map[string]uint16{
 	"ABS_MT_TOOL_Y":      0x3d,
 }
 
-// axisOverride is what a claim states about one absolute axis: the
-// two fields of struct input_absinfo that a hwdb entry sets. A nil
-// field states nothing, which leaves the device's own value alone.
-//
-// In the kernel's terms: the input core drops a change smaller than
-// half the fuzz and smooths one smaller than the fuzz before any
-// handler sees it, and it reports a position inside the flat around
-// the axis centre as the centre.
+// axisOverride is the fuzz and flat that a claim sets for one absolute
+// axis. A nil field leaves the device's own value.
 type axisOverride struct {
 	Fuzz *int32 `json:"fuzz"`
 	Flat *int32 `json:"flat"`
 }
 
-// axisOverrides is what a claim states about a controller's axes,
-// keyed by the axis's own code.
+// axisOverrides holds a claim's values for a controller's axes, keyed
+// by axis code.
 type axisOverrides map[uint16]axisOverride
 
-// axisFields names what an axis block may hold, for a message that
-// refuses something else.
 const axisFields = "fuzz, flat"
 
 // parseAxisOverrides reads the `axes` block of a claim's
-// configuration. Every refusal names what is accepted, because the
-// claim is held in ContainerCreating until a person fixes it.
+// configuration. Each error lists the fields an axis accepts, because
+// the kubelet keeps the pod in ContainerCreating until a person fixes
+// the claim from the message.
 func parseAxisOverrides(block map[string]json.RawMessage) (axisOverrides, error) {
 	if len(block) == 0 {
 		return nil, nil
@@ -103,29 +94,28 @@ func parseAxisOverrides(block map[string]json.RawMessage) (axisOverrides, error)
 	for name, raw := range block {
 		code, found := absCodes[name]
 		if !found {
-			return nil, fmt.Errorf("%q is not an absolute axis; name one of the kernel's ABS_* codes, such as ABS_X or ABS_RX, and give it %s", name, axisFields)
+			return nil, fmt.Errorf("%q is not the name of an absolute axis. Use a kernel ABS_* code such as ABS_X or ABS_RX, with the fields %s", name, axisFields)
 		}
 		if code == absMTSlot {
-			return nil, fmt.Errorf("the kernel refuses a write to ABS_MT_SLOT, because the number of contacts a device reserved cannot change; the axes this driver sets take %s", axisFields)
+			return nil, fmt.Errorf("ABS_MT_SLOT cannot be set, because the kernel refuses to change the number of contacts a device reserved. The other axes take the fields %s", axisFields)
 		}
 		var override axisOverride
 		decoder := json.NewDecoder(strings.NewReader(string(raw)))
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&override); err != nil {
-			return nil, fmt.Errorf("reading %s: %w; an axis takes %s", name, err, axisFields)
+			return nil, fmt.Errorf("reading the axis %s: %w (an axis takes the fields %s)", name, err, axisFields)
 		}
 		if (override.Fuzz != nil && *override.Fuzz < 0) || (override.Flat != nil && *override.Flat < 0) {
-			return nil, fmt.Errorf("%s takes no negative value; %s count the steps of the axis", name, axisFields)
+			return nil, fmt.Errorf("the axis %s has a negative value, and %s count steps of the axis, so they cannot be negative", name, axisFields)
 		}
 		overrides[code] = override
 	}
 	return overrides, nil
 }
 
-// merge unites what two claims state. A controller's axes take the
-// largest value any prepared claim states, the same union rule the
-// input classes take, so each claim receives at least the smoothing
-// it asked for.
+// merge combines the overrides of two claims on the same controller.
+// When both set a field, it takes the larger value, so each claim gets
+// at least the filtering it asked for.
 func (o axisOverrides) merge(other axisOverrides) axisOverrides {
 	if len(o) == 0 && len(other) == 0 {
 		return nil
@@ -143,8 +133,8 @@ func (o axisOverrides) merge(other axisOverrides) axisOverrides {
 	return united
 }
 
-// larger is the greater of two values either of which may state
-// nothing.
+// larger returns the greater of two optional values, or the one that
+// is set.
 func larger(one, other *int32) *int32 {
 	switch {
 	case one == nil:
@@ -157,11 +147,11 @@ func larger(one, other *int32) *int32 {
 	return one
 }
 
-// record writes the applied values as one line, so a restart of this
-// operator applies the same values to the same axes. Each entry is
-// <code name>=<fuzz>:<flat>, with an empty field for a value the
-// claims left alone, and the entries are in code order so the same
-// claim always records the same line.
+// record writes the overrides as one line, which a prepared claim
+// keeps so that a restarted operator applies the same values. Each
+// entry is <code name>=<fuzz>:<flat>, with an empty field for a value
+// that no claim set. Entries are sorted by code, so equal overrides
+// always produce the same line.
 func (o axisOverrides) record() string {
 	if len(o) == 0 {
 		return ""
@@ -181,7 +171,7 @@ func field(value *int32) string {
 	return strconv.FormatInt(int64(*value), 10)
 }
 
-// parseRecordedAxes reads a recorded line back.
+// parseRecordedAxes reads a line that record wrote.
 func parseRecordedAxes(recorded string) (axisOverrides, error) {
 	if recorded == "" {
 		return nil, nil
@@ -191,19 +181,19 @@ func parseRecordedAxes(recorded string) (axisOverrides, error) {
 		name, values, found := strings.Cut(entry, "=")
 		code, known := absCodes[name]
 		if !found || !known {
-			return nil, fmt.Errorf("%q is not an axis record", entry)
+			return nil, fmt.Errorf("the recorded axis %q is not in the form <code name>=<fuzz>:<flat>", entry)
 		}
 		fuzz, flat, found := strings.Cut(values, ":")
 		if !found {
-			return nil, fmt.Errorf("%q is not an axis record", entry)
+			return nil, fmt.Errorf("the recorded axis %q is not in the form <code name>=<fuzz>:<flat>", entry)
 		}
 		override := axisOverride{}
 		var err error
 		if override.Fuzz, err = recordedField(fuzz); err != nil {
-			return nil, fmt.Errorf("the fuzz of %s: %w", name, err)
+			return nil, fmt.Errorf("reading the recorded fuzz of %s: %w", name, err)
 		}
 		if override.Flat, err = recordedField(flat); err != nil {
-			return nil, fmt.Errorf("the flat of %s: %w", name, err)
+			return nil, fmt.Errorf("reading the recorded flat of %s: %w", name, err)
 		}
 		overrides[code] = override
 	}
@@ -221,8 +211,8 @@ func recordedField(value string) (*int32, error) {
 	return ptr(int32(number)), nil
 }
 
-// absCodeName is the kernel's name for one axis, or its number when
-// the kernel defines no name for it.
+// absCodeName returns the name of an axis code, or its decimal number
+// when absCodes has no name for it.
 func absCodeName(code uint16) string {
 	for name, known := range absCodes {
 		if known == code {
@@ -232,15 +222,15 @@ func absCodeName(code uint16) string {
 	return strconv.FormatUint(uint64(code), 10)
 }
 
-// tunedAxis is the absinfo one axis takes: everything the kernel
-// reports for it now, with the fuzz and the flat the prepared claims
-// state, and the device's own values for a field no claim states.
+// tunedAxis returns the absinfo to write to one axis. Every field
+// except fuzz and flat keeps the kernel's current value. Fuzz and flat
+// come from the override, and a field that it does not set goes back
+// to original, the device's own value.
 //
-// The original comes from the stored snapshot, never from the device.
-// The kernel reports back whatever this operator last wrote, so the
-// device's own values would be lost after the first write. The
-// snapshot in the bond's Secret holds them from the first time the
-// controller connected.
+// original comes from the capability snapshot in the bond's Secret,
+// which keeps the fuzz and flat the device reported before this
+// operator tuned the axis. Reading the device cannot give them,
+// because the kernel reports what this operator last wrote.
 func tunedAxis(original absAxis, current absInfo, override axisOverride) absInfo {
 	tuned := current
 	tuned.Fuzz, tuned.Flat = original.Fuzz, original.Flat
@@ -253,6 +243,5 @@ func tunedAxis(original absAxis, current absInfo, override axisOverride) absInfo
 	return tuned
 }
 
-// ptr is the address of a value, which is how a stated field differs
-// from a field the claim left out.
+// ptr returns a pointer to value.
 func ptr[T any](value T) *T { return &value }

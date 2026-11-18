@@ -7,30 +7,25 @@ import (
 	"testing"
 )
 
-// The addresses of the machine this design was measured on: one
-// adapter, one paired controller, and one neighbour's device that
-// BlueZ detected on the air and holds no link key for.
+// An adapter, a paired controller, and a nearby device that BlueZ saw
+// advertising and has no link key for.
 const (
 	testAdapter   = "04:4A:69:66:92:27"
 	testDevice    = "7C:66:EF:22:E7:80"
 	testNeighbour = "E3:28:E9:23:21:6F"
 )
 
-// address parses a literal that the test itself wrote, so a failure
-// here is a broken test and not a broken input.
 func address(t *testing.T, literal string) Address {
 	t.Helper()
 	parsed, err := ParseAddress(literal)
 	if err != nil {
-		t.Fatalf("ParseAddress(%q): %v", literal, err)
+		t.Fatalf("parsing %q as an address: %v", literal, err)
 	}
 	return parsed
 }
 
-// blueZTree builds the storage tree BlueZ writes, as a real machine
-// has it: one paired device with an info file and an empty attributes
-// file, a cache directory holding an entry for the paired device and
-// one for a neighbour's, and the adapter's own settings file.
+// blueZTree writes one adapter's storage tree in the layout that BlueZ
+// writes, with files that are not bonds beside the paired device's.
 func blueZTree(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -39,10 +34,10 @@ func blueZTree(t *testing.T) string {
 	write := func(path string, contents string) {
 		t.Helper()
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-			t.Fatal(err)
+			t.Fatalf("creating the directory of %s: %v", path, err)
 		}
 		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing %s: %v", path, err)
 		}
 	}
 	write(filepath.Join(adapter, testDevice, "info"), testInfo)
@@ -53,8 +48,8 @@ func blueZTree(t *testing.T) string {
 	return root
 }
 
-// testInfo is one paired device's info file, in BlueZ's own shape.
-// The link key makes this file worth a Secret.
+// testInfo is the info file of one paired device. The link key is what
+// makes it a bond.
 const testInfo = `[LinkKey]
 Key=0123456789ABCDEF0123456789ABCDEF
 Type=4
@@ -69,11 +64,8 @@ Blocked=false
 Services=00001124-0000-1000-8000-00805f9b34fb;
 `
 
-// testCache is the same device's cache file, cut down from the one on
-// the lab machine. The HID SDP record under [ServiceRecords] is why
-// this file travels: the input profile parses it when the controller
-// connects, and bluetoothd runs no new discovery for a device it
-// already holds a bond for.
+// testCache is the cache file of the same device, with its HID SDP
+// record.
 const testCache = `[General]
 Name=DualSense Wireless Controller
 
@@ -81,21 +73,17 @@ Name=DualSense Wireless Controller
 0x00010000=35760900000A0001000009000135031124
 `
 
-// testNeighbourCache is a cache entry for a device this adapter has
-// never paired with. It has a name and no key, and it must not
-// reach the API.
+// testNeighbourCache is a cache entry for a device that was never
+// paired. It has a name and no key, so it must not be stored.
 const testNeighbourCache = `[General]
 Name=Somebody's Phone
 `
 
-// files builds one device's stored files out of the two strings.
 func files(info, cache string) Files {
 	return Files{Info: []byte(info), Cache: []byte(cache)}
 }
 
-// equalTrees reports whether two trees hold the same devices with the
-// same files. It compares each device with Files.Equal, so a round-trip
-// test measures the same equality the operator uses.
+// equalTrees compares two trees with Files.Equal, as the operator does.
 func equalTrees(a, b Tree) bool {
 	return maps.EqualFunc(a, b, Files.Equal)
 }
@@ -149,7 +137,7 @@ func TestEqualTrees(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := equalTrees(c.a, c.b); got != c.want {
-				t.Errorf("equalTrees = %v, want %v", got, c.want)
+				t.Errorf("equalTrees(a, b) = %v, want %v", got, c.want)
 			}
 		})
 	}

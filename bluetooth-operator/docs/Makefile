@@ -1,26 +1,20 @@
-# The docs domain builds the manual served at liken.sh/bluetooth. The three
-# CRD reference pages are generated, never edited: crdref, the
-# generator the brand component publishes, renders each page from
-# its schema in deploy/crds.yaml and a hand-written preamble that
-# opens it. The schema descriptions become the field tables, so a
-# schema edit is a manual edit. The three CRDs travel in one manifest
-# file, so each rule selects its kind. go.mod names the generator as
-# a tool, the way it names Hugo, and each rule lists the generator's
-# sources as inputs, so a change to the generator regenerates every
-# page.
+# Builds the manual served at liken.sh/bluetooth. The CRD reference
+# pages are generated, never edited by hand: crdref, from brand/,
+# renders each page from a hand-written preamble and the kind's schema
+# in deploy/crds.yaml, so editing a schema description edits the
+# manual.
 HUGO := go tool hugo
 CRDREF := go tool crdref
 
-# A recipe that fails, or a build that is killed during one, leaves its
-# target partly written and newer than its inputs. make deletes that
-# target, so the next build makes it again and does not take it as
-# current.
+# A recipe that fails or is killed can leave a partly written target
+# newer than its inputs. make deletes it, so the next build makes it
+# again.
 .DELETE_ON_ERROR:
 
-# crdref comes from brand/ through the replace directive in go.mod, so
-# an edit to its sources never changes go.mod. Each generated page
-# names those sources as inputs, and go.mod for the generator's own
-# dependencies, so an edit to either one regenerates the page.
+# go.mod reaches crdref in brand/ through a replace directive, so an
+# edit to the generator's sources never changes go.mod. Each generated
+# page lists those sources and go.mod as inputs, so an edit to either
+# regenerates the page.
 BRAND := ../../brand
 CRDREF_SOURCES := go.mod $(BRAND)/go.mod \
 	$(filter-out %_test.go,$(wildcard $(BRAND)/crdref/*.go $(BRAND)/linkcheck/*.go))
@@ -35,10 +29,8 @@ GENERATED := \
 SKILLS := go tool skills
 BASE := https://liken.sh/bluetooth/
 
-# The generate target builds every generated reference page and
-# nothing else. The test-docs target in ../Makefile runs it with -B,
-# so that every page is regenerated, and fails when one differs from
-# what git has staged.
+# test-docs in ../Makefile runs this target with -B and fails when a
+# regenerated page differs from what git has staged.
 .PHONY: generate
 generate: $(GENERATED)
 
@@ -46,17 +38,15 @@ generate: $(GENERATED)
 build: $(GENERATED)
 	$(HUGO) --destination dist/site
 
-# The site's own tests: every internal link resolves before the build
-# (manual_test.go passes this site's exceptions).
+# The site's tests check that every internal link resolves, with the
+# exceptions that manual_test.go passes to the link check.
 .PHONY: test
 test:
 	go test ./...
 
-# The skills target emits every guide as an Agent Skill into ../skills,
-# one SKILL.md per guide, with the generator the brand component
-# publishes (its README says what the output holds). The output is
-# committed, and the test-docs target in ../Makefile fails when it is
-# stale.
+# Writes each guide as an Agent Skill, a SKILL.md in ../skills, with
+# the skills generator from brand/. The output is committed, and
+# test-docs in ../Makefile fails when it is out of date.
 .PHONY: skills
 skills:
 	$(SKILLS) -base $(BASE) content/docs/guides ../skills

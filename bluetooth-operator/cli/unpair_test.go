@@ -38,22 +38,22 @@ func peripheralObject(name string) *unstructured.Unstructured {
 func TestDeletePeripheralRemovesTheObject(t *testing.T) {
 	client := fakeDynamic(peripheralObject("a0-ab-51-33-b7-12"))
 	if err := deletePeripheral(context.Background(), client, "a0-ab-51-33-b7-12"); err != nil {
-		t.Fatalf("deletePeripheral: %v", err)
+		t.Fatalf("deleting the Peripheral: %v", err)
 	}
 	if _, err := client.Resource(peripheralGVR).Get(context.Background(), "a0-ab-51-33-b7-12", metav1.GetOptions{}); err == nil {
-		t.Fatal("the Peripheral is still present after the delete")
+		t.Fatal("the Peripheral still exists after deletePeripheral, want it deleted")
 	}
 }
 
 func TestDeletePeripheralReportsAMissingOne(t *testing.T) {
 	client := fakeDynamic()
 	if err := deletePeripheral(context.Background(), client, "a0-ab-51-33-b7-12"); err == nil {
-		t.Fatal("deletePeripheral returned no error for a device that is not paired")
+		t.Fatal("deletePeripheral returned no error for a device that is not paired, want not found")
 	}
 }
 
 func TestRunUnpairNeedsADevice(t *testing.T) {
 	if err := runUnpair(context.Background(), nil, unpairOptions{}, io.Discard); err == nil {
-		t.Fatal("runUnpair returned no error with no device")
+		t.Fatal("runUnpair returned no error with no device, want one")
 	}
 }

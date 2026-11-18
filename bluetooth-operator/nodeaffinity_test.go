@@ -11,7 +11,7 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// daemonSetIn is the one DaemonSet in the manifest file.
+// daemonSetIn returns the first DaemonSet in the manifest at path.
 func daemonSetIn(t *testing.T, path string) *appsv1.DaemonSet {
 	t.Helper()
 	raw, err := os.ReadFile(path)
@@ -32,12 +32,12 @@ func daemonSetIn(t *testing.T, path string) *appsv1.DaemonSet {
 	return nil
 }
 
-// A person keeps the pod off a node with no Bluetooth adapter by one label on
-// that node. NotIn also matches a node with no such label, so the
-// requirement must be the only term: a second term would be ORed with
-// it and let the pod back onto the labeled node. It must also be the
-// only expression in that term, because a second one narrows where the
-// pod runs on a node with no label.
+// A person keeps the pod off a node with no Bluetooth adapter by
+// labeling the node. NotIn also matches a node that has no such label.
+// The requirement must be the only term, because Kubernetes ORs terms
+// and a second term would let the pod onto the labeled node. It must
+// also be the only expression in its term, because a second expression
+// would restrict which unlabeled nodes the pod can run on.
 func TestTheDaemonSetStaysOffANodeLabeledNone(t *testing.T) {
 	daemonSet := daemonSetIn(t, "deploy/operator.yaml")
 	affinity := daemonSet.Spec.Template.Spec.Affinity

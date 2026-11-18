@@ -1,12 +1,9 @@
 package main
 
-// The HCI monitor channel.
-//
-// A socket bound to the monitor channel receives a copy of every HCI
-// packet that any adapter on the machine sends or receives, and of
-// every Management API command and event, each with a header that
-// names the adapter. Each read returns one whole packet. The kernel
-// tests CAP_NET_RAW when the socket binds (hci_sock_bind in
+// A socket bound to the HCI monitor channel receives a copy of every
+// HCI packet that any adapter on the machine sends or receives, and of
+// every Management API command and event. Each read returns one whole
+// packet. Binding the socket needs CAP_NET_RAW (hci_sock_bind in
 // net/bluetooth/hci_sock.c).
 
 import (
@@ -18,8 +15,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// The packet header and the packet types of the monitor channel, from
-// include/net/bluetooth/hci_mon.h. Every field is little-endian.
+// The header size and the packet types of the monitor channel, from
+// include/net/bluetooth/hci_mon.h. The header fields are little-endian.
 const (
 	monitorHeaderSize = 6
 
@@ -33,16 +30,15 @@ const (
 	monitorCtrlCommand = 16
 )
 
-// packet is one packet from the monitor channel: its type, the index
-// of the adapter it belongs to, and its data.
+// packet is one packet of the monitor channel.
 type packet struct {
 	kind  uint16
 	index uint16
 	data  []byte
 }
 
-// parsePacket reads one monitor packet. ok is false for a packet
-// shorter than its header states.
+// parsePacket splits one raw read into a packet. ok is false when the
+// read is shorter than the header or than the length the header gives.
 func parsePacket(raw []byte) (packet, bool) {
 	if len(raw) < monitorHeaderSize {
 		return packet{}, false
@@ -58,16 +54,17 @@ func parsePacket(raw []byte) (packet, bool) {
 	}, true
 }
 
-// readPackets reads the channel on its own goroutine until a read
-// fails, which a Close of the channel causes, or until ctx ends. Each
-// packet arrives on the first channel, and the read error on the
-// second.
+// readPackets reads monitor on its own goroutine. It sends each packet
+// on the first channel, and the error that ends the reads on the
+// second. The goroutine checks ctx only while it waits to send a
+// packet, so to stop a read that is blocked, close monitor.
 func readPackets(ctx context.Context, monitor io.Reader) (<-chan packet, <-chan error) {
 	packets := make(chan packet, 64)
 	failed := make(chan error, 1)
 	go func() {
-		// A raw socket drops the part of a packet that does not fit, so
-		// the buffer holds the largest packet the header can describe.
+		// A raw socket truncates a packet that does not fit the buffer,
+		// so the buffer fits the longest packet that the 16-bit length
+		// in the header allows.
 		buffer := make([]byte, monitorHeaderSize+0xffff)
 		for {
 			n, err := monitor.Read(buffer)
@@ -88,13 +85,12 @@ func readPackets(ctx context.Context, monitor io.Reader) (<-chan packet, <-chan 
 	return packets, failed
 }
 
-// monitorSocket is the kernel's monitor channel.
+// monitorSocket is an HCI socket bound to the monitor channel.
 type monitorSocket struct {
 	fd int
 }
 
-// openMonitor opens an HCI socket and binds it to the monitor channel
-// for every adapter.
+// openMonitor opens a monitorSocket for all adapters.
 func openMonitor() (io.ReadCloser, error) {
 	fd, err := unix.Socket(unix.AF_BLUETOOTH, unix.SOCK_RAW|unix.SOCK_CLOEXEC, unix.BTPROTO_HCI)
 	if err != nil {

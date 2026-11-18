@@ -1,79 +1,67 @@
 package main
 
-// The identity of a published device.
+// This file names the devices that the operator publishes.
 //
-// A controller's peer MAC address is the only name here that survives
-// a reboot. The HID instance suffix in a sysfs directory name, the
-// .0005 and the digits after it, is a counter that restarts at zero
-// on every boot. The hci0:N connection handle changes on every
-// reconnect. A claim written against either one allocates different
-// hardware after the next boot, and the MAC does not move.
-//
-// A DRA device name must be a DNS label, and a colon is not a legal
-// character in one, so the device name is the address in lowercase
-// with dashes in place of the colons. The address itself publishes as
-// an attribute, in the uppercase form that BlueZ prints and the label
-// on the controller shows, so a selector can compare the address
-// the way a person reads it.
+// A controller's MAC address is the only identifier that survives a
+// reboot. The HID instance suffix in a sysfs directory name, such as
+// .0005, is a counter that restarts at zero on every boot. The hci0:N
+// connection handle changes on every reconnect. A claim that selects
+// by either one can get a different controller after the next boot.
 
 import "strings"
 
-// normalizeMAC returns an address in the one form this program keys
-// on: lowercase, with colons. The two sources of an address disagree
-// about case. BlueZ prints A0:AB:51:33:B7:12 over D-Bus, and the
-// kernel prints HID_UNIQ as a0:ab:51:33:b7:12, so the two have to
-// meet somewhere before a map lookup can pair them.
+// normalizeMAC returns the address in lowercase with colons, the form
+// this program uses as a map key. BlueZ sends an address over D-Bus in
+// uppercase, and HID_UNIQ can be lowercase, so both are normalized
+// before they are compared.
 func normalizeMAC(address string) string {
 	return strings.ToLower(strings.TrimSpace(address))
 }
 
-// publishedMAC returns an address in the form the ResourceSlice
-// uses: uppercase, with colons. `bluetoothctl devices` prints this
-// form and the label on a controller shows it, so a DeviceClass or a
-// claim that names one controller spells the address the way a person
-// already has it written down.
+// publishedMAC returns the address in uppercase with colons, the form
+// of the `address` attribute in the ResourceSlice. `bluetoothctl
+// devices` prints this form and the label on a controller shows it, so
+// a person can copy it into a DeviceClass or claim selector.
 func publishedMAC(address string) string {
 	return strings.ToUpper(normalizeMAC(address))
 }
 
-// deviceName turns an address into the DNS label that a DRA device
-// name must be. Lowercase and dashes are both required: the API
-// rejects an uppercase letter and rejects a colon.
+// deviceName returns the DRA device name for an address: lowercase
+// with dashes. A device name must be a DNS label, which allows no
+// uppercase letters and no colons.
 func deviceName(address string) string {
 	return strings.ReplaceAll(normalizeMAC(address), ":", "-")
 }
 
-// macFromDeviceName inverts deviceName. The DRA prepare call supplies
-// the allocated device's name and nothing else, so this is how the
-// plugin reads which controller a claim holds.
+// macFromDeviceName converts a device name back to a normalized
+// address. The DRA prepare call receives only the allocated device's
+// name, so the plugin finds the controller from the name.
 func macFromDeviceName(name string) string {
 	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(name)), "-", ":")
 }
 
-// mediaBusSuffix ends the media bus device's name. The bus is named
-// for the adapter's own address in the controllers' MAC form, plus
-// this suffix, so it can never collide with a peer's device name: a
-// controller's name is six octets and nothing more.
+// mediaBusSuffix is the end of the media bus device's name. The bus
+// name is the adapter's address in device-name form plus this suffix.
+// A controller's device name is six octets with no suffix, so the two
+// cannot collide.
 const mediaBusSuffix = "-media"
 
-// mediaBusName builds the media bus device's name from the adapter's
+// mediaBusName returns the media bus device's name for the adapter's
 // address.
 func mediaBusName(address string) string {
 	return deviceName(address) + mediaBusSuffix
 }
 
-// isMediaBusName reports whether an allocated device name is the
-// media bus. The prepare and refresh paths read the allocated name
-// and nothing else, so the suffix is the whole distinction.
+// isMediaBusName reports whether a device name is the media bus's.
 func isMediaBusName(name string) bool {
 	return strings.HasSuffix(name, mediaBusSuffix)
 }
 
-// validMAC reports whether a string is six colon-separated pairs of
+// validMAC reports whether the string is six colon-separated pairs of
 // hexadecimal digits. HID_UNIQ is empty on a HID device that has no
-// peer address, and a device name from a prepare call is whatever the
-// claim's allocation says, so both paths check the shape before they
-// use it as an identity.
+// peer address, and a device name from a prepare call can be any
+// string, so callers check the shape before they use either as an
+// address.
 func validMAC(address string) bool {
 	octets := strings.Split(normalizeMAC(address), ":")
 	if len(octets) != 6 {

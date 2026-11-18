@@ -1,10 +1,5 @@
 package main
 
-// The wakes that start a pass. Six sources say that something changed.
-// wakes merges them into one channel, and settle collapses each burst
-// into one pass, so a controller that connects with a burst of uevents
-// and D-Bus signals costs one write.
-
 import (
 	"context"
 	"fmt"
@@ -13,14 +8,14 @@ import (
 
 // wakes merges the kernel's uevents, bluetoothd's signals, the
 // PairingRequests that need a pass, the edits to Adapters and
-// Peripherals, and the loop's own retries into one channel. None of
-// them holds state that the loop uses, so the merge loses nothing:
-// each wake means look again.
+// Peripherals, the loop's own retries, and a timer at backstopInterval
+// into one channel. A wake carries no data and the pass reads the whole
+// state, so merging loses nothing.
 //
-// Each uevent also goes to the second channel, which the loop reads
-// without the settle window, so the relay opens a new evdev node at
-// once. Every uevent goes there, not only an input add, because the
-// uevent channel drops an event when it is full, and the dropped event
+// wakes also sends each uevent to the second channel, which the loop
+// reads without waiting for settle, so the relay opens a new evdev node
+// at once. It sends every uevent there, not only an input add, because
+// the uevent channel drops events when it is full, and the dropped event
 // can be the input add.
 func wakes(ctx context.Context, uevents <-chan kernelEvent, blueZChanges, retries, requests, edits <-chan struct{}) (<-chan struct{}, <-chan struct{}) {
 	out := make(chan struct{}, 1)
@@ -75,12 +70,9 @@ func wakes(ctx context.Context, uevents <-chan kernelEvent, blueZChanges, retrie
 	return out, attaches
 }
 
-// kernelEventLine says what one uevent reported. A HID event names its
-// controller, and a power supply change names none, because the
-// datagram carries no address. A lost datagram says so.
 func kernelEventLine(event kernelEvent) string {
 	if event.Lost {
-		return "kernel: uevents were lost; reading the whole state"
+		return "kernel: uevents were lost, so the operator reads the whole state"
 	}
 	if event.MAC == "" {
 		return fmt.Sprintf("kernel: %s %s", event.Subsystem, event.Action)
@@ -88,14 +80,13 @@ func kernelEventLine(event kernelEvent) string {
 	return fmt.Sprintf("controller %s: %s %s", publishedMAC(event.MAC), event.Subsystem, event.Action)
 }
 
-// settle collapses a burst of events into one wake. It emits after
-// the input has been quiet for window, or after limit has passed
-// since the first event of the burst, whichever comes first.
+// settle collapses a burst of wakes into one, so a controller that
+// connects with many uevents and D-Bus signals causes one pass. It sends
+// a wake when the input has been quiet for window, or when limit has
+// passed since the first wake of the burst, whichever comes first.
 //
-// The limit keeps the loop publishing under a flapping controller.
-// Without it, hardware that reconnects faster than the quiet window
-// would restart the wait on every event and the loop would never
-// write.
+// Without limit, a controller that reconnects more often than window
+// would restart the wait each time, and the loop would never run a pass.
 func settle(ctx context.Context, in <-chan struct{}, window, limit time.Duration) <-chan struct{} {
 	out := make(chan struct{}, 1)
 	go func() {

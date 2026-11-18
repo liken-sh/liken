@@ -1,25 +1,23 @@
 package main
 
-// Connecting the bonded speakers.
+// A trusted bond lets a device connect without a pairing agent, but it
+// does not make the device connect. After a power cycle, an A2DP speaker
+// stays paired and trusted but disconnected until something connects to
+// it. Until then its Sink has the bluetooth.liken.sh/disconnected taint,
+// and a claim on it stays Pending. So the operator calls Device1.Connect
+// for each bonded, trusted audio sink that is not connected, with the
+// backoff below.
 //
-// A trusted bond lets a device connect with no agent, but it does not
-// make the device connect. An A2DP speaker stays paired, trusted, and
-// disconnected after a power cycle until something pages it, and
-// until then its Sink carries the bluetooth.liken.sh/disconnected
-// taint and a claim on it parks. So every pass calls Device1.Connect
-// for each bonded, trusted audio sink that is not connected.
+// The operator does not connect a game controller. A controller stays
+// asleep until its own button wakes it and it connects to the radio, so
+// an attempt to connect it never succeeds and occupies the radio until it
+// times out.
 //
-// Audio sinks only. A game controller sleeps until its own button
-// pages the radio, so a page at a controller never succeeds and holds
-// the radio while it fails.
-//
-// The call runs off the loop. Device1.Connect returns only when the
-// link is up or the page failed, which takes several seconds for a
-// device that is switched off, and the reconcile loop is one
-// goroutine that also publishes the slice and writes the bonds.
-//
-// A failure reaches the log and not the API. A Peripheral status field
-// for the last connect error is the natural next step.
+// Device1.Connect returns only when the link is up or the attempt has
+// failed, which takes several seconds for a device that is switched off.
+// The reconcile loop also publishes the ResourceSlice and writes the
+// bonds, so each call runs in its own goroutine. A failed attempt is
+// written to the log and not to the API.
 
 import (
 	"fmt"
@@ -31,33 +29,29 @@ import (
 )
 
 const (
-	// A speaker that is switched off or out of range fails every
-	// attempt, and each attempt holds the radio for the page timeout.
-	// The first retry waits 10 seconds, the wait doubles on each
-	// failure, and the ceiling bounds what a device that never answers
-	// costs.
+	// After a failed attempt the operator waits firstConnectRetry, and
+	// it doubles the wait on each further failure up to maxConnectRetry.
+	// The limit bounds how much radio time a speaker that is switched off
+	// or out of range can use.
 	firstConnectRetry = 10 * time.Second
 	maxConnectRetry   = 2 * time.Minute
 )
 
-// audioSinkProfile is the flag classify.go decodes from the A2DP sink
-// UUID. A device that carries it is one this operator pages.
+// audioSinkProfile is the flag that profileFlags returns for the A2DP
+// sink UUID.
 const audioSinkProfile = "audioSink"
 
-// connector holds the only state kept between passes about
-// connecting: which device has a call in flight, and how long the next
-// attempt on a device waits. The loop reads both and the goroutines
-// that run the calls write them, so a mutex covers them.
+// connector starts Device1.Connect calls for bonded audio sinks, and
+// keeps the backoff of each device between passes. mu guards the maps,
+// because the reconcile loop and the goroutines that make the calls both
+// write them.
 type connector struct {
 	radio radio
 
-	// now is the clock, a field so a test runs a backoff out without
-	// waiting for it.
 	now func() time.Time
 
-	// wake asks the loop for another pass. A connect that finishes
-	// changes state the pass reads from bluetoothd, and the goroutine
-	// that finishes it is not the loop.
+	// wake asks the reconcile loop to run another pass, so that the
+	// loop reads the device's state after a call returns.
 	wake func()
 
 	mu       sync.Mutex
@@ -65,8 +59,7 @@ type connector struct {
 	backoff  map[bonds.Address]time.Duration
 	nextTry  map[bonds.Address]time.Time
 
-	// attempts counts the calls in flight, so a test waits for them
-	// instead of polling.
+	// attempts lets a test wait for the calls in flight to return.
 	attempts sync.WaitGroup
 }
 
@@ -81,32 +74,32 @@ func newConnector(radio radio, now func() time.Time) *connector {
 	}
 }
 
-// reconcile decides from the snapshot alone, in one pass over the
-// devices. A connected device costs a map read and nothing else.
+// reconcile starts a connection attempt for each bonded, trusted audio
+// sink in the snapshot that is not connected and not being unpaired.
 func (c *connector) reconcile(snapshot radioSnapshot, pass *inventoryPass) {
 	for _, device := range snapshot.Devices {
 		if !device.Paired || !device.Trusted || !isAudioSink(device) {
 			continue
 		}
 		if device.Connected {
-			// The device answered, whatever paged it, so its backoff
-			// goes.
+			// The device is connected, by this operator or by itself, so
+			// its backoff no longer applies.
 			c.forget(device.Address)
 			continue
 		}
 		if pass.unpairing[device.Address] {
-			// The teardown disconnects the device and removes the
-			// bond, so a page would work against it.
+			// The unpair disconnects the device and removes the bond,
+			// so connecting it now would undo that.
 			continue
 		}
 		c.attempt(device, pass)
 	}
 }
 
-// attempt starts one call, behind two guards: one call at a time for
-// a device, and no call before its backoff runs out. A pass inside
-// the backoff window asks for the wake that ends it, so the retry is
-// one more pass and not a second loop.
+// attempt starts a Connect call in a goroutine, unless the device
+// already has a call in flight or its backoff has not ended. During the
+// backoff it asks for another pass when the backoff ends, so the retry
+// needs no timer of its own.
 func (c *connector) attempt(device deviceState, pass *inventoryPass) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -123,9 +116,8 @@ func (c *connector) attempt(device deviceState, pass *inventoryPass) {
 	go c.connect(device)
 }
 
-// connect runs the one blocking call and then wakes the loop, so the
-// next pass reads the state bluetoothd holds now and not the state
-// this goroutine believes.
+// connect makes the blocking Device1.Connect call, records the result,
+// and wakes the reconcile loop.
 func (c *connector) connect(device deviceState) {
 	defer c.attempts.Done()
 	err := c.radio.Connect(device.Address)
@@ -136,23 +128,21 @@ func (c *connector) connect(device deviceState) {
 		return
 	}
 	next := c.failed(device.Address)
-	fmt.Printf("peripheral: %s (%s) did not connect: %v; next try in %s\n",
+	fmt.Printf("peripheral: %s (%s) did not connect: %v, next try in %s\n",
 		deviceDisplayName(device), device.Address, err, next)
 	c.wake()
 }
 
-// forget drops the wait of a device bluetoothd reports connected. The
-// in-flight mark stays: only the call that set it knows when it is
-// over, and clearing it here would let a second call start beside the
-// first.
+// forget clears the backoff of a device that bluetoothd reports as
+// connected. It does not clear inFlight. The goroutine that makes the
+// call clears it when the call returns, and clearing it earlier would let
+// the next pass start a second call while the first runs.
 func (c *connector) forget(device bonds.Address) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.clearWait(device)
 }
 
-// succeeded records that the call is over and the device answered, so
-// both the in-flight mark and the wait go.
 func (c *connector) succeeded(device bonds.Address) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -166,8 +156,8 @@ func (c *connector) clearWait(device bonds.Address) {
 	delete(c.nextTry, device)
 }
 
-// failed doubles this device's wait, caps it, and returns the wait it
-// wrote so the caller names it in the log.
+// failed doubles the device's backoff up to maxConnectRetry and returns
+// the new backoff.
 func (c *connector) failed(device bonds.Address) time.Duration {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -184,9 +174,6 @@ func (c *connector) failed(device bonds.Address) time.Duration {
 	return next
 }
 
-// isAudioSink reports whether the device plays audio, which the A2DP
-// sink profile says. classify.go's decode is the one place a UUID
-// becomes a name.
 func isAudioSink(device deviceState) bool {
 	return slices.Contains(profileFlags(device.UUIDs), audioSinkProfile)
 }

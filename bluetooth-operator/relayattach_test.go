@@ -1,10 +1,10 @@
 package main
 
-// These tests run the operator's loop over a controller that wakes
-// from sleep, and check when its relay opens the new input node. The
-// kernel keeps no backlog for a reader that opens a node late, so each
-// press that arrives before the open is lost. The settle window
-// batches the ResourceSlice writes, and the open must not wait for it.
+// These tests run the operator's loop with a controller that wakes
+// from sleep, and check when the relay opens the controller's new input
+// node. The kernel does not queue events for a reader that opens a node
+// late, so every key press before the open is lost. The settle window
+// delays ResourceSlice writes, and the relay must not wait for it.
 
 import (
 	"net/http"
@@ -17,28 +17,28 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
-// wakingRemote is the controller these tests wake. It is bonded and
-// asleep when the loop starts, so sysfs holds no node for it.
+// wakingRemote is the controller these tests wake. It is bonded but
+// asleep when the loop starts, so sysfs has no input node for it.
 var wakingRemote = dualSense("0001", testMAC, "input/event5")
 
-// wakingController is the operator's loop, running over the walk, the
-// relay's fake kernel, and a test API server that holds the slice.
+// wakingController is the operator's loop running against a fake
+// sysfs, a fake kernel for the relay, and a test API server that
+// stores the ResourceSlice.
 type wakingController struct {
 	t       *testing.T
 	sysfs   string
 	kernel  *fakeKernel
 	uevents chan kernelEvent
 
-	// slices answers the publisher from the API server's goroutine, and
-	// synctest.Wait does not order the test's read after that write, so
-	// the lock does.
+	// The API server's goroutine writes slices, and synctest.Wait does
+	// not make the test's read wait for that write, so mu guards it.
 	mu     sync.Mutex
 	slices *slicePublishFixture
 }
 
-// runningLoop starts the loop the way main does: one pass, then the
-// wakes of the kernel's uevents through the settle window. The bluetoothd
-// that the pass reads reports the remote as connected.
+// runningLoop starts the loop the way main does: one pass, then a
+// pass after each batch of kernel uevents, delayed by the settle
+// window. The fake bluetoothd reports the remote as connected.
 func runningLoop(t *testing.T) *wakingController {
 	t.Helper()
 	cdiTempDir(t)
@@ -48,24 +48,24 @@ func runningLoop(t *testing.T) *wakingController {
 	t.Cleanup(func() { draSysfsRoot = previous })
 
 	w := &wakingController{t: t, sysfs: sysfs, slices: &slicePublishFixture{}, uevents: make(chan kernelEvent, 16)}
-	answer := w.slices.handler(t)
+	slicesAPI := w.slices.handler(t)
 	server := apiservertest.Start(t, http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		w.mu.Lock()
 		defer w.mu.Unlock()
-		answer.ServeHTTP(rw, r)
+		slicesAPI.ServeHTTP(rw, r)
 	}))
-	held := relaysFor(t, wakingRemote)
+	relays := relaysFor(t, wakingRemote)
 	publish := &publisher{
 		client:   apiclient.New(apiservertest.Host, server.Client(), ""),
 		nodeName: "liken-1",
 		owner:    testOwner(),
-		relays:   held,
+		relays:   relays,
 	}
 	paired, adapter := pairedSet(connectedController()), adapterIs(t)
 	pass := func() { publish.reconcile(paired, adapter, nil) }
 	pass()
 	w.slices.existing = w.slices.created
-	w.kernel = held.kernel.(*fakeKernel)
+	w.kernel = relays.kernel.(*fakeKernel)
 
 	quiet := make(chan struct{})
 	woken, attaches := wakes(t.Context(), w.uevents, quiet, quiet, quiet, quiet)
@@ -74,16 +74,16 @@ func runningLoop(t *testing.T) *wakingController {
 	return w
 }
 
-// connect registers the remote's input node in sysfs, and sends the
-// uevents the kernel sends for it: the HID device, then its evdev node.
+// connect adds the remote's input node to sysfs and sends the uevents
+// the kernel sends for it: the HID device, then its evdev node.
 func (w *wakingController) connect() {
 	addHID(w.t, w.sysfs, wakingRemote)
 	w.uevents <- kernelEvent{Subsystem: subsystemHID, Action: "add", MAC: testMAC}
 	w.uevents <- kernelEvent{Subsystem: "input", Action: "add", MAC: testMAC}
 }
 
-// batteryChanges sends n power supply changes, one each half window,
-// so each one restarts the settle window before it ends.
+// batteryChanges sends n power supply uevents, one every half settle
+// window, so each one restarts the window before it ends.
 func (w *wakingController) batteryChanges(n int) {
 	for range n {
 		w.uevents <- kernelEvent{Subsystem: subsystemPowerSupply, Action: "change"}
@@ -91,15 +91,16 @@ func (w *wakingController) batteryChanges(n int) {
 	}
 }
 
-// opened answers whether the relay reads the remote's real node, after
-// every goroutine in the bubble has settled.
+// opened reports whether the relay has opened the remote's input node,
+// after every goroutine in the bubble is blocked.
 func (w *wakingController) opened() bool {
 	synctest.Wait()
 	return w.kernel.opened() == 1
 }
 
-// rewritten answers with the slice a pass after the first one wrote,
-// or nil, after every goroutine in the bubble has settled.
+// rewritten returns the ResourceSlice that a pass after the first one
+// updated, or nil if there was none, after every goroutine in the
+// bubble is blocked.
 func (w *wakingController) rewritten() *ResourceSlice {
 	synctest.Wait()
 	w.mu.Lock()
@@ -108,7 +109,7 @@ func (w *wakingController) rewritten() *ResourceSlice {
 }
 
 // The relay opens the node as soon as the kernel adds it. The slice
-// write waits for the settle window, and the pass at its end publishes
+// update waits for the settle window, and the pass at its end publishes
 // the remote with no taint.
 func TestARelayOpensANewNodeBeforeTheSettleWindowEnds(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
@@ -116,22 +117,22 @@ func TestARelayOpensANewNodeBeforeTheSettleWindowEnds(t *testing.T) {
 
 		remote.connect()
 		if !remote.opened() {
-			t.Fatal("the relay did not open the node when the kernel added it")
+			t.Fatal("the relay did not open the node after the kernel added it, want it opened")
 		}
 		if remote.rewritten() != nil {
-			t.Fatal("the slice was written before the settle window ended")
+			t.Fatal("the ResourceSlice was written before the settle window ended, want no write until it ends")
 		}
 
 		time.Sleep(settleWindow)
 		if device := deviceNamed(t, remote.rewritten(), "a0-ab-51-33-b7-12"); len(device.Taints) != 0 {
-			t.Errorf("taints = %+v, want none", device.Taints)
+			t.Errorf("the device taints are %+v, want none", device.Taints)
 		}
 	})
 }
 
-// A connect sends battery changes and bluetoothd signals before and
-// after the node appears, and each one restarts the settle window. The
-// relay opens the node while the window stays open.
+// Power supply uevents arrive before and after the node appears, and
+// each one restarts the settle window. The relay must still open the
+// node while the window stays open.
 func TestARelayOpensANewNodeWhileUeventsHoldTheSettleWindowOpen(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		remote := runningLoop(t)
@@ -139,30 +140,31 @@ func TestARelayOpensANewNodeWhileUeventsHoldTheSettleWindowOpen(t *testing.T) {
 		remote.batteryChanges(4)
 		remote.connect()
 		if !remote.opened() {
-			t.Fatal("the relay did not open the node while the settle window was open")
+			t.Fatal("the relay did not open the node during the settle window, want it opened")
 		}
 		remote.batteryChanges(4)
 		if remote.rewritten() != nil {
-			t.Fatal("the slice was written while the events went on")
+			t.Fatal("the ResourceSlice was written while events kept arriving, want no write")
 		}
 	})
 }
 
-// An unpair stops a retired controller's relay, and nothing may start
-// it again. attach leaves out the controllers the last pass retired,
+// An unpair stops the relay of a controller that it removed from the
+// slice, and nothing may start it again. attach skips the controllers
+// that the last pass excluded,
 // even when the controller's node is still in sysfs.
-func TestAttachLeavesARetiredControllerAlone(t *testing.T) {
+func TestAttachLeavesAnExcludedControllerAlone(t *testing.T) {
 	publish, _ := reconcileFixture(t, "", wakingRemote)
 	sysfs := draSysfsRoot
 	draSysfsRoot = fakeSysfs(t)
-	retired := map[string]bool{testMAC: true}
-	if !publish.reconcile(pairedSet(connectedController()), adapterIs(t), retired) {
-		t.Fatal("the pass reported a failure")
+	excluded := map[string]bool{testMAC: true}
+	if !publish.reconcile(pairedSet(connectedController()), adapterIs(t), excluded) {
+		t.Fatal("the pass returned false, want true")
 	}
 
 	draSysfsRoot = sysfs
 	publish.attach()
 	if opened := publish.relays.kernel.(*fakeKernel).opened(); opened != 0 {
-		t.Fatalf("attach opened %d nodes of a retired controller", opened)
+		t.Fatalf("attach opened %d nodes of an excluded controller", opened)
 	}
 }

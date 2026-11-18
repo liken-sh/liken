@@ -1,29 +1,26 @@
 package main
 
-// Low Energy privacy for the radio this pod holds.
+// Low Energy privacy for this pod's radio.
 //
 // With privacy on, the radio advertises and connects from a resolvable
-// private address that it changes every few minutes, so a device that
-// never paired with it cannot recognize it from one appearance to the
-// next. A person turns it on with the Adapter's spec.privacy.
+// private address that changes periodically, so a device that never
+// paired with the radio cannot track it. The Adapter's spec.privacy
+// turns it on.
 //
-// bluetoothd reads its Privacy key once, from main.conf, and sends it
-// to the kernel when the adapter starts. The kernel accepts the privacy
-// command only while the radio is powered off. So a new value takes
-// effect only when bluetoothd starts again, and bondfetch writes the
-// value into the pod's settings volume before that start
-// (bondfetch/privacy.go). The file in the volume records the value
-// that the running bluetoothd started with.
+// bluetoothd reads Privacy from main.conf only when it starts, and the
+// kernel accepts the privacy setting only while the radio is powered
+// off, so a new value needs a new bluetoothd. bondfetch writes the
+// value into the pod's settings volume before bluetoothd starts
+// (bondfetch/privacy.go), so the file there holds the value that the
+// running bluetoothd started with.
 //
-// On each pass, the operator compares spec.privacy with that file.
-// When they differ, it deletes its own pod, and the DaemonSet creates a
-// new one, whose bondfetch writes the new value. The delete waits for a
-// pass that stored every bond, because the pod's bonds tree is an
-// emptyDir, and a pairing from the last seconds would go with it.
-//
-// Restarting only the bluetoothd container would not apply the value,
-// because the file in the volume stays as it is until bondfetch runs
-// again, and bondfetch runs only in a new pod.
+// When spec.privacy differs from that file, the operator deletes its
+// own pod, and the DaemonSet creates a new one whose bondfetch writes
+// the new value. Restarting only the bluetoothd container would not
+// help, because bondfetch is the init container and runs only when a
+// pod starts. The delete waits for a pass that stored every bond in
+// its Secret, because the bonds directory is an emptyDir that the
+// delete empties, and a bond not yet stored would be lost.
 
 import (
 	"errors"
@@ -38,30 +35,30 @@ import (
 )
 
 const (
-	// settingsRoot is the pod's settings volume. bondfetch writes it,
-	// start-bluetoothd and start-btmon read it, and this container
+	// settingsRoot is the pod's settings volume. bondfetch writes it
+	// and start-bluetoothd and start-btmon read it. This container
 	// writes only its btmon file (btmon.go).
 	settingsRoot = "/var/run/bluetooth.liken.sh/settings"
 
-	// privacyFile is the file in the settings volume that holds the
+	// privacyFile is the file in the settings volume that records the
 	// value bluetoothd started with.
 	privacyFile = "privacy"
 
-	// privacyOff is BlueZ's default, and the value of an empty
-	// spec.privacy.
+	// privacyOff is BlueZ's default, and the value that an empty
+	// spec.privacy means.
 	privacyOff = "off"
 
-	// podNameVar names this pod, which the pod spec supplies through the
-	// downward API. The restart deletes the pod by this name.
+	// podNameVar is the environment variable that holds this pod's
+	// name, set from the downward API. privacyRestart deletes the pod
+	// by this name.
 	podNameVar = "POD_NAME"
 )
 
-// readStartedPrivacy answers the value that bluetoothd started with.
-//
-// A missing file answers an empty value and no error. That is a pod
-// with no settings volume, where start-bluetoothd started bluetoothd
-// with privacy off. The restart cannot apply a value to such a pod,
-// because no bondfetch in it writes the file.
+// readStartedPrivacy returns the privacy value that bluetoothd started
+// with, read from the settings volume. It returns an empty string when
+// the file is missing, as in a pod with no settings volume. There,
+// start-bluetoothd starts bluetoothd with privacy off, and no bondfetch
+// writes a new value, so a restart cannot change it.
 func readStartedPrivacy(settings string) (string, error) {
 	contents, err := os.ReadFile(filepath.Join(settings, privacyFile))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -73,8 +70,8 @@ func readStartedPrivacy(settings string) (string, error) {
 	return strings.TrimSpace(string(contents)), nil
 }
 
-// wantedPrivacy answers the value an Adapter asks for. An empty field
-// is off.
+// wantedPrivacy returns the Adapter's spec.privacy, or off when it is
+// empty.
 func wantedPrivacy(adapter *Adapter) string {
 	if adapter.Spec.Privacy == "" {
 		return privacyOff
@@ -83,28 +80,25 @@ func wantedPrivacy(adapter *Adapter) string {
 }
 
 // privacyRestart deletes this pod when the Adapter's spec.privacy
-// differs from the value bluetoothd started with.
+// differs from the value that bluetoothd started with.
 type privacyRestart struct {
 	client    *apiclient.Client
 	namespace string
 	pod       string
 	recorder  *events.Recorder
 
-	// announced records that the Event is posted, and deleted records
-	// that the API server accepted the delete. The pod runs for some
-	// seconds after the delete, and the passes in that time must not
-	// post a second Event or send a second delete. A delete that failed
-	// is sent again on the next pass, with no second Event.
+	// The pod keeps running for a few seconds after the delete.
+	// announced and deleted keep the passes in that time from posting
+	// a second Event or sending a second delete. A failed delete is
+	// sent again on the next pass, without a second Event.
 	announced bool
 	deleted   bool
 }
 
-// apply compares the Adapter's spec.privacy with the value bluetoothd
-// started with, and deletes this pod when they differ. stored reports
-// whether this pass stored every bond and the identity file.
-//
-// A nil Adapter is a pass that did not read one, and an empty started
-// value is a pod with no settings file. Neither one restarts.
+// apply deletes this pod when the Adapter's spec.privacy differs from
+// started, the value bluetoothd started with, and stored reports that
+// this pass stored every bond and the identity file. It does nothing
+// when the pass read no Adapter or the pod has no settings file.
 func (r *privacyRestart) apply(adapter *Adapter, started string, stored bool) {
 	if r.deleted || adapter == nil || started == "" {
 		return
@@ -114,29 +108,27 @@ func (r *privacyRestart) apply(adapter *Adapter, started string, stored bool) {
 		return
 	}
 	if !stored {
-		fmt.Printf("privacy: %s asks for %s; the pod restarts after a pass that stores every bond\n",
+		fmt.Printf("privacy: the Adapter %s sets privacy %s, so the pod restarts after a pass that stores every bond\n",
 			adapter.Metadata.Name, wanted)
 		return
 	}
-	// The Event is queued before the delete is sent. The recorder
-	// writes from its own goroutine, and the kubelet stops this
-	// container soon after the delete lands, so an Event queued after
-	// the delete could go with the container.
+	// Queue the Event before sending the delete. The recorder writes
+	// from its own goroutine, and the kubelet stops this container soon
+	// after the delete, so an Event queued later could be lost.
 	if !r.announced {
 		r.recorder.Normal(adapterReference(adapter), reasonPrivacyChanged, fmt.Sprintf(
-			"privacy changes from %s to %s; deleting pod %s so that bluetoothd starts with the new value",
+			"spec.privacy changed from %s to %s, so the operator is deleting pod %s to start bluetoothd with the new value",
 			started, wanted, r.pod))
 		r.announced = true
 	}
 	if err := deleteObject(r.client, podPath(r.namespace, r.pod)); err != nil {
-		fmt.Fprintf(os.Stderr, "deleting pod %s to apply privacy %s: %v\n", r.pod, wanted, err)
+		fmt.Fprintf(os.Stderr, "privacy: deleting pod %s to apply privacy %s: %v\n", r.pod, wanted, err)
 		return
 	}
 	r.deleted = true
-	fmt.Printf("privacy: deleted pod %s; the next pod starts bluetoothd with privacy %s\n", r.pod, wanted)
+	fmt.Printf("privacy: deleted pod %s, so the next pod starts bluetoothd with privacy %s\n", r.pod, wanted)
 }
 
-// podPath is the API server's URL for one pod.
 func podPath(namespace, name string) string {
 	return "/api/v1/namespaces/" + namespace + "/pods/" + name
 }

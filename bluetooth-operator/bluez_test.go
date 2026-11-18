@@ -12,9 +12,9 @@ import (
 	"github.com/godbus/dbus/v5"
 )
 
-// managedObjects builds a GetManagedObjects answer out of whole
-// objects, in the shape BlueZ returns: a path, the interfaces it has,
-// and each interface's properties.
+// managedObjects builds a GetManagedObjects reply in the shape BlueZ
+// returns: each object path maps to its interfaces, and each interface
+// maps to its properties.
 type managedObjects map[dbus.ObjectPath]map[string]map[string]dbus.Variant
 
 func (m managedObjects) adapter(path string) managedObjects {
@@ -60,14 +60,12 @@ func TestControllersFromKeepsThePairedSet(t *testing.T) {
 			"Paired":    true,
 			"Connected": false,
 		}).
-		// Detected on the air with no link key, so it is not this
-		// machine's to offer.
+		// Found by discovery and never paired, so it has no link key.
 		device("/org/bluez/hci0/dev_CC_CC_CC_CC_CC_CC", map[string]any{
 			"Address": "CC:CC:CC:CC:CC:CC",
 			"Paired":  false,
 		}).
-		// A device object with no usable address has no identity a
-		// claim could name.
+		// A claim cannot refer to a device whose address is not a MAC.
 		device("/org/bluez/hci0/dev_broken", map[string]any{
 			"Address": "not-an-address",
 			"Paired":  true,
@@ -75,27 +73,22 @@ func TestControllersFromKeepsThePairedSet(t *testing.T) {
 
 	controllers, err := controllersFrom(objects)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the controllers: %v", err)
 	}
 	if len(controllers) != 2 {
-		t.Fatalf("got %d controllers, want 2: %+v", len(controllers), controllers)
+		t.Fatalf("the set holds %d controllers, want 2: %+v", len(controllers), controllers)
 	}
 	one := controllers["a0:ab:51:33:b7:12"]
 	if one.Name != "DualSense Wireless Controller" || !one.Connected {
-		t.Errorf("controller = %+v", one)
+		t.Errorf("the controller a0:ab:51:33:b7:12 is %+v, want the name DualSense Wireless Controller and Connected", one)
 	}
-	// Paired and disconnected is still a member. A person can claim it
-	// and the pod starts when somebody turns the controller on.
+	// A paired controller that is disconnected stays in the set.
 	two, ok := controllers["b4:8c:9d:11:22:33"]
 	if !ok || two.Connected {
-		t.Errorf("controller = %+v, present = %v", two, ok)
+		t.Errorf("the controller b4:8c:9d:11:22:33 is %+v (present %v), want present and not Connected", two, ok)
 	}
 }
 
-// The class facts arrive in the inquiry response and the UUIDs
-// arrive from the SDP browse after pairing, but by the time this
-// parse runs they are all plain Device1 properties, read in one
-// GetManagedObjects answer.
 func TestControllersFromReadsTheDeviceProperties(t *testing.T) {
 	objects := managedObjects{}.
 		adapter("/org/bluez/hci0").
@@ -117,7 +110,7 @@ func TestControllersFromReadsTheDeviceProperties(t *testing.T) {
 
 	controllers, err := controllersFrom(objects)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the controllers: %v", err)
 	}
 	got := controllers["e3:28:e9:23:21:6f"]
 	want := controller{
@@ -134,13 +127,10 @@ func TestControllersFromReadsTheDeviceProperties(t *testing.T) {
 		},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("controller = %+v, want %+v", got, want)
+		t.Fatalf("the controller is %+v, want %+v", got, want)
 	}
 }
 
-// A device that reports none of the identity properties parses to
-// zero values, which is what the publisher reads as "publish
-// nothing".
 func TestControllersFromLeavesAnAbsentPropertyZero(t *testing.T) {
 	objects := managedObjects{}.
 		adapter("/org/bluez/hci0").
@@ -151,22 +141,22 @@ func TestControllersFromLeavesAnAbsentPropertyZero(t *testing.T) {
 
 	controllers, err := controllersFrom(objects)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the controllers: %v", err)
 	}
 	if got := controllers["a0:ab:51:33:b7:12"]; !reflect.DeepEqual(got, controller{}) {
-		t.Fatalf("controller = %+v, want the zero value", got)
+		t.Fatalf("the controller is %+v, want the zero value", got)
 	}
 }
 
 func TestControllersFromWithAnAdapterAndNoPeripherals(t *testing.T) {
-	// An adapter with nothing paired is an authoritative empty set,
-	// and unpairing is the one sanctioned removal.
+	// An adapter with no paired devices is an empty paired set and not
+	// an error, because unpairing the last controller must remove it.
 	controllers, err := controllersFrom(managedObjects{}.adapter("/org/bluez/hci0"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the controllers: %v", err)
 	}
 	if len(controllers) != 0 {
-		t.Fatalf("got %+v, want an empty set", controllers)
+		t.Fatalf("the set is %+v, want empty", controllers)
 	}
 }
 
@@ -180,7 +170,7 @@ func TestControllersFromWithoutAnAdapter(t *testing.T) {
 	for name, objects := range cases {
 		t.Run(name, func(t *testing.T) {
 			if _, err := controllersFrom(objects); err != ErrNoAdapter {
-				t.Fatalf("err = %v, want ErrNoAdapter", err)
+				t.Fatalf("the error is %v, want ErrNoAdapter", err)
 			}
 		})
 	}
@@ -196,28 +186,24 @@ func TestAdapterAddressFromReadsTheAdapter(t *testing.T) {
 
 	address, err := adapterAddressFrom(objects)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the adapter address: %v", err)
 	}
-	// The adapter's address labels every bond Secret and names the
-	// adapter's directory in BlueZ's tree. A device's address does
-	// neither.
+	// The bond Secrets are labeled with the adapter's address, not a
+	// device's.
 	if address.Directory() != "00:1A:7D:DA:71:13" {
-		t.Fatalf("address = %s", address)
+		t.Fatalf("the adapter address is %s, want the address of the adapter", address)
 	}
 }
 
 func TestAdapterAddressFromWithoutAnAdapter(t *testing.T) {
-	// The same startup window and the same departure that the paired
-	// set reads as ErrNoAdapter.
 	if _, err := adapterAddressFrom(managedObjects{}); err != ErrNoAdapter {
-		t.Fatalf("err = %v, want ErrNoAdapter", err)
+		t.Fatalf("the error is %v, want ErrNoAdapter", err)
 	}
 }
 
 func TestAdapterAddressFromWithTwoAdapters(t *testing.T) {
-	// A pod claims one adapter, so a second one is not expected. The
-	// lowest object path wins, so two reads of the same tree answer
-	// with the same adapter and every bond takes the same label.
+	// Every read picks the lowest object path, so every bond gets the
+	// same label.
 	objects := managedObjects{}.adapter("/org/bluez/hci1")
 	objects[dbus.ObjectPath("/org/bluez/hci0")] = map[string]map[string]dbus.Variant{
 		adapterInterface: {"Address": dbus.MakeVariant("14:B4:57:91:2F:C8")},
@@ -226,10 +212,10 @@ func TestAdapterAddressFromWithTwoAdapters(t *testing.T) {
 	for range 4 {
 		address, err := adapterAddressFrom(objects)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("reading the adapter address: %v", err)
 		}
 		if address.Directory() != "14:B4:57:91:2F:C8" {
-			t.Fatalf("address = %s", address)
+			t.Fatalf("the adapter address is %s, want the address of the adapter", address)
 		}
 	}
 }
@@ -241,12 +227,12 @@ func TestAdapterAddressFromWithAnUnusableAddress(t *testing.T) {
 	}
 
 	if _, err := adapterAddressFrom(objects); err == nil {
-		t.Fatal("an unusable address reported an adapter")
+		t.Fatal("an adapter with the address not-an-address returned no error, want one")
 	}
 }
 
-// nameOwnerChanged builds the bus daemon's report that a name changed
-// hands. An empty owner means the name has no owner now.
+// nameOwnerChanged builds a NameOwnerChanged signal. An empty owner
+// means the name has no owner after the change.
 func nameOwnerChanged(name, owner string) *dbus.Signal {
 	return &dbus.Signal{
 		Name: "org.freedesktop.DBus.NameOwnerChanged",
@@ -254,9 +240,10 @@ func nameOwnerChanged(name, owner string) *dbus.Signal {
 	}
 }
 
-// ready answers whether a channel has a value or has closed, and takes
-// the value. A test calls it after synctest.Wait, when the goroutine
-// under test has done all it can.
+// ready does a non-blocking receive. got is true when the receive
+// completed, either with a value or because the channel is closed, and
+// open is false only for a closed channel. A test calls it after
+// synctest.Wait, when the goroutine under test is blocked.
 func ready[T any](from <-chan T) (open, got bool) {
 	select {
 	case _, open := <-from:
@@ -275,25 +262,22 @@ func TestRelayBlueZSignalsWakesOnASignal(t *testing.T) {
 		signals <- &dbus.Signal{Name: "org.freedesktop.DBus.Properties.PropertiesChanged"}
 		synctest.Wait()
 		if open, got := ready(changed); !open || !got {
-			t.Fatal("a signal produced no wake")
+			t.Fatal("a signal from bluetoothd sent no wake")
 		}
 
-		// A closed signal channel is godbus reporting that the
-		// connection to the bus is gone. The relay closes its own
-		// channel, and the main loop reads that as the lost bus.
+		// godbus closes the signal channel when the connection to the
+		// bus is lost, and the relay must then close its own channel.
 		close(signals)
 		synctest.Wait()
 		if open, got := ready(changed); open || !got {
-			t.Fatal("the relay did not close its channel when its source closed")
+			t.Fatal("the relay left its channel open after its source closed, want it closed")
 		}
 		if _, got := ready(released); !got {
-			t.Fatal("the relay never released its signal channel")
+			t.Fatal("the relay did not remove its signal channel, want it removed")
 		}
 	})
 }
 
-// A Disconnected signal records why the link ended before it wakes the
-// loop, so the pass that the wake starts reads the reason.
 func TestRelayBlueZSignalsRecordsWhyALinkEnded(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		signals := make(chan *dbus.Signal, 4)
@@ -304,7 +288,7 @@ func TestRelayBlueZSignalsRecordsWhyALinkEnded(t *testing.T) {
 		synctest.Wait()
 
 		if _, got := ready(changed); !got {
-			t.Error("the signal produced no wake")
+			t.Error("the signal sent no wake")
 		}
 		if reason := ends.reason(testAddress(t, sampleRemote)); reason != blueZReasonTimeout {
 			t.Errorf("the record holds %q, want %q", reason, blueZReasonTimeout)
@@ -322,10 +306,10 @@ func TestRelayBlueZSignalsStopsWithItsContext(t *testing.T) {
 		cancel()
 		synctest.Wait()
 		if open, got := ready(changed); open || !got {
-			t.Fatal("the relay did not close its channel when its context ended")
+			t.Fatal("the relay left its channel open after its context ended, want it closed")
 		}
 		if _, got := ready(released); !got {
-			t.Fatal("the relay never released its signal channel")
+			t.Fatal("the relay did not remove its signal channel, want it removed")
 		}
 	})
 }
@@ -333,10 +317,8 @@ func TestRelayBlueZSignalsStopsWithItsContext(t *testing.T) {
 func TestWatchNameLossReportsADeadConnection(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		// godbus closes every registered signal channel when the
-		// connection to the bus is lost. bluetoothd is then unreachable
-		// whether or not it is still running, so this counts as the
-		// daemon leaving. Without it the operator would exit zero and
-		// look like a clean shutdown.
+		// connection to the bus is lost, and that counts as bluetoothd
+		// leaving.
 		names := make(chan *dbus.Signal, 1)
 		released := make(chan struct{})
 		gone := watchNameLoss(t.Context(), names, func() { close(released) })
@@ -344,10 +326,10 @@ func TestWatchNameLossReportsADeadConnection(t *testing.T) {
 		close(names)
 		synctest.Wait()
 		if _, got := ready(gone); !got {
-			t.Fatal("a closed signal channel did not report the daemon gone")
+			t.Fatal("a closed signal channel did not report bluetoothd gone, want it reported")
 		}
 		if _, got := ready(released); !got {
-			t.Fatal("the watcher never released its signal channel")
+			t.Fatal("the watcher did not remove its signal channel, want it removed")
 		}
 	})
 }
@@ -357,27 +339,25 @@ func TestWatchNameLossReportsTheNameLosingItsOwner(t *testing.T) {
 		names := make(chan *dbus.Signal, 4)
 		gone := watchNameLoss(t.Context(), names, func() {})
 
-		// Neither of these is bluetoothd going away.
+		// None of these means bluetoothd left the bus.
 		names <- nameOwnerChanged("org.freedesktop.systemd1", "")
 		names <- nameOwnerChanged(bluezService, ":1.9")
 		names <- &dbus.Signal{Name: "org.bluez.Adapter1.PropertiesChanged"}
 		synctest.Wait()
 		if _, got := ready(gone); got {
-			t.Fatal("an unrelated signal reported the daemon gone")
+			t.Fatal("an unrelated signal reported bluetoothd gone, want no report")
 		}
 
 		names <- nameOwnerChanged(bluezService, "")
 		synctest.Wait()
 		if _, got := ready(gone); !got {
-			t.Fatal("bluetoothd losing its name did not report it gone")
+			t.Fatal("bluetoothd losing its bus name did not report it gone, want it reported")
 		}
 	})
 }
 
 func TestWatchNameLossStaysQuietOnShutdown(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		// A shutdown must not read as the daemon dying. The channel
-		// stays open and empty, so the loop's own ctx.Done branch wins.
 		ctx, cancel := context.WithCancel(t.Context())
 		names := make(chan *dbus.Signal, 1)
 		released := make(chan struct{})
@@ -386,16 +366,17 @@ func TestWatchNameLossStaysQuietOnShutdown(t *testing.T) {
 		cancel()
 		synctest.Wait()
 		if _, got := ready(released); !got {
-			t.Fatal("the watcher never released its signal channel")
+			t.Fatal("the watcher did not remove its signal channel, want it removed")
 		}
 		if _, got := ready(gone); got {
-			t.Fatal("the shutdown reported the daemon gone")
+			t.Fatal("the shutdown reported bluetoothd gone, want no report")
 		}
 	})
 }
 
-// An address with no bus behind it is the state the operator finds
-// when it starts before the bluetoothd container binds the socket.
+// absentBusAddress points D-Bus at a socket that does not exist, which
+// is what the operator finds when it starts before the bluetoothd
+// container has bound the socket.
 func absentBusAddress(t *testing.T) {
 	t.Helper()
 	t.Setenv("DBUS_SYSTEM_BUS_ADDRESS", "unix:path="+filepath.Join(t.TempDir(), "system_bus_socket"))
@@ -405,7 +386,7 @@ func TestWaitForBusReportsABusThatNeverArrives(t *testing.T) {
 	absentBusAddress(t)
 
 	if _, err := waitForBus(context.Background(), 0); err == nil {
-		t.Fatal("waitForBus reported a connection to a bus that is not there")
+		t.Fatal("waitForBus returned a connection, want an error because the bus is not there")
 	}
 }
 

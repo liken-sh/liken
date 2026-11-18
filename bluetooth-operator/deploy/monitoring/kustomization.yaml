@@ -1,34 +1,28 @@
-# The monitoring component. liken milestone 65 gives every operator's
-# metrics wiring this shape: the base applies on a cluster with no
-# monitoring at all, and an owner who runs the prometheus-operator adds
-# this component beside the base to scrape it.
+# The base applies on a cluster without monitoring. A cluster that
+# runs the prometheus-operator adds this component to the base to
+# scrape the operator's metrics. It is a Component, not a second base,
+# because it adds resources to the namespace and labels that the base
+# sets.
 #
-# A Component, not a second base, because it adds a PodMonitor to the
-# same namespace and labels the base already establishes, rather than
-# standing up a tree of its own.
-#
-# This component sets no top-level namespace. A Component's namespace
-# would apply to every resource it lists, and the dashboard ConfigMap
-# belongs in the monitoring namespace the kube-prometheus-stack sidecar
-# watches, not liken-system where the operator's pod runs. podmonitor.yaml
-# states liken-system on the PodMonitor directly instead.
+# The component sets no top-level namespace, because that would apply
+# to every resource it lists. The dashboard ConfigMap must be in the
+# monitoring namespace that the kube-prometheus-stack sidecar watches,
+# and the PodMonitor must be in liken-system with the operator's pod.
+# So each resource sets its own namespace.
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 
 resources:
   - podmonitor.yaml
 
-# The dashboard travels as a ConfigMap carrying the
-# `grafana_dashboard: "1"` label. The kube-prometheus-stack runs a
-# sidecar beside Grafana that watches for that label and loads every
-# ConfigMap that carries it, so the dashboard needs no Grafana API call
-# and no provisioning file.
+# The dashboard is a ConfigMap with the label `grafana_dashboard: "1"`.
+# The kube-prometheus-stack runs a sidecar next to Grafana that loads
+# every ConfigMap with that label, so installing the dashboard needs no
+# Grafana API call and no provisioning file.
 #
-# The generated name carries no content hash. A hash would make every
-# dashboard edit create a second ConfigMap, and an apply without
-# pruning would leave both loaded, so Grafana would show the old
-# dashboard beside the new one. A stable name replaces the dashboard
-# in place, and the sidecar reloads it.
+# The generated name has no content hash. With a hash, each dashboard
+# edit creates a new ConfigMap, an apply that does not prune keeps the
+# old one, and Grafana loads both dashboards.
 configMapGenerator:
   - name: bluetooth-operator-dashboard
     namespace: monitoring

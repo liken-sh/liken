@@ -1,10 +1,9 @@
 package main
 
-// These tests run one prepare call end to end: a claim read from a
-// test API server, a relay over a fake kernel, and the CDI spec file
-// that the container runtime would read. The spec file states which
-// device nodes a consumer's container receives, so it is the thing
-// worth asserting on.
+// These tests run a prepare call from start to finish: a claim read
+// from a test API server, a relay over a fake kernel, and the CDI spec
+// file that the container runtime reads. The tests assert on the spec
+// file, because it lists the device nodes a container receives.
 
 import (
 	"encoding/json"
@@ -21,15 +20,15 @@ import (
 
 const testClaimUID = "0f8b1a2c-3d4e-5f60-8172-93a4b5c6d7e8"
 
-// allocatedClaim serves one ResourceClaim whose allocation holds these
-// results and no configuration, which is the claim that receives every
-// input class.
+// allocatedClaim serves a ResourceClaim whose allocation has these
+// results and no configuration, so the claim receives every input
+// class.
 func allocatedClaim(t *testing.T, results ...AllocatedDevice) http.Handler {
 	t.Helper()
 	return configuredClaim(t, nil, results...)
 }
 
-// configuredClaim serves one ResourceClaim whose allocation carries
+// configuredClaim serves a ResourceClaim whose allocation has
 // configuration blocks as well as results.
 func configuredClaim(t *testing.T, config []AllocatedConfig, results ...AllocatedDevice) http.Handler {
 	t.Helper()
@@ -52,23 +51,21 @@ func configuredClaim(t *testing.T, config []AllocatedConfig, results ...Allocate
 	})
 }
 
-// preparePlugin wires a plugin to a test API server, with the CDI
-// directory pointed at one the test owns and one relay running for
-// each controller these HID devices name. A controller that is not
-// named here has no relay, which is the state of a bond that has never
-// connected.
+// preparePlugin returns a plugin that reads claims from a test API
+// server and writes CDI specs to a temporary directory. It starts one
+// relay for each controller that these HID devices belong to. A
+// controller with no device here has no relay, like a bond that has
+// never connected.
 func preparePlugin(t *testing.T, claims http.Handler, devices ...fakeHID) *draPlugin {
 	t.Helper()
 	cdiTempDir(t)
-	held := relaysFor(t, devices...)
+	inputRelays := relaysFor(t, devices...)
 	for _, device := range devices {
-		held.ensure(device.Uevent["HID_UNIQ"], realNodes(device))
+		inputRelays.ensure(device.Uevent["HID_UNIQ"], realNodes(device))
 	}
-	return &draPlugin{client: testClient(t, claims), relays: held}
+	return &draPlugin{client: testClient(t, claims), relays: inputRelays}
 }
 
-// controllerAllocation is one paired controller as the scheduler
-// allocates it.
 func controllerAllocation() AllocatedDevice {
 	return AllocatedDevice{
 		Request: "controller",
@@ -78,8 +75,8 @@ func controllerAllocation() AllocatedDevice {
 	}
 }
 
-// deliveredNodes are the device nodes one prepared claim's spec grants.
-func deliveredNodes(t *testing.T, spec cdiSpec, device int) []string {
+// specNodes returns the device node paths of one device in a CDI spec.
+func specNodes(t *testing.T, spec cdiSpec, device int) []string {
 	t.Helper()
 	var paths []string
 	for _, node := range spec.Devices[device].ContainerEdits.DeviceNodes {
@@ -92,9 +89,9 @@ func testClaim() *drav1.Claim {
 	return &drav1.Claim{Namespace: "arcade", Name: "player-one", Uid: testClaimUID}
 }
 
-func TestPrepareClaimDeliversOneControllersInputNodes(t *testing.T) {
-	// Two controllers are connected. The claim allocated one of them,
-	// and the container must receive that one's nodes and no others.
+func TestPrepareClaimGrantsOnlyTheAllocatedControllersNodes(t *testing.T) {
+	// Two controllers are connected. The claim has one of them, so the
+	// container gets only that controller's nodes.
 	plugin := preparePlugin(t,
 		allocatedClaim(t, controllerAllocation()),
 		dualSense("0001", "a0:ab:51:33:b7:12", "input/event5", "input/js0"),
@@ -104,30 +101,30 @@ func TestPrepareClaimDeliversOneControllersInputNodes(t *testing.T) {
 
 	resp := plugin.prepareClaim(testClaim())
 	if resp.Error != "" {
-		t.Fatalf("prepare failed: %s", resp.Error)
+		t.Fatalf("preparing the claim returned the error %q, want none", resp.Error)
 	}
 	if len(resp.Devices) != 1 {
-		t.Fatalf("devices = %+v", resp.Devices)
+		t.Fatalf("devices = %+v, want one", resp.Devices)
 	}
 	device := resp.Devices[0]
 	if device.DeviceName != "a0-ab-51-33-b7-12" || device.PoolName != "liken-1" {
-		t.Errorf("device = %+v", device)
+		t.Errorf("device = %+v, want device a0-ab-51-33-b7-12 in pool liken-1", device)
 	}
 	wantID := "bluetooth.liken.sh/controller=" + testClaimUID + "-a0-ab-51-33-b7-12"
 	if len(device.CdiDeviceIds) != 1 || device.CdiDeviceIds[0] != wantID {
 		t.Errorf("cdiDeviceIds = %v, want [%s]", device.CdiDeviceIds, wantID)
 	}
 
-	// The file name starts with this driver's prefix, so liken's own specs
-	// in the same directory never collide with these.
+	// The file name starts with this driver's name, so it cannot collide
+	// with the spec files of other drivers in the same directory.
 	path := filepath.Join(cdiDir, "bluetooth.liken.sh-"+testClaimUID+".json")
 	spec := readSpec(t, path)
 	if len(spec.Devices) != 1 {
-		t.Fatalf("spec devices = %+v", spec.Devices)
+		t.Fatalf("spec devices = %+v, want one", spec.Devices)
 	}
-	// Both of the allocated controller's HID devices contribute a
-	// virtual node, and the other controller contributes nothing.
-	paths := deliveredNodes(t, spec, 0)
+	// Both HID devices of the allocated controller give a virtual node,
+	// and the other controller gives none.
+	paths := specNodes(t, spec, 0)
 	want := plugin.relays.virtualNodes("a0:ab:51:33:b7:12")
 	if len(want) != 2 {
 		t.Fatalf("the relay holds %v, want two nodes", want)
@@ -143,28 +140,25 @@ func TestPrepareClaimDeliversOneControllersInputNodes(t *testing.T) {
 }
 
 // A claim on a controller that is asleep is prepared from the
-// capability snapshot its bond's Secret holds. This is why the relay
-// exists: a standing pod for a remote that reconnects on the next
-// press starts before anybody presses anything.
-func TestPrepareClaimDeliversAControllerThatIsAsleep(t *testing.T) {
+// capabilities snapshot in its bond's Secret, so the pod starts before
+// anyone presses a button.
+func TestPrepareClaimGrantsNodesForAControllerThatIsAsleep(t *testing.T) {
 	plugin := preparePlugin(t, allocatedClaim(t, controllerAllocation()))
-	// The controller registers no real node anywhere. Its capabilities
-	// come from the Secret, written the last time it was connected.
 	plugin.relays.restore("a0:ab:51:33:b7:12", storedCapabilities(t))
 
 	resp := plugin.prepareClaim(testClaim())
 	if resp.Error != "" {
-		t.Fatalf("prepare failed: %s", resp.Error)
+		t.Fatalf("preparing the claim returned the error %q, want none", resp.Error)
 	}
-	paths := deliveredNodes(t, readSpec(t, cdiSpecPath(testClaimUID)), 0)
+	paths := specNodes(t, readSpec(t, cdiSpecPath(testClaimUID)), 0)
 	want := plugin.relays.virtualNodes("a0:ab:51:33:b7:12")
 	if len(want) != 1 || !reflect.DeepEqual(paths, want) {
 		t.Fatalf("nodes = %v, want %v", paths, want)
 	}
 }
 
-// storedCapabilities is one controller's evdev snapshot as its bond's
-// Secret holds it.
+// storedCapabilities returns the evdev capabilities snapshot of one
+// controller, as stored in its bond's Secret.
 func storedCapabilities(t *testing.T) []byte {
 	t.Helper()
 	stored, err := json.Marshal(evdevSnapshot{
@@ -172,12 +166,11 @@ func storedCapabilities(t *testing.T) []byte {
 		Nodes:   []evdevCapabilities{testCapabilities()},
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("marshaling the capabilities snapshot: %v", err)
 	}
 	return stored
 }
 
-// busAllocation is the media bus as the scheduler allocates it.
 func busAllocation() AllocatedDevice {
 	return AllocatedDevice{
 		Request: "sound",
@@ -187,16 +180,15 @@ func busAllocation() AllocatedDevice {
 	}
 }
 
-// The bus grants a mount and a variable, and no device node. It is
-// also ready whenever bluetoothd is serving, so a prepare on a machine
-// with no controller on the air still succeeds: the sysfs walk that
-// gates a controller does not apply to it.
-func TestPrepareClaimDeliversTheMediaBus(t *testing.T) {
+// The bus grants a mount and an environment variable, and no device
+// node. It has no relay, so a prepare succeeds on a machine with no
+// connected controller.
+func TestPrepareClaimGrantsTheMediaBusMountAndVariable(t *testing.T) {
 	plugin := preparePlugin(t, allocatedClaim(t, busAllocation()))
 
 	resp := plugin.prepareClaim(testClaim())
 	if resp.Error != "" {
-		t.Fatalf("prepare failed: %s", resp.Error)
+		t.Fatalf("preparing the claim returned the error %q, want none", resp.Error)
 	}
 	wantID := "bluetooth.liken.sh/controller=" + testClaimUID + "-" + testBus
 	if len(resp.Devices) != 1 || resp.Devices[0].CdiDeviceIds[0] != wantID {
@@ -205,7 +197,7 @@ func TestPrepareClaimDeliversTheMediaBus(t *testing.T) {
 
 	spec := readSpec(t, cdiSpecPath(testClaimUID))
 	if len(spec.Devices) != 1 {
-		t.Fatalf("spec devices = %+v", spec.Devices)
+		t.Fatalf("spec devices = %+v, want one", spec.Devices)
 	}
 	edits := spec.Devices[0].ContainerEdits
 	wantEnv := []string{"DBUS_SYSTEM_BUS_ADDRESS=unix:path=/var/run/bluetooth.liken.sh/dbus/system_bus_socket"}
@@ -225,9 +217,10 @@ func TestPrepareClaimDeliversTheMediaBus(t *testing.T) {
 	}
 }
 
-// One claim can allocate both kinds of device from this driver, and
-// each entry in the one spec file carries its own kind of edit.
-func TestPrepareClaimDeliversAControllerAndTheBusTogether(t *testing.T) {
+// One claim can hold both kinds of device from this driver. The spec
+// file has one entry for each, and each entry has only the edits for
+// its kind of device.
+func TestPrepareClaimGrantsAControllerAndTheBusInOneSpec(t *testing.T) {
 	plugin := preparePlugin(t,
 		allocatedClaim(t, controllerAllocation(), busAllocation()),
 		dualSense("0001", "a0:ab:51:33:b7:12", "input/event5"),
@@ -235,7 +228,7 @@ func TestPrepareClaimDeliversAControllerAndTheBusTogether(t *testing.T) {
 
 	resp := plugin.prepareClaim(testClaim())
 	if resp.Error != "" {
-		t.Fatalf("prepare failed: %s", resp.Error)
+		t.Fatalf("preparing the claim returned the error %q, want none", resp.Error)
 	}
 	if len(resp.Devices) != 2 {
 		t.Fatalf("devices = %+v, want two", resp.Devices)
@@ -252,18 +245,18 @@ func TestPrepareClaimDeliversAControllerAndTheBusTogether(t *testing.T) {
 		t.Errorf("the controller's edits = %+v, want %v", controller, relayed)
 	}
 	if len(controller.Env) != 0 || len(controller.Mounts) != 0 {
-		t.Errorf("the controller received the bus edits: %+v", controller)
+		t.Errorf("the controller's edits = %+v, want none of the bus's edits", controller)
 	}
 	bus := edits[testClaimUID+"-"+testBus]
 	if len(bus.Env) != 1 || len(bus.Mounts) != 1 || len(bus.DeviceNodes) != 0 {
-		t.Errorf("the bus's edits = %+v", bus)
+		t.Errorf("the bus's edits = %+v, want the bus edits", bus)
 	}
 }
 
-func TestPrepareClaimLeavesAnotherDriversAllocationAlone(t *testing.T) {
-	// The operator's own pod holds a claim on liken's adapter. The
-	// kubelet asks every registered driver about every claim, and this
-	// driver has nothing to prepare for that one.
+func TestPrepareClaimIgnoresAnotherDriversDevice(t *testing.T) {
+	// A claim can also hold devices of other drivers, such as a USB
+	// adapter from the liken.sh driver. The plugin prepares nothing for
+	// them and writes no spec file.
 	plugin := preparePlugin(t,
 		allocatedClaim(t, AllocatedDevice{
 			Request: "adapter",
@@ -276,41 +269,37 @@ func TestPrepareClaimLeavesAnotherDriversAllocationAlone(t *testing.T) {
 
 	resp := plugin.prepareClaim(testClaim())
 	if resp.Error != "" {
-		t.Fatalf("prepare failed: %s", resp.Error)
+		t.Fatalf("preparing the claim returned the error %q, want none", resp.Error)
 	}
 	if len(resp.Devices) != 0 {
 		t.Fatalf("devices = %+v, want none", resp.Devices)
 	}
 	if _, err := os.Stat(cdiSpecPath(testClaimUID)); !os.IsNotExist(err) {
-		t.Fatal("a claim this driver prepares nothing for still wrote a spec file")
+		t.Fatal("a CDI spec file exists for a claim with no device of this driver, want none")
 	}
 }
 
-func TestPrepareClaimWaitsForABondThatHasNeverConnected(t *testing.T) {
-	// The bond was made and the controller has never connected since,
-	// so no snapshot exists and the relay holds no virtual device.
-	// Failing per claim holds the pod in ContainerCreating with a
-	// reason a describe of the pod shows, which is the correct outcome
-	// while the device's NoSchedule taint keeps the next pod parked.
+func TestPrepareClaimFailsForABondThatHasNeverConnected(t *testing.T) {
+	// The controller has not connected since it was paired, so there is
+	// no snapshot and the relay has no virtual device.
 	plugin := preparePlugin(t, allocatedClaim(t, controllerAllocation()))
 
 	resp := plugin.prepareClaim(testClaim())
 	if resp.Error == "" {
-		t.Fatal("prepare succeeded for a controller with no relay")
+		t.Fatal("preparing a claim for a controller with no relay returned no error, want one")
 	}
-	// The message names the controller, so a person reading the pod's
-	// events knows which one to switch on.
+	// The pod's events show this error, so it must name the controller
+	// to turn on.
 	if !strings.Contains(resp.Error, "A0:AB:51:33:B7:12") {
-		t.Errorf("the failure does not name the controller: %s", resp.Error)
+		t.Errorf("the error is %q, want it to name the controller A0:AB:51:33:B7:12", resp.Error)
 	}
 	if _, err := os.Stat(cdiSpecPath(testClaimUID)); !os.IsNotExist(err) {
-		t.Fatal("a failed prepare wrote a spec file")
+		t.Fatal("a CDI spec file exists after a failed prepare, want none")
 	}
 }
 
-func TestPrepareClaimRefusesARecreatedClaim(t *testing.T) {
-	// A claim deleted and recreated under the same name is a different
-	// grant, and it is not the one this pod was scheduled against.
+func TestPrepareClaimFailsWhenTheClaimUIDChanged(t *testing.T) {
+	// The claim was deleted and created again under the same name.
 	plugin := preparePlugin(t, allocatedClaim(t, AllocatedDevice{
 		Driver: DriverName,
 		Device: "a0-ab-51-33-b7-12",
@@ -319,49 +308,49 @@ func TestPrepareClaimRefusesARecreatedClaim(t *testing.T) {
 	claim := testClaim()
 	claim.Uid = "99999999-0000-0000-0000-000000000000"
 	if resp := plugin.prepareClaim(claim); resp.Error == "" {
-		t.Fatal("prepare accepted a claim whose UID had changed")
+		t.Fatal("preparing a claim whose UID changed returned no error, want one")
 	}
 }
 
-func TestUnprepareRemovesTheSpecAndRepeats(t *testing.T) {
+func TestUnprepareDeletesTheSpecAndSucceedsWhenRepeated(t *testing.T) {
 	plugin := preparePlugin(t,
 		allocatedClaim(t, controllerAllocation()),
 		dualSense("0001", "a0:ab:51:33:b7:12", "input/event5"),
 	)
 	if resp := plugin.prepareClaim(testClaim()); resp.Error != "" {
-		t.Fatalf("prepare failed: %s", resp.Error)
+		t.Fatalf("preparing the claim returned the error %q, want none", resp.Error)
 	}
 
 	req := &drav1.NodeUnprepareResourcesRequest{
 		Claims: []*drav1.Claim{{Namespace: "arcade", Name: "player-one", Uid: testClaimUID}},
 	}
-	// The kubelet repeats an unprepare whenever it has no record that
-	// the call succeeded, so the second one must answer the same way.
+	// The kubelet repeats an unprepare when it has no record that the
+	// call succeeded, so the second call must succeed too.
 	for range 2 {
 		resp, err := plugin.NodeUnprepareResources(t.Context(), req)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("unpreparing the claim: %v", err)
 		}
 		if got := resp.Claims[testClaimUID]; got == nil || got.Error != "" {
-			t.Fatalf("unprepare = %+v", got)
+			t.Fatalf("unprepare response = %+v, want an entry with no error", got)
 		}
 	}
 	if _, err := os.Stat(cdiSpecPath(testClaimUID)); !os.IsNotExist(err) {
-		t.Fatal("the spec file is still there")
+		t.Fatal("the CDI spec file exists after unprepare, want it deleted")
 	}
 }
 
-// inputsOf are the classes a prepared claim's spec file records for
-// one device.
+// inputsOf returns the input classes that a spec records for one
+// device.
 func inputsOf(t *testing.T, spec cdiSpec, device int) []string {
 	t.Helper()
 	return spec.Devices[device].inputs()
 }
 
-// The classes a claim asked for are written beside the nodes it
-// received, because the spec file is what a restart of this operator
-// rebuilds each pump's demand from.
-func TestPrepareClaimRecordsTheClassesTheClaimAsksFor(t *testing.T) {
+// The input classes a claim requests are written to the spec file with
+// its nodes, because the relays rebuild their settings from the spec
+// files when the operator restarts.
+func TestPrepareClaimRecordsTheRequestedInputClasses(t *testing.T) {
 	plugin := preparePlugin(t,
 		configuredClaim(t,
 			[]AllocatedConfig{driverConfig("FromClaim", `{"inputs":["joystick"]}`)},
@@ -371,7 +360,7 @@ func TestPrepareClaimRecordsTheClassesTheClaimAsksFor(t *testing.T) {
 
 	resp := plugin.prepareClaim(testClaim())
 	if resp.Error != "" {
-		t.Fatalf("prepare failed: %s", resp.Error)
+		t.Fatalf("preparing the claim returned the error %q, want none", resp.Error)
 	}
 	spec := readSpec(t, cdiSpecPath(testClaimUID))
 	if got := inputsOf(t, spec, 0); !reflect.DeepEqual(got, []string{"joystick"}) {
@@ -379,37 +368,34 @@ func TestPrepareClaimRecordsTheClassesTheClaimAsksFor(t *testing.T) {
 	}
 }
 
-// A claim that receives every class records no list, so a spec file
-// this driver wrote before the parameter existed reads back the same
-// way.
-func TestPrepareClaimRecordsNoListForEveryClass(t *testing.T) {
+// A claim that receives every class records no list of classes.
+func TestPrepareClaimRecordsNoClassListWhenTheClaimRequestsEveryClass(t *testing.T) {
 	plugin := preparePlugin(t,
 		allocatedClaim(t, controllerAllocation()),
 		dualSense("0001", "a0:ab:51:33:b7:12", "input/event5"),
 	)
 
 	if resp := plugin.prepareClaim(testClaim()); resp.Error != "" {
-		t.Fatalf("prepare failed: %s", resp.Error)
+		t.Fatalf("preparing the claim returned the error %q, want none", resp.Error)
 	}
 	if got := inputsOf(t, readSpec(t, cdiSpecPath(testClaimUID)), 0); got != nil {
 		t.Errorf("inputs = %v, want none", got)
 	}
 }
 
-// A configuration this driver cannot read fails the claim rather than
-// delivering something the claim did not ask for. The pod waits in
-// ContainerCreating and a describe of it says what is wrong.
-func TestPrepareClaimRefusesAConfigurationItCannotRead(t *testing.T) {
+// An invalid configuration fails the claim, so the container does not
+// get input the claim did not request.
+func TestPrepareClaimFailsOnAnInvalidConfiguration(t *testing.T) {
 	cases := []struct {
 		name       string
 		parameters string
-		says       string
+		contains   string
 	}{
-		{name: "an empty list", parameters: `{"inputs":[]}`, says: "empty"},
-		{name: "an unknown class", parameters: `{"inputs":["buttons"]}`, says: `"buttons"`},
-		{name: "an unknown axis", parameters: `{"axes":{"ABS_NOPE":{"fuzz":4}}}`, says: "ABS_NOPE"},
-		{name: "a field an axis does not take", parameters: `{"axes":{"ABS_X":{"maximum":9}}}`, says: "maximum"},
-		{name: "a negative fuzz", parameters: `{"axes":{"ABS_X":{"fuzz":-1}}}`, says: "negative"},
+		{name: "an empty list", parameters: `{"inputs":[]}`, contains: "empty"},
+		{name: "an unknown class", parameters: `{"inputs":["buttons"]}`, contains: `"buttons"`},
+		{name: "an unknown axis", parameters: `{"axes":{"ABS_NOPE":{"fuzz":4}}}`, contains: "ABS_NOPE"},
+		{name: "a field an axis does not take", parameters: `{"axes":{"ABS_X":{"maximum":9}}}`, contains: "maximum"},
+		{name: "a negative fuzz", parameters: `{"axes":{"ABS_X":{"fuzz":-1}}}`, contains: "negative"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -422,22 +408,21 @@ func TestPrepareClaimRefusesAConfigurationItCannotRead(t *testing.T) {
 
 			resp := plugin.prepareClaim(testClaim())
 			if resp.Error == "" {
-				t.Fatal("prepare accepted a configuration it cannot read")
+				t.Fatal("preparing a claim with an invalid configuration returned no error, want one")
 			}
-			if !strings.Contains(resp.Error, c.says) {
-				t.Errorf("the failure does not say %s: %s", c.says, resp.Error)
+			if !strings.Contains(resp.Error, c.contains) {
+				t.Errorf("the error is %q, want it to contain %s", resp.Error, c.contains)
 			}
 			if _, err := os.Stat(cdiSpecPath(testClaimUID)); !os.IsNotExist(err) {
-				t.Fatal("a failed prepare wrote a spec file")
+				t.Fatal("a CDI spec file exists after a failed prepare, want none")
 			}
 		})
 	}
 }
 
-// The axis values a claim applied are recorded beside its classes,
-// because a restart of this operator applies the same values to the
-// same axes.
-func TestPrepareClaimRecordsTheAxesItApplied(t *testing.T) {
+// The axis settings of a claim are recorded with its classes, so the
+// relays apply the same settings after an operator restart.
+func TestPrepareClaimRecordsTheAxisSettings(t *testing.T) {
 	plugin := preparePlugin(t,
 		configuredClaim(t,
 			[]AllocatedConfig{driverConfig("FromClaim",
@@ -448,11 +433,11 @@ func TestPrepareClaimRecordsTheAxesItApplied(t *testing.T) {
 
 	resp := plugin.prepareClaim(testClaim())
 	if resp.Error != "" {
-		t.Fatalf("prepare failed: %s", resp.Error)
+		t.Fatalf("preparing the claim returned the error %q, want none", resp.Error)
 	}
 	spec := readSpec(t, cdiSpecPath(testClaimUID))
 	if got := spec.Devices[0].axes(); got != "ABS_RX=4:,ABS_RY=4:" {
-		t.Errorf("axes = %q, want the two axes the claim states", got)
+		t.Errorf("axes = %q, want the two axes the claim sets", got)
 	}
 	if got := inputsOf(t, spec, 0); !reflect.DeepEqual(got, []string{"joystick"}) {
 		t.Errorf("inputs = %v, want [joystick]", got)

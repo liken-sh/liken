@@ -1,49 +1,38 @@
-# The site's configuration. The look is not configured here: the
-# brand theme, brand/ at the top of the repository, provides the page
-# shell, the nav, and the stylesheet that every liken site shares, so
-# this site reads as one place with the manual at liken.sh. Every
-# manual is titled with its component's name, the name the rest of
-# the project uses for it. It is served at https://liken.sh/bluetooth/.
+# The page layout, navigation, and stylesheet come from the brand
+# theme in brand/ at the top of the repository, which every liken site
+# shares.
 baseURL: https://liken.sh/bluetooth/
 
-# The generated reference pages put an id on each field's table row,
-# as a raw-HTML span, so a link can land on exactly one field (the
-# crdref generator emits them). Goldmark drops raw HTML unless this
-# is set, and everything this site renders is authored in this
-# repository.
+# The crdref generator puts an HTML span with an id in each field's
+# table row, so a link can point at one field. Goldmark drops raw HTML
+# unless `unsafe` is set. That is safe here because the repository
+# authors everything the site renders.
 markup:
   goldmark:
     renderer:
       unsafe: true
 title: bluetooth-operator
-# Hugo looks for a theme by name under themesDir, and the repository
-# root holds brand/, so the site and the theme it builds with are
-# always the same commit.
+# themesDir is the repository root, so the site builds with the
+# brand/ theme of the same commit.
 themesDir: ../..
 theme: brand
 
-# No taxonomies and no feeds: the site is a manual, not a blog. The
-# sitemap stays, because it is free and crawlers use it.
+# The manual has no tags or feeds. Hugo still writes the sitemap.
 disableKinds: [taxonomy, term, rss]
 
 params:
-  # The directory this site documents. The theme's nav points its
-  # repository entry here, and the sidebar heads the manual with the
-  # project's name, taken from the last path segment.
+  # The theme links to this directory, and the sidebar title uses its
+  # last path segment as the project name.
   repository: https://github.com/liken-sh/liken/tree/main/bluetooth-operator
 
   # The site serves the test coverage report at /coverage.html. The
-  # theme's footer
-  # links that page only when this parameter is set.
+  # theme's footer links to that page only when this is set.
   coverage: true
 
-# Every page renders twice, once as HTML for people and once as the
-# authored Markdown for agents and scripts. The two files land side
-# by side, so the Markdown twin of / is /index.md. The theme provides
-# the templates for the twin, but a theme cannot declare an output
-# format, so each consuming site declares this block itself
-# (brand/README.md). Without it, the site builds, but only as
-# HTML.
+# Every page renders as HTML for people and as its authored Markdown
+# for agents and scripts. The Markdown copy of / is /index.md. The
+# theme has the templates, but a theme cannot declare an output
+# format, so each site declares it here (see brand/README.md).
 outputFormats:
   markdown:
     mediaType: text/markdown
@@ -55,14 +44,12 @@ outputs:
   section: [html, markdown]
   page: [html, markdown]
 
-# The site serves the repository's own manifests as raw YAML under
-# /deploy/, so a reader reads the CRDs in place and a Kustomization
-# references the files without cloning the repository. The mount takes
-# the files straight from deploy/, so the served YAML is the same file
-# the repository holds, never a copy that can drift. Declaring any
-# mount replaces every default mount for this module, so content/ is
-# declared again beside it; the other defaults name directories this
-# site does not have.
+# The site serves the manifests in deploy/ as raw YAML under /deploy/,
+# so a reader can open the CRDs and a Kustomization can reference the
+# files by URL without cloning the repository. The mount reads deploy/
+# directly, so the served files are the repository's. Declaring any
+# mount removes Hugo's default mounts, so content/ is mounted again.
+# This site has none of the other default directories.
 module:
   mounts:
     - source: content
