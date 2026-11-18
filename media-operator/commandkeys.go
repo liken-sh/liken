@@ -1,25 +1,23 @@
 package main
 
-// The command sidecar's controller half. The events topic carries key
-// names, so nothing stands between a controller and the pod that owns
-// mpv's socket, and one container holds every controller the unit
-// names. The focus mark is still the gate: it names a Player and never
-// a Play, and a controller pointed at another room reaches this film
-// not at all.
+// The command sidecar reads the key events of every controller of its
+// Player and writes the matching commands to mpv's socket. Each
+// controller has a focus mark, a retained message with the name of the
+// Player it drives. The sidecar acts on a key only when the mark is this
+// sidecar's Player.
 
 import "encoding/json"
 
-// A playRemote is one of the unit's controllers as this sidecar reads
-// it: the retained focus topic it gates on. The events topic is the
-// map's key, because that is what an inbound message carries.
+// A playRemote is one controller of this Play's Player, and focus is the
+// topic of its focus mark. The sidecar keys its playRemotes by events
+// topic, because that is what an incoming message gives it.
 type playRemote struct {
 	focus string
 }
 
-// playRemoteMap pairs each remote's events topic with the focus topic
-// on the same line of the second list. The operator joins both lists
-// with newlines and keeps them aligned by position, the same shape the
-// idle screen client reads.
+// playRemoteMap pairs each events topic with the focus topic at the
+// same position. The operator writes both lists to the pod's environment
+// joined with newlines, in the same order.
 func playRemoteMap(events, focuses string) map[string]playRemote {
 	remotes := map[string]playRemote{}
 	focusList := splitTopicLines(focuses)
@@ -36,10 +34,9 @@ func playRemoteMap(events, focuses string) map[string]playRemote {
 	return remotes
 }
 
-// subscribeRemotes makes the two subscriptions each controller needs.
-// Both are made once, because the Bus re-sends every filter on a
-// reconnect. The focus topic is retained, so the gate stands before
-// the first press.
+// subscribeRemotes runs once, because the Bus subscribes to every
+// filter again after a reconnect. The broker retains the focus mark, so
+// the current mark arrives right after the subscription.
 func (c *commander) subscribeRemotes(bus *Bus) {
 	for events, remote := range c.remotes {
 		bus.Subscribe(events)
@@ -49,9 +46,9 @@ func (c *commander) subscribeRemotes(bus *Bus) {
 	}
 }
 
-// handleRemote answers the topics the controllers own and reports
-// whether this message was one of them, so the caller reads the
-// commands topic only for a message no controller sent.
+// handleRemote handles a message on a controller's events or focus
+// topic, and returns false for any other topic so that the caller can
+// handle it as a command.
 func (c *commander) handleRemote(topic string, payload []byte) bool {
 	if remote, ours := c.remotes[topic]; ours {
 		c.key(topic, remote, payload)
@@ -64,24 +61,22 @@ func (c *commander) handleRemote(topic string, payload []byte) bool {
 	return false
 }
 
-// key turns one key event into what this pod does with it. A press
-// this Play's Player does not hold the mark for does nothing. A key
-// with no row does nothing. The cycle key asks the operator to move
-// the mark and never reaches mpv.
+// key handles one key event from a controller. It ignores the key when
+// the focus mark is not this Play's Player or when the playback table
+// has no row for the key. The cycle key publishes a focus cycle request
+// and sends nothing to mpv.
 //
-// The press is what a person did, so the press earns one line: the
-// key, the Remote, and what the press did or why it did nothing. A
-// repeat acts the same and writes no line, and the release of a held
-// key writes one line with the count of repeats it acted on.
+// Each press writes one log line with what it did or why it did nothing.
+// A repeat writes no line, and the release of a held key writes one line
+// with the number of repeats that acted.
 func (c *commander) key(topic string, remote playRemote, payload []byte) {
 	var event keyEvent
 	if err := json.Unmarshal(payload, &event); err != nil {
 		return
 	}
-	// The operator reads the volume keys off the same events topic, sets
-	// the room's level, and writes the press's line, so the sidecar
-	// does nothing with them and writes no line of its own.
-	if _, theOperators := volumeKeys[event.Key]; theOperators {
+	// The operator reads the volume keys from the same topic, sets the
+	// volume, and logs the press, so the sidecar ignores them.
+	if _, isVolumeKey := volumeKeys[event.Key]; isVolumeKey {
 		return
 	}
 	trigger := event.Key + " from remote " + remoteOfTopic(topic)
@@ -89,7 +84,7 @@ func (c *commander) key(topic string, remote playRemote, payload []byte) {
 		c.release(topic, trigger, event.Key)
 		return
 	}
-	if mark, holds := c.focusMark(topic); !holds {
+	if mark, focused := c.focusMark(topic); !focused {
 		if event.Value == 1 {
 			logLine(c.log, "command: %s ignored, because %s", trigger, focusElsewhere(mark))
 		}
@@ -108,14 +103,12 @@ func (c *commander) key(topic string, remote playRemote, payload []byte) {
 	}
 	repeat := event.Value == 2
 	if repeat {
-		c.hold(topic, event.Key)
+		c.countRepeat(topic, event.Key)
 	}
 	command.Remote = remoteOfTopic(topic)
 	c.apply(trigger, command, repeat)
 }
 
-// focusElsewhere says why a press did nothing when the mark does not
-// name this pod's Player.
 func focusElsewhere(mark string) string {
 	if mark == "" {
 		return "no focus mark names a player for this remote"
@@ -123,38 +116,37 @@ func focusElsewhere(mark string) string {
 	return "focus is on player " + mark
 }
 
-// hold counts one repeat a held control acted on.
-func (c *commander) hold(topic, key string) {
+// countRepeat counts one repeat of a held key that acted.
+func (c *commander) countRepeat(topic, key string) {
 	c.focusMu.Lock()
 	defer c.focusMu.Unlock()
-	if c.holds == nil {
-		c.holds = map[string]int{}
+	if c.repeatCounts == nil {
+		c.repeatCounts = map[string]int{}
 	}
-	c.holds[topic+" "+key]++
+	c.repeatCounts[topic+" "+key]++
 }
 
-// release ends one hold, and logs the count when the hold repeated. A
-// release with no repeats before it is the ordinary tap, and its press
-// already has its line.
+// release logs the number of repeats of a held key. A tap has no
+// repeats, and its press already has a log line.
 func (c *commander) release(topic, trigger, key string) {
 	c.focusMu.Lock()
-	repeats := c.holds[topic+" "+key]
-	delete(c.holds, topic+" "+key)
+	repeats := c.repeatCounts[topic+" "+key]
+	delete(c.repeatCounts, topic+" "+key)
 	c.focusMu.Unlock()
 	if repeats > 0 {
 		logLine(c.log, "command: %s released after %s", trigger, countOf(repeats, "repeat", "repeats"))
 	}
 }
 
-// focusCycleSuffix turns a remote's focus topic into its cycle topic, the
-// same path remoteFocusCycleTopic builds, so the sidecar needs no second
-// topic list.
+// The sidecar appends focusCycleSuffix to a focus topic to get the
+// topic that remoteFocusCycleTopic builds, so the operator does not pass
+// it a list of cycle topics.
 const focusCycleSuffix = "/cycle"
 
-// publishCycle sends the cycle request the operator arbitrates, on
-// the remote's own cycle topic, not retained, because a cycle is an
-// event and not a state. It is the same message the idle screen client
-// publishes between films.
+// publishCycle publishes a request for the operator to move the
+// controller's focus to the next Player. The message is not retained,
+// because a cycle request is an event and not a state. The idle screen
+// client publishes the same request when it has focus.
 func (c *commander) publishCycle(trigger string, remote playRemote) {
 	if remote.focus == "" {
 		logLine(c.log, "command: %s ignored, because the remote has no focus topic", trigger)
@@ -164,9 +156,8 @@ func (c *commander) publishCycle(trigger string, remote playRemote) {
 	logLine(c.log, "command: %s: cycle focus, published the cycle request to %s", trigger, remote.focus+focusCycleSuffix)
 }
 
-// setFocus records one controller's mark. The gate is set on every
-// message, catch-up and live alike, because this pod draws nothing on
-// a mark and only reads it.
+// setFocus stores every focus mark, the retained one and each later
+// change, because the sidecar reads the mark only when a key arrives.
 func (c *commander) setFocus(events, mark string) {
 	c.focusMu.Lock()
 	defer c.focusMu.Unlock()
@@ -176,9 +167,8 @@ func (c *commander) setFocus(events, mark string) {
 	c.marks[events] = mark
 }
 
-// focusMark reads this controller's mark, and reports whether it names
-// the Player this Play runs on. A sidecar that read no Player name
-// matches no mark and answers no press.
+// focusMark returns the controller's mark and whether it is this Play's
+// Player. A sidecar with no Player name ignores every press.
 func (c *commander) focusMark(events string) (string, bool) {
 	c.focusMu.Lock()
 	defer c.focusMu.Unlock()
@@ -186,8 +176,6 @@ func (c *commander) focusMark(events string) (string, bool) {
 	return mark, c.playerName != "" && mark == c.playerName
 }
 
-// remoteForFocus reports which controller a focus topic marks. The
-// list is the unit's own controllers, so the scan is over a handful.
 func (c *commander) remoteForFocus(topic string) (string, bool) {
 	if topic == "" {
 		return "", false

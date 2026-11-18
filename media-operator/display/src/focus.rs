@@ -1,6 +1,6 @@
-//! The input router and the summon state of the display. It holds which stop
-//! has focus and whether a chooser captures, and it sends each press to the
-//! right module. It draws no pixels.
+//! Routes each remote press to the module that owns the focused stop, and
+//! tracks whether the on-screen display (OSD) is shown, which stop has
+//! focus, and whether mpv is paused. It draws nothing.
 
 use serde_json::json;
 
@@ -15,8 +15,7 @@ use crate::skip::Skip;
 use crate::strip::Strip;
 use crate::upnext::UpNext;
 
-/// The six words the command sidecar sends, and the whole of what the display
-/// answers.
+/// A remote press, as the command sidecar names it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     Up,
@@ -41,15 +40,13 @@ impl Action {
     }
 }
 
-/// The focus stops, top to bottom. The scrubber owns two of them, fine and
-/// chapter, on one bar. up and down walk the stops present for the current file
-/// and skip the rest, so the list is flat and dynamic.
-/// The up-next offer is the stop above the scrubber, so up from the fine axis
-/// lands on it and down returns. The skip control is between the two while
-/// the playhead is inside an intro or a recap, because it is the one a person
-/// reaches for then. The cast row is the stop above the offer, because a
-/// person browses it once the film is paused, and reaches for the offer and
-/// the skip control while it plays.
+/// The places on the OSD that can take focus, top to bottom. `Fine` and
+/// `Chapter` are the seek and chapter axes of the scrubber bar. Up and down
+/// move between the stops that the current file has.
+///
+/// The cast row is at the top because a viewer reads it while the film is
+/// paused. The up-next offer and the skip control are just above the bar,
+/// because a viewer uses them while the film plays.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stop {
     Cast,
@@ -71,34 +68,32 @@ const STOPS: [Stop; 7] = [
     Stop::Strip,
 ];
 
-/// The script-message the display and the command sidecar agree on for the exit
-/// press. The sidecar answers it: it publishes the ending to the bus and then
-/// quits mpv. The display does not quit mpv itself, because the operator must
-/// read the ending while the film is still on the display. It then draws the
-/// idle screen over the film that is shutting down, with no black gap between
-/// the two.
+/// The script-message that asks the command sidecar to end the run. The
+/// sidecar publishes the end of the run to the bus, and then quits mpv with
+/// exit code 0, so the pod ends as `Completed` and not `Error`. The display
+/// does not quit mpv itself, because the end of the run must reach the bus
+/// while mpv still draws the film.
 const EXIT: &str = "liken-exit";
 
-/// The script-message a select on the up-next offer broadcasts. The command
-/// sidecar reads it and publishes the Play's own request block on the Player's
-/// commands topic, and the browser starts the next work.
+/// The script-message that taking the up-next offer sends. The command
+/// sidecar publishes `play-next` with the offer's request on the Player's
+/// commands topic, and the program that created the Play creates the next
+/// one.
 const NEXT: &str = "liken-next";
 
-/// The modules one press reaches, and the film they read.
+/// The modules that a press can reach, and the film state they read.
 pub struct Parts<'a> {
     pub presentation: &'a Presentation,
     pub film: &'a Film,
     pub scrubber: &'a mut Scrubber,
     pub strip: &'a mut Strip,
-    /// The monotonic second the seek ramp reads.
+    /// A monotonic time in seconds, for the scrubber's seek acceleration.
     pub now: f64,
     pub upnext: &'a mut UpNext,
     pub skip: &'a mut Skip,
     pub cast: &'a mut Cast,
 }
 
-/// Whether the display stands summoned, where the focus is, and how far the
-/// fade has moved.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Focus {
     summoned: bool,
@@ -115,8 +110,8 @@ impl Default for Focus {
 }
 
 impl Focus {
-    /// The display starts clear, and the first pause callback only records the
-    /// state mpv is already in.
+    /// The OSD starts hidden. `first_pause` makes `on_pause` record mpv's
+    /// first pause report without showing the OSD.
     pub fn new() -> Self {
         Self {
             summoned: false,
@@ -131,12 +126,12 @@ impl Focus {
         self.summoned
     }
 
-    /// Whether the risen card is the one thing on the bare video a select
-    /// can act on. Then it draws focused, and a select takes it, so the
-    /// viewer reads what select does before pressing it. With the skip
-    /// control beside it, the card draws unfocused and select keeps the
-    /// meaning the control gives it alone, because a skip that lands by
-    /// surprise is undone by a seek back, and a taken offer ends the run.
+    /// Whether a select while the OSD is hidden takes the up-next card. It
+    /// does only when the card is shown and no skip control is, and the card
+    /// then draws focused so the viewer sees what select will do. When a
+    /// skip control is also shown, the card draws unfocused and never takes
+    /// the select, because a seek back undoes an unwanted skip, but nothing
+    /// undoes a taken offer, which starts the next Play.
     pub fn card_takes_select(self, upnext: &UpNext, skip: &Skip) -> bool {
         upnext.risen_outside(self.summoned) && !skip.available()
     }
@@ -145,8 +140,8 @@ impl Focus {
         self.focused
     }
 
-    /// The fade factor, so the frame loop draws the layout while it is above 0
-    /// and draws nothing once it reaches 0.
+    /// The OSD's fade. The frame loop draws the OSD while the fade is above
+    /// 0.
     pub fn fade(&self) -> &Fade {
         self.clock.fade()
     }
@@ -159,13 +154,12 @@ impl Focus {
         self.paused
     }
 
-    /// The idle window this press asks for, which the frame loop arms and
-    /// cancels because it owns the timer.
+    /// Returns and resets the pending change to the OSD's hide timer. The
+    /// frame loop owns the timer and applies the change.
     pub fn take_hide(&mut self) -> Hide {
         self.clock.take_hide()
     }
 
-    /// Which axis of the bar has focus, and none when the focus is elsewhere.
     pub fn axis(self) -> Option<Axis> {
         match self.focused {
             Some(Stop::Fine) => Some(Axis::Fine),
@@ -174,8 +168,8 @@ impl Focus {
         }
     }
 
-    /// A stop takes focus only when it has something to show, so up and down
-    /// walk the present stops and skip the rest.
+    /// The stops that have something to show for the current file, top to
+    /// bottom. Only these can take focus.
     pub fn present(parts: &Parts<'_>) -> Vec<Stop> {
         STOPS
             .into_iter()
@@ -196,68 +190,64 @@ impl Focus {
         }
     }
 
-    /// Show the display and arm the idle window. A summon from a press lands
-    /// on the skip control when it shows, so the select after the press
-    /// skips.
+    /// Shows the OSD and arms its hide timer, unless the film is paused or a
+    /// chooser is open. When the OSD was hidden, focus goes to the first
+    /// stop below the cast row and the up-next offer: the skip control when
+    /// it is shown, and otherwise the bar. Focus never starts on the offer,
+    /// because a viewer who presses select to pause would take the offer
+    /// and start the next Play. Starting on the skip control is safe,
+    /// because a seek back undoes a skip.
     pub fn summon(&mut self, parts: &Parts<'_>) {
-        self.raise(parts, &[Stop::Cast, Stop::Next]);
+        self.show(parts, &[Stop::Cast, Stop::Next]);
     }
 
-    /// Show the display, landing the focus on the first present stop that is
-    /// not in `passed`.
-    fn raise(&mut self, parts: &Parts<'_>, passed: &[Stop]) {
+    /// Shows the OSD. When it was hidden, focus goes to the first present
+    /// stop that is not in `skipped`.
+    fn show(&mut self, parts: &Parts<'_>, skipped: &[Stop]) {
         if !self.summoned {
             self.summoned = true;
-            self.focused = Self::first_present(parts, passed);
+            self.focused = Self::first_present(parts, skipped);
         }
         self.clock.show(self.idle_window(parts));
     }
 
-    /// Whether an open chooser or adjuster captures the presses. The display
-    /// stands while one is open, because the idle hide would close it under
-    /// a person who is still reading it.
-    fn holding(parts: &Parts<'_>) -> bool {
+    /// Whether a chooser or an adjuster of the strip is open and receives
+    /// every press.
+    fn chooser_open(parts: &Parts<'_>) -> bool {
         parts.strip.capturing().is_some()
     }
 
-    /// The idle window the display asks for now. A pause arms nothing, so
-    /// the display stands for as long as the film does, and an open chooser
-    /// or adjuster arms nothing, so it stands until it closes.
+    /// The hide-timer change for a shown OSD. The timer is cancelled while
+    /// the film is paused, and while a chooser or an adjuster is open so
+    /// that the OSD does not hide a list the viewer is reading. Otherwise
+    /// it is armed.
     fn idle_window(self, parts: &Parts<'_>) -> Hide {
-        match self.paused || Self::holding(parts) {
+        match self.paused || Self::chooser_open(parts) {
             true => Hide::Cancel,
             false => Hide::Arm,
         }
     }
 
-    /// Clear the display and cancel the idle window.
+    /// Hides the OSD and cancels its hide timer. It also collapses an
+    /// expanded up-next card and closes an open chooser, so the next summon
+    /// shows the strip and the offer as they first appear.
     pub fn dismiss(&mut self, parts: &mut Parts<'_>) {
         self.summoned = false;
         parts.upnext.collapse();
         parts.strip.close();
-        self.clock.ask(Hide::Cancel);
+        self.clock.request_hide(Hide::Cancel);
         self.clock.hide();
     }
 
-    /// A summon lands below the offer, so the main button stays play-pause,
-    /// and a select on the offer takes an up press first. The offer ends the
-    /// run, and a press that lands on it by surprise would end a film the
-    /// viewer meant to pause.
-    ///
-    /// The skip control is different. It shows on the bare video before the
-    /// press, the focus that lands on it draws the panel around it, and a seek
-    /// back undoes a skip. So a press lands on it, and the viewer reads what
-    /// select does before pressing it.
-    fn first_present(parts: &Parts<'_>, passed: &[Stop]) -> Option<Stop> {
+    fn first_present(parts: &Parts<'_>, skipped: &[Stop]) -> Option<Stop> {
         Self::present(parts)
             .into_iter()
-            .find(|stop| !passed.contains(stop))
+            .find(|stop| !skipped.contains(stop))
     }
 
-    /// A stop can leave while the focus is on it: the skip control
-    /// leaves when the playhead leaves its span or a select skips it. The
-    /// frame loop and the select call this then, and a focus on a stop that
-    /// is gone moves to the first stop below the offer.
+    /// Moves focus off a stop that is no longer present, such as the skip
+    /// control after the playhead leaves its span or a select takes it.
+    /// Focus moves to the first present stop below the skip control.
     pub fn refocus(&mut self, parts: &Parts<'_>) {
         let present = Self::present(parts);
         if self.focused.is_some_and(|stop| !present.contains(&stop)) {
@@ -265,28 +255,28 @@ impl Focus {
         }
     }
 
-    /// The frame loop observes pause and reports it here. A pause summons the
-    /// display and holds it, and a resume dismisses it at once.
+    /// Records a change of mpv's `pause` property. A pause shows the OSD and
+    /// keeps it shown, and a resume hides it at once.
     ///
-    /// mpv reports the pause state once at registration. The first report only
-    /// records it, so a film that loads paused starts with the display hidden.
-    /// A later pause, during playback, summons the display. It lands below
-    /// the skip control as well as the offer, so the select that resumes the
-    /// film resumes it.
+    /// mpv reports the property once when the display starts to observe it.
+    /// That report only records the state, so a film that loads paused
+    /// starts with the OSD hidden. When a pause shows the OSD, focus skips
+    /// the skip control as well as the offer, so the next select resumes the
+    /// film.
     pub fn on_pause(&mut self, paused: bool, parts: &mut Parts<'_>) {
         self.paused = paused;
         if self.first_pause {
             self.first_pause = false;
             return;
         }
-        // A taken offer pauses mpv, and the OSD stays down for that pause,
-        // because the screen is handing off to the next Play.
+        // Taking the offer pauses mpv. The OSD stays hidden for that pause,
+        // because the next Play is about to replace the screen.
         if paused && parts.upnext.waiting() {
             return;
         }
         if paused {
-            self.raise(parts, &[Stop::Cast, Stop::Next, Stop::Skip]);
-            self.clock.ask(Hide::Cancel);
+            self.show(parts, &[Stop::Cast, Stop::Next, Stop::Skip]);
+            self.clock.request_hide(Hide::Cancel);
         } else if self.summoned {
             self.dismiss(parts);
         }
@@ -302,29 +292,25 @@ impl Focus {
             .position(|stop| Some(*stop) == self.focused)
             .unwrap_or(0) as i64;
         let next = present[(at + direction).clamp(0, present.len() as i64 - 1) as usize];
-        // Leaving the fine stop drops a scan in flight, so a preview does not
-        // outlive the move to another control.
+        // A scan in progress would keep its preview on the screen after
+        // focus leaves the bar.
         if self.focused == Some(Stop::Fine) && next != Stop::Fine {
             parts.scrubber.cancel();
         }
-        // An expanded card is part of the stop, so leaving the stop collapses
-        // it.
         if self.focused == Some(Stop::Next) && next != Stop::Next {
             parts.upnext.collapse();
         }
         self.focused = Some(next);
     }
 
-    /// Route the horizontal presses to the focused stop. The fine and chapter
-    /// stops seek and step on the scrubber. The strip moves its control focus,
-    /// and select opens a chooser that captures.
+    /// Sends a left, right, or select press to the focused stop.
     fn route(&mut self, action: Action, parts: &mut Parts<'_>) -> Vec<Command> {
         match self.focused {
-            // The offer and the skip control are each one thing to take, so
-            // they answer select and nothing else.
+            // The offer and the skip control react only to select, which
+            // `select` handles.
             Some(Stop::Next | Stop::Skip) | None => Vec::new(),
-            // The cast row moves its own focus, and select falls through to
-            // play-pause, so the press that resumes the film resumes it.
+            // `select` does not route a select here, so a select on the cast
+            // row plays or pauses.
             Some(Stop::Cast) => {
                 match action {
                     Action::Left => parts.cast.step(-1, parts.film),
@@ -352,30 +338,26 @@ impl Focus {
         }
     }
 
-    /// select carries the main action and play/pause on one button. It acts on
-    /// an open chooser, the focused strip control, a fine scan in flight, or
-    /// the skip control or the up-next card the bare video shows focused, and
-    /// otherwise toggles play/pause. So the button confirms a choice when the
-    /// display has one to make, and plays or pauses the film when it does
-    /// not.
+    /// Handles select. It acts on an open chooser, the focused stop, or a
+    /// control that draws focused over the hidden OSD, and otherwise toggles
+    /// pause.
     fn select(&mut self, parts: &mut Parts<'_>) -> Vec<Command> {
         if parts.strip.capturing().is_some() {
             return parts.strip.handle(Action::Select, parts.film);
         }
         if self.summoned {
             if self.focused == Some(Stop::Next) {
-                // The first select on the chip grows it into the card, and a
-                // select on the card sends the ask. So the offer shows what it
-                // starts before a press starts it. A card the rise raised takes
-                // one press.
+                // The offer draws as a small chip, and the first select
+                // expands it into the card, so the viewer sees what it
+                // starts. A select on the card takes the offer. A card that
+                // appeared on its own near the end of the film takes the
+                // first select.
                 if parts.upnext.showing_card() {
                     return self.take_offer(parts);
                 }
                 parts.upnext.expand();
                 return Vec::new();
             }
-            // A select on the skip control seeks past the span, and the
-            // control leaves with it, so the focus moves to the bar.
             if self.focused == Some(Stop::Skip) && parts.skip.available() {
                 let commands = parts.skip.take();
                 self.refocus(parts);
@@ -388,57 +370,52 @@ impl Focus {
                 return parts.scrubber.commit();
             }
         }
-        // Over the bare video the control for an intro or a recap draws
-        // focused, so the select takes it and the display stays down.
+        // While the OSD is hidden, the skip control for an intro or a recap
+        // draws focused, so select takes it and the OSD stays hidden.
         if !self.summoned && parts.skip.takes_select_outside() {
             return parts.skip.take();
         }
-        // The risen card alone over the bare video draws focused, so the
-        // select takes the offer and the display stays down.
         if self.card_takes_select(parts.upnext, parts.skip) {
             return self.take_offer(parts);
         }
-        // Toggle mpv's pause. The pause observer summons the display, so a
-        // pause from select needs no separate summon. The no-osd prefix
-        // suppresses mpv's own pause indicator, so the liken display is the
-        // only thing that draws.
+        // `on_pause` shows the OSD when mpv reports the pause, so this needs
+        // no summon. The `no-osd` prefix keeps mpv from drawing its own
+        // pause message.
         vec![vec![json!("no-osd"), json!("cycle"), json!("pause")]]
     }
 
-    /// A select took the offer. The offer fades out, and the press asks the
-    /// command sidecar for the next work and pauses mpv in the same breath,
-    /// so the credits' sound stops at the press instead of playing on under
-    /// the fade while the next Play starts.
+    /// Takes the up-next offer: the card fades out, the command sidecar is
+    /// asked for the next Play, and mpv pauses, so the credits' sound stops
+    /// at the press and does not play on while the next Play starts.
     fn take_offer(&self, parts: &mut Parts<'_>) -> Vec<Command> {
         parts.upnext.take(self.clock.fade().value());
-        vec![next(), hold()]
+        vec![next(), set_pause()]
     }
 
-    /// back has one meaning per state, tried in order. An open chooser closes.
-    /// Else a fine scan cancels its preview. Else the visible display
-    /// dismisses. Else a film stepped back at the credits returns to the
-    /// whole screen. Else, at the bare video, back asks the command sidecar
-    /// to end the run, and the sidecar quits mpv with code 0, so the pod ends
-    /// as the Completed a finished film gives, not an Error.
+    /// Handles one press and returns the mpv commands it produces.
     ///
-    /// A press that opens a chooser or an adjuster cancels the idle window,
-    /// and the press that closes it starts the whole window again, so the
-    /// display hides a full window after the last thing a person read.
+    /// A press that opens a chooser or an adjuster cancels the hide timer,
+    /// and the press that closes it arms the timer again, so the OSD hides a
+    /// full timeout after the chooser closes.
     pub fn nav(&mut self, action: Action, parts: &mut Parts<'_>) -> Vec<Command> {
-        let held = Self::holding(parts);
-        let commands = self.answer(action, parts);
-        if Self::holding(parts) {
-            self.clock.ask(Hide::Cancel);
-        } else if held && self.summoned {
-            self.clock.ask(self.idle_window(parts));
+        let chooser_was_open = Self::chooser_open(parts);
+        let commands = self.handle_press(action, parts);
+        if Self::chooser_open(parts) {
+            self.clock.request_hide(Hide::Cancel);
+        } else if chooser_was_open && self.summoned {
+            self.clock.request_hide(self.idle_window(parts));
         }
         commands
     }
 
-    fn answer(&mut self, action: Action, parts: &mut Parts<'_>) -> Vec<Command> {
-        // The offer is taken and the next Play is starting, so the display
-        // routes every press to nothing. back still ends the run, on the same
-        // message the bare video sends, because a person must be able to leave.
+    /// Back does the first of these that applies: it closes an open
+    /// chooser, cancels a scan, hides the OSD, or returns a film that was
+    /// shrunk beside the up-next offer to the whole screen. When none
+    /// applies, back asks the sidecar to end the run.
+    fn handle_press(&mut self, action: Action, parts: &mut Parts<'_>) -> Vec<Command> {
+        // After the offer is taken, every press except back is ignored
+        // while the next Play starts. Back still ends the run, so the viewer
+        // can always leave.
         if parts.upnext.waiting() {
             if action == Action::Back {
                 return vec![exit()];
@@ -450,15 +427,11 @@ impl Focus {
             if parts.strip.capturing().is_some() {
                 parts.strip.close();
             } else if self.focused == Some(Stop::Fine) && parts.scrubber.scanning() {
-                // A scan is in flight, so back cancels the preview and leaves
-                // the video where it plays.
+                // The film keeps playing from where it was.
                 parts.scrubber.cancel();
             } else if self.summoned {
                 self.dismiss(parts);
             } else if parts.upnext.stepped_back() {
-                // The film stands back beside the next work. back keeps
-                // watching: the film returns to the whole screen and plays
-                // on, and the next back ends the run.
                 parts.upnext.restore();
             } else {
                 return vec![exit()];
@@ -470,20 +443,14 @@ impl Focus {
             return self.select(parts);
         }
 
-        // The press that wakes a hidden display only wakes it. It lands focus
-        // on the first stop present, and does not move or seek. The next press
-        // starts navigating, so a viewer sees where the film is before a press
-        // changes it.
+        // A direction press on a hidden OSD only shows it, so the viewer
+        // sees where focus is before a press changes anything.
         let was_visible = self.summoned;
         self.summon(parts);
         if !was_visible {
             return Vec::new();
         }
 
-        // A captured widget receives up, down, left, and right. A chooser is a
-        // vertical list, so it moves on up and down and ignores left and right.
-        // The delay adjuster uses left and right to nudge a delay. back, handled
-        // above, closes the widget.
         if parts.strip.capturing().is_some() {
             return parts.strip.handle(action, parts.film);
         }
@@ -505,10 +472,9 @@ fn next() -> Command {
     vec![json!("script-message"), json!(NEXT)]
 }
 
-/// Pause, as a set and not a toggle, so a film the person already paused
-/// stays paused. The no-osd prefix keeps mpv's own pause indicator off the
-/// screen.
-fn hold() -> Command {
+/// Sets `pause` instead of toggling it, so a film that is already paused
+/// stays paused.
+fn set_pause() -> Command {
     vec![json!("no-osd"), json!("set"), json!("pause"), json!("yes")]
 }
 
@@ -519,7 +485,7 @@ mod tests {
     use crate::strip::Control;
     use serde_json::json;
 
-    /// One film, one presentation, and the two modules a press reaches.
+    /// A film and every module that a press can reach.
     struct Display {
         presentation: Presentation,
         film: Film,
@@ -565,29 +531,30 @@ mod tests {
             }
         }
 
-        /// The playhead inside the intro, which offers the skip control.
+        /// Puts the playhead inside the intro, so the skip control shows.
         fn intro(&mut self) {
             self.skip.on_position(Some(INTRO));
         }
 
-        /// The block the sidecar sends for the work that follows this one.
         fn offer(&mut self) {
             self.upnext.receive(OFFER);
         }
 
-        /// The offer, and the playhead past its rise, so the card stands
-        /// over the bare video.
+        /// Receives the offer and moves the playhead near the end, so the
+        /// card appears on its own over the hidden OSD.
         fn rise(&mut self) {
             self.offer();
-            assert!(self.upnext.on_percent(Some(98.0), &self.film, Some(0.0)));
+            assert!(
+                self.upnext.on_percent(Some(98.0), &self.film, Some(0.0)),
+                "moving the playhead to 98 percent did not show the card, want it shown"
+            );
         }
 
         fn card_takes_select(&self) -> bool {
             self.focus.card_takes_select(&self.upnext, &self.skip)
         }
 
-        /// The offer taken, which is the rise, a select on the card, and the
-        /// wait that follows.
+        /// Takes the offer, so the display waits for the next Play.
         fn take(&mut self) {
             self.offer();
             self.upnext.expand();
@@ -633,12 +600,12 @@ mod tests {
         }
     }
 
-    /// The block the sidecar sends for an episode.
+    /// The next block that the sidecar sends for an episode.
     const OFFER: &str = r#"{"reason":"Next in Harbor Lights",
         "title":"E05 \u00b7 The Long Tide",
         "detail":"Harbor Lights \u00b7 S02 \u00b7 45 min"}"#;
 
-    /// The intro the skip control offers, in the film's own seconds.
+    /// An intro from 1100 to 1250 seconds.
     const INTRO: Jump = Jump {
         span: Span {
             kind: Kind::Intro,
@@ -652,9 +619,7 @@ mod tests {
         vec![vec![json!("seek"), json!(1250.0), json!("absolute+exact")]]
     }
 
-    /// The two commands a take sends: the ask for the next work, and the
-    /// pause that stops the credits' sound.
-    fn ask() -> Vec<Command> {
+    fn next_and_pause() -> Vec<Command> {
         vec![
             vec![json!("script-message"), json!("liken-next")],
             vec![json!("no-osd"), json!("set"), json!("pause"), json!("yes")],
@@ -665,8 +630,6 @@ mod tests {
         vec![vec![json!("no-osd"), json!("cycle"), json!("pause")]]
     }
 
-    /// A film with a length, chapters, and tracks carries four of the five
-    /// stops, and a still photo carries the images stop instead.
     #[test]
     fn a_stop_is_present_when_it_has_something_to_show() {
         let mut display = Display::new("{}");
@@ -693,21 +656,20 @@ mod tests {
             vec![Stop::Fine, Stop::Chapter]
         );
 
-        // A film with no tracks at all still has the audio offset, so the
-        // strip is the one stop it has.
+        // A film with no tracks still has the strip's audio offset control.
         let mut bare = Display::new("{}");
         bare.film = Film::default();
         assert_eq!(Focus::present(&bare.parts()), vec![Stop::Strip]);
     }
 
-    /// A summon lands on the first stop below the offer, so the main button
-    /// stays play-pause.
+    /// A summon focuses the first stop below the offer, so select still
+    /// plays or pauses.
     #[test]
     fn a_summon_lands_on_the_first_stop_below_the_offer() {
         let mut display = Display::new("{}");
         display.offer();
         display.summon();
-        assert!(display.focus.visible());
+        assert!(display.focus.visible(), "the focus is hidden, want visible");
         assert_eq!(display.focus.focused_stop(), Some(Stop::Fine));
 
         let mut photo = Display::new(r#"{"type":"image"}"#);
@@ -715,22 +677,24 @@ mod tests {
         assert_eq!(photo.focus.focused_stop(), Some(Stop::Images));
     }
 
-    /// The first press wakes the display and moves nothing.
     #[test]
-    fn the_press_that_wakes_the_display_only_wakes_it() {
+    fn a_direction_on_a_hidden_osd_only_shows_it() {
         for action in [Action::Up, Action::Down, Action::Left, Action::Right] {
             let mut display = Display::new("{}");
             assert!(
                 display.press(action).is_empty(),
-                "{action:?} runs no command"
+                "pressing {action:?} runs a command, want none"
             );
-            assert!(display.focus.visible());
+            assert!(display.focus.visible(), "the focus is hidden, want visible");
             assert_eq!(display.focus.focused_stop(), Some(Stop::Fine));
-            assert!(!display.scrubber.scanning());
+            assert!(
+                !display.scrubber.scanning(),
+                "the scrubber is scanning, want not scanning"
+            );
         }
     }
 
-    /// up and down walk the present stops and hold at the ends of the list.
+    /// Up and down move through the present stops and stop at each end.
     #[test]
     fn up_and_down_walk_the_present_stops() {
         let mut display = Display::new("{}");
@@ -751,31 +715,46 @@ mod tests {
         assert_eq!(display.focus.focused_stop(), Some(Stop::Strip));
     }
 
-    /// Leaving the fine stop drops a scan in flight.
     #[test]
-    fn leaving_the_fine_stop_drops_the_scan() {
+    fn leaving_the_fine_stop_cancels_the_scan() {
         let mut display = Display::new("{}");
         display.summon();
         display.press(Action::Right);
-        assert!(display.scrubber.scanning());
+        assert!(
+            display.scrubber.scanning(),
+            "the scrubber is not scanning, want scanning"
+        );
         display.press(Action::Down);
-        assert!(!display.scrubber.scanning());
+        assert!(
+            !display.scrubber.scanning(),
+            "the scrubber is scanning, want not scanning"
+        );
     }
 
     /// The fine stop scans on left and right and seeks on select. The chapter
-    /// stop steps a chapter and answers select with play-pause.
+    /// stop steps a chapter on left and right, and select there plays or
+    /// pauses.
     #[test]
-    fn each_stop_answers_the_presses_it_owns() {
+    fn each_stop_handles_the_presses_it_owns() {
         let mut display = Display::new("{}");
         display.summon();
 
-        assert!(display.press(Action::Right).is_empty());
-        assert!(display.scrubber.scanning());
+        assert!(
+            display.press(Action::Right).is_empty(),
+            "pressing Right runs a command, want none"
+        );
+        assert!(
+            display.scrubber.scanning(),
+            "the scrubber is not scanning, want scanning"
+        );
         assert_eq!(
             display.press(Action::Select),
             vec![vec![json!("seek"), json!(1205.0), json!("absolute+exact")]]
         );
-        assert!(!display.scrubber.scanning());
+        assert!(
+            !display.scrubber.scanning(),
+            "the scrubber is scanning, want not scanning"
+        );
         assert_eq!(display.press(Action::Select), pause_toggle());
 
         display.press(Action::Down);
@@ -787,8 +766,8 @@ mod tests {
         assert_eq!(display.press(Action::Select), pause_toggle());
     }
 
-    /// The image stop steps the playlist on left and right, and select there
-    /// plays or pauses.
+    /// The image stop moves through the playlist on left and right, and
+    /// select there plays or pauses.
     #[test]
     fn the_image_stop_steps_the_playlist() {
         let mut display = Display::new(r#"{"type":"image"}"#);
@@ -805,8 +784,6 @@ mod tests {
         assert_eq!(display.press(Action::Select), pause_toggle());
     }
 
-    /// The strip moves its own focus on left and right, and select opens the
-    /// focused control's chooser.
     #[test]
     fn the_strip_stop_opens_a_chooser_on_select() {
         let mut display = Display::new("{}");
@@ -815,12 +792,18 @@ mod tests {
         display.press(Action::Down);
         assert_eq!(display.focus.focused_stop(), Some(Stop::Strip));
 
-        assert!(display.press(Action::Select).is_empty());
-        assert!(display.strip.capturing().is_some());
+        assert!(
+            display.press(Action::Select).is_empty(),
+            "pressing Select runs a command, want none"
+        );
+        assert!(
+            display.strip.capturing().is_some(),
+            "the strip is not capturing a key, want capturing"
+        );
     }
 
-    /// A chooser captures up, down, left, and right, and a select applies and
-    /// closes it.
+    /// A down press moves inside the open chooser, not to another stop, and
+    /// a select applies the choice and closes the chooser.
     #[test]
     fn an_open_chooser_captures_every_press_but_back() {
         let mut display = Display::new("{}");
@@ -835,11 +818,14 @@ mod tests {
             display.press(Action::Select),
             vec![vec![json!("set_property"), json!("aid"), json!("2")]]
         );
-        assert!(display.strip.capturing().is_none());
+        assert!(
+            display.strip.capturing().is_none(),
+            "the strip is capturing a key, want not capturing"
+        );
     }
 
-    /// back closes an open adjuster and leaves the strip's focus on its
-    /// offset, so the next select opens the same adjuster.
+    /// Back closes an open adjuster and leaves the strip's focus on its
+    /// control, so the next select opens the same adjuster.
     #[test]
     fn back_returns_the_focus_to_the_offset_whose_adjuster_it_closed() {
         let mut display = Display::new("{}");
@@ -857,30 +843,51 @@ mod tests {
         assert_eq!(display.strip.capturing(), Some(Control::AudioOffset));
     }
 
-    /// back closes an open chooser, then cancels a scan, then dismisses the
-    /// display, and at the bare video it ends the run.
+    /// Back closes an open chooser, then cancels a scan, then hides the OSD,
+    /// and then ends the run.
     #[test]
-    fn back_has_one_meaning_per_state() {
+    fn back_undoes_one_thing_at_a_time_and_then_ends_the_run() {
         let mut display = Display::new("{}");
         display.summon();
         display.press(Action::Down);
         display.press(Action::Down);
         display.press(Action::Select);
-        assert!(display.press(Action::Back).is_empty());
-        assert!(display.strip.capturing().is_none());
-        assert!(display.focus.visible());
+        assert!(
+            display.press(Action::Back).is_empty(),
+            "pressing Back runs a command, want none"
+        );
+        assert!(
+            display.strip.capturing().is_none(),
+            "the strip is capturing a key, want not capturing"
+        );
+        assert!(display.focus.visible(), "the focus is hidden, want visible");
 
         display.press(Action::Up);
         display.press(Action::Up);
         assert_eq!(display.focus.focused_stop(), Some(Stop::Fine));
         display.press(Action::Right);
-        assert!(display.scrubber.scanning());
-        assert!(display.press(Action::Back).is_empty());
-        assert!(!display.scrubber.scanning());
-        assert!(display.focus.visible());
+        assert!(
+            display.scrubber.scanning(),
+            "the scrubber is not scanning, want scanning"
+        );
+        assert!(
+            display.press(Action::Back).is_empty(),
+            "pressing Back runs a command, want none"
+        );
+        assert!(
+            !display.scrubber.scanning(),
+            "the scrubber is scanning, want not scanning"
+        );
+        assert!(display.focus.visible(), "the focus is hidden, want visible");
 
-        assert!(display.press(Action::Back).is_empty());
-        assert!(!display.focus.visible());
+        assert!(
+            display.press(Action::Back).is_empty(),
+            "pressing Back runs a command, want none"
+        );
+        assert!(
+            !display.focus.visible(),
+            "the focus is visible, want hidden"
+        );
 
         assert_eq!(
             display.press(Action::Back),
@@ -888,17 +895,27 @@ mod tests {
         );
     }
 
-    /// The film stepped back at the rise. The first back at the bare video
-    /// returns it and leaves it playing, and the next back ends the run.
+    /// When the film is shrunk beside the offer and the OSD is hidden, the
+    /// first back returns the film to the whole screen, and the next back
+    /// ends the run.
     #[test]
     fn back_over_the_stepped_back_film_returns_it_first() {
         let mut display = Display::new("{}");
         display.rise();
         display.upnext.step_back();
 
-        assert!(display.press(Action::Back).is_empty());
-        assert!(!display.upnext.stepped_back());
-        assert!(!display.focus.visible());
+        assert!(
+            display.press(Action::Back).is_empty(),
+            "pressing Back runs a command, want none"
+        );
+        assert!(
+            !display.upnext.stepped_back(),
+            "the up-next card has stepped back, want not stepped back"
+        );
+        assert!(
+            !display.focus.visible(),
+            "the focus is visible, want hidden"
+        );
 
         assert_eq!(
             display.press(Action::Back),
@@ -906,8 +923,8 @@ mod tests {
         );
     }
 
-    /// With the display up, back dismisses it first, as it does over a film
-    /// at the default, and the film stays back until the next back.
+    /// While the OSD is shown, the first back hides it, and the film stays
+    /// shrunk until the next back.
     #[test]
     fn back_dismisses_the_display_before_it_returns_the_film() {
         let mut display = Display::new("{}");
@@ -915,34 +932,50 @@ mod tests {
         display.upnext.step_back();
         display.summon();
 
-        assert!(display.press(Action::Back).is_empty());
-        assert!(!display.focus.visible());
-        assert!(display.upnext.stepped_back());
+        assert!(
+            display.press(Action::Back).is_empty(),
+            "pressing Back runs a command, want none"
+        );
+        assert!(
+            !display.focus.visible(),
+            "the focus is visible, want hidden"
+        );
+        assert!(
+            display.upnext.stepped_back(),
+            "the up-next card has not stepped back, want stepped back"
+        );
 
-        assert!(display.press(Action::Back).is_empty());
-        assert!(!display.upnext.stepped_back());
+        assert!(
+            display.press(Action::Back).is_empty(),
+            "pressing Back runs a command, want none"
+        );
+        assert!(
+            !display.upnext.stepped_back(),
+            "the up-next card has stepped back, want not stepped back"
+        );
     }
 
-    /// A taken offer keeps the film where it stands, and back still ends the
-    /// run, because a person must be able to leave.
+    /// After the offer is taken, back ends the run and leaves the film
+    /// shrunk.
     #[test]
     fn back_after_a_take_ends_the_run_with_the_film_back() {
         let mut display = Display::new("{}");
         display.rise();
         display.upnext.step_back();
-        assert_eq!(display.press(Action::Select), ask());
+        assert_eq!(display.press(Action::Select), next_and_pause());
 
         assert_eq!(
             display.press(Action::Back),
             vec![vec![json!("script-message"), json!("liken-exit")]]
         );
-        assert!(display.upnext.stepped_back());
+        assert!(
+            display.upnext.stepped_back(),
+            "the up-next card has not stepped back, want stepped back"
+        );
     }
 
-    /// While the display waits on the next Play it routes every press to
-    /// nothing, and back ends the run whether the display is up or down.
     #[test]
-    fn the_waiting_gate_swallows_every_press_but_back() {
+    fn after_a_take_every_press_but_back_does_nothing() {
         let mut display = Display::new("{}");
         display.take();
         display.summon();
@@ -955,31 +988,36 @@ mod tests {
         ] {
             assert!(
                 display.press(action).is_empty(),
-                "{action:?} runs no command"
+                "pressing {action:?} runs a command, want none"
             );
         }
         assert_eq!(display.focus.focused_stop(), Some(Stop::Fine));
-        assert!(!display.scrubber.scanning());
+        assert!(
+            !display.scrubber.scanning(),
+            "the scrubber is scanning, want not scanning"
+        );
         assert_eq!(
             display.press(Action::Back),
             vec![vec![json!("script-message"), json!("liken-exit")]]
         );
-        assert!(display.focus.visible());
+        assert!(display.focus.visible(), "the focus is hidden, want visible");
     }
 
-    /// A select on a hidden display plays or pauses, and summons nothing of
-    /// its own.
+    /// A select on a hidden OSD plays or pauses and does not show the OSD.
     #[test]
-    fn a_select_on_a_hidden_display_plays_or_pauses() {
+    fn a_select_on_a_hidden_osd_plays_or_pauses() {
         let mut display = Display::new("{}");
         assert_eq!(display.press(Action::Select), pause_toggle());
-        assert!(!display.focus.visible());
+        assert!(
+            !display.focus.visible(),
+            "the focus is visible, want hidden"
+        );
     }
 
-    /// A summon arms the idle window, a dismiss cancels it, and a summon while
-    /// paused arms nothing.
+    /// A summon arms the hide timer, a dismiss cancels it, and a pause
+    /// cancels it.
     #[test]
-    fn the_idle_window_follows_the_summon() {
+    fn the_hide_timer_follows_the_summon() {
         let mut display = Display::new("{}");
         display.summon();
         assert_eq!(display.focus.take_hide(), Hide::Arm);
@@ -990,11 +1028,10 @@ mod tests {
 
         display.pause(false);
         display.pause(true);
-        assert!(display.focus.visible());
+        assert!(display.focus.visible(), "the focus is hidden, want visible");
         assert_eq!(display.focus.take_hide(), Hide::Cancel);
     }
 
-    /// The strip stop's select, which opens the audio chooser.
     fn open_the_chooser(display: &mut Display) {
         display.summon();
         display.press(Action::Down);
@@ -1003,12 +1040,11 @@ mod tests {
         assert_eq!(display.strip.capturing(), Some(Control::Audio));
     }
 
-    /// An open chooser cancels the idle window, and every press inside it
-    /// keeps the window cancelled, so the hide never closes a list a person
-    /// is reading. The select that applies a track closes the chooser and
-    /// starts the whole window again.
+    /// An open chooser cancels the hide timer, a press inside it does not
+    /// arm the timer, and the select that applies a track closes the chooser
+    /// and arms the timer.
     #[test]
-    fn an_open_chooser_holds_the_display_up() {
+    fn an_open_chooser_keeps_the_display_shown() {
         let mut display = Display::new("{}");
         open_the_chooser(&mut display);
         assert_eq!(display.focus.take_hide(), Hide::Cancel);
@@ -1021,10 +1057,10 @@ mod tests {
         assert_eq!(display.focus.take_hide(), Hide::Arm);
     }
 
-    /// An adjuster holds the display up the same way, and the back that
-    /// closes it starts the window again.
+    /// An open adjuster cancels the hide timer the same way, and the back
+    /// that closes it arms the timer.
     #[test]
-    fn an_open_adjuster_holds_the_display_up() {
+    fn an_open_adjuster_keeps_the_display_shown() {
         let mut display = Display::new("{}");
         display.summon();
         display.press(Action::Down);
@@ -1042,9 +1078,9 @@ mod tests {
         assert_eq!(display.focus.take_hide(), Hide::Arm);
     }
 
-    /// The command sidecar summons the display after a seek of its own. A
-    /// summon over an open chooser arms nothing, so it does not start a
-    /// window that would close the list.
+    /// The command sidecar summons the OSD after a seek that it sends. A
+    /// summon while a chooser is open must not arm the hide timer, which
+    /// would close the list.
     #[test]
     fn a_summon_over_an_open_chooser_arms_nothing() {
         let mut display = Display::new("{}");
@@ -1055,8 +1091,8 @@ mod tests {
         assert_eq!(display.focus.take_hide(), Hide::Cancel);
     }
 
-    /// A paused film holds the display up on its own, so a chooser that
-    /// closes over it arms no window either.
+    /// While the film is paused, closing a chooser does not arm the hide
+    /// timer.
     #[test]
     fn a_chooser_that_closes_over_a_pause_arms_nothing() {
         let mut display = Display::new("{}");
@@ -1065,21 +1101,22 @@ mod tests {
         display.press(Action::Down);
         display.press(Action::Down);
         display.press(Action::Select);
-        assert!(display.strip.capturing().is_some());
+        assert!(
+            display.strip.capturing().is_some(),
+            "the strip is not capturing a key, want capturing"
+        );
 
         display.press(Action::Back);
         assert_eq!(display.focus.take_hide(), Hide::Cancel);
     }
 
-    /// A spans file in which one person is in the scene at the playhead, 1200.
+    /// A spans file with one person on screen at the playhead, 1200 seconds.
     const SPANS: &str = r#"{"format":"liken.sh/appearances/spans/v1",
         "people":{"p/pilot":{"name":"Jane Roe"}},
         "spans":[{"start":1190.0,"end":1205.0,"people":["p/pilot"]}]}"#;
 
-    /// A card of the cast row is something to read, so a select on the
-    /// focused card plays or pauses the film as it does at the bar. It opens
-    /// nothing that captures the presses or holds the display up, and the
-    /// focus stays on the row.
+    /// A select on the cast row plays or pauses, opens no chooser, does not
+    /// cancel the hide timer, and leaves focus on the row.
     #[test]
     fn a_select_on_a_cast_card_opens_nothing() {
         let mut display = Display::new("{}");
@@ -1087,7 +1124,10 @@ mod tests {
             .cast
             .on_item(Some("spans.json"), None)
             .expect("an item with spans");
-        assert!(display.cast.on_read(item, crate::cast::Spans::parse(SPANS)));
+        assert!(
+            display.cast.on_read(item, crate::cast::Spans::parse(SPANS)),
+            "reading the spans did not change the cast, want a change"
+        );
         display.summon();
         display.press(Action::Up);
         assert_eq!(display.focus.focused_stop(), Some(Stop::Cast));
@@ -1099,25 +1139,35 @@ mod tests {
         assert_ne!(display.focus.take_hide(), Hide::Cancel);
     }
 
-    /// A film that loads paused starts with the display hidden, a later pause
-    /// summons it, and a resume dismisses it at once.
+    /// A film that loads paused starts with the OSD hidden, a later pause
+    /// shows it, and a resume hides it at once.
     #[test]
     fn a_pause_summons_the_display_and_a_resume_dismisses_it() {
         let mut display = Display::new("{}");
         display.pause(true);
-        assert!(!display.focus.visible());
-        assert!(display.focus.paused());
+        assert!(
+            !display.focus.visible(),
+            "the focus is visible, want hidden"
+        );
+        assert!(
+            display.focus.paused(),
+            "the focus is not paused, want paused"
+        );
 
         display.pause(false);
-        assert!(!display.focus.visible());
+        assert!(
+            !display.focus.visible(),
+            "the focus is visible, want hidden"
+        );
         display.pause(true);
-        assert!(display.focus.visible());
+        assert!(display.focus.visible(), "the focus is hidden, want visible");
         display.pause(false);
-        assert!(!display.focus.visible());
+        assert!(
+            !display.focus.visible(),
+            "the focus is visible, want hidden"
+        );
     }
 
-    /// The bar's axis follows the focus, and no other stop brightens either
-    /// group.
     #[test]
     fn the_axis_follows_the_focus() {
         let mut display = Display::new("{}");
@@ -1130,8 +1180,6 @@ mod tests {
         assert_eq!(Focus::new().axis(), None);
     }
 
-    /// A dismiss closes an open chooser, so the next summon shows the strip
-    /// and not the list.
     #[test]
     fn a_dismiss_closes_an_open_chooser() {
         let mut display = Display::new("{}");
@@ -1139,17 +1187,26 @@ mod tests {
         display.press(Action::Down);
         display.press(Action::Down);
         display.press(Action::Select);
-        assert!(display.strip.capturing().is_some());
+        assert!(
+            display.strip.capturing().is_some(),
+            "the strip is not capturing a key, want capturing"
+        );
 
         let mut focus = display.focus;
         focus.dismiss(&mut display.parts());
         display.focus = focus;
-        assert!(display.strip.capturing().is_none());
-        assert!(!display.focus.visible());
+        assert!(
+            display.strip.capturing().is_none(),
+            "the strip is capturing a key, want not capturing"
+        );
+        assert!(
+            !display.focus.visible(),
+            "the focus is visible, want hidden"
+        );
     }
 
-    /// With no offer there is no stop above the bar, and the select that
-    /// would take it plays or pauses the film instead.
+    /// With no offer, up from the bar stays on the bar, and select plays or
+    /// pauses.
     #[test]
     fn no_offer_has_no_stop_and_never_asks_for_the_next_work() {
         let mut display = Display::new("{}");
@@ -1159,8 +1216,6 @@ mod tests {
         assert_eq!(display.press(Action::Select), pause_toggle());
     }
 
-    /// The offer answers select and nothing else, so a horizontal press on it
-    /// moves no focus and starts no scan.
     #[test]
     fn left_and_right_on_the_offer_do_nothing() {
         let mut display = Display::new("{}");
@@ -1169,41 +1224,63 @@ mod tests {
         display.press(Action::Up);
 
         for action in [Action::Left, Action::Right] {
-            assert!(display.press(action).is_empty());
+            assert!(
+                display.press(action).is_empty(),
+                "pressing action runs a command, want none"
+            );
             assert_eq!(display.focus.focused_stop(), Some(Stop::Next));
-            assert!(!display.scrubber.scanning());
+            assert!(
+                !display.scrubber.scanning(),
+                "the scrubber is scanning, want not scanning"
+            );
         }
     }
 
-    /// back on the offer dismisses the display, as it does on every other
-    /// stop, and does not end the run.
+    /// Back on the offer hides the OSD, as on every other stop, and does not
+    /// end the run.
     #[test]
-    fn back_on_the_offer_dismisses_the_display() {
+    fn back_on_the_offer_hides_the_osd() {
         let mut display = Display::new("{}");
         display.offer();
         display.summon();
         display.press(Action::Up);
 
-        assert!(display.press(Action::Back).is_empty());
-        assert!(!display.focus.visible());
+        assert!(
+            display.press(Action::Back).is_empty(),
+            "pressing Back runs a command, want none"
+        );
+        assert!(
+            !display.focus.visible(),
+            "the focus is visible, want hidden"
+        );
     }
 
-    /// The first select on the chip grows it into the card and asks for
-    /// nothing, so the offer shows what it starts before a press starts it.
+    /// The first select on the chip expands it into the card and sends no
+    /// command, so the viewer sees what the offer starts before a press
+    /// starts it.
     #[test]
-    fn the_first_select_on_the_chip_grows_it_into_the_card() {
+    fn the_first_select_on_the_chip_expands_it_into_the_card() {
         let mut display = Display::new("{}");
         display.offer();
         display.summon();
         display.press(Action::Up);
 
-        assert!(display.press(Action::Select).is_empty());
-        assert!(display.upnext.showing_card());
-        assert!(!display.upnext.waiting());
+        assert!(
+            display.press(Action::Select).is_empty(),
+            "pressing Select runs a command, want none"
+        );
+        assert!(
+            display.upnext.showing_card(),
+            "the up-next card is hidden, want showing"
+        );
+        assert!(
+            !display.upnext.waiting(),
+            "the up-next card is waiting, want not waiting"
+        );
         assert_eq!(display.focus.focused_stop(), Some(Stop::Next));
     }
 
-    /// The select after that sends the ask and starts the wait.
+    /// The second select takes the offer.
     #[test]
     fn a_select_on_the_card_asks_for_the_next_work() {
         let mut display = Display::new("{}");
@@ -1212,11 +1289,14 @@ mod tests {
         display.press(Action::Up);
         display.press(Action::Select);
 
-        assert_eq!(display.press(Action::Select), ask());
-        assert!(display.upnext.waiting());
+        assert_eq!(display.press(Action::Select), next_and_pause());
+        assert!(
+            display.upnext.waiting(),
+            "the up-next card is not waiting, want waiting"
+        );
     }
 
-    /// A card the rise raised takes one press.
+    /// A card that appeared on its own near the end takes the first select.
     #[test]
     fn a_select_on_the_risen_card_asks_for_the_next_work() {
         let mut display = Display::new("{}");
@@ -1224,18 +1304,21 @@ mod tests {
         assert!(
             display
                 .upnext
-                .on_percent(Some(98.0), &display.film, Some(0.0))
+                .on_percent(Some(98.0), &display.film, Some(0.0)),
+            "moving the playhead to 98 percent did not show the card, want it shown"
         );
         display.summon();
         display.press(Action::Up);
 
-        assert_eq!(display.press(Action::Select), ask());
-        assert!(display.upnext.waiting());
+        assert_eq!(display.press(Action::Select), next_and_pause());
+        assert!(
+            display.upnext.waiting(),
+            "the up-next card is not waiting, want waiting"
+        );
     }
 
-    /// An expansion is part of the stop, so leaving the stop collapses it.
     #[test]
-    fn leaving_the_offer_collapses_the_expansion() {
+    fn leaving_the_offer_collapses_the_card() {
         let mut display = Display::new("{}");
         display.offer();
         display.summon();
@@ -1243,13 +1326,14 @@ mod tests {
         display.press(Action::Select);
 
         display.press(Action::Down);
-        assert!(!display.upnext.showing_card());
+        assert!(
+            !display.upnext.showing_card(),
+            "the up-next card is showing, want hidden"
+        );
     }
 
-    /// A hidden display collapses the expansion too, so a summon shows the
-    /// chip again.
     #[test]
-    fn a_dismiss_collapses_the_expansion() {
+    fn a_dismiss_collapses_the_card() {
         let mut display = Display::new("{}");
         display.offer();
         display.summon();
@@ -1257,11 +1341,14 @@ mod tests {
         display.press(Action::Select);
 
         display.press(Action::Back);
-        assert!(!display.upnext.showing_card());
+        assert!(
+            !display.upnext.showing_card(),
+            "the up-next card is showing, want hidden"
+        );
     }
 
-    /// The offer's stop stands above the fine axis, and a summon lands below
-    /// it, so a select reaches the offer only after an up press.
+    /// The offer is above the bar and a summon focuses the bar, so select
+    /// reaches the offer only after an up press.
     #[test]
     fn up_reaches_the_offer_and_down_returns() {
         let mut display = Display::new("{}");
@@ -1274,25 +1361,30 @@ mod tests {
         assert_eq!(display.focus.focused_stop(), Some(Stop::Fine));
     }
 
-    /// The pause a take sends raises no OSD over the hand-off.
+    /// The pause that taking the offer sends does not show the OSD.
     #[test]
     fn the_pause_a_take_sends_raises_no_osd() {
         let mut display = Display::new("{}");
         display.pause(false);
         display.rise();
-        assert_eq!(display.press(Action::Select), ask());
+        assert_eq!(display.press(Action::Select), next_and_pause());
 
         display.pause(true);
-        assert!(!display.focus.visible());
+        assert!(
+            !display.focus.visible(),
+            "the focus is visible, want hidden"
+        );
         assert_eq!(display.focus.fade().value(), 0.0);
     }
 
-    /// The waiting gate ends the run from a hidden display as well.
     #[test]
-    fn the_waiting_gate_ends_the_run_from_a_hidden_display() {
+    fn after_a_take_back_ends_the_run_from_a_hidden_osd() {
         let mut display = Display::new("{}");
         display.take();
-        assert!(!display.focus.visible());
+        assert!(
+            !display.focus.visible(),
+            "the focus is visible, want hidden"
+        );
 
         assert_eq!(
             display.press(Action::Back),
@@ -1300,8 +1392,6 @@ mod tests {
         );
     }
 
-    /// The skip control is a stop between the offer and the bar while the
-    /// playhead is inside the span.
     #[test]
     fn the_skip_control_is_a_stop_while_the_playhead_is_inside_the_span() {
         let mut display = Display::new("{}");
@@ -1319,27 +1409,33 @@ mod tests {
         );
     }
 
-    /// The press that wakes the display lands on the skip control, so the
-    /// select after it skips: two presses from the bare video.
+    /// A direction that shows the OSD focuses the skip control, so the
+    /// select after it skips.
     #[test]
-    fn a_wake_lands_on_the_skip_control_and_a_select_skips() {
+    fn showing_the_osd_focuses_the_skip_control_and_a_select_skips() {
         for action in [Action::Up, Action::Down, Action::Left, Action::Right] {
             let mut display = Display::new("{}");
             display.intro();
-            assert!(display.press(action).is_empty(), "{action:?}");
+            assert!(
+                display.press(action).is_empty(),
+                "pressing {action:?} runs a command, want none"
+            );
             assert_eq!(display.focus.focused_stop(), Some(Stop::Skip), "{action:?}");
             assert_eq!(
                 display.press(Action::Select),
                 skip_to_the_end(),
                 "{action:?}"
             );
-            assert!(!display.skip.available(), "{action:?}");
+            assert!(
+                !display.skip.available(),
+                "after Select on the skip control opened by {action:?}, the control is available, want unavailable"
+            );
             assert_eq!(display.focus.focused_stop(), Some(Stop::Fine), "{action:?}");
         }
     }
 
-    /// Over the bare video, the control for an intro or a recap draws
-    /// focused, so a select takes it in one press and the display stays down.
+    /// While the OSD is hidden, one select skips an intro or a recap, and the
+    /// OSD stays hidden.
     #[test]
     fn a_select_at_the_bare_video_skips_an_intro_or_a_recap() {
         for kind in [Kind::Intro, Kind::Recap] {
@@ -1349,14 +1445,20 @@ mod tests {
                 ..INTRO
             }));
             assert_eq!(display.press(Action::Select), skip_to_the_end(), "{kind:?}");
-            assert!(!display.skip.available(), "{kind:?}");
-            assert!(!display.focus.visible(), "{kind:?}");
+            assert!(
+                !display.skip.available(),
+                "after Select on {kind:?} the skip control is available, want unavailable"
+            );
+            assert!(
+                !display.focus.visible(),
+                "after Select on {kind:?} the focus is visible, want hidden"
+            );
         }
     }
 
-    /// The skip to the scene after the credits draws unfocused over the bare
-    /// video, so a select there pauses. The card is up then too, and a viewer
-    /// may press select to stop and read the credits.
+    /// While the OSD is hidden, the control that skips the credits draws
+    /// unfocused, so a select pauses, for a viewer who wants to read the
+    /// credits.
     #[test]
     fn a_select_at_the_bare_video_pauses_in_the_credits() {
         let mut display = Display::new("{}");
@@ -1369,51 +1471,72 @@ mod tests {
             to: 5600.0,
         }));
         assert_eq!(display.press(Action::Select), pause_toggle());
-        assert!(display.skip.available());
+        assert!(
+            display.skip.available(),
+            "the skip control is unavailable, want available"
+        );
     }
 
-    /// The risen card alone over the bare video draws focused, so a select
-    /// takes it in one press and the display stays down.
+    /// While the OSD is hidden and no skip control shows, one select takes
+    /// the card, and the OSD stays hidden.
     #[test]
     fn a_select_at_the_bare_video_takes_the_risen_card() {
         let mut display = Display::new("{}");
         display.rise();
-        assert!(display.card_takes_select());
-        assert_eq!(display.press(Action::Select), ask());
-        assert!(display.upnext.waiting());
-        assert!(!display.focus.visible());
+        assert!(
+            display.card_takes_select(),
+            "the card does not take Select, want it to"
+        );
+        assert_eq!(display.press(Action::Select), next_and_pause());
+        assert!(
+            display.upnext.waiting(),
+            "the up-next card is not waiting, want waiting"
+        );
+        assert!(
+            !display.focus.visible(),
+            "the focus is visible, want hidden"
+        );
     }
 
-    /// Once the card's hide window runs out, the card leaves the bare video,
-    /// and a select there plays or pauses again.
+    /// After the card's hide timer runs out, a select plays or pauses again.
     #[test]
     fn a_select_at_the_bare_video_pauses_once_the_card_leaves() {
         let mut display = Display::new("{}");
         display.rise();
         display.upnext.hide();
-        assert!(!display.card_takes_select());
+        assert!(
+            !display.card_takes_select(),
+            "the card takes Select, want it not to"
+        );
         assert_eq!(display.press(Action::Select), pause_toggle());
-        assert!(!display.upnext.waiting());
+        assert!(
+            !display.upnext.waiting(),
+            "the up-next card is waiting, want not waiting"
+        );
     }
 
-    /// While the OSD is up, the card is one of its stops, so the bare video
-    /// rule does not apply, and a summon lands below the offer as before.
+    /// While the OSD is shown, the card takes select only when it has focus,
+    /// and a summon focuses the bar.
     #[test]
     fn a_risen_card_inside_the_osd_takes_select_only_with_focus() {
         let mut display = Display::new("{}");
         display.rise();
         display.summon();
-        assert!(!display.card_takes_select());
+        assert!(
+            !display.card_takes_select(),
+            "the card takes Select, want it not to"
+        );
         assert_eq!(display.focus.focused_stop(), Some(Stop::Fine));
         assert_eq!(display.press(Action::Select), pause_toggle());
-        assert!(!display.upnext.waiting());
+        assert!(
+            !display.upnext.waiting(),
+            "the up-next card is waiting, want not waiting"
+        );
     }
 
-    /// When the skip control shares the bare video with the card, the card
-    /// draws unfocused, and a select does what it does with the control
-    /// alone: it skips an intro or a recap, and it pauses in the credits. A
-    /// skip that lands by surprise is undone by a seek back, and a taken
-    /// offer ends the run, so the card never takes a select it shares.
+    /// While the OSD is hidden and a skip control shows beside the card, a
+    /// select never takes the card. It skips an intro or a recap, and it
+    /// pauses in the credits.
     #[test]
     fn a_select_beside_the_skip_control_leaves_the_card() {
         let cases = [
@@ -1428,16 +1551,22 @@ mod tests {
                 span: Span { kind, ..INTRO.span },
                 ..INTRO
             }));
-            assert!(!display.card_takes_select(), "{kind:?}");
+            assert!(
+                !display.card_takes_select(),
+                "for {kind:?} the card takes Select, want it not to"
+            );
             assert_eq!(display.press(Action::Select), want, "{kind:?}");
-            assert!(!display.upnext.waiting(), "{kind:?}");
+            assert!(
+                !display.upnext.waiting(),
+                "after Select on {kind:?} the up-next card is waiting, want not waiting"
+            );
         }
     }
 
-    /// A pause lands below the skip control, so the select that resumes the
-    /// film resumes it.
+    /// A pause focuses the bar below the skip control, so the next select
+    /// resumes the film.
     #[test]
-    fn a_pause_lands_below_the_skip_control() {
+    fn a_pause_focuses_below_the_skip_control() {
         let mut display = Display::new("{}");
         display.intro();
         display.pause(false);
@@ -1446,10 +1575,8 @@ mod tests {
         assert_eq!(display.press(Action::Select), pause_toggle());
     }
 
-    /// up from the bar reaches the skip control, and left and right on it do
-    /// nothing.
     #[test]
-    fn up_reaches_the_skip_control_and_it_answers_select_alone() {
+    fn up_reaches_the_skip_control_and_it_reacts_only_to_select() {
         let mut display = Display::new("{}");
         display.pause(false);
         display.pause(true);
@@ -1457,14 +1584,20 @@ mod tests {
         display.press(Action::Up);
         assert_eq!(display.focus.focused_stop(), Some(Stop::Skip));
         for action in [Action::Left, Action::Right] {
-            assert!(display.press(action).is_empty(), "{action:?}");
-            assert!(!display.scrubber.scanning(), "{action:?}");
+            assert!(
+                display.press(action).is_empty(),
+                "pressing {action:?} runs a command, want none"
+            );
+            assert!(
+                !display.scrubber.scanning(),
+                "after {action:?} the scrubber is scanning, want not scanning"
+            );
         }
         assert_eq!(display.press(Action::Select), skip_to_the_end());
     }
 
-    /// When the playhead leaves the span, the focus on the control moves to
-    /// the first stop below the offer, and a select there plays or pauses.
+    /// When the playhead leaves the span, focus moves from the skip control
+    /// to the bar, and a select there plays or pauses.
     #[test]
     fn the_focus_leaves_the_control_with_the_span() {
         let mut display = Display::new("{}");
@@ -1477,21 +1610,21 @@ mod tests {
         assert_eq!(display.focus.focused_stop(), Some(Stop::Fine));
         assert_eq!(display.press(Action::Select), pause_toggle());
 
-        // A focus on a stop that is still there stays where it is.
+        // Focus on a stop that is still present does not move.
         display.press(Action::Down);
         display.refocus();
         assert_eq!(display.focus.focused_stop(), Some(Stop::Chapter));
     }
 
-    /// A focus built either way holds the same state, so one built through
-    /// the derive never summons the display on mpv's first pause report.
+    /// `Focus::default()` must also skip mpv's first pause report, or the
+    /// OSD would show when a film loads paused.
     #[test]
-    fn a_focus_reads_the_same_whichever_way_it_is_built() {
+    fn default_equals_new() {
         assert_eq!(Focus::default(), Focus::new());
     }
 
     #[test]
-    fn the_six_words_are_the_whole_of_what_a_press_can_be() {
+    fn from_word_reads_only_the_press_names() {
         assert_eq!(Action::from_word("up"), Some(Action::Up));
         assert_eq!(Action::from_word("down"), Some(Action::Down));
         assert_eq!(Action::from_word("left"), Some(Action::Left));

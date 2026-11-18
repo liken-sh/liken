@@ -1,12 +1,12 @@
 package main
 
-// The standing pod's normalising half. Normalisation runs here and
-// nowhere else, because this is the one process beside the device, it
-// is where hwdb runs on any Linux machine, and one pod serves every
-// consumer at once. The pod holds the table the operator publishes on
-// this Remote's keys topic, folds each raw evdev event through it,
-// publishes the kernel's name for the control, and synthesises the
-// repeat a device that never autorepeats cannot report.
+// The remote pod translates each evdev event of its controller with the
+// key table that the operator publishes on the Remote's keys topic, and
+// publishes the key name to the Remote's events topic. It also generates
+// repeats for controls that the kernel does not autorepeat, such as a
+// hat axis. The translation runs in the remote pod because that pod
+// reads the device, and every consumer of the Remote then receives the
+// same key names.
 
 import (
 	"context"
@@ -17,48 +17,43 @@ import (
 	"time"
 )
 
-// maxRepeatWindow caps one synthesised repeat. A controller that
-// sleeps mid-hold publishes no release, and without the cap the repeat
-// would run until the film ended. No person holds a control this
-// long.
+// maxRepeatWindow is the longest that one generated repeat runs. A
+// controller that goes to sleep while a control is held sends no
+// release, and without this limit the repeat would continue until the
+// film ended.
 var maxRepeatWindow = 30 * time.Second
 
-// The ceiling on the milliseconds a table off the bus can name. It is
-// past any rate a person holds a control at and past the window above,
-// and it keeps a value that overflows a Duration from panicking the
-// ticker.
+// maxRepeatMillis is the largest repeat delay or interval that setTable
+// accepts from the bus. A larger value can overflow when it is converted
+// to a time.Duration and become negative, and time.NewTicker panics on
+// a non-positive interval.
 const maxRepeatMillis = 60000
 
-// A control is one physical thing on the controller: the event type
-// with the code. The type belongs in the key because a hat axis and a
-// key share the number space, so the code alone would collide.
+// control identifies one button or axis on the controller by its evdev
+// event type and code. The type is part of the identity because a hat
+// axis and a key can have the same code.
 type control struct {
 	eventType uint16
 	code      uint16
 }
 
-// keyState is what the fold holds: the table the keys topic
-// delivered, the key each hat axis is holding down, and one cancel
-// per control that repeats. The axis needs holding because the
-// release of a hat carries value 0 and no direction, so the name of
-// the key to release comes from the press.
 type keyState struct {
-	mu      sync.Mutex
-	table   []compiledBinding
+	mu    sync.Mutex
+	table []compiledBinding
+	// held is the key that each hat axis last pressed, by axis code.
 	held    map[uint16]string
 	repeats map[control]context.CancelFunc
 }
 
-// setTable replaces the held table. A payload that does not decode
-// leaves the last good table in place, so a cleared or malformed table
-// does not stop a controller mid-film. The repeat milliseconds are
-// clamped, because a table off the bus is not necessarily the
-// operator's own compile.
+// setTable replaces the key table with the one in payload. A payload
+// that does not decode as JSON leaves the previous table in place, so a
+// malformed publish does not stop a controller in the middle of a film.
+// The repeat times are clamped because the payload comes from the bus
+// and not from this process.
 //
-// A table is the operator's answer to a person's Keymap or Remote edit,
-// so a new one gets a line. The operator publishes it retained and a
-// reconnect delivers it again, so a table equal to the one held writes
-// none.
+// A new table logs one line, because it means someone edited a Keymap
+// or a Remote. The topic is retained, so a reconnect delivers the same
+// table again, and an unchanged table logs nothing.
 func (r *reader) setTable(payload []byte) {
 	var table []compiledBinding
 	if err := json.Unmarshal(payload, &table); err != nil {
@@ -78,9 +73,9 @@ func (r *reader) setTable(payload []byte) {
 	}
 }
 
-// clampMillis holds one value under the ceiling. A value at or below
-// zero passes through: an interval below zero is a row that does not
-// repeat, and a delay that low starts the repeat at once.
+// clampMillis limits a repeat time to maxRepeatMillis. A value of zero
+// or less is kept, because an interval of zero or less turns the repeat
+// off, and a delay of zero or less starts the repeat at once.
 func clampMillis(millis int) int {
 	if millis > maxRepeatMillis {
 		return maxRepeatMillis
@@ -88,17 +83,16 @@ func clampMillis(millis int) int {
 	return millis
 }
 
-// fold is the whole of what the pod does with one event, and it has
-// three answers. A control the table names publishes that name. A
-// KEY_* code with no row publishes itself. A control the table maps to
-// none, or the kernel does not name, publishes nothing. The value is
-// the kernel's, and a row with a repeat block makes the press start
-// the synthesised stream the release ends.
+// fold translates one evdev event and publishes it with the event's
+// value. A control with a row in the table publishes the row's key, and
+// a code with no row publishes the kernel's name for the code. Nothing
+// is published when the row maps the control to none, or when the code
+// has no row and no kernel name. A press starts the row's repeat, and
+// the release stops it.
 //
-// The answer is the line a press earns: the control, and what the pod
-// published for it or why it published nothing. Only the press earns
-// one. The release and every repeat, the kernel's or the pod's own,
-// return no line, because one press is one thing a person did.
+// fold returns a log line for a press, with the control and the key it
+// published or the reason it published nothing. It returns "" for a
+// release and a repeat, so one press logs one line.
 func (r *reader) fold(event inputEvent) string {
 	if event.Type == evAbs {
 		return r.foldAxis(event)
@@ -127,17 +121,17 @@ func (r *reader) fold(event inputEvent) string {
 		r.startRepeat(control{eventType: evKey, code: event.Code}, name, row)
 		return pressed + ", published " + name + " to " + r.eventsTopic
 	default:
-		// The kernel's own autorepeat on a keyboard key. It passes as it
-		// arrived, and the pod synthesises nothing beside it.
+		// The kernel's own autorepeat of a keyboard key passes through
+		// unchanged, and the pod generates no repeat of its own for it.
 		r.publishKey(name, event.Value)
 	}
 	return ""
 }
 
-// foldAxis is the hat's half. It is separate because a hat reports its
-// direction in the value: the press names the key and the release
-// carries no direction at all, so the pod holds the key the press
-// published to name the release.
+// foldAxis translates an ABS event. A hat axis reports its direction in
+// the event value, and its return to center has value 0 and no
+// direction. So foldAxis records the key that each press published, and
+// publishes the release of that key.
 func (r *reader) foldAxis(event inputEvent) string {
 	if event.Value == 0 {
 		name := r.releaseAxis(event.Code)
@@ -168,9 +162,9 @@ func (r *reader) table() []compiledBinding {
 	return r.keys.table
 }
 
-// holdAxis records the key one hat direction is holding down. A
-// second press with no release between them replaces the first,
-// because the two directions of one axis are one control.
+// holdAxis records the key that the axis last pressed. A second press
+// with no release between replaces the first, because both directions
+// of an axis are one control.
 func (r *reader) holdAxis(code uint16, key string) {
 	r.keys.mu.Lock()
 	defer r.keys.mu.Unlock()
@@ -180,9 +174,9 @@ func (r *reader) holdAxis(code uint16, key string) {
 	r.keys.held[code] = key
 }
 
-// releaseAxis names the key a hat's return to center releases, and
-// forgets it. A center with no press before it names nothing, which
-// is the ordinary case of an axis the table drops.
+// releaseAxis returns and deletes the key that the axis last pressed.
+// It returns "" when no press was recorded, as for an axis that has no
+// row or is mapped to none.
 func (r *reader) releaseAxis(code uint16) string {
 	r.keys.mu.Lock()
 	defer r.keys.mu.Unlock()
@@ -191,19 +185,18 @@ func (r *reader) releaseAxis(code uint16) string {
 	return key
 }
 
-// publishKey writes one key event to the Remote's events topic, not
-// retained, because a press is an event and not a state.
+// publishKey publishes a key event to the Remote's events topic. The
+// message is not retained, because a subscriber that connects later must
+// not receive an old press.
 func (r *reader) publishKey(key string, value int32) {
-	// A string and an integer marshal unconditionally, so the error is
-	// dropped.
+	// Marshaling a string and an integer cannot fail.
 	payload, _ := json.Marshal(keyEvent{Key: key, Value: value})
 	r.bus.Publish(r.eventsTopic, payload, false)
 }
 
-// startRepeat runs one held control's synthesised repeat. A row with
-// no interval starts nothing. A second press of the same control
-// replaces a running repeat, because a second press means the release
-// was missed or the hat changed direction.
+// startRepeat starts the generated repeat for a pressed control. A
+// second press of the same control replaces the running repeat, because
+// the release was missed or the hat changed direction.
 func (r *reader) startRepeat(held control, key string, row compiledBinding) {
 	if row.RepeatInterval <= 0 {
 		return
@@ -224,8 +217,6 @@ func (r *reader) startRepeat(held control, key string, row compiledBinding) {
 		func() { r.publishKey(key, 2) })
 }
 
-// stopRepeat ends the repeat a release names. A release for a control
-// with no repeat is the ordinary case and does nothing.
 func (r *reader) stopRepeat(held control) {
 	r.keys.mu.Lock()
 	if cancel, running := r.keys.repeats[held]; running {
@@ -235,10 +226,9 @@ func (r *reader) stopRepeat(held control) {
 	r.keys.mu.Unlock()
 }
 
-// stopAllRepeats ends every synthesised repeat at once, for the moment
-// the controller's nodes vanish. A controller that slept mid-hold
-// sends no release, and nothing may keep publishing for a device that
-// is gone.
+// stopAllRepeats stops every running repeat and deletes the recorded
+// axis keys. readAndPublish calls it when it stops reading the device
+// nodes, because a node that closes during a press sends no release.
 func (r *reader) stopAllRepeats() {
 	r.keys.mu.Lock()
 	for held, cancel := range r.keys.repeats {
@@ -249,10 +239,9 @@ func (r *reader) stopAllRepeats() {
 	r.keys.mu.Unlock()
 }
 
-// runRepeat is the clock a held control ticks on. It waits the delay,
-// which is what separates a tap from a hold, then fires every
-// interval. It ends on the context, which the release cancels, or on
-// the safety window.
+// runRepeat calls fire every interval after delay, so a short tap is
+// released before the first repeat. It returns when ctx is canceled, or
+// maxRepeatWindow after the delay ends.
 func runRepeat(ctx context.Context, delay, interval time.Duration, fire func()) {
 	select {
 	case <-ctx.Done():

@@ -1,10 +1,5 @@
 package main
 
-// These tests cover the role's own process: the settings it reads and
-// their defaults, the composition slots, the certificate it serves,
-// the trust it dials a sibling with, the tokens it sends, the log
-// line, and the readiness latch.
-
 import (
 	"context"
 	"crypto/tls"
@@ -50,7 +45,7 @@ func TestTheCompositionLimitReadsTheEnvironment(t *testing.T) {
 	}
 }
 
-func TestOnlyOneCompositionRunsPerSlot(t *testing.T) {
+func TestACompositionSlotIsFreeOnlyAfterItIsReleased(t *testing.T) {
 	server := &apiServer{compositions: make(chan struct{}, 1)}
 
 	release, taken := server.takeComposition()
@@ -63,14 +58,14 @@ func TestOnlyOneCompositionRunsPerSlot(t *testing.T) {
 	mustMatch(t, third, true)
 }
 
-func TestTheServingCertificateIsTheOneLastHeld(t *testing.T) {
+func TestTheServingCertificateIsTheLastOneSet(t *testing.T) {
 	server := &apiServer{}
 
 	_, err := server.servingCertificate()
 	mustFail(t, err)
 
 	held := &tls.Certificate{}
-	server.holdCertificate(held)
+	server.setCertificate(held)
 	loaded, err := server.servingCertificate()
 
 	mustSucceed(t, err)
@@ -99,8 +94,8 @@ func serverListed(t *testing.T, body []byte) string {
 	return document.Servers[0].URL
 }
 
-// downServer is an API server that refuses every connection, the way a
-// port with no server does.
+// downServer refuses every connection, like a port with nothing
+// listening.
 func downServer(t *testing.T) *apiservertest.Server {
 	t.Helper()
 	server := apiservertest.Start(t, http.NotFoundHandler())
@@ -108,10 +103,10 @@ func downServer(t *testing.T) *apiservertest.Server {
 	return server
 }
 
-// An API server that will not answer a review is a 503 with
-// Retry-After, because the fault is not in this API and a retry
-// clears it.
-func TestAnApiServerThatWillNotAnswerIsAServiceUnavailable(t *testing.T) {
+// When the API server does not respond to a TokenReview, the response
+// is 503 with Retry-After, because the fault is outside this API and a
+// retry can succeed.
+func TestAnApiServerThatDoesNotRespondIsAServiceUnavailable(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
 		fixture.server.client = apiclient.New(apiservertest.Host, downServer(t).Client(), "")
@@ -123,14 +118,13 @@ func TestAnApiServerThatWillNotAnswerIsAServiceUnavailable(t *testing.T) {
 	})
 }
 
-// The log line is one JSON object per request on standard output, so
-// a log collector reads it without a parser of its own.
+// A log collector can read the line without a parser of its own.
 func TestTheLogLineIsOneJSONObject(t *testing.T) {
 	read, written, err := os.Pipe()
 	mustSucceed(t, err)
-	held := os.Stdout
+	saved := os.Stdout
 	os.Stdout = written
-	defer func() { os.Stdout = held }()
+	defer func() { os.Stdout = saved }()
 
 	writeLogLine(apiLogLine{ID: "7f3c2a19", Route: apiPlayerTemplate, Status: 200})
 	mustSucceed(t, written.Close())
@@ -143,13 +137,12 @@ func TestTheLogLineIsOneJSONObject(t *testing.T) {
 	mustMatch(t, line.Route, apiPlayerTemplate)
 }
 
-// This API's own token is read from the path the kubelet mounts, and a
-// missing file is an error rather than an empty token.
+// A missing token file is an error, not an empty token.
 func TestTheServiceAccountTokenIsReadFromDisk(t *testing.T) {
 	directory := t.TempDir()
-	held := serviceAccountDir
+	saved := serviceAccountDir
 	serviceAccountDir = directory
-	defer func() { serviceAccountDir = held }()
+	defer func() { serviceAccountDir = saved }()
 
 	_, err := serviceAccountToken()
 	mustFail(t, err)
@@ -161,30 +154,27 @@ func TestTheServiceAccountTokenIsReadFromDisk(t *testing.T) {
 	mustMatch(t, token, "own-token")
 }
 
-// Readiness latches on one answer from the API server, whether or not
-// that answer accepts this API's own token, and stays down while the
-// API server does not answer at all.
-func TestReadinessLatchesOnAnAnsweringApiServer(t *testing.T) {
+// The API is ready once the API server responds to a TokenReview,
+// whether or not the review accepts this API's own token.
+func TestReadyOnceTheApiServerResponds(t *testing.T) {
 	directory := t.TempDir()
-	held := serviceAccountDir
+	saved := serviceAccountDir
 	serviceAccountDir = directory
-	defer func() { serviceAccountDir = held }()
+	defer func() { serviceAccountDir = saved }()
 	mustSucceed(t, os.WriteFile(filepath.Join(directory, "token"), []byte("own-token"), 0o600))
 
 	plane := newControlPlane()
 	plane.authenticated = false
-	plane.words = "the audience media-api is not one of this token's"
-	answering := apiservertest.Start(t, plane.handler()).Client()
+	plane.message = "the audience media-api is not one of this token's"
+	responding := apiservertest.Start(t, plane.handler()).Client()
 
-	mustMatch(t, reviewsAnswer(newAuthorizer(apiclient.New(apiservertest.Host, answering, ""))), true)
-	mustMatch(t, reviewsAnswer(newAuthorizer(apiclient.New(apiservertest.Host, downServer(t).Client(), ""))), false)
+	mustMatch(t, apiServerResponds(newAuthorizer(apiclient.New(apiservertest.Host, responding, ""))), true)
+	mustMatch(t, apiServerResponds(newAuthorizer(apiclient.New(apiservertest.Host, downServer(t).Client(), ""))), false)
 }
 
-// A sibling is reached only through an anchor the trust store holds:
-// with the sibling's CA in a ConfigMap the dial succeeds, and with no
-// anchor it fails. The sibling serves TLS on a pipeListener, so the
-// handshake runs in the bubble with the stores.
-func TestASiblingIsReachedOnlyThroughATrustedAnchor(t *testing.T) {
+// The sibling serves TLS on a pipeListener, so the handshake runs
+// inside the synctest bubble.
+func TestASiblingIsReachedOnlyWithItsCAInTheTrustStore(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		authority, err := mintAuthority(time.Now())
 		mustSucceed(t, err)
@@ -218,34 +208,33 @@ func TestASiblingIsReachedOnlyThroughATrustedAnchor(t *testing.T) {
 	})
 }
 
-// clusterHolding stands in for an API server that holds one CA
-// ConfigMap with the given anchor, or nothing when the anchor is
-// empty.
-func clusterHolding(t *testing.T, anchor string) *coreAPI {
+// clusterHolding returns a fake API server with a CA ConfigMap that
+// contains the given certificate, or with no ConfigMap when the
+// certificate is empty.
+func clusterHolding(t *testing.T, certificate string) *coreAPI {
 	t.Helper()
 	api := newCoreAPI()
-	if anchor != "" {
+	if certificate != "" {
 		api.seed(t, "configmaps/"+displayCAConfigMapName, &ConfigMap{
 			Metadata: ObjectMeta{Name: displayCAConfigMapName, ResourceVersion: "1"},
-			Data:     map[string]string{apiCACertKey: anchor},
+			Data:     map[string]string{apiCACertKey: certificate},
 		})
 	}
 	return api
 }
 
-// A body that goes quiet past the idle timeout ends the composition
-// and the upstream request, so the client reads a truncated stream
-// instead of waiting forever.
+// When an upstream body sends nothing for longer than
+// upstreamIdleTimeout, the composition and the upstream request end, so
+// the client receives a truncated stream and does not wait forever.
 //
-// The test runs outside a synctest bubble, on the real clock, because
-// the composition runs a stand-in ffmpeg as a child process. This API
-// reads the child's output from an OS pipe, and that read is not
-// durably blocked, so a bubble's clock would never reach the idle
-// bound.
-func TestABodyThatGoesQuietEndsTheComposition(t *testing.T) {
-	held := upstreamIdleTimeout
+// The test runs on the real clock, outside a synctest bubble, because
+// the composition reads a fake ffmpeg's output from an OS pipe. A read
+// on an OS pipe is not durably blocked, so the bubble's fake clock
+// would never reach the timeout.
+func TestABodyThatStopsSendingEndsTheComposition(t *testing.T) {
+	saved := upstreamIdleTimeout
 	upstreamIdleTimeout = 50 * time.Millisecond
-	defer func() { upstreamIdleTimeout = held }()
+	defer func() { upstreamIdleTimeout = saved }()
 
 	fixture := newAPIFixture(t)
 	fixture.server.now = time.Now
@@ -259,9 +248,6 @@ func TestABodyThatGoesQuietEndsTheComposition(t *testing.T) {
 	mustMatch(t, len(fixture.lines), 1)
 }
 
-// Each sibling is called with the token projected for its own
-// audience, because each public API reviews the audience it is named
-// for and one token cannot open both.
 func TestEachSiblingIsCalledWithItsOwnToken(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
@@ -275,9 +261,8 @@ func TestEachSiblingIsCalledWithItsOwnToken(t *testing.T) {
 	})
 }
 
-// A sibling with no projected token is a 503 whose detail names the
-// file this API could not read, so the owner sees which volume is
-// missing.
+// The problem detail names the sibling whose token could not be read,
+// so the cluster owner can see which projected volume is missing.
 func TestASiblingWithNoProjectedTokenIsAServiceUnavailable(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
@@ -290,10 +275,11 @@ func TestASiblingWithNoProjectedTokenIsAServiceUnavailable(t *testing.T) {
 	})
 }
 
-// A cluster may run this API before it runs the siblings. Every route
-// this API answers for itself still answers, and only a composition
-// through the absent sibling fails, with that sibling's own reason.
-func TestTheApiServesWhileASiblingAnchorIsAbsent(t *testing.T) {
+// A cluster can run this API before it runs the display and audio
+// APIs. Every route that this API serves by itself still works. Only a
+// composition that needs the missing sibling fails, with a problem
+// detail.
+func TestTheApiServesWhileASiblingCAIsAbsent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
 		fixture.server.display = testDisplayBase
@@ -314,9 +300,8 @@ func TestTheApiServesWhileASiblingAnchorIsAbsent(t *testing.T) {
 	})
 }
 
-// A pair that another writer puts in the Secret serves the next
-// connection when the watch delivers it, with no wait for the hourly
-// review.
+// The watch selects the Secret by name, so it lists and watches no
+// other Secret of the namespace.
 func TestTheServingPairFollowsTheSecret(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := newCoreAPI()

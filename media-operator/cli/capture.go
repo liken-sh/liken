@@ -1,9 +1,9 @@
 package main
 
-// The capture verb, a thin client over the media operator's
-// public capture API. It streams the composed media aspect of one
-// Player, what the Player currently shows with its sound, to a writer,
-// and puts only the media bytes there, so a pipe stays clean.
+// The capture verb is a thin client of the media operator's public
+// capture API. It streams one Player's composed media, the picture the
+// Player shows together with its sound, to a writer. It writes only the
+// media bytes, so the output can go through a pipe.
 
 import (
 	"context"
@@ -18,16 +18,16 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-// The composed media stream of one Player: the
-// namespace and name the API path names, and the container form.
+// captureTarget is the Player to capture and the container format of
+// the stream.
 type captureTarget struct {
 	Namespace string
 	Name      string
 	Format    string
 }
 
-// The capture verb's flags and its one positional
-// argument.
+// captureOptions holds the flags and the positional argument of the
+// capture verb.
 type captureOptions struct {
 	Namespace string
 	Name      string
@@ -35,44 +35,44 @@ type captureOptions struct {
 	Force     bool
 }
 
-// A format name to its extension route and the media
-// type the request accepts, in the operator's own spelling for the
-// composed media aspect.
+// captureFormats maps a format name to the file extension that ends the
+// API path and the media type that the request sends in its Accept
+// header.
 var captureFormats = map[string][2]string{
 	"mp4": {"mp4", "video/mp4"},
 	"mkv": {"mkv", "video/matroska"},
 }
 
-// targetFromOptions turns the parsed flags into a
-// target, or reports why they name no Player.
+// targetFromOptions turns the parsed flags into a target. It returns
+// an error when the flags do not identify a Player or name an unknown
+// format.
 func targetFromOptions(opts captureOptions) (captureTarget, error) {
 	if opts.Namespace == "" {
-		return captureTarget{}, fmt.Errorf("capture needs a namespace")
+		return captureTarget{}, fmt.Errorf("the namespace of the Player is empty, so capture does not know which Player to read")
 	}
 	if opts.Name == "" {
-		return captureTarget{}, fmt.Errorf("capture needs a name")
+		return captureTarget{}, fmt.Errorf("the name of the Player is empty, so capture does not know which Player to read")
 	}
 	if _, ok := captureFormats[opts.Format]; !ok {
-		return captureTarget{}, fmt.Errorf("unknown format %q", opts.Format)
+		return captureTarget{}, fmt.Errorf("unknown format %q, want mp4 or mkv", opts.Format)
 	}
 	return captureTarget{Namespace: opts.Namespace, Name: opts.Name, Format: opts.Format}, nil
 }
 
-// captureRoute builds the API path that taps the
-// composed media aspect of a Player and the media type the request
-// accepts.
+// captureRoute returns the API path of a Player's composed media, and
+// the media type for the Accept header.
 func captureRoute(target captureTarget) (path, accept string, err error) {
 	form, ok := captureFormats[target.Format]
 	if !ok {
-		return "", "", fmt.Errorf("unknown format %q", target.Format)
+		return "", "", fmt.Errorf("unknown format %q, want mp4 or mkv", target.Format)
 	}
 	path = "/v1/media/namespaces/" + target.Namespace + "/players/" + target.Name + "/media." + form[0]
 	return path, form[1], nil
 }
 
-// streamCapture issues the tap request and copies only
-// the media bytes to out; a non-2xx answer becomes an error that
-// carries the API's own words.
+// streamCapture requests the capture and copies only the media bytes
+// to out. A response that is not 2xx becomes an error that includes the
+// first 4096 bytes of the API's response body.
 func streamCapture(ctx context.Context, client *http.Client, base, token string, target captureTarget, out io.Writer) error {
 	path, accept, err := captureRoute(target)
 	if err != nil {
@@ -100,9 +100,10 @@ func streamCapture(ctx context.Context, client *http.Client, base, token string,
 	return err
 }
 
-// The HTTPS client for the capture request. It trusts the
-// operator's own CA and sends the API Service's DNS name as the
-// server name, while it dials a forwarded local port.
+// captureClient returns the HTTPS client for the capture request. It
+// trusts only the operator's CA. It dials a forwarded local port, so it
+// sets the API Service's DNS name as the TLS server name to match the
+// operator's certificate.
 func captureClient(anchor *x509.CertPool, certificate func(*tls.CertificateRequestInfo) (*tls.Certificate, error)) *http.Client {
 	config := &tls.Config{
 		RootCAs:    anchor,
@@ -118,10 +119,10 @@ func captureClient(anchor *x509.CertPool, certificate func(*tls.CertificateReque
 	}
 }
 
-// runCapture wires the cluster reach to the stream: it
-// resolves the namespace, reads the operator version and warns or
-// refuses on drift, opens the trust anchor and a forwarded port to the
-// API, and streams the media to stdout.
+// runCapture streams the capture to stdout through a local port that it
+// forwards to a ready operator pod. When the CLI and the operator have
+// different versions, it prints a warning unless --force is set, and
+// runs the capture either way.
 func runCapture(ctx context.Context, getter genericclioptions.RESTClientGetter, opts captureOptions, stdout, stderr io.Writer) error {
 	if opts.Namespace == "" {
 		namespace, _, err := getter.ToRawKubeConfigLoader().Namespace()
@@ -146,7 +147,7 @@ func runCapture(ctx context.Context, getter genericclioptions.RESTClientGetter, 
 
 	operator, err := operatorVersion(ctx, clientset)
 	if err != nil {
-		fmt.Fprintf(stderr, "reading the operator version: %v\n", err)
+		fmt.Fprintf(stderr, "reading the version of media-operator: %v\n", err)
 	}
 	switch action, message := decideVersionAction(version, operator, ""); action {
 	case actionRefuse:
@@ -166,7 +167,7 @@ func runCapture(ctx context.Context, getter genericclioptions.RESTClientGetter, 
 		return err
 	}
 	if token == "" && certificate == nil {
-		return fmt.Errorf("the current context carries neither a bearer token nor a client certificate; the API authenticates a tap with one")
+		return fmt.Errorf("the current kubeconfig context has neither a bearer token nor a client certificate, and the API authenticates a capture with one of them")
 	}
 	anchor, err := trustAnchor(ctx, clientset)
 	if err != nil {

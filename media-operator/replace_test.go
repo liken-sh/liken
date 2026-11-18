@@ -1,8 +1,8 @@
 package main
 
-// These tests cover a recreate against an API server that keeps a deleted
-// pod while its containers stop: one delete, one new pod, and one line,
-// however many passes read the old pod in that window.
+// These tests run a recreate against a fake API server that keeps a
+// deleted pod while its containers stop. However many passes find the old
+// pod, the operator sends one delete and creates one new pod.
 
 import (
 	"net/http"
@@ -21,7 +21,7 @@ func podDeletes(requests []string) int {
 	return count
 }
 
-// podLines keeps the lines that say the operator created or recreated a
+// podLines returns the log lines that report a created or recreated
 // playback pod.
 func podLines(log *logBuffer) []string {
 	var kept []string
@@ -64,9 +64,9 @@ func TestARecreateWaitsForTheOldPodAndRecreatesOnce(t *testing.T) {
 			media, log := loggingOperator(t, cluster)
 			media.reports.fold("house", "movie", playReport{Item: 1, Position: "0:36:01"})
 
-			// The old pod stands while its containers stop, and every pass in
-			// that window reads it. Its mpv exits 4 on the SIGTERM, which
-			// fails the pod before it goes.
+			// The old pod remains while its containers stop, and every pass in
+			// that time reads it. Its mpv exits with 4 on SIGTERM, so the pod
+			// fails before it is removed.
 			media.pass()
 			media.pass()
 			cluster.pods["movie-playback"].Status.Phase = podFailed
@@ -84,8 +84,8 @@ func TestARecreateWaitsForTheOldPodAndRecreatesOnce(t *testing.T) {
 	}
 }
 
-// The terminating pod's own failure is the delete, not the run's, so the
-// Play never reads Failed while it waits.
+// The terminating pod fails because of the delete, not because playback
+// failed, so the Play does not show Failed while the operator waits.
 func TestTheTerminatingPodDoesNotFailThePlay(t *testing.T) {
 	cluster := remoteChangeCluster()
 	cluster.podsLinger["movie-playback"] = true
@@ -101,7 +101,7 @@ func TestTheTerminatingPodDoesNotFailThePlay(t *testing.T) {
 	})
 }
 
-// The new pod carries the controllers the edited Player names.
+// The new pod subscribes to the remotes of the edited Player.
 func TestTheReplacementCarriesTheEditedRemoteSet(t *testing.T) {
 	cluster := remoteChangeCluster()
 	cluster.podsLinger["movie-playback"] = true
@@ -115,8 +115,9 @@ func TestTheReplacementCarriesTheEditedRemoteSet(t *testing.T) {
 		[]string{remoteEventsTopic(defaultTopicBase, "house", "armchair")})
 }
 
-// A recreate that changed the claim waits for the old claim to go too,
-// because a pod created against a claim on its way out never starts.
+// A recreate that changed the claim also waits until the old claim is
+// deleted, because a pod that uses a claim that is being deleted never
+// starts.
 func TestAReplacementWaitsForTheOldClaim(t *testing.T) {
 	cluster := runningCluster(housePlayer())
 	cluster.players["theater"] = brightPlayer()
@@ -139,8 +140,8 @@ func TestAReplacementWaitsForTheOldClaim(t *testing.T) {
 	mustMatch(t, len(cluster.claims["movie-devices"].Spec.Devices.Config) > 0, true)
 }
 
-// A delete the API server refused leaves the pod running as the run's
-// pod, so its reports still count and its ending still ends the run.
+// When the API server refuses the delete, the pod is still the run's pod,
+// so its report that playback ended still ends the run.
 func TestAPodWhoseDeleteFailedStillEndsTheRun(t *testing.T) {
 	cluster := remoteChangeCluster()
 	cluster.pods["movie-playback"].Metadata.UID = "old-pod"

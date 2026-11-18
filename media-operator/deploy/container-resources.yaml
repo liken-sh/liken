@@ -1,20 +1,19 @@
-# The cpu and memory settings of every container media-operator builds.
-# The kustomization generates the ConfigMap media-operator-resources from
-# this file, and the operator reads it once at start. A changed value
-# changes the ConfigMap's name, so the operator's pod restarts with it.
+# The cpu and memory settings of every container that media-operator
+# creates. kustomization.yaml generates the ConfigMap
+# media-operator-resources from this file.
 #
-# Each entry follows a container's resources block. The operator states
-# no cpu limit on any container, so a limits.cpu here is ignored. A value
-# that is missing or is not a Kubernetes quantity takes the operator's
-# built-in default, which is the value below, and the operator logs one
-# line for it.
+# Each entry has the shape of a container's resources block. The
+# operator sets no cpu limit on any container, so it ignores
+# limits.cpu and logs a line. When a value is missing, is not a
+# Kubernetes quantity, or is below zero, or when limits.memory is zero,
+# the operator logs a line and uses its built-in default, which is the
+# value below. When requests.memory is above limits.memory, it uses the
+# defaults of both.
 #
-# The requests are near the steady use of a 1920x1080 screen, measured on
-# a home cluster, so a playback pod and an idle pod together request
-# about 688Mi and schedule on a 1GB machine. The memory limits are above
-# the highest use measured on a 3840x2160 screen, with about half again
-# as headroom, so a film on that screen is not killed at these values.
-# containerresources.go gives the measurement behind each value.
+# The requests are sized for a 1920x1080 screen, so that a playback pod
+# and an idle pod can schedule together on a 1GB machine. The memory
+# limits are sized for a 3840x2160 screen, so that a film on it is not
+# killed. containerresources.go has the measurements.
 
 # The playback pod: mpv, the on-screen display, and the command sidecar.
 player:

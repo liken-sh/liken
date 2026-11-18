@@ -8,14 +8,14 @@ toc: true
 
 # Routes
 
-The routes below are generated from the OpenAPI document `media-api`
-serves at `/v1/media/openapi.json`. The API renders that document
-from its router, so this page lists every route the program serves.
+These are the routes of `media-api`, generated from the OpenAPI
+document that it serves at `/v1/media/openapi.json`. A test fails when
+that document differs from the router, so the list covers every route.
 
-[The media API](/docs/reference/api/) is the page beside this one. It
-says what the API is for, which routes redirect to `display-api` and
-`audio-api`, how it composes a screen with its sound, who may capture
-a `Player`, and what each error means.
+[The media API](/docs/reference/api/) explains what the API is for,
+which routes redirect to `display-api` and `audio-api`, how it combines
+a screen with its sound, who may capture a `Player`, and what each
+error means.
 
 `media-api`, version `v1alpha1`, described in OpenAPI 3.1.0.
 
@@ -138,7 +138,7 @@ The Player's sound, in the format chosen by Accept.
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
 | 409 | No Play runs on this Player, or it resolves no Sink. |
-| 502 | An upstream answer this API cannot relay. |
+| 502 | An upstream response that this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
@@ -167,7 +167,7 @@ The Player's sound, in the format chosen by Accept. The headers alone, with no b
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
 | 409 | No Play runs on this Player, or it resolves no Sink. |
-| 502 | An upstream answer this API cannot relay. |
+| 502 | An upstream response that this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
@@ -206,7 +206,7 @@ The Player's sound, as audio/flac.
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
 | 409 | No Play runs on this Player, or it resolves no Sink. |
-| 502 | An upstream answer this API cannot relay. |
+| 502 | An upstream response that this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
@@ -235,7 +235,7 @@ The Player's sound, as audio/flac. The headers alone, with no body, no capture, 
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
 | 409 | No Play runs on this Player, or it resolves no Sink. |
-| 502 | An upstream answer this API cannot relay. |
+| 502 | An upstream response that this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
@@ -274,7 +274,7 @@ The Player's sound, as audio/ogg.
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
 | 409 | No Play runs on this Player, or it resolves no Sink. |
-| 502 | An upstream answer this API cannot relay. |
+| 502 | An upstream response that this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
@@ -303,7 +303,7 @@ The Player's sound, as audio/ogg. The headers alone, with no body, no capture, a
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
 | 409 | No Play runs on this Player, or it resolves no Sink. |
-| 502 | An upstream answer this API cannot relay. |
+| 502 | An upstream response that this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
@@ -342,7 +342,7 @@ The Player's sound, as audio/wav.
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
 | 409 | No Play runs on this Player, or it resolves no Sink. |
-| 502 | An upstream answer this API cannot relay. |
+| 502 | An upstream response that this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
@@ -371,7 +371,7 @@ The Player's sound, as audio/wav. The headers alone, with no body, no capture, a
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
 | 409 | No Play runs on this Player, or it resolves no Sink. |
-| 502 | An upstream answer this API cannot relay. |
+| 502 | An upstream response that this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
@@ -416,7 +416,7 @@ The Player's screen and sound in one stream, in the format chosen by Accept.
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
 | 409 | The Player resolves no stream at all, or an upstream reports its Display, Sink, or Source away. |
-| 502 | An upstream answer this API cannot relay. |
+| 502 | An upstream response that this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
@@ -451,7 +451,7 @@ The Player's screen and sound in one stream, in the format chosen by Accept. The
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
 | 409 | The Player resolves no stream at all, or an upstream reports its Display, Sink, or Source away. |
-| 502 | An upstream answer this API cannot relay. |
+| 502 | An upstream response that this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
@@ -496,7 +496,7 @@ The Player's screen and sound in one stream, as video/matroska.
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
 | 409 | The Player resolves no stream at all, or an upstream reports its Display, Sink, or Source away. |
-| 502 | An upstream answer this API cannot relay. |
+| 502 | An upstream response that this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
@@ -531,7 +531,7 @@ The Player's screen and sound in one stream, as video/matroska. The headers alon
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
 | 409 | The Player resolves no stream at all, or an upstream reports its Display, Sink, or Source away. |
-| 502 | An upstream answer this API cannot relay. |
+| 502 | An upstream response that this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
@@ -576,7 +576,7 @@ The Player's screen and sound in one stream, as video/mp4.
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
 | 409 | The Player resolves no stream at all, or an upstream reports its Display, Sink, or Source away. |
-| 502 | An upstream answer this API cannot relay. |
+| 502 | An upstream response that this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
@@ -611,7 +611,7 @@ The Player's screen and sound in one stream, as video/mp4. The headers alone, wi
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
 | 409 | The Player resolves no stream at all, or an upstream reports its Display, Sink, or Source away. |
-| 502 | An upstream answer this API cannot relay. |
+| 502 | An upstream response that this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
@@ -654,7 +654,7 @@ The Player's screen, in the format chosen by Accept.
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
 | 409 | The Player has no status.screen. |
-| 502 | An upstream answer this API cannot relay. |
+| 502 | An upstream response that this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
@@ -687,7 +687,7 @@ The Player's screen, in the format chosen by Accept. The headers alone, with no 
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
 | 409 | The Player has no status.screen. |
-| 502 | An upstream answer this API cannot relay. |
+| 502 | An upstream response that this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
@@ -730,7 +730,7 @@ The Player's screen, as image/jpeg.
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
 | 409 | The Player has no status.screen. |
-| 502 | An upstream answer this API cannot relay. |
+| 502 | An upstream response that this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
@@ -763,7 +763,7 @@ The Player's screen, as image/jpeg. The headers alone, with no body, no capture,
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
 | 409 | The Player has no status.screen. |
-| 502 | An upstream answer this API cannot relay. |
+| 502 | An upstream response that this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
@@ -806,7 +806,7 @@ The Player's screen, as multipart/x-mixed-replace.
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
 | 409 | The Player has no status.screen. |
-| 502 | An upstream answer this API cannot relay. |
+| 502 | An upstream response that this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
@@ -839,7 +839,7 @@ The Player's screen, as multipart/x-mixed-replace. The headers alone, with no bo
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
 | 409 | The Player has no status.screen. |
-| 502 | An upstream answer this API cannot relay. |
+| 502 | An upstream response that this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
@@ -882,7 +882,7 @@ The Player's screen, as video/mp4.
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
 | 409 | The Player has no status.screen. |
-| 502 | An upstream answer this API cannot relay. |
+| 502 | An upstream response that this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
@@ -915,7 +915,7 @@ The Player's screen, as video/mp4. The headers alone, with no body, no capture, 
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
 | 409 | The Player has no status.screen. |
-| 502 | An upstream answer this API cannot relay. |
+| 502 | An upstream response that this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
@@ -958,7 +958,7 @@ The Player's screen, as image/png.
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
 | 409 | The Player has no status.screen. |
-| 502 | An upstream answer this API cannot relay. |
+| 502 | An upstream response that this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
@@ -991,7 +991,7 @@ The Player's screen, as image/png. The headers alone, with no body, no capture, 
 | 405 | A method other than GET, HEAD, or OPTIONS. |
 | 406 | Nothing this route serves is acceptable. |
 | 409 | The Player has no status.screen. |
-| 502 | An upstream answer this API cannot relay. |
+| 502 | An upstream response that this API cannot relay. |
 | 503 | An upstream is busy, or this API is at its composition limit. |
 | 504 | An upstream sent no headers within ten seconds plus the t= begin. |
 
@@ -1013,7 +1013,7 @@ This OpenAPI document.
 
 | Status | Description |
 | --- | --- |
-| 200 | This document, with the servers entry naming the origin the request reached. |
+| 200 | This document. Its servers entry is the configured public base URL, or else the origin that the request used. |
 | 304 | The document matches the If-None-Match field. |
 | 401 | No client certificate and no token, or a token the TokenReview refused. |
 | 403 | The SubjectAccessReview denied the subject. |
@@ -1027,7 +1027,7 @@ This OpenAPI document. The headers alone, with no body, no capture, and no upstr
 
 | Status | Description |
 | --- | --- |
-| 200 | This document, with the servers entry naming the origin the request reached. |
+| 200 | This document. Its servers entry is the configured public base URL, or else the origin that the request used. |
 | 304 | The document matches the If-None-Match field. |
 | 401 | No client certificate and no token, or a token the TokenReview refused. |
 | 403 | The SubjectAccessReview denied the subject. |
@@ -1052,9 +1052,11 @@ Every route requires `mutualTLS`, or `bearer`, unless its own section states oth
 | `bearer` | HTTP bearer, JWT | A Kubernetes ServiceAccount token minted with the audience media-api, which this API checks with a TokenReview. |
 | `mutualTLS` | Mutual TLS | A client certificate the cluster's own authority signed. The subject's common name is the user and its organization values are the groups, which is how the API server reads one. |
 
-## The document itself
+## The OpenAPI document
 
-`media-api` serves the document this page is made from at
-`/v1/media/openapi.json`. The repository holds the same copy at
-`openapi.json`, and a test fails when the router and that copy
-differ.
+`media-api` serves the OpenAPI document that this page is generated
+from at `/v1/media/openapi.json`. The repository keeps a copy of it in
+`media-operator/openapi.json`, and a test fails when that copy differs
+from the router's routes. The served copy differs from the committed one
+only in its `servers` entry, which is the origin that the request
+reached.

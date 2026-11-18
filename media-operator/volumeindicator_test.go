@@ -1,10 +1,10 @@
 package main
 
-// The volume indicator a Receiver draws itself. A Receiver with
-// spec.volume.indicator Receiver shows its own overlay on the TV, so the
-// relay marks its level with "indicator": "receiver" and the screens
-// track the level and draw no bar. The mark follows the device that sets
-// the level now: the sinks carry none.
+// A Receiver with spec.volume.indicator set to Receiver draws its own
+// volume overlay on the TV. While that Receiver sets the level, the
+// relay adds "indicator": "receiver" to the level message, and the
+// screens track the level without drawing a bar. A level from the Sinks
+// never has the indicator field.
 
 import (
 	"io"
@@ -13,16 +13,13 @@ import (
 	"testing/synctest"
 )
 
-// denonWithOverlay is the house Denon with its own on-screen overlay.
 func denonWithOverlay(level float64) volumeDevice {
 	device := denon(level)
 	device.indicator = relayIndicatorReceiver
 	return device
 }
 
-// The relay carries the mark only for a Receiver that draws its own
-// indicator.
-func TestTheRelayMarksOnlyAReceiverThatDrawsItsOwnIndicator(t *testing.T) {
+func TestTheIndicatorFieldIsSetOnlyForAReceiverThatDrawsItsOwnOverlay(t *testing.T) {
 	cases := []struct {
 		name   string
 		device volumeDevice
@@ -35,35 +32,35 @@ func TestTheRelayMarksOnlyAReceiverThatDrawsItsOwnIndicator(t *testing.T) {
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
-			recorder := &deskRecorder{}
+			recorder := &volumeWriteRecorder{}
 			engine := newVolumeEngine(recorder.write, recorder.publish, io.Discard)
 
-			engine.observe(engineUnit, []volumeDevice{each.device}, true)
+			engine.observe(enginePlayer, []volumeDevice{each.device}, true)
 
 			mustMatchAll(t, recorder.relayed(), []string{each.want})
 		})
 	}
 }
 
-// When the Receiver stops setting the level, the sinks set it and the
-// relay carries no mark, so the screens draw the bar again.
-func TestTheMarkLeavesWithTheReceiver(t *testing.T) {
+// When the Sinks take over the level from the Receiver, the message has
+// no indicator field, so the screens draw the bar again.
+func TestALevelFromTheSinksHasNoIndicatorField(t *testing.T) {
 	engine, recorder := engineFor(denonWithOverlay(36))
 	sink := volumeDevice{kind: deviceSink, name: "front", max: 100, step: 5, level: 40, reported: true}
 
-	engine.observe(engineUnit, []volumeDevice{sink}, true)
+	engine.observe(enginePlayer, []volumeDevice{sink}, true)
 
 	mustMatchAll(t, recorder.relayed(), []string{`{"level":0.4,"muted":false}`})
 }
 
 // A change of the indicator alone republishes the level, so the
-// retained message holds the mark the screens read.
+// retained message has the current indicator field.
 func TestAChangeOfTheIndicatorAloneIsPublished(t *testing.T) {
 	engine, recorder := engineFor(denon(36))
 
-	engine.observe(engineUnit, []volumeDevice{denonWithOverlay(36)}, true)
-	engine.observe(engineUnit, []volumeDevice{denonWithOverlay(36)}, true)
-	engine.observe(engineUnit, []volumeDevice{denon(36)}, true)
+	engine.observe(enginePlayer, []volumeDevice{denonWithOverlay(36)}, true)
+	engine.observe(enginePlayer, []volumeDevice{denonWithOverlay(36)}, true)
+	engine.observe(enginePlayer, []volumeDevice{denon(36)}, true)
 
 	mustMatchAll(t, recorder.relayed(), []string{
 		`{"level":0.5,"muted":false,"indicator":"receiver"}`,
@@ -71,9 +68,9 @@ func TestAChangeOfTheIndicatorAloneIsPublished(t *testing.T) {
 	})
 }
 
-// The pass reads spec.volume.indicator off the Receiver that sets the
-// level, and off no Receiver once it is unreachable.
-func TestAPassMarksTheLevelOfAReceiverWithItsOwnOverlay(t *testing.T) {
+// When the Receiver is unreachable, the Sinks set the level, so the
+// pass reads no spec.volume.indicator.
+func TestAPassSetsTheIndicatorFieldForAReceiverWithItsOwnOverlay(t *testing.T) {
 	cases := []struct {
 		name      string
 		reachable string
@@ -102,10 +99,10 @@ func TestAPassMarksTheLevelOfAReceiverWithItsOwnOverlay(t *testing.T) {
 	}
 }
 
-// The sidecar sends the display every live level, with a third word
-// that says whether to draw the bar. A marked level draws nothing, and
-// neither does a message that changes the mark alone, while the level
-// the display holds still follows.
+// The sidecar sends each live level to the display with a last
+// argument that says whether to draw the bar. A level with the
+// indicator field draws no bar, and neither does a message that changes
+// only the indicator field.
 func TestTheSidecarTellsTheDisplayWhetherToDraw(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -138,8 +135,8 @@ func TestTheSidecarTellsTheDisplayWhetherToDraw(t *testing.T) {
 					volumeTopic: playerVolumeTopic(defaultTopicBase, "house", "theater"),
 					mpv:         client,
 				}
-				// An empty retained payload decodes to no level, the way a
-				// unit with nothing retained starts.
+				// An empty retained payload decodes to no level, the same as
+				// no retained message.
 				c.handleRetained(c.volumeTopic, []byte(each.retained))
 
 				c.handle(c.volumeTopic, []byte(each.live))

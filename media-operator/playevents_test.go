@@ -1,10 +1,7 @@
 package main
 
-// These tests cover the Events of a run: each phase it moves to, each
-// pod the operator creates again, and the delete that ends a Play.
-// Each runs whole passes in a synctest bubble, so the recorder's queue
-// drains on the bubble's clock, and reads the Events from the fake
-// cluster's eventstest.Events.
+// Each test runs whole passes in a synctest bubble, so the recorder's
+// queue drains on the bubble's clock.
 
 import (
 	"testing"
@@ -12,9 +9,9 @@ import (
 	"time"
 )
 
-// postedOn answers the Events about one object, each as its type, its
-// reason, and its message, once every goroutine in the bubble is
-// blocked, so each Event the pass queued is written.
+// postedOn returns the Events about one object as "type reason:
+// message" strings. synctest.Wait lets the recorder write each queued
+// Event first.
 func postedOn(cluster *fakeCluster, kind, name string) []string {
 	synctest.Wait()
 	var posted []string
@@ -24,17 +21,14 @@ func postedOn(cluster *fakeCluster, kind, name string) []string {
 	return posted
 }
 
-// pendingCluster is the running cluster whose Play the last pass wrote
-// as Pending, so the pass under test moves it on.
+// pendingCluster returns a running cluster whose Play is Pending, so
+// the next pass changes the phase.
 func pendingCluster() *fakeCluster {
 	cluster := runningCluster(housePlayer())
 	cluster.plays["movie"].Status = PlayStatus{Phase: phasePending, Pod: "movie-playback"}
 	return cluster
 }
 
-// Each phase a Play moves to posts one Event: Normal for a film that
-// starts or finishes, and a Warning that names the cause for a Play
-// that fails.
 func TestAPlayPostsTheEventOfEachPhaseItMovesTo(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -70,8 +64,8 @@ func TestAPlayPostsTheEventOfEachPhaseItMovesTo(t *testing.T) {
 			setup: func(cluster *fakeCluster, _ *operator) {
 				cluster.plays["movie"].Spec.Items = []PlayItem{{URI: "rtsp://camera/front"}}
 			},
-			want: []string{"Warning InvalidSpec: the scheme rtsp:// is not one the operator resolves; " +
-				"it resolves https://, nfs://, claim://, and pattern://"},
+			want: []string{"Warning InvalidSpec: the scheme rtsp:// is not one the operator resolves, " +
+				"which are https://, nfs://, claim://, and pattern://"},
 		},
 	}
 	for _, each := range cases {
@@ -89,9 +83,7 @@ func TestAPlayPostsTheEventOfEachPhaseItMovesTo(t *testing.T) {
 	}
 }
 
-// A phase that stands posts nothing more, so a second pass over the
-// same running film adds no Event.
-func TestAPhaseThatStandsPostsOnce(t *testing.T) {
+func TestASecondPassOverTheSamePhasePostsNothing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cluster := pendingCluster()
 		media := testOperator(t, cluster, make(chan struct{}, 1))
@@ -105,8 +97,6 @@ func TestAPhaseThatStandsPostsOnce(t *testing.T) {
 	})
 }
 
-// A pod the operator creates again posts why: a Warning for a pod that
-// failed or is gone, and Normal for a spec edit that reshaped it.
 func TestARecreatedPodPostsWhy(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -153,8 +143,6 @@ func TestARecreatedPodPostsWhy(t *testing.T) {
 	}
 }
 
-// A pod that fails again soon after a recreate posts ResumeBackoff
-// with the wait the next recreate takes, beside the recreate itself.
 func TestAPodThatKeepsFailingPostsTheBackoff(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cluster := runningCluster(housePlayer())
@@ -168,13 +156,11 @@ func TestAPodThatKeepsFailingPostsTheBackoff(t *testing.T) {
 
 		mustMatchAll(t, postedOn(cluster, "Play", "movie"), []string{
 			"Warning PodRecreated: recreated playback pod movie-playback at the start, because the pod failed",
-			"Warning ResumeBackoff: the playback pod failed 2 times in a row; the next recreate waits at least 20s",
+			"Warning ResumeBackoff: Recreated the playback pod 2 times in a row, so the next recreate waits at least 20s",
 		})
 	})
 }
 
-// A Play the operator deletes posts why on the Play and on its Player,
-// because the Play's own Events leave `kubectl describe` with it.
 func TestADeletedPlayPostsOnThePlayAndThePlayer(t *testing.T) {
 	cases := []struct {
 		name    string

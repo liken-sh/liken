@@ -1,18 +1,15 @@
 package main
 
-// A recreate replaces the playback pod under the same name, so it is two
-// steps with a wait between them. The API server keeps a deleted pod,
-// marked with a deletionTimestamp, until the kubelet has stopped every
-// container in it, and a create under that name answers 409 until then.
-// mpv stops at once, but the sidecars take their grace period, so the old
-// pod stands for a second or more.
+// A recreate gives the new playback pod the old pod's name, so it needs a
+// delete, a wait, and a create. The API server keeps a deleted pod until
+// the kubelet has stopped all of its containers, and a create under that
+// name fails with 409 until then. The sidecars use their termination grace
+// period, so this can take a second or more.
 //
-// The operator sends the delete and keeps the reason in
-// operator.replacements. Each pass that reads the terminating pod leaves
-// it alone. The pod watch reports the delete, and the pass that finds the
-// name free creates the new pod and writes the one line. Without the wait,
-// every pass in that window reads the old remote set off the terminating
-// pod, sends another delete, and meets the 409.
+// replace sends the delete and records the reason in o.replacements.
+// Passes that find the pod terminating leave it alone, and the first pass
+// that finds it gone creates the new pod. Without the wait, every pass
+// during the grace period would send another delete and get a 409.
 
 import (
 	"errors"
@@ -21,19 +18,19 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// replace deletes the run's pod, and its claim when the claim itself
-// diverged, and creates the new pod at the film's place when the name is
-// already free. Otherwise the pass that finds the name free creates it,
-// and replace returns no pod.
+// replace deletes the run's pod, and also its claim when claimChanged is
+// set. If the pod name is already free, it creates the new pod at the
+// film's saved position and returns it. Otherwise it returns no pod, and
+// a later pass creates the pod.
 //
-// The report desk learns the old pod's UID before the delete goes out, so
-// the ending its sidecar reports on the SIGTERM is not read as the Play's.
-// runpod.go says what that ending would do.
+// It marks the old pod's UID as gone in o.reports before it sends the
+// delete, because the old pod's sidecar reports the end of playback when
+// it receives SIGTERM, and that report must not end the Play.
 func (o *operator) replace(play *Play, player *Player, running *Pod, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote, claimChanged bool, reason recreate) (*Pod, error) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
-	o.reports.replacing(namespace, name, running.Metadata.UID)
+	o.reports.markReplaced(namespace, name, running.Metadata.UID)
 	if err := DeletePod(o.client, namespace, podName(name)); err != nil {
-		o.reports.keeping(namespace, name, running.Metadata.UID)
+		o.reports.unmarkReplaced(namespace, name, running.Metadata.UID)
 		return nil, err
 	}
 	if claimChanged {
@@ -49,9 +46,10 @@ func (o *operator) replace(play *Play, player *Player, running *Pod, claim *Reso
 	return nil, err
 }
 
-// finishReplacement creates the pod a recreate owes, once the old pod is
-// gone. A claim that is still being deleted is not the claim the new pod
-// must hold, so the pod waits for the claim too.
+// finishReplacement creates the new pod after the old pod is gone, and
+// creates the claim first when it is missing. It returns no pod while the
+// old claim is still being deleted, because a pod must not use a claim
+// that is being deleted.
 func (o *operator) finishReplacement(play *Play, player *Player, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote, reason recreate) (*Pod, error) {
 	key := runKey(play.Metadata.Namespace, play.Metadata.Name)
 	held, err := GetResourceClaim(o.client, claim.Metadata.Namespace, claim.Metadata.Name)
@@ -63,25 +61,25 @@ func (o *operator) finishReplacement(play *Play, player *Player, claim *Resource
 	case err != nil:
 		return nil, err
 	case held.Metadata.deleting():
-		// A claim that the old pod held finishes its delete only after the
-		// pod is gone, so the pass that finds the pod gone can still find
-		// the claim on its way out. The claim's removal wakes the pass
-		// (changewake.go), and that pass creates the pod.
+		// The claim is deleted only after the old pod is gone, so this pass
+		// can find the pod gone and the claim still terminating. The claim's
+		// deletion starts another pass (changewake.go), which creates the pod.
 		return nil, nil
 	}
-	pod, err := o.createPodAtStash(play, player, claim, resolved, prefs, remotes)
+	pod, err := o.createPodAtSavedPosition(play, player, claim, resolved, prefs, remotes)
 	if err != nil {
 		return nil, err
 	}
 	delete(o.replacements, key)
 	o.notePodRecreated(play, fmt.Sprintf("recreated playback pod %s at %s, because %s",
-		pod.Metadata.Name, startName(o.stashedPosition(play)), reason.reason), reason.fault)
+		pod.Metadata.Name, startName(o.savedPosition(play)), reason.reason), reason.fault)
 	return pod, nil
 }
 
-// recreate is why a run's pod is created again. fault marks a pod that
-// failed or vanished, which a person may need to look at, apart from a
-// spec edit that reshaped the pod.
+// recreate is the reason for creating a run's pod again. fault is true
+// when the pod failed or disappeared, and notePodRecreated then posts a
+// Warning Event. It is false when a spec edit changed the pod, and the
+// Event is Normal.
 type recreate struct {
 	reason string
 	fault  bool

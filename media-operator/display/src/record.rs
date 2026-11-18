@@ -1,14 +1,15 @@
-//! The display's record of what a person's presses did. A press that makes
-//! the display send mpv a command earns one line: the navigation word, what
-//! the command does in a person's words, the command's exact words, and
-//! mpv's answer. The frame loop gives each such command a request id and
-//! leaves its line in [`Notes`], and the socket reader writes the line when
-//! mpv answers under that id. So one line says what triggered the command,
-//! what the display sent, and what came back.
+//! Log lines for the key presses that send mpv a command. Each line has
+//! the key's navigation word, a description of the command, the command
+//! as sent, and mpv's reply.
 //!
-//! A held key repeats the navigation word many times a second. Each repeat
-//! acts, and none writes a line: the hold writes one line for all of its
-//! repeats when it ends, which is the next press or the idle hide.
+//! [`Record::press`] sends each command with its own request id and
+//! stores the start of its line in [`Notes`] under that id. The socket
+//! reader completes the line and writes it when mpv replies with that id.
+//!
+//! A held key repeats its navigation word, and each repeat sends its
+//! command to mpv. A line for each repeat would flood the log, so
+//! [`Record`] counts the repeats and writes one line for the hold when it
+//! ends: at the next press, at a summon, or when the display hides.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -17,30 +18,28 @@ use serde_json::Value;
 
 use crate::ipc::{self, Command};
 
-/// The lines that wait for mpv's answer, by the request id their command
-/// carries. The frame loop writes them and the socket reader takes them, on
-/// two tasks, so the map takes a lock.
+/// The log lines that wait for mpv's reply, by request id. The frame
+/// loop inserts them and the socket reader removes them, so the map is
+/// behind a lock.
 pub type Notes = Arc<Mutex<BTreeMap<u64, String>>>;
 
-/// The first request id a press's command carries. The observes take the
-/// ids 1 to 16 and the gate takes 1 and 2, and those answers are the
-/// display's own business, so a press counts from well above them.
+/// The first request id of a press's command. The `observe_property`
+/// registrations and the `GATE` reads in `ipc` use small ids, and their
+/// replies write no log line, so press ids start above them.
 pub const FIRST_ID: u64 = 1000;
 
-/// The third word the command sidecar adds to a navigation word that a held
-/// key repeated.
+/// The second word of the navigation message that the command sidecar
+/// sends for each repeat of a held key.
 pub const REPEAT: &str = "repeat";
 
-/// What one press or repeat sends: the socket lines, and the line that ends
-/// the hold before it, when there is one.
+/// The lines to send to mpv's socket for one press or repeat, and the
+/// log line of the previous hold when this press ended it.
 #[derive(Debug, Default, PartialEq)]
 pub struct Pressed {
     pub lines: Vec<String>,
     pub ended: Option<String>,
 }
 
-/// One held key: its word, how many repeats it made, and the last command a
-/// repeat sent.
 #[derive(Debug)]
 struct Hold {
     word: String,
@@ -48,7 +47,6 @@ struct Hold {
     last: Option<Command>,
 }
 
-/// The ids the display gives and the hold it is inside.
 #[derive(Debug)]
 pub struct Record {
     next: u64,
@@ -65,9 +63,9 @@ impl Default for Record {
 }
 
 impl Record {
-    /// Turn one press's commands into socket lines. A press leaves a note for
-    /// each command a person would name; a repeat leaves none and counts
-    /// toward its hold.
+    /// Turn one press's commands into lines for mpv's socket. A press
+    /// stores a note for each command that [`describe`] describes. A
+    /// repeat of the held key stores none and counts toward the hold.
     pub fn press(
         &mut self,
         word: &str,
@@ -77,7 +75,10 @@ impl Record {
     ) -> Pressed {
         let mut pressed = Pressed::default();
         if repeat && self.hold.as_ref().is_some_and(|hold| hold.word == word) {
-            let hold = self.hold.as_mut().expect("the hold stands");
+            let hold = self
+                .hold
+                .as_mut()
+                .expect("a hold exists for this word, checked above");
             hold.repeats += 1;
             if let Some(last) = commands.last() {
                 hold.last = Some(last.clone());
@@ -99,7 +100,7 @@ impl Record {
             };
             let id = self.next;
             self.next += 1;
-            notes.lock().expect("no task panics with the notes").insert(
+            notes.lock().expect("the notes lock is poisoned").insert(
                 id,
                 format!(
                     "media-display: {word} pressed: {what}, sent {} to mpv",
@@ -111,9 +112,8 @@ impl Record {
         pressed
     }
 
-    /// End the hold, and answer its line when its repeats sent mpv anything.
-    /// A hold that only moved the focus or the cursor sent nothing, and the
-    /// press that follows it has its own line.
+    /// End the hold in progress. Returns its log line, or `None` when no
+    /// repeat sent mpv a command, as for a hold that only moved the focus.
     pub fn settle(&mut self) -> Option<String> {
         let hold = self.hold.take()?;
         let last = hold.last?;
@@ -131,33 +131,31 @@ impl Record {
     }
 }
 
-/// The line one of mpv's answers completes, and nothing for an id no press
-/// gave.
+/// Complete the stored line for the id of mpv's reply. Returns `None`
+/// when no press stored a line under that id.
 pub fn answered(notes: &Notes, id: u64, error: &str) -> Option<String> {
     let note = notes
         .lock()
-        .expect("no task panics with the notes")
+        .expect("the notes lock is poisoned")
         .remove(&id)?;
     Some(format!("{note}, mpv answered {error}"))
 }
 
-/// The lines still waiting when the socket closes. mpv will not answer them
-/// now, so each is written with that reason, in the order it was sent.
+/// Complete every waiting line, in the order of their ids, when the
+/// socket closes and mpv can no longer reply.
 pub fn abandoned(notes: &Notes) -> Vec<String> {
-    std::mem::take(&mut *notes.lock().expect("no task panics with the notes"))
+    std::mem::take(&mut *notes.lock().expect("the notes lock is poisoned"))
         .into_values()
         .map(|note| format!("{note}, mpv closed its socket before it answered"))
         .collect()
 }
 
-/// A command's words the way mpv's socket carries them.
 fn words(command: &Command) -> String {
     Value::Array(command.clone()).to_string()
 }
 
-/// What a command does, in a person's words. The two broadcasts to the
-/// command sidecar, the exit and the up-next ask, answer nothing: the sidecar
-/// logs those itself.
+/// What a command does, for the log line. Returns `None` for a
+/// `script-message`, because the command sidecar receives it and logs it.
 pub fn describe(command: &Command) -> Option<String> {
     let text = |index: usize| -> String {
         match command.get(index) {
@@ -192,7 +190,7 @@ pub fn describe(command: &Command) -> Option<String> {
     }
 }
 
-/// A position as H:MM:SS, floored, the way the Play's status writes one.
+/// A position in seconds as H:MM:SS, rounded down.
 fn clock(seconds: f64) -> String {
     let whole = seconds.max(0.0).floor() as i64;
     format!(
@@ -213,7 +211,7 @@ mod tests {
     }
 
     #[test]
-    fn each_command_reads_in_a_persons_words() {
+    fn each_command_is_described_in_plain_words() {
         let cases: Vec<(Command, Option<&str>)> = vec![
             (
                 vec![json!("no-osd"), json!("cycle"), json!("pause")],
@@ -267,7 +265,7 @@ mod tests {
         }
     }
 
-    /// A press writes one line, when mpv answers, with every fact in it.
+    /// A press writes its line when mpv replies.
     #[test]
     fn a_press_line_waits_for_mpvs_answer() {
         let notes = notes();
@@ -297,9 +295,8 @@ mod tests {
         assert_eq!(answered(&notes, 1000, "success"), None);
     }
 
-    /// mpv's refusal reaches the line word for word.
     #[test]
-    fn a_refusal_is_written_in_mpvs_words() {
+    fn an_mpv_error_appears_in_the_line_unchanged() {
         let notes = notes();
         let mut record = Record::default();
         record.press(
@@ -317,15 +314,15 @@ mod tests {
         );
     }
 
-    /// An answer under an id no press gave completes nothing.
+    /// A reply with an id that no press stored finishes no line.
     #[test]
     fn an_answer_to_the_displays_own_command_writes_nothing() {
         assert_eq!(answered(&notes(), 0, "success"), None);
     }
 
-    /// The broadcasts and a press that sends nothing leave no note.
+    /// A `script-message` and a press that sends no command store no note.
     #[test]
-    fn a_press_mpv_runs_nothing_for_leaves_no_note() {
+    fn a_command_with_no_description_stores_no_note() {
         let notes = notes();
         let mut record = Record::default();
 
@@ -343,11 +340,14 @@ mod tests {
                 "{\"command\":[\"script-message\",\"liken-exit\"],\"request_id\":0}\n".to_string()
             ]
         );
-        assert!(notes.lock().expect("the notes").is_empty());
+        assert!(
+            notes.lock().expect("the notes lock is poisoned").is_empty(),
+            "a note was recorded, want none"
+        );
     }
 
-    /// A hold writes one line for all of its repeats, when the next press
-    /// arrives or when the caller settles it, and its repeats leave no note.
+    /// A hold writes one line for all of its repeats, when the next
+    /// press arrives or the caller settles it.
     #[test]
     fn a_hold_writes_one_line_for_its_repeats() {
         let notes = notes();
@@ -358,7 +358,11 @@ mod tests {
         for step in 2..=4 {
             let pressed = record.press("right", true, nudge(f64::from(step) / 10.0), &notes);
             assert_eq!(pressed.ended, None);
-            assert!(pressed.lines[0].ends_with("\"request_id\":0}\n"));
+            assert!(
+                pressed.lines[0].ends_with("\"request_id\":0}\n"),
+                "the line is {:?}, want it to end with request_id 0",
+                pressed.lines[0]
+            );
         }
         let pressed = record.press("select", false, Vec::new(), &notes);
 
@@ -368,12 +372,12 @@ mod tests {
                 "media-display: right held for 3 repeats, last sent [\"set_property\",\"sub-delay\",0.4] to mpv"
             )
         );
-        assert_eq!(notes.lock().expect("the notes").len(), 1);
+        assert_eq!(notes.lock().expect("the notes lock is poisoned").len(), 1);
         assert_eq!(record.settle(), None);
     }
 
-    /// A repeat whose press the display never read starts a hold of its own,
-    /// and one repeat reads in the singular.
+    /// A repeat with no earlier press starts its own hold, and one repeat
+    /// reads in the singular.
     #[test]
     fn a_repeat_with_no_press_starts_its_own_hold() {
         let notes = notes();
@@ -388,11 +392,12 @@ mod tests {
                 "media-display: right held for 1 repeat, last sent [\"add\",\"chapter\",1] to mpv"
             )
         );
-        assert!(notes.lock().expect("the notes").is_empty());
+        assert!(
+            notes.lock().expect("the notes lock is poisoned").is_empty(),
+            "a note was recorded, want none"
+        );
     }
 
-    /// A hold that moved only the focus sent mpv nothing, so it ends with no
-    /// line.
     #[test]
     fn a_hold_that_sent_nothing_ends_quietly() {
         let notes = notes();
@@ -404,7 +409,7 @@ mod tests {
     }
 
     /// The lines still waiting when the socket closes are written in the
-    /// order they were sent, and the notes are empty after.
+    /// order they were sent, and `Notes` is empty after.
     #[test]
     fn a_closed_socket_writes_every_waiting_line() {
         let notes = notes();
@@ -429,6 +434,9 @@ mod tests {
                 "media-display: right pressed: chapter +1, sent [\"add\",\"chapter\",1] to mpv, mpv closed its socket before it answered",
             ]
         );
-        assert!(abandoned(&notes).is_empty());
+        assert!(
+            abandoned(&notes).is_empty(),
+            "a note was abandoned, want none"
+        );
     }
 }

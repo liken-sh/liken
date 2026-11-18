@@ -1,11 +1,10 @@
 package main
 
-// What the CLI reads from the cluster before it streams: the
-// operator's version from its Deployment image tag, the trust anchor
-// the API publishes, a Ready pod behind the API Service, and the
-// caller's own credential, a bearer token or a client certificate. The
-// label selector and the names here are the contract the sibling CLIs
-// copy.
+// This file reads from the cluster what the CLI needs before it
+// streams a capture: the operator's version from the image tag of its
+// Deployment, the CA certificate that the API publishes, a Ready pod
+// behind the API Service, and the caller's bearer token or client
+// certificate.
 
 import (
 	"context"
@@ -24,44 +23,39 @@ import (
 )
 
 const (
-	// Where liken installs the operator and its API.
+	// The namespace that `liken` installs the operator and its API in.
 	operatorNamespace = "liken-system"
 
-	// The label the base binary selects on to find an
-	// operator's Deployment, and this operator's value for it.
+	// The label that the base binary selects on to find an operator's
+	// Deployment, and the value for this operator.
 	pluginLabel  = "cli.liken.sh/plugin"
 	pluginDomain = "media"
 
-	// The Service and Deployment that serve the capture
-	// API, and the DNS name its leaf certificate carries.
+	// The Service and Deployment that serve the capture API, and the
+	// DNS name in the API's certificate.
 	apiServiceName = "media-api"
 	apiServiceDNS  = "media-api.liken-system.svc"
 
-	// The port the API container serves HTTPS on.
+	// The port that the API container serves HTTPS on.
 	apiContainerPort = 8443
 
-	// The ConfigMap the API publishes its CA in, and
-	// the key that holds the PEM.
+	// The ConfigMap that the API publishes its CA certificate in, and
+	// the key of the PEM in it.
 	trustConfigMap = "media-api-ca"
 	trustKey       = "ca.crt"
 )
 
-// The label selector for the operator Deployment.
 var pluginSelector = pluginLabel + "=" + pluginDomain
 
-// The Player resource the capture positional names, as the group,
-// version, and resource a dynamic client lists. Completion reads these
-// with no typed client and no generated code, so the sibling CLIs change
-// only the three strings for their own object.
+// playerGVR identifies Players to the dynamic client that shell
+// completion lists them with. The dynamic client needs no typed client
+// or generated code.
 var playerGVR = schema.GroupVersionResource{
 	Group:    "media.liken.sh",
 	Version:  "v1alpha1",
 	Resource: "players",
 }
 
-// listPlayers lists the Player names in a namespace through a dynamic
-// client. Completion filters the names it returns against the word under
-// the cursor.
 func listPlayers(ctx context.Context, client dynamic.Interface, namespace string) ([]string, error) {
 	list, err := client.Resource(playerGVR).Namespace(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -74,9 +68,8 @@ func listPlayers(ctx context.Context, client dynamic.Interface, namespace string
 	return names, nil
 }
 
-// operatorVersion reads the version tag off the
-// operator Deployment's image, the one source every CLI can read with
-// no new API.
+// operatorVersion returns the tag of the operator Deployment's image,
+// which is the operator's version.
 func operatorVersion(ctx context.Context, clientset kubernetes.Interface) (string, error) {
 	deployments, err := clientset.AppsV1().Deployments("").List(ctx, metav1.ListOptions{
 		LabelSelector: pluginSelector,
@@ -85,17 +78,18 @@ func operatorVersion(ctx context.Context, clientset kubernetes.Interface) (strin
 		return "", err
 	}
 	if len(deployments.Items) == 0 {
-		return "", fmt.Errorf("no Deployment carries the label %s", pluginSelector)
+		return "", fmt.Errorf("no Deployment has the label %s", pluginSelector)
 	}
 	containers := deployments.Items[0].Spec.Template.Spec.Containers
 	if len(containers) == 0 {
-		return "", fmt.Errorf("the operator Deployment declares no container")
+		return "", fmt.Errorf("the operator Deployment has no containers")
 	}
 	return imageTag(containers[0].Image), nil
 }
 
-// imageTag reads the tag off an image reference, and
-// reports an empty tag for a bare name or a digest reference.
+// imageTag returns the tag of an image reference, or "" when the
+// reference has no tag. A digest is ignored, so name:tag@sha256:... has
+// the tag.
 func imageTag(image string) string {
 	if at := strings.LastIndex(image, "@"); at >= 0 {
 		image = image[:at]
@@ -107,8 +101,8 @@ func imageTag(image string) string {
 	return image[colon+1:]
 }
 
-// trustAnchor reads the CA the API publishes and builds
-// the pool the capture client trusts.
+// trustAnchor returns a pool with the CA certificate that the API
+// publishes, for the capture client to verify the API's certificate.
 func trustAnchor(ctx context.Context, clientset kubernetes.Interface) (*x509.CertPool, error) {
 	configmap, err := clientset.CoreV1().ConfigMaps(operatorNamespace).Get(ctx, trustConfigMap, metav1.GetOptions{})
 	if err != nil {
@@ -116,17 +110,17 @@ func trustAnchor(ctx context.Context, clientset kubernetes.Interface) (*x509.Cer
 	}
 	anchor := configmap.Data[trustKey]
 	if anchor == "" {
-		return nil, fmt.Errorf("the ConfigMap %s holds no %s", trustConfigMap, trustKey)
+		return nil, fmt.Errorf("the ConfigMap %s has no key %s", trustConfigMap, trustKey)
 	}
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM([]byte(anchor)) {
-		return nil, fmt.Errorf("the ConfigMap %s holds no certificate in %s", trustConfigMap, trustKey)
+		return nil, fmt.Errorf("the key %[2]s of the ConfigMap %[1]s has no PEM certificate", trustConfigMap, trustKey)
 	}
 	return pool, nil
 }
 
-// pickReadyPod finds one Ready pod behind the API
-// Service, which is the pod the port-forward targets.
+// pickReadyPod returns the name of a Ready pod behind the API Service,
+// for the port-forward.
 func pickReadyPod(ctx context.Context, clientset kubernetes.Interface) (string, error) {
 	pods, err := clientset.CoreV1().Pods(operatorNamespace).List(ctx, metav1.ListOptions{
 		LabelSelector: "app=" + apiServiceName,
@@ -142,8 +136,6 @@ func pickReadyPod(ctx context.Context, clientset kubernetes.Interface) (string, 
 	return "", fmt.Errorf("no Ready %s pod runs in %s", apiServiceName, operatorNamespace)
 }
 
-// podReady is true when the pod's Ready condition is
-// true.
 func podReady(pod corev1.Pod) bool {
 	for _, condition := range pod.Status.Conditions {
 		if condition.Type == corev1.PodReady {
@@ -153,10 +145,9 @@ func podReady(pod corev1.Pod) bool {
 	return false
 }
 
-// bearerToken reads the caller's own token from the REST config, and
-// reports an empty token when the context carries none. A context that
-// authenticates with a client certificate names no token, and the
-// capture client presents that certificate instead.
+// bearerToken returns the caller's token from the REST config, inline
+// or from its file, or "" when the kubeconfig context has none. A
+// context that authenticates with a client certificate has no token.
 func bearerToken(config *rest.Config) (string, error) {
 	if config.BearerToken != "" {
 		return config.BearerToken, nil
@@ -171,11 +162,11 @@ func bearerToken(config *rest.Config) (string, error) {
 	return "", nil
 }
 
-// clientCertificate reads the caller's client certificate from the
-// REST config. The capture API verifies it against the cluster's own
-// client authority and reads the caller's identity from it, so a
-// person captures with the kubeconfig they already hold. It reports a
-// nil accessor when the context authenticates some other way.
+// clientCertificate returns a function that supplies the caller's
+// client certificate from the REST config, or nil when the context
+// authenticates another way. The capture API verifies the certificate
+// against the cluster's client CA and reads the caller's identity from
+// it, so a person can capture with the kubeconfig they already use.
 func clientCertificate(config *rest.Config) (func(*tls.CertificateRequestInfo) (*tls.Certificate, error), error) {
 	kube, err := rest.TLSConfigFor(config)
 	if err != nil {

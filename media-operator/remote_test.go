@@ -9,9 +9,6 @@ import (
 	"testing/synctest"
 )
 
-// The gate stands before the fold. The reader folds every EV_KEY event
-// and the two hat axes, and everything else, the analog sticks and the
-// EV_SYN and EV_MSC frames, reaches the fold not at all.
 func TestPublishableKeepsOnlyBindableEvents(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -57,9 +54,8 @@ func TestPublishableKeepsOnlyBindableEvents(t *testing.T) {
 	}
 }
 
-// testReader wires a reader to a fake broker, so a test reads what the
-// standing pod publishes. Each caller runs in a synctest bubble, so a
-// wait for a publish runs on the bubble's clock and not the wall clock.
+// testReader returns a reader connected to a fake broker. Call it in a
+// synctest bubble, so waiting for a publish uses the fake clock.
 func testReader(t *testing.T) (*reader, *fakeBroker) {
 	t.Helper()
 	bus, brokers, connected := startBus(t, 1, nil, nil)
@@ -75,9 +71,8 @@ func testReader(t *testing.T) (*reader, *fakeBroker) {
 	}, brokers[0]
 }
 
-// The Bus remembers subscriptions across a reconnect but not publishes, so
-// a fresh session republishes the availability and the declared codes the
-// pod last held. The operator's gap report survives a broker restart.
+// The operator's report of unbound codes survives a broker restart only
+// when the reader publishes its codes again on reconnect.
 func TestTheReaderRepublishesItsRetainedStateOnConnect(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r, broker := testReader(t)
@@ -98,8 +93,6 @@ func TestTheReaderRepublishesItsRetainedStateOnConnect(t *testing.T) {
 	})
 }
 
-// The declared codes are the union over the kept nodes, in code order
-// and with no repeat.
 func TestTheDeclaredCodesAreTheUnionOverTheKeptNodes(t *testing.T) {
 	nodes := []openNode{
 		{
@@ -118,25 +111,20 @@ func TestTheDeclaredCodesAreTheUnionOverTheKeptNodes(t *testing.T) {
 	mustMatchAll(t, codes.Axes, []uint16{0x10, 0x11})
 }
 
-// A node-open cycle logs one line per node, and a scan that finds the
-// same picture logs nothing.
-func TestTheReaderLogsAVerdictOnlyWhenThePictureChanges(t *testing.T) {
+func TestTheReaderLogsAScanOnlyWhenItsLinesChange(t *testing.T) {
 	var log bytes.Buffer
 	r := &reader{log: &log}
 
-	r.logVerdicts([]string{"event3 \"pad\" keep: 2 key codes, no hat axes"})
+	r.logScan([]string{"event3 \"pad\" keep: 2 key codes, no hat axes"})
 	first := log.String()
-	r.logVerdicts([]string{"event3 \"pad\" keep: 2 key codes, no hat axes"})
+	r.logScan([]string{"event3 \"pad\" keep: 2 key codes, no hat axes"})
 	mustMatch(t, log.String(), first)
 
-	r.logVerdicts([]string{"event4 \"pad\" reject: no key codes, no hat axes"})
+	r.logScan([]string{"event4 \"pad\" reject: no key codes, no hat axes"})
 	mustMatch(t, strings.Contains(log.String(), "event4"), true)
 	mustMatch(t, strings.HasPrefix(first, "remote: event3"), true)
 }
 
-// The declared codes are a state, so the pod publishes them retained
-// at every node open, clears them when the nodes vanish, and
-// republishes whichever stands on a reconnect.
 func TestTheReaderPublishesTheDeclaredCodesRetained(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r, broker := testReader(t)
@@ -162,9 +150,6 @@ func TestTheReaderPublishesTheDeclaredCodesRetained(t *testing.T) {
 	})
 }
 
-// A reader in discovery logs each raw event the way a Keymap names it
-// and folds it all the same, so a controller a person maps still drives
-// the unit it holds.
 func TestADiscoveringReaderLogsEachEventAndPublishesItAnyway(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r, broker := testReader(t)
@@ -196,8 +181,6 @@ func TestADiscoveringReaderLogsEachEventAndPublishesItAnyway(t *testing.T) {
 	})
 }
 
-// Out of discovery the reader logs the press alone: one line that names
-// the node, the control, and the key it published.
 func TestAnOrdinaryReaderLogsThePressItPublished(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r, broker := testReader(t)
@@ -220,8 +203,6 @@ func TestAnOrdinaryReaderLogsThePressItPublished(t *testing.T) {
 	})
 }
 
-// A controller that connects and then leaves is two lines: the nodes it
-// arrived on with what they declare, and the same nodes as they close.
 func TestTheReaderLogsAControllerConnectingAndLeaving(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r, broker := testReader(t)
@@ -245,8 +226,8 @@ func TestTheReaderLogsAControllerConnectingAndLeaving(t *testing.T) {
 	})
 }
 
-// A pod the kubelet stops is not a controller that left, so the end of
-// the run writes no disconnect line.
+// A stopping pod writes no disconnect line, because the controller did
+// not leave.
 func TestAStoppingPodLogsNoDisconnect(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r, _ := testReader(t)

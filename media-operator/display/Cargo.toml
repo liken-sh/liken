@@ -3,9 +3,8 @@ name = "media-display"
 version = "0.1.0"
 edition = "2024"
 
-# The crate is a library with one binary over it, so the theme, the
-# canvas, the fade, and the IPC framing have unit tests that open no
-# window.
+# The library lets unit tests cover the theme, the canvas, the fade, and the
+# IPC framing without opening a window.
 [lib]
 name = "media_display"
 path = "src/lib.rs"
@@ -14,29 +13,21 @@ path = "src/lib.rs"
 name = "media-display"
 path = "src/main.rs"
 
-# The iced facade, not the pieces the idle screen takes, because this
-# display needs no frame capture and drives no winit loop of its own.
+# The display uses the `iced` facade, unlike the idle screen, because it
+# captures no frames and runs no winit event loop of its own. It runs only
+# under a Wayland compositor, so iced builds with no X11 and no software
+# renderer.
 #
-# Every version is exact, so a build from this manifest resolves the
-# crates the lock file names.
+# The theme's colors are encoded sRGB, and the translucent surfaces were
+# tuned with blending on those values. Without `web-colors`, `iced_wgpu`
+# converts colors to linear light before the shader blends them, and the
+# surfaces look lighter or darker.
 #
-# The target is a Wayland kiosk, so the toolkit builds with Wayland alone
-# and neither X11 nor the software renderer enters the build.
-#
-# Without `web-colors` `iced_wgpu` converts every colour to linear light
-# before the shader sees it, and the blend runs in linear light.
-# The theme states every color and alpha as encoded sRGB, and every
-# scrim, dim, and panel was judged by eye against a blend on those
-# values. A blend in linear light reads every translucent surface
-# lighter or darker than the value the theme names, so the colors reach
-# the shader as they were written.
-#
-# crisp is on because the display snaps every value that moves with the
-# position to a whole output pixel, and this feature makes the toolkit do
-# the same for what it lays out.
+# `crisp` makes iced snap the widgets it lays out to whole output pixels, as
+# `Canvas::snap` does for the positions that the display computes.
 [dependencies]
-# advanced is on because the display measures a run of text through the
-# toolkit's own shaper, which the facade keeps behind that feature.
+# `advanced` exposes iced's text shaper, which the display uses to measure
+# the width of text.
 iced = { version = "=0.14.0", default-features = false, features = [
     "advanced",
     "wgpu",
@@ -47,46 +38,39 @@ iced = { version = "=0.14.0", default-features = false, features = [
     "web-colors",
     "crisp",
 ] }
-# liken-iced carries the palette and the brand's two faces. It parses the
-# palette out of liken.css, so a colour on this screen and a colour on a
-# page are one value and cannot drift. The crate is in brand/, beside this
-# component, and the image build takes brand/ as a second build context
-# and puts it at /brand, so this path holds in the image too.
+# liken-iced gives the brand's fonts and the palette, which it parses out of
+# brand/'s liken.css, so this screen and the web pages use the same colors.
+# The image build copies brand/ to /brand, so this path also resolves in the
+# image.
 liken-iced = { path = "../../brand/iced" }
-# jiff reads the wall clock in the zone TZ names. Its tzdb-zoneinfo feature
-# reads the image's own /usr/share/zoneinfo, and the bundled databases stay
-# out of the binary, so the clock and the rest of the image name the same
-# zone rules.
+# jiff reads the time zone that TZ names from /usr/share/zoneinfo in the
+# image, so the binary bundles no time zone database.
 jiff = { version = "=0.2.38", default-features = false, features = [
     "std",
     "tz-system",
     "tzdb-zoneinfo",
 ] }
-# image decodes the logo, the cover, and the trickplay sheets, which are
-# PNG and JPEG on the volumes, so no other decoder builds. The library's
-# browser decodes the same two formats with the same crate, so a picture
-# reads the same on both screens.
+# image decodes the logo, the cover, and the trickplay sheets, which are PNG
+# or JPEG. library-operator's media browser decodes them with the same crate.
 image = { version = "=0.25.10", default-features = false, features = [
     "jpeg",
     "png",
 ] }
-# lofty reads the picture inside a music file's tags, which is the cover
-# tier between the block's own reference and a cover file beside the
-# track. It reads the ID3, MP4, FLAC, Vorbis, and APE families.
+# lofty reads the picture in a music file's tags. The display uses it when
+# the item's `presentation.art` gives no cover, before it looks for a cover file
+# in the track's folder.
 lofty = "=0.25.5"
 serde_json = { workspace = true }
-# The display binds liken_arrangement_v1 on the Wayland connection winit
-# opened for its window, because the compositor tells clients apart by
+# The display binds the compositor's liken_arrangement_v1 protocol on winit's
+# Wayland connection, because the compositor identifies a client by its
 # connection. wayland-backend wraps winit's wl_display, wayland-client gives
-# the binding its own event queue on it, and wayland-scanner generates the
-# protocol's client code from the XML at build time. winit already builds
-# these versions with the system library, so the build adds no crate to
-# the link.
+# the binding its own event queue, and wayland-scanner generates the client
+# code from the protocol's XML. winit already links these versions.
 wayland-backend = { version = "=0.3.17", features = ["client_system"] }
 wayland-client = "=0.31.15"
 wayland-scanner = "=0.31.11"
-# The display needs tokio for one unix socket, newline-delimited JSON, and
-# a reconnect loop with a timeout on every wait.
+# tokio runs the connection to mpv's JSON IPC socket, which the display dials
+# again when it closes.
 tokio = { version = "=1.54.1", default-features = false, features = [
     "io-util",
     "macros",
@@ -95,16 +79,14 @@ tokio = { version = "=1.54.1", default-features = false, features = [
     "sync",
     "time",
 ] }
-# ureq fetches an https logo. The library's browser reads its own streams
-# with the same crate; this one turns tls on, because a logo the Play
-# names is a URL on the internet, and leaves the rest of the defaults off.
+# ureq fetches a picture, such as a logo or a cover, that a Play gives as an
+# https URL.
 ureq = { version = "=3.5.0", default-features = false, features = ["rustls"] }
-# tiny-skia rasterizes every shape the display draws, with its edges
-# antialiased, into a picture the frame draws. The toolkit's own
-# antialiasing multisamples a target the size of the whole window for
-# every layer that holds a shape, and a picture costs one texture read per
-# pixel it covers. winit already builds this version with these features
-# for its window decorations, so the build compiles nothing new.
+# tiny-skia draws each antialiased shape into an image, and the frame draws
+# the image. iced's own antialiasing multisamples a render target the size of
+# the window for each layer that has a shape, and an image costs one texture
+# read per pixel that it covers. winit already builds this version with these
+# features.
 tiny-skia = { version = "=0.11.4", default-features = false, features = [
     "std",
     "simd",

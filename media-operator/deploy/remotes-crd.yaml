@@ -1,8 +1,9 @@
-# The Remote API. A Remote is one physical controller: its device
-# selector and the Keymap for its model. It names no player; a Player
-# names the Remote through spec.remotes. The device is selected the way
-# a Player's display is, by class and CEL over the attributes a
-# hardware operator publishes.
+# A Remote is one physical controller. It holds the selector for the
+# controller's device and the name of the Keymap for its model. A
+# Remote does not name a Player. A Player lists its Remotes in
+# spec.remotes. The selector has the same form as a Player's
+# spec.display: a DeviceClass and a CEL expression over the device
+# attributes that a hardware operator publishes.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -20,17 +21,17 @@ spec:
     - name: v1alpha1
       served: true
       storage: true
-      # The operator reports the focused Player on a Remote, so this
-      # version carries a status subresource. The split keeps the operator
-      # from rewriting the device selector a person declared. A Remote
-      # whose Keymap will not compile still shows the failure on the Play
-      # that tried to use it.
+      # The status subresource lets the operator write status without
+      # being able to change the spec that a person wrote. Status has no
+      # field for a Keymap that does not compile. The operator posts a
+      # KeymapRefused Warning Event on the Remote, and the last key table
+      # that compiled stays in effect.
       subresources:
         status: {}
-      # The Player column answers which unit this controller drives now,
-      # so kubectl get remotes reads it without a read of the bus. The
-      # Peripheral column names the bonded device, which is where a
-      # person reads the link and the charge.
+      # The Player column shows which Player the controller drives now,
+      # so `kubectl get remotes` does not need a read of the message bus.
+      # The Peripheral column names the paired device. Its Peripheral
+      # object shows the link state and the battery level.
       additionalPrinterColumns:
         - name: Keymap
           type: string
@@ -55,129 +56,126 @@ spec:
                 they create from it, and Kubernetes limits some of those
                 names to 63 characters
           description: >-
-            One physical controller, selected by its device and mapped by the
-            default mapping and, where its model needs one, by its Keymap. A
-            Player names the Remotes it owns; the Remote names no player.
+            One physical controller. `spec.device` selects the controller,
+            and the default key mapping translates its input. When the
+            controller's model needs a different mapping, `spec.keymap`
+            names a Keymap. A Player lists the Remotes that drive it in
+            `spec.remotes`. A Remote does not name a Player.
           properties:
             spec:
               type: object
               required: [device]
               description: >-
-                The controller, and the Keymap for its model where its
-                model needs one.
+                The controller to use, and the Keymap for its model when
+                the model needs one.
               properties:
                 device:
                   type: object
                   required: [class]
                   description: >-
-                    The controller itself, selected out of the
-                    devices the hardware operators publish, and the
-                    parameters its driver prepares it with.
+                    The controller, selected from the devices that the
+                    hardware operators publish, and the parameters that
+                    its driver uses to prepare it.
                   properties:
                     class:
                       type: string
                       description: >-
-                        The DeviceClass the claim allocates through.
-                        Consumer classes are the cluster owner's
-                        vocabulary, so the name is whatever this
-                        cluster calls its controllers.
+                        The name of the `DeviceClass` that the claim
+                        allocates from. The cluster owner creates this
+                        class, so its name is whatever your cluster
+                        calls its controllers.
                     selector:
                       type: string
                       description: >-
-                        A CEL expression over device.attributes that
-                        picks this one controller, such as a match
-                        on its address. Omit it, and the class alone
-                        chooses.
+                        A CEL expression over `device.attributes` that
+                        matches one controller, for example on its
+                        address. When you omit it, the claim can
+                        allocate any device of the class.
                     parameters:
                       type: object
                       required: [driver]
                       description: >-
-                        Opaque configuration for the driver that
-                        prepares the controller, carried onto the claim
-                        unread. This is where a Remote names the
-                        classes of input it needs. The bluetooth
-                        operator's manual documents its inputs
+                        Configuration for the driver that prepares the
+                        controller. The operator copies it to the claim
+                        and does not read it. Use it to set the classes
+                        of input that the Remote needs. The manual of
+                        the bluetooth operator describes its `inputs`
                         parameter.
                       properties:
                         driver:
                           type: string
                           description: >-
-                            The driver the parameters are for, such
-                            as bluetooth.liken.sh.
+                            The name of the driver that reads the
+                            parameters, for example `bluetooth.liken.sh`.
                         values:
                           type: object
                           x-kubernetes-preserve-unknown-fields: true
                           description: >-
-                            The parameters themselves. The driver
-                            defines them, and this operator copies them
-                            to the claim.
+                            The parameters. The driver defines them,
+                            and this operator copies them to the claim.
                 keymap:
                   type: string
                   description: >-
-                    The Keymap for this controller's model, by name. A Keymap
-                    is cluster-scoped, so the name has no namespace. The field
-                    is optional and rarely needed: the default mapping already
-                    passes every KEY_* code and turns the hats into the
-                    arrows, so a Keymap is for a device the kernel names
-                    wrongly. A device maps one way on every unit, as it does
-                    under hwdb.
+                    The name of the Keymap for this controller's model. A
+                    Keymap is cluster-scoped, so the name has no namespace.
+                    The default mapping passes every `KEY_*` code and turns
+                    the hat axes into the arrow keys, so you need a Keymap
+                    only for a controller whose codes the kernel names
+                    incorrectly. The mapping belongs to the controller and
+                    applies on every Player that lists the Remote, as a udev
+                    `hwdb` entry applies to a device.
                 discovery:
                   type: boolean
                   description: >-
-                    Discovery mode, for mapping a controller that has
-                    no Keymap yet. The Remote's pod keeps every input
-                    node the claim delivered and logs each event the
-                    way a Keymap names it, so a person presses every
-                    button and reads the codes out of the pod log. The
-                    pod still publishes keys in discovery exactly as it
-                    does outside it, so the controller keeps driving
-                    its unit while a person maps it. Turning discovery
-                    on or off replaces the Remote's pod, which drops
-                    controller input for a few seconds.
-                    A pod in discovery reads every event the claim
-                    delivers. Outside discovery the pod reads only the
-                    keys and hats it publishes.
+                    When true, the Remote's pod logs every input event
+                    from the controller, with the code as a Keymap writes
+                    it. Use it to find the codes of a controller that has
+                    no Keymap: press each button and read the codes in the
+                    pod log. In discovery mode the pod reads every input
+                    node that the claim provides. Otherwise it reads only
+                    the keys and hats that it publishes. The pod publishes
+                    keys the same way in both modes, so the controller
+                    keeps driving its Player while you map it. Changing
+                    this field replaces the Remote's pod, and the
+                    controller sends no input for a few seconds.
             status:
               type: object
               description: >-
                 What the operator reports about this controller: the
-                unit its presses reach now, the bonded device its claim
-                allocated, and the declared codes its Keymap leaves unbound.
+                Player that receives its key presses now, the paired
+                device that its claim allocated, and the codes that the
+                controller declares and its Keymap does not bind.
               properties:
                 player:
                   type: string
                   description: >-
-                    The Player this Remote's focus mark names now:
-                    the unit its presses reach, idle or playing. It
-                    is empty while no Player lists this Remote.
+                    The Player that receives this Remote's key presses
+                    now, whether the Player is idle or playing. Empty
+                    while no Player lists this Remote.
                 peripheral:
                   type: string
                   description: >-
-                    The Peripheral for the device this Remote's claim
-                    allocated. The name is the device's address in
-                    lowercase with dashes. Read that object for the
-                    link and the battery level. The field is empty
+                    The name of the `Peripheral` for the device that this
+                    Remote's claim allocated. The name is the device's
+                    address in lowercase, with dashes. Read that object
+                    for the link state and the battery level. Empty
                     while the claim has no allocation, and for a
-                    controller another driver publishes.
-                # The map is keyed on code and type together, because
-                # one number can name both a key and an axis: KEY_Q and
-                # ABS_HAT0X are both 16. The list carries no maxItems,
-                # because the evdev ABI bounds a node's key codes at 768
-                # and the gap shrinks toward empty as the Keymap grows.
+                    controller that another driver publishes.
+                # The list is keyed on code and type together, because
+                # one number can be both a key and an axis: KEY_Q and
+                # ABS_HAT0X are both 16. It has no maxItems, because the
+                # evdev ABI already limits a device to 768 key codes.
                 unbound:
                   type: array
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [code, type]
                   description: >-
-                    Every code that this controller declares and its
-                    Keymap does not bind. The list holds only the
-                    unbound codes, not every code. A controller whose
-                    Keymap binds every declared code reports nothing
-                    here, and the field is absent until the Remote's
-                    pod has reported. The list shrinks as
-                    the Keymap grows, so it measures a mapping's
-                    progress during discovery and provides a
-                    completeness check after discovery.
+                    The codes that this controller declares and its
+                    Keymap does not bind. The list is empty when the
+                    Keymap binds every declared code, and absent until the
+                    Remote's pod has reported. Each row that you add to the
+                    Keymap removes a code from the list, so you can use it
+                    to check that a Keymap is complete.
                   items:
                     type: object
                     required: [code, type]
@@ -185,18 +183,17 @@ spec:
                       code:
                         type: integer
                         description: >-
-                          The raw evdev code, the number the
-                          controller reports on the wire.
+                          The raw evdev code, as a number.
                       name:
                         type: string
                         description: >-
-                          The evdev name for the code, which is the
-                          name a Keymap binds it by. It is empty when
-                          the kernel gives the code no name, and such
-                          a code cannot be bound.
+                          The evdev name for the code. A Keymap binds
+                          the code by this name. Empty when the kernel
+                          has no name for the code, and a Keymap cannot
+                          bind such a code.
                       type:
                         type: string
                         enum: [key, abs]
                         description: >-
-                          Which event type carries the code: key for
-                          a button, abs for a hat axis.
+                          The evdev event type of the code: `key` for a
+                          button, `abs` for a hat axis.

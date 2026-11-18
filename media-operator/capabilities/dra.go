@@ -1,21 +1,20 @@
 package main
 
-// The DRA driver's kubelet half. The kubelet calls a driver's plugin
-// before it starts a pod whose claim holds one of that driver's
-// devices, and refuses to start the pod while no plugin of the driver
-// is registered on the node. So this program registers for
-// media.liken.sh although its devices deliver nothing.
+// The kubelet-facing side of the DRA driver. Before the kubelet starts
+// a pod whose claim holds a device of this driver, it calls the
+// driver's plugin, and it does not start the pod while no plugin of the
+// driver is registered on the node. So this program registers a plugin
+// for `media.liken.sh` even though the plugin has nothing to prepare.
 //
-// The driver runs two gRPC servers, and the kubelet is the only client
-// of both. The kubelet finds the registration socket in its registry
-// directory and calls GetInfo, which names the socket of the second
-// server, the DRA plugin API itself.
+// The driver runs two gRPC servers, and only the kubelet calls them.
+// The kubelet finds the registration socket in its registry directory
+// and calls GetInfo, which returns the socket of the DRA plugin server.
 //
-// A media.liken.sh device is a statement about a GPU. The render node
-// that the statement is about comes to the pod from `liken`, through
-// the paired request in the same claim. So a prepare answers each
-// claim with no device and no CDI edit, and reads nothing from the API
-// server, and an unprepare has nothing to give back.
+// A `media.liken.sh` device describes a GPU and gives the pod nothing
+// to use. The pod gets the render node from `liken`, through the paired
+// request in the same claim. So a prepare returns an entry with no
+// device and no CDI edit for each claim, and does not read the API
+// server. An unprepare has nothing to undo.
 
 import (
 	"context"
@@ -29,21 +28,20 @@ import (
 	regv1 "k8s.io/kubelet/pkg/apis/pluginregistration/v1"
 )
 
-// The kubelet's plugin directories. These are variables so a test can
-// substitute them.
+// The kubelet's plugin directories. They are variables so a test can
+// point them at a temporary directory.
 var (
 	draRegistryDir = "/var/lib/kubelet/plugins_registry"
 	draPluginDir   = "/var/lib/kubelet/plugins/" + DriverName
 )
 
-// draPlugin answers the kubelet's prepare and unprepare calls.
+// draPlugin handles the kubelet's prepare and unprepare calls.
 type draPlugin struct {
 	drav1.UnimplementedDRAPluginServer
 }
 
-// NodePrepareResources answers every claim with no device. The kubelet
-// treats a claim missing from the response as a failure, so each claim
-// gets an entry.
+// NodePrepareResources returns an entry with no device for each claim.
+// The kubelet treats a claim missing from the response as a failure.
 func (draPlugin) NodePrepareResources(ctx context.Context, req *drav1.NodePrepareResourcesRequest) (*drav1.NodePrepareResourcesResponse, error) {
 	resp := &drav1.NodePrepareResourcesResponse{Claims: map[string]*drav1.NodePrepareResourceResponse{}}
 	for _, claim := range req.Claims {
@@ -52,8 +50,8 @@ func (draPlugin) NodePrepareResources(ctx context.Context, req *drav1.NodePrepar
 	return resp, nil
 }
 
-// NodeUnprepareResources answers every claim with success, because a
-// prepare left nothing on the node.
+// NodeUnprepareResources reports success for each claim, because a
+// prepare leaves nothing on the node to undo.
 func (draPlugin) NodeUnprepareResources(ctx context.Context, req *drav1.NodeUnprepareResourcesRequest) (*drav1.NodeUnprepareResourcesResponse, error) {
 	resp := &drav1.NodeUnprepareResourcesResponse{Claims: map[string]*drav1.NodeUnprepareResourceResponse{}}
 	for _, claim := range req.Claims {
@@ -62,7 +60,7 @@ func (draPlugin) NodeUnprepareResources(ctx context.Context, req *drav1.NodeUnpr
 	return resp, nil
 }
 
-// draRegistrar answers the kubelet's plugin-watcher handshake.
+// draRegistrar handles the kubelet's plugin registration handshake.
 type draRegistrar struct {
 	regv1.UnimplementedRegistrationServer
 	endpoint string
@@ -73,27 +71,26 @@ func (r *draRegistrar) GetInfo(ctx context.Context, req *regv1.InfoRequest) (*re
 		Type:     regv1.DRAPlugin,
 		Name:     DriverName,
 		Endpoint: r.endpoint,
-		// The strings name gRPC services, not versions. This driver
-		// serves the v1 API. The list names no health service, so the
-		// kubelet opens no device-health stream: a statement about a GPU
-		// has no health of its own.
+		// The entries are gRPC service names, not version numbers. The
+		// list leaves out the device-health service, because a
+		// `media.liken.sh` device has no health of its own.
 		SupportedVersions: []string{drav1.DRAPluginService},
 	}, nil
 }
 
 func (r *draRegistrar) NotifyRegistrationStatus(ctx context.Context, status *regv1.RegistrationStatus) (*regv1.RegistrationStatusResponse, error) {
 	if !status.PluginRegistered {
-		fmt.Fprintf(os.Stderr, "dra: the kubelet rejected the plugin registration: %s\n", status.Error)
+		fmt.Fprintf(os.Stderr, "dra: the kubelet rejected the registration of the plugin: %s\n", status.Error)
 	}
 	return &regv1.RegistrationStatusResponse{}, nil
 }
 
 // serveDRAPlugin starts both servers and returns when the context ends
-// or a server fails. The plugin socket listens before the registration
-// socket exists, because the kubelet dials the announced endpoint as
-// soon as it reads the registration. A stale socket from an earlier pod
-// is removed first, because a bind to a socket file fails even when
-// nothing listens on it.
+// or a server fails. It listens on the plugin socket before it creates
+// the registration socket, because the kubelet dials the endpoint from
+// GetInfo as soon as the registration socket appears. It removes each
+// socket file before it listens, because a bind fails on a socket file
+// that an earlier pod left, even when nothing listens on it.
 func serveDRAPlugin(ctx context.Context) error {
 	if err := os.MkdirAll(draPluginDir, 0o755); err != nil {
 		return err
@@ -102,7 +99,7 @@ func serveDRAPlugin(ctx context.Context) error {
 	_ = os.Remove(pluginSocket)
 	pluginListener, err := net.Listen("unix", pluginSocket)
 	if err != nil {
-		return fmt.Errorf("the plugin socket: %w", err)
+		return fmt.Errorf("listening on the plugin socket: %w", err)
 	}
 	pluginServer := grpc.NewServer()
 	drav1.RegisterDRAPluginServer(pluginServer, draPlugin{})
@@ -112,7 +109,7 @@ func serveDRAPlugin(ctx context.Context) error {
 	registrationListener, err := net.Listen("unix", registrationSocket)
 	if err != nil {
 		pluginListener.Close()
-		return fmt.Errorf("the registration socket: %w", err)
+		return fmt.Errorf("listening on the registration socket: %w", err)
 	}
 	registrationServer := grpc.NewServer()
 	regv1.RegisterRegistrationServer(registrationServer, &draRegistrar{endpoint: pluginSocket})

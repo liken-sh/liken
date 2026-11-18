@@ -1,10 +1,10 @@
-// The liken look in one place. Every view reads its colors and its measures
-// from here, so a change to either lands in one file.
+// The colors, type scale, and margins of the idle screen.
 //
-// The colors are the brand's, through the liken-iced crate, which parses them
-// out of liken.css. The measures below are this display's own: a type scale
-// and margins for a screen a person reads from a couch, which no stylesheet
-// for a page states.
+// The colors are the brand's, which `liken-iced` parses from `liken.css`.
+// The sizes and opacities are given as the ASS values they equal, the
+// units of the `display` crate's theme, so this screen matches it. ASS
+// alpha counts transparency, so an alpha byte `a` is the opacity
+// `(255 - a) / 255`.
 
 use iced_widget::canvas::{Path, Text};
 use iced_winit::core::alignment::Vertical;
@@ -12,52 +12,49 @@ use iced_winit::core::text::{Alignment, LineHeight};
 use iced_winit::core::{Color, Font, Pixels, Point, Rectangle, Size};
 use liken_iced::palette;
 
-/// The ground the client fills. It is the clear color of every frame and every
-/// capture.
-///
-/// The ground is black rather than the brand's `--page`, because the idle
-/// screen shares one output with a film. A film's black and the screen's black
-/// have to be the same black, or the panel shows a seam where one ends.
+/// The color that every frame and every capture is cleared to. It is
+/// black and not the brand's `--page`, because the idle screen shares an
+/// output with a film, and a different black shows on the panel when one
+/// replaces the other.
 pub const BACKGROUND: Color = Color::BLACK;
 
-/// The color of every line of text on the screen, the dark scheme's `--ink`.
+/// The color of text: the dark scheme's `--ink`.
 pub fn text() -> Color {
     palette::dark().ink
 }
 
-/// The accent that fills a bar, the dark scheme's `--link`. It is the palest
-/// lichen green, so it reads over the track below at a distance.
+/// The color of a bar's fill: the dark scheme's `--link`, the palest
+/// green of the palette.
 pub fn fill() -> Color {
     palette::dark().link
 }
 
-/// The track a bar's fill runs over, the light scheme's `--link`. It is the
-/// darkest green of the family, dark enough that the fill reads over it.
+/// The color of a bar's track: the light scheme's `--link`, the darkest
+/// green of the palette, so the fill shows against it.
 pub fn track() -> Color {
     palette::light().link
 }
 
-/// The color of text that reads under the rest, the dark scheme's
-/// `--ink-muted`.
+/// The color of secondary text: the dark scheme's `--ink-muted`.
 pub fn muted() -> Color {
     palette::dark().ink_muted
 }
 
-/// The same color at another opacity, for an element that fades on its own.
+/// Returns `color` with its alpha set to `alpha`.
 pub const fn faded(color: Color, alpha: f32) -> Color {
     Color { a: alpha, ..color }
 }
 
-// The canvas. The display draws in one space 1080 rows tall, and the width
-// follows the real surface's own ratio, so a canvas pixel is square. A 16:9
-// surface gives 1920, the width this space has always held. A fixed 1920 on a
-// 21:9 screen stretches every vector drawing by a third and pulls every margin
-// inside where it belongs.
+/// The canvas is 1080 rows tall, and its width follows the aspect ratio
+/// of the real surface, so a canvas pixel is square. A fixed width of
+/// 1920 on a 21:9 surface would stretch every vector drawing and every
+/// margin horizontally by a third.
 pub const CANVAS_HEIGHT: f32 = 1080.0;
 
-/// The canvas width for one surface size. The surface can change size while
-/// the client runs, so every element measures against the screen that is there
-/// now rather than a width read once at startup.
+/// The canvas width for a surface size in pixels, or the 16:9 width when
+/// either dimension is 0. The surface can change size while the client
+/// runs, so the elements take the width from the current size and not
+/// from a width read at startup.
 pub fn canvas_width(surface: (u32, u32)) -> f32 {
     if surface.0 == 0 || surface.1 == 0 {
         return CANVAS_HEIGHT * 16.0 / 9.0;
@@ -65,79 +62,74 @@ pub fn canvas_width(surface: (u32, u32)) -> f32 {
     (CANVAS_HEIGHT * surface.0 as f32 / surface.1 as f32 + 0.5).floor()
 }
 
-// The side margin every flush-left and flush-right element keeps, and the top
-// margin. The bottom margin is the top one by symmetry: the clock and the
-// activity line hang from it, and the identity block stands the same distance
-// off the bottom edge.
+/// The distance from the left and right edges to the elements placed
+/// against them.
 pub const MARGIN_X: f32 = 96.0;
+
+/// The distance from the top edge to the clock, and from the bottom edge
+/// to the identity block.
 pub const MARGIN_Y: f32 = 90.0;
 
-// The face's metric: its bounding height over its em, 1326 units over
-// 1000. The bounding height is `usWinAscent` plus `usWinDescent` and the
-// em is `unitsPerEm`, from the `OS/2` and `head` tables of
-// `SourceSans3-Regular.otf`, the face the brand crate carries and both
-// renderers draw.
+// The bounding height of `SourceSans3-Regular.otf` divided by its em:
+// `usWinAscent` 1000 plus `usWinDescent` 326 from the `OS/2` table, over
+// `unitsPerEm` 1000 from the `head` table. This screen and the `display`
+// crate both draw in this font.
 //
-// libass scales a face so that its bounding height fills the size an ASS
-// `\fs` states, so one `\fs` number states two measures: the line box the
-// text draws in, in canvas pixels, and the type size, which is that box
-// divided by this metric. A layout measure in `\fs` units is a canvas
-// measure here and passes through unchanged. Only a type size goes through
-// the metric.
+// libass scales a font so that its bounding height equals the `\fs`
+// size. So an `\fs` number is the height of a line box in canvas pixels,
+// and the font size that iced takes is that height divided by this
+// ratio. A layout measure in `\fs` units needs no conversion.
 const FACE_METRIC: f32 = 1326.0 / 1000.0;
 
-/// The line box one type size draws in, in canvas pixels. A line's anchor falls
-/// on that box. It is also the `\fs` number that states the size.
+/// The height in canvas pixels of the line box of font size `size`,
+/// which is also the ASS `\fs` of that size. [`line`] gives each line
+/// this height, so an anchor places an edge of the box.
 pub const fn line_box(size: f32) -> f32 {
     size * FACE_METRIC
 }
 
-/// The type size that draws in a line box `height` canvas pixels tall, which is
-/// the other direction of [`line_box`].
+/// The font size whose line box is `height` canvas pixels tall, the
+/// inverse of [`line_box`].
 pub const fn type_size(height: f32) -> f32 {
     height / FACE_METRIC
 }
 
-// The type scale, in canvas pixels. The sizes are large enough to read from a
-// couch at 1080. They are `\fs40`, `\fs34`, and `\fs28` through `type_size`,
-// each rounded to a whole pixel.
+// The font sizes in canvas pixels: `type_size` of `\fs40`, `\fs34`, and
+// `\fs28`, rounded to a whole pixel. These are the `LABEL`, `SMALL`, and
+// `TINY` of the `display` crate's `type_scale`.
 pub const LABEL: f32 = 30.0;
 pub const SMALL: f32 = 26.0;
 pub const TINY: f32 = 21.0;
 
-/// The small size's line box, `\fs34`, as the canvas measure every layout
-/// built on that box reads. It is stated, not read back through
-/// `line_box(SMALL)`, because the type size is rounded to a whole pixel and
-/// its box is then up to half a metric off the `\fs34`.
+/// The line box of `SMALL`, `\fs34`. It is written out and not computed
+/// as `line_box(SMALL)`, because `SMALL` is rounded to a whole pixel, so
+/// its line box can differ from 34 by up to half of `FACE_METRIC`.
 pub const SMALL_BOX: f32 = 34.0;
 
-/// The drop from one line of the top-right column to the next: one line box of
-/// the small size, and 12 canvas pixels of air. The clock hangs at the top
-/// margin, the activity line one pitch under it, and the volume row one pitch
-/// under that, so the three read as a column and no two of them touch.
+/// The distance from the top of one line of the top-right column to the
+/// next: one `SMALL_BOX` and 12 canvas pixels of space. From the top
+/// margin down, the column is the clock, the activity line, and the
+/// volume row.
 pub const LINE_PITCH: f32 = SMALL_BOX + 12.0;
 
-/// The one family the whole display draws in. It comes from the brand crate,
-/// which carries the two files and loads them into the toolkit before the
-/// first frame, so this screen and every other liken display draw one face.
+/// The font family of every line. `liken-iced` loads its font files
+/// into iced before the first frame.
 pub use liken_iced::font::FAMILY as FONT;
 
-/// Where a line's position falls on the line, in ASS anchors. The display
-/// draws with three of the nine.
+/// The corner of a line's box that its position gives, with the ASS
+/// `\an` tag of the same corner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Anchor {
-    /// `\an1`. The identity block stacks upward from the bottom margin, so
-    /// each of its lines is placed by its own bottom.
+    /// `\an1`. The identity block stacks its lines upward from the
+    /// bottom margin.
     BottomLeft,
-    /// `\an3`. The preview legend draws on the bottom margin at the right.
+    /// `\an3`. The preview legend.
     BottomRight,
-    /// `\an9`. The clock, the activity line, and the volume row hang from the
-    /// top margin at the right, so each is placed by its own top.
+    /// `\an9`. The clock, the activity line, and the volume row.
     TopRight,
 }
 
-/// One line of text: an anchor, a position in canvas units, a size from the
-/// type scale, and a colour.
+/// One line of text at a position in canvas units.
 pub fn line(content: String, at: Point, anchor: Anchor, size: f32, color: Color) -> Text {
     Text {
         content,
@@ -158,11 +150,9 @@ pub fn line(content: String, at: Point, anchor: Anchor, size: f32, color: Color)
     }
 }
 
-/// One rounded rectangle. A radius wider than half the shape has no meaning, so
-/// a bar with a few pixels of fill rounds by what it has.
-///
-/// Two elements draw bars, the volume row and the charge beside a part
-/// in the identity block, and both round their ends this way.
+/// A rounded rectangle whose radius is capped at half the shape's width
+/// and half its height, so a bar with only a few pixels of fill still
+/// draws as a rounded shape.
 pub fn rounded(shape: Rectangle, radius: f32) -> Path {
     let radius = radius.min(shape.width / 2.0).min(shape.height / 2.0);
     Path::rounded_rectangle(
@@ -172,28 +162,25 @@ pub fn rounded(shape: Rectangle, radius: f32) -> Path {
     )
 }
 
-/// One colour under the shade. `light` runs from 1 at full brightness to 0 on
-/// a screen the quiet window has darkened.
+/// Returns `color` with its alpha scaled by the shade's `light`, which is
+/// 1 at full brightness and 0 when the shade has darkened the screen.
 ///
-/// The shade is a factor every element applies to its own colours, and not a
-/// black rectangle over them. `iced_wgpu` renders a layer in four passes,
-/// quads then meshes then images then text, and a canvas frame is one layer,
-/// so a rectangle drawn last still lands under every line of text. Over the
-/// black ground this display fills, an alpha scaled by `light` composites to
-/// the pixels a black cover would give.
+/// Each element darkens its own colors this way, because a black
+/// rectangle drawn over the frame would not cover the text: `iced_wgpu`
+/// draws a layer's text after all its other primitives, and a canvas
+/// frame is one layer. Over the black background, the scaled alpha gives
+/// the same pixels as a black cover of opacity `1 - light`.
 pub const fn under(color: Color, light: f32) -> Color {
     faded(color, color.a * light)
 }
 
-/// A part of the screen far enough under full brightness that a glance tells
-/// it from the rest, and bright enough to read. It is the ASS alpha byte 0xA8,
-/// which leaves 87 of the 255 steps of light.
+/// The opacity of a dim part of the screen, low enough to tell apart at
+/// a glance and high enough to read. ASS alpha 0xA8.
 pub const DIM: f32 = 87.0 / 255.0;
-/// A bar's track, under the fill that reads against it. It is the ASS alpha
-/// byte 0x50.
+/// The opacity of a bar's track. ASS alpha 0x50.
 pub const TRACK_OPACITY: f32 = 175.0 / 255.0;
-/// The dark surface an element carries when it draws over a frame with no
-/// scrim under it. It is the ASS alpha byte 0x34.
+/// The opacity of the black panel that the volume row draws behind
+/// itself. ASS alpha 0x34.
 pub const SURFACE: f32 = 203.0 / 255.0;
 
 #[cfg(test)]
@@ -245,18 +232,18 @@ mod tests {
     }
 
     #[test]
-    fn a_size_and_its_line_box_are_the_two_readings_of_one_ass_size() {
-        // The small size is `\fs34`, so the line box the small size draws in
-        // is 34 canvas pixels. The size is rounded to a whole pixel, so its
-        // box lands within half a metric of that number.
+    fn a_type_size_and_its_line_box_convert_to_each_other() {
         let box_ = line_box(SMALL);
 
-        assert!((box_ - 34.0).abs() < FACE_METRIC / 2.0, "{box_}");
+        assert!(
+            (box_ - 34.0).abs() < FACE_METRIC / 2.0,
+            "the line box is {box_}, want within half of FACE_METRIC of 34.0"
+        );
         assert!((type_size(box_) - SMALL).abs() < 0.001, "{box_}");
     }
 
     #[test]
-    fn a_line_takes_the_face_the_size_and_the_box_that_size_states() {
+    fn a_line_uses_the_font_the_size_and_the_matching_line_box() {
         let drawn = line(
             "9:01 am".into(),
             Point::new(1780.0, 90.0),
@@ -294,6 +281,9 @@ mod tests {
     #[test]
     fn the_fill_reads_over_the_track() {
         let brightness = |color: Color| color.r + color.g + color.b;
-        assert!(brightness(fill()) > brightness(track()));
+        assert!(
+            brightness(fill()) > brightness(track()),
+            "the fill is not brighter than the track, want the fill to read over the track"
+        );
     }
 }

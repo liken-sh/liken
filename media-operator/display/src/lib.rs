@@ -1,5 +1,5 @@
-// The display is a library with a binary over it, so its theme, its canvas,
-// its fade, and its IPC framing have unit tests that open no window.
+// The display is a library that `main.rs` calls, so the theme, canvas,
+// fade, and IPC framing can be unit tested without opening a window.
 
 pub mod arranger;
 pub mod art;

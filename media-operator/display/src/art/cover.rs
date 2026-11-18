@@ -1,8 +1,8 @@
-//! The music art pipeline. An album's cover lives inside its media files as
-//! often as it lives in the Play's spec, so the display resolves the playing
-//! item's art through tiers and reads a file's tags where the block is silent.
-//! An album arrives as one EDL item, and its first segment carries the cover
-//! for the whole timeline.
+//! Finds the cover art of the playing music item. The display tries the
+//! item's `presentation.art` first, then the picture embedded in the media
+//! file's tags, then a cover file in the file's folder. An album plays as one
+//! EDL timeline, so the file tiers read the timeline's first segment, and the
+//! whole album gets one cover.
 
 use std::path::Path;
 
@@ -12,69 +12,65 @@ use lofty::probe::Probe;
 
 use super::decode;
 
-/// The tiers an item's art resolves through, in the order the display tries
-/// them. A reference the block states beats the file, because the block
-/// carries what the operator resolved from the spec. The picture inside the
-/// file beats a cover beside it, because a file's own art is more specific
-/// than its folder's. An item that reaches the end of the list draws no art.
+/// Where an item's art can come from, in the order the display tries them.
+/// `presentation.art` comes first because it is how the library describes
+/// the item, and the display prefers that over the file's tags. A picture
+/// embedded in the file comes before a folder cover, because it belongs to
+/// that track and the folder cover belongs to the whole album.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Tier {
-    /// The block's own reference, a pod path or an https URL.
-    Block(String),
-    /// The picture inside the named media file's tags.
+    /// The item's `presentation.art`, a path in the pod or an https URL.
+    Presentation(String),
+    /// The picture in the tags of the named media file.
     Embedded(String),
-    /// A cover file beside the track.
-    Sibling(String),
+    /// A cover file in the track's folder.
+    Folder(String),
 }
 
-/// The sibling cover file names, in the order the display tries them. Rippers
-/// and library managers write one cover file into an album's folder, so one
-/// file serves every track in it.
+/// The file names of a folder cover, in the order the display tries them.
+/// Rippers and library managers write one of these files in each album
+/// folder.
 const COVER_NAMES: [&str; 4] = ["cover.jpg", "Cover.jpg", "folder.jpg", "Folder.jpg"];
 
-/// The two ways an item names a timeline, and the separator that stands in for
-/// a newline inside the URL form.
+/// An item refers to an EDL timeline either as a file with the `.edl`
+/// extension or as an `edl://` URL. In the URL form a semicolon replaces
+/// each newline.
 const EDL_SCHEME: &str = "edl://";
 const EDL_URL_SEPARATOR: char = ';';
 const EDL_FILE_EXTENSION: &str = ".edl";
 
-/// The header mpv reads an EDL by. A file that opens with anything else is no
-/// timeline. The `edl://` URL form carries no header, because the scheme has
-/// already said what the text is.
+/// The first line of an mpv EDL file. A file that starts with anything else
+/// is not a timeline. The `edl://` URL form has no header line.
 const EDL_HEADER: &str = "# mpv EDL v0";
 
-/// Settle one item's art from its presentation block and the file mpv plays.
-/// An album is one EDL item, so the file tiers read the album's first segment,
-/// and one album resolves one cover.
+/// Picks the art tier for one item from its `presentation.art` and the file
+/// that mpv plays. Returns `None` when no tier has art.
 pub fn resolve(art: Option<&str>, file: Option<&str>) -> Option<Tier> {
     if let Some(art) = art.filter(|art| !art.is_empty()) {
-        return Some(Tier::Block(art.to_string()));
+        return Some(Tier::Presentation(art.to_string()));
     }
     let path = album_source_path(file?)?;
     if embedded(&path).is_some() {
         return Some(Tier::Embedded(path));
     }
-    sibling_cover(&path).map(Tier::Sibling)
+    folder_cover(&path).map(Tier::Folder)
 }
 
-/// Read the art the tier named. The block's reference and the sibling cover
-/// are files or URLs the logo path already opens, and the embedded picture
-/// comes out of the media file itself.
+/// Reads the image bytes for a tier.
 pub fn read(tier: &Tier) -> Option<Vec<u8>> {
     match tier {
-        Tier::Block(source) | Tier::Sibling(source) => decode::open(source),
+        Tier::Presentation(source) | Tier::Folder(source) => decode::open(source),
         Tier::Embedded(source) => embedded(source),
     }
 }
 
-/// The picture inside one media file's tags. A file with no tags is not an
-/// error here: it is an item whose art comes from the block, from a cover
-/// beside it, or from nowhere.
+/// The first picture in a media file's tags, or `None` when the file has no
+/// tags or no picture.
 fn embedded(path: &str) -> Option<Vec<u8>> {
     let tagged = Probe::open(path)
         .ok()?
-        // The properties are the sample rate and the bit rate, which nothing
-        // here draws, so the read stops at the tags.
+        // The audio properties (sample rate, bit rate) are not drawn, so
+        // skip parsing them.
         .options(ParseOptions::new().read_properties(false))
         .read()
         .ok()?;
@@ -83,9 +79,8 @@ fn embedded(path: &str) -> Option<Vec<u8>> {
     (!picture.is_empty()).then(|| picture.to_vec())
 }
 
-/// The file the two file tiers read. A plain media file is its own source. An
-/// EDL is a timeline of tracks, so the album's first segment stands for the
-/// whole of it.
+/// The local media file that the embedded and folder tiers read: the item
+/// itself, or the first segment of an EDL timeline.
 fn album_source_path(file: &str) -> Option<String> {
     let Some((text, dir)) = timeline(file) else {
         return local_media_path(file);
@@ -93,10 +88,10 @@ fn album_source_path(file: &str) -> Option<String> {
     Some(segment_path(&dir, &first_segment(&text)?))
 }
 
-/// The timeline an item names, and the directory a relative segment path is
-/// measured from. mpv reads a timeline from a file the shim wrote or from an
-/// `edl://` URL, where a semicolon stands in for the newline. An item that
-/// names no timeline says so, and the caller reads it as a plain media file.
+/// The timeline text of an item and the directory that relative segment
+/// paths resolve against. The timeline is a `.edl` file that the player shim
+/// wrote, or the text of an `edl://` URL. Returns `None` when the item is not
+/// a timeline.
 fn timeline(file: &str) -> Option<(String, String)> {
     if let Some(inline) = file.strip_prefix(EDL_SCHEME) {
         return Some((inline.replace(EDL_URL_SEPARATOR, "\n"), String::new()));
@@ -116,11 +111,9 @@ fn timeline(file: &str) -> Option<(String, String)> {
     Some((text, dir))
 }
 
-/// The file the timeline's first segment plays. The header, the comments, and
-/// the `!` lines carry stream and chapter directives no reader here has a use
-/// for, so they are skipped. A line the reader cannot read is skipped rather
-/// than fatal, so one malformed segment costs the album one cover and not the
-/// run.
+/// The file of the timeline's first segment. Comment lines and mpv's `!`
+/// header lines hold no file, so they are skipped. A line that does not parse
+/// is skipped too, so one malformed segment does not stop the cover lookup.
 fn first_segment(text: &str) -> Option<String> {
     text.lines()
         .map(|line| line.trim_end_matches('\r').trim())
@@ -128,10 +121,10 @@ fn first_segment(text: &str) -> Option<String> {
         .find_map(segment_file)
 }
 
-/// The file name one segment line opens with. The format quotes a value as a
-/// percent sign, the length in bytes, another percent sign, then the text,
-/// which is what lets a file name carry a comma. A line whose first field
-/// carries a name is a line with no file in front, so it names no segment.
+/// The file name at the start of one segment line. mpv lets a value be
+/// quoted as `%<length>%<text>`, so a file name can contain a comma. Only a
+/// file name in the first position is read, so a line that starts with
+/// `key=value` gives `None`.
 fn segment_file(line: &str) -> Option<String> {
     let (file, rest) = match line.starts_with('%') {
         true => quoted(line)?,
@@ -143,9 +136,9 @@ fn segment_file(line: &str) -> Option<String> {
     (!file.is_empty() && !rest.starts_with('=')).then_some(file)
 }
 
-/// One `%<length>%<text>` run, and where the line goes on. A length that does
-/// not parse, or one that runs past the end of the line, is a line the reader
-/// cannot read.
+/// Reads one `%<length>%<text>` value at the start of a line and returns the
+/// text and the rest of the line. Returns `None` when the length does not
+/// parse or runs past the end of the line.
 fn quoted(line: &str) -> Option<(String, &str)> {
     let end = line[1..].find('%')? + 1;
     let length: usize = line[1..end].parse().ok()?;
@@ -153,9 +146,9 @@ fn quoted(line: &str) -> Option<(String, &str)> {
     Some((text.to_string(), &line[end + 1 + length..]))
 }
 
-/// Where one segment's file lives. A relative path is measured from the
-/// timeline's own directory, the way mpv measures it, and an absolute path or
-/// a URL stands on its own.
+/// The location of a segment's file. Like mpv, this resolves a relative path
+/// against the timeline file's directory, and keeps an absolute path or a URL
+/// as it is.
 fn segment_path(dir: &str, file: &str) -> String {
     if dir.is_empty() || Path::new(file).is_absolute() || file.contains("://") {
         return file.to_string();
@@ -163,16 +156,14 @@ fn segment_path(dir: &str, file: &str) -> String {
     Path::new(dir).join(file).to_string_lossy().to_string()
 }
 
-/// One playlist entry as a path the display can open. It reads nothing for a
-/// URI it cannot read as a file, because the tags and the sibling cover both
-/// need a local file.
+/// A playlist entry as a local path, or `None` for a URI of another scheme.
 fn local_media_path(entry: &str) -> Option<String> {
     let path = entry.strip_prefix("file://").unwrap_or(entry);
     (!path.is_empty() && !path.contains("://")).then(|| path.to_string())
 }
 
-/// The album's own cover file beside the track.
-fn sibling_cover(path: &str) -> Option<String> {
+/// The first of `COVER_NAMES` that exists as a file in the track's folder.
+fn folder_cover(path: &str) -> Option<String> {
     let dir = Path::new(path).parent()?;
     COVER_NAMES.iter().find_map(|name| {
         let candidate = dir.join(name);
@@ -191,7 +182,8 @@ mod tests {
     use image::ImageFormat;
     use std::path::PathBuf;
 
-    /// One album folder of its own, emptied before each test writes into it.
+    /// A separate album folder for each test, emptied before the test writes
+    /// into it.
     fn folder(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("media-display-{name}.album"));
         let _ = std::fs::remove_dir_all(&dir);
@@ -199,8 +191,8 @@ mod tests {
         dir
     }
 
-    /// One media file with an ID3v2.3 tag: a title, and a picture when the
-    /// test states one.
+    /// A media file with an ID3v2.3 tag that holds a title, and a picture
+    /// when the test passes one.
     fn media(dir: &Path, name: &str, picture: Option<Vec<u8>>) -> String {
         let mut body = frame("TIT2", &[&[0][..], b"Track"].concat());
         if let Some(picture) = picture {
@@ -223,8 +215,8 @@ mod tests {
         path.to_string_lossy().to_string()
     }
 
-    /// One ID3 frame: the four-character name, the payload length, two flag
-    /// bytes, then the payload.
+    /// One ID3v2.3 frame: the four-character name, the payload length, two
+    /// flag bytes, then the payload.
     fn frame(name: &str, payload: &[u8]) -> Vec<u8> {
         let mut bytes = name.as_bytes().to_vec();
         bytes.extend((payload.len() as u32).to_be_bytes());
@@ -237,14 +229,14 @@ mod tests {
         encoded(width, height, ImageFormat::Png, [200, 40, 40, 255])
     }
 
-    /// One cover file beside the tracks.
+    /// A cover file in the album folder.
     fn cover(dir: &Path, name: &str) -> String {
         let path = dir.join(name);
         std::fs::write(&path, png(8, 8)).expect("a cover to read back");
         path.to_string_lossy().to_string()
     }
 
-    /// One timeline, the way the player shim writes an album.
+    /// An EDL file in the format the player shim writes for an album.
     fn timeline_file(dir: &Path, files: &[&str]) -> String {
         let mut text = format!("{EDL_HEADER}\n");
         for file in files {
@@ -255,21 +247,21 @@ mod tests {
         path.to_string_lossy().to_string()
     }
 
-    /// The block's own reference beats the file and the cover beside it.
     #[test]
-    fn the_blocks_art_beats_the_file_and_the_cover() {
-        let dir = folder("block");
+    fn the_presentation_art_beats_the_embedded_picture_and_the_folder_cover() {
+        let dir = folder("presentation");
         cover(&dir, "cover.jpg");
         let file = media(&dir, "track.mp3", Some(png(8, 8)));
         assert_eq!(
             resolve(Some("https://art.example/cover.png"), Some(&file)),
-            Some(Tier::Block("https://art.example/cover.png".to_string()))
+            Some(Tier::Presentation(
+                "https://art.example/cover.png".to_string()
+            ))
         );
     }
 
-    /// The picture inside the file beats a cover beside it.
     #[test]
-    fn the_embedded_picture_beats_the_cover_beside_it() {
+    fn the_embedded_picture_beats_the_folder_cover() {
         let dir = folder("embedded");
         cover(&dir, "cover.jpg");
         let file = media(&dir, "track.mp3", Some(png(8, 8)));
@@ -280,14 +272,12 @@ mod tests {
         assert_eq!(read(&Tier::Embedded(file)), Some(png(8, 8)));
     }
 
-    /// A file that embeds no picture falls to the cover beside it, and a track
-    /// with no art anywhere reaches the end of the list.
     #[test]
-    fn a_file_with_no_picture_falls_to_the_cover_and_then_to_nothing() {
-        let dir = folder("sibling");
+    fn a_file_with_no_picture_falls_back_to_the_folder_cover_and_then_to_none() {
+        let dir = folder("folder");
         let beside = cover(&dir, "cover.jpg");
         let file = media(&dir, "track.mp3", None);
-        assert_eq!(resolve(None, Some(&file)), Some(Tier::Sibling(beside)));
+        assert_eq!(resolve(None, Some(&file)), Some(Tier::Folder(beside)));
 
         let bare = folder("bare");
         let alone = media(&bare, "track.mp3", None);
@@ -296,8 +286,6 @@ mod tests {
         assert_eq!(resolve(None, None), None);
     }
 
-    /// A remote track reads no picture and no cover, because both tiers need a
-    /// local file.
     #[test]
     fn a_remote_track_reads_no_picture_and_no_cover() {
         let dir = folder("remote");
@@ -305,9 +293,8 @@ mod tests {
         assert_eq!(resolve(None, Some("https://media.example/track.mp3")), None);
     }
 
-    /// A `file://` URI names the path it holds.
     #[test]
-    fn a_file_uri_reads_the_picture_the_path_holds() {
+    fn a_file_uri_reads_the_picture_at_its_path() {
         let dir = folder("uri");
         let file = media(&dir, "track.mp3", Some(png(8, 8)));
         assert_eq!(
@@ -316,8 +303,6 @@ mod tests {
         );
     }
 
-    /// An album is one EDL item, so its first segment carries the cover for
-    /// the whole timeline.
     #[test]
     fn an_album_reads_the_picture_in_its_first_segment() {
         let dir = folder("album");
@@ -327,32 +312,26 @@ mod tests {
         assert_eq!(resolve(None, Some(&album)), Some(Tier::Embedded(first)));
     }
 
-    /// An album whose first segment embeds no picture reads the cover beside
-    /// that segment.
     #[test]
-    fn an_album_with_no_picture_reads_the_cover_beside_its_first_segment() {
+    fn an_album_with_no_picture_reads_the_folder_cover_of_its_first_segment() {
         let dir = folder("albumcover");
         let beside = cover(&dir, "folder.jpg");
         media(&dir, "one.mp3", None);
         let album = timeline_file(&dir, &["one.mp3"]);
-        assert_eq!(resolve(None, Some(&album)), Some(Tier::Sibling(beside)));
+        assert_eq!(resolve(None, Some(&album)), Some(Tier::Folder(beside)));
     }
 
-    /// The `edl://` form carries the timeline in the URL, with a semicolon
-    /// where the newline would be.
     #[test]
     fn the_edl_url_form_reads_its_first_segment() {
         let dir = folder("inline");
         let first = media(&dir, "one.mp3", Some(png(8, 8)));
         let second = media(&dir, "two.mp3", None);
-        let url = format!("edl://{first},title=Oh No;{second},title=Masterswarm");
+        let url = format!("edl://{first},title=Track One;{second},title=Track Two");
         assert_eq!(resolve(None, Some(&url)), Some(Tier::Embedded(first)));
     }
 
-    /// A relative segment path is measured from the timeline's own directory,
-    /// and an absolute path or a URL stands on its own.
     #[test]
-    fn a_segment_path_is_measured_from_the_timeline() {
+    fn a_relative_segment_path_resolves_against_the_timeline_directory() {
         assert_eq!(
             segment_path("/media/album", "one.mp3"),
             "/media/album/one.mp3"
@@ -368,9 +347,6 @@ mod tests {
         );
     }
 
-    /// The first segment is the first line that names a file. The header, the
-    /// comments, the directives, and a line the reader cannot read are
-    /// skipped.
     #[test]
     fn the_first_segment_is_the_first_line_that_names_a_file() {
         assert_eq!(
@@ -396,8 +372,6 @@ mod tests {
         }
     }
 
-    /// A file that is not a timeline is read as the media file it names: one
-    /// with another extension, and one whose text carries no header.
     #[test]
     fn a_file_that_is_not_a_timeline_reads_as_a_media_file() {
         let dir = folder("notimeline");
@@ -410,10 +384,8 @@ mod tests {
         assert_eq!(timeline("/media/nothing.edl"), None);
     }
 
-    /// The four cover names are tried in order, and the first that exists
-    /// wins.
     #[test]
-    fn the_sibling_cover_order_is_fixed() {
+    fn the_folder_cover_names_are_tried_in_order() {
         for (present, want) in [
             (&COVER_NAMES[..], Some("cover.jpg")),
             (&COVER_NAMES[1..], Some("Cover.jpg")),
@@ -426,34 +398,34 @@ mod tests {
                 cover(&dir, name);
             }
             assert_eq!(
-                sibling_cover(&dir.join("track.mp3").to_string_lossy()),
+                folder_cover(&dir.join("track.mp3").to_string_lossy()),
                 want.map(|name| dir.join(name).to_string_lossy().to_string()),
                 "{present:?}"
             );
         }
     }
 
-    /// A candidate that is a directory is no cover.
     #[test]
     fn a_directory_named_like_a_cover_is_no_cover() {
         let dir = folder("directory");
         std::fs::create_dir(dir.join("cover.jpg")).expect("a directory to skip");
         let beside = cover(&dir, "folder.jpg");
         assert_eq!(
-            sibling_cover(&dir.join("track.mp3").to_string_lossy()),
+            folder_cover(&dir.join("track.mp3").to_string_lossy()),
             Some(beside)
         );
     }
 
-    /// The block's reference and a cover beside the track open the way a logo
-    /// opens, and a file that is not there reads nothing.
     #[test]
     fn every_tier_reads_the_bytes_it_names() {
         let dir = folder("reads");
         let beside = cover(&dir, "cover.jpg");
-        assert_eq!(read(&Tier::Sibling(beside.clone())), Some(png(8, 8)));
-        assert_eq!(read(&Tier::Block(beside)), Some(png(8, 8)));
-        assert_eq!(read(&Tier::Block("/art/nothing.png".to_string())), None);
+        assert_eq!(read(&Tier::Folder(beside.clone())), Some(png(8, 8)));
+        assert_eq!(read(&Tier::Presentation(beside)), Some(png(8, 8)));
+        assert_eq!(
+            read(&Tier::Presentation("/art/nothing.png".to_string())),
+            None
+        );
         assert_eq!(read(&Tier::Embedded("/art/nothing.mp3".to_string())), None);
     }
 }

@@ -1,6 +1,7 @@
-# The MediaPreferences API. One cluster-scoped resource holds the
-# cluster's default for audio and subtitle languages, the lowest of the
-# three tiers a Play resolves.
+# A cluster has one MediaPreferences, named default, with the
+# cluster's default languages, time zone, and idle screen settings. For
+# each language setting, the operator uses the Play's value, then the
+# Player's, then this one.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -13,16 +14,14 @@ spec:
     plural: mediapreferences
     singular: mediapreferences
     categories: [media]
-  # A MediaPreferences is cluster-scoped because the default belongs
-  # to the whole cluster, not one namespace, the same reason a Keymap
-  # is cluster-scoped.
+  # The defaults apply to the whole cluster, not to one namespace.
   scope: Cluster
   versions:
     - name: v1alpha1
       served: true
       storage: true
-      # A MediaPreferences is a table a person writes and nothing reports
-      # on, so there is no status subresource and the listing shows its age.
+      # Nothing writes status on a MediaPreferences, so it has no
+      # status subresource.
       additionalPrinterColumns:
         - name: Subtitles
           type: string
@@ -35,34 +34,30 @@ spec:
           type: object
           description: >-
             The cluster's defaults: the preferred audio and subtitle
-            languages, the time zone its displays show, and what an
-            idle display does. A Player or a Play overrides the
-            language fields field by field; the time zone has no
-            override.
-          # The name is fixed at default, because a second default is a
-          # contradiction. A MediaPreferences under any other name is
-          # rejected at apply, so the mistake shows at once instead of
-          # adding a silent second object.
+            languages, the time zone of the display clock, and what an
+            idle screen does. A Player or a Play can override each language
+            field. Nothing overrides the time zone.
+          # Two sets of defaults would conflict, so the API server refuses
+          # any name but default.
           x-kubernetes-validations:
             - rule: self.metadata.name == 'default'
-              message: the only MediaPreferences is named default
+              message: a MediaPreferences must be named default
           properties:
             spec:
               type: object
               description: >-
-                The default language and subtitle fields. The operator uses
-                each one only when the Player and the Play leave it unset.
+                The operator uses a language or subtitle field here only
+                when neither the Play nor the Player sets it.
               properties:
                 audioLanguages:
                   type: array
                   x-kubernetes-list-type: atomic
                   maxItems: 10
                   description: >-
-                    Ordered audio language codes, most wanted
-                    first; mpv takes the first audio track that
-                    matches. Codes are IETF language tags, and mpv
-                    treats the ISO 639-1 form en and the ISO 639-2
-                    form eng as the same language.
+                    Audio languages in order of preference, as IETF language
+                    tags such as `en` or `pt-BR`. mpv plays the first audio
+                    track that matches, and treats `en` and `eng` as the same
+                    language.
                   items:
                     type: string
                     pattern: '^[a-z]{2,3}(-[A-Za-z]{2,4})?$'
@@ -71,9 +66,9 @@ spec:
                   x-kubernetes-list-type: atomic
                   maxItems: 10
                   description: >-
-                    Ordered subtitle language codes, separate from
-                    the audio list, so one viewer takes foreign audio with
-                    native subtitles.
+                    Subtitle languages in order of preference, so a viewer can
+                    hear the original audio with subtitles in their own
+                    language. When it is empty, `audioLanguages` is used.
                   items:
                     type: string
                     pattern: '^[a-z]{2,3}(-[A-Za-z]{2,4})?$'
@@ -81,91 +76,86 @@ spec:
                   type: string
                   enum: ["on", "off", "auto"]
                   description: >-
-                    When subtitles show. With on, the command sidecar
-                    shows the first full or SDH track in the order of
-                    subtitleLanguages, or of audioLanguages when
-                    subtitleLanguages is empty, and when none exists, the forced
-                    track in the language of the audio, if that language
-                    is in audioLanguages. With auto, audio in the first
-                    of audioLanguages shows only its forced track, or
-                    nothing, and other audio shows a track as on does.
-                    With off, no subtitles show.
+                    When subtitles show. With `on`, the playback pod shows the
+                    first full or SDH track in the order of
+                    `subtitleLanguages`. When there is none, it shows the
+                    forced track of the audio's language, if that language is
+                    in `audioLanguages`. With `auto`, audio in the first
+                    language of `audioLanguages` shows only its forced track,
+                    or nothing, and other audio chooses as `on` does. With
+                    `off`, no subtitles show.
                 sdh:
                   type: string
                   enum: [prefer, avoid]
                   description: >-
-                    Whether an SDH track, one with the descriptions of
-                    sounds for a viewer who is deaf or hard of hearing,
-                    ranks ahead of a full track in the same language
-                    (prefer) or behind it (avoid). Omit it, and the two
-                    rank the same, so the track with the default flag
-                    wins, and then the first in the file.
+                    Whether an SDH track ranks ahead of a full track in the
+                    same language (`prefer`) or behind it (`avoid`). An SDH
+                    track also describes sounds, for a viewer who is deaf or
+                    hard of hearing. When omitted, the two rank the same, and
+                    the playback pod takes the track with the default flag, or else
+                    the first in the file.
                 timeZone:
                   type: string
-                  # An IANA zone name, for example America/New_York. The display
-                  # clock reads it. One per cluster, with no Play or Player override.
                   description: >-
-                    The time zone, as an IANA name like
-                    America/New_York. The player pod reads it as TZ,
-                    so the display clock shows local time instead of
-                    UTC. One per cluster: no Play or Player
-                    overrides it.
+                    The time zone, as an IANA name such as `America/New_York`.
+                    The playback pod gets it as `TZ`, so the display clock shows
+                    local time and not UTC.
                 idle:
                   type: object
                   description: >-
-                    The cluster's default for what a display does
-                    while nothing plays, read for each field a
-                    Player's own block leaves unset.
+                    What a screen does while nothing plays. Each field applies
+                    to a Player whose own `idle` block leaves it unset.
                   properties:
                     controller:
                       type: string
                       pattern: '^[a-z0-9.-]+/[a-z0-9-]+$'
                       description: >-
-                        The operator that draws every idle screen whose Player
-                        does not name its own, as a domain-qualified name. Two
-                        names belong to the media operator:
-                        media.liken.sh/idle-screen, the default, which draws
-                        the idle screen this operator ships, and
-                        media.liken.sh/none, under which nothing draws an idle
-                        screen and no claim exists. Any other name hands each
-                        screen to the operator that handles it, which reads a
-                        Player's status.idle for the claim to reference, the
-                        requests it carries, the two windows, and the bus it
-                        joins.
+                        The operator that draws the idle screen, as a
+                        domain-qualified name. With the default,
+                        `media.liken.sh/idle-screen`, media-operator draws its
+                        own idle screen. With `media.liken.sh/none`, nothing
+                        draws one and the operator creates no idle claim. Any
+                        other name leaves the screen to the operator with that
+                        name, which reads the Player's `status.idle` for the
+                        claim to use, its request names, the fade and off
+                        windows, and the MQTT broker and topics.
                     image:
                       type: string
                       description: >-
-                        The container image that draws every idle screen. The
-                        image starts with its own entrypoint and reads each
-                        unit's state from the bus. It implements the fade and
-                        off windows, the focus gate, the shade, the volume
-                        indicator, and the panel desire in its own process.
-                        Unset, every screen whose Player names no image runs
-                        the idle client that the media operator ships.
+                        The container image that draws the idle screen. The
+                        image runs its own entrypoint and reads the Player's
+                        state from the MQTT bus. It implements the fade and off
+                        windows, the dimming of the screen, the volume
+                        indicator, and the requests to turn the panel on or
+                        off. It acts on a remote's press only while that
+                        remote's focus is on this Player. When unset, the
+                        screen runs the idle client that media-operator ships.
                     fadeAfterSeconds:
                       type: integer
                       format: int64
                       minimum: 0
                       description: >-
                         Seconds with no activity before an idle screen fades
-                        to black. Zero disables the automatic fade; unset,
-                        every screen fades after 600.
+                        to black. The default is 600, and 0 turns the fade
+                        off.
                     offAfterSeconds:
                       type: integer
                       format: int64
                       minimum: 0
                       description: >-
-                        Seconds with no activity before an idle panel goes
-                        dark, at least fadeAfterSeconds. Zero or unset means
-                        panels never go dark on their own. A panel goes dark
-                        only where the cluster runs a display-operator that
-                        publishes a Display for the screen.
+                        Seconds with no activity before an idle panel turns
+                        off. Unset or 0 leaves the panel on. The shipped idle
+                        client treats a value below `fadeAfterSeconds` as
+                        `fadeAfterSeconds`. A panel turns off only when display-operator
+                        runs in the cluster and publishes a `Display` for the
+                        screen.
                     offMode:
                       type: string
                       enum: [backlight, power]
                       description: >-
-                        Which override the off window applies to the screen's
-                        Display. The default, backlight, holds the panel at
-                        brightness zero, which still answers DDC. Power off
-                        stops some panels from answering DDC at all; use it
-                        only for a panel that you have seen wake from it.
+                        How the panel turns off after `offAfterSeconds`. With
+                        `backlight`, the default, the panel stays on at
+                        brightness zero and still responds to DDC. With
+                        `power`, the panel powers off, and some panels then
+                        stop responding to DDC. Use `power` only for a panel
+                        that you have seen wake from it.

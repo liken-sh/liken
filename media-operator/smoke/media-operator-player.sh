@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Proves the media-operator-player image before it ships.
+# Checks the media-operator-player image before it is published.
 #
 # Usage: media-operator-player.sh <image>
 #
@@ -7,16 +7,16 @@
 #            ghcr.io/liken-sh/media-operator-player:2026.10.02-001. The
 #            image must be in the local Docker daemon.
 #
-# The runner has no GPU, no Wayland, and no PipeWire, so nothing here
-# plays; what can break invisibly is the closure. mpv proves it can
-# load its libraries by printing its version, and the supervisor binary
-# must be present at the path the entrypoint names.
+# The CI runner has no GPU, Wayland, or PipeWire, so the check cannot
+# play anything. It checks the files of the image instead: mpv must
+# load its libraries and print its version, and /media-operator-pod
+# must exist.
 set -euo pipefail
 
 image=$1
 
-# The image must hold the notices of the third-party software in it,
-# as notices/check.sh describes.
+# Checks the license notices of the third-party software in the image
+# (notices/check.sh).
 "$(dirname "$0")/../../notices/check.sh" "$image" \
   usr/share/doc/go/LICENSE \
   usr/share/doc/fonts-droid-fallback/copyright
@@ -25,8 +25,9 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 docker run --rm --entrypoint /usr/bin/mpv "$image" --version
-# grep -q closes the pipe early, tar dies on the closed pipe, and
-# pipefail fails the check, so the listing goes to a file first.
+# The listing goes to a file because `grep -q` exits at the first match,
+# which kills tar on the closed pipe and fails the pipeline under
+# pipefail.
 container=$(docker create "$image")
 docker export "$container" | tar -t > "$work/image-files.txt"
 docker rm "$container" > /dev/null

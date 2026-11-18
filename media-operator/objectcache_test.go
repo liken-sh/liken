@@ -1,19 +1,15 @@
 package main
 
-// These tests cover what the Play store adds to the shared object
-// cache.
-
 import (
 	"testing"
 )
 
-// A Play the API server no longer holds is left out of the list, though
-// the store still holds its copy, once the operator's own delete has
-// noted it.
+// After the operator deletes a Play, the list leaves it out even though
+// the store still has its copy.
 func TestAPlayTheOperatorDeletedIsNotListedFromTheStore(t *testing.T) {
 	cluster := runningCluster(housePlayer())
 	media := testOperator(t, cluster, make(chan struct{}, 1))
-	// The watch has not delivered the delete, so the store keeps its copy.
+	// The watch has not delivered the delete yet.
 	frozen := newFakeCluster()
 	frozen.plays["movie"] = cluster.plays["movie"]
 	media.view.plays.View.Store = frozen.view().plays.View.Store

@@ -1,11 +1,10 @@
 package main
 
-// An album is one item. The presentation block declares an item's shape,
-// the way a video item's hint does: a directory item marked as an album
-// becomes one written timeline, and a file item passes through as itself.
-// The expansion runs in the shim, because the playback pod is the one
-// process that mounts the media, so it is the one process that can read an
-// album's files.
+// An album is one playlist item that plays a directory of audio files.
+// The item's presentation block marks the directory as an album, and the
+// `player` role replaces the directory with an mpv EDL timeline that
+// lists the files. The playback pod does this because it is the only
+// process that mounts the media.
 
 import (
 	"encoding/json"
@@ -16,23 +15,22 @@ import (
 	"github.com/liken-sh/liken/media-operator/edl"
 )
 
-// The two block values that mark an album. An item needs both, because the
-// music type alone is a standalone track, and the hint names the shape the
-// way movie and series name a video's.
+// The presentation values that mark an album. An item needs both,
+// because type music alone is a standalone track.
 const (
 	presentationTypeMusic = "music"
 	presentationHintAlbum = "album"
 )
 
-// Where the shim writes an album's timeline. It is the volume the playback
-// pod already shares between mpv and the command sidecar, so mpv loads the
-// timeline and the sidecar reads it back for the album's cover. It is a
-// variable rather than a constant so a test writes under its own directory.
+// albumTimelineDir is where the shim writes album timelines. It is the
+// volume that mpv and the command sidecar already share, so mpv loads the
+// timeline and the sidecar reads it back to find the album's cover. It is
+// a variable so that a test can write to its own directory.
 var albumTimelineDir = ipcMountPath
 
-// expandItems turns the resolved playlist into the entries mpv loads. An
-// album directory becomes the one timeline written for it, and every other
-// item is the path the resolver already settled.
+// expandItems returns the entries mpv loads for the resolved playlist.
+// Each album directory becomes the path of the timeline written for it,
+// and every other item stays as it is.
 func expandItems(items []string, blocks []json.RawMessage) ([]string, error) {
 	entries := make([]string, len(items))
 	for index, item := range items {
@@ -49,34 +47,32 @@ func expandItems(items []string, blocks []json.RawMessage) ([]string, error) {
 	return entries, nil
 }
 
-// writeAlbumTimeline reads one album folder and writes its timeline. An
-// album with no audio files fails the run, because a spec that marks a
-// folder as an album and points at an empty one states a wrong fact, and
-// silence would hide it.
+// writeAlbumTimeline writes the timeline for one album directory and
+// returns its path. An album with no audio files is an error, so a Play
+// that points at an empty or wrong directory fails instead of playing
+// nothing.
 func writeAlbumTimeline(dir string, index int) (string, error) {
 	files, err := edl.AlbumFiles(dir)
 	if err != nil {
-		return "", fmt.Errorf("read the album %q: %w", dir, err)
+		return "", fmt.Errorf("reading the album %q: %w", dir, err)
 	}
 	if len(files) == 0 {
 		return "", fmt.Errorf("the album %q holds no audio files", dir)
 	}
 	path := filepath.Join(albumTimelineDir, fmt.Sprintf("album-%d.edl", index+1))
 	if err := os.WriteFile(path, []byte(edl.Timeline(files)), 0o644); err != nil {
-		return "", fmt.Errorf("write the timeline for %q: %w", dir, err)
+		return "", fmt.Errorf("writing the timeline of the album %q: %w", dir, err)
 	}
 	return path, nil
 }
 
-// isAlbum reads one block as the mark of an album: the music type and the
-// album hint together.
 func isAlbum(presentation Presentation) bool {
 	return presentation.Type == presentationTypeMusic && presentation.Hint == presentationHintAlbum
 }
 
-// allMusic says whether every item of the run is music. The answer decides
-// --vid=no, and the flag is global to the run, so one film in the list must
-// keep video on for the whole of it.
+// allMusic reports whether every item of the run is music. player.go
+// turns video off only for such a run, because --vid=no applies to
+// every item.
 func allMusic(blocks []json.RawMessage, items int) bool {
 	if items == 0 {
 		return false
@@ -89,9 +85,9 @@ func allMusic(blocks []json.RawMessage, items int) bool {
 	return true
 }
 
-// presentationAt reads one item's block. An item the pod baked no block for
-// reads as an empty block, so a Play that declares nothing keeps the
-// player's own defaults.
+// presentationAt returns the presentation block of one item. An item with
+// no block, or with a block that does not parse, gets an empty block, so
+// mpv keeps its defaults for it.
 func presentationAt(blocks []json.RawMessage, index int) Presentation {
 	var presentation Presentation
 	if index < 0 || index >= len(blocks) {

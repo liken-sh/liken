@@ -1,13 +1,9 @@
 package main
 
-// This file is the fixture every API test builds on: the API server
-// under a stand-in control plane that answers the two reviews, one
-// Player, and the Events this API posts, with two stand-in servers in
-// place of the display API and the audio API. The control plane and the
-// siblings answer over in-memory connections, so a test that composes
-// no stream through ffmpeg runs in a synctest bubble. The clock is
-// fixed, so every header field a test compares is the same bytes on
-// every run.
+// Every API test builds on this fixture. It connects the API server to
+// a fake control plane and to fake display and audio APIs over
+// in-memory connections, so a test that runs no ffmpeg can run in a
+// synctest bubble.
 
 import (
 	"encoding/json"
@@ -29,9 +25,9 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events/eventstest"
 )
 
-// The Player every capture test asks about: its namespace and name,
-// its Display, its two Sinks, and the token and subject the control
-// plane answers for.
+// The fixture Player and the token and subject that the control plane
+// accepts. playingPlayer has only testAPISink. A test that needs a
+// second sink adds testAPISecond.
 const (
 	testAPINamespace = "media"
 	testAPIPlayer    = "studio"
@@ -42,31 +38,29 @@ const (
 	testAPISubject   = "system:serviceaccount:media:viewer"
 )
 
-// The sibling base URLs as a cluster names them, for the tests that
-// compare a Location or a Link byte for byte with what a cluster
-// would send.
+// The sibling base URLs in a cluster, for tests that compare a Location
+// or Link header.
 const (
 	testDisplayBase = "https://display-api.liken-system.svc"
 	testAudioBase   = "https://audio-api.liken-system.svc"
 )
 
-// testAPIClock is the instant every capture header is stamped with,
-// so a Content-Disposition file name is the same on every run.
+// testAPIClock is fixed so the Content-Disposition file name is the
+// same on every run.
 var testAPIClock = time.Date(2026, 9, 16, 21, 2, 16, 0, time.UTC)
 
-// controlPlane stands in for the API server: it answers the
-// TokenReview and the SubjectAccessReview with the verdicts a test
-// sets, and serves the Players a test placed. The Events this API
-// posts go to an eventstest.Events in front of it.
+// controlPlane is a fake Kubernetes API server. It returns the
+// TokenReview and SubjectAccessReview results that a test sets, and
+// serves the Players that a test adds.
 type controlPlane struct {
 	mutex         sync.Mutex
 	players       map[string]*Player
 	authenticated bool
 	audiences     []string
-	words         string
+	message       string
 	allowed       bool
-	// How many token reviews it answered, for a test that proves a
-	// credential never reached the token path.
+	// tokenReviews lets a test show that a request never reached token
+	// review.
 	tokenReviews int
 	reviews      []SubjectAccessReview
 }
@@ -92,7 +86,7 @@ func (c *controlPlane) handler() http.Handler {
 			review.Status = TokenReviewStatus{
 				Authenticated: c.authenticated,
 				Audiences:     c.audiences,
-				Error:         c.words,
+				Error:         c.message,
 				User: TokenReviewUser{
 					Username: testAPISubject,
 					UID:      "uid-1",
@@ -108,23 +102,22 @@ func (c *controlPlane) handler() http.Handler {
 			review.Status = SubjectAccessReviewStatus{Allowed: c.allowed}
 			_ = json.NewEncoder(w).Encode(review)
 		case strings.Contains(r.URL.Path, "/players/"):
-			held, standing := c.players[r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]]
-			if !standing {
+			player, found := c.players[r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]]
+			if !found {
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
-			_ = json.NewEncoder(w).Encode(held)
+			_ = json.NewEncoder(w).Encode(player)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
 	})
 }
 
-// sibling stands in for one sibling API as this API's client meets
-// it. A test sets the status, the type, the body, and the Retry-After
-// it answers, a delay before its headers, or a stall that holds the
-// body open until this API ends the request. It keeps every call and
-// every Authorization field it was sent.
+// sibling is a fake display or audio API. A test sets the response,
+// a delay before the headers, or a stall that keeps the body open until
+// the client cancels the request. It records each request URI and
+// Authorization header.
 type sibling struct {
 	mutex       sync.Mutex
 	server      *apiservertest.Server
@@ -140,16 +133,16 @@ type sibling struct {
 	stall       bool
 	hungUp      bool
 
-	// A body written in several parts, with a pause between them and a
-	// hook the test runs as each one goes out. A stream longer than the
-	// header bound is how a test tells the two bounds apart.
+	// When chunks is set, the sibling writes the body chunks times,
+	// flushing and calling onChunk after each write and then sleeping
+	// chunkGap. A test uses it to stream for longer than the header
+	// timeout.
 	chunks   int
 	chunkGap time.Duration
 	onChunk  func()
 
-	// How long the sibling holds its first body byte after it has sent
-	// and flushed its headers, which is what a capture waiting for its
-	// first keyframe does.
+	// bodyDelay is the wait between the headers and the first body
+	// byte, like a capture that waits for its first keyframe.
 	bodyDelay time.Duration
 }
 
@@ -169,8 +162,6 @@ func newSibling(t *testing.T, url string) *sibling {
 		s.calls = append(s.calls, call)
 		s.credentials = append(s.credentials, r.Header.Get("Authorization"))
 		s.mutex.Unlock()
-		// A sibling whose caller gave up stops waiting, the way a
-		// server's handler ends with its request.
 		if delay > 0 {
 			select {
 			case <-time.After(delay):
@@ -211,10 +202,9 @@ func newSibling(t *testing.T, url string) *sibling {
 	return s
 }
 
-// siblingRoutes sends a request for a sibling's URL to that sibling.
-// It refuses a request for any other address, the way the network
-// refuses a connection to a sibling that does not run, so no test
-// reaches the network or waits on a name lookup.
+// siblingRoutes sends each request to the sibling whose URL it starts
+// with. Any other address fails with connection refused, as for a
+// sibling that is not deployed, so no test reaches the network.
 type siblingRoutes []*sibling
 
 func (r siblingRoutes) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -232,8 +222,7 @@ func (s *sibling) made() []string {
 	return append([]string(nil), s.calls...)
 }
 
-// ended reports whether this API ended the request the stalled
-// sibling had open, which is how a test sees a cancelled composition.
+// ended reports whether the client canceled the stalled request.
 func (s *sibling) ended() bool {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -246,13 +235,9 @@ func (s *sibling) sent() []string {
 	return append([]string(nil), s.credentials...)
 }
 
-// apiFixture is the whole fixture: one API server, one control plane,
-// two siblings, and the log lines the server wrote, for a test that
-// reads the request id or the offset.
 type apiFixture struct {
-	server *apiServer
-	plane  *controlPlane
-	// events holds the Events the server posted.
+	server  *apiServer
+	plane   *controlPlane
 	events  *eventstest.Events
 	display *sibling
 	audio   *sibling
@@ -294,25 +279,23 @@ func newAPIFixture(t *testing.T) *apiFixture {
 	return fixture
 }
 
-// projectSiblingTokens writes the two projected tokens the kubelet
-// would mount, one per sibling audience, so the upstream client reads
-// them from files the way it does in a pod.
+// projectSiblingTokens writes a token file for each sibling, as the
+// kubelet's projected volume does in a pod.
 func projectSiblingTokens(t *testing.T) {
 	t.Helper()
 	directory := t.TempDir()
-	held := siblingTokenPaths
+	original := siblingTokenPaths
 	siblingTokenPaths = map[string]string{}
 	for _, upstream := range []string{upstreamDisplay, upstreamAudio} {
 		path := filepath.Join(directory, upstream+"-token")
 		mustSucceed(t, os.WriteFile(path, []byte("token-for-"+upstream+"-api"), 0o600))
 		siblingTokenPaths[upstream] = path
 	}
-	t.Cleanup(func() { siblingTokenPaths = held })
+	t.Cleanup(func() { siblingTokenPaths = original })
 }
 
-// upstreamInstants is the clock the upstream client stamps header
-// arrival with: one instant for the display sibling and one for the
-// audio sibling, so the offset is 40 ms on every run.
+// upstreamInstants returns the time at which each sibling's response
+// headers arrive, so the offset between the siblings is always 40 ms.
 func upstreamInstants() func(string) time.Time {
 	return func(upstream string) time.Time {
 		if upstream == upstreamDisplay {
@@ -322,8 +305,8 @@ func upstreamInstants() func(string) time.Time {
 	}
 }
 
-// playingPlayer is a Player with a screen, one sink, and a Play
-// running on it: two streams, so media.mp4 composes.
+// playingPlayer is playing, with a screen and one sink, so media.mp4
+// has a video and an audio stream to compose.
 func playingPlayer() *Player {
 	return &Player{
 		Metadata: ObjectMeta{Namespace: testAPINamespace, Name: testAPIPlayer, UID: "player-uid"},
@@ -343,7 +326,7 @@ func (f *apiFixture) call(method, target string, header http.Header) *httptest.R
 			request.Header.Add(key, value)
 		}
 	}
-	if _, stated := header["Authorization"]; !stated {
+	if _, hasAuthorization := header["Authorization"]; !hasAuthorization {
 		request.Header.Set("Authorization", "Bearer "+testAPIToken)
 	}
 	recorder := httptest.NewRecorder()
@@ -359,8 +342,8 @@ func (f *apiFixture) accept(target, accept string) *httptest.ResponseRecorder {
 	return f.call(http.MethodGet, target, http.Header{"Accept": {accept}})
 }
 
-// playerPathFor is the fixture Player's route, with an aspect suffix
-// or without one for the info document.
+// playerPathFor returns the route of the fixture Player, which serves
+// the info document, or the route of a suffix below it.
 func playerPathFor(suffix string) string {
 	path := apiBasePath + "/namespaces/" + testAPINamespace + "/players/" + testAPIPlayer
 	if suffix == "" {

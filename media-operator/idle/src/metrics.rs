@@ -1,8 +1,7 @@
-//! This client's `/metrics` listener: milestone 65's layer 1, and the one
-//! gauge [`media_screen::reader`] reports on this client's own bus
-//! connection. This client never touches mpv, so it carries none of
-//! `media-screen`'s row in plan 26's table; that reads through mpv's own
-//! properties, which this process never opens a socket to.
+//! The Prometheus `/metrics` listener of the idle client. It serves the
+//! build info, the `process_*` metrics, and the `media_bus_connected`
+//! gauge that [`media_screen::reader`] sets. It reports no mpv metrics,
+//! because this client does not connect to mpv.
 
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -10,15 +9,14 @@ use std::time::Duration;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use metrics_process::Collector;
 
-/// How often the collector reads `/proc` again. The exporter has no
-/// per-scrape hook to call it from, so a thread of its own keeps the
-/// numbers under ten seconds old, well inside any interval a Prometheus
-/// scrapes at.
+/// How often the collector reads `/proc`. The exporter has no hook that
+/// runs on each scrape, so a separate thread refreshes the `process_*`
+/// metrics on this interval.
 const COLLECTION_INTERVAL: Duration = Duration::from_secs(10);
 
-/// Parse `MEDIA_METRICS_ADDRESS`. Empty or unreadable is the address every
-/// other setting on this client answers to with: no listener opens, and the
-/// gauges below cost a lookup that finds nowhere to go.
+/// Parses `MEDIA_METRICS_ADDRESS`. An empty or invalid value gives
+/// `None`, and no listener starts. The metric calls elsewhere still run
+/// and record nothing.
 pub fn address(raw: &str) -> Option<SocketAddr> {
     let raw = raw.trim();
     if raw.is_empty() {
@@ -27,21 +25,21 @@ pub fn address(raw: &str) -> Option<SocketAddr> {
     raw.parse().ok()
 }
 
-/// Install the exporter, report this client's build identity, and start the
-/// thread that keeps `process_*` current. A failure here is a line, never an
-/// exit: the client draws the idle screen whether or not a Prometheus reads
-/// it, the way a lost bus session draws on with its last-known state.
+/// Starts the exporter on `address`, records the build info, and starts
+/// the thread that refreshes `process_*`. If the exporter fails to
+/// start, this prints an error and returns, because the idle screen
+/// must keep drawing without metrics.
 pub fn serve(address: SocketAddr, component: &str, version: &str) {
     if let Err(error) = PrometheusBuilder::new()
         .with_http_listener(address)
         .install()
     {
-        eprintln!("idle-screen: metrics: {error}");
+        eprintln!("idle-screen: starting the metrics exporter: {error}");
         return;
     }
     media_screen::metrics::build_info(component, version);
-    // Primed before this client's own reader opens, so a scrape between
-    // start and the first session reads a stated 0, not an absent series.
+    // Set before the bus reader opens, so a scrape before the first
+    // session reads 0 and not a missing series.
     media_screen::metrics::bus_connected(false);
 
     let collector = Collector::default();
@@ -74,10 +72,10 @@ mod tests {
         assert_eq!(address("0.0.0.0:9200"), Some(([0, 0, 0, 0], 9200).into()));
     }
 
-    // The global recorder installs once per process, so this is the one test
-    // in the crate that calls `serve`. The first call takes the recorder and
-    // proves the happy path runs with no panic; the second finds it taken,
-    // which proves the listener's own failure never becomes this client's.
+    // The global recorder can be installed once per process, so this is
+    // the only test that calls `serve`. The first call installs it. The
+    // second fails to install it, which must print an error and not
+    // panic.
     #[test]
     fn a_second_listener_in_one_process_fails_without_panicking() {
         serve(([127, 0, 0, 1], 0).into(), "idle-screen", "test");

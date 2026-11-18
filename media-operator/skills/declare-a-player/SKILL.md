@@ -7,51 +7,51 @@ This skill is the guide at https://liken.sh/media/docs/guides/declare-a-player/,
 
 # Declare a Player
 
-A `Player` is one unit of equipment: a screen, the outputs its sound
-goes to, the GPU that draws, and the controllers that drive it. This
-guide declares one for a machine that is connected to a television or
-a monitor, reads its status until the screen is present, and proves
-it with one `Play`. At the end, the unit shows its idle screen and a
-remote drives it.
+A `Player` describes one unit of equipment: a screen, the outputs that
+play its sound, the GPU that draws the picture, and the controllers
+that drive it. In this guide you declare a `Player` for a machine that
+is connected to a television or a monitor, read its status until the
+screen is present, and start a `Play` to check it. At the end, the
+screen shows the idle screen and a remote controls the `Player`.
 
 You need:
 
 * The operator and its bus, from the [install](https://liken.sh/media/docs/guides/install/).
 * The [`display-operator`](https://liken.sh/display/) and the
-  [`audio-operator`](https://liken.sh/audio/) installed, with the
-  consumer classes your cluster names for a screen, a render node,
-  and an output. Each operator's install guide gives the YAML for
-  its class, and the class names below are examples.
-* A `Remote` for each controller the unit owns, from
+  [`audio-operator`](https://liken.sh/audio/) installed, with a
+  `DeviceClass` for a screen, a render node, and an audio output. Each
+  operator's install guide has the YAML for its class. The class names
+  in this guide are examples.
+* A `Remote` for each controller of the `Player`, from
   [Map a new controller](https://liken.sh/media/docs/guides/mapping-a-controller/). A
-  `Player` with no controllers is fine; add them later.
+  `Player` can have no controllers, and you can add them later.
 * `kubectl` access to the namespace.
 
 ## 1. Confirm the machine publishes the hardware
 
-The scheduler places every pod of a `Player` on the one machine that
-owns all of its devices, so start with what that machine publishes.
-The display operator publishes one device per connector, and the
-audio operator one per output:
+Every pod of a `Player` must run on the machine that has all of the
+`Player`'s devices, so first check what that machine publishes.
+`display-operator` publishes a device for each connector, and
+`audio-operator` publishes one for each output:
 
     kubectl get resourceslice <node>-display.liken.sh -o yaml
     kubectl get displays
     kubectl get sinks
 
-The monitor you want must appear as a `Display`, and the outputs you
-want as `Sinks` on that node. A connector with no monitor publishes
-with a `disconnected` taint, and a claim on it parks.
+The monitor must appear as a `Display`, and the outputs as `Sinks`,
+on that node. A connector with no monitor is published with a
+`disconnected` taint, and a claim on it stays `Pending`.
 
-A monitor that is switched to another input sends no hotplug event,
-and the display operator polls nothing. If the `Display` for a
+A monitor that shows another input can send no hotplug event, and
+`display-operator` does not poll for one. If the `Display` for a
 connected monitor is missing, switch the monitor to this machine's
-input, and it appears within seconds.
+input, and the `Display` appears within seconds.
 
 ## 2. Write the Player
 
-Declare the unit in the namespace its `Remotes` are in. Name each
-device by class, and narrow the class with a selector where the
-machine has more than one of a kind:
+Create the `Player` in the namespace of its `Remotes`. Give each
+device's class, and when the machine has more than one device of a
+class, add a selector to choose one:
 
     kubectl apply -f - <<EOF
     apiVersion: media.liken.sh/v1alpha1
@@ -81,84 +81,83 @@ machine has more than one of a kind:
           displayName: Den Remote
     EOF
 
-The selectors are the same CEL a hand-written claim would use, over
-the attributes each hardware operator publishes. Guard an attribute
-that comes from the monitor with `has()`, because it is absent on an
-empty connector, and a selector that reads a missing attribute fails
-the whole allocation. The display operator's
-[claim guide](https://liken.sh/display/docs/guides/claim/) and the
-audio operator's [claim guide](https://liken.sh/audio/docs/guides/claim/)
-list the attributes and the selectors that survive a re-cabling.
+The selectors are CEL expressions over the attributes that each
+hardware operator publishes, as in a hand-written `ResourceClaim`.
+Guard an attribute that comes from the monitor with `has()`, because
+an empty connector has no such attribute, and a selector that reads a
+missing attribute fails the whole allocation. The claim guides of
+[`display-operator`](https://liken.sh/display/docs/guides/claim/) and
+[`audio-operator`](https://liken.sh/audio/docs/guides/claim/) list the
+attributes, and selectors that still match after you change the
+cabling.
 
-`render` is required for video. `mpv` decodes and draws through the
-GPU, and a `Player` with a display and no render node plays nothing.
-Omit `display` and `render` together for a unit that plays sound
-alone. [Players](https://liken.sh/media/docs/reference/players/) describes every field.
+A `Player` with a `display` needs a `render`, because `mpv` decodes
+and draws through the GPU, and without one it plays nothing. For a
+`Player` that plays sound only, omit both `display` and `render`.
+[Players](https://liken.sh/media/docs/reference/players/) describes every field.
 
 ## 3. Read the status
 
-The operator creates a persistent claim for the screen and a pod that
-draws the idle screen, named `<player>-idle`:
+The operator creates a claim for the screen, named
+`<player>-idle-devices` and owned by the `Player`, and a pod named
+`<player>-idle` that draws the idle screen:
 
     kubectl get player den
     NAME   ZONE   ACTIVITY   PLAY   IDLE                          SCREEN    AGE
     den    den    Idle              media.liken.sh/idle-screen    Present   40s
 
-`SCREEN` is the reason of the `Screen` condition. `Present` means the
-screen's `Display` reports a panel on its connector, and the idle
-screen is on it. The condition is absent until the claim resolves
-once, so an empty column right after the apply is normal. Read the
-whole status for the screen and the outputs the claim resolved to:
+`SCREEN` shows the reason of the `Screen` condition. `Present` means
+that the screen's `Display` reports a panel on its connector. The
+condition does not exist until the claim has been allocated once, so
+the column is empty right after you apply the `Player`. To see which
+screen and outputs the claims were allocated, read the status:
 
     kubectl get player den -o jsonpath='{.status.screen}{"\n"}{.status.sinks}{"\n"}'
 
-`status.sinks` fills after the first `Play`, because the operator
-reads the outputs from an allocated playback claim.
+`status.sinks` is empty until the first `Play`, because the operator
+reads the outputs from the allocated claim of a playback pod.
 
 ## 4. When the idle pod stays Pending
 
-A `Pending` idle pod means the claim on the screen did not allocate.
-The `Screen` condition says why:
+A `Pending` idle pod means that the claim for the screen was not
+allocated. The reason of the `Screen` condition shows why:
 
-* `PanelAway`: the `Display` reports no panel on the connector. The
-  monitor shows another input, or its cable is out. Switch the input
-  or seat the cable, and the pod schedules on its own. This park is
-  by design, and the pod stays `Pending` until the panel returns.
-  `display-operator` reports a panel gone only after its connector
-  has read no panel for 5 seconds, so an A/V receiver in standby that
-  drops hot plug detect for a moment does not move the condition.
-* `NoDisplay` or `NotReported`: no `Display` carries the monitor the
-  claim remembers. Go back to step 1 and confirm the machine
-  publishes the screen.
-* An empty column: the claim has not resolved. Read the claim's
-  events for the selector that matched nothing, or matched devices
-  on two machines:
+* `PanelAway`: the `Display` reports no panel on the connector,
+  because the monitor shows another input or its cable is
+  disconnected. Switch the input or connect the cable, and the
+  scheduler starts the pod. `display-operator` reports a panel as
+  gone only after the connector has read no panel for 5 seconds, so
+  an A/V receiver in standby that drops hot plug detect for a moment
+  does not change the condition.
+* `NoDisplay` or `NotReported`: no `Display` exists for the monitor
+  that the claim was allocated to. Go back to step 1 and check that
+  the machine publishes the screen.
+* An empty column: the claim has not been allocated. Read the claim's
+  events to find a selector that matched no device, or matched
+  devices on two machines:
 
         kubectl describe resourceclaim den-idle-devices
 
 A selector that reads an attribute without `has()` fails on every
-device that lacks it. If every candidate lacks that attribute, the
-resulting claim matches no device.
+device that lacks the attribute. When every candidate device lacks it,
+the claim matches no device.
 
-A pod whose events say `Insufficient memory` or `Insufficient cpu`
-has a different cause: the machine that has the screen has too little
-memory or cpu left for the pod's requests. Every pod of a `Player`
-must run on that machine, so the scheduler cannot place it on another
-one. At the defaults, the idle pod requests 96Mi of memory and 5m of
-cpu. A playback pod requests 592Mi and 100m in all: 432Mi and 80m for
-the player, 144Mi and 10m for the display, and 16Mi and 10m for the
-command sidecar. The idle pod keeps running under a film, so a machine
-must hold both pods at once: about 688Mi and 105m. Free memory on the
+When a pod's events say `Insufficient memory` or `Insufficient cpu`,
+the machine that has the screen lacks free memory or cpu for the
+pod's requests, and the pod cannot run on another machine. The idle
+pod keeps running during a film, so with the default values the
+machine needs room for both pods at once: 688Mi of memory and 105m of
+cpu, of which the idle pod requests 96Mi and 5m. Free memory on the
 machine, lower the requests as the
 [install guide](https://liken.sh/media/docs/guides/install/#container-resources) shows, or
-connect the screen to a machine with more.
+connect the screen to a machine with more memory.
 
     kubectl describe pod den-idle
 
 ## 5. Prove it plays
 
-Create a `Play` that names the unit, with one file the machine can
-reach:
+Create a `Play` for the `Player`, with one file that the machine can
+read:
 
     kubectl apply -f - <<EOF
     apiVersion: media.liken.sh/v1alpha1
@@ -172,59 +171,63 @@ reach:
         - uri: nfs://nas/media/movies/Example (2019)/Example.mkv
     EOF
 
-The `Player`'s `ACTIVITY` goes to `Starting`, then `Playing`, and the
-film is on the screen with its sound on the outputs you named. Press
-a button on the remote to confirm it drives the unit. Delete the
-`Play` to stop, and the idle screen returns:
+The `ACTIVITY` of the `Player` changes to `Starting`, and then to
+`Playing`. The film appears on the screen, and its sound plays on the
+outputs that you selected. Press a button on the remote to check that
+it controls the `Player`. To stop the film, delete the `Play`, and the
+idle screen returns:
 
     kubectl delete play den-check
 
-A `Play` that stays `Starting` has a pod that did not schedule, and
-its events name the device that did not allocate. A `uri` scheme the
-operator does not know fails the `Play` before any pod exists.
-[Plays](https://liken.sh/media/docs/reference/plays/) describes the item forms.
+When a `Play` stays `Starting`, the scheduler could not place its pod,
+and the pod's events name the device that was not allocated. A `uri`
+with a scheme that the operator does not support fails the `Play`
+before the operator creates a pod.
+[Plays](https://liken.sh/media/docs/reference/plays/) describes the forms of an item.
 
 ## Choose what the screen does when idle
 
-The operator's own idle screen is the default. Three fields on
-`spec.idle` change it, and each one overrides the default
-`MediaPreferences` on its own:
+By default `media-operator` draws the idle screen. The fields of
+`spec.idle` change that, and each field you set on a `Player`
+overrides the same field of the default `MediaPreferences`:
 
-* `controller` hands the screen to another operator, such as the
-  library operator's browser.
+* `controller` gives the screen to another operator, such as the
+  browser of `library-operator`.
   [Hand the idle screen to another controller](https://liken.sh/media/docs/guides/handing-the-idle-screen-to-another-controller/)
-  covers both sides.
-* `fadeAfterSeconds` fades the idle screen to black after that much
-  quiet. `offAfterSeconds` darkens the panel itself after that much
-  quiet, at least `fadeAfterSeconds`, and only where a `Display`
-  exists for the screen.
-* Set `offAfterSeconds: 0` for a monitor that other machines share.
-  The panel cannot say whose input it would darken.
+  describes both sides.
+* `fadeAfterSeconds` fades the idle screen to black after that many
+  seconds with no activity. Zero turns the fade off.
+* `offAfterSeconds` turns the panel off after that many seconds with
+  no activity. The idle client treats a value below `fadeAfterSeconds`
+  as `fadeAfterSeconds`, and the panel turns off only when a `Display`
+  exists for the screen. Zero keeps the panel on. Set it to zero for a
+  monitor that other machines also use, because the panel cannot tell
+  which machine's input it is showing.
 
-Set the defaults once for every unit in the cluster's
-[`MediaPreferences`](https://liken.sh/media/docs/reference/mediapreferences/), and set a
-field on a `Player` only where that unit differs.
+To set a default for every `Player` in the cluster, use
+[`MediaPreferences`](https://liken.sh/media/docs/reference/mediapreferences/). Set a field
+on a `Player` only when that `Player` needs a different value.
 
 ## Send Dolby and DTS to the receiver
 
-With `passthrough: On`, a film's Dolby and DTS tracks go to an A/V
-receiver encoded, and the receiver decodes them itself. That is the
-only way the receiver's height speakers play Dolby Atmos and DTS:X,
-because `mpv` decodes a track to its channel bed and drops the height
-objects. A track whose format the receiver does not take is decoded,
-as it is with passthrough off.
+With `passthrough: On`, `mpv` sends a film's Dolby and DTS tracks to
+an A/V receiver encoded, and the receiver decodes them. Only then do
+the receiver's height speakers play Dolby Atmos and DTS:X, because
+`mpv` decodes a track to its channel bed and drops the height
+objects. `mpv` still decodes a track in a format that the receiver
+does not accept.
 
 You need:
 
-* A `Receiver` under the `Player`, with a `Reachable` condition of
-  `True`. The equipment operator's
+* A `Receiver` that belongs to the `Player`, with a `Reachable`
+  condition of `True`. The equipment operator's
   [install guide](https://liken.sh/equipment/docs/guides/install/#put-it-under-a-player)
   wires it in.
-* Exactly one entry in `spec.sinks`, because one `mpv` stream goes to
-  one sink.
-* A sink that lists the formats the receiver accepts. The audio
-  operator writes them from the receiver's own report, and an empty
-  answer means the sink takes none:
+* Exactly one entry in `spec.sinks`, because `mpv` sends one stream
+  to one sink.
+* A `Sink` that lists the formats that the receiver accepts.
+  `audio-operator` writes the list from the receiver's own report, and
+  an empty list means that the sink accepts none:
 
         kubectl get sink <name> -o jsonpath='{.status.passthrough}{"\n"}'
         ["AC3","EAC3","DTS","DTS-HD","TrueHD"]
@@ -233,31 +236,31 @@ Set the field on the `Player`:
 
     kubectl patch player den -n media --type merge -p '{"spec":{"passthrough":"On"}}'
 
-The setting is off by default, because it changes how the volume
-works. PipeWire cannot scale an encoded track, so while one plays, the
-sink's level and mute do nothing. The remote's volume keys move the
-receiver's own volume, as they do for every `Player` whose level a
+Passthrough is off by default, because it changes how volume works.
+PipeWire cannot scale an encoded track, so while one plays, the sink's
+level and mute have no effect. The remote's volume keys change the
+receiver's own volume, as they do for every `Player` whose volume a
 reachable `Receiver` sets.
 
-The operator reads the formats when it creates the playback pod, from
-the sink in `status.sinks`. So two plays decode although the setting
-is on:
+The operator reads the sink's formats when it creates the playback
+pod, from the sink in the `Player`'s `status.sinks`. So `mpv` decodes
+the tracks even with passthrough on in these cases:
 
-* The first play after the `Player`'s first sink allocation. The
+* The first `Play` that is allocated the `Player`'s sink. The
   operator creates the pod before the scheduler allocates its sink,
-  so `status.sinks` names no sink yet. Every later play reads it.
-* A play that starts while the receiver is still waking. A receiver in
-  standby can report fewer formats or none, and the sink then lists
-  only those until the receiver is on. Stop the play and start it
-  again when the receiver is on.
+  so `status.sinks` has no sink yet. Each later `Play` reads it.
+* A `Play` that starts while the receiver is waking up. A receiver in
+  standby can report fewer formats or none, and the sink lists only
+  those until the receiver is on. Stop the `Play` and start it again
+  when the receiver is on.
 
-The operator writes one line for each play start on a `Player` with
-`passthrough: On`. The line names the codecs `mpv` passes through and
-the sink, or says why the play decodes:
+For each `Play` that starts on a `Player` with `passthrough: On`, the
+operator logs a line with the codecs that `mpv` passes through and the
+sink, or the reason that `mpv` decodes the tracks:
 
     kubectl logs -n liken-system deploy/media-operator | grep passthrough
 
-To confirm that the receiver gets the bitstream, read its front panel
-or its sound mode during the film. It names the format, such as Dolby
-Atmos or DTS:X. A receiver that shows multichannel PCM gets a decoded
-track.
+To check that the receiver gets the encoded stream, read its front
+panel or its sound mode during the film. It shows the format, such as
+Dolby Atmos or DTS:X. A receiver that shows multichannel PCM is
+receiving a decoded track.

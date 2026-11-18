@@ -1,16 +1,13 @@
 package main
 
-// A collection whose watch the API server forbids is read from the API
-// server, because no watch keeps its store current.
-
 import (
 	"testing"
 	"testing/synctest"
 )
 
-// A Remote created after the first read of a collection whose watch
-// the API server forbids reaches no store. The view reads the
-// collection and the object from the API server, and answers it.
+// When the API server returns 403 for a collection's watch, the store
+// never becomes ready, so the view reads the collection from the API
+// server. A Remote created after the view started is then still found.
 func TestAForbiddenWatchReadsTheAPIServer(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := servedCluster(t, newFakeCluster())
@@ -33,12 +30,8 @@ func TestAForbiddenWatchReadsTheAPIServer(t *testing.T) {
 	})
 }
 
-// The report desk tells the run's pod from an older one by the pod
-// store, and it runs on the bus reader's goroutine for each report,
-// about one a second for each playing run. It reads only the store,
-// even while the API server forbids the pod watch, so a report sends
-// the API server no request and never waits on a 429 under the desk's
-// lock. The desk already reads a store that lags behind the API server.
+// fold checks a report's pod against the pod store only, even while the
+// pod watch is forbidden. readPodsFrom in report.go gives the reason.
 func TestAReportWhileThePodWatchIsForbiddenSendsNoRequest(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cluster := newFakeCluster()
@@ -49,19 +42,19 @@ func TestAReportWhileThePodWatchIsForbiddenSendsNoRequest(t *testing.T) {
 		pods.forbidWatch = true
 		server.mu.Unlock()
 		view := watchedView(t, server, make(chan struct{}, 1))
-		desk := newReports(make(chan struct{}, 1))
-		desk.readPodsFrom(view)
+		playReports := newReports(make(chan struct{}, 1))
+		playReports.readPodsFrom(view)
 		before := server.objectReads()
 
-		desk.fold("house", "movie", playReport{Item: 1, Position: "0:00:10", Pod: "some-pod"})
+		playReports.fold("house", "movie", playReport{Item: 1, Position: "0:00:10", Pod: "some-pod"})
 
 		mustMatch(t, server.objectReads(), before)
 	})
 }
 
-// A collection the API server does not serve lists as empty while the
-// store is not ready, the way the watch of an optional collection reads
-// it, and a read of one of its objects answers that it does not exist.
+// While the store is not ready, a collection that the API server does
+// not serve lists as empty and has no objects, the same as the watch of
+// an optional resource reads it.
 func TestAnUnservedCollectionReadsAsEmptyWhileTheStoreIsNotReady(t *testing.T) {
 	server := newCollectionServer()
 	source := watchedSource{client: viewClient(t, server), resource: receiverResource}
@@ -69,7 +62,7 @@ func TestAnUnservedCollectionReadsAsEmptyWhileTheStoreIsNotReady(t *testing.T) {
 	listed, err := source.List()
 	mustSucceed(t, err)
 	mustMatch(t, len(listed), 0)
-	_, held, err := source.GetByKey("theater")
+	_, found, err := source.GetByKey("theater")
 	mustSucceed(t, err)
-	mustMatch(t, held, false)
+	mustMatch(t, found, false)
 }

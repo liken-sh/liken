@@ -1,27 +1,23 @@
 package main
 
-// The base table, the layer under every Keymap. Linux splits input in
-// two: the kernel and udev's hwdb normalise a device, so a scancode
-// becomes KEY_VOLUMEUP, and each program binds those names to what
-// they mean there. The base is this operator's half of the first
-// layer. Every KEY_* code passes as itself with no row, so a Remote
-// with no Keymap already works. The base binds only what the kernel
-// cannot name as a key: the hat axes become the arrows, because a
-// d-pad is not a button, and the south and east face buttons become
-// enter and back, because every console reads them that way. Nothing
-// else in the base binds a button.
+// The base key table is the set of rows that every Remote starts from,
+// and a Keymap's rows replace or extend it. The kernel and udev's hwdb
+// already turn a device's scancodes into KEY_* codes such as
+// KEY_VOLUMEUP, and a KEY_* code with no row is sent as itself, so a
+// Remote with no Keymap already works. The base adds rows only for
+// controls that have no KEY_* code. The hat axes become the arrow keys,
+// because a d-pad reports an axis and not a button, and the south and
+// east face buttons become enter and back, as they are on game consoles.
 
 import "fmt"
 
-// The hat repeat cadence. A gamepad never autorepeats in the kernel,
-// so the standing pod synthesises the repeat, and 400ms then 250ms is
-// the cadence a person expects from a keyboard's arrows.
+// The kernel does not autorepeat a gamepad's controls, so the Remote's
+// pod generates the repeat for a held hat direction. The delays of 400ms
+// and then 250ms match keyboard arrow keys.
 var baseHatRepeat = KeymapRepeat{Delay: "400ms", Interval: "250ms"}
 
-// The base itself, written as a Keymap so it compiles through the
-// same path a cluster's Keymap does. This is the one place the
-// project states what a controller means before anybody writes a
-// row.
+// baseKeymap is the base table written as a Keymap, so it compiles
+// through the same compileRows as a Keymap from the cluster.
 var baseKeymap = &Keymap{
 	Metadata: ObjectMeta{Name: "base"},
 	Spec: KeymapSpec{
@@ -38,10 +34,9 @@ var baseKeymap = &Keymap{
 	},
 }
 
-// baseKeys is the compiled base. A failure here panics at start,
-// because the rows are compiled into the binary: a name this build
-// cannot resolve is a fault in this file and not in a cluster's
-// object.
+// baseKeys is the compiled base table. The operator panics at start if
+// it does not compile, because the rows are part of the binary, so a
+// failure is a mistake in this file and not in a cluster's object.
 var baseKeys = mustCompileBase()
 
 func mustCompileBase() []compiledBinding {
@@ -52,11 +47,11 @@ func mustCompileBase() []compiledBinding {
 	return rows
 }
 
-// compileTable is the whole fold: the base first, then the Remote's
-// Keymap over it, one row replacing the base row for the same
-// control. A Remote with no Keymap gets the base alone. The order is
-// stable, because the operator compares the published payload against
-// the last one it wrote.
+// compileTable returns the base rows with the Keymap's rows applied
+// over them. A Keymap row replaces the base row for the same control,
+// and any other Keymap row is appended. A nil Keymap returns the base
+// alone. The row order is deterministic, because the operator compares
+// the payload it would publish with the last one it published.
 func compileTable(keymap *Keymap) ([]compiledBinding, error) {
 	table := make([]compiledBinding, len(baseKeys))
 	copy(table, baseKeys)
@@ -77,9 +72,10 @@ func compileTable(keymap *Keymap) ([]compiledBinding, error) {
 	return table, nil
 }
 
-// indexOfControl finds the row that names the same control. A button
-// row always carries value 1, and an axis row carries the direction,
-// so the three fields together are the control's identity.
+// indexOfControl returns the index of the row in table for the same
+// control as row, or -1. A control is identified by event type, code,
+// and value. A button row always has value 1, and an axis row has the
+// direction, so the two directions of a hat are two controls.
 func indexOfControl(table []compiledBinding, row compiledBinding) int {
 	for index, held := range table {
 		if held.EventType == row.EventType && held.Code == row.Code && held.Value == row.Value {
@@ -89,11 +85,11 @@ func indexOfControl(table []compiledBinding, row compiledBinding) int {
 	return -1
 }
 
-// lookupKey is the match the standing pod runs on every event. The
-// value is normalised for a key and exact for an axis: a key's row
-// states the press, and the release and the autorepeat carry the same
-// meaning under the same name, while a hat's two directions are two
-// rows on one code.
+// lookupKey returns the row that matches an input event. The Remote's
+// pod calls it for every event. A key event matches its row whatever
+// its value, so the press, the release, and the autorepeat of a key all
+// return the same row. An axis event must match the row's value
+// exactly, because each direction of a hat has its own row.
 func lookupKey(table []compiledBinding, event inputEvent) (compiledBinding, bool) {
 	value := event.Value
 	if event.Type == evKey {

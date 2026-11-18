@@ -1,8 +1,8 @@
 package main
 
-// The shared apiclient package sends every write, and every read that
-// must include this program's own last write. The watches read each
-// collection through client-go (clusterwatch.go and informer.WatchOne).
+// Every write, and every read that must see this program's own last
+// write, goes through the apiclient package. The watches read through
+// client-go (clusterwatch.go and informer.WatchOne).
 
 import (
 	"encoding/json"
@@ -13,33 +13,23 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// serviceAccountDir is a variable so a test points it at a directory
-// it controls.
+// serviceAccountDir is a variable so that a test can point it at a
+// directory of its own.
 var serviceAccountDir = apiclient.ServiceAccountDir
 
-// inClusterClient builds the client from the pod's environment and its
-// ServiceAccount. timeout limits one request, and zero takes apiclient's
-// default.
+// inClusterClient builds a client from the pod's ServiceAccount. timeout
+// limits one request, and zero uses apiclient's default.
 func inClusterClient(timeout time.Duration) (*apiclient.Client, error) {
 	return apiclient.InCluster(apiclient.InClusterOptions{ServiceAccountDir: serviceAccountDir, Timeout: timeout})
 }
 
-// The two content types this client sends besides JSON. An apply is a
-// body the API server reads as a partial object under the caller's
-// field manager. The apply media type is named for YAML and accepts
-// JSON, because YAML is its superset.
-//
-// The merge patch type writes one metadata field and leaves every other
-// field of the object alone.
+// The apply content type says YAML, and the API server accepts the JSON
+// body that this client sends because JSON is valid YAML.
 const (
 	applyContentType = "application/apply-patch+yaml"
 	mergePatchType   = "application/merge-patch+json"
 )
 
-// The collection paths. The watches read each collection through
-// client-go (clusterwatch.go), and this client writes each object
-// under its namespace's path, and under its group's path for a
-// cluster-scoped kind.
 const (
 	playsPath       = "/apis/" + mediaAPIVersion + "/plays"
 	playersPath     = "/apis/" + mediaAPIVersion + "/players"
@@ -87,10 +77,10 @@ func GetPlay(c *apiclient.Client, namespace, name string) (*Play, error) {
 	return play, nil
 }
 
-// DeletePlay removes one Play once its window after finishing has passed.
-// It is the one object a person created that this operator deletes, and it
-// deletes it only in that one state. An already-absent Play is success,
-// because a person may delete a Finished Play before its window ends.
+// DeletePlay deletes a Play. The operator deletes a Finished Play when
+// its retention window has passed, and a Play that a newer Play on the
+// same Player replaces. A Play that is already gone is not an error,
+// because a person can delete it first.
 func DeletePlay(c *apiclient.Client, namespace, name string) error {
 	err := c.RequestJSON(http.MethodDelete, playPath(namespace, name), nil, nil)
 	if errors.Is(err, apiclient.ErrNotFound) {
@@ -99,11 +89,11 @@ func DeletePlay(c *apiclient.Client, namespace, name string) error {
 	return err
 }
 
-// PatchPlayFinalizers writes one Play's finalizer list and answers the
-// resourceVersion the write left behind. The resourceVersion the caller
-// read the Play at rides in the patch, so a write another program made
-// first answers apiclient.ErrConflict rather than overwriting it. An absent Play
-// answers apiclient.ErrNotFound.
+// PatchPlayFinalizers sets a Play's finalizer list and returns the new
+// resourceVersion. The patch includes the resourceVersion that the
+// caller read, so when another writer changed the Play first, the call
+// returns apiclient.ErrConflict and does not overwrite that change. A
+// Play that does not exist returns apiclient.ErrNotFound.
 func PatchPlayFinalizers(c *apiclient.Client, namespace, name, resourceVersion string, finalizers []string) (string, error) {
 	body, err := json.Marshal(map[string]any{
 		"metadata": map[string]any{
@@ -130,8 +120,6 @@ func GetPlayer(c *apiclient.Client, namespace, name string) (*Player, error) {
 	return player, nil
 }
 
-// GetRemote reads one Remote by name in a namespace, the name a
-// Player's spec.remotes entry carries.
 func GetRemote(c *apiclient.Client, namespace, name string) (*Remote, error) {
 	remote := &Remote{}
 	if err := c.RequestJSON(http.MethodGet, remotePath(namespace, name), nil, remote); err != nil {
@@ -140,9 +128,9 @@ func GetRemote(c *apiclient.Client, namespace, name string) (*Remote, error) {
 	return remote, nil
 }
 
-// PutRemoteStatus writes the Remote's status subresource, the one write
-// path this operator has onto a Remote. The subresource split keeps it
-// from ever rewriting the device selector a person declared.
+// PutRemoteStatus replaces a Remote's status through the status
+// subresource, so the write cannot change the Remote's spec. The
+// operator writes a Remote only this way.
 func PutRemoteStatus(c *apiclient.Client, remote *Remote) (*Remote, error) {
 	body, err := json.Marshal(remote)
 	if err != nil {
@@ -196,12 +184,9 @@ func CreatePod(c *apiclient.Client, pod *Pod) (*Pod, error) {
 	return created, nil
 }
 
-// PatchPodLabels adds labels to one pod and leaves the labels it
-// already carries alone, which is what a merge patch of
-// metadata.labels does. The operator writes one label this way, the
-// ending, so the patch names no other field of a pod the kubelet is
-// running. An absent pod answers apiclient.ErrNotFound, because a pod
-// that has gone is nothing to label.
+// PatchPodLabels merge-patches labels into a running pod's
+// metadata.labels. It keeps the pod's other labels and changes no other
+// field. A pod that does not exist returns apiclient.ErrNotFound.
 func PatchPodLabels(c *apiclient.Client, namespace, name string, labels map[string]string) error {
 	body, err := json.Marshal(map[string]any{
 		"metadata": map[string]any{"labels": labels},
@@ -213,10 +198,8 @@ func PatchPodLabels(c *apiclient.Client, namespace, name string, labels map[stri
 		mergePatchType, body, nil)
 }
 
-// DeletePod removes one playback pod. An already-absent pod is
-// success, because the graceful recreate deletes the pod before it
-// creates the replacement, and a delete that races another pass must
-// not fail.
+// DeletePod deletes a pod. A pod that is already gone is not an error,
+// so two deletes that race both succeed.
 func DeletePod(c *apiclient.Client, namespace, name string) error {
 	err := c.RequestJSON(http.MethodDelete, podsPath(namespace)+"/"+name, nil, nil)
 	if errors.Is(err, apiclient.ErrNotFound) {
@@ -225,10 +208,10 @@ func DeletePod(c *apiclient.Client, namespace, name string) error {
 	return err
 }
 
-// ApplyDisplayOverride writes spec.override and nothing else,
-// under this operator's own field manager. A nil override applies an
-// empty spec, and the API server then removes the block this manager
-// owns, which is how the panel comes back.
+// ApplyDisplayOverride server-side applies a Display's spec.override as
+// this operator's field manager. A nil override applies an empty spec,
+// so the API server removes the override that this manager set, and the
+// panel returns to its normal state.
 func ApplyDisplayOverride(c *apiclient.Client, name string, override *DisplayOverride) error {
 	body, err := json.Marshal(&displayApply{
 		APIVersion: displayAPIVersion,
@@ -243,15 +226,14 @@ func ApplyDisplayOverride(c *apiclient.Client, name string, override *DisplayOve
 	return c.Request(http.MethodPatch, path, applyContentType, body, nil)
 }
 
-// ApplyReceiverSession writes status.session and nothing else, under
-// this operator's own field manager on the status subresource. A nil
-// session applies an empty status, and the API server then removes the
-// block this manager owns. That is how the equipment is released.
+// ApplyReceiverSession server-side applies a Receiver's status.session
+// as this operator's field manager. A nil session applies an empty
+// status, so the API server removes the session that this manager set.
 //
-// The session is status and not spec because a status write changes no
-// metadata.generation. The equipment operator reads a new generation as
-// a new statement of its settings, so a session in spec made every
-// active or awake flip send the settings again.
+// The session is in status because a status write does not change
+// metadata.generation. equipment-operator sends a Receiver's settings
+// to the receiver again for each new generation, so a session in spec
+// would resend the settings on every change to the session.
 func ApplyReceiverSession(c *apiclient.Client, name string, session *ReceiverSession) error {
 	body, err := json.Marshal(&receiverStatusApply{
 		APIVersion: receiverAPIVersion,
@@ -266,10 +248,10 @@ func ApplyReceiverSession(c *apiclient.Client, name string, session *ReceiverSes
 	return c.Request(http.MethodPatch, path, applyContentType, body, nil)
 }
 
-// ReleaseReceiverSpecSession applies an empty spec under this
-// operator's field manager, and the API server then removes the
-// spec.session this manager owns. A field another manager owns stays,
-// so the apply never removes the cluster owner's inputs or topics.
+// ReleaseReceiverSpecSession applies an empty spec as this operator's
+// field manager, so the API server removes any spec.session that this
+// manager set. Fields that another manager set, such as the inputs and
+// topics, stay.
 func ReleaseReceiverSpecSession(c *apiclient.Client, name string) error {
 	body, err := json.Marshal(&receiverSpecApply{
 		APIVersion: receiverAPIVersion,
@@ -283,10 +265,8 @@ func ReleaseReceiverSpecSession(c *apiclient.Client, name string) error {
 	return c.Request(http.MethodPatch, path, applyContentType, body, nil)
 }
 
-// DeleteResourceClaim removes one playback claim. The operator deletes
-// a claim only when a Player reshaped it, so the recreate builds the
-// claim the current Player produces. An already-absent claim is
-// success.
+// DeleteResourceClaim deletes a ResourceClaim. A claim that is already
+// gone is not an error.
 func DeleteResourceClaim(c *apiclient.Client, namespace, name string) error {
 	err := c.RequestJSON(http.MethodDelete, claimsPath(namespace)+"/"+name, nil, nil)
 	if errors.Is(err, apiclient.ErrNotFound) {

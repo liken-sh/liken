@@ -1,9 +1,13 @@
-//! The display decodes its own art. Each consumer asks for a picture at a
-//! pixel size, a decode task on the blocking pool reads the file or fetches
-//! the URL and scales it, and the answer comes back as the pixels the toolkit
-//! draws.
-// One module holds the pictures the display draws, because it draws them in
-// its own z order instead of handing overlay ids to mpv.
+//! Decodes the pictures the display draws: the logo, a music track's
+//! cover, the scrub thumbnail, the up-next offer's picture, and cast
+//! portraits. The thumbnail is one tile of the item's trickplay sprite
+//! sheet.
+//!
+//! `Art` returns a `Job` for each picture it needs. The caller runs the
+//! job on the blocking pool, where it reads the file or fetches the URL
+//! and scales the picture, and passes the result to `Art::on_answer`.
+//! The display draws the pictures in its own window above mpv's, not as
+//! mpv overlays, so it controls what draws over what.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -24,58 +28,60 @@ pub use bitmap::Bitmap;
 
 use trickplay::Sheets;
 
-/// The logo's largest box, in canvas coordinates. It sits where the title line
-/// does, and is about that line's height, so the second line below it stays
-/// clear. The logo scales to fit inside this box.
+/// The largest box the logo can fill, in canvas coordinates. It starts
+/// at the title line and is about as tall as that line, so the second
+/// line below it stays clear.
 const LOGO_MAX_W: f32 = 760.0;
 const LOGO_MAX_H: f32 = 110.0;
 
-/// The tile's box in canvas coordinates. The tile fits inside the box and
-/// keeps the aspect, so the bitmap may be smaller.
+/// The box a scrub thumbnail fits in, in canvas coordinates. The
+/// thumbnail keeps its aspect ratio, so the bitmap can be smaller.
 const TILE_W: f32 = 360.0;
 const TILE_H: f32 = 220.0;
 
-/// The tile's bottom edge in canvas coordinates. The tile sits above the time
-/// label and the bar, and grows upward from this line.
+/// The y coordinate of the thumbnail's bottom edge, above the time
+/// label and the scrub bar.
 const TILE_BOTTOM_Y: f32 = 836.0;
-/// The top edge of the largest thumbnail, the highest row a scan's preview
-/// draws on.
+/// The y coordinate of the top of the tallest thumbnail. Subtitles move
+/// above it while a thumbnail shows.
 pub const TILE_TOP: f32 = TILE_BOTTOM_Y - TILE_H;
 
-/// The region the cover fits in: between the left margin and the right one,
-/// and from under the header block to above the scrubber.
+/// The region the cover fits in, in canvas coordinates: the full width
+/// between the side margins, and from below the header to above the
+/// scrub bar.
 const REGION_TOP: f32 = 300.0;
 const REGION_BOTTOM: f32 = 832.0;
 const BOX_H: f32 = REGION_BOTTOM - REGION_TOP;
 const CENTER_Y: f32 = REGION_TOP + BOX_H / 2.0;
 
-/// One canvas length in real pixels, the way every request and every placement
-/// rounds one.
+/// Converts a canvas length to whole pixels. Requests and placements
+/// both use it, so a picture is decoded at the size it is drawn at.
 fn pixels(length: f32, canvas: &Canvas) -> i32 {
     canvas.to_pixels(length) as i32
 }
 
-/// The pixel box a request asks for, and nothing for a screen that gives no
-/// box at all.
+/// The pixel size to decode at, or `None` when either side is zero or
+/// less, as it is for a screen whose size is not known yet.
 fn pixel_box(width: i32, height: i32) -> Option<(i32, i32)> {
     (width > 0 && height > 0).then_some((width, height))
 }
 
-/// What one request asks for, as the name an answer carries back. A slot
-/// takes an answer only for the key it asks for now, so a decode the state
-/// outran lands on nothing.
+/// Identifies one request. `Art` keeps the key of what it requested
+/// last for each picture, and drops an answer whose key differs, such
+/// as an answer for an earlier screen size.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Key {
-    /// The logo and the cover, which the pixel box alone names.
+    /// The logo and the cover, which are identified by their pixel box.
     Box(i32, i32),
-    /// The offer's picture. The reference names it as well as the box,
-    /// because every offer of a Play draws its own picture in the same box.
+    /// An offer's picture or a portrait. The key includes the
+    /// reference, because every offer of a `Play` draws its picture in
+    /// the same box, and every portrait in a row has the same box.
     Picture(String, i32, i32),
-    /// One tile, at the whole second the scan previews.
+    /// One thumbnail, at a whole second of the film.
     Tile(i64, i32, i32),
 }
 
-/// The pictures the display decodes, one name per consumer.
+/// The picture a job or an answer is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     Logo,
@@ -88,23 +94,27 @@ pub enum Kind {
 /// What one decode reads.
 #[derive(Debug, Clone)]
 enum Source {
-    /// One reference the display opens: the item's logo, or the offer's art.
+    /// A file path or URL: the item's logo or the offer's art.
     Picture(String),
-    /// One cell of a sprite sheet, at the millisecond the scan previews.
+    /// One cell of a trickplay sprite sheet in directory `dir`, for the
+    /// time `ms` in milliseconds.
     Tile { dir: String, ms: i64 },
-    /// The playing track's cover, which settles through its tiers on the pool
-    /// because every tier opens a file.
+    /// The playing track's cover. `cover::resolve` takes the item's
+    /// `art`, then a picture embedded in the file, then a cover file in
+    /// its folder. Each check opens a file, so the search runs in the
+    /// job and not on the frame loop.
     Cover {
         art: Option<String>,
         file: Option<String>,
     },
-    /// One person's portrait, which fills its card's box rather than fitting
-    /// inside it, so every card in the row shows a picture of one size.
+    /// One person's portrait. It is scaled to fill its card's box and
+    /// not to fit inside it, so every card in the row shows a picture
+    /// of the same size.
     Portrait(String),
 }
 
-/// One decode the display asks for. It carries the item it was asked for, so
-/// an answer the item swap outran is dropped.
+/// One decode to run. It records the item it was requested for, so
+/// `Art::on_answer` can drop the answer when the item has changed.
 #[derive(Debug, Clone)]
 pub struct Job {
     kind: Kind,
@@ -117,8 +127,8 @@ pub struct Job {
 }
 
 impl Job {
-    /// Read the source and scale it into the box. This runs on the blocking
-    /// pool, because a decode and a network fetch must never hold up a frame.
+    /// Reads the source and scales it into the box. Call it on the
+    /// blocking pool, because decoding and fetching a URL are slow.
     pub fn run(self) -> Answer {
         let (width, height) = (self.width, self.height);
         let bitmap = match &self.source {
@@ -133,22 +143,24 @@ impl Job {
                 decode::open(reference).and_then(|bytes| decode::fill(&bytes, width, height))
             }
         };
-        // A reference that reads back no picture is worth a line: a logo that
-        // never appears reads on screen exactly like a logo the item never
-        // declared.
+        // A picture that fails to decode looks the same on screen as a
+        // picture the item does not have, so the failure is logged.
         if bitmap.is_none() {
-            eprintln!("media-display: no picture in {}", self.reference());
+            eprintln!(
+                "media-display: decoding {} produced no picture",
+                self.reference()
+            );
         }
         self.answer(bitmap)
     }
 
-    /// The answer for a decode that never ran. It is an answer like any
-    /// other, so the slot it names stops waiting on it.
+    /// An answer with no picture, for a job whose decode panicked. It
+    /// still ends the wait for its request.
     pub fn empty(self) -> Answer {
         self.answer(None)
     }
 
-    /// What this decode reads, as the line about it names it.
+    /// The path or URL this job reads, for log lines.
     pub fn reference(&self) -> &str {
         match &self.source {
             Source::Picture(reference) | Source::Portrait(reference) => reference,
@@ -167,10 +179,9 @@ impl Job {
     }
 }
 
-/// One decode as it comes back. A bitmap of nothing is the answer for a source
-/// the display found no picture in, and it is an answer like any other: silence
-/// would read as a slow decode, so the display would ask again on every redraw
-/// and never stop.
+/// The result of one `Job`. A `None` bitmap means the source held no
+/// picture. It is still an answer, because without it `Art` would treat
+/// the request as pending and repeat it on every redraw.
 #[derive(Debug, Clone)]
 pub struct Answer {
     kind: Kind,
@@ -179,122 +190,118 @@ pub struct Answer {
     bitmap: Option<Bitmap>,
 }
 
-/// The logo, the cover, and the offer's picture each ask for one box and hold
-/// what came back.
+/// The request and the result for one picture: the logo, the cover, the
+/// thumbnail, the offer's picture, or one portrait.
 #[derive(Debug, Default)]
 struct Slot {
-    /// What was last asked for, so the same request is not made twice and an
-    /// answer for anything else is dropped.
-    want: Option<Key>,
-    /// The decoded picture. It is nothing until an answer arrives, and a swap
-    /// clears it.
+    /// The key of the latest request. `Art` makes no second request for
+    /// the same key, and drops an answer for any other key.
+    requested: Option<Key>,
+    /// The picture of the latest accepted answer, or `None`.
     bitmap: Option<Bitmap>,
 }
 
-/// The newest tile the display asks for: its key, the target time, and the
-/// pixel box.
+/// The latest thumbnail request.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Wanted {
+struct NewestTile {
     key: Key,
     ms: i64,
     width: i32,
     height: i32,
 }
 
-/// What each consumer asked for, and what came back. The cache is the four
-/// slots and the one held sheet: each consumer holds one picture at the box it
-/// draws, and a scrub holds the sheet it crops from.
+/// The decoded pictures of the current item, and the state that decides
+/// which pictures to request next.
 #[derive(Debug, Default)]
 pub struct Art {
-    /// The logo the current item declared, nothing when it has none.
+    /// The current item's logo, or `None` when it has none or is music.
     logo_uri: Option<String>,
     logo: Slot,
-    /// The sprite-sheet directory the current item declared, nothing when it
-    /// declares none.
+    /// The trickplay sprite-sheet directory the current item declares,
+    /// or `None`.
     trickplay: Option<String>,
     tile: Slot,
-    /// The gate. `inflight` is the key of the decode in flight, and
-    /// `tile_want` is the newest tile the display asks for. One decode runs at
-    /// a time, so a held scrub starts one decode per answer, and the last
-    /// answer is for the newest position. Without the gate a hold starts about
-    /// thirty decodes a second and the tile keeps moving after the hand lifts.
-    /// An unchanged second and box are not asked for again.
+    /// `inflight` is the key of the running thumbnail decode, and
+    /// `newest_tile` is the latest thumbnail request. Only one decode
+    /// runs at a time, and when it finishes, `on_answer` starts one for
+    /// `newest_tile` if that differs. So decodes do not queue up one per
+    /// frame during a scrub, and the thumbnail settles soon after the
+    /// scrub stops.
     inflight: Option<Key>,
-    tile_want: Option<Wanted>,
+    newest_tile: Option<NewestTile>,
     cover: Slot,
-    /// The box already answered for. A redraw then asks once, and an answer of
-    /// no cover ends the asking instead of starting it again.
-    answered: Option<Key>,
+    /// The key of the last cover request that received an answer. After
+    /// an answer with no cover, this stops `cover_request` from asking
+    /// again on every redraw.
+    cover_answered: Option<Key>,
     next: Slot,
-    /// The canvas box the offer's picture draws in, which the display sets
-    /// from the offer: the card's box, or the larger column's while the film
-    /// stands back. Nothing is the card's box.
+    /// The canvas size of the box the offer's picture draws in. The
+    /// display sets it to the up-next card's art box, or to the larger
+    /// column box while the film is stepped back. `None` means the
+    /// card's box.
     next_box: Option<Size>,
-    /// The offer's art reference while an offer with a picture stands, so an
-    /// answer for an offer that no longer stands is dropped.
+    /// The art reference of the current offer, or `None` when no offer
+    /// with a picture is showing. Answers for any other offer are
+    /// dropped.
     offer: Option<String>,
-    /// The portraits of the people the cast row has shown for this item, by
-    /// their path. A row holds a few people and a film a few dozen, so the
-    /// display keeps every portrait it decoded until the item changes.
+    /// The portraits the cast row has requested for this item, by path.
+    /// They stay until the item changes, so a portrait that scrolls out
+    /// of the row and back is not decoded again.
     portraits: HashMap<String, Slot>,
-    // The canvas the last requests were sized for. This client learns its
-    // own surface from the frame it draws.
+    /// The canvas the latest requests were sized for. `on_resize`
+    /// compares each frame's canvas with it.
     canvas: Option<Canvas>,
-    /// How many items have played. Each decode carries the count it was asked
-    /// under, so an answer the item swap outran lands on nothing.
+    /// A counter that increases for each item. Each job records it, so
+    /// an answer for an earlier item can be recognized and dropped.
     item: u64,
-    /// The one decoded sheet a scrub crops from, shared with every decode task
-    /// so a scrub within one sheet reads no second file.
+    /// The most recently decoded sprite sheet, shared with the jobs, so
+    /// a tile from the same sheet is cut without reading the file again.
     sheets: Arc<Mutex<Sheets>>,
 }
 
 impl Art {
-    /// The item's logo, and where it sits in real pixels. The logo shows only
-    /// while the OSD is up and a picture is ready, which the caller gates.
+    /// The item's decoded logo.
     pub fn logo(&self) -> Option<&Bitmap> {
         self.logo.bitmap.as_ref()
     }
 
-    /// The thumbnail the scan previews.
+    /// The decoded scrub thumbnail.
     pub fn tile(&self) -> Option<&Bitmap> {
         self.tile.bitmap.as_ref()
     }
 
-    /// The playing track's cover art, the one picture a music screen carries.
+    /// The decoded cover of the playing track.
     pub fn cover(&self) -> Option<&Bitmap> {
         self.cover.bitmap.as_ref()
     }
 
-    /// Set the canvas box the offer's picture draws in. A new box asks for
-    /// the picture again at its size, and the old picture draws until the
-    /// new one arrives.
+    /// Sets the canvas size of the box the offer's picture draws in.
+    /// The next `sync` requests the picture again at the new size, and
+    /// the old picture stays on screen until the new one arrives.
     pub fn frame_next(&mut self, size: Size) {
         self.next_box = Some(size);
     }
 
-    /// The offer's picture, which the up-next card draws in its own art box.
+    /// The decoded picture of the up-next offer.
     pub fn next(&self) -> Option<&Bitmap> {
         self.next.bitmap.as_ref()
     }
 
-    /// One person's portrait, once its decode has answered.
+    /// The decoded portrait for `path`, once its job has been answered.
     pub fn portrait(&self, path: &str) -> Option<&Bitmap> {
         self.portraits.get(path)?.bitmap.as_ref()
     }
 
-    /// A new item. It drops the previous item's pictures and asks for the new
-    /// item's logo. An item with no logo leaves the header falling back to
-    /// text.
+    /// Starts a new item and drops the previous item's pictures. It also
+    /// clears `inflight`, because `on_answer` drops the answer of the
+    /// previous item's thumbnail decode, and without the reset the new
+    /// item would never start a thumbnail decode.
     ///
-    /// A music item asks for no logo at all. The one fact its header changes is
-    /// the track name, and a logo would stand in the line that carries it.
+    /// A music item requests no logo, because its header shows the
+    /// track name where the logo would go.
     ///
-    /// A stale answer for the old item then does not land on the new one. The
-    /// in-flight mark goes as well, so the new item's first request goes out
-    /// even when the old item's last decode answered nothing.
-    ///
-    /// The offer's picture is named by its box alone and serves the whole run,
-    /// so an item swap leaves it where it is.
+    /// The offer's picture belongs to the offer, not the item, so an
+    /// item change keeps it.
     pub fn on_item(&mut self, presentation: &Presentation, canvas: &Canvas) {
         self.item += 1;
         self.logo_uri = match presentation.is_music() {
@@ -304,10 +311,10 @@ impl Art {
         self.trickplay = presentation.trickplay().map(str::to_string);
         self.logo = Slot::default();
         self.tile = Slot::default();
-        self.tile_want = None;
+        self.newest_tile = None;
         self.inflight = None;
         self.cover = Slot::default();
-        self.answered = None;
+        self.cover_answered = None;
         self.portraits.clear();
         if let Ok(mut sheets) = self.sheets.lock() {
             *sheets = Sheets::default();
@@ -315,12 +322,12 @@ impl Art {
         self.canvas = Some(*canvas);
     }
 
-    /// The frame's own turn: ask for what this state needs.
+    /// Returns the jobs for the pictures this frame needs and has not
+    /// already requested.
     ///
-    /// `preview` carries the target time while a fine scan is in flight for an
-    /// item that declares trickplay, and nothing at every other moment.
-    /// `offer` carries the art of an offer that stands. `portraits` names the
-    /// portraits the cast row draws now.
+    /// `preview` is the time the scrub thumbnail shows, or `None` when
+    /// no thumbnail shows. `offer` is the art reference of the offer on
+    /// screen. `portraits` lists the portraits the cast row draws.
     pub fn sync(
         &mut self,
         presentation: &Presentation,
@@ -351,51 +358,51 @@ impl Art {
         jobs
     }
 
-    /// The screen size changed. Every consumer asks at the new box, and each
-    /// keeps the picture it holds on screen until the new one arrives, so
-    /// nothing blinks on a resize.
+    /// Handles a change of screen size. The logo, thumbnail, offer
+    /// picture, and portraits are requested again at the new size, and
+    /// each keeps its current picture on screen until the new one
+    /// arrives.
     ///
-    /// The cover forgets no key. A new box differs from the one in flight and
-    /// from the one answered, so its own request asks on its own, and a change
-    /// that leaves the box where it was asks nothing.
+    /// The cover needs no reset. Its new box differs from both the box
+    /// being decoded and the last answered box, so `cover_request`
+    /// makes a request for it.
     fn on_resize(&mut self, canvas: &Canvas) {
         if self.canvas == Some(*canvas) {
             return;
         }
         self.canvas = Some(*canvas);
-        self.logo.want = None;
-        self.tile_want = None;
+        self.logo.requested = None;
+        self.newest_tile = None;
         self.inflight = None;
-        self.next.want = None;
+        self.next.requested = None;
         for slot in self.portraits.values_mut() {
-            slot.want = None;
+            slot.requested = None;
         }
     }
 
-    /// Decode the current logo at the pixel size the screen needs. It asks for
-    /// nothing when the item has no logo, when the screen size gives no box,
-    /// or when this item's logo was already asked for at that size.
+    /// Requests the logo at the pixel size of its box. It returns
+    /// `None` when the item has no logo, when the screen size gives no
+    /// box, or when the logo was already requested at this size.
     fn logo_request(&mut self, canvas: &Canvas) -> Option<Job> {
         self.logo_uri.as_ref()?;
         let (width, height) = pixel_box(pixels(LOGO_MAX_W, canvas), pixels(LOGO_MAX_H, canvas))?;
         let key = Key::Box(width, height);
-        if self.logo.want.as_ref() == Some(&key) {
+        if self.logo.requested.as_ref() == Some(&key) {
             return None;
         }
-        self.logo.want = Some(key.clone());
+        self.logo.requested = Some(key.clone());
         let reference = self.logo_uri.clone()?;
         Some(self.job(Kind::Logo, key, Source::Picture(reference), width, height))
     }
 
-    /// Decode the playing track's cover at the pixel box the region gives it.
-    /// The cover fits inside the box and keeps the aspect, so the bitmap may be
-    /// smaller. It asks for nothing before the screen size gives a box, or when
-    /// the same box is already in flight or already answered.
+    /// Requests the playing track's cover, fitted inside the cover
+    /// region. It returns `None` before the screen size gives a box,
+    /// and when this box is already requested or answered.
     ///
-    /// A request for an item whose file mpv has not named yet is held rather
-    /// than asked, because the display asks once and keeps the answer, so an
-    /// answer of no cover sent before the file arrived would leave the cover
-    /// dark for the whole run.
+    /// It also returns `None` while the item has no `art` and mpv has
+    /// not reported a file path. The cover is requested once per box,
+    /// so an answer with no cover, sent before the file was known,
+    /// would leave the cover empty for the rest of the item.
     fn cover_request(
         &mut self,
         presentation: &Presentation,
@@ -410,10 +417,11 @@ impl Art {
             pixels(BOX_H, canvas),
         )?;
         let key = Key::Box(width, height);
-        if self.cover.want.as_ref() == Some(&key) || self.answered.as_ref() == Some(&key) {
+        if self.cover.requested.as_ref() == Some(&key) || self.cover_answered.as_ref() == Some(&key)
+        {
             return None;
         }
-        self.cover.want = Some(key.clone());
+        self.cover.requested = Some(key.clone());
         let source = Source::Cover {
             art: presentation.art().map(str::to_string),
             file: film.path.clone(),
@@ -421,40 +429,45 @@ impl Art {
         Some(self.job(Kind::Album, key, source, width, height))
     }
 
-    /// Decode the tile at the target time and pixel box. Quantize the request
-    /// to a whole second, so a scrub within one second asks for nothing. A new
-    /// second, or a new box, asks again. While a decode is in flight, a new
-    /// want is recorded and not started; the answer starts it when it arrives.
+    /// Requests the thumbnail for the target time. The time is rounded
+    /// to a whole second, so a scrub within one second makes no new
+    /// request. While a decode is running, the new request is only
+    /// recorded in `newest_tile`, and `on_answer` starts it when the
+    /// running decode returns.
     fn tile_request(&mut self, time: f64, canvas: &Canvas) -> Option<Job> {
         self.trickplay.as_ref()?;
         let (width, height) = pixel_box(pixels(TILE_W, canvas), pixels(TILE_H, canvas))?;
         let key = Key::Tile((time + 0.5).floor() as i64, width, height);
-        if self.tile_want.as_ref().is_some_and(|want| want.key == key) {
+        if self
+            .newest_tile
+            .as_ref()
+            .is_some_and(|tile| tile.key == key)
+        {
             return None;
         }
-        let wanted = Wanted {
+        let newest = NewestTile {
             key,
             ms: (time * 1000.0 + 0.5).floor() as i64,
             width,
             height,
         };
-        self.tile_want = Some(wanted.clone());
+        self.newest_tile = Some(newest.clone());
         match self.inflight {
             Some(_) => None,
-            None => Some(self.send_tile(&wanted)),
+            None => Some(self.send_tile(&newest)),
         }
     }
 
-    /// Decode the offer's art at the pixel size the art box takes on this
-    /// screen, once per size. The picture fits inside the box and keeps its
-    /// ratio, so a poster comes back letterboxed.
+    /// Requests the offer's picture at the pixel size of its box, once
+    /// per reference and size. The picture keeps its aspect ratio, so a
+    /// poster is letterboxed.
     fn next_request(&mut self, canvas: &Canvas) -> Option<Job> {
         let frame = self
             .next_box
             .unwrap_or(Size::new(crate::upnext::CARD_W, crate::upnext::ART_H));
         let (width, height) = pixel_box(pixels(frame.width, canvas), pixels(frame.height, canvas))?;
         let asked = matches!(
-            (self.offer.as_deref(), &self.next.want),
+            (self.offer.as_deref(), &self.next.requested),
             (Some(reference), Some(Key::Picture(had, wide, high)))
                 if had == reference && *wide == width && *high == height
         );
@@ -463,12 +476,12 @@ impl Art {
         }
         let reference = self.offer.clone()?;
         let key = Key::Picture(reference.clone(), width, height);
-        self.next.want = Some(key.clone());
+        self.next.requested = Some(key.clone());
         Some(self.job(Kind::Next, key, Source::Picture(reference), width, height))
     }
 
-    /// Decode one portrait at the pixel box a card's picture takes on this
-    /// screen, once per box.
+    /// Requests one portrait at the pixel size of a card's picture,
+    /// once per path and size.
     fn portrait_request(&mut self, path: &str, canvas: &Canvas) -> Option<Job> {
         let (width, height) = pixel_box(
             pixels(crate::cast::PORTRAIT_W, canvas),
@@ -476,10 +489,10 @@ impl Art {
         )?;
         let key = Key::Picture(path.to_string(), width, height);
         let slot = self.portraits.entry(path.to_string()).or_default();
-        if slot.want.as_ref() == Some(&key) {
+        if slot.requested.as_ref() == Some(&key) {
             return None;
         }
-        slot.want = Some(key.clone());
+        slot.requested = Some(key.clone());
         Some(self.job(
             Kind::Portrait,
             key,
@@ -489,24 +502,24 @@ impl Art {
         ))
     }
 
-    /// Start one tile decode and mark it in flight.
-    fn send_tile(&mut self, wanted: &Wanted) -> Job {
-        self.inflight = Some(wanted.key.clone());
+    /// Returns the job for a thumbnail request and records it as
+    /// running.
+    fn send_tile(&mut self, newest: &NewestTile) -> Job {
+        self.inflight = Some(newest.key.clone());
         let source = Source::Tile {
             dir: self.trickplay.clone().unwrap_or_default(),
-            ms: wanted.ms,
+            ms: newest.ms,
         };
         self.job(
             Kind::Trickplay,
-            wanted.key.clone(),
+            newest.key.clone(),
             source,
-            wanted.width,
-            wanted.height,
+            newest.width,
+            newest.height,
         )
     }
 
-    /// One decode, for the item that stands now and the sheet this display
-    /// holds.
+    /// Builds a job for the current item.
     fn job(&self, kind: Kind, key: Key, source: Source, width: i32, height: i32) -> Job {
         Job {
             kind,
@@ -519,33 +532,34 @@ impl Art {
         }
     }
 
-    /// One answer. Each consumer takes its own kind and only the key it asks
-    /// for now, so a misrouted answer and a decode the state outran both draw
-    /// nothing. The return says whether anything the display draws changed,
-    /// and the answer the tile's gate holds open may start the next decode.
+    /// Stores an answer. An answer is kept only when its picture kind
+    /// and key match the latest request for that picture, so late
+    /// answers draw nothing. It returns whether anything drawn changed,
+    /// and a job when a newer thumbnail request was waiting for this
+    /// decode to finish.
     pub fn on_answer(&mut self, answer: Answer) -> (bool, Vec<Job>) {
-        // An answer for an item that is no longer playing lands on nothing, so
-        // the last item's art never draws over the new one. The offer's
-        // picture serves the whole run, so it is the one kind an item swap
-        // does not outrun.
+        // The offer's picture belongs to the offer, not the item, so its
+        // answer is kept across an item change.
         if answer.item != self.item && answer.kind != Kind::Next {
             return (false, Vec::new());
         }
         match answer.kind {
-            // An answer for an item that no longer has a logo is dropped, and
-            // so is one for a box the screen no longer asks for.
+            // Drop the answer when the item has no logo now or the box
+            // changed.
             Kind::Logo
-                if self.logo_uri.is_some() && self.logo.want.as_ref() == Some(&answer.key) =>
+                if self.logo_uri.is_some() && self.logo.requested.as_ref() == Some(&answer.key) =>
             {
                 self.logo.bitmap = answer.bitmap;
             }
-            // Either answer marks the box answered, so the display asks once
-            // for a box, and a missing cover ends the asking.
-            Kind::Album if self.cover.want.as_ref() == Some(&answer.key) => {
-                self.answered = self.cover.want.clone();
+            // An answer without a bitmap also marks the box answered,
+            // so a missing cover is not requested again.
+            Kind::Album if self.cover.requested.as_ref() == Some(&answer.key) => {
+                self.cover_answered = self.cover.requested.clone();
                 self.cover.bitmap = answer.bitmap;
             }
-            Kind::Next if self.offer.is_some() && self.next.want.as_ref() == Some(&answer.key) => {
+            Kind::Next
+                if self.offer.is_some() && self.next.requested.as_ref() == Some(&answer.key) =>
+            {
                 self.next.bitmap = answer.bitmap;
             }
             Kind::Portrait => {
@@ -553,21 +567,23 @@ impl Art {
                     return (false, Vec::new());
                 };
                 match self.portraits.get_mut(path) {
-                    Some(slot) if slot.want.as_ref() == Some(&answer.key) => {
+                    Some(slot) if slot.requested.as_ref() == Some(&answer.key) => {
                         slot.bitmap = answer.bitmap;
                     }
                     _ => return (false, Vec::new()),
                 }
             }
-            // The answer names the tile it carries. When the want names a
-            // different tile, it starts here: this is the one decode per
-            // answer.
+            // The decode finished. When the newest request is for a
+            // different tile, start its decode now.
             Kind::Trickplay => {
                 self.inflight = None;
                 self.tile.bitmap = answer.bitmap;
-                let wanted = self.tile_want.clone().filter(|want| want.key != answer.key);
-                return match wanted {
-                    Some(wanted) => (true, vec![self.send_tile(&wanted)]),
+                let newest = self
+                    .newest_tile
+                    .clone()
+                    .filter(|tile| tile.key != answer.key);
+                return match newest {
+                    Some(newest) => (true, vec![self.send_tile(&newest)]),
                     None => (true, Vec::new()),
                 };
             }
@@ -577,15 +593,15 @@ impl Art {
     }
 }
 
-/// Where the logo sits, in canvas units on the output pixel grid. Every
-/// picture is placed in whole output pixels, because it is decoded to the
-/// pixel size it draws at and a half pixel would resample it.
+/// Returns where to draw the logo, in canvas units. Pictures are placed
+/// on whole output pixels, because each is decoded at its drawn size
+/// and a fractional position would make the renderer resample it.
 pub fn logo_at(canvas: &Canvas) -> Point {
     Point::new(canvas.snap(theme::MARGIN_X), canvas.snap(theme::MARGIN_Y))
 }
 
-/// Where the tile sits: centered on the playhead x, above the bar. It is
-/// clamped, so it stays on screen at both ends.
+/// Returns where to draw the thumbnail: centered on `cursor_x`, above
+/// the scrub bar, and clamped to stay on screen.
 pub fn tile_at(canvas: &Canvas, tile: &Bitmap, cursor_x: f32) -> Point {
     let width = tile.width as i32;
     let mut x = pixels(cursor_x, canvas) - width / 2;
@@ -599,8 +615,7 @@ pub fn tile_at(canvas: &Canvas, tile: &Bitmap, cursor_x: f32) -> Point {
     )
 }
 
-/// Where the cover sits: centered in the region between the header block and
-/// the scrubber.
+/// Returns where to draw the cover: centered in the cover region.
 pub fn cover_at(canvas: &Canvas, cover: &Bitmap) -> Point {
     let centre = theme::MARGIN_X + (canvas.width() - 2.0 * theme::MARGIN_X) / 2.0;
     let x = (pixels(centre, canvas) - cover.width as i32 / 2).max(0);
@@ -627,8 +642,8 @@ mod tests {
         presentation
     }
 
-    /// A film whose file mpv has named, which is what the cover's file tiers
-    /// need before they can answer.
+    /// A film with a file path, which the cover needs to look for an
+    /// embedded or neighboring picture.
     fn film() -> Film {
         Film {
             path: Some("/media/track.flac".to_string()),
@@ -636,27 +651,27 @@ mod tests {
         }
     }
 
-    /// What each decode asks for: its consumer and its pixel box.
+    /// The picture kind and pixel size of each job.
     fn boxes(jobs: &[Job]) -> Vec<(Kind, u32, u32)> {
         jobs.iter()
             .map(|job| (job.kind, job.width, job.height))
             .collect()
     }
 
-    /// The millisecond one tile decode was asked at.
+    /// The time in milliseconds that a thumbnail job is for.
     fn at(job: &Job) -> i64 {
         match job.source {
             Source::Tile { ms, .. } => ms,
-            _ => panic!("the decode is not a tile"),
+            _ => panic!("the job decodes {:?}, want a Source::Tile", job.kind),
         }
     }
 
-    /// One picture of the stated size, as a decode answers with.
+    /// A blank picture of the given size.
     fn picture(width: u32, height: u32) -> Option<Bitmap> {
         Bitmap::from_rgba(width, height, vec![0; (width * height * 4) as usize])
     }
 
-    /// One answer for a decode, carrying the picture the test states.
+    /// An answer for `job` with the given picture.
     fn answer(job: &Job, bitmap: Option<Bitmap>) -> Answer {
         Answer {
             kind: job.kind,
@@ -666,9 +681,10 @@ mod tests {
         }
     }
 
-    /// Every consumer asks for the box its own formula gives, in real pixels.
+    /// Each picture is requested at the pixel size of its box on a
+    /// 1080p canvas.
     #[test]
-    fn every_consumer_asks_for_the_box_its_formula_gives() {
+    fn each_picture_is_requested_at_its_own_box_size() {
         let mut art = Art::default();
         art.on_item(&block(r#"{"logo":"/art/logo.png"}"#), &canvas());
         let jobs = art.sync(
@@ -724,9 +740,9 @@ mod tests {
         assert_eq!(boxes(&next), [(Kind::Next, 440, 248)]);
     }
 
-    /// A 4K surface asks for every box at twice the canvas measure.
+    /// A 4K canvas requests every box at twice the pixel size.
     #[test]
-    fn a_larger_surface_asks_for_a_larger_box() {
+    fn a_larger_screen_requests_larger_boxes() {
         let mut art = Art::default();
         art.on_item(&block(r#"{"logo":"/art/logo.png"}"#), &wide());
         let logo = art.sync(
@@ -751,10 +767,10 @@ mod tests {
         assert_eq!(boxes(&cover), [(Kind::Album, 3456, 1064)]);
     }
 
-    /// A music item asks for no logo at all, and an item with none asks for
-    /// nothing.
+    /// A music item requests no logo even when it declares one, and an
+    /// item without a logo requests none.
     #[test]
-    fn only_an_item_that_declares_a_logo_asks_for_one() {
+    fn only_an_item_with_a_logo_requests_one() {
         for text in [r#"{"type":"music","logo":"/art/logo.png"}"#, "{}"] {
             let mut art = Art::default();
             art.on_item(&block(text), &canvas());
@@ -764,9 +780,10 @@ mod tests {
         }
     }
 
-    /// The header asks once for a size, and asks again for every other item.
+    /// The logo is requested once per size, and again for the next
+    /// item.
     #[test]
-    fn the_logo_asks_once_for_a_size() {
+    fn the_logo_is_requested_once_per_size() {
         let mut art = Art::default();
         let item = block(r#"{"logo":"/art/logo.png"}"#);
         art.on_item(&item, &canvas());
@@ -774,50 +791,59 @@ mod tests {
         assert_eq!(jobs.len(), 1);
         assert!(
             art.sync(&item, &film(), &canvas(), None, None, &[])
-                .is_empty()
+                .is_empty(),
+            "sync requested a picture again, want no request",
         );
 
         art.on_answer(answer(&jobs[0], picture(1, 1)));
-        assert!(art.logo().is_some());
+        assert!(art.logo().is_some(), "no logo picture is stored, want one");
         art.on_item(&item, &canvas());
-        assert!(art.logo().is_none());
+        assert!(art.logo().is_none(), "a logo picture is stored, want none");
         assert_eq!(
             art.sync(&item, &film(), &canvas(), None, None, &[]).len(),
             1
         );
     }
 
-    /// The cover asks once for a box, and an answer of no cover ends the
-    /// asking.
+    /// The cover is requested once per box, and an answer with no cover
+    /// stops further requests.
     #[test]
-    fn an_empty_cover_answer_ends_the_asking() {
+    fn an_empty_cover_answer_stops_further_cover_requests() {
         let mut art = Art::default();
         let item = block(r#"{"type":"music"}"#);
         let jobs = art.sync(&item, &film(), &canvas(), None, None, &[]);
         assert_eq!(jobs.len(), 1);
         assert!(
             art.sync(&item, &film(), &canvas(), None, None, &[])
-                .is_empty()
+                .is_empty(),
+            "sync requested a picture again, want no request",
         );
 
-        assert!(art.on_answer(answer(&jobs[0], None)).0);
-        assert!(art.cover().is_none());
+        assert!(
+            art.on_answer(answer(&jobs[0], None)).0,
+            "the answer reports no change to what is drawn, want one"
+        );
+        assert!(
+            art.cover().is_none(),
+            "a cover picture is stored, want none"
+        );
         assert!(
             art.sync(&item, &film(), &canvas(), None, None, &[])
-                .is_empty()
+                .is_empty(),
+            "sync requested a picture again, want no request",
         );
     }
 
-    /// A cover request is held while mpv has named no file and the block names
-    /// no art, because an answer of no cover would end the asking for the
-    /// whole run.
+    /// No cover is requested while mpv has no file and the item has no
+    /// `art`, because an empty answer would stop all later requests.
     #[test]
-    fn a_cover_waits_for_the_file_mpv_plays() {
+    fn a_cover_is_not_requested_before_mpv_reports_the_file() {
         let mut art = Art::default();
         let item = block(r#"{"type":"music"}"#);
         assert!(
             art.sync(&item, &Film::default(), &canvas(), None, None, &[])
-                .is_empty()
+                .is_empty(),
+            "sync requested a picture again, want no request",
         );
         assert_eq!(
             art.sync(&item, &film(), &canvas(), None, None, &[]).len(),
@@ -833,47 +859,57 @@ mod tests {
         );
     }
 
-    /// A new item drops the cover it holds and asks again, so a film after a
-    /// music item carries no cover parked over it.
+    /// A new item drops the previous cover, so a film that follows a
+    /// music item does not draw the old cover.
     #[test]
-    fn a_new_item_drops_the_cover_and_asks_again() {
+    fn a_new_item_drops_the_cover_and_requests_it_again() {
         let mut art = Art::default();
         let item = block(r#"{"type":"music"}"#);
         let jobs = art.sync(&item, &film(), &canvas(), None, None, &[]);
         art.on_answer(answer(&jobs[0], picture(1, 1)));
-        assert!(art.cover().is_some());
+        assert!(
+            art.cover().is_some(),
+            "no cover picture is stored, want one"
+        );
 
         art.on_item(&block("{}"), &canvas());
-        assert!(art.cover().is_none());
+        assert!(
+            art.cover().is_none(),
+            "a cover picture is stored, want none"
+        );
         assert_eq!(
             art.sync(&item, &film(), &canvas(), None, None, &[]).len(),
             1
         );
     }
 
-    /// The offer's picture is named by its box alone and serves the whole run,
-    /// so it asks once and an item swap leaves it where it is.
+    /// The offer's picture is requested once. An item change keeps it,
+    /// because it belongs to the offer.
     #[test]
-    fn the_offers_picture_asks_once_and_outlives_an_item() {
+    fn the_offer_picture_is_requested_once_and_survives_an_item_change() {
         let mut art = Art::default();
         let offer = Some("/art/next.jpg");
         let jobs = art.sync(&block("{}"), &film(), &canvas(), None, offer, &[]);
         assert_eq!(jobs.len(), 1);
         assert!(
             art.sync(&block("{}"), &film(), &canvas(), None, offer, &[])
-                .is_empty()
+                .is_empty(),
+            "sync requested a picture again, want no request",
         );
 
-        assert!(art.on_answer(answer(&jobs[0], picture(1, 1))).0);
-        assert!(art.next().is_some());
+        assert!(
+            art.on_answer(answer(&jobs[0], picture(1, 1))).0,
+            "the answer reports no change to what is drawn, want one"
+        );
+        assert!(art.next().is_some(), "no next picture is stored, want one");
         art.on_item(&block("{}"), &canvas());
-        assert!(art.next().is_some());
+        assert!(art.next().is_some(), "no next picture is stored, want one");
     }
 
-    /// An answer for an offer that no longer stands, and one for an item with
-    /// no logo, are dropped.
+    /// An answer is dropped when its offer is no longer shown or when
+    /// the item no longer has a logo.
     #[test]
-    fn an_answer_for_something_that_no_longer_stands_is_dropped() {
+    fn an_answer_for_a_withdrawn_offer_or_a_removed_logo_is_dropped() {
         let mut art = Art::default();
         let jobs = art.sync(
             &block("{}"),
@@ -884,23 +920,28 @@ mod tests {
             &[],
         );
         let _ = art.sync(&block("{}"), &film(), &canvas(), None, None, &[]);
-        assert!(!art.on_answer(answer(&jobs[0], picture(1, 1))).0);
-        assert!(art.next().is_none());
+        assert!(
+            !art.on_answer(answer(&jobs[0], picture(1, 1))).0,
+            "the answer reports a change to what is drawn, want none"
+        );
+        assert!(art.next().is_none(), "a next picture is stored, want none");
 
         let mut art = Art::default();
         let item = block(r#"{"logo":"/art/logo.png"}"#);
         art.on_item(&item, &canvas());
         let jobs = art.sync(&item, &film(), &canvas(), None, None, &[]);
         art.on_item(&block("{}"), &canvas());
-        assert!(!art.on_answer(answer(&jobs[0], picture(1, 1))).0);
-        assert!(art.logo().is_none());
+        assert!(
+            !art.on_answer(answer(&jobs[0], picture(1, 1))).0,
+            "the answer reports a change to what is drawn, want none"
+        );
+        assert!(art.logo().is_none(), "a logo picture is stored, want none");
     }
 
-    /// A decode the screen size outran lands on nothing. Two decodes of one
-    /// picture run at once after a resize, and the answer for the box the
-    /// screen no longer draws must not take the slot.
+    /// After a resize, two decodes of one picture can run at once. The
+    /// answer for the old size must not replace the picture.
     #[test]
-    fn an_answer_for_a_box_the_screen_no_longer_asks_for_is_dropped() {
+    fn an_answer_for_a_previous_screen_size_is_dropped() {
         let mut art = Art::default();
         let item = block(r#"{"logo":"/art/logo.png"}"#);
         art.on_item(&item, &canvas());
@@ -908,32 +949,49 @@ mod tests {
         let large = art.sync(&item, &film(), &wide(), None, None, &[]);
         assert_eq!(boxes(&large), [(Kind::Logo, 1520, 220)]);
 
-        // The answer for the old box lands after the new one was asked for.
-        assert!(!art.on_answer(answer(&small[0], picture(760, 110))).0);
-        assert!(art.logo().is_none());
-        assert!(art.on_answer(answer(&large[0], picture(1520, 220))).0);
+        // The answer for the old size arrives after the new request.
+        assert!(
+            !art.on_answer(answer(&small[0], picture(760, 110))).0,
+            "the answer reports a change to what is drawn, want none"
+        );
+        assert!(art.logo().is_none(), "a logo picture is stored, want none");
+        assert!(
+            art.on_answer(answer(&large[0], picture(1520, 220))).0,
+            "the answer reports no change to what is drawn, want one"
+        );
         assert_eq!(art.logo().map(|logo| logo.width), Some(1520));
     }
 
-    /// The cover's own late answer marks no box answered, so the box the
-    /// screen asks for now is still asked for.
+    /// A late answer for the old cover box does not mark the new box
+    /// answered, so the new box's answer is still accepted.
     #[test]
-    fn a_late_cover_answer_leaves_the_new_box_asked_for() {
+    fn a_late_cover_answer_does_not_mark_the_new_box_answered() {
         let mut art = Art::default();
         let item = block(r#"{"type":"music"}"#);
         let small = art.sync(&item, &film(), &canvas(), None, None, &[]);
         let large = art.sync(&item, &film(), &wide(), None, None, &[]);
         assert_eq!(large.len(), 1);
 
-        assert!(!art.on_answer(answer(&small[0], picture(1, 1))).0);
-        assert!(art.cover().is_none());
-        assert!(art.on_answer(answer(&large[0], picture(1, 1))).0);
-        assert!(art.cover().is_some());
+        assert!(
+            !art.on_answer(answer(&small[0], picture(1, 1))).0,
+            "the answer reports a change to what is drawn, want none"
+        );
+        assert!(
+            art.cover().is_none(),
+            "a cover picture is stored, want none"
+        );
+        assert!(
+            art.on_answer(answer(&large[0], picture(1, 1))).0,
+            "the answer reports no change to what is drawn, want one"
+        );
+        assert!(
+            art.cover().is_some(),
+            "no cover picture is stored, want one"
+        );
     }
 
-    /// Every offer of a Play draws its picture in the same box, so the offer's
-    /// slot is named by the reference as well: a second offer decodes its own
-    /// picture, and the first offer's answer does not land on it.
+    /// A second offer requests its own picture, and the first offer's
+    /// answer is dropped.
     #[test]
     fn a_second_offer_decodes_its_own_picture() {
         let mut art = Art::default();
@@ -965,47 +1023,64 @@ mod tests {
                 Some("/art/two.jpg"),
                 &[]
             )
-            .is_empty()
+            .is_empty(),
+            "sync requested a picture again, want no request",
         );
 
-        assert!(!art.on_answer(answer(&first[0], picture(2, 2))).0);
-        assert!(art.next().is_none());
-        assert!(art.on_answer(answer(&second[0], picture(4, 4))).0);
+        assert!(
+            !art.on_answer(answer(&first[0], picture(2, 2))).0,
+            "the answer reports a change to what is drawn, want none"
+        );
+        assert!(art.next().is_none(), "a next picture is stored, want none");
+        assert!(
+            art.on_answer(answer(&second[0], picture(4, 4))).0,
+            "the answer reports no change to what is drawn, want one"
+        );
         assert_eq!(art.next().map(|next| next.width), Some(4));
     }
 
-    /// A decode that never ran answers with no picture, so the slot it names
-    /// stops waiting on it and the display asks again only for a new box.
+    /// The empty answer for a panicked decode ends the wait, and the
+    /// cover is requested again only for a new box.
     #[test]
-    fn a_decode_that_never_ran_answers_with_no_picture() {
+    fn a_panicked_decode_ends_the_wait_for_its_picture() {
         let mut art = Art::default();
         let item = block(r#"{"type":"music"}"#);
         let jobs = art.sync(&item, &film(), &canvas(), None, None, &[]);
-        assert!(art.on_answer(jobs[0].clone().empty()).0);
-        assert!(art.cover().is_none());
+        assert!(
+            art.on_answer(jobs[0].clone().empty()).0,
+            "the answer reports no change to what is drawn, want one"
+        );
+        assert!(
+            art.cover().is_none(),
+            "a cover picture is stored, want none"
+        );
         assert!(
             art.sync(&item, &film(), &canvas(), None, None, &[])
-                .is_empty()
+                .is_empty(),
+            "sync requested a picture again, want no request",
         );
     }
 
-    /// An answer the item swap outran lands on nothing, so the last item's art
-    /// never draws over the new one.
+    /// An answer for the previous item is dropped, so its art is not
+    /// drawn over the new item.
     #[test]
-    fn an_answer_the_item_swap_outran_lands_on_nothing() {
+    fn an_answer_for_the_previous_item_is_dropped() {
         let mut art = Art::default();
         let item = block(r#"{"logo":"/art/logo.png"}"#);
         art.on_item(&item, &canvas());
         let jobs = art.sync(&item, &film(), &canvas(), None, None, &[]);
         art.on_item(&item, &canvas());
-        assert!(!art.on_answer(answer(&jobs[0], picture(1, 1))).0);
-        assert!(art.logo().is_none());
+        assert!(
+            !art.on_answer(answer(&jobs[0], picture(1, 1))).0,
+            "the answer reports a change to what is drawn, want none"
+        );
+        assert!(art.logo().is_none(), "a logo picture is stored, want none");
     }
 
-    /// Three turns during one decode in flight start one decode, and the
-    /// answer starts the newest want.
+    /// Three frames while a thumbnail decode runs start one decode. Its
+    /// answer starts the decode for the newest time.
     #[test]
-    fn one_tile_decode_stands_in_flight_at_a_time() {
+    fn one_tile_decode_runs_at_a_time() {
         let mut art = Art::default();
         let item = block(r#"{"trickplay":"/art/tiles"}"#);
         art.on_item(&item, &canvas());
@@ -1017,15 +1092,19 @@ mod tests {
         assert_eq!(at(&started[0]), 10_000);
 
         let (changed, more) = art.on_answer(answer(&started[0], picture(1, 1)));
-        assert!(changed);
+        assert!(
+            changed,
+            "the answer reports no change to what is drawn, want one"
+        );
         assert_eq!(more.len(), 1);
         assert_eq!(at(&more[0]), 12_000);
-        assert!(art.tile().is_some());
+        assert!(art.tile().is_some(), "no tile picture is stored, want one");
     }
 
-    /// An answer for the want the display holds starts nothing more.
+    /// An answer for the newest requested thumbnail starts no further
+    /// decode.
     #[test]
-    fn an_answer_for_the_want_the_display_holds_starts_nothing() {
+    fn an_answer_for_the_newest_tile_starts_no_decode() {
         let mut art = Art::default();
         let item = block(r#"{"trickplay":"/art/tiles"}"#);
         art.on_item(&item, &canvas());
@@ -1035,13 +1114,16 @@ mod tests {
         }
         assert_eq!(started.len(), 1);
         let (_, more) = art.on_answer(answer(&started[0], picture(1, 1)));
-        assert!(more.is_empty());
+        assert!(
+            more.is_empty(),
+            "the answer started another decode, want none"
+        );
     }
 
-    /// A new item reopens the gate, so the new item's first tile goes out even
-    /// when the old item's last decode answered nothing.
+    /// A new item starts its first thumbnail decode while the previous
+    /// item's decode is still running.
     #[test]
-    fn a_new_item_reopens_the_tile_gate() {
+    fn a_new_item_starts_a_tile_decode_while_one_is_running() {
         let mut art = Art::default();
         let item = block(r#"{"trickplay":"/art/tiles"}"#);
         art.on_item(&item, &canvas());
@@ -1057,10 +1139,10 @@ mod tests {
         assert_eq!(at(&started[0]), 20_000);
     }
 
-    /// A resize reopens the gate and asks at the new box, and the logo and the
-    /// offer ask again as well.
+    /// A resize requests the logo, thumbnail, and offer picture again
+    /// at the new size.
     #[test]
-    fn a_resize_asks_every_consumer_again() {
+    fn a_resize_requests_every_picture_again() {
         let mut art = Art::default();
         let item = block(r#"{"logo":"/art/logo.png","trickplay":"/art/tiles"}"#);
         let offer = Some("/art/next.jpg");
@@ -1079,10 +1161,11 @@ mod tests {
     }
 
     /// The column beside a stepped-back film draws the offer's picture
-    /// larger than the card does, so the decode asks again at the column's
-    /// box, and once more at the card's when the film returns.
+    /// larger than the card does. The picture is requested again at the
+    /// column's size, and again at the card's size when the film
+    /// returns.
     #[test]
-    fn the_offers_picture_follows_the_box_it_draws_in() {
+    fn the_offer_picture_follows_the_box_it_draws_in() {
         let mut art = Art::default();
         let item = block("{}");
         let offer = Some("/art/next.jpg");
@@ -1093,7 +1176,8 @@ mod tests {
         assert_eq!(boxes(&column), [(Kind::Next, 704, 396)]);
         assert!(
             art.sync(&item, &film(), &canvas(), None, offer, &[])
-                .is_empty()
+                .is_empty(),
+            "sync requested a picture again, want no request",
         );
 
         art.frame_next(Size::new(440.0, 248.0));
@@ -1101,18 +1185,18 @@ mod tests {
         assert_eq!(boxes(&card), [(Kind::Next, 440, 248)]);
     }
 
-    /// The logo sits at the title's own corner, in canvas units, so a larger
-    /// surface puts it at the same place in the layout.
+    /// The logo is at the title's corner in canvas units on any screen
+    /// size.
     #[test]
-    fn the_logo_sits_at_the_title_corner() {
+    fn the_logo_is_placed_at_the_title_corner() {
         assert_eq!(logo_at(&canvas()), Point::new(96.0, 90.0));
         assert_eq!(logo_at(&wide()), Point::new(96.0, 90.0));
     }
 
-    /// The tile centres on the playhead and stands on its own bottom line, and
-    /// it clamps to the screen at both ends.
+    /// The thumbnail is centered on the playhead, bottom-aligned to its
+    /// line, and clamped to the screen at both ends.
     #[test]
-    fn the_tile_centres_on_the_playhead_and_clamps() {
+    fn the_tile_is_centered_on_the_playhead_and_clamped_to_the_screen() {
         let tile = picture(360, 220).expect("a tile");
         for (cursor, at) in [
             (960.0, Point::new(780.0, 616.0)),
@@ -1123,18 +1207,18 @@ mod tests {
         }
     }
 
-    /// A tile taller than the line it stands on clamps to the top of the
-    /// screen.
+    /// A thumbnail taller than the space above its line is clamped to
+    /// the top of the screen.
     #[test]
-    fn a_tile_taller_than_its_line_clamps_to_the_top() {
+    fn a_tile_taller_than_its_bottom_line_is_clamped_to_the_top() {
         let tile = picture(4, 900).expect("a tall tile");
         assert_eq!(tile_at(&canvas(), &tile, 960.0).y, 0.0);
     }
 
-    /// The cover centres in its region, and a cover larger than the screen
-    /// clamps to the corner.
+    /// The cover is centered in its region, and a cover wider than the
+    /// screen is clamped to the left edge.
     #[test]
-    fn the_cover_centres_in_its_region() {
+    fn the_cover_is_centered_in_its_region() {
         let cover = picture(532, 532).expect("a cover");
         assert_eq!(cover_at(&canvas(), &cover), Point::new(694.0, 300.0));
 

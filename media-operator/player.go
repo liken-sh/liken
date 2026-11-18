@@ -1,12 +1,11 @@
 package main
 
-// The player mode is the playback pod's entrypoint shim. mpv reads no
-// options from the environment, so the shim reads what the operator set
-// there, builds mpv's arguments the way the pod's Play declares them,
-// and execs mpv.
-// Because it execs, the shim replaces itself, so mpv is the pod's own
-// process. The kubelet then sends mpv the grace-period SIGTERM and
-// reads its exit code, and a zero code is a Play that ran to the end.
+// The player mode is the entrypoint of the playback pod's player
+// container. mpv takes its options only as arguments, so this code
+// reads the environment variables that the operator set from the Play,
+// builds the argument list, and execs mpv. Exec makes mpv the
+// container's main process, so the kubelet sends SIGTERM to mpv and
+// reads its exit code, and exit code 0 means the Play ran to its end.
 
 import (
 	"encoding/json"
@@ -18,39 +17,33 @@ import (
 	"syscall"
 )
 
-// mpvBinary is a variable rather than a constant because the pod runs
-// the mpv its image carries, and a test points it at a stand-in that
-// needs no display and no sound card.
+// mpvBinary is a variable so that a test can point it at a stand-in.
 var mpvBinary = "mpv"
 
-// compositorLostExit is mpv's exit code when its compositor goes away.
-// mpv answers a closed or broken Wayland connection with the CLOSE_WIN
-// key, and its own binding for that key is a plain quit, which exits
-// zero. A zero exit makes the pod Succeeded, and the operator reads a
-// Succeeded pod as a film that reached its end. The shim binds the key
-// to a quit with this code, so the pod fails, and the operator creates
-// the run again at the last position the run reported.
+// compositorLostExit is the exit code of mpv when its Wayland
+// connection closes or breaks. mpv then acts as if the CLOSE_WIN key
+// were pressed, and by default that key quits with exit code 0, which
+// makes the pod Succeeded and the operator reads as a film that played
+// to its end. With CLOSE_WIN bound to a quit with this code, the pod
+// fails, and the operator recreates it at the last position that mpv
+// reported.
 const compositorLostExit = 7
 
-// overlayFont is the family the overlay draws in, installed as two OTF
-// files in the player image and named here for mpv's own OSD. The brand
-// crate carries the same family for the idle screen.
+// overlayFont is the font family of mpv's on-screen display.
+// Dockerfile.player installs it from brand/fonts, and the idle screen
+// uses the same family.
 const overlayFont = "Source Sans 3"
 
-// videoAppID is the xdg app_id of mpv's window. The display tells the
-// compositor where each surface of the claim shows by app_id, and the
-// display's own window carries liken-media-overlay, so the two surfaces
-// of one playback pod move apart.
+// videoAppID is the Wayland app_id of mpv's window. The pod's display
+// container arranges the claim's surfaces by app_id, and its own window
+// is liken-media-overlay. display/src/arranger.rs has the same value.
 const videoAppID = "liken-media-video"
 
-// runPlayer builds mpv's argument vector and execs mpv, so mpv becomes
-// the container's process. On any failure it writes the reason to
-// stderr and exits nonzero, which the kubelet reads as a pod that
-// failed to start its player.
+// runPlayer execs mpv. On a failure it writes the reason to stderr and
+// exits with code 1, so the pod fails.
 func runPlayer(items []string) {
-	// The shim reads the same blocks the command sidecar reads, because the
-	// block is where an item declares its shape, and the album expansion
-	// needs that declaration before mpv sees any argument.
+	// An item's presentation block says whether it is an album, which
+	// expandItems needs before any item becomes an mpv argument.
 	blocks := parsePresentations(os.Getenv(presentationsVariable))
 	entries, err := expandItems(items, blocks)
 	if err != nil {
@@ -62,108 +55,89 @@ func runPlayer(items []string) {
 		fmt.Fprintf(os.Stderr, "player: %v\n", err)
 		os.Exit(1)
 	}
-	// syscall.Exec replaces this process with mpv, so it returns only
-	// when the exec itself fails. The resolved path is argv[0] because
-	// the kernel runs the file the path names, not a PATH lookup.
+	// syscall.Exec does not search PATH, so argv[0] is the full path
+	// that playerArgv resolved.
 	if err := syscall.Exec(argv[0], argv, os.Environ()); err != nil {
-		fmt.Fprintf(os.Stderr, "player: exec %s: %v\n", argv[0], err)
+		fmt.Fprintf(os.Stderr, "player: starting %s: %v\n", argv[0], err)
 		os.Exit(1)
 	}
 }
 
-// playerArgv is the whole of how mpv is told to play. The dmabuf-wayland
-// video output, because the display claim delivers a compositor socket
-// and this output hands each decoded frame to the compositor as a
-// dmabuf: no shader pass in mpv, and a fullscreen surface can go to a
-// display plane. The gpu output renders every frame through EGL and
-// costs a render thread plus the compositor's copy of it, which matters
-// on a passively cooled machine. VAAPI, because the render claim
-// delivers the node that decodes, and this output needs a hardware
-// surface. The PipeWire audio output, because Wayland
-// carries no audio and the sink claim delivers that socket. The IPC
-// server stays because the command sidecar drives that same socket to
-// run each named command and read the report. --osc=no turns off mpv's
-// built-in on-screen controller, because the display draws its own.
-// --load-console=no turns off mpv's built-in command console, which
-// nothing here opens.
+// playerArgv returns mpv's full argument list, with argv[0] resolved
+// from mpvBinary on PATH. It fails when the image has no mpv.
 //
-// The list ends with -- because a media path that starts with a dash
-// would otherwise read as a flag.
+//   - --vo=dmabuf-wayland hands each decoded frame to the compositor as
+//     a dmabuf, so mpv runs no shader pass and a fullscreen surface can
+//     go to a hardware display plane. The gpu output renders through
+//     EGL, which costs a render thread and a compositor copy, and that
+//     heat matters on a machine with passive cooling.
+//   - --hwdec=vaapi decodes on the render claim's render node, because
+//     dmabuf-wayland needs a hardware decoded surface.
+//   - --ao=pipewire plays through the sink claim's socket.
+//   - --input-ipc-server opens the socket that the command container
+//     uses to send commands to mpv.
+//   - --osc=no turns off mpv's on-screen controller, because the
+//     display container draws its own, and --load-console=no turns off
+//     the console, which nothing opens.
 //
-// --no-input-terminal is deliberately absent. mpv installs its SIGTERM
-// handler only on the terminal-input path, and without the handler the
-// kubelet's SIGTERM ends the player the hard way instead of letting it
-// quit.
+// --no-input-terminal is left out on purpose. mpv installs its SIGTERM
+// handler only when terminal input is on, and without that handler the
+// kubelet's SIGTERM kills mpv at once instead of letting it quit
+// cleanly.
 //
-// argv[0] is the resolved binary path, so a test that points mpvBinary
-// at a stand-in reads back the path it set. exec.LookPath fails before
-// mpv runs when the image carries no mpv, which the shim reports rather
-// than execing nothing.
+// The "--" before the items keeps a path that starts with a dash from
+// being read as an option.
 func playerArgv(items []string, blocks []json.RawMessage) ([]string, error) {
 	path, err := exec.LookPath(mpvBinary)
 	if err != nil {
-		return nil, fmt.Errorf("find %s: %w", mpvBinary, err)
+		return nil, err
 	}
 	argv := []string{
 		path,
 		"--vo=dmabuf-wayland",
 		"--hwdec=vaapi",
 		"--fullscreen",
-		// mpv holds its window at the film's own aspect by default. So for a
-		// 2.4:1 film it answers the compositor's 1920 by 1080 configure with
-		// a 1920 by 800 buffer, and the compositor scales that buffer to the
-		// region, which squishes the picture. With the window filling the
-		// region, mpv letterboxes the film inside it, the way fullscreen
-		// did.
+		// By default mpv sizes its window to the film's aspect ratio, so
+		// a 2.4:1 film in a 1920 by 1080 region gets a 1920 by 800
+		// buffer, which the compositor stretches to the region. With
+		// this option the window fills the region and mpv letterboxes
+		// the film.
 		"--keepaspect-window=no",
 		"--ao=pipewire",
 		"--input-ipc-server=" + mpvSocketPath,
 		"--osc=no",
 		"--load-console=no",
-		// mpv's own OSD messages draw in the brand family; libass resolves
-		// it through fontconfig against the two OTF files the image installs.
 		"--osd-font=" + overlayFont,
-		// The binding that makes a lost compositor a failed pod, as
-		// compositorLostExit says. memory:// is mpv's inline file, so the
-		// shim writes no file to a root filesystem it may not write to.
+		// memory:// is an inline config file, so nothing is written to
+		// a root filesystem that may be read-only.
 		"--input-conf=memory://CLOSE_WIN quit " + strconv.Itoa(compositorLostExit),
-		// The display arranges the claim's surfaces through the compositor,
-		// and an arrangement names a surface by its xdg app_id. So mpv's
-		// window carries the name the display steps back at the credits.
-		// display/src/arranger.rs names the same value.
 		"--wayland-app-id=" + videoAppID,
-		// mpv's --tls-verify defaults to no, so without this flag mpv plays
-		// an https:// item from a server with an expired, self-signed, or
-		// wrong-host certificate. mpv checks the chain against the CA bundle
-		// that the image copies from the trust component.
+		// mpv's --tls-verify defaults to no, which accepts any
+		// certificate for an https:// item. mpv checks the chain against
+		// the CA bundle that the image copies from the trust component.
 		"--tls-verify=yes",
 	}
-	// --quiet is the default because mpv prints its status line about
-	// eight times a second, this process's stdout is the pod log on the
-	// machine's disk, and containerd and the kubelet tail it. --quiet
-	// drops that line and keeps warnings and errors. MEDIA_PLAYER_VERBOSE
-	// with any value brings the full output back; the shim adds no -v.
+	// mpv prints its status line many times a second into the pod log,
+	// which is written to the machine's disk. --quiet drops the status
+	// line and keeps warnings and errors.
 	if os.Getenv(playerVerboseVariable) == "" {
 		argv = append(argv, "--quiet")
 	}
-	// A run of nothing but music draws no video, so the display owns the
-	// whole frame instead of annotating the cover art mpv would frame. One
-	// item that is not music keeps video on for the whole run.
-	//
-	// --force-window=yes holds a window over the blanked video. Without it
-	// mpv opens no window at all for a run with no video track, and the
-	// display draws nothing.
+	// When every item is music, mpv shows no cover art, and the display
+	// container draws the whole frame. --vid applies to the whole run,
+	// so one item that is not music keeps video on. mpv opens no window
+	// for a run with no video track, so --force-window=yes keeps one
+	// open for the display container to draw over.
 	if allMusic(blocks, len(items)) {
 		argv = append(argv, "--vid=no", "--force-window=yes")
 	}
-	// The declared start applies to the first file mpv loads and to no
-	// later playlist entry, which is exactly what spec.start means: the
-	// run begins here, and later items begin at their own start.
+	// mpv applies --start to the first file only, which matches
+	// spec.start: later items begin at their own start.
 	if start := os.Getenv(playStartVariable); start != "" {
 		argv = append(argv, "--start="+start)
 	}
-	// The operator resolved these language and subtitle flags and joined them with
-	// newlines. The shim forwards each one to mpv, unread.
+	// The operator resolved the language, subtitle, and S/PDIF
+	// passthrough options, and joined them with newlines.
 	if options := os.Getenv(playerOptionsVariable); options != "" {
 		for _, option := range strings.Split(options, "\n") {
 			if option != "" {

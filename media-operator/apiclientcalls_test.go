@@ -1,9 +1,5 @@
 package main
 
-// These tests run every call this client makes against a server that
-// answers each one, and against one that fails each one, so no reader or writer
-// swallows a failure.
-
 import (
 	"net/http"
 	"testing"
@@ -11,9 +7,9 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// Every read and write this client makes, against a server that fails
-// each one. A caller sees the failure rather than an empty object.
-func TestEveryCallCarriesTheServersFailure(t *testing.T) {
+// Against a server that fails every request, each read and write
+// returns the error, not an empty object.
+func TestEveryCallReturnsTheServersFailure(t *testing.T) {
 	cases := []struct {
 		name string
 		call func(c *apiclient.Client) error
@@ -64,8 +60,9 @@ func TestEveryCallCarriesTheServersFailure(t *testing.T) {
 	}
 }
 
-// The three deletes treat an already-absent object as success, because
-// each one races another pass or a person who deleted the object first.
+// The delete functions treat an object that is already gone as a
+// success, because each can race with another pass or with a person who
+// deleted the object first.
 func TestAnAbsentObjectIsASuccessfulDelete(t *testing.T) {
 	cases := []struct {
 		name string
@@ -85,9 +82,8 @@ func TestAnAbsentObjectIsASuccessfulDelete(t *testing.T) {
 	}
 }
 
-// Each read reaches its own path.
-func TestEachReadNamesItsOwnPath(t *testing.T) {
-	api := &cannedAPI{answers: map[string]any{
+func TestEachReadRequestsItsOwnPath(t *testing.T) {
+	api := &cannedAPI{responses: map[string]any{
 		"GET /apis/media.liken.sh/v1alpha1/namespaces/house/plays/movie":    Play{Metadata: ObjectMeta{Name: "movie"}},
 		"GET /apis/media.liken.sh/v1alpha1/namespaces/house/remotes/wand":   Remote{},
 		"GET /apis/resource.k8s.io/v1/namespaces/house/resourceclaims/mine": ResourceClaim{},
@@ -110,10 +106,10 @@ func TestEachReadNamesItsOwnPath(t *testing.T) {
 	mustMatch(t, pod.Metadata.Name, "movie-playback")
 }
 
-// A Player's status goes through the status subresource, so the write
-// can never touch the spec a person declared.
+// A Player's status is written through the status subresource, so the
+// write cannot change the spec that a person declared.
 func TestAPlayerStatusWritesTheStatusSubresource(t *testing.T) {
-	api := &cannedAPI{answers: map[string]any{
+	api := &cannedAPI{responses: map[string]any{
 		"PUT /apis/media.liken.sh/v1alpha1/namespaces/house/players/theater/status": Player{
 			Metadata: ObjectMeta{Name: "theater", Namespace: "house", ResourceVersion: "13"},
 		},
@@ -129,10 +125,10 @@ func TestAPlayerStatusWritesTheStatusSubresource(t *testing.T) {
 	mustMatch(t, api.requests[0].Path, "/apis/media.liken.sh/v1alpha1/namespaces/house/players/theater/status")
 }
 
-// A Remote's status goes through its own subresource, so the write never
-// rewrites the device selector a person declared.
+// A Remote's status is written through its status subresource, so the
+// write cannot change the device selector that a person declared.
 func TestPutRemoteStatusWritesTheStatusSubresource(t *testing.T) {
-	api := &cannedAPI{answers: map[string]any{
+	api := &cannedAPI{responses: map[string]any{
 		"PUT /apis/media.liken.sh/v1alpha1/namespaces/house/remotes/wand/status": Remote{
 			Metadata: ObjectMeta{Name: "wand", Namespace: "house", ResourceVersion: "8"},
 		},
@@ -145,13 +141,10 @@ func TestPutRemoteStatusWritesTheStatusSubresource(t *testing.T) {
 	mustMatch(t, api.requests[0].Path, "/apis/media.liken.sh/v1alpha1/namespaces/house/remotes/wand/status")
 }
 
-// The session apply reaches the Receiver's status subresource, under
-// this operator's field manager, as an apply patch that carries the
-// session alone. A nil session carries an empty status, which is the
-// lift.
-//
-// The active and awake flags are always on the wire, so a session that
-// carries neither still states both as false.
+// ApplyReceiverSession sends an apply patch to the Receiver's status
+// subresource with the session as the only field. A nil session sends an
+// empty status, which releases the session that this field manager
+// owns. The active and awake fields are always sent, even as false.
 func TestTheSessionApplyCarriesTheSessionAlone(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -159,17 +152,17 @@ func TestTheSessionApplyCarriesTheSessionAlone(t *testing.T) {
 		want    string
 	}{
 		{
-			name:    "a session the run holds",
+			name:    "a session with active and awake set",
 			session: &ReceiverSession{Player: "house/theater", Input: "GAME", Active: true, Awake: true},
 			want:    `{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"den-receiver"},"status":{"session":{"player":"house/theater","input":"GAME","active":true,"awake":true}}}`,
 		},
 		{
-			name:    "a session at a dark panel",
+			name:    "a session with neither active nor awake",
 			session: &ReceiverSession{Player: "house/theater", Input: "GAME"},
 			want:    `{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"den-receiver"},"status":{"session":{"player":"house/theater","input":"GAME","active":false,"awake":false}}}`,
 		},
 		{
-			name: "a session with its three asks",
+			name: "a session with volume, power, and input asks",
 			session: &ReceiverSession{
 				Player:    "house/theater",
 				Input:     "GAME",
@@ -182,13 +175,13 @@ func TestTheSessionApplyCarriesTheSessionAlone(t *testing.T) {
 				`"volumeAsk":{"level":44.5,"mute":false,"at":"2026-10-04T12:15:25.164Z"},"powerAsk":{"action":"toggle","at":"2026-10-04T12:20:01.002Z"},"inputAsk":{"action":"ensure","at":"2026-10-04T12:20:07.410Z"}}}}`,
 		},
 		{
-			name: "the lift",
+			name: "no session",
 			want: `{"apiVersion":"equipment.liken.sh/v1alpha1","kind":"Receiver","metadata":{"name":"den-receiver"},"status":{}}`,
 		},
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
-			api := &cannedAPI{answers: map[string]any{
+			api := &cannedAPI{responses: map[string]any{
 				"PATCH /apis/equipment.liken.sh/v1alpha1/receivers/den-receiver/status": Receiver{},
 			}}
 
@@ -202,11 +195,11 @@ func TestTheSessionApplyCarriesTheSessionAlone(t *testing.T) {
 	}
 }
 
-// The spec release reaches the Receiver's own path as an apply patch
-// with an empty spec, which releases the spec.session this manager
-// owns and nothing else.
+// ReleaseReceiverSpecSession sends an apply patch with an empty spec,
+// which releases the spec.session fields that this field manager owns
+// and no other field.
 func TestTheSpecReleaseCarriesAnEmptySpec(t *testing.T) {
-	api := &cannedAPI{answers: map[string]any{
+	api := &cannedAPI{responses: map[string]any{
 		"PATCH /apis/equipment.liken.sh/v1alpha1/receivers/den-receiver": Receiver{},
 	}}
 

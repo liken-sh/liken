@@ -1,9 +1,5 @@
 package main
 
-// These tests cover the trust store: every sibling's CA is an anchor,
-// an absent sibling is tolerated, every certificate in a rotating
-// file is an anchor, and the watch keeps the pool current.
-
 import (
 	"context"
 	"crypto/x509"
@@ -32,8 +28,8 @@ func caConfigMap(name string, certificates ...[]byte) *ConfigMap {
 	}
 }
 
-// chainsTo checks the outcome the pool is for: a serving certificate
-// this CA signed verifies against it for a sibling's Service name.
+// chainsTo returns an error unless a serving certificate that ca signs
+// verifies against pool.
 func chainsTo(t *testing.T, ca *authority, pool *x509.CertPool) error {
 	t.Helper()
 	certPEM, _, err := ca.mintLeaf(time.Now(), "sibling.liken-system.svc")
@@ -44,10 +40,9 @@ func chainsTo(t *testing.T, ca *authority, pool *x509.CertPool) error {
 	return err
 }
 
-// followTrust runs the trust store's watches until the test ends, and
-// answers the channels that close on the first read of each ConfigMap.
-// The caller runs in a synctest bubble. When the test ends, the watches
-// stop, and the bubble waits for them to end, before the server closes.
+// followTrust runs the trust store's watches until the test ends and
+// returns the channels of follow. The caller runs in a synctest bubble.
+// Cleanup waits for the watches to stop before the fake server closes.
 func followTrust(t *testing.T, api *coreAPI, store *trustStore) []<-chan struct{} {
 	t.Helper()
 	watcher := testWatcher(t, api.handler())
@@ -61,15 +56,14 @@ func followTrust(t *testing.T, api *coreAPI, store *trustStore) []<-chan struct{
 	return read
 }
 
-// followedTrust runs the trust store's watches until the test ends, and
-// checks that every ConfigMap had its first read, the way the api role
-// waits for them before it serves.
+// followedTrust is followTrust, and it fails the test unless every
+// ConfigMap had its first read.
 func followedTrust(t *testing.T, api *coreAPI, store *trustStore) {
 	t.Helper()
 	mustMatch(t, awaitSynced(t.Context(), followTrust(t, api, store)...), true)
 }
 
-func TestTrustStoreCarriesEverySiblingsAnchor(t *testing.T) {
+func TestTrustStoreTrustsEverySiblingsCA(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := newCoreAPI()
 		display, audio := testAuthority(t), testAuthority(t)
@@ -84,8 +78,6 @@ func TestTrustStoreCarriesEverySiblingsAnchor(t *testing.T) {
 	})
 }
 
-// A cluster may run one sibling and not the other, so an absent
-// ConfigMap leaves the other anchor in place and fails nothing.
 func TestTrustStoreToleratesAnAbsentConfigMap(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := newCoreAPI()
@@ -100,9 +92,7 @@ func TestTrustStoreToleratesAnAbsentConfigMap(t *testing.T) {
 	})
 }
 
-// A rotation appends the new CA to ca.crt, so both certificates in
-// the file are anchors and a leaf under either verifies.
-func TestTrustStoreTakesEveryCertificateInTheFile(t *testing.T) {
+func TestTrustStoreTrustsEveryCertificateInTheFile(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := newCoreAPI()
 		retiring, coming := testAuthority(t), testAuthority(t)
@@ -117,9 +107,8 @@ func TestTrustStoreTakesEveryCertificateInTheFile(t *testing.T) {
 	})
 }
 
-// An API server that refuses the read leaves the ConfigMap unread, and
-// the pool trusts nothing from it.
-func TestTrustStoreTrustsNothingItCouldNotRead(t *testing.T) {
+// When the API server fails the read, the first read never completes.
+func TestTrustStoreTrustsNothingFromAFailedRead(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := newCoreAPI()
 		authority := testAuthority(t)
@@ -134,9 +123,7 @@ func TestTrustStoreTrustsNothingItCouldNotRead(t *testing.T) {
 	})
 }
 
-// The watch keeps the pool current, taking up an appended anchor and
-// dropping a deleted one.
-func TestTrustStoreWatchTakesUpANewAnchor(t *testing.T) {
+func TestTrustStoreWatchFollowsConfigMapChanges(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := newCoreAPI()
 		was, next := testAuthority(t), testAuthority(t)
@@ -154,9 +141,6 @@ func TestTrustStoreWatchTakesUpANewAnchor(t *testing.T) {
 	})
 }
 
-// A sibling this cluster has not deployed yet is one line at the first
-// read, and its ConfigMap is trusted when the watch delivers it, with
-// one more line that says so.
 func TestTrustStoreReportsASiblingThatAppears(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := newCoreAPI()
@@ -173,7 +157,7 @@ func TestTrustStoreReportsASiblingThatAppears(t *testing.T) {
 		lines.mu.Lock()
 		defer lines.mu.Unlock()
 		mustMatch(t, len(lines.lines), 2)
-		mustMatch(t, strings.Contains(lines.lines[0], "composes no stream through that API"), true)
-		mustMatch(t, strings.Contains(lines.lines[1], "is present and media-api trusts it"), true)
+		mustMatch(t, strings.Contains(lines.lines[0], "does not trust its CA"), true)
+		mustMatch(t, strings.Contains(lines.lines[1], "is present again"), true)
 	})
 }

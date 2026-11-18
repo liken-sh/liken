@@ -9,28 +9,28 @@ components = ["brand", "ffmpeg", "kubernetes", "media-screen", "mpv", "notices",
 [docs]
 prefix = "media"
 
-# gofmt, vet, a tidy check of go.mod, and one run of the tests that
-# checks for races and writes the coverage profile, then the coverage
-# gate on that profile. .testcoverage.yml holds the floor.
+# Runs gofmt, vet, a go.mod tidy check, and the tests with the race
+# detector. The coverage gate reads coverage.out, and .testcoverage.yml
+# sets the minimum.
 [[jobs]]
 name = "go"
 toolchain = "go"
 run = "make test-go"
 timeout = 20
 coverage = ["coverage.out"]
-# The tests that cut media run the real ffmpeg.
+# Some tests run the real ffmpeg.
 apt = ["ffmpeg"]
 
-# The link check, the generated skills, and the site build.
+# Checks links, checks the generated skills, and builds the site.
 [[jobs]]
 name = "docs"
 toolchain = "hugo"
 module = "docs"
 run = "make test-docs"
 
-# The Rust workspace: the idle screen and the display.
-# The screen tests run the programs under cage, a headless Wayland
-# compositor, on Mesa's software Vulkan driver.
+# Tests the idle screen and the display. The tests run each program
+# under cage, a Wayland compositor, on its headless backend with Mesa's
+# software Vulkan driver.
 [[jobs]]
 name = "rust"
 toolchain = "rust"
@@ -40,33 +40,33 @@ env = { CARGO_INCREMENTAL = "0", WLR_RENDERER = "pixman" }
 apt = ["cage", "wlr-randr", "mesa-vulkan-drivers", "libvulkan1", "libwayland-client0", "libxkbcommon0"]
 coverage = ["coverage-idle-screen.xml", "coverage-display.xml"]
 
-# The hooks in .pre-commit-config.yaml: the formatters, the linters,
-# and the hygiene checks. The jobs above run the tests and the
-# coverage gates.
+# Runs the formatters, linters, and file checks in
+# .pre-commit-config.yaml.
 [[jobs]]
 name = "prek"
 toolchain = "prek"
-# The go and rust jobs run the same checks as these hooks.
+# The go and rust jobs already run these hooks' checks.
 skip = ["gofmt", "go-vet", "go-mod-tidy", "cargo-fmt"]
 
 [outputs]
 deploy = "deploy"
 
-# The sidecar image is the operator image under a second name. The
-# operator image holds the program's pod build beside the operator's
-# full build, and every sidecar runs the pod build in one of its modes.
-# A repository that needs only the sidecar pins a name that promises
-# nothing about the controller.
+# The operator image also ships /media-operator-pod, the program built
+# with the `pod` tag, which every sidecar container runs.
+# media-operator-sidecar is a second name for the same image, so a
+# repository that runs only the sidecars can pin an image whose name
+# does not suggest the controller.
 #
-# Every image that builds from this module's go.mod takes the shared
-# kubernetes module as a build context, because go.mod replaces it with
+# Every image built from this module's go.mod takes the kubernetes
+# module as a build context, because go.mod replaces it with
 # ../kubernetes. The screen images build from the Rust workspace alone.
 #
-# The player and the screen images install a fallback font from the
-# Debian snapshot of the bases. So they take the vulkan directory as
-# the context builder, for snapshot.sh, and vulkan's version as the
-# snapshot date. The screen images take toolchains as a build context,
-# for the cargo-auditable that toolchains/cargo-auditable/fetch.sh pins.
+# The player and screen images install a fallback font from the Debian
+# snapshot that the base images use. So they take the vulkan directory,
+# which has snapshot.sh, as the build context `builder`, and vulkan's
+# version as the snapshot date. The screen images also take toolchains
+# as a build context, for the cargo-auditable that
+# toolchains/cargo-auditable/fetch.sh pins.
 [[outputs.images]]
 name = "media-operator"
 description = "media-operator, and the pod build of the same program that each sidecar runs."
@@ -107,9 +107,8 @@ file = "Dockerfile.api"
 contexts = { kubernetes = "kubernetes", notices = "notices" }
 smoke = "media-operator/smoke/media-operator-api.sh"
 
-# The capabilities agent's image builds on the vaapi base, because its
-# query loads libva and the media driver, and only from the
-# capabilities package of this module.
+# The capabilities agent builds on the vaapi base because it loads
+# libva and the media driver.
 [[outputs.images]]
 name = "media-operator-capabilities"
 description = "The agent that asks each render node's driver through libva what it decodes, encodes, and scales, on the vaapi image."
@@ -117,9 +116,9 @@ file = "Dockerfile.capabilities"
 contexts = { kubernetes = "kubernetes", notices = "notices" }
 smoke = "media-operator/smoke/media-operator-capabilities.sh"
 
-# The CLI image carries the same version as the operator, so the base
-# binary pulls a CLI that never drifts from the operator it faces. It is
-# built for linux/amd64 only.
+# The CLI image has the same version as the operator, so the liken
+# toolkit pulls a CLI that matches the operator. It is built for
+# linux/amd64 only.
 [[outputs.images]]
 name = "media-operator-cli"
 description = "kubectl-liken-media, the kubectl plugin that the liken toolkit pulls from this image."

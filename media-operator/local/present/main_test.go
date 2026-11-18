@@ -1,8 +1,5 @@
 package main
 
-// The tests build a media folder under t.TempDir(), with the NFO and art
-// files each case names, and check the block presentationBlock builds for it.
-
 import (
 	"encoding/json"
 	"os"
@@ -14,14 +11,14 @@ import (
 func mustSucceed(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
-		t.Fatalf("wanted no error, got %v", err)
+		t.Fatalf("got error %v, want none", err)
 	}
 }
 
 func mustFail(t *testing.T, err error) {
 	t.Helper()
 	if err == nil {
-		t.Fatal("wanted an error, got none")
+		t.Fatal("got no error, want one")
 	}
 }
 
@@ -32,8 +29,8 @@ func mustMatch[T comparable](t *testing.T, got, want T) {
 	}
 }
 
-// fixture writes a media folder under t.TempDir(). Each key is a path in the
-// folder, and a path that ends with a slash becomes a directory.
+// fixture writes the files into a new temporary folder and returns its
+// path. A key that ends with a slash creates a directory.
 func fixture(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()

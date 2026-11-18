@@ -1,14 +1,13 @@
 package main
 
-// What a home press does to a running film.
-
 import (
 	"testing"
 	"testing/synctest"
 )
 
-// The ask reaches the Player's commands topic before the ending does.
-func TestAHomePressPublishesTheAskAndThenEndsTheRun(t *testing.T) {
+// The home command reaches the Player's commands topic before the
+// ending does.
+func TestAHomePressPublishesTheHomeCommandAndThenEndsTheRun(t *testing.T) {
 	cases := []struct{ key string }{
 		{key: "KEY_HOMEPAGE"},
 		{key: "KEY_WWW"},
@@ -17,7 +16,7 @@ func TestAHomePressPublishesTheAskAndThenEndsTheRun(t *testing.T) {
 		t.Run(each.key, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				c, broker, lines := keyTestCommander(t)
-				c.statusTopic = playStatusTopic(defaultTopicBase, keyTestPlayNS, keyTestPlayrun)
+				c.statusTopic = playStatusTopic(defaultTopicBase, keyTestPlayNS, keyTestPlay)
 				c.playerCommandsTopic = playerCommandsTopic(defaultTopicBase, keyTestPlayNS, keyTestPlayer)
 				c.lastReport = playReport{Item: 1, Position: "0:20:00"}
 				c.haveReport = true
@@ -29,9 +28,9 @@ func TestAHomePressPublishesTheAskAndThenEndsTheRun(t *testing.T) {
 				ask := waitForPublish(t, broker.pubs)
 				mustMatch(t, ask.topic, c.playerCommandsTopic)
 				mustMatch(t, ask.retained, false)
-				// The ask names the Remote whose press made it, so the
-				// operator, which answered that press from the Remote's
-				// events topic, writes no second ask on the receiver.
+				// The command names the Remote, so the operator does not
+				// ask the receiver to show the Player a second time. It
+				// already did that for the press on the events topic.
 				mustMatch(t, string(ask.payload), `{"action":"home","remote":"`+remoteOfTopic(events)+`"}`)
 				ending := waitForPublish(t, broker.pubs)
 				mustMatch(t, ending.topic, c.statusTopic)
@@ -42,11 +41,12 @@ func TestAHomePressPublishesTheAskAndThenEndsTheRun(t *testing.T) {
 	}
 }
 
-// A pod that read no Player publishes no ask and still ends the film.
-func TestAHomePressWithNoPlayerEndsTheRunAndAsksNothing(t *testing.T) {
+// A pod that read no Player publishes no home command and still ends
+// the film.
+func TestAHomePressWithNoPlayerEndsTheRunAndPublishesNoCommand(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, broker, lines := keyTestCommander(t)
-		c.statusTopic = playStatusTopic(defaultTopicBase, keyTestPlayNS, keyTestPlayrun)
+		c.statusTopic = playStatusTopic(defaultTopicBase, keyTestPlayNS, keyTestPlay)
 		c.lastReport = playReport{Item: 1, Position: "0:20:00"}
 		c.haveReport = true
 		events, _ := keyTestTopics()
@@ -61,11 +61,12 @@ func TestAHomePressWithNoPlayerEndsTheRunAndAsksNothing(t *testing.T) {
 	})
 }
 
-// A home command on the Play's commands topic runs the path a press runs.
+// A home command on the Play's commands topic takes the same path as a
+// press.
 func TestAHomeCommandOnThePlaysTopicEndsTheRun(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, broker, lines := keyTestCommander(t)
-		c.statusTopic = playStatusTopic(defaultTopicBase, keyTestPlayNS, keyTestPlayrun)
+		c.statusTopic = playStatusTopic(defaultTopicBase, keyTestPlayNS, keyTestPlay)
 		c.playerCommandsTopic = playerCommandsTopic(defaultTopicBase, keyTestPlayNS, keyTestPlayer)
 		c.lastReport = playReport{Item: 1}
 		c.haveReport = true

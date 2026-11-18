@@ -8,26 +8,25 @@ toc: true
 
 # `Keymap`
 
-A `Keymap` is one controller model's table from its odd controls to
-the kernel key names they should report, written once per model and
-shared by every [`Remote`](/docs/reference/remotes/) of that model. A
-model needs one only where the base table gets it wrong. The base
-passes every `KEY_*` code as itself, turns the hat axes into the
-arrows, and reads a gamepad's south and east buttons as enter and
-back, so a `Remote` with no `Keymap` already works.
+A `Keymap` changes the key name that a controller's buttons and hat
+axes send. You write one for each controller model, and each
+[`Remote`](/docs/reference/remotes/) of that model refers to it. You
+need one only when the base table gets a control wrong. The base table
+sends every `KEY_*` code as itself, turns the hat axes into the arrow
+keys, and maps a gamepad's south and east buttons to `KEY_ENTER` and
+`KEY_BACK`. So a `Remote` with no `Keymap` already works.
 
-It is cluster-scoped, the way a `DeviceClass` and a `StorageClass` are,
-because one model's table is the same in every namespace. A `Remote` in
-any namespace names it without a namespace qualifier.
+A `Keymap` is cluster-scoped, like a `DeviceClass`, because a model's
+buttons are the same in every namespace. A `Remote` in any namespace
+refers to it by name alone.
 
-Both sides of the table use evdev's names, because every Linux
-controller driver reports the south face button as `BTN_SOUTH`,
-whatever is printed on the button, and `KEY_VOLUMEUP` means one step
-up of the room's level from every controller. A `Keymap` renames a
-control and nothing
-more. The right side is a kernel key name, or `none` to drop the
-control, and each consumer holds its own table from key names to what
-they mean there.
+Every binding uses evdev names. `press` or `axis` is the control, and
+`key` is the key name that the control sends. Linux controller drivers
+report the south face button as `BTN_SOUTH`, whatever is printed on
+the button. A key of `none` makes the control send nothing. A `Keymap`
+only renames controls. The program that reads the key decides what it
+does. For example, `media-operator` turns each `KEY_VOLUMEUP` into one
+step up of the `Player`'s volume.
 
     apiVersion: media.liken.sh/v1alpha1
     kind: Keymap
@@ -52,75 +51,74 @@ they mean there.
           value: 1
           key: KEY_RIGHT
 
-Buttons and axes are separate lists because they bind differently: a
-button is a press, and an axis entry names a direction as well. A
-`Keymap` must bind at least one entry across the two lists.
+An axis binding also needs a direction, `value`, so axes have their own
+list. A `Keymap` must have at least one entry in `buttons` or `axes`.
 
-One controller model's mapping from the controls that its kernel driver names wrongly to the key names they should report. Write one Keymap per model that needs one, and share it through every Remote of that model.
+The key names that a controller model reports in place of the names the kernel gives its controls. A Remote uses a Keymap when its `spec.keymap` names it. Write one only for a model whose controls the default mapping gets wrong.
 
 ## spec
 
-The table itself, in two lists: buttons for key presses, and axes for the hat directions.
+The entries: `buttons` for buttons and keys, and `axes` for the directions of a d-pad. Set at least one of them.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="spec--buttons"></span>`buttons` | [\[\]object](#specbuttons) | no | Button entries. Each one renames one control. A control with no entry reports the name the kernel gives it, and the release stops a repeat the press started. |
-| <span id="spec--axes"></span>`axes` | [\[\]object](#specaxes) | no | Axis entries. A gamepad's d-pad arrives as the two hat axes rather than as buttons, so each d-pad direction is one entry here. |
+| <span id="spec--buttons"></span>`buttons` | [\[\]object](#specbuttons) | no | Button entries. Each entry sets the key name that one button reports. A button with no entry keeps its default mapping. |
+| <span id="spec--axes"></span>`axes` | [\[\]object](#specaxes) | no | D-pad entries. A gamepad's d-pad reports two hat axes, not buttons. Each entry sets the key name that one direction of a hat axis reports. |
 
 ### spec.buttons[]
 
-Button entries. Each one renames one control. A control with no entry reports the name the kernel gives it, and the release stops a repeat the press started.
+Button entries. Each entry sets the key name that one button reports. A button with no entry keeps its default mapping.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specbuttons--press"></span>`press` | string | yes | The button, by its evdev key name: BTN_SOUTH on a gamepad, KEY_PLAYPAUSE on a media remote. Every Linux driver reports the same button under the same name, so the name works across models. Any name in the kernel's EV_KEY space is accepted; the pattern catches an obvious typo, and the operator refuses a name that is not in its own table of evdev key names when it compiles the Keymap. A Remote in discovery logs the name of every code its controller reports, so the names come from the log, not from a vendor document. Pattern: `^(BTN\|KEY)_[A-Z0-9_]+$`. |
-| <span id="specbuttons--key"></span>`key` | string | yes | The kernel key name this control reports instead, or none to drop it. Both sides are the kernel's own names. A consumer binds this name and not the control, and none is how a Keymap silences a control that the default mapping would otherwise pass. Pattern: `^((BTN\|KEY)_[A-Z0-9_]+\|none)$`. |
-| <span id="specbuttons--repeat"></span>`repeat` | [object](#specbuttonsrepeat) | no | When present, the Remote's pod synthesises the repeat while the button is held: it publishes the press, waits the delay, then publishes a repeat every interval until the release. A gamepad button never autorepeats in the kernel, so it needs this block. A keyboard key autorepeats on its own and needs none. One repeat is capped at 30 seconds, because a controller that sleeps mid-hold publishes no release. |
+| <span id="specbuttons--press"></span>`press` | string | yes | The button's evdev name as the kernel reports it, such as `BTN_SOUTH` on a gamepad or `KEY_PLAYPAUSE` on a media remote. The operator refuses the Keymap when it does not know the name. To find a button's name, set `spec.discovery: true` on the Remote, press the button, and read the name in the log of the Remote's pod. Pattern: `^(BTN\|KEY)_[A-Z0-9_]+$`. |
+| <span id="specbuttons--key"></span>`key` | string | yes | The evdev key name that the button reports instead, such as `KEY_ENTER`, or `none` to drop the button's presses. Pattern: `^((BTN\|KEY)_[A-Z0-9_]+\|none)$`. |
+| <span id="specbuttons--repeat"></span>`repeat` | [object](#specbuttonsrepeat) | no | Repeats the key while the button is held. The Remote's pod sends the press, waits for `delay`, and then sends the key every `interval` until the button is released. Set it for a gamepad button, because the kernel does not repeat gamepad buttons. A keyboard key repeats without it. The pod stops a repeat 30 seconds after it starts, because a controller that goes to sleep while a button is held sends no release. The pod limits `delay` and `interval` to 60 seconds each. |
 
 #### spec.buttons[].repeat
 
-When present, the Remote's pod synthesises the repeat while the button is held: it publishes the press, waits the delay, then publishes a repeat every interval until the release. A gamepad button never autorepeats in the kernel, so it needs this block. A keyboard key autorepeats on its own and needs none. One repeat is capped at 30 seconds, because a controller that sleeps mid-hold publishes no release.
+Repeats the key while the button is held. The Remote's pod sends the press, waits for `delay`, and then sends the key every `interval` until the button is released. Set it for a gamepad button, because the kernel does not repeat gamepad buttons. A keyboard key repeats without it. The pod stops a repeat 30 seconds after it starts, because a controller that goes to sleep while a button is held sends no release. The pod limits `delay` and `interval` to 60 seconds each.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specbuttonsrepeat--delay"></span>`delay` | string | no | How long to hold before the repeat starts, as a duration like 400ms. A tap shorter than this does not repeat. Defaults to 400ms. Pattern: `^[0-9]+(\.[0-9]+)?(ms\|s)$`. |
-| <span id="specbuttonsrepeat--interval"></span>`interval` | string | no | How often to publish the repeat while the button is held, as a duration like 300ms. Defaults to 300ms. Pattern: `^[0-9]+(\.[0-9]+)?(ms\|s)$`. |
+| <span id="specbuttonsrepeat--delay"></span>`delay` | string | no | How long the button must be held before the repeat starts, as a duration such as `400ms`. The default is `400ms`. Pattern: `^[0-9]+(\.[0-9]+)?(ms\|s)$`. |
+| <span id="specbuttonsrepeat--interval"></span>`interval` | string | no | The time between repeats, as a duration such as `300ms`. The default is `300ms`. Pattern: `^[0-9]+(\.[0-9]+)?(ms\|s)$`. |
 
 ### spec.axes[]
 
-Axis entries. A gamepad's d-pad arrives as the two hat axes rather than as buttons, so each d-pad direction is one entry here.
+D-pad entries. A gamepad's d-pad reports two hat axes, not buttons. Each entry sets the key name that one direction of a hat axis reports.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specaxes--axis"></span>`axis` | string | yes | One of the two hat axes, X across and Y down. The analog sticks are not bindable: a resting thumb reports hundreds of times a second, and no key name carries an analog value. One of: `ABS_HAT0X`, `ABS_HAT0Y`. |
-| <span id="specaxes--value"></span>`value` | integer | yes | Which direction of the axis this entry binds. The hat reports -1 and 1 as its two presses and 0 as the release, and the release stops a repeat the press started. One of: `-1`, `1`. |
-| <span id="specaxes--key"></span>`key` | string | yes | The kernel key name this direction reports, or none to drop it. The default mapping already names both directions of both hats as the arrows, so an entry here is for a pad that means something else by them. Pattern: `^((BTN\|KEY)_[A-Z0-9_]+\|none)$`. |
-| <span id="specaxes--repeat"></span>`repeat` | [object](#specaxesrepeat) | no | The same repeat block the buttons carry, for a hat direction. The default mapping already repeats the four arrows, so an entry needs this only where it names a key of its own. |
+| <span id="specaxes--axis"></span>`axis` | string | yes | The hat axis: `ABS_HAT0X` for left and right, or `ABS_HAT0Y` for up and down. Analog sticks cannot be mapped to keys. One of: `ABS_HAT0X`, `ABS_HAT0Y`. |
+| <span id="specaxes--value"></span>`value` | integer | yes | The direction: `-1` for left or up, `1` for right or down. Releasing the d-pad back to the center stops a repeat. One of: `-1`, `1`. |
+| <span id="specaxes--key"></span>`key` | string | yes | The evdev key name that this direction reports, or `none` to drop it. The default mapping already turns the d-pad into the arrow keys, so add an entry only when a direction should report another key. Pattern: `^((BTN\|KEY)_[A-Z0-9_]+\|none)$`. |
+| <span id="specaxes--repeat"></span>`repeat` | [object](#specaxesrepeat) | no | Repeats the key while the d-pad is held in this direction, the same way as a button's `repeat`. An entry replaces the default mapping of its direction, and the default's repeat with it, so set this block when the direction should still repeat. |
 
 #### spec.axes[].repeat
 
-The same repeat block the buttons carry, for a hat direction. The default mapping already repeats the four arrows, so an entry needs this only where it names a key of its own.
+Repeats the key while the d-pad is held in this direction, the same way as a button's `repeat`. An entry replaces the default mapping of its direction, and the default's repeat with it, so set this block when the direction should still repeat.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specaxesrepeat--delay"></span>`delay` | string | no | How long to hold before the repeat starts, as a duration like 400ms. Defaults to 400ms. Pattern: `^[0-9]+(\.[0-9]+)?(ms\|s)$`. |
-| <span id="specaxesrepeat--interval"></span>`interval` | string | no | How often to publish the repeat while the direction is held, as a duration like 300ms. Defaults to 300ms. Pattern: `^[0-9]+(\.[0-9]+)?(ms\|s)$`. |
+| <span id="specaxesrepeat--delay"></span>`delay` | string | no | How long the direction must be held before the repeat starts, as a duration such as `400ms`. The default is `400ms`. Pattern: `^[0-9]+(\.[0-9]+)?(ms\|s)$`. |
+| <span id="specaxesrepeat--interval"></span>`interval` | string | no | The time between repeats, as a duration such as `300ms`. The default is `300ms`. Pattern: `^[0-9]+(\.[0-9]+)?(ms\|s)$`. |
 
 ## No status
 
-Nothing reports on a `Keymap`, so it has no status subresource, and
-`kubectl get keymaps` shows each table's age. The operator compiles
-each table on every pass. A `press`, `axis`, or `key` name that is not
-an evdev name fails the compile, the operator logs the failure, and
-every `Remote` that names the `Keymap` keeps the last good table.
+A `Keymap` has no status, so `kubectl get keymaps` shows only each
+`Keymap`'s age. On each pass, the operator builds the key table of each
+`Remote` from the base table and the `Remote`'s `Keymap`. When a
+`press` or `key` name is not one the operator knows, or a repeat time
+does not parse, the operator logs the error and posts a
+`KeymapRefused` Warning `Event` on each `Remote` that uses the
+`Keymap`. Those `Remote`s keep their last good table.
 
 ## On the bus
 
-A `Keymap` owns no topic of its own. The operator folds the base table
-with the `Keymap` and publishes the result retained on the `keys`
-topic of each `Remote` that names it, under the
-[`Remote`'s tree](/docs/reference/remotes/). A `Keymap` that does not
-compile publishes nothing and leaves the last good table on each of
-those topics. A deleted `Keymap` leaves each of its `Remote`s on the
-base alone, and the operator republishes their tables on the next
-pass.
+A `Keymap` has no topic of its own. The operator publishes each
+`Remote`'s key table, retained, on that `Remote`'s `keys` topic, in the
+[`Remote`'s topic tree](/docs/reference/remotes/). When a `Keymap` has
+an error, the operator publishes nothing, so the broker keeps the last
+good table. When you delete a `Keymap`, the operator publishes the base
+table alone to each `Remote` that used it, on the next pass.

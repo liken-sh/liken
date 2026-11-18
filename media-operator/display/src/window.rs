@@ -1,8 +1,9 @@
-//! The display's own Wayland surface, and what it draws on it.
+//! The display's Wayland window, the frame loop that drives it, and the
+//! drawing of the on-screen display (OSD) over mpv's video.
 //!
-//! The window is 1920 by 1080 in logical pixels, undecorated, and
-//! transparent. Between summons it draws nothing, and a frame that draws
-//! nothing is a fully transparent frame.
+//! The window opens at 1920 by 1080 logical pixels, undecorated and
+//! transparent. Where the display draws nothing, the film shows through
+//! every pixel.
 
 use std::hash::{Hash, Hasher};
 use std::path::Path;
@@ -36,62 +37,54 @@ use crate::upnext::{self, UpNext};
 use crate::volume::Volume;
 use crate::{clock, header, images, theme};
 
-/// How long the display waits for mpv to report a position before it exits
-/// and lets the kubelet restart the container. It is longer than a player
-/// takes to open a film and shorter than a person waits at a bare picture.
+/// How long `main` waits for mpv to report a position. When mpv reports
+/// none in that time, the display exits with an error and the kubelet
+/// restarts the container.
 pub const PLAYER_GRACE: Duration = Duration::from_secs(60);
 
-/// How many messages the socket reader may run ahead of the frame loop, and
-/// how many commands the frame loop may run ahead of the socket.
+/// The capacity of each channel between mpv's socket and the frame loop,
+/// in both directions.
 const EVENT_QUEUE: usize = 64;
 
-/// What moves the display.
 #[derive(Debug, Clone)]
 pub enum Message {
-    /// One line mpv wrote.
+    /// One event from mpv's socket: a script message, a property
+    /// change, or the socket closing.
     Mpv(ipc::Event),
-    /// One step of the fade.
     Tick,
-    /// One minute of the wall clock. A paused film pushes no position, so
-    /// this is what moves the reading and the end time while it stands.
+    /// The wall-clock minute changed.
     Minute,
-    /// The surface the compositor configured, as the window reports it.
     Resized(Size),
-    /// The window's scale factor, the output pixels one logical pixel covers.
+    /// The window's scale factor: how many output pixels one logical
+    /// pixel covers.
     Rescaled(f32),
-    /// One item's spans file came back from the blocking pool, with the
-    /// count of the item that asked for it.
+    /// The read of an item's spans file finished. The number identifies
+    /// the item, so `Cast::on_read` ignores the result for an item that
+    /// was replaced.
     Cast(u64, Option<Spans>),
-    /// The idle window ran out. The count says which summon armed it, so a
-    /// window a later summon replaced dismisses nothing.
+    /// The display's hide timer fired. The number identifies the timer,
+    /// so a timer that a later summon replaced hides nothing.
     Hide(u64),
-    /// The up-next card's own window ran out, so the card leaves while the
-    /// film plays on.
     HideCard(u64),
-    /// The volume row's own window ran out.
     HideRow(u64),
-    /// One decode came back from the blocking pool.
     Art(Answer),
-    /// The arranger's binding started on the window's connection, or could
-    /// not start.
     Attached(Result<Link, String>),
-    /// One event of the arranger.
     Arranger(arrangement::Event),
-    /// The compositor asked the window to close.
     Close,
 }
 
-/// One hide window: how long it waits, how many have been armed, and which one
-/// stands. A window a later change replaced takes nothing down, so each one
-/// carries the count of the change that armed it.
+/// A timer that hides one element after `wait`. A fired timer cannot be
+/// recalled, so each arm gets a new number and its message carries that
+/// number. A timer that a later arm or a cancel replaced no longer
+/// matches `armed`, so it hides nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Idle {
+struct HideTimer {
     wait: Duration,
     count: u64,
     armed: Option<u64>,
 }
 
-impl Idle {
+impl HideTimer {
     fn new(wait: Duration) -> Self {
         Self {
             wait,
@@ -116,12 +109,14 @@ impl Idle {
         }
     }
 
-    /// Cancel the window that stands, so its expiry takes nothing down.
+    /// Forgets the current timer. It still fires, but `expired` returns
+    /// false for it.
     fn cancel(&mut self) {
         self.armed = None;
     }
 
-    /// Whether this window is the one that stands, which takes it down.
+    /// Whether the timer numbered `at` is the current one. A true result
+    /// also clears it, so a timer takes effect once.
     fn expired(&mut self, at: u64) -> bool {
         if self.armed != Some(at) {
             return false;
@@ -131,15 +126,16 @@ impl Idle {
     }
 }
 
-/// The whole of the display's state: what mpv reports, what the item declared,
-/// where the focus stands, and how far the fade has moved.
+/// The state of the display: what mpv reports, the current item's
+/// `presentation` block, which control has focus, and each fade.
 pub struct Display {
     wire: Wire,
-    /// The request ids and the hold behind the lines a press earns.
+    /// The request ids of the commands that presses send, and the held
+    /// key whose repeats go into one log line.
     record: Record,
-    /// The lines this display wrote, which a test reads back.
+    /// The log lines written, for tests to read.
     #[cfg(test)]
-    said: Vec<String>,
+    logged: Vec<String>,
     focus: Focus,
     film: Film,
     presentation: Presentation,
@@ -150,48 +146,43 @@ pub struct Display {
     volume: Volume,
     cast: Cast,
     art: Art,
-    /// Where the display last asked mpv to draw the subtitles.
     subtitles: crate::subtitles::Subtitles,
-    /// What the compositor granted and where the film stands, and the
-    /// binding that carries each arrangement to the compositor.
+    /// `link` is the Wayland binding that sends each arrangement to the
+    /// compositor.
     arranger: Arranger,
     link: Option<Link>,
-    /// Whether mpv's socket closed. The display then draws nothing for the
-    /// rest of its life, which `detaching` explains.
+    /// Whether mpv's socket closed. After that the display draws
+    /// nothing until it exits. The `detaching` module gives the reason.
     detached: bool,
-    /// The arrangements this display committed, which a test reads back.
     #[cfg(test)]
     committed: Vec<arrangement::Commit>,
-    /// The hide windows the display, the card, and the row wait out, each on
-    /// its own clock and none reading another's.
-    idle: Idle,
-    card: Idle,
-    row: Idle,
-    /// The monotonic clock the seek ramp reads, which the scan's rate needs
-    /// and the wall clock cannot give.
+    /// The hide timers of the whole display, the up-next card, and the
+    /// volume row. They run independently.
+    idle: HideTimer,
+    card: HideTimer,
+    row: HideTimer,
+    /// When the display started, on a monotonic clock. The scrubber
+    /// times its scans from it, and a wall-clock jump would break them.
     started: Instant,
-    /// The last position signature, so a push that moves nothing a person can
-    /// see redraws nothing.
+    /// The `Signature` of the last position that was drawn.
     signature: Option<Signature>,
-    /// The surface the compositor configured, which the window reports and
-    /// every decode and every snap reads.
+    /// The layout space of the surface that the compositor configured.
     canvas: Canvas,
-    /// The window's scale factor, which the scrims and the shapes read to
-    /// draw at output pixels.
     density: f32,
-    /// The scrims for that surface, resolved once per size and scale factor.
+    /// The scrims for `canvas` and `density`.
     scrims: Scrims,
-    /// What the socket reader needs to tell whether one position push moves
-    /// anything on screen.
+    /// Tells the socket reader task what is on screen, so `Pace` can
+    /// drop positions that change nothing on screen.
     watching: watch::Sender<Watching>,
-    /// The two drawn layers. mpv pushes a position on every video frame, and a
-    /// layer is rebuilt only when one of the things it draws changes.
+    /// The cached drawing of each layer. mpv sends a position on every
+    /// video frame, so a layer is drawn again only after a `redraw`
+    /// clears its cache.
     below: canvas::Cache,
     above: canvas::Cache,
 }
 
-/// What a position moves on screen: the playhead's own output pixel and the
-/// whole second the label reads.
+/// The parts of a position that show on screen: the output pixel of the
+/// playhead and the whole second on the time label.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Signature {
     pixel: Option<i32>,
@@ -215,7 +206,7 @@ impl Display {
             },
             record: Record::default(),
             #[cfg(test)]
-            said: Vec::new(),
+            logged: Vec::new(),
             focus: Focus::new(),
             film: Film::default(),
             presentation: Presentation::default(),
@@ -232,9 +223,9 @@ impl Display {
             detached: false,
             #[cfg(test)]
             committed: Vec::new(),
-            idle: Idle::new(theme::IDLE_HIDE),
-            card: Idle::new(theme::CARD_HIDE),
-            row: Idle::new(theme::IDLE_HIDE),
+            idle: HideTimer::new(theme::IDLE_HIDE),
+            card: HideTimer::new(theme::CARD_HIDE),
+            row: HideTimer::new(theme::IDLE_HIDE),
             started: Instant::now(),
             signature: None,
             canvas,
@@ -246,9 +237,9 @@ impl Display {
         }
     }
 
-    /// One message, the art's own turn, which asks for what the state it
-    /// leaves behind needs, and the word to the socket reader about what the
-    /// display draws now.
+    /// Handles one message. Then it updates the arrangement, the
+    /// subtitle position, and the image decodes for the new state, and
+    /// tells the socket reader what is on screen.
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.step(message);
         self.follow_offer();
@@ -276,10 +267,9 @@ impl Display {
                 self.volume.fade_mut().step();
                 self.redraw();
             }
-            // The wall clock and the film's end time stand in the lower
-            // layer. The up-next card reads the clock for its end time too,
-            // and it stands in the upper layer while it shows over the bare
-            // video.
+            // The clock and the film's end time are in the lower layer.
+            // The up-next card shows an end time too, and while the OSD
+            // is down the card is in the upper layer.
             Message::Minute => {
                 self.redraw_below();
                 if self.upnext.draws_outside(self.focus.visible()) {
@@ -289,14 +279,15 @@ impl Display {
             Message::Resized(size) => self.on_resize(size),
             Message::Rescaled(density) => self.on_rescale(density),
             Message::Hide(at) if self.idle.expired(at) => {
-                // A held key whose display hid is a hold that ended.
+                // Hiding the display ends a held key's hold, so its log
+                // line is written now.
                 let ended = self.record.settle();
                 self.say(ended);
                 let mut focus = self.focus;
                 focus.dismiss(&mut self.parts());
                 self.focus = focus;
                 self.redraw();
-                return self.windows();
+                return self.arm_hide_timers();
             }
             Message::HideCard(at) => {
                 if self.card.expired(at) {
@@ -330,8 +321,8 @@ impl Display {
         Task::none()
     }
 
-    /// The surface changed size. Every scrim is resolved for the new one, and
-    /// the decodes that follow ask at the new box.
+    /// Rebuilds the scrims for the new surface size. Later image
+    /// decodes use the new canvas.
     fn on_resize(&mut self, size: Size) {
         let canvas = Canvas::for_output(size);
         if canvas == self.canvas {
@@ -342,10 +333,10 @@ impl Display {
         self.redraw();
     }
 
-    /// The window moved to an output with another scale factor, or learned
-    /// its first one. The scrims are resolved again, so each of their rows
-    /// still covers one output row. A factor of nothing or less would divide
-    /// every row away, so it changes nothing.
+    /// Rebuilds the scrims for a new scale factor, so that each scrim
+    /// row still covers one output row. The factor changes when the
+    /// window moves to another output or reports its first factor. A
+    /// factor that is NaN or not positive is ignored.
     fn on_rescale(&mut self, density: f32) {
         if density.is_nan() || density <= 0.0 || density == self.density {
             return;
@@ -355,27 +346,30 @@ impl Display {
         self.redraw();
     }
 
-    // Rebuild both layers on the next frame, which is what a change to
-    // anything the display draws asks for.
+    /// Clears both layer caches, so the next frame draws them again.
+    /// Call it after any change to what the display draws.
     fn redraw(&self) {
         self.redraw_below();
         self.redraw_above();
     }
 
-    // The layer under the OSD: the header, the clock, the scrubber, the
-    // strip, and the offer inside the OSD. The position moves this one alone.
+    /// Clears the lower layer, which holds the OSD and the music cover.
+    /// A position that moves only the playhead or the time label clears
+    /// only this layer.
     fn redraw_below(&self) {
         self.below.clear();
     }
 
-    // The layer over the OSD: an open chooser, the card on its own clock, and
-    // the volume row. A level and a hide window move this one alone.
+    /// Clears the upper layer, which holds an open chooser, the volume
+    /// row, and the up-next card and the skip control while they draw
+    /// over the bare video. The card's and the row's hide timers clear
+    /// only this layer.
     fn redraw_above(&self) {
         self.above.clear();
     }
 
-    /// The modules one press reaches. The frame loop owns them, so it hands
-    /// them to the router for the length of the press.
+    /// Borrows the parts of the display that a press can change, for
+    /// the focus router to use during one call.
     fn parts(&mut self) -> Parts<'_> {
         let now = self.now();
         Parts {
@@ -390,8 +384,10 @@ impl Display {
         }
     }
 
-    /// The six navigation words the command sidecar sends, the summon it sends
-    /// after a seek of its own, and the block it sends for every item.
+    /// Handles a script message from the command sidecar: a navigation
+    /// word (`up`, `down`, `left`, `right`, `select`, or `back`),
+    /// `summon`, `presentation`, `next`, or `volume-changed`. Returns the
+    /// tasks that arm the hide timers and read a new item's spans file.
     fn on_message(&mut self, words: &[String]) -> Task<Message> {
         let Some(word) = words.first() else {
             return Task::none();
@@ -408,20 +404,19 @@ impl Display {
                 let _ = self.wire.commands.send(line);
             }
         } else if word == ipc::SUMMON {
-            // Every message but a repeat ends the hold before it.
+            // A summon ends the current hold, so the hold's log line is
+            // written now.
             let ended = self.record.settle();
             self.say(ended);
             focus.summon(&self.parts());
         } else if word == ipc::PRESENTATION {
             self.presentation
                 .receive(words.get(1).map_or("", String::as_str));
-            // A new block is a new item. It drops the previous item's
-            // pictures and the measurements of its lines, and the turn that
-            // follows decodes the new item's logo.
+            // A `presentation` block starts a new item, so drop the
+            // previous item's pictures and the cached text measurements.
             crate::canvas::forget_measurements();
             self.art.on_item(&self.presentation, &self.canvas);
-            // The new item's marks may place the playhead inside a span, or
-            // outside the one the last item offered.
+            // The new item's marks can show or hide the skip control.
             self.follow_marks();
             let read = self.cast.on_item(
                 self.presentation.appearances(),
@@ -430,7 +425,7 @@ impl Display {
             if let Some((item, path)) = read {
                 self.focus = focus;
                 self.redraw();
-                return Task::batch([self.windows(), read_spans(item, path)]);
+                return Task::batch([self.arm_hide_timers(), read_spans(item, path)]);
             }
         } else if word == ipc::NEXT {
             self.upnext.receive(words.get(1).map_or("", String::as_str));
@@ -448,18 +443,17 @@ impl Display {
         }
         self.focus = focus;
         self.redraw();
-        self.windows()
+        self.arm_hide_timers()
     }
 
-    /// mpv pushes a position on every video frame, and a redraw builds the
-    /// whole layer again. Two things on screen follow the value: the playhead
-    /// moves one output pixel every few seconds, and the time label changes
-    /// once a second. The signature carries both, so a push that leaves it
-    /// alone moves nothing a person can see and redraws nothing.
+    /// Applies a property change from mpv. mpv sends `time-pos` on
+    /// every video frame, and a redraw draws a whole layer again. So a
+    /// position redraws the lower layer only when its `Signature`
+    /// changes.
     ///
-    /// The offer reads the position as well, and raises its card at the rise,
-    /// and the skip control comes and goes with the intro and the recap.
-    /// Those are the two things a position does with the display down.
+    /// A position also raises the up-next card when the playhead reaches
+    /// `rise`, and shows or hides the skip control at the edges of an
+    /// intro or a recap. Both happen while the display is down too.
     fn on_property(&mut self, name: &str, value: &serde_json::Value) -> Task<Message> {
         self.film.apply(name, value);
         if name == "time-pos" {
@@ -471,15 +465,15 @@ impl Display {
                 self.redraw();
             }
             self.follow_marks();
-            // Playback or a seek can move where nobody is named, and the
-            // focus on the cast row then moves to the bar.
+            // The cast row disappears at a time where the spans file
+            // names nobody, so the focus moves off it to the bar.
             if self.focus.focused_stop() == Some(Stop::Cast) && !self.cast.available(&self.film) {
                 let mut focus = self.focus;
                 focus.refocus(&self.parts());
                 self.focus = focus;
             }
-            // With the display down nothing under it follows the position, so
-            // the signature is not worth the work.
+            // While the display is down, nothing drawn depends on the
+            // position.
             if self.focus.fade().value() > 0.0 {
                 let signature = self.signature(value.as_f64());
                 if self.signature != Some(signature) {
@@ -488,7 +482,7 @@ impl Display {
                 }
             }
             return match rose {
-                true => self.windows(),
+                true => self.arm_hide_timers(),
                 false => Task::none(),
             };
         }
@@ -497,19 +491,19 @@ impl Display {
             let mut focus = self.focus;
             focus.on_pause(value.as_bool().unwrap_or(false), &mut self.parts());
             self.focus = focus;
-            return self.windows();
+            return self.arm_hide_timers();
         }
-        // The offer is for the item the Play started on, so a move to another
-        // item drops it.
+        // The up-next offer belongs to the item that the `Play` started
+        // on, so a move to another playlist entry drops it.
         if name == "playlist-pos" {
             self.upnext.on_playlist_pos(value.as_i64());
         }
         Task::none()
     }
 
-    /// Offer the skip control while the playhead is inside an intro or a
-    /// recap, and take it down when the playhead leaves. A focus on the
-    /// control that has gone moves to the bar.
+    /// Shows the skip control while the playhead is inside an intro or
+    /// a recap, and hides it when the playhead leaves. When the control
+    /// disappears while it has focus, the focus moves to the bar.
     fn follow_marks(&mut self) {
         let inside = self
             .presentation
@@ -524,17 +518,16 @@ impl Display {
         self.redraw();
     }
 
-    /// How far into the work the playhead stands, as the hundredths mpv
-    /// reports in `percent-pos`. The offer reads it to tell whether the
-    /// playhead has crossed the rise, and it is the position over the length,
-    /// so the display observes one property for both.
+    /// The playhead's position as a percentage of the duration,
+    /// computed from `time-pos` and `duration`. It is `None` while
+    /// either is unknown or the duration is 0.
     fn percent(&self) -> Option<f64> {
         let duration = self.film.duration.filter(|duration| *duration > 0.0)?;
         Some(self.film.position? / duration * 100.0)
     }
 
-    /// What the decode needs to know for this state: the surface the compositor
-    /// configured, the item, the file mpv plays, and the scan in flight.
+    /// Updates `art` for the current state and returns the decodes to
+    /// start.
     fn sync_art(&mut self) -> Vec<Job> {
         let (canvas, preview) = (self.canvas, self.previewing());
         self.art.frame_next(self.upnext.art_box());
@@ -559,24 +552,22 @@ impl Display {
         }
     }
 
-    /// The monotonic second the tile's own gate reads, which the wall clock
-    /// cannot give.
+    /// Seconds since the display started, on a monotonic clock.
     fn now(&self) -> f64 {
         self.started.elapsed().as_secs_f64()
     }
 
-    /// Whether a picture the OSD carries shows. The logo, the tile, and the
-    /// offer's picture show while the OSD is up, and hide when it hides and
-    /// while a chooser captures, so a corner logo never lingers over a plain
-    /// frame or floats above the chooser's dim.
+    /// Whether the pictures of the OSD are drawn: the logo, the scan
+    /// thumbnail, and the cast row. They hide with the OSD and while a
+    /// chooser is open.
     fn showing(&self) -> bool {
         self.focus.visible() && self.strip.capturing().is_none()
     }
 
-    /// The time the thumbnail previews. It shows only while a fine scan is in
-    /// flight, for an item that declares trickplay. At rest the video shows the
-    /// frame the thumbnail would, so the tile appears only when the scan
-    /// previews another position.
+    /// The time that the scan thumbnail shows. It is `None` unless the
+    /// OSD pictures show, the fine axis has focus, a scan is running, and
+    /// the item has a `trickplay` directory. With no scan running, the
+    /// video itself shows the frame at the cursor.
     fn previewing(&self) -> Option<f64> {
         (self.showing()
             && self.focus.focused_stop() == Some(Stop::Fine)
@@ -586,11 +577,11 @@ impl Display {
         .flatten()
     }
 
-    /// The second the up-next card rises at. Every item takes the start of
-    /// its credits when its marks place them. With no credits mark, the time
-    /// rule decides: the series rule for an episode, and the film rule for
-    /// anything else. The same rule caps a wait for a scene after the
-    /// credits.
+    /// The playback second at which the up-next card appears: the start
+    /// of the credits when the item's marks include them, otherwise
+    /// `series_rise` for an episode and `time_rise` for anything else.
+    /// `Marks::credits` also caps the wait for a scene after the credits
+    /// at that same rule.
     fn rise(&self) -> Option<f64> {
         let latest = match self.presentation.series() {
             Some(_) => upnext::series_rise,
@@ -601,10 +592,10 @@ impl Display {
         Some(credits.unwrap_or_else(|| latest(duration)))
     }
 
-    /// Whether the cast row shows: while the OSD is up and the playhead
-    /// stands in a span that names someone. A scan's thumbnail stands where the row
-    /// does, and previews another moment than the one the row names, so the
-    /// row steps aside while a scan is in flight.
+    /// Whether the cast row is drawn: the OSD pictures show and the
+    /// playhead is in a span that names someone. The scan thumbnail
+    /// covers the same area and shows another time, so the row hides
+    /// during a scan.
     fn cast_showing(&self) -> bool {
         self.showing() && self.previewing().is_none() && self.cast.available(&self.film)
     }
@@ -616,34 +607,32 @@ impl Display {
         }
     }
 
-    /// Arm or cancel every hide window the last change asked for. The
-    /// display, the up-next card, and the volume row each wait out a window of
-    /// its own.
-    fn windows(&mut self) -> Task<Message> {
+    /// Arms or cancels each hide timer that the last change requested.
+    /// The returned task completes when a timer fires.
+    fn arm_hide_timers(&mut self) -> Task<Message> {
         let idle = self.idle.arm(self.focus.take_hide(), Message::Hide);
         let card = self.card.arm(self.upnext.take_hide(), Message::HideCard);
         let row = self.row.arm(self.volume.take_hide(), Message::HideRow);
         Task::batch([idle, card, row])
     }
 
-    /// Write one line of the display's record.
+    /// Writes the log line to stderr, if there is one.
     fn say(&mut self, line: Option<String>) {
         let Some(line) = line else {
             return;
         };
         eprintln!("{line}");
         #[cfg(test)]
-        self.said.push(line);
+        self.logged.push(line);
     }
 
-    /// Draw the header and the clock, then the scrubber, then the strip. The
-    /// scrubber owns two focus stops but draws one bar, told which axis is
-    /// focused.
+    /// Draws the lower layer. The scrubber has two focus stops but
+    /// draws one bar, for the focused axis.
     fn paint_below(&self, brush: &mut Brush<'_>, now: &Zoned) {
         let canvas = brush.canvas();
-        // The cover does not track the OSD, because a music screen with the OSD
-        // down would otherwise be a black frame. Every other picture rises and
-        // falls with the layer; this one holds the frame at full strength.
+        // The cover draws at full strength whatever the OSD fade is,
+        // because a music screen with the OSD down would otherwise be a
+        // black frame. Every other picture fades with the layer.
         if let Some(cover) = self.art.cover() {
             brush.at_fade(1.0, |brush| {
                 cover.draw(brush, art::cover_at(&canvas, cover));
@@ -653,8 +642,8 @@ impl Display {
             return;
         }
 
-        // The top scrim backs the header and the clock, drawn before them so
-        // their text is on top.
+        // Each scrim draws before the text it darkens, so the text is
+        // on top.
         let logo = self.art.logo();
         let head = header::lines(
             &self.presentation,
@@ -687,9 +676,8 @@ impl Display {
             .strip
             .lines(&canvas, &self.presentation, &self.film, on_strip);
         if bar.is_some() || !counter.is_empty() || !strip.is_empty() {
-            // The bottom scrim backs the scrubber and the strip, drawn before
-            // them so their text is on top. While the cast row shows, the
-            // taller cast scrim backs the row as well.
+            // While the cast row shows, the taller cast scrim replaces
+            // the bottom scrim, so the row is darkened as well.
             let scrim = match self.cast_showing() {
                 true => &self.scrims.cast,
                 false => &self.scrims.bottom,
@@ -710,9 +698,8 @@ impl Display {
                 brush.text(line);
             }
         }
-        // The cast row draws over the bottom scrim, above the skip control
-        // and the chip, and it ends short of the up-next card while the card
-        // stands.
+        // While the up-next card shows, the cast row stops
+        // `CARD_CLEAR` short of the card.
         if self.cast_showing() {
             let limit = self
                 .upnext
@@ -727,21 +714,16 @@ impl Display {
                 now.date(),
             );
         }
-        // The skip control draws after the bottom cluster, so it reads over
-        // the scrim, and before the thumbnail, so a scan near the start of
-        // the film shows its frame over the control.
+        // The skip control draws before the thumbnail, so a scan near
+        // the start of the film shows its frame over the control.
         self.skip
             .draw(brush, self.focus.focused_stop() == Some(Stop::Skip));
-        // The thumbnail stands over the bar, centred on the playhead it
-        // previews.
         if let Some(tile) = self.art.tile()
             && self.previewing().is_some()
             && let Some(cursor) = self.scrubber.cursor_x(&canvas, &self.film)
         {
             tile.draw(brush, art::tile_at(&canvas, tile, cursor));
         }
-        // The offer draws after the bottom cluster, so the chip and the card
-        // read over the scrim and beside the scrubber.
         self.upnext.draw(
             brush,
             self.focus.focused_stop() == Some(Stop::Next),
@@ -750,19 +732,17 @@ impl Display {
         );
     }
 
-    /// The open chooser, which covers every region while it captures input.
+    /// Draws the upper layer.
     ///
-    // The chooser draws in a layer of its own. iced_wgpu draws one layer in
-    // four passes, quads then meshes then images then text, so a rectangle in
-    // the same layer as the text lands under every line of it. A second layer
-    // draws after the whole of the first, and the dim and the panel cover the
-    // text they are meant to cover.
+    /// The chooser needs a layer of its own. iced_wgpu draws one layer
+    /// in four passes: quads, then meshes, then images, then text. A
+    /// rectangle in the same layer as text would draw under all of the
+    /// text. A second layer draws after the whole first layer, so the
+    /// dim and the panel cover the text that they must cover.
     fn paint_above(&self, brush: &mut Brush<'_>, now: &Zoned) {
         let canvas = brush.canvas();
         if self.strip.capturing().is_some() {
-            // A chooser is open. Dim the whole frame under it, so the list
-            // reads as the one thing in focus and the scrubber and strip
-            // recede.
+            // Dim the whole frame under the open chooser.
             brush.rect(
                 Rectangle::new(
                     iced::Point::ORIGIN,
@@ -772,11 +752,12 @@ impl Display {
             );
             self.strip.draw_chooser(brush, &self.film);
         }
-        // The card shows itself with the OSD down when the playhead crosses
-        // the rise, and a taken card fades out over the hand-off with the OSD
-        // up or down. So it draws outside the OSD block on a fade of its own.
-        // The column beside a stepped-back film draws over the OSD as well,
-        // so it draws focused when the OSD's focus stands on the offer.
+        // The up-next card appears at `rise` with the OSD down, and a
+        // selected card fades out while the next work starts, with the
+        // OSD up or down. So it has its own fade outside the OSD. While
+        // the compositor has shrunk the film, the offer draws as a
+        // column beside it in this layer, and the column draws as
+        // focused when the OSD's focus is on the offer.
         let focused = self.focus.card_takes_select(&self.upnext, &self.skip)
             || (self.upnext.stepped_back() && self.focus.focused_stop() == Some(Stop::Next));
         self.upnext.draw_outside(
@@ -786,13 +767,12 @@ impl Display {
             &self.bridge(&canvas),
             now,
         );
-        // The skip control stays over the bare video for the whole span, on a
-        // fade of its own, for the same reason.
+        // The skip control has its own fade too, so it stays on the
+        // bare video for the whole intro or recap.
         self.skip.draw_outside(brush, self.focus.visible());
-        // The volume row draws outside the OSD block, because it comes and
-        // goes on a clock of its own and a level change must show the level
-        // and nothing else. It draws last, so it reads over a chooser's dim as
-        // well as over the bare video.
+        // A volume change shows only the volume row, so the row has
+        // its own fade and hide timer. It draws last, on top of a
+        // chooser's dim.
         self.volume.draw(brush);
     }
 
@@ -808,9 +788,8 @@ impl Display {
         iced::widget::stack![layer(Part::Below), layer(Part::Above)].into()
     }
 
-    /// The socket reader always runs. The frame tick runs only while the
-    /// fade is moving, so a display standing at either end costs the process
-    /// nothing.
+    /// The frame tick runs only while a fade is moving, so a display at
+    /// rest runs no frame timer.
     pub fn subscription(&self) -> Subscription<Message> {
         let mpv = Subscription::run_with(self.wire.clone(), |wire| {
             let ipc = Ipc::at(&wire.path);
@@ -846,23 +825,19 @@ impl Display {
         if self.fading() {
             running.push(iced::time::every(theme::FADE_TICK).map(|_| Message::Tick));
         }
-        // A paused film pushes no position, and the display stands open for
-        // as long as the pause lasts, so the reading and the end time follow
-        // a tick of their own while it is up. The up-next card's end time
-        // follows the same tick while the card stands over the bare video.
+        // A paused film sends no position, and the display stays up for
+        // the whole pause, so the clock and the end times need their own
+        // timer while the OSD or the up-next card shows.
         if (self.focus.visible() || self.upnext.draws_outside(false)) && !self.detached {
             running.push(Subscription::run(minutes));
         }
         Subscription::batch(running)
     }
 
-    /// Whether one layer draws anything. A frame with nothing in it is what
-    /// the display draws between summons: the film below shows through
-    /// every pixel of the window. The up-next card, the skip control, and
-    /// the volume row come and go on clocks of their own, so the layer above
-    /// draws for them with the display down. The cover is the one picture
-    /// that holds the frame with the OSD down, so the layer under the OSD
-    /// draws for it as well. Once mpv detaches, neither layer draws.
+    /// Whether a layer has anything to draw. With the OSD down, the
+    /// lower layer draws only the music cover, and the upper layer draws
+    /// the elements that have their own fades. After mpv's socket closes
+    /// neither layer draws.
     fn draws(&self, part: Part) -> bool {
         if self.detached {
             return false;
@@ -880,9 +855,8 @@ impl Display {
         }
     }
 
-    /// Whether any of the five fades is moving: the display's own, the
-    /// up-next card's and its column's, the skip control's, and the volume
-    /// row's. Once mpv detaches nothing draws, so nothing ticks.
+    /// Whether any fade is moving. After mpv's socket closes nothing
+    /// draws, so nothing ticks.
     fn fading(&self) -> bool {
         !self.detached
             && (self.focus.fade().running()
@@ -893,18 +867,19 @@ impl Display {
     }
 }
 
-// The spans file is on the library's volume, so it is read on tokio's
-// blocking pool like every picture, and a read that panics answers with no
-// spans.
+/// Reads the spans file on tokio's blocking pool, so a slow read never
+/// delays a frame. A read that panics produces a `Cast` message with no
+/// spans.
 fn read_spans(item: u64, path: String) -> Task<Message> {
     Task::future(async move { tokio::task::spawn_blocking(move || Spans::read(&path)).await })
         .then(move |spans| Task::done(Message::Cast(item, spans.ok().flatten())))
 }
 
-// The decode runs on tokio's blocking pool. A file read, an https fetch,
-// and a sprite-sheet decode are all blocking work that must never run
-// inside a frame. A decode that panics answers with no picture, so the slot
-// it names stops waiting on it, and the line names the reference that did it.
+/// Runs each job on tokio's blocking pool, because a file read, an
+/// HTTPS fetch, and a sprite-sheet decode block, and no frame may wait
+/// for one. When a job panics, the frame loop still receives an empty
+/// answer for it, so `Art` stops waiting for that picture, and a log
+/// line names the reference that failed.
 fn decode(jobs: Vec<Job>) -> Task<Message> {
     Task::batch(jobs.into_iter().map(|job| {
         let failed = job.clone();
@@ -913,7 +888,10 @@ fn decode(jobs: Vec<Job>) -> Task<Message> {
                 Task::done(Message::Art(match answer {
                     Ok(answer) => answer,
                     Err(_) => {
-                        eprintln!("media-display: the decode of {} failed", failed.reference());
+                        eprintln!(
+                            "media-display: decoding {} panicked, so it draws no picture",
+                            failed.reference()
+                        );
                         failed.clone().empty()
                     }
                 }))
@@ -922,10 +900,10 @@ fn decode(jobs: Vec<Job>) -> Task<Message> {
     }))
 }
 
-// The socket and the channel the frame loop writes its commands to, as one
-// subscription, and the word back about what the display draws now. The path
-// alone names the subscription, so a redraw that rebuilds it attaches to the
-// same socket instead of dialing again.
+/// What the mpv socket subscription needs. iced identifies a
+/// subscription by its hash, and only `path` is hashed, so the
+/// subscription keeps its socket across updates instead of connecting
+/// again.
 #[derive(Debug, Clone)]
 pub struct Wire {
     path: Arc<Path>,
@@ -940,25 +918,23 @@ impl Hash for Wire {
     }
 }
 
-/// What the socket reader reads to tell whether one position push moves
-/// anything: the surface the playhead travels across, and whether the display
-/// draws at all.
+/// What `Pace` reads to decide whether a position changes the screen.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Watching {
     canvas: Canvas,
     visible: bool,
 }
 
-/// The gate on the position pushes.
+/// Drops the `time-pos` changes that change nothing on screen, before
+/// they reach the frame loop.
 ///
-/// mpv pushes a position on every video frame, and the toolkit presents a
-/// frame for every batch of messages it takes, so a push that moves no pixel
-/// costs a surface commit and a recomposite of the whole screen. The reader
-/// forwards one only when the second the time label reads changes, or the
-/// playhead moves an output pixel. With the display down nothing under it
-/// follows the position, so the whole second alone carries it, which holds
-/// the film's own state current at one message a second for the summon that
-/// follows.
+/// mpv sends `time-pos` on every video frame, and iced presents a frame
+/// for every batch of messages. A position that moves no pixel would
+/// still cost a surface commit and a recomposite of the whole screen.
+/// So `Pace` forwards a position only when the whole second on the time
+/// label changes or the playhead moves an output pixel. While the OSD is
+/// down only the second counts, which still updates the film's position
+/// once a second for the next summon.
 struct Pace {
     watching: watch::Receiver<Watching>,
     duration: Option<f64>,
@@ -974,7 +950,7 @@ impl Pace {
         }
     }
 
-    /// Whether one event reaches the frame loop.
+    /// Whether to forward the event to the frame loop.
     fn forwards(&mut self, event: &ipc::Event) -> bool {
         let ipc::Event::Property { name, value } = event else {
             return true;
@@ -1003,9 +979,8 @@ impl Pace {
     }
 }
 
-// The two halves meet here. The card states its seam in canvas units and the
-// display holds its pictures in real pixels, so this carries the canvas the
-// frame draws on and reads the one in the other.
+/// Gives `upnext` the offer's picture in canvas units. `upnext` lays out
+/// the card in canvas units, and `Art` stores pictures in output pixels.
 struct Bridge<'a> {
     art: &'a Art,
     canvas: Canvas,
@@ -1028,14 +1003,13 @@ impl upnext::Art for Bridge<'_> {
     }
 }
 
-/// Which of the two layers one canvas draws.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Part {
     Below,
     Above,
 }
 
-/// One layer of the display, which the modules draw into.
+/// One layer of the display as an iced canvas program.
 struct Layer<'a> {
     display: &'a Display,
     part: Part,
@@ -1052,11 +1026,11 @@ impl canvas::Program<Message> for Layer<'_> {
         bounds: Rectangle,
         _cursor: iced::mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
-        // The canvas comes from the surface the compositor configured, which
-        // the window reports on its own, because the region a Layout gives
-        // this pod is the compositor's choice and not this client's. The
-        // frame loop learns it before it draws, so the first decode of an
-        // item asks for the box the screen really takes.
+        // The canvas comes from the surface size that the window
+        // reports, not from a constant, because the compositor sets the
+        // region that a `Layout` gives this pod. `run` reads the size
+        // before the first frame, so the first decode of an item already
+        // uses the real size.
         let canvas = self.display.canvas;
 
         if !self.display.draws(self.part) {
@@ -1064,9 +1038,6 @@ impl canvas::Program<Message> for Layer<'_> {
         }
         let fade = self.display.focus.fade().value();
 
-        // Both layers read the wall clock: the lower one for the reading and
-        // the film's end time, and the upper one for the end time on the
-        // up-next card that stands over the bare video.
         let now = clock::now();
         let cache = match self.part {
             Part::Below => &self.display.below,
@@ -1084,11 +1055,10 @@ impl canvas::Program<Message> for Layer<'_> {
     }
 }
 
-/// One `Minute` each time the wall minute turns. A fixed one-minute step
-/// from whenever the display opened would redraw up to a minute after the
-/// turn, so the reading and the end times would lag the wall clock. Each
-/// wait is measured from the clock again, so a slow frame never moves the
-/// tick off the turn.
+/// A stream that yields `Minute` each time the wall-clock minute
+/// changes. Each wait runs to the next minute from the current time,
+/// because a fixed 60-second interval would lag the clock by up to a
+/// minute, and a slow frame would shift every later tick.
 fn minutes() -> impl iced::futures::Stream<Item = Message> {
     iced::stream::channel(1, async |mut output| {
         use iced::futures::SinkExt;
@@ -1102,22 +1072,25 @@ fn minutes() -> impl iced::futures::Stream<Item = Message> {
     })
 }
 
-/// Open the window and run the frame loop. The caller waits for mpv first,
-/// so the surface this opens arrives after the film's.
+/// Opens the window and runs the frame loop until the window closes.
+/// `main` first waits for mpv to report a position, so this window is
+/// created after mpv's.
 pub fn run(ipc: Ipc) -> iced::Result {
     iced::application(
-        // The window answers its own size once at the start. Every later
-        // size arrives as a resize event, so the display holds the surface
-        // it draws on from its first frame.
+        // At startup the display reads the window's size and scale
+        // factor once, so it has the real surface before its first
+        // frame.
         //
-        // The display reads no pointer, so its surface takes an empty
-        // input region and the pointer reaches the film's surface under
-        // it. The compositor's shell gives the keyboard to the surface a
-        // click lands on, so without this the scrim takes every click
-        // and the player never gets a key.
+        // The display handles no pointer input, so mouse passthrough
+        // gives its surface an empty input region, and clicks reach
+        // mpv's surface under it. The compositor's shell gives the
+        // keyboard to the surface that receives a click. Without
+        // passthrough the display's window would take every click, and
+        // mpv would never receive a key.
         //
-        // The arranger binds on the window's own connection, from winit's
-        // thread, and its events reach the frame loop through a channel.
+        // The arranger binds on the window's own Wayland connection, on
+        // winit's thread, and sends its events to the frame loop through
+        // a channel.
         move || {
             let (sender, events) = tokio::sync::mpsc::unbounded_channel();
             let events = iced::futures::stream::unfold(events, |mut events| async move {
@@ -1144,36 +1117,32 @@ pub fn run(ipc: Ipc) -> iced::Result {
         Display::view,
     )
     .subscription(Display::subscription)
-    // The window is transparent, so the whole style is the ground it
-    // does not paint.
     .style(|_display, _theme| iced::theme::Style {
         background_color: Color::TRANSPARENT,
         text_color: theme::color::text(),
     })
     .window(settings())
-    // A close request reaches the frame loop as Message::Close, which closes
-    // the arranger's link before the toolkit exits, so the link's thread
-    // never reads a connection winit has closed.
+    // A close request arrives as `Message::Close`. The handler closes
+    // the arranger's link first and then exits, so the link's thread
+    // never reads a connection that winit already closed.
     .exit_on_close_request(false)
-    // The brand's two faces come out of the binary, not out of whatever
-    // the image has installed, so every liken display draws the same
-    // face.
+    // The fonts are embedded in the binary, so every `liken` display
+    // draws the same typeface whatever fonts the image has installed.
     .font(liken_iced::font::REGULAR_OTF)
     .font(liken_iced::font::ITALIC_OTF)
     .default_font(liken_iced::font::REGULAR)
     .title("liken display")
-    // Every shape reaches the frame as a picture the brush rasterized with
-    // its edges antialiased, so the frame holds no mesh to multisample.
-    // With this on, the toolkit renders each layer that holds a mesh into a
-    // multisampled target the size of the whole window, and the window
-    // covers the whole screen.
+    // `Brush` rasterizes every shape into a picture with antialiased
+    // edges, so the frame has no mesh to multisample. With the
+    // toolkit's antialiasing on, iced renders each layer that has a
+    // mesh into a multisampled target as large as the window, which
+    // here is the whole screen.
     .antialiasing(false)
     .run()
 }
 
-/// The window: the canvas's size, no decorations, and a transparent ground.
-/// Its app_id names it to the compositor, so an arrangement places the
-/// display's surface apart from mpv's.
+/// The compositor reads `application_id` as the Wayland app_id, so an
+/// arrangement can place the display's surface apart from mpv's.
 fn settings() -> iced::window::Settings {
     iced::window::Settings {
         size: Size::new(theme::CANVAS_WIDTH, theme::CANVAS_HEIGHT),
@@ -1194,7 +1163,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn the_window_carries_the_overlay_app_id() {
+    fn the_window_has_the_overlay_app_id() {
         assert_eq!(
             settings().platform_specific.application_id,
             "liken-media-overlay"
@@ -1216,8 +1185,9 @@ mod tests {
         property("pause", json!(paused))
     }
 
-    /// One display over a film with a length, chapters, and two audio tracks,
-    /// with a reader on the socket so the commands it sends can be read back.
+    /// Creates a display for a 6000-second film at 1200 seconds, with
+    /// chapters and two audio tracks. The receiver reads the commands
+    /// that the display sends to mpv.
     pub(super) fn display() -> (Display, broadcast::Receiver<String>) {
         let mut display = Display::new(Ipc::default());
         let commands = display.wire.commands.subscribe();
@@ -1242,7 +1212,7 @@ mod tests {
         (display, commands)
     }
 
-    /// Run every fade to wherever it is going, the way the tick does.
+    /// Ticks until every fade has finished moving.
     pub(super) fn settle(display: &mut Display) {
         while display.fading() {
             let _ = display.update(Message::Tick);
@@ -1273,7 +1243,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_summon_and_the_six_actions_raise_the_display() {
+    async fn a_summon_or_a_direction_raises_the_display() {
         for word in ["summon", "up", "down", "left", "right"] {
             let (mut display, _) = display();
             let _ = display.update(message(word));
@@ -1284,7 +1254,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_message_the_display_has_no_case_for_raises_nothing() {
+    async fn an_unknown_or_empty_message_raises_nothing() {
         let (mut display, _) = display();
         let _ = display.update(message("liken-art"));
         let _ = display.update(Message::Mpv(ipc::Event::Message(Vec::new())));
@@ -1293,7 +1263,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_idle_window_dismisses_the_display() {
+    async fn the_idle_timer_hides_the_display() {
         let (mut display, _) = display();
         let _ = display.update(message("summon"));
         settle(&mut display);
@@ -1306,12 +1276,11 @@ mod tests {
         assert_eq!(display.idle.armed, None);
     }
 
-    /// The window the summon armed runs out while the audio chooser is
-    /// open, and the chooser and the display both stay up. The back that
-    /// closes the chooser arms a new window, and that one takes the display
-    /// down.
+    /// The timer that a summon armed fires while the audio chooser is
+    /// open, and the display stays up. Closing the chooser with back
+    /// arms a new timer, which hides the display.
     #[tokio::test]
-    async fn the_idle_window_leaves_an_open_chooser_up() {
+    async fn the_idle_timer_leaves_an_open_chooser_up() {
         let (mut display, _) = display();
         let _ = display.update(message("summon"));
         let summoned = display.idle.armed.expect("a summon arms an idle window");
@@ -1336,10 +1305,8 @@ mod tests {
         assert!(!display.focus.visible());
     }
 
-    /// A second summon arms a second window, and the first one's expiry
-    /// dismisses nothing.
     #[tokio::test]
-    async fn a_stale_idle_window_dismisses_nothing() {
+    async fn a_stale_idle_timer_hides_nothing() {
         let (mut display, _) = display();
         let _ = display.update(message("summon"));
         let first = display.idle.armed.expect("a summon arms an idle window");
@@ -1352,8 +1319,9 @@ mod tests {
         assert_eq!(display.focus.fade().value(), 1.0);
     }
 
-    /// mpv reports the pause state once at registration. The first report
-    /// only records it, so a film that loads paused starts hidden.
+    /// mpv reports `pause` once when the display starts observing it.
+    /// The first report is only recorded, so a film that loads paused
+    /// starts with the display hidden.
     #[tokio::test]
     async fn a_film_that_loads_paused_starts_hidden() {
         let (mut display, _) = display();
@@ -1365,7 +1333,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_pause_raises_the_display_and_arms_no_idle_window() {
+    async fn a_pause_raises_the_display_and_arms_no_hide_timer() {
         let (mut display, _) = display();
         let _ = display.update(pause(false));
         let _ = display.update(pause(true));
@@ -1388,8 +1356,6 @@ mod tests {
         assert_eq!(display.focus.fade().value(), 0.0);
     }
 
-    /// A summon while the fade is falling reverses it in place, so the
-    /// display never drops to nothing and rises again.
     #[tokio::test]
     async fn a_summon_during_a_fade_out_reverses_it() {
         let (mut display, _) = display();
@@ -1409,8 +1375,6 @@ mod tests {
         assert_eq!(display.focus.fade().value(), 1.0);
     }
 
-    /// The display resolves the scrims for the surface it draws on, and a
-    /// surface of another size resolves them again.
     #[tokio::test]
     async fn a_resize_resolves_the_scrims_for_the_new_surface() {
         let (mut display, _) = display();
@@ -1429,9 +1393,8 @@ mod tests {
         assert!(rows(&display) < before);
     }
 
-    /// A window at twice the scale resolves each scrim at twice the rows, so
-    /// every row still covers one output row, and a factor of nothing changes
-    /// nothing.
+    /// At scale factor 2 each scrim has twice as many rows, so each row
+    /// still covers one output row. A factor of 0 changes nothing.
     #[tokio::test]
     async fn a_rescale_resolves_the_scrims_at_the_new_density() {
         let (mut display, _) = display();
@@ -1451,10 +1414,11 @@ mod tests {
         assert_eq!(rows(&display), single * 2);
     }
 
-    /// A frame of playback that moves nothing redraws nothing, and a whole
-    /// second of it redraws the layer.
+    /// A position inside the same second and the same output pixel
+    /// keeps the signature, so nothing redraws. A position in the next
+    /// second changes it.
     #[tokio::test]
-    async fn a_position_that_moves_nothing_a_person_sees_redraws_nothing() {
+    async fn a_position_in_the_same_second_keeps_the_signature() {
         let (mut display, _) = display();
         let _ = display.update(message("summon"));
         settle(&mut display);
@@ -1469,10 +1433,8 @@ mod tests {
         assert_eq!(display.film.position, Some(1200.6));
     }
 
-    /// A pixel of playhead travel redraws the layer, although the label reads
-    /// the same second.
     #[tokio::test]
-    async fn a_pixel_of_playhead_travel_carries_a_new_signature() {
+    async fn a_position_on_another_pixel_changes_the_signature_pixel() {
         let (mut display, _) = display();
         let _ = display.update(message("summon"));
         settle(&mut display);
@@ -1483,10 +1445,8 @@ mod tests {
         assert_ne!(moved.pixel, first.pixel);
     }
 
-    /// A film with no length carries no pixel, so a position on it follows the
-    /// whole second alone.
     #[tokio::test]
-    async fn a_film_with_no_length_carries_no_playhead_pixel() {
+    async fn a_film_with_no_duration_has_no_playhead_pixel() {
         let mut display = Display::new(Ipc::default());
         let _ = display.update(message("summon"));
         settle(&mut display);
@@ -1503,10 +1463,8 @@ mod tests {
         ))
     }
 
-    /// A press that sends mpv a command leaves one line waiting for mpv's
-    /// answer, and the answer completes it.
     #[tokio::test]
-    async fn a_press_leaves_its_line_for_mpvs_answer() {
+    async fn a_press_writes_its_log_line_when_mpv_responds() {
         let (mut display, mut commands) = display();
         let _ = display.update(message("summon"));
         let _ = display.update(message("right"));
@@ -1519,12 +1477,12 @@ mod tests {
                 "media-display: select pressed: seek to 0:20:05, sent [\"seek\",1205.0,\"absolute+exact\"] to mpv, mpv answered success"
             )
         );
-        assert!(display.said.is_empty());
+        assert!(display.logged.is_empty());
     }
 
-    /// A held arrow on the chapter axis steps on every repeat, writes one
-    /// line for the hold when the idle window hides the display, and leaves
-    /// no note for any repeat.
+    /// Each repeat of a held arrow sends a command, and one log line
+    /// covers the whole hold. The line is written when the display
+    /// hides, and no repeat stores a note.
     #[tokio::test]
     async fn a_held_arrow_writes_one_line_when_the_display_hides() {
         let (mut display, mut commands) = display();
@@ -1536,18 +1494,17 @@ mod tests {
         }
         assert_eq!(sent(&mut commands).len(), 4);
         assert_eq!(display.wire.notes.lock().expect("the notes").len(), 1);
-        assert!(display.said.is_empty());
+        assert!(display.logged.is_empty());
 
         let armed = display.idle.armed.expect("the press armed the idle window");
         let _ = display.update(Message::Hide(armed));
 
-        assert_eq!(display.said.len(), 1);
+        assert_eq!(display.logged.len(), 1);
         assert!(
-            display.said[0].starts_with("media-display: right held for 3 repeats, last sent [")
+            display.logged[0].starts_with("media-display: right held for 3 repeats, last sent [")
         );
     }
 
-    /// A summon from the sidecar ends the hold before it too.
     #[tokio::test]
     async fn a_summon_ends_the_hold_before_it() {
         let (mut display, _commands) = display();
@@ -1557,12 +1514,11 @@ mod tests {
 
         let _ = display.update(message("summon"));
 
-        assert_eq!(display.said.len(), 1);
+        assert_eq!(display.logged.len(), 1);
     }
 
-    /// Every press the router answers reaches mpv on the display's own socket.
     #[tokio::test]
-    async fn a_press_the_router_answers_reaches_mpv() {
+    async fn a_press_with_a_command_sends_it_to_mpv() {
         let (mut display, mut commands) = display();
         let _ = display.update(message("summon"));
         assert!(sent(&mut commands).is_empty());
@@ -1582,10 +1538,8 @@ mod tests {
         );
     }
 
-    /// The block the sidecar sends names the item, and a block for another
-    /// item replaces it.
     #[tokio::test]
-    async fn the_block_the_sidecar_sends_names_the_item() {
+    async fn a_presentation_block_sets_the_item_and_the_next_replaces_it() {
         let (mut display, _) = display();
         let _ = display.update(Message::Mpv(ipc::Event::Message(vec![
             "presentation".to_string(),
@@ -1603,7 +1557,6 @@ mod tests {
         assert_eq!(display.presentation.title(&display.film), None);
     }
 
-    /// One block the sidecar sends, as the message it arrives in.
     fn present(block: &str) -> Message {
         Message::Mpv(ipc::Event::Message(vec![
             "presentation".to_string(),
@@ -1611,7 +1564,6 @@ mod tests {
         ]))
     }
 
-    /// One picture on disk, of the size a decode reads back.
     fn picture(name: &str, width: u32, height: u32) -> String {
         let path = std::env::temp_dir().join(format!("media-display-window-{name}.png"));
         let mut bytes = Vec::new();
@@ -1629,16 +1581,17 @@ mod tests {
         path.to_string_lossy().to_string()
     }
 
-    /// One message, and the decodes the state it leaves behind asks for. The
-    /// frame loop hands these to the blocking pool; a test runs them itself.
-    fn asks(display: &mut Display, message: Message) -> Vec<Job> {
+    /// Handles one message and returns the decode jobs that the new
+    /// state needs. A test runs them directly instead of on the
+    /// blocking pool.
+    fn jobs_after(display: &mut Display, message: Message) -> Vec<Job> {
         let _ = display.step(message);
         display.sync_art()
     }
 
-    /// One decode run the way the pool runs it, with its answer taken back
-    /// into the display and the decode it may start in turn.
-    fn answer(display: &mut Display, job: Job) -> Vec<Job> {
+    /// Runs a decode job, gives its answer to the display, and returns
+    /// the jobs that the answer starts.
+    fn run_job(display: &mut Display, job: Job) -> Vec<Job> {
         let (changed, more) = display.art.on_answer(job.run());
         if changed {
             display.redraw();
@@ -1646,70 +1599,65 @@ mod tests {
         more
     }
 
-    /// A new item decodes the logo it declares, and the answer clears the
-    /// header's second line.
     #[tokio::test]
-    async fn an_item_decodes_its_logo_and_the_answer_moves_the_second_line() {
+    async fn an_item_decodes_its_logo_once_and_the_result_sets_its_height() {
         let (mut display, _) = display();
         let logo = picture("logo", 800, 128);
-        let jobs = asks(
+        let jobs = jobs_after(
             &mut display,
             present(&format!(r#"{{"title":"A Film","logo":"{logo}"}}"#)),
         );
         assert_eq!(jobs.len(), 1);
 
-        assert!(answer(&mut display, jobs.into_iter().next().unwrap()).is_empty());
+        assert!(run_job(&mut display, jobs.into_iter().next().unwrap()).is_empty());
         let drawn = display.art.logo().expect("the answer carries a picture");
         assert_eq!(drawn.canvas_height(&display.canvas), 110.0);
-        // The box is asked for once per item, and a new item asks again.
-        assert!(asks(&mut display, property("time-pos", json!(12.0))).is_empty());
+        assert!(jobs_after(&mut display, property("time-pos", json!(12.0))).is_empty());
         assert_eq!(
-            asks(&mut display, present(&format!(r#"{{"logo":"{logo}"}}"#))).len(),
+            jobs_after(&mut display, present(&format!(r#"{{"logo":"{logo}"}}"#))).len(),
             1
         );
     }
 
-    /// A music item whose block names no cover waits for the file mpv plays,
-    /// because an answer of no cover would end the asking for the whole run.
-    /// One whose block names its cover decodes it at once, and holds it
-    /// whether or not the OSD is up.
+    /// A music item whose block names no cover waits for mpv's `path`
+    /// before it requests the cover from the file. The display keeps the
+    /// first answer, so a request made before the path is known would
+    /// leave the item with no cover. A block that names its cover
+    /// decodes it at once, and the cover draws with the OSD down.
     #[tokio::test]
-    async fn a_music_item_decodes_its_cover_and_holds_it() {
+    async fn a_music_item_decodes_its_cover_and_keeps_it_with_the_display_down() {
         let (mut display, _) = display();
         assert!(
-            asks(
+            jobs_after(
                 &mut display,
                 present(r#"{"type":"music","title":"A Record"}"#)
             )
             .is_empty()
         );
 
-        let jobs = asks(&mut display, property("path", json!("/media/track.flac")));
+        let jobs = jobs_after(&mut display, property("path", json!("/media/track.flac")));
         assert_eq!(jobs.len(), 1);
-        assert!(answer(&mut display, jobs.into_iter().next().unwrap()).is_empty());
+        assert!(run_job(&mut display, jobs.into_iter().next().unwrap()).is_empty());
         assert!(display.art.cover().is_none());
-        // The box is answered, so the asking ends there.
-        assert!(asks(&mut display, property("time-pos", json!(12.0))).is_empty());
+        assert!(jobs_after(&mut display, property("time-pos", json!(12.0))).is_empty());
 
         let cover = picture("cover", 532, 532);
-        let jobs = asks(
+        let jobs = jobs_after(
             &mut display,
             present(&format!(r#"{{"type":"music","art":"{cover}"}}"#)),
         );
         assert_eq!(jobs.len(), 1);
-        let _ = answer(&mut display, jobs.into_iter().next().unwrap());
+        let _ = run_job(&mut display, jobs.into_iter().next().unwrap());
         assert!(display.art.cover().is_some());
         assert!(!display.focus.visible());
     }
 
-    /// The tile is decoded only while a fine scan is in flight for an item
-    /// that declares trickplay.
-    /// A film paused in a span asks for the portraits of the people the
-    /// spans file names there, and a resume asks for none.
+    /// A pause inside a span requests the portraits of the people that
+    /// the spans file names there, and a resume hides the cast row.
     #[tokio::test]
     async fn a_pause_in_a_span_decodes_the_portraits_of_its_people() {
         let (mut display, _) = display();
-        let _ = asks(
+        let _ = jobs_after(
             &mut display,
             present(r#"{"appearances":"/art/spans.json","contributors":"/art/.contributors"}"#),
         );
@@ -1718,41 +1666,40 @@ mod tests {
                 "people":{"ja/jane":{"name":"Jane","portrait":"ja/jane/headshot.jpg"}},
                 "spans":[{"start":10.0,"end":20.0,"people":["ja/jane"]}]}"#,
         );
-        let _ = asks(&mut display, Message::Cast(1, spans));
-        let _ = asks(&mut display, property("time-pos", json!(12.0)));
-        let _ = asks(&mut display, pause(false));
-        let jobs = asks(&mut display, pause(true));
+        let _ = jobs_after(&mut display, Message::Cast(1, spans));
+        let _ = jobs_after(&mut display, property("time-pos", json!(12.0)));
+        let _ = jobs_after(&mut display, pause(false));
+        let jobs = jobs_after(&mut display, pause(true));
         assert_eq!(
             jobs.iter().map(Job::reference).collect::<Vec<_>>(),
             vec!["/art/.contributors/ja/jane/headshot.jpg"]
         );
-        let _ = asks(&mut display, pause(false));
+        let _ = jobs_after(&mut display, pause(false));
         assert!(!display.cast_showing());
     }
 
     #[tokio::test]
     async fn only_a_scan_on_a_trickplay_item_decodes_a_tile() {
         let (mut display, _) = display();
-        let _ = asks(&mut display, present(r#"{"title":"A Film"}"#));
-        let _ = asks(&mut display, message("summon"));
-        assert!(asks(&mut display, message("right")).is_empty());
+        let _ = jobs_after(&mut display, present(r#"{"title":"A Film"}"#));
+        let _ = jobs_after(&mut display, message("summon"));
+        assert!(jobs_after(&mut display, message("right")).is_empty());
         assert!(display.previewing().is_none());
 
-        let jobs = asks(
+        let jobs = jobs_after(
             &mut display,
             present(r#"{"title":"A Film","trickplay":"/art/tiles"}"#),
         );
         assert!(display.previewing().is_some());
         assert_eq!(jobs.len(), 1);
-        // The directory holds no sheet, so the tile answers nothing and the
-        // gate reopens.
-        assert!(answer(&mut display, jobs.into_iter().next().unwrap()).is_empty());
+        // The directory has no sprite sheet, so the decode returns no
+        // tile and starts no further job.
+        assert!(run_job(&mut display, jobs.into_iter().next().unwrap()).is_empty());
         assert!(display.art.tile().is_none());
     }
 
-    /// A chooser hides the logo and the tile, the way a hidden display does.
     #[tokio::test]
-    async fn a_chooser_hides_the_pictures_the_osd_carries() {
+    async fn an_open_chooser_hides_the_logo_and_the_thumbnail() {
         let (mut display, _) = display();
         let _ = display.update(present(r#"{"title":"A Film","trickplay":"/art/tiles"}"#));
         let _ = display.update(message("summon"));
@@ -1767,7 +1714,6 @@ mod tests {
         assert!(display.previewing().is_none());
     }
 
-    /// The block the sidecar sends for the work that follows this one.
     pub(super) const OFFER: &str = r#"{"reason":"Next in Harbor Lights",
         "title":"E05 \u00b7 The Long Tide",
         "detail":"Harbor Lights \u00b7 S02 \u00b7 45 min"}"#;
@@ -1779,9 +1725,8 @@ mod tests {
         ]))
     }
 
-    /// The offer arrives on its own message and raises nothing by itself.
     #[tokio::test]
-    async fn the_offer_the_sidecar_sends_raises_nothing() {
+    async fn a_next_message_stores_the_offer_and_raises_nothing() {
         let (mut display, _) = display();
         let _ = display.update(block("next", OFFER));
         assert!(display.upnext.available());
@@ -1792,8 +1737,6 @@ mod tests {
         assert!(!display.upnext.available());
     }
 
-    /// The position raises the card at the rise, on its own fade and its own
-    /// hide window, with the display still down.
     #[tokio::test]
     async fn the_position_raises_the_card_with_the_display_down() {
         let (mut display, _) = display();
@@ -1814,9 +1757,8 @@ mod tests {
         assert_eq!(display.card.armed, None);
     }
 
-    /// A hide window a later change replaced takes nothing down.
     #[tokio::test]
-    async fn a_stale_card_window_takes_nothing_down() {
+    async fn a_stale_card_timer_hides_nothing() {
         let (mut display, _) = display();
         let _ = display.update(block("next", OFFER));
         let _ = display.update(property("time-pos", json!(5940.0)));
@@ -1828,15 +1770,14 @@ mod tests {
         assert!(display.upnext.draws_outside(false));
     }
 
-    /// The lines a take sends mpv: the ask for the next work, and the pause
-    /// that stops the credits' sound.
+    /// What a select on the card sends to mpv: a `liken-next` script
+    /// message that requests the next work, and a pause that stops the
+    /// sound of the credits.
     pub(super) const TAKE: [&str; 2] = [
         "{\"command\":[\"script-message\",\"liken-next\"],\"request_id\":0}",
         "{\"command\":[\"no-osd\",\"set\",\"pause\",\"yes\"],\"request_id\":1000}",
     ];
 
-    /// A select on the card asks the sidecar for the next work, and the wait
-    /// deadens every press but back.
     #[tokio::test]
     async fn a_select_on_the_card_asks_for_the_next_work() {
         let (mut display, mut commands) = display();
@@ -1859,10 +1800,8 @@ mod tests {
         );
     }
 
-    /// The risen card alone over the bare video takes a select, so one press
-    /// asks for the next work with the display down.
     #[tokio::test]
-    async fn a_select_at_the_bare_video_takes_the_risen_card() {
+    async fn a_select_with_the_display_down_takes_the_showing_card() {
         let (mut display, mut commands) = display();
         let _ = display.update(block("next", OFFER));
         let _ = display.update(property("time-pos", json!(5940.0)));
@@ -1879,8 +1818,6 @@ mod tests {
         assert!(display.committed.is_empty(), "no arranger, no hand-off");
     }
 
-    /// Once the card's hide window runs out, a select at the bare video
-    /// pauses again.
     #[tokio::test]
     async fn a_select_after_the_card_leaves_pauses() {
         let (mut display, mut commands) = display();
@@ -1899,8 +1836,8 @@ mod tests {
         assert!(!display.upnext.waiting());
     }
 
-    /// A new item drops the offer, and the first report of the position the
-    /// Play started on does not.
+    /// A move to another playlist entry drops the offer. The first
+    /// `playlist-pos` report does not.
     #[tokio::test]
     async fn a_new_item_drops_the_offer() {
         let (mut display, _) = display();
@@ -1912,15 +1849,13 @@ mod tests {
         assert!(!display.upnext.available());
     }
 
-    /// An item whose marks place its intro around the playhead the fixture
-    /// film stands at, and its credits in its second half.
+    /// An item with an intro around the fixture's playhead at 1200
+    /// seconds, and credits near the end.
     const MARKED: &str = r#"{"title":"A Film","marks":[
         {"kind":"intro","end":1250.0,"source":"theintrodb"},
         {"kind":"intro","start":1100.0,"end":1250.0},
         {"kind":"credits","start":5400.0,"end":5900.0}]}"#;
 
-    /// The skip control comes with the intro and leaves with it, on its own
-    /// fade, with the display down.
     #[tokio::test]
     async fn the_skip_control_follows_the_intro_with_the_display_down() {
         let (mut display, _) = display();
@@ -1936,7 +1871,6 @@ mod tests {
         assert!(!display.skip.draws_outside(false));
     }
 
-    /// An item with no marks offers no skip control anywhere in the film.
     #[tokio::test]
     async fn an_item_with_no_marks_offers_no_skip_control() {
         let (mut display, _) = display();
@@ -1947,11 +1881,10 @@ mod tests {
         }
     }
 
-    /// The press that wakes the display lands on the control, and the select
-    /// after it seeks to the end of the intro. The focus moves to the bar when
-    /// the playhead leaves the span.
+    /// A select on the skip control seeks to the end of the intro. When
+    /// the playhead leaves the span, the focus moves to the bar.
     #[tokio::test]
-    async fn a_wake_and_a_select_skip_the_intro() {
+    async fn the_press_that_raises_the_display_and_a_select_skip_the_intro() {
         let (mut display, mut commands) = display();
         let _ = display.update(present(MARKED));
         let _ = display.update(message("down"));
@@ -1966,8 +1899,6 @@ mod tests {
         assert_eq!(display.focus.focused_stop(), Some(Stop::Fine));
     }
 
-    /// Credits in the second half raise the card at their start, earlier than
-    /// the time that remains would, for a film and for an episode.
     #[tokio::test]
     async fn the_credits_raise_the_card_at_their_start() {
         credits_raise_the_card(MARKED);
@@ -1993,10 +1924,9 @@ mod tests {
         assert!(display.upnext.showing_card());
     }
 
-    /// An episode caps its wait for the scene after the credits at the series
-    /// rule, two minutes from the end of a 100 minute file, where a film caps
-    /// it at four minutes. So the card waits for a scene that ends in the
-    /// last four minutes of an episode.
+    /// For an episode, the wait for a scene after the credits ends at
+    /// the series rule, two minutes before the end of this 100-minute
+    /// file. A film's rule would end it four minutes before the end.
     #[tokio::test]
     async fn an_episodes_card_waits_for_a_late_scene() {
         let (mut display, _) = display();
@@ -2013,8 +1943,6 @@ mod tests {
         assert!(display.upnext.showing_card());
     }
 
-    /// An episode with no credits mark raises the card by the series rule,
-    /// two minutes from the end of a 100 minute file.
     #[tokio::test]
     async fn an_unmarked_episode_raises_the_card_by_the_series_rule() {
         let (mut display, _) = display();
@@ -2030,10 +1958,10 @@ mod tests {
         assert!(display.upnext.showing_card());
     }
 
-    /// In the credits before a scene, the skip control shows and the card
-    /// waits. A wake lands on the control, up reaches the offer's chip, and a
-    /// select on the control seeks to the scene in the gap between the two
-    /// credits spans. The card rises at the credits after the scene.
+    /// During credits that come before a scene, the skip control shows
+    /// and the card waits. A select on the control seeks to the end of
+    /// the first credits span, and the card appears when the second
+    /// span starts.
     #[tokio::test]
     async fn the_card_waits_for_the_scene_and_the_control_leads_to_it() {
         let (mut display, mut commands) = display();
@@ -2064,7 +1992,6 @@ mod tests {
         assert!(!display.skip.available());
     }
 
-    /// The level shows the row and nothing else on the display.
     #[tokio::test]
     async fn a_level_change_shows_the_row_alone() {
         let (mut display, _) = display();
@@ -2082,8 +2009,9 @@ mod tests {
         assert!(!display.volume.showing());
     }
 
-    /// A level the sidecar marks as not drawn, because the receiver shows
-    /// its own overlay on the TV, sets the level and shows no row.
+    /// When the sidecar marks a level as not to be drawn, because the
+    /// receiver shows its own overlay on the TV, the display records the
+    /// level and shows no row.
     #[tokio::test]
     async fn a_level_change_the_receiver_draws_shows_no_row() {
         let (mut display, _) = display();
@@ -2095,7 +2023,6 @@ mod tests {
         assert!(display.row.armed.is_none());
     }
 
-    /// A message with no level the display reads draws nothing.
     #[tokio::test]
     async fn a_level_change_with_no_level_draws_nothing() {
         let (mut display, _) = display();
@@ -2104,8 +2031,8 @@ mod tests {
         assert!(!display.volume.showing());
     }
 
-    /// mpv plays at unity, so its own volume and mute say nothing about the
-    /// room's level and show no row.
+    /// mpv plays at unity gain, so its own `volume` and `mute` do not
+    /// reflect the room's level, and they show no row.
     #[tokio::test]
     async fn mpvs_own_volume_shows_no_row() {
         let (mut display, _) = display();
@@ -2115,8 +2042,6 @@ mod tests {
         assert!(!display.volume.showing());
     }
 
-    /// The frame tick runs while any of the three fades moves, and the card's
-    /// fade moves with the display down.
     #[tokio::test]
     async fn the_frame_tick_runs_for_every_fade() {
         let (mut display, _) = display();
@@ -2134,8 +2059,8 @@ mod tests {
         assert!(!display.fading());
     }
 
-    /// One offer that carries a picture, 800 by 400, which the card's own box
-    /// is narrower than.
+    /// A `next` block with a picture of 800 by 400, which is wider than
+    /// the card's picture box.
     pub(super) fn offer_with_art() -> String {
         format!(
             r#"{{"title":"E05 · The Long Tide","art":"{}"}}"#,
@@ -2146,32 +2071,33 @@ mod tests {
     #[tokio::test]
     async fn an_offer_with_a_picture_decodes_it() {
         let (mut display, _) = display();
-        assert!(asks(&mut display, block("next", OFFER)).is_empty());
+        assert!(jobs_after(&mut display, block("next", OFFER)).is_empty());
         assert_eq!(display.upnext.art(), None);
 
-        let jobs = asks(&mut display, block("next", &offer_with_art()));
+        let jobs = jobs_after(&mut display, block("next", &offer_with_art()));
         assert!(display.upnext.art().is_some());
         assert_eq!(jobs.len(), 1);
     }
 
-    /// The card takes the offer's picture at the size it draws at, in canvas
-    /// units. The picture is wider than its box, so it comes back letterboxed.
+    /// The card gets the offer's picture at its drawn size, in canvas
+    /// units. The picture is wider than its box, so it is scaled down to
+    /// fit.
     #[tokio::test]
     async fn the_card_takes_the_offers_picture_at_the_size_it_draws_at() {
         let (mut display, _) = display();
         let canvas = display.canvas;
         assert_eq!(upnext::Art::next(&display.bridge(&canvas)), None);
 
-        let jobs = asks(&mut display, block("next", &offer_with_art()));
-        let _ = answer(&mut display, jobs.into_iter().next().unwrap());
+        let jobs = jobs_after(&mut display, block("next", &offer_with_art()));
+        let _ = run_job(&mut display, jobs.into_iter().next().unwrap());
         assert_eq!(
             upnext::Art::next(&display.bridge(&canvas)),
             Some(Size::new(440.0, 220.0))
         );
     }
 
-    /// One run of positions as mpv pushes them, and how many of them the
-    /// reader forwards to the frame loop.
+    /// Sends a duration and then the positions through a `Pace`, and
+    /// returns how many positions it forwards.
     fn paced(visible: bool, duration: f64, positions: &[f64]) -> usize {
         let (_sender, watching) = watch::channel(Watching {
             canvas: Canvas::default(),
@@ -2193,23 +2119,19 @@ mod tests {
             .count()
     }
 
-    /// One second of pushes as mpv writes them, all reading the same whole
-    /// second on the time label.
+    /// Ten positions, 0.04 seconds apart, that all round to the same
+    /// whole second on the time label.
     fn one_second(from: f64) -> Vec<f64> {
         (0..10)
             .map(|frame| from + f64::from(frame) / 25.0)
             .collect()
     }
 
-    /// mpv pushes a position on every video frame. A run of them inside one
-    /// second moves neither the time label nor the playhead of a long film,
-    /// so one of them reaches the frame loop and the rest are dropped.
     #[tokio::test]
-    async fn a_second_of_position_pushes_reaches_the_frame_loop_once() {
+    async fn a_second_of_positions_reaches_the_frame_loop_once() {
         assert_eq!(paced(true, 6000.0, &one_second(1200.6)), 1);
         assert_eq!(paced(false, 6000.0, &one_second(1200.6)), 1);
 
-        // The second the label reads changes, so that push is forwarded.
         let two: Vec<f64> = one_second(1200.6)
             .into_iter()
             .chain(one_second(1201.6))
@@ -2217,16 +2139,14 @@ mod tests {
         assert_eq!(paced(true, 6000.0, &two), 2);
     }
 
-    /// On a short work the playhead travels a pixel inside one second, so the
-    /// pushes that move it are forwarded while the display is up, and the
-    /// whole second alone carries them while it is down.
+    /// In a 100-second film the playhead crosses output pixels within one
+    /// second, so `Pace` forwards those positions while the OSD is up.
     #[tokio::test]
     async fn a_playhead_that_moves_inside_a_second_is_forwarded() {
         assert!(paced(true, 100.0, &one_second(50.6)) > 1);
         assert_eq!(paced(false, 100.0, &one_second(50.6)), 1);
     }
 
-    /// Every message that is not a position reaches the frame loop.
     #[tokio::test]
     async fn every_other_event_reaches_the_frame_loop() {
         let (_sender, watching) = watch::channel(Watching {
@@ -2242,11 +2162,8 @@ mod tests {
         }));
     }
 
-    /// While the display draws nothing under it, a position moves no
-    /// signature, so the work of measuring one is not done at all. A summon
-    /// puts the signature back.
     #[tokio::test]
-    async fn a_position_with_the_display_down_carries_no_signature() {
+    async fn a_position_with_the_display_down_computes_no_signature() {
         let (mut display, _) = display();
         let _ = display.update(property("time-pos", json!(1200.0)));
         assert_eq!(display.signature, None);
@@ -2257,19 +2174,14 @@ mod tests {
         assert!(display.signature.is_some());
     }
 
-    /// A paused film pushes no position, so the wall clock follows a tick of
-    /// its own while the display stands, and that tick rebuilds the layer the
-    /// reading draws in.
     #[tokio::test]
-    async fn the_wall_clock_follows_a_tick_while_the_display_stands() {
+    async fn a_minute_message_keeps_the_raised_display_up() {
         let (mut display, _) = display();
         let _ = display.update(pause(false));
         let _ = display.update(pause(true));
         settle(&mut display);
         assert!(display.focus.visible());
 
-        // The minute rebuilds the layer under the OSD, where the reading and
-        // the end time draw.
         let _ = display.update(Message::Minute);
         assert!(display.focus.visible());
     }

@@ -1,13 +1,11 @@
-// The frames a run writes to disk: which frame is due, where it goes, and the
-// PNG the renderer's readback becomes.
-//
-// The schedule is a function of the clock alone, so a test drives it with
-// numbers and never opens a window.
+// The frames that a run saves as PNG files (`--capture` and
+// `--capture-at`). `Captures::due` takes the time as an argument, so
+// tests call it with numbers and open no window.
 
 use std::path::{Path, PathBuf};
 
-/// The directory the frames go in, the seconds they were asked for, and a
-/// cursor into that list. The cursor only moves forward, so a capture fires
+/// The output directory, the requested capture seconds, and the index
+/// of the next one. The index only increases, so each capture happens
 /// once.
 #[derive(Debug)]
 pub struct Captures {
@@ -17,9 +15,8 @@ pub struct Captures {
 }
 
 impl Captures {
-    /// The captures `--capture` and `--capture-at` asked for, or nothing. The
-    /// directory is where a frame goes, so a run that named none captures
-    /// nothing whatever seconds it listed.
+    /// Returns `None` when `--capture` named no directory, even when
+    /// `--capture-at` lists seconds.
     pub fn requested(dir: Option<PathBuf>, at: Vec<f64>) -> Option<Self> {
         Some(Self {
             dir: dir?,
@@ -28,8 +25,9 @@ impl Captures {
         })
     }
 
-    /// The path this frame is written to, if the frame is the first one at or
-    /// after the next capture second.
+    /// The file to write this frame to, if it is the first frame at or
+    /// after the next capture second. The name is that second as
+    /// `SSS.ss.png`.
     pub fn due(&mut self, at: f64) -> Option<PathBuf> {
         let when = *self.at.get(self.next)?;
         if at < when {
@@ -39,40 +37,40 @@ impl Captures {
         Some(self.dir.join(format!("{when:06.2}.png")))
     }
 
-    /// The second of the next capture still to come. The loop folds it into
-    /// the wake time, so a capturing run sleeps to the second it needs rather
-    /// than drawing every pass toward it.
+    /// The second of the next capture, which the loop includes when it
+    /// picks its next wake time.
     pub fn next_due(&self) -> Option<f64> {
         self.at.get(self.next).copied()
     }
 
-    /// Whether a capture is still to come.
+    /// Whether a capture is still scheduled.
     pub fn pending(&self) -> bool {
         self.next < self.at.len()
     }
 
-    /// Whether the run has taken every capture it asked for. A run that named
-    /// a directory and no second takes none and ends its own way.
+    /// True when every requested capture is written. A run with no
+    /// capture seconds returns false, so it does not end on its captures.
     pub fn taken(&self) -> bool {
         !self.at.is_empty() && !self.pending()
     }
 }
 
-/// Write one captured frame. `rgba` is what the renderer read back.
+/// Writes one frame as a PNG. `rgba` is the pixels that the renderer
+/// read back. Failures are printed and do not stop the run.
 pub fn write_png(path: &Path, width: u32, height: u32, rgba: &[u8]) {
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
     let Some(buffer) = image::RgbaImage::from_raw(width, height, rgba.to_vec()) else {
         eprintln!(
-            "capture {}: {} bytes is not {width}x{height}",
+            "writing the capture {}: {} bytes do not fill {width}x{height} RGBA pixels",
             path.display(),
             rgba.len()
         );
         return;
     };
     if let Err(error) = buffer.save(path) {
-        eprintln!("capture {}: {error}", path.display());
+        eprintln!("writing the capture {}: {error}", path.display());
     }
 }
 
@@ -86,7 +84,10 @@ mod tests {
 
     #[test]
     fn a_run_with_no_directory_captures_nothing() {
-        assert!(Captures::requested(None, vec![0.5]).is_none());
+        assert!(
+            Captures::requested(None, vec![0.5]).is_none(),
+            "a run with no directory captures, want no Captures"
+        );
     }
 
     #[test]
@@ -126,23 +127,38 @@ mod tests {
     }
 
     #[test]
-    fn a_run_has_taken_its_captures_after_the_last_one() {
+    fn a_run_has_finished_its_captures_after_the_last_one() {
         let mut captures = capturing("/frames", vec![0.5, 1.5]);
-        assert!(captures.pending());
-        assert!(!captures.taken());
+        assert!(captures.pending(), "no capture was taken, want pending");
+        assert!(
+            !captures.taken(),
+            "before any capture is due, the run has taken them all"
+        );
 
         captures.due(0.5);
-        assert!(!captures.taken());
+        assert!(
+            !captures.taken(),
+            "after the first of two captures, the run has taken them all"
+        );
 
         captures.due(1.5);
-        assert!(captures.taken());
-        assert!(!captures.pending());
+        assert!(
+            captures.taken(),
+            "after the last capture, the run has not taken them all"
+        );
+        assert!(
+            !captures.pending(),
+            "after the last capture, a capture is still pending"
+        );
     }
 
     #[test]
-    fn a_directory_with_no_seconds_captures_nothing_and_ends_nothing() {
+    fn a_directory_with_no_seconds_has_no_captures_and_is_not_finished() {
         let captures = capturing("/frames", Vec::new());
-        assert!(!captures.pending());
-        assert!(!captures.taken());
+        assert!(!captures.pending(), "a capture is pending, want none");
+        assert!(
+            !captures.taken(),
+            "the captures are taken, want not finished"
+        );
     }
 }

@@ -1,5 +1,5 @@
-// One pass of the frame loop: the script's keys, the draw, the capture, and
-// the numbers. The pass ends by setting the pace of the next one.
+// The frame loop of `Ready`: key presses, drawing one frame, and the
+// choice of when the loop wakes next.
 
 use iced_wgpu::graphics::Viewport;
 use iced_wgpu::wgpu;
@@ -16,16 +16,17 @@ use super::stats::millis;
 use super::timeline::{self, Wake};
 use super::{QUIT, Ready, Screen};
 
-/// The least time between two frames, one sixtieth of a second. The surface
-/// presents without vsync, so this floor is the whole of the frame-rate cap:
-/// an animation that answers "now" on every ask draws sixty frames a second
-/// and not as many as the loop can spin.
+/// The shortest time between two frames, one sixtieth of a second. The
+/// surface presents without vsync, so this is the only frame-rate limit. A
+/// screen that asks for a frame on every pass is drawn 60 times a second
+/// instead of as fast as the loop can run.
 pub const STEP: f64 = 1.0 / 60.0;
 
 impl<S: Screen> Ready<S> {
-    /// Hand one key from the keyboard to the screen, at the second it
-    /// arrived. A press lands between frames, and the screen folds it at the
-    /// second its clock reads, so the clock moves to now first.
+    /// Passes a key from the keyboard to the screen, and returns true when
+    /// the key ends the run. A key can arrive between frames, so the
+    /// screen's clock moves to the current time first, so an animation
+    /// that the key starts begins at that time.
     pub(crate) fn keyboard(&mut self, name: &str) -> bool {
         if let Some(start) = self.start {
             self.screen.tick(start.elapsed().as_secs_f64());
@@ -33,36 +34,32 @@ impl<S: Screen> Ready<S> {
         self.press(name)
     }
 
-    /// Hand one key to the screen. The answer is true when the key ends the
-    /// run. Both the keyboard and the script arrive here, so the key that
-    /// ends a run is decided once for the two of them.
+    /// Passes a key from the keyboard or the script to the screen, and
+    /// returns true when the key is [`QUIT`].
     pub(crate) fn press(&mut self, name: &str) -> bool {
         if name == QUIT {
             return true;
         }
-        // A key changes what the screen draws, so the frame on the glass is
-        // stale and the second named before the press no longer holds.
-        self.scheduled = None;
-        self.stale = true;
+        // The key can change the view and the screen's schedule.
+        self.next_frame_at = None;
+        self.needs_redraw = true;
         self.screen.key(name);
         false
     }
 
-    /// Write the numbers and leave the loop. The mark says the run ended on its
-    /// own terms, so a loop that returns without it is a window that went away.
+    /// Writes the statistics and exits the event loop as a requested exit.
     pub(crate) fn stop(&mut self, event_loop: &ActiveEventLoop) {
         self.stopped = true;
         self.finish();
         event_loop.exit();
     }
 
-    /// Build, draw, capture, and present one frame.
+    /// Builds, draws, captures if due, and presents one frame.
     pub(crate) fn frame(&mut self, event_loop: &ActiveEventLoop) {
-        // This frame is the one the schedule asked for, so the schedule is
-        // spent and the next pass asks the screen again. It draws every fold
-        // so far, so the glass is current again.
-        self.scheduled = None;
-        self.stale = false;
+        // This frame draws every change so far, and it is the frame that the
+        // saved second was waiting for.
+        self.next_frame_at = None;
+        self.needs_redraw = false;
         let loop_start = std::time::Instant::now();
         let at = match self.start {
             Some(start) => start.elapsed().as_secs_f64(),
@@ -76,12 +73,12 @@ impl<S: Screen> Ready<S> {
             }
         };
 
-        self.drawn = at;
+        self.last_frame_at = at;
 
-        // The clock moves before the script's keys, so a key folds at this
-        // frame's second. A settled screen draws once a minute, and a key
-        // stamped with the second of the frame before it would start its
-        // motion up to a minute in the past, with every ease already over.
+        // The clock moves before the scripted keys, so each key is handled at
+        // this frame's second. A screen at rest can draw only once a minute,
+        // so at the previous frame's second a key's animation could start a
+        // minute in the past and already be over.
         self.screen.tick(at);
 
         for key in self.timeline.due(at) {
@@ -120,7 +117,7 @@ impl<S: Screen> Ready<S> {
         let frame = match self.graphics.surface.get_current_texture() {
             Ok(frame) => frame,
             Err(wgpu::SurfaceError::OutOfMemory) => {
-                eprintln!("surface out of memory");
+                eprintln!("the window surface is out of memory, stopping the event loop");
                 self.stop(event_loop);
                 return;
             }
@@ -130,8 +127,8 @@ impl<S: Screen> Ready<S> {
             }
         };
 
-        // The clock starts after the swapchain image is in hand, so the frame
-        // time measures the work of a frame and not the wait for the display.
+        // The timer starts after the surface texture is acquired, so the
+        // frame time excludes the wait for the display.
         #[cfg(feature = "measure")]
         let build_start = std::time::Instant::now();
         let view = frame
@@ -171,8 +168,8 @@ impl<S: Screen> Ready<S> {
         }
 
         let background = self.screen.background();
-        // The frame is built. A capture writes a file and blocks on a readback,
-        // so the clock stops here and starts again for the submit.
+        // The frame time is paused here. A capture writes a file and blocks
+        // on a GPU readback, so its time stays out of the frame time.
         #[cfg(feature = "measure")]
         let drawn_ms = millis(build_start.elapsed());
 
@@ -188,17 +185,17 @@ impl<S: Screen> Ready<S> {
                 &self.viewport,
             );
         }
-        // The frame time is the work of a frame: build the interface, draw it,
-        // and submit the commands. It stops before the surface is presented,
-        // because that call waits for the compositor and measures the screen's
-        // rate rather than this program's cost.
+        // The frame time covers building the interface, drawing it, and
+        // submitting the commands. It stops before `frame.present()`,
+        // because that call waits for the compositor and would measure the
+        // display's rate instead of this program's work.
         #[cfg(feature = "measure")]
         let build_ms = drawn_ms + millis(submit_start.elapsed());
 
         frame.present();
 
-        // A captured frame draws twice and blocks on a readback, so it says
-        // nothing about the cost of a frame and stays out of the numbers.
+        // A captured frame waits on a GPU readback and writes a file, so its
+        // timings are left out of the statistics.
         #[cfg(feature = "measure")]
         if let Some(stats) = &mut self.stats {
             stats.frame(build_ms, millis(loop_start.elapsed()), !captured);
@@ -209,16 +206,12 @@ impl<S: Screen> Ready<S> {
         }
     }
 
-    /// Set the pace of the loop, and ask for the frame that pace calls for.
-    ///
-    /// The loop sleeps until the earliest second anything is due, so a screen
-    /// at rest builds one frame a change rather than one a display refresh. A
-    /// second the screen has already named holds until the clock reaches it.
-    /// The screen is asked for its next change after the frame on the glass,
-    /// and not after the clock, for the reason [`screen_due`] gives.
+    /// Chooses when the loop wakes next, and asks winit for a frame when one
+    /// is due now. The loop sleeps until the earliest second at which
+    /// anything is due, so a screen at rest is drawn once per change and not
+    /// once per display refresh.
     pub(crate) fn pace(&mut self, event_loop: &ActiveEventLoop) {
-        // Before the first frame there is no clock to schedule against, and
-        // the first frame is what starts it.
+        // The clock starts at the first frame, so request that frame now.
         let Some(start) = self.start else {
             event_loop.set_control_flow(ControlFlow::Poll);
             self.graphics.window.request_redraw();
@@ -226,20 +219,17 @@ impl<S: Screen> Ready<S> {
         };
 
         let at = start.elapsed().as_secs_f64();
-        let screen_next = screen_due(&self.screen, self.scheduled, self.drawn);
-        self.scheduled = None;
+        let screen_next = screen_due(&self.screen, self.next_frame_at, self.last_frame_at);
+        self.next_frame_at = None;
 
-        // The wake is the earliest second anything is due: a stale frame is
-        // due now, and after it the screen's own change, the next script key,
-        // the deadline, or the next capture. The harness's own seconds come
-        // from forward-only cursors, so they are asked again on every pass,
-        // and only the screen's answer is held. The floor holds every answer
-        // at least [`STEP`] after the last frame, which is the frame-rate
-        // cap: a burst of folds coalesces to sixty frames a second and no
-        // press waits past the next one.
-        let stale_now = self.stale.then_some(at);
+        // The next wake is the earliest of: now when the last frame is out
+        // of date, the screen's next change, the next scripted key, the
+        // deadline, and the next capture. Only the screen's second is saved
+        // between passes. The result is moved to at least `STEP` after the last frame, so a burst
+        // of changes draws at most 60 frames a second.
+        let redraw_now = self.needs_redraw.then_some(at);
         let next = [
-            stale_now,
+            redraw_now,
             screen_next,
             self.timeline.next_due(),
             self.next_capture(),
@@ -247,19 +237,19 @@ impl<S: Screen> Ready<S> {
         .into_iter()
         .flatten()
         .min_by(f64::total_cmp)
-        .map(|next| next.max(self.drawn + STEP));
+        .map(|next| next.max(self.last_frame_at + STEP));
 
         match timeline::wake(self.resized, at, next) {
             Wake::Now => {
                 event_loop.set_control_flow(ControlFlow::Poll);
                 self.graphics.window.request_redraw();
             }
-            // The loop wakes at the backstop on the way to a frame that is
-            // far off, and that wake pumps the sources and draws nothing
-            // unless a fold made the glass stale. The screen's second stays
-            // held, so the frame it names is drawn when the clock reaches it.
+            // The loop wakes at most `timeline::BACKSTOP` seconds from now to
+            // call `Screen::pump`, and that wake draws nothing unless a change
+            // made the frame out of date. The screen's second is saved for
+            // the wakes until the clock reaches it.
             Wake::At(next) => {
-                self.scheduled = screen_next;
+                self.next_frame_at = screen_next;
                 event_loop.set_control_flow(ControlFlow::WaitUntil(
                     start + std::time::Duration::from_secs_f64(timeline::sleep_until(at, next)),
                 ));
@@ -268,14 +258,12 @@ impl<S: Screen> Ready<S> {
         }
     }
 
-    /// Write this frame to a file, if a capture is due at this second. The
-    /// answer is whether one was written.
+    /// Writes this frame to a PNG file if a capture is due at second `at`.
+    /// Returns whether a file was written.
     ///
-    /// `Renderer::screenshot` renders the frame that was just drawn into an
-    /// offscreen texture and reads it back as RGBA. It is iced's own path off
-    /// the GPU, and it draws the same layers the surface would get. The
-    /// surface itself is left alone on a capture frame, because one drawn
-    /// frame must not be submitted twice.
+    /// `Renderer::screenshot` draws the frame into an offscreen texture and
+    /// reads it back as RGBA. On a capture frame the caller does not also
+    /// call `Renderer::present`, so the frame is not submitted twice.
     #[cfg(feature = "measure")]
     fn capture(&mut self, at: f64, background: Color) -> bool {
         let Some(path) = self.captures.as_mut().and_then(|captures| captures.due(at)) else {
@@ -292,13 +280,11 @@ impl<S: Screen> Ready<S> {
         true
     }
 
-    /// A build without the `measure` feature captures no frame.
     #[cfg(not(feature = "measure"))]
     fn capture(&mut self, _at: f64, _background: Color) -> bool {
         false
     }
 
-    /// The second of the next capture, folded into the wake time.
     #[cfg(feature = "measure")]
     fn next_capture(&self) -> Option<f64> {
         self.captures.as_ref().and_then(Captures::next_due)
@@ -309,7 +295,6 @@ impl<S: Screen> Ready<S> {
         None
     }
 
-    /// Whether the run has taken every capture it asked for, which ends it.
     #[cfg(feature = "measure")]
     fn captured_everything(&self) -> bool {
         self.captures.as_ref().is_some_and(Captures::taken)
@@ -320,7 +305,7 @@ impl<S: Screen> Ready<S> {
         false
     }
 
-    /// Write the statistics file once, whichever way the run ends.
+    /// Writes the statistics file once, however the run ends.
     pub(crate) fn finish(&mut self) {
         if self.finished {
             return;
@@ -333,22 +318,25 @@ impl<S: Screen> Ready<S> {
     }
 }
 
-/// The second the screen next changes after the frame on the glass,
-/// which drew at `drawn`, for the pace of the loop. A second the screen
-/// already named holds.
+/// Returns `saved`, the second the screen already returned, or else asks
+/// the screen with `last_frame_at`.
 ///
-/// The loop asks after the work of a frame, so the clock reads later than
-/// `drawn`, and a motion can end in between. Asked at the clock, the
-/// screen answers that nothing moves, and the glass keeps the frame that
-/// drew the motion short of its end until the next second the screen
-/// schedules, such as the turn of the clock's minute up to a minute
-/// later. Asked at `drawn`, the screen answers that the frame on the
-/// glass is still in motion, and the loop draws one more frame, at or
-/// after the end.
-pub(crate) fn screen_due<S: Screen>(screen: &S, scheduled: Option<f64>, drawn: f64) -> Option<f64> {
-    match scheduled {
-        Some(scheduled) => Some(scheduled),
-        None => screen.next_frame(drawn),
+/// The screen is asked about the last frame drawn and not the current
+/// clock. Building a frame takes time, so an animation can end between the
+/// frame's second and the moment the loop asks. Asked at the current time,
+/// the screen would report nothing left to draw, and the display would keep
+/// the unfinished animation until the screen's next scheduled change, which
+/// can be a minute away. Asked at `last_frame_at`, the screen reports the
+/// animation still running, so the loop draws one more frame that shows its
+/// end.
+pub(crate) fn screen_due<S: Screen>(
+    screen: &S,
+    saved: Option<f64>,
+    last_frame_at: f64,
+) -> Option<f64> {
+    match saved {
+        Some(saved) => Some(saved),
+        None => screen.next_frame(last_frame_at),
     }
 }
 
@@ -358,9 +346,8 @@ mod tests {
     use iced_wgpu::Renderer;
     use iced_winit::core::{Element, Theme};
 
-    // A screen with one motion that runs until `ends`. It asks for every
-    // frame while the motion runs and for none after it, the way the idle
-    // screen's fades do.
+    // A screen with one animation that runs until `ends`, like a fade on the
+    // idle screen.
     struct Moving {
         ends: f64,
     }
@@ -381,14 +368,8 @@ mod tests {
         }
     }
 
-    // The loop asks for the next frame after the work of the last one, so
-    // the clock can pass the end of a motion while that frame is drawn.
-    // The frame on the glass then shows the motion short of its end, so a
-    // frame drawn before the end is due another, whatever the clock reads
-    // when the loop asks. A frame drawn at the end or after it shows the
-    // motion whole.
     #[test]
-    fn a_frame_drawn_before_a_motion_ends_is_due_another() {
+    fn a_frame_drawn_before_an_animation_ends_is_followed_by_another() {
         let moving = Moving { ends: 1.01 };
         let cases = [(1.0, Some(1.0)), (1.01, None), (1.03, None)];
         for (drawn, due) in cases {
@@ -397,7 +378,7 @@ mod tests {
     }
 
     #[test]
-    fn a_named_second_holds() {
+    fn a_saved_second_is_kept() {
         let moving = Moving { ends: 1.01 };
         assert_eq!(screen_due(&moving, Some(4.0), 1.0), Some(4.0));
     }

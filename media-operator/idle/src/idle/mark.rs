@@ -1,21 +1,20 @@
-//! The mark: the fourteen-hexagon mosaic at the middle of the screen.
+//! The `liken` mark, a mosaic of hexagons, at the center of the screen.
 //!
-//! The geometry, the colours, and the pulse are the `brand` repository's, and
-//! `liken-iced` reads them out of `liken.svg`. This module places the mark on
-//! the canvas and hands it the energy. Where the mark draws and how large it
-//! draws are this display's layout and not the brand's.
+//! `liken-iced` reads the hexagons and their colors from
+//! `brand/liken.svg` and draws them. This module places the mark at the
+//! center of the layout, sets its size, and passes it the energy level
+//! and phase.
 
 use super::energy;
 use super::{Frame, Layout};
 use crate::unit::Unit;
 
-/// Draw the element into the frame, in canvas units.
+/// Draws the mark into the frame, in canvas units. `light` scales its
+/// colors by the same factor that every element uses, so the whole
+/// screen dims together when it sleeps.
 ///
-/// The mark draws at the shade's own factor and at no opacity of its own, so
-/// the whole screen darkens as one when the quiet window runs out.
-///
-/// The mark is fourteen filled paths whose corners are geometry, so it needs
-/// nothing from the canvas scale. `liken_iced::mark::outline` says why.
+/// The mark is filled paths with no stroke, so it scales with the
+/// frame's transform. `liken_iced::mark::outline` explains why.
 pub fn draw(frame: &mut Frame, layout: &Layout, unit: &Unit, at: f64, light: f32) {
     liken_iced::mark::draw(
         frame,
@@ -27,13 +26,12 @@ pub fn draw(frame: &mut Frame, layout: &Layout, unit: &Unit, at: f64, light: f32
     );
 }
 
-/// The second the mark next changes, for [`super::Idle::next_frame`].
+/// The second at which the mark next changes, for
+/// [`super::Idle::next_frame`].
 ///
-/// The animation clock runs at the speed floor or above it while the energy is
-/// above 0, and a ramp that lands above 0 goes on turning the mark after it,
-/// so the mark answers with `at` and the harness draws now. At energy 0 the
-/// swing is 0 and the animation clock stands still, so every frame draws the
-/// fourteen hexagons in the same places and the mark states nothing.
+/// While the energy is above 0 the mark moves, also after a ramp has
+/// finished, so the next frame is due at `at`. At energy 0 every frame
+/// is identical, so this returns `None`.
 pub fn next_frame(unit: &Unit, at: f64) -> Option<f64> {
     (energy::level(unit, at) > 0.0).then_some(at)
 }
@@ -55,7 +53,7 @@ mod tests {
     }
 
     #[test]
-    fn a_starting_play_swings_the_mosaic_and_rest_holds_it_still() {
+    fn a_starting_play_moves_the_mosaic_and_rest_leaves_it_still() {
         let mut unit = Unit::default();
         let layout = layout();
         let hexagon = &liken_iced::mark::hexagons()[0];
@@ -82,7 +80,7 @@ mod tests {
     }
 
     #[test]
-    fn a_swinging_mark_asks_for_a_frame_now() {
+    fn a_moving_mark_needs_a_frame_now() {
         let mut unit = Unit::default();
         unit.fold(
             Moment::Status(Status {
@@ -92,14 +90,14 @@ mod tests {
             0.0,
         );
 
-        // The ramp has landed at full swing by 1.2 seconds, and the mark goes
-        // on turning at that level with no ramp under it.
+        // By 1.2 seconds the ramp has finished, and the mark keeps
+        // moving at full level.
         assert_eq!(next_frame(&unit, 0.6), Some(0.6));
         assert_eq!(next_frame(&unit, 30.0), Some(30.0));
     }
 
     #[test]
-    fn a_mark_at_rest_asks_for_no_frame() {
+    fn a_mark_at_rest_needs_no_frame() {
         assert_eq!(next_frame(&Unit::default(), 600.0), None);
     }
 }

@@ -1,23 +1,20 @@
 package main
 
-// Focus is which unit holds a controller's presses right now. One
-// controller can drive several units, so its one events topic has several
-// readers: the command sidecar in every Play's pod, and the idle screen
-// client of every unit that lists it. Without a gate, one press would
-// reach them all. A
-// retained mark per Remote names the one Player that owns the presses, and
-// every reader gates on the mark. The mark names a Player and never a Play:
-// a claim is exclusive, so one active Play holds one Player, and the film
-// on the focused Player is unambiguous. A mark may also name an idle
-// Player, which is how the idle screen takes presses at all.
+// Focus decides which Player receives a controller's key presses. One
+// controller can drive several Players, so its events topic has several
+// readers: the command sidecar in each Play's pod and the idle screen
+// of each Player that lists the controller. Each Remote has a retained
+// focus mark on the bus, which is the name of one Player, and every
+// reader ignores presses unless the mark names its own Player. The mark
+// names a Player and not a Play, because a Player's claim is exclusive,
+// so a Player runs at most one Play. A mark can name an idle Player,
+// and then the idle screen receives the presses.
 //
-// This file is the operator's side of that. The focus desk is the boundary
-// between the bus and the reconcile loop, the way the report desk is for a
-// Play's status. The operator is the only writer of a mark: only it reads
-// every Player, so only it holds a controller's full cycle set and its
-// order. It reads its own retained writes back, so it recovers the current
-// marks after a restart, and the loop drains and arbitrates the cycle
-// requests a source press leaves on the desk.
+// The operator is the only process that publishes marks, because it
+// reads every Player and so can compute which Players a controller
+// cycles through. After a restart it reads its own retained marks back
+// from the bus. The bus handler stores marks and cycle requests in a
+// focusCache, and the reconcile loop reads them from it.
 
 import (
 	"slices"
@@ -26,90 +23,91 @@ import (
 	"sync"
 )
 
-// focusDesk holds the current mark per controller and the pending cycle
-// requests. One mutex guards both, because the bus handler writes them on
-// its goroutine and the reconcile loop reads and clears them on its own.
+// focusCache stores the current mark of each controller and the pending
+// cycle requests. The bus handler writes them on its goroutine and the
+// reconcile loop reads and clears them on another, so one mutex guards
+// all three maps.
 //
-// delivered names the controllers whose mark the current broker session
-// holds: the session delivered the mark, or the operator published it on
-// this session. A mark the desk holds and the session did not deliver is
-// one a restarted broker lost, and it is the only mark the operator
-// publishes again after a reconnect. A mark that the broker still holds
-// is not published again, because each reader gets a republish as a live
-// mark, and the idle screen wakes on a live mark that names its Player.
-type focusDesk struct {
+// confirmed has each controller whose mark the broker retains in the
+// current session, because the broker sent it on this session or the
+// operator published it on this session. After a reconnect, a stored
+// mark that is not confirmed is one that a restarted broker lost, and
+// the operator publishes only those marks again. Each publish reaches
+// every reader as a live message that no person caused.
+type focusCache struct {
 	mutex     sync.Mutex
 	marks     map[string]string
-	delivered map[string]bool
+	confirmed map[string]bool
 	cycles    map[string]bool
 	wake      chan<- struct{}
 }
 
-func newFocusDesk(wake chan<- struct{}) *focusDesk {
-	return &focusDesk{
+func newFocusCache(wake chan<- struct{}) *focusCache {
+	return &focusCache{
 		marks:     map[string]string{},
-		delivered: map[string]bool{},
+		confirmed: map[string]bool{},
 		cycles:    map[string]bool{},
 		wake:      wake,
 	}
 }
 
-// newSession forgets which marks the last broker session held. The bus
-// calls it at each connect, before the session delivers anything.
-func (f *focusDesk) newSession() {
+// newSession clears confirmed. The bus calls it on each connect, before
+// the new session delivers any message.
+func (f *focusCache) newSession() {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
-	f.delivered = map[string]bool{}
+	f.confirmed = map[string]bool{}
 }
 
-// undelivered copies the marks the desk holds that the current session
-// has not delivered.
-func (f *focusDesk) undelivered() map[string]string {
+// unconfirmed returns a copy of the stored marks that the current
+// session has not confirmed.
+func (f *focusCache) unconfirmed() map[string]string {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 	marks := map[string]string{}
 	for key, player := range f.marks {
-		if !f.delivered[key] {
+		if !f.confirmed[key] {
 			marks[key] = player
 		}
 	}
 	return marks
 }
 
-// setMark stores the owning Player for one controller, whether the mark
-// arrived on the bus or the operator just published it. Either way the
-// current session holds it. An empty player deletes the key, the shape a
-// cleared retained mark arrives in. A value that changes wakes the loop,
-// because a Player's bus status and a Remote's status both derive from the
-// mark, and the pass that writes them must run again. The operator reads
-// its own retained writes back, and those repeat the stored value, so they
-// wake nothing.
-func (f *focusDesk) setMark(key, player string) {
+// setMark stores the Player that receives one controller's presses,
+// for a mark that arrives from the bus and for a mark that the operator
+// just published. Either one confirms the mark for the current session.
+// An empty player deletes the mark, because a cleared retained message
+// arrives with an empty payload. A changed value wakes the reconcile
+// loop, because the Player's bus status and the Remote's status are
+// derived from the mark. When the operator's own message comes back
+// from the bus, the value is unchanged, so it wakes nothing.
+func (f *focusCache) setMark(key, player string) {
 	f.mutex.Lock()
 	was := f.marks[key]
 	if player == "" {
 		delete(f.marks, key)
-		delete(f.delivered, key)
+		delete(f.confirmed, key)
 	} else {
 		f.marks[key] = player
-		f.delivered[key] = true
+		f.confirmed[key] = true
 	}
 	f.mutex.Unlock()
 	if was != player {
-		poke(f.wake)
+		signalWake(f.wake)
 	}
 }
 
-// markFor reads one controller's current mark.
-func (f *focusDesk) markFor(key string) string {
+// markFor returns the Player that receives one controller's presses,
+// or an empty string.
+func (f *focusCache) markFor(key string) string {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 	return f.marks[key]
 }
 
-// snapshot copies the current marks, so the pass reads them without
-// holding the desk lock while it writes the bus.
-func (f *focusDesk) snapshot() map[string]string {
+// snapshot returns a copy of the marks, so the reconcile loop does not
+// hold the mutex while it publishes to the bus.
+func (f *focusCache) snapshot() map[string]string {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 	marks := make(map[string]string, len(f.marks))
@@ -119,20 +117,19 @@ func (f *focusDesk) snapshot() map[string]string {
 	return marks
 }
 
-// requestCycle records that a source press asked to cycle one controller
-// and wakes the loop to arbitrate it. The cycle is an event, so a request
-// the operator misses while it is down is lost, and a later press asks
-// again.
-func (f *focusDesk) requestCycle(key string) {
+// requestCycle records that a press asked to move one controller to the
+// next Player, and wakes the reconcile loop to do it. A request made
+// while the operator is down is lost, and the next press asks again.
+func (f *focusCache) requestCycle(key string) {
 	f.mutex.Lock()
 	f.cycles[key] = true
 	f.mutex.Unlock()
-	poke(f.wake)
+	signalWake(f.wake)
 }
 
 // takeCycles returns the controllers with a pending cycle request and
-// clears the set, so the loop arbitrates each request once.
-func (f *focusDesk) takeCycles() []string {
+// clears them, so the reconcile loop handles each request once.
+func (f *focusCache) takeCycles() []string {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 	keys := make([]string, 0, len(f.cycles))
@@ -143,19 +140,17 @@ func (f *focusDesk) takeCycles() []string {
 	return keys
 }
 
-// controllerKey is the one key shape for a controller, its namespace and
-// name. It matches the two segments the focus topic path carries, so the
-// bus handler and the loop name a controller the same way.
+// controllerKey is the key of a Remote in focusCache. The namespace and
+// the name are the same two segments that the Remote's focus topic has.
 func controllerKey(namespace, remote string) string {
 	return namespace + "/" + remote
 }
 
-// stealFocus marks each of a fresh Play's controllers to the Player the
-// Play runs on. When a Play starts on a unit a controller drives, the
-// newest film takes the controller, which is the friendly default: start a
-// film, and the controller in your hand drives it. A source press moves
-// the mark the other way.
-func (o *operator) stealFocus(play *Play, remotes []boundRemote) {
+// takeFocus sets the mark of each of a new Play's controllers to the
+// Player that the Play runs on, so a person who starts a film controls
+// it with the controller in their hand. A cycle press can move the mark
+// away again.
+func (o *operator) takeFocus(play *Play, remotes []boundRemote) {
 	namespace := play.Metadata.Namespace
 	for _, remote := range remotes {
 		o.publishFocus(controllerKey(namespace, remote.Name), playerName(play),
@@ -163,13 +158,12 @@ func (o *operator) stealFocus(play *Play, remotes []boundRemote) {
 	}
 }
 
-// reconcileFocus arbitrates focus from the Players alone. A controller's
-// cycle set is every Player in its namespace whose spec.remotes lists it,
-// in name order, so the cycle steps the same way every pass and an idle
-// Player is a real stop. No Play is read here: a claim is exclusive, so the
-// film on the focused Player is whatever Play holds its claim, and a Play
-// that finishes moves no mark, because the Player it names is still there,
-// showing its idle screen.
+// reconcileFocus applies cycle requests and repairs marks from the
+// Players alone. A controller's cycle set is the Players in its
+// namespace whose spec.remotes lists it, sorted by name, so a cycle
+// visits them in the same order each time, idle Players included. It
+// reads no Play, because a finished Play leaves its Player on the idle
+// screen, and the mark stays correct.
 func (o *operator) reconcileFocus(players []Player) {
 	sets := map[string][]string{}
 	for index := range players {
@@ -183,12 +177,11 @@ func (o *operator) reconcileFocus(players []Player) {
 		sort.Strings(sets[key])
 	}
 
-	// A cycle advances one step from the current mark. A mark that names no
-	// Player in the set reads as index -1, so the step lands on the first,
-	// and the modulo wraps the last back to the first. A set of one wraps
-	// onto itself and republishes the same mark, and that repeat is the
-	// press's feedback: the idle screen answers it with a pulse on its
-	// focus marker.
+	// A mark that names no Player in the set gives index -1, so the
+	// cycle starts at the first Player. With one Player in the set, the
+	// cycle publishes the same mark again. The idle screen that sent the
+	// cycle pulses its focus marker when the repeat arrives, so the
+	// person sees that the press worked.
 	for _, key := range o.focus.takeCycles() {
 		names := sets[key]
 		if len(names) == 0 {
@@ -198,33 +191,31 @@ func (o *operator) reconcileFocus(players []Player) {
 		index := slices.Index(names, o.focus.markFor(key))
 		next := names[(index+1)%len(names)]
 		if len(names) == 1 {
-			logLine(o.log, "remote %s: asked to cycle focus, focus stays on player %s, the one player that lists the remote", key, next)
+			logLine(o.log, "remote %s: asked to cycle focus, focus stays on player %s, the only Player that lists the Remote", key, next)
 		}
 		o.publishFocus(key, next, "the remote asked to cycle focus")
 	}
 
-	// A restarted broker holds no retained mark, so a mark the desk holds
-	// that the new session did not deliver goes out again, once the
-	// catch-up has had time to deliver what the broker does hold. A mark
-	// that no longer names a Player in the set is left to the recovery
-	// below, which publishes the mark that replaces it.
+	// A restarted broker has lost its retained marks. Once caughtUp is
+	// true, publish again each stored mark that the new session did not
+	// confirm. Skip a mark that names a Player outside the set, because
+	// the recovery below replaces it.
 	if o.caughtUp() {
-		for key, player := range o.focus.undelivered() {
+		for key, player := range o.focus.unconfirmed() {
 			if slices.Contains(sets[key], player) {
 				o.publishFocus(key, player, "the broker session is new and the broker holds no mark")
 			}
 		}
 	}
 
-	// Recovery moves a mark that is empty or names a Player outside the
-	// set, so a controller always drives a unit that lists it. It never
-	// moves a mark that still names a Player in the set, so it does not
-	// steal from a holder.
+	// Move a mark that is empty or names a Player outside the set to the
+	// first Player of the set, so a controller always drives a Player
+	// that lists it. A mark that names a Player in the set stays.
 	//
-	// An empty desk is not an empty mark until the broker's catch-up has
-	// had time to arrive. Before that, the retained mark can still be on
-	// its way, and a recovery would move a shared controller to the first
-	// room of the set.
+	// Before caughtUp is true, an empty mark does not prove that the
+	// broker has no mark, because the retained mark can still be on its
+	// way. Recovering then would
+	// move a controller that several Players share to the first one.
 	for key, names := range sets {
 		current := o.focus.markFor(key)
 		if current == "" && !o.caughtUp() {
@@ -235,9 +226,9 @@ func (o *operator) reconcileFocus(players []Player) {
 		}
 	}
 
-	// A controller no Player lists any more has nothing to drive, so its
-	// mark is cleared. The empty retained payload is the delete, and it
-	// leaves no stale mark on the bus for a later reader to gate open on.
+	// Clear the mark of a controller that no Player lists. An empty
+	// retained payload deletes the broker's retained message, so a reader
+	// that subscribes later does not receive a stale mark.
 	for key := range o.focus.snapshot() {
 		if len(sets[key]) == 0 {
 			o.publishFocus(key, "", "no player lists the remote")
@@ -245,15 +236,11 @@ func (o *operator) reconcileFocus(players []Player) {
 	}
 }
 
-// publishFocus writes one controller's mark to the retained topic and to
-// the local desk, the two the operator keeps in step so the cycle math on
-// the same pass reads the value it just wrote. It publishes every time it
-// is called, an unchanged value included, because the repeat of a current
-// mark is the feedback a cycle press earns.
-//
-// A mark that moves is a person's controller changing rooms, so it earns
-// a line with the reason. An unchanged mark writes none; the cycle that
-// wraps onto itself says so where it is arbitrated.
+// publishFocus publishes one controller's mark as a retained message
+// and stores it in the focusCache, so the rest of the same pass reads the
+// new value. It publishes even when the value is unchanged, because the
+// repeat is the feedback for a cycle press. It logs only a change. The
+// caller logs a cycle that stays on the same Player.
 func (o *operator) publishFocus(key, player, reason string) {
 	namespace, remote, _ := strings.Cut(key, "/")
 	topic := remoteFocusTopic(o.topicBase, namespace, remote)

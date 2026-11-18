@@ -1,16 +1,16 @@
-//! Where the display asks mpv to draw the subtitles. The frame loop is the
-//! one place that knows what the display draws in the band at the foot of
-//! the frame and how far its fade has moved, so it decides after every
-//! message, and `crate::subtitles` turns that into mpv's `sub-pos`.
+//! Moves mpv's subtitles above the controls that the display draws at
+//! the bottom of the frame. This code is in `Display` because the
+//! controls on screen and the fade's progress are its fields, and
+//! `Display::update` runs it after every message. `crate::subtitles`
+//! turns the result into mpv's `sub-pos`.
 
 use super::Display;
 
 impl Display {
-    /// The highest canvas row the display draws on in the band at the foot of
-    /// the frame, or nothing while the display draws nothing there or no
-    /// subtitle track plays. It follows what `paint_below` and `paint_above`
-    /// draw: the time over the scrubber always, the up-next chip or the skip
-    /// control on the row above it, the cast row, a scan's thumbnail, and an
+    /// The topmost canvas row of the controls at the bottom of the frame,
+    /// or `None` when the controls are faded out or no subtitle track is
+    /// selected. The controls are the time over the scrubber, the up-next
+    /// chip or the skip control, the cast row, a scan's thumbnail, and an
     /// open chooser or adjuster.
     fn band_top(&self) -> Option<f32> {
         if !self.focus.fade().shown() || !self.film.tracks_of("sub").any(|track| track.selected) {
@@ -29,10 +29,9 @@ impl Display {
         .reduce(f32::min)
     }
 
-    /// Send mpv the subtitles' position for the band and the fade as they
-    /// stand after one message. The fade ticks only while it moves, so the
-    /// subtitles glide with it, and a message that changes neither sends
-    /// nothing.
+    /// Sends mpv a new `sub-pos` when `band_top` or the fade changed. The
+    /// fade sends a message on each tick while it moves, so the subtitles
+    /// move with it. Sends nothing once mpv has exited and closed its socket.
     pub(super) fn follow_subtitles(&mut self) {
         if self.detached {
             return;
@@ -40,7 +39,7 @@ impl Display {
         let follow = self
             .subtitles
             .follow(self.band_top(), self.focus.fade().value());
-        self.say(follow.said);
+        self.say(follow.logged);
         if let Some(command) = follow.command {
             let _ = self.wire.commands.send(crate::ipc::line(&command));
         }
@@ -82,9 +81,9 @@ mod tests {
         (at * 10.0).round() / 10.0
     }
 
-    /// A summon lifts the subtitles above the time over the scrubber as the
-    /// display fades in, one step for each tick and never back down, and
-    /// the hide returns them to their place as it fades out.
+    /// Summoning the display raises the subtitles above the time over the
+    /// scrubber, one step per fade tick and never downward. Hiding returns
+    /// them to their rest position as the display fades out.
     #[tokio::test]
     async fn the_subtitles_rise_and_fall_with_the_display() {
         let (mut display, mut commands) = display();
@@ -92,20 +91,32 @@ mod tests {
         let _ = display.update(message("summon"));
         settle(&mut display);
         let rise = positions(&sent(&mut commands));
-        assert!(rise.len() > 2, "{rise:?}");
-        assert!(rise.windows(2).all(|pair| pair[1] < pair[0]), "{rise:?}");
+        assert!(
+            rise.len() > 2,
+            "{rise:?} has 2 or fewer sub-pos steps, want a step per fade tick"
+        );
+        assert!(
+            rise.windows(2).all(|pair| pair[1] < pair[0]),
+            "sub-pos while rising is {rise:?}, want each step lower than the one before"
+        );
         assert_eq!(rise.last(), Some(&rounded(lifted(crate::scrubber::TOP))));
 
         let armed = display.idle.armed.expect("a summon arms the idle window");
         let _ = display.update(Message::Hide(armed));
         settle(&mut display);
         let fall = positions(&sent(&mut commands));
-        assert!(fall.len() > 2, "{fall:?}");
-        assert!(fall.windows(2).all(|pair| pair[1] > pair[0]), "{fall:?}");
+        assert!(
+            fall.len() > 2,
+            "{fall:?} has 2 or fewer sub-pos steps, want a step per fade tick"
+        );
+        assert!(
+            fall.windows(2).all(|pair| pair[1] > pair[0]),
+            "sub-pos while falling is {fall:?}, want each step higher than the one before"
+        );
         assert_eq!(fall.last(), Some(&REST));
     }
 
-    /// A film with no subtitle track playing sends mpv nothing for them.
+    /// With no subtitle track selected, the display sends no `sub-pos`.
     #[tokio::test]
     async fn no_subtitle_track_sends_nothing() {
         let (mut display, mut commands) = display();
@@ -114,9 +125,10 @@ mod tests {
         assert!(sent(&mut commands).is_empty());
     }
 
-    /// Each case is the presses after a summon and the row the subtitles
-    /// clear: the strip in focus leaves them over the scrubber, and the
-    /// audio chooser's panel of two rows stands higher.
+    /// Each case is the key presses after a summon and the row that the
+    /// subtitles must clear. With the strip focused, the highest control
+    /// is still the scrubber time. The audio chooser's two-row panel is
+    /// higher.
     #[tokio::test]
     async fn the_subtitles_clear_the_highest_thing_in_the_band() {
         let cases: [(&[&str], f32); 3] = [
@@ -135,13 +147,13 @@ mod tests {
             assert_eq!(
                 positions(&sent(&mut commands)).last(),
                 Some(&rounded(lifted(top))),
-                "{presses:?}"
+                "after a summon and the presses {presses:?}, the last sub-pos is not the one above the chooser or adjuster"
             );
         }
     }
 
-    /// Subtitles turned off while the display is up return to their place
-    /// in one step, so the next track a person turns on starts there.
+    /// Turning the subtitles off while the display is up returns them to
+    /// the rest position in one step, so the next track starts there.
     #[tokio::test]
     async fn subtitles_turned_off_return_at_once() {
         let (mut display, mut commands) = display();
@@ -157,8 +169,8 @@ mod tests {
         assert_eq!(positions(&sent(&mut commands)), [REST]);
     }
 
-    /// The up-next chip stands on the row above the time, so the subtitles
-    /// clear the chip while the offer waits.
+    /// The up-next chip is drawn above the scrubber time, so the subtitles
+    /// clear the chip while an offer is showing.
     #[tokio::test]
     async fn the_subtitles_clear_the_up_next_chip() {
         let (mut display, mut commands) = display();
@@ -172,10 +184,10 @@ mod tests {
         );
     }
 
-    /// The record takes one line as the subtitles move up and one as they
-    /// return, and none for the ticks between.
+    /// The display's record gets one line when the subtitles move up and
+    /// one when they return, and none for the ticks in between.
     #[tokio::test]
-    async fn the_record_takes_one_line_each_way() {
+    async fn the_record_gets_one_line_each_way() {
         let (mut display, _commands) = display();
         subtitled(&mut display);
         let _ = display.update(message("summon"));
@@ -184,7 +196,7 @@ mod tests {
         let _ = display.update(Message::Hide(armed));
         settle(&mut display);
         let lines: Vec<&str> = display
-            .said
+            .logged
             .iter()
             .map(String::as_str)
             .filter(|line| line.contains("subtitles"))

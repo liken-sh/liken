@@ -1,13 +1,12 @@
 package main
 
-// Every status this operator writes comes from the one derivation in
-// this file. The shape matters because the loop is level-triggered: a
-// pass must reach the same status from the same facts, whatever order
-// the events arrived in.
-//
-// The condition stamp is the one clock the derivation reads, and it
-// moves only when the condition's status changes, so two passes over
-// the same facts still produce the same status.
+// This file builds a Play's status and writes it. A pass derives the
+// status from the current state, not from the events that woke it, so
+// the same inputs must give the same status in any event order. A
+// timestamp changes only on a transition: conditions.Set changes a
+// condition's lastTransitionTime only when its status changes, and
+// retire in operate.go writes finishedAt once, in the first pass that
+// reads the Play as Finished.
 
 import (
 	"encoding/json"
@@ -19,15 +18,11 @@ import (
 	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
-// derivePlayStatus builds the phase-and-numbers status and stamps
-// the activity word onto it, so every path through the derivation
-// carries the one word a person reads without a second rule
-// deciding it later.
 func derivePlayStatus(play *Play, player *Player, buildErr error, pod *Pod, latest *playReport, prefs resolvedPreferences) PlayStatus {
 	status := buildPlayStatus(play, player, buildErr, pod, latest)
 	status.Activity = playActivity(status.Phase, status.Paused)
-	// Report the resolved preferences on every status, the console-parity record
-	// of what the three tiers settled on.
+	// A person compares the resolved preferences with the languages mpv
+	// chose, AudioLanguage and SubtitleLanguage.
 	status.AudioLanguages = prefs.AudioLanguages
 	status.SubtitleLanguages = prefs.SubtitleLanguages
 	status.Subtitles = prefs.Subtitles
@@ -35,25 +30,20 @@ func derivePlayStatus(play *Play, player *Player, buildErr error, pod *Pod, late
 	return status
 }
 
-// buildPlayStatus takes the phase from the pod and the numbers from
-// the pod's reports. The kubelet is the authority for whether the
-// player process runs, and it cannot lie about an exit; only mpv
-// knows where the playhead is, and it can only say so through the
-// supervisor's reports. Each argument may be absent: a nil player is
-// a Player not yet declared, a buildErr is a run no pod could ever
-// perform, a nil pod is a run not yet started, and a nil report is a
-// pod that has not spoken yet.
+// buildPlayStatus reads the phase from the pod and the playback
+// position from the pod's latest report. player is nil when the Player
+// does not exist, buildErr is set when no pod could be built for the
+// Play, pod is nil when the run has not started, and latest is nil when
+// the pod has sent no report.
 func buildPlayStatus(play *Play, player *Player, buildErr error, pod *Pod, latest *playReport) PlayStatus {
 	if buildErr != nil {
-		// A URI the resolver refuses, or a Remote whose Keymap will
-		// not compile, fails the Play before any object exists,
-		// because the pod it describes could never be built.
+		// For example, a URI the resolver refuses, or a Remote whose
+		// Keymap does not compile.
 		return PlayStatus{Phase: phaseFailed, Message: buildErr.Error()}
 	}
 	if player == nil {
-		// An absent Player is Pending rather than Failed. The Player
-		// may arrive after the Play, and the run starts when it
-		// does; Failed would end a run that never had its chance.
+		// Pending, not Failed, because Failed is final and the Player
+		// can still be created after the Play.
 		return PlayStatus{
 			Phase:   phasePending,
 			Message: fmt.Sprintf("the Player %s does not exist in this namespace", playerName(play)),
@@ -68,30 +58,28 @@ func buildPlayStatus(play *Play, player *Player, buildErr error, pod *Pod, lates
 		}
 	}
 
-	// A position, once reported, stays in the status until a fresher
-	// report advances it. The report desk drops a run's report when the
-	// pod goes offline, and the resume reads the place from the status,
-	// so a blank here would restart the film from the top.
+	// The position and the track languages stay as the last report set
+	// them until a newer report arrives. The reports store drops a run's
+	// report when its pod goes offline, and a replacement pod resumes
+	// from the position in the status, so clearing it would restart the
+	// film from the top.
 	status := PlayStatus{
-		Pod:      pod.Metadata.Name,
-		Item:     play.Status.Item,
-		Position: play.Status.Position,
-		Duration: play.Status.Duration,
-		// Carry the chosen track languages forward like the position, so a dropped
-		// report does not blank them.
+		Pod:              pod.Metadata.Name,
+		Item:             play.Status.Item,
+		Position:         play.Status.Position,
+		Duration:         play.Status.Duration,
 		AudioLanguage:    play.Status.AudioLanguage,
 		SubtitleLanguage: play.Status.SubtitleLanguage,
 	}
 	switch pod.Status.Phase {
 	case podRunning:
-		// Running covers a paused film too. The phase moves forward
-		// only; the paused field beside the position says the rest.
 		status.Phase = phaseRunning
 		foldReport(&status, latest)
 		status.Paused = latest != nil && latest.Paused
-		// A display that keeps crashing leaves the film with no on-screen
-		// display, so the run ends here the way a finished film ends,
-		// and the unit returns to its idle screen.
+		// When the display container keeps restarting, the film would
+		// play without its on-screen display. The run ends as Finished
+		// instead, the same as when the film ends, and the Player
+		// returns to its idle screen.
 		if condition, reported := displayAlive(pod); reported {
 			status.Conditions = []PlayCondition{
 				foldPlayCondition(play.Status.Conditions, condition, play.Metadata.Generation),
@@ -102,24 +90,20 @@ func buildPlayStatus(play *Play, player *Player, buildErr error, pod *Pod, lates
 			}
 		}
 	case podSucceeded:
-		// The last item ended, or a person's exit press quit mpv:
-		// mpv exited zero and the pod succeeded. A compositor that
-		// went away exits compositorLostExit and fails the pod
-		// instead, so the run resumes. The numbers stay as the last
-		// report left them, so a finished season still shows which
-		// episode ended it and where.
+		// mpv exited zero because the last item ended or a person
+		// pressed the exit key. A lost compositor exits with
+		// compositorLostExit instead, so that the pod fails and the run
+		// starts again.
 		status.Phase = phaseFinished
 		foldReport(&status, latest)
 	case podFailed:
 		status.Phase = phaseFailed
 		status.Message = podFailureMessage(pod)
 	default:
-		// A pod that has not started yet is a Play still Pending.
-		// The ordinary hold is allocation: a Player whose devices no
-		// one machine can satisfy parks its pod unschedulable, and
-		// the pod's own message says which request wants. The
-		// scheduler's holds, a claim that does not exist among them,
-		// arrive on a condition instead, so the fold reads both.
+		// The pod has not started. When no node can allocate the
+		// Player's devices, the pod's message names the request that
+		// failed. Other scheduling failures, such as a missing claim,
+		// appear only in a pod condition.
 		status.Phase = phasePending
 		if pod.Status.Message != "" {
 			status.Message = pod.Status.Message
@@ -130,22 +114,20 @@ func buildPlayStatus(play *Play, player *Player, buildErr error, pod *Pod, lates
 	return status
 }
 
-// foldPlayCondition puts the condition in a copy of the run's held
-// conditions with conditions.Set, which keeps the held stamp while the
-// status is unchanged and stamps the moment the status changed. So
-// lastTransitionTime answers how long the run has been in the state it
-// reports.
-func foldPlayCondition(held []PlayCondition, condition PlayCondition, generation int64) PlayCondition {
+// foldPlayCondition returns condition as conditions.Set merges it into
+// the Play's current conditions, so it keeps the existing
+// lastTransitionTime while its status is unchanged.
+func foldPlayCondition(current []PlayCondition, condition PlayCondition, generation int64) PlayCondition {
 	condition.ObservedGeneration = generation
-	list := append([]PlayCondition(nil), held...)
+	list := append([]PlayCondition(nil), current...)
 	conditions.Set(&list, condition)
 	folded, _ := conditions.Find(list, condition.Type)
 	return folded
 }
 
-// podConditionMessage is the scheduler's word on a pod it cannot place:
-// the message of the first condition that is false. A claim that does
-// not exist parks a pod this way, and the message names the claim.
+// podConditionMessage returns the message of the first pod condition
+// whose status is False, or "". The scheduler reports a missing claim
+// this way.
 func podConditionMessage(pod *Pod) string {
 	for _, condition := range pod.Status.Conditions {
 		if condition.Status == "False" && condition.Message != "" {
@@ -155,9 +137,9 @@ func podConditionMessage(pod *Pod) string {
 	return ""
 }
 
-// foldReport passes the item, the position, and the duration through
-// as the supervisor sent them. This operator never parses a time; it
-// carries the supervisor's strings into the status unread.
+// foldReport copies the playback fields of the sidecar's report into
+// the status. The position and duration stay the strings the sidecar
+// sent, because the operator never parses them.
 func foldReport(status *PlayStatus, latest *playReport) {
 	if latest == nil {
 		return
@@ -169,10 +151,12 @@ func foldReport(status *PlayStatus, latest *playReport) {
 	status.SubtitleLanguage = latest.SubtitleLanguage
 }
 
-// podFailureMessage prefers the container's terminated state,
-// because it carries the exit code, which is the part a person acts
-// on: 1 is the player refusing its input, 7 is a compositor that went
-// away, and 137 is the kernel ending a pod over its limit.
+// podFailureMessage describes why a pod failed. It prefers the player
+// container's terminated state, because the exit code tells a person
+// what happened. 1 means the player could not build mpv's arguments or
+// mpv failed to start, compositorLostExit means the compositor went
+// away, and 137 means the container was killed with SIGKILL, usually
+// for exceeding its memory limit.
 func podFailureMessage(pod *Pod) string {
 	for _, container := range pod.Status.ContainerStatuses {
 		if container.Name != playerContainer || container.State.Terminated == nil {
@@ -204,37 +188,36 @@ func playerName(play *Play) string {
 	return play.Spec.Players[0]
 }
 
-// writePlayStatus follows the two rules that keep the write quiet:
-// an unchanged status is not written at all, and a conflict earns
-// exactly one retry.
+// writePlayStatus writes desired to the Play's status. It skips the
+// write when the status is already the same, because every write wakes
+// the operator's own Play watch, and the next pass would write again.
+// When the write fails because the copy is stale (409 or 404), it reads
+// the Play again and tries once more.
 //
-// The unchanged case matters because every status write bumps the
-// resourceVersion, and this operator watches its own collection. A
-// write per pass would wake the watch that wakes the pass, and the
-// ten-second tick would become a write every ten seconds for
-// every settled Play in the cluster.
-//
-// versions is the memo of the Play store (objectcache.go), which notes
-// each copy the API server answers. A nil memo notes nothing.
+// versions is the memo of the Play store (objectcache.go), and it may
+// be nil.
 func writePlayStatus(c *apiclient.Client, versions *memo.Versions, play *Play, desired PlayStatus) error {
 	_, _, err := writePlayStatusFrom(c, versions, play, desired)
 	return err
 }
 
-// writePlayStatusFrom is writePlayStatus that also answers the status
-// the API server held before the write, and whether it wrote. A pass
-// can hold a copy that another writer changed since, and the conflict
-// that follows reads the Play again, so the status that read answers
-// is the one a line, a counter, and an Event compare against. The copy the caller
-// holds ends as the API server's answer, with its new resourceVersion,
-// so a later write in the same pass does not meet a conflict of its own.
+// writePlayStatusFrom is writePlayStatus, and it also returns the
+// status the Play had before the write and whether it wrote. When the
+// first write fails on a stale copy, the returned status comes from the
+// fresh read. The caller compares against it in its log lines,
+// metrics, and Events, so they describe the change the API server
+// actually stored.
+//
+// After the write, play is the API server's response, with the new
+// resourceVersion. A second write in the same pass then does not fail
+// with a conflict.
 func writePlayStatusFrom(c *apiclient.Client, versions *memo.Versions, play *Play, desired PlayStatus) (PlayStatus, bool, error) {
 	was := play.Status
 	var compared error
 	wrote, err := informer.SettleStatus(c, versions, playPath(play.Metadata.Namespace, play.Metadata.Name), play,
-		func(held *Play) bool {
-			was = held.Status
-			same, err := sameStatus(held.Status, desired)
+		func(stored *Play) bool {
+			was = stored.Status
+			same, err := sameStatus(stored.Status, desired)
 			if err != nil {
 				compared = err
 				return false
@@ -242,7 +225,7 @@ func writePlayStatusFrom(c *apiclient.Client, versions *memo.Versions, play *Pla
 			if same {
 				return false
 			}
-			held.Status = desired
+			stored.Status = desired
 			return true
 		})
 	if compared != nil {
@@ -251,12 +234,9 @@ func writePlayStatusFrom(c *apiclient.Client, versions *memo.Versions, play *Pla
 	return was, wrote, err
 }
 
-// onlyPositionChanged reports whether the desired status differs from the
-// current one in nothing but the position and the duration. The operator
-// throttles a change that is only a position advance, because the
-// command sidecar publishes a live position to the bus every second, and
-// each write to the resource wakes the operator's own plays watch, so an
-// unthrottled position write would spin the loop against the API server.
+// onlyPositionChanged reports whether desired differs from current only
+// in Position and Duration. positionWriteInterval in operate.go limits
+// how often such a change is written.
 func onlyPositionChanged(current, desired PlayStatus) bool {
 	same, err := sameStatus(current, desired)
 	if err != nil || same {
@@ -268,9 +248,9 @@ func onlyPositionChanged(current, desired PlayStatus) bool {
 	return err == nil && rest
 }
 
-// sameStatus compares the marshaled form, because that is what the
-// API server stores and what a field's omitempty decides: two
-// statuses that marshal alike write alike.
+// sameStatus compares the JSON of the two statuses, because the JSON is
+// what the API server stores, so differences that omitempty drops do
+// not count.
 func sameStatus(current, desired PlayStatus) (bool, error) {
 	was, err := json.Marshal(current)
 	if err != nil {

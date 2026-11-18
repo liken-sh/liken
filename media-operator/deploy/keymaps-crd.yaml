@@ -1,14 +1,14 @@
-# The Keymap API. A Keymap is one controller model's table from its
-# odd controls to the kernel key names they should report, the way an
-# hwdb entry is written, and a model needs one only where the base
-# gets it wrong. The base passes every KEY_* code as itself and turns
-# the hat axes into the arrows, so a Remote with no Keymap already
-# works. The operator folds each Keymap over the base and publishes the
-# result retained on each Remote's keys topic, so the standing pod
-# reads the current table the instant it connects and an edit reaches
-# a running controller with no pod restart. A table the operator
-# cannot compile is logged and publishes nothing, leaving the last
-# good table in place.
+# A Keymap changes the key names that one controller model reports,
+# the way a udev hwdb entry does. Most controllers need none, because
+# the default mapping passes every KEY_* code through unchanged, turns
+# the d-pad's hat axes into the arrow keys, and turns BTN_SOUTH and
+# BTN_EAST into KEY_ENTER and KEY_BACK. An entry in a Keymap replaces
+# the default for the same control. The operator publishes the merged
+# table as a retained message on the keys topic of each Remote that
+# names the Keymap, so an edit reaches a running pod with no restart.
+# When the Keymap does not compile, the operator publishes nothing,
+# the last good table stays in effect, and the operator posts a
+# Warning Event with the reason KeymapRefused on the Remote.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -21,18 +21,14 @@ spec:
     plural: keymaps
     singular: keymap
     categories: [media]
-  # A Keymap is cluster-scoped because it is one controller model's
-  # vocabulary, written once and shared across every room, the way a
-  # DeviceClass and a StorageClass are cluster-scoped. A Remote in any
-  # namespace names it without a namespace qualifier.
+  # A Keymap is cluster-scoped so that the Remotes of one controller
+  # model in every namespace can share it.
   scope: Cluster
   versions:
     - name: v1alpha1
       served: true
       storage: true
-      # A Keymap is a table a person writes and nothing reports on,
-      # so there is no status subresource and the listing shows
-      # nothing but its age.
+      # The operator writes nothing to a Keymap, so it has no status.
       additionalPrinterColumns:
         - name: Age
           type: date
@@ -41,18 +37,16 @@ spec:
         openAPIV3Schema:
           type: object
           description: >-
-            One controller model's mapping from the controls that its kernel
-            driver names wrongly to the key names they should report. Write
-            one Keymap per model that needs one, and share it through every
-            Remote of that model.
+            The key names that a controller model reports in place of the
+            names the kernel gives its controls. A Remote uses a Keymap
+            when its `spec.keymap` names it. Write one only for a model
+            whose controls the default mapping gets wrong.
           properties:
             spec:
               type: object
               description: >-
-                The table itself, in two lists: buttons for key presses,
-                and axes for the hat directions.
-              # A Keymap with no row would compile to the base alone, so
-              # at least one entry is required across the two lists.
+                The entries: `buttons` for buttons and keys, and `axes` for
+                the directions of a d-pad. Set at least one of them.
               x-kubernetes-validations:
                 - rule: >-
                     (has(self.buttons) && size(self.buttons) > 0) ||
@@ -63,76 +57,65 @@ spec:
                   type: array
                   x-kubernetes-list-type: atomic
                   description: >-
-                    Button entries. Each one renames one control. A
-                    control with no entry reports the name the kernel
-                    gives it, and the release stops a repeat the press
-                    started.
+                    Button entries. Each entry sets the key name that one
+                    button reports. A button with no entry keeps its default
+                    mapping.
                   items:
                     type: object
                     required: [press, key]
-                    # No CEL rule is needed here. The press and the key
-                    # are both held to the evdev name shape by their
-                    # patterns, and the operator's compile is the gate on
-                    # the names themselves.
                     properties:
                       press:
                         type: string
                         pattern: '^(BTN|KEY)_[A-Z0-9_]+$'
                         description: >-
-                          The button, by its evdev key name: BTN_SOUTH on a
-                          gamepad, KEY_PLAYPAUSE on a media remote. Every
-                          Linux driver reports the same button under the same
-                          name, so the name works across models. Any name in
-                          the kernel's EV_KEY space is accepted; the pattern
-                          catches an obvious typo, and the operator refuses a
-                          name that is not in its own table of evdev key names
-                          when it compiles the Keymap. A Remote in discovery
-                          logs the name of every code its controller reports,
-                          so the names come from the log, not from a vendor
-                          document.
+                          The button's evdev name as the kernel reports it,
+                          such as `BTN_SOUTH` on a gamepad or `KEY_PLAYPAUSE`
+                          on a media remote. The operator refuses the Keymap
+                          when it does not know the name. To find a button's
+                          name, set `spec.discovery: true` on the Remote,
+                          press the button, and read the name in the log of
+                          the Remote's pod.
                       key:
                         type: string
                         pattern: '^((BTN|KEY)_[A-Z0-9_]+|none)$'
                         description: >-
-                          The kernel key name this control reports instead, or
-                          none to drop it. Both sides are the kernel's own
-                          names. A consumer binds this name and not the
-                          control, and none is how a Keymap silences a control
-                          that the default mapping would otherwise pass.
+                          The evdev key name that the button reports instead,
+                          such as `KEY_ENTER`, or `none` to drop the button's
+                          presses.
                       repeat:
                         type: object
                         description: >-
-                          When present, the Remote's pod synthesises the
-                          repeat while the button is held: it publishes the
-                          press, waits the delay, then publishes a repeat
-                          every interval until the release. A gamepad button
-                          never autorepeats in the kernel, so it needs this
-                          block. A keyboard key autorepeats on its own and
-                          needs none. One repeat is capped at 30 seconds,
-                          because a controller that sleeps mid-hold publishes
-                          no release.
+                          Repeats the key while the button is held. The
+                          Remote's pod sends the press, waits for `delay`, and
+                          then sends the key every `interval` until the button
+                          is released. Set it for a gamepad button, because
+                          the kernel does not repeat gamepad buttons. A
+                          keyboard key repeats without it. The pod stops a
+                          repeat 30 seconds after it starts, because a
+                          controller that goes to sleep while a button is
+                          held sends no release. The pod limits `delay` and
+                          `interval` to 60 seconds each.
                         properties:
                           delay:
                             type: string
                             pattern: '^[0-9]+(\.[0-9]+)?(ms|s)$'
                             description: >-
-                              How long to hold before the repeat starts,
-                              as a duration like 400ms. A tap shorter than
-                              this does not repeat. Defaults to 400ms.
+                              How long the button must be held before the
+                              repeat starts, as a duration such as `400ms`.
+                              The default is `400ms`.
                           interval:
                             type: string
                             pattern: '^[0-9]+(\.[0-9]+)?(ms|s)$'
                             description: >-
-                              How often to publish the repeat while the
-                              button is held, as a duration like 300ms.
-                              Defaults to 300ms.
+                              The time between repeats, as a duration such as
+                              `300ms`. The default is `300ms`.
                 axes:
                   type: array
                   x-kubernetes-list-type: atomic
                   description: >-
-                    Axis entries. A gamepad's d-pad arrives as the
-                    two hat axes rather than as buttons, so each
-                    d-pad direction is one entry here.
+                    D-pad entries. A gamepad's d-pad reports two hat axes,
+                    not buttons. Each entry sets the key name that one
+                    direction of a hat axis reports.
                   items:
                     type: object
                     required: [axis, value, key]
@@ -141,45 +124,44 @@ spec:
                         type: string
                         enum: [ABS_HAT0X, ABS_HAT0Y]
                         description: >-
-                          One of the two hat axes, X across and Y
-                          down. The analog sticks are not bindable:
-                          a resting thumb reports hundreds of times
-                          a second, and no key name carries an analog
-                          value.
+                          The hat axis: `ABS_HAT0X` for left and right, or
+                          `ABS_HAT0Y` for up and down. Analog sticks cannot
+                          be mapped to keys.
                       value:
                         type: integer
                         enum: [-1, 1]
                         description: >-
-                          Which direction of the axis this entry
-                          binds. The hat reports -1 and 1 as its two
-                          presses and 0 as the release, and the release
-                          stops a repeat the press started.
+                          The direction: `-1` for left or up, `1` for right
+                          or down. Releasing the d-pad back to the center
+                          stops a repeat.
                       key:
                         type: string
                         pattern: '^((BTN|KEY)_[A-Z0-9_]+|none)$'
                         description: >-
-                          The kernel key name this direction reports, or none
-                          to drop it. The default mapping already names both
-                          directions of both hats as the arrows, so an entry
-                          here is for a pad that means something else by them.
+                          The evdev key name that this direction reports, or
+                          `none` to drop it. The default mapping already
+                          turns the d-pad into the arrow keys, so add an entry
+                          only when a direction should report another key.
                       repeat:
                         type: object
                         description: >-
-                          The same repeat block the buttons carry, for a hat
-                          direction. The default mapping already repeats the
-                          four arrows, so an entry needs this only where it
-                          names a key of its own.
+                          Repeats the key while the d-pad is held in this
+                          direction, the same way as a button's `repeat`. An
+                          entry replaces the default mapping of its
+                          direction, and the default's repeat with it, so
+                          set this block when the direction should still
+                          repeat.
                         properties:
                           delay:
                             type: string
                             pattern: '^[0-9]+(\.[0-9]+)?(ms|s)$'
                             description: >-
-                              How long to hold before the repeat starts,
-                              as a duration like 400ms. Defaults to 400ms.
+                              How long the direction must be held before the
+                              repeat starts, as a duration such as `400ms`.
+                              The default is `400ms`.
                           interval:
                             type: string
                             pattern: '^[0-9]+(\.[0-9]+)?(ms|s)$'
                             description: >-
-                              How often to publish the repeat while the
-                              direction is held, as a duration like 300ms.
-                              Defaults to 300ms.
+                              The time between repeats, as a duration such as
+                              `300ms`. The default is `300ms`.

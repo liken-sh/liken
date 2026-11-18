@@ -1,41 +1,38 @@
 package main
 
-// The device this driver publishes for one render node.
-//
-// The device is a statement about a GPU and its media driver. It
-// delivers no device node, and any number of claims can allocate it at
+// This driver publishes one device for each render node. The device
+// describes what the GPU's media driver can decode, encode, and scale.
+// It has no device node, and any number of claims can allocate it at
 // once. A workload's claim pairs it with the `liken.sh` render node of
-// the same GPU through a matchAttribute constraint, so the claim
-// receives the render node from `liken` and the guarantee from this
-// device.
+// the same GPU through a matchAttribute constraint, so the pod gets the
+// render node from `liken` and the capabilities from this device.
 
-// pciBusIDAttribute is the attribute that pairs this driver's device
-// with the render node. Kubernetes defines it as a standard attribute
-// in the resource.kubernetes.io domain, which belongs to no single
-// driver, and `liken` publishes it on every device of a PCI card. A
-// bare attribute name belongs to the driver that published it, so
-// `liken.sh/address` and `media.liken.sh/address` are two names and a
-// constraint cannot match one against the other. The reference is
-// https://kubernetes.io/docs/reference/node/dra-standard-device-attributes/.
+// pciBusIDAttribute is the attribute that the claim's matchAttribute
+// constraint compares. The constraint needs an attribute in a domain
+// that both drivers publish, because an attribute name with no domain
+// belongs to its driver: `liken.sh/address` and `media.liken.sh/address`
+// are different names. Kubernetes defines this standard attribute at
+// https://kubernetes.io/docs/reference/node/dra-standard-device-attributes/
+// and `liken` publishes it on every device of a PCI card.
 const pciBusIDAttribute = "resource.kubernetes.io/pciBusID"
 
-// vaDriverAttribute names the media driver that stated the
-// capabilities, such as "Intel iHD driver for Intel(R) Gen Graphics -
-// 26.1.2 ()". A person reads it to see which driver a value came from.
+// vaDriverAttribute is the vendor string of the VA-API driver that
+// reported the capabilities, such as "Intel iHD driver for Intel(R) Gen
+// Graphics - 26.1.2 ()".
 const vaDriverAttribute = "vaDriver"
 
-// identityAttributes are the attributes of the `liken` device that this
-// device repeats, so `kubectl get resourceslice` shows which GPU each
-// statement is about.
+// identityAttributes are copied from the `liken` device, so a person
+// who reads the ResourceSlice can tell which GPU a media device describes.
 var identityAttributes = []string{"address", "driver", "vendor", "product", "name"}
 
-// maxAttributeString is the API's limit on the length of a string
-// attribute.
+// maxAttributeString is the longest string value that the API accepts
+// in a device attribute.
 const maxAttributeString = 64
 
-// mediaDevice builds the device for one GPU from the `liken` device of
-// its render node and the report of its driver. A failed query passes
-// an empty report, so every capability is false.
+// mediaDevice builds the media device for one GPU from the `liken`
+// device of its render node and the driver's report. When the query
+// failed, the caller passes an empty report, and every capability is
+// false.
 func mediaDevice(gpu SliceDevice, facts report) SliceDevice {
 	attrs := map[string]DeviceAttribute{}
 	for name, value := range capabilitiesOf(facts) {
@@ -46,9 +43,9 @@ func mediaDevice(gpu SliceDevice, facts report) SliceDevice {
 			attrs[name] = attrString(value)
 		}
 	}
-	// The PCI address and the standard attribute hold the same value,
-	// so a `liken` release that predates the standard attribute still
-	// gives this device its pairing value.
+	// The value is the PCI address, so this device has the attribute
+	// even when an older `liken` release published the render node's
+	// device without it.
 	if gpu.stringAttribute("bus") == "pci" {
 		attrs[pciBusIDAttribute] = attrString(gpu.stringAttribute("address"))
 	}

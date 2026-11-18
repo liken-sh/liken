@@ -1,19 +1,17 @@
 package main
 
-// A run's pod can stop while its Play goes on: a Player edit recreates
-// it, mpv crashes and the operator resumes the run, or something else
-// deletes the pod, such as an eviction. The new pod keeps the old pod's
-// name, so the pod UID on each bus message is what tells the two apart.
-// These tests play each case out and read what the unit published.
+// A Play's pod can stop while the Play continues: a Player edit
+// recreates the pod, mpv crashes and the operator starts the run again,
+// or something else, such as an eviction, deletes the pod. The new pod
+// has the old pod's name, so only the pod UID in each bus message tells
+// the two apart.
 
 import (
 	"testing"
 	"testing/synctest"
 )
 
-// interruption is one way a run's pod stops while its Play goes on. stop
-// runs after the old pod has reported its place, and it leaves the old
-// pod on its way out.
+// stop runs after the old pod has reported its position.
 type interruption struct {
 	name    string
 	cluster func() *fakeCluster
@@ -21,14 +19,13 @@ type interruption struct {
 	want    []string
 }
 
-// oldPodEnds is the old pod's sidecar reporting the ending, which it does
-// on every SIGTERM and when mpv closes its socket.
+// The sidecar sends the ended report on SIGTERM and when mpv closes its
+// socket.
 func oldPodEnds(media *operator) {
 	media.handleBusMessage(playStatusTopic(defaultTopicBase, "house", "movie"),
 		[]byte(`{"item":1,"position":"0:36:01","ended":true,"pod":"old-pod"}`))
 }
 
-// activity is the line the unit writes on one published move.
 func activity(move string) string {
 	return "player house/theater: activity " + move + ", published to " +
 		playerStatusTopic(defaultTopicBase, "house", "theater")
@@ -36,8 +33,9 @@ func activity(move string) string {
 
 var interruptions = []interruption{
 	{
-		// A remote edit on the Player reshapes the pod, so the pass deletes
-		// it, and the kubelet's SIGTERM makes the sidecar report the ending.
+		// The Player now names a different remote, which changes the pod
+		// spec, so the pass deletes the pod. The kubelet's SIGTERM makes
+		// the sidecar report the ending.
 		name:    "a recreate after a Player edit",
 		cluster: remoteChangeCluster,
 		stop: func(_ *testing.T, _ *fakeCluster, media *operator) {
@@ -51,9 +49,9 @@ var interruptions = []interruption{
 		},
 	},
 	{
-		// mpv exits non-zero. The sidecar reports the ending when the socket
-		// closes, and the pod fails. The run is interrupted on the screen,
-		// so the unit reads Idle, and the resume is a new start.
+		// mpv exits non-zero, so the sidecar reports the ending and the
+		// pod fails. Playback stopped on the screen, so the Player shows
+		// Idle before the run starts again.
 		name:    "an mpv crash",
 		cluster: func() *fakeCluster { return runningCluster(housePlayer()) },
 		stop: func(_ *testing.T, cluster *fakeCluster, media *operator) {
@@ -85,9 +83,8 @@ var interruptions = []interruption{
 	},
 }
 
-// interrupt plays one interruption out. The old pod plays and reports,
-// stops the way the case says, and goes. The pass then creates the new
-// pod under the same name, and the new pod plays and reports.
+// interrupt lets the old pod report, stops it the case's way, deletes
+// it, and lets the new pod of the same name report.
 func interrupt(t *testing.T, each interruption) (*fakeCluster, *operator, *logBuffer) {
 	t.Helper()
 	cluster := each.cluster()
@@ -115,8 +112,8 @@ func interrupt(t *testing.T, each interruption) (*fakeCluster, *operator, *logBu
 	return cluster, media, &log
 }
 
-// The unit never goes back to a state it left for the Play. Only the
-// crash reads Idle, because the film stopped on the screen.
+// The Player's activity never goes back to a state it already left for
+// the Play.
 func TestAnInterruptedRunMovesItsUnitForwardOnly(t *testing.T) {
 	for _, each := range interruptions {
 		t.Run(each.name, func(t *testing.T) {
@@ -129,8 +126,8 @@ func TestAnInterruptedRunMovesItsUnitForwardOnly(t *testing.T) {
 	}
 }
 
-// The old pod's ending does not use up the run's ending label, so the new
-// pod's own ending labels the new pod, and its fade runs.
+// The old pod's ended report must not set the ending label, so that the
+// new pod's own ended report labels the new pod and its fade runs.
 func TestAnInterruptedRunLabelsTheNewPodsEnding(t *testing.T) {
 	for _, each := range interruptions {
 		t.Run(each.name, func(t *testing.T) {
@@ -148,9 +145,9 @@ func TestAnInterruptedRunLabelsTheNewPodsEnding(t *testing.T) {
 	}
 }
 
-// The broker sends a dead pod's Last Will once the keepalive runs out,
-// which can be after the new pod plays. That offline names the old pod,
-// so the new pod's report stands and the unit stays Playing.
+// The broker publishes a dead pod's Last Will when its keepalive
+// expires, which can be after the new pod is playing. The offline
+// message names the old pod's UID, so the new pod's report stays.
 func TestALateOfflineFromADeadPodLeavesTheNewPodsReport(t *testing.T) {
 	for _, each := range interruptions {
 		t.Run(each.name, func(t *testing.T) {

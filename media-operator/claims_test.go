@@ -1,9 +1,5 @@
 package main
 
-// These tests cover the manifest the operator writes so nobody has
-// to: which requests a Player becomes, what each one selects and
-// tolerates, and where the Player's parameters land.
-
 import (
 	"encoding/json"
 	"reflect"
@@ -11,7 +7,6 @@ import (
 	"testing"
 )
 
-// One Play, with the identity the claim and the pod both copy.
 func testPlay() *Play {
 	return &Play{
 		Metadata: ObjectMeta{Name: "movie", Namespace: "house", UID: "play-1"},
@@ -19,8 +14,6 @@ func testPlay() *Play {
 	}
 }
 
-// A Player that holds every role: a screen, two speakers, and a
-// render node.
 func testPlayer() *Player {
 	return &Player{
 		Metadata: ObjectMeta{Name: "theater", Namespace: "house"},
@@ -59,7 +52,7 @@ func TestBuildClaimTurnsEveryRoleIntoARequest(t *testing.T) {
 			continue
 		}
 		if request.Exactly == nil {
-			t.Errorf("%s carries no exactly block", role.name)
+			t.Errorf("request %s has no exactly block, want one", role.name)
 			continue
 		}
 		if request.Exactly.DeviceClassName != role.class {
@@ -74,10 +67,9 @@ func TestBuildClaimTurnsEveryRoleIntoARequest(t *testing.T) {
 	}
 }
 
-// The expression the Player wrote is the expression the claim
-// carries, and a Player that wrote none leaves the selector list out
-// of the object entirely.
-func TestBuildClaimCarriesOnlyTheSelectorsThePlayerWrote(t *testing.T) {
+// A device with no selector gets no selectors key, because the API
+// server rejects an empty CEL expression.
+func TestBuildClaimCopiesOnlyTheSelectorsThePlayerSets(t *testing.T) {
 	expression := `device.attributes["display.liken.sh"].connector == "HDMI-A-1"`
 	player := testPlayer()
 	player.Spec.Display.Selector = expression
@@ -96,31 +88,24 @@ func TestBuildClaimCarriesOnlyTheSelectorsThePlayerWrote(t *testing.T) {
 	}
 	written, err := json.Marshal(render)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("marshaling the render request: %v", err)
 	}
 	if strings.Contains(string(written), "selectors") {
 		t.Errorf("render = %s, want no selectors key", written)
 	}
 }
 
-// The playback claim carries no disconnected toleration on any request.
-// A display or a speaker that a taint marks gone evicts the playback pod,
-// and the operator recreates it at the film's place, so the film resumes
-// rather than freezes on a device that left.
-func TestBuildClaimCarriesNoDisconnectedTolerations(t *testing.T) {
+func TestBuildClaimHasNoTolerations(t *testing.T) {
 	claim := buildClaim(testPlay(), testPlayer())
 
 	for _, request := range claim.Spec.Devices.Requests {
 		if len(request.Exactly.Tolerations) != 0 {
-			t.Errorf("request %q carries tolerations %+v, want none",
+			t.Errorf("request %q has tolerations %+v, want none",
 				request.Name, request.Exactly.Tolerations)
 		}
 	}
 }
 
-// The parameters reach the driver as the Player wrote them, aimed at
-// the one request they belong to. A device with no parameters adds
-// no config block at all.
 func TestBuildClaimConfiguresOnlyTheDevicesWithParameters(t *testing.T) {
 	mode := json.RawMessage(`{"mode":"1920x1080@60"}`)
 	player := testPlayer()
@@ -136,17 +121,17 @@ func TestBuildClaimConfiguresOnlyTheDevicesWithParameters(t *testing.T) {
 		t.Errorf("requests = %v, want [screen]", config[0].Requests)
 	}
 	if config[0].Opaque == nil {
-		t.Fatal("the config entry carries no opaque block")
+		t.Fatal("the config entry has no opaque block, want one")
 	}
 	if config[0].Opaque.Driver != "display.liken.sh" {
-		t.Errorf("driver = %q", config[0].Opaque.Driver)
+		t.Errorf("driver = %q, want display.liken.sh", config[0].Opaque.Driver)
 	}
 	if string(config[0].Opaque.Parameters) != string(mode) {
 		t.Errorf("parameters = %s, want %s", config[0].Opaque.Parameters, mode)
 	}
 }
 
-func TestBuildClaimConfiguresEachDeviceSeparately(t *testing.T) {
+func TestBuildClaimAddsOneConfigBlockForEachDeviceWithParameters(t *testing.T) {
 	player := testPlayer()
 	player.Spec.Sinks[1].Parameters = &DeviceParameters{
 		Driver: "audio.liken.sh",
@@ -170,20 +155,18 @@ func TestBuildClaimConfiguresEachDeviceSeparately(t *testing.T) {
 		t.Errorf("config[1] requests = %v, want [render]", config[1].Requests)
 	}
 	if string(config[0].Opaque.Parameters) != `{"codec":"aptx"}` {
-		t.Errorf("config[0] parameters = %s", config[0].Opaque.Parameters)
+		t.Errorf("config[0] parameters = %s, want {\"codec\":\"aptx\"}", config[0].Opaque.Parameters)
 	}
 	if string(config[1].Opaque.Parameters) != `{"node":"renderD128"}` {
-		t.Errorf("config[1] parameters = %s", config[1].Opaque.Parameters)
+		t.Errorf("config[1] parameters = %s, want {\"node\":\"renderD128\"}", config[1].Opaque.Parameters)
 	}
 }
 
-// The claim's name and its owner are what make deleting the Play the
-// whole teardown.
 func TestBuildClaimNamesTheClaimForThePlayThatOwnsIt(t *testing.T) {
 	claim := buildClaim(testPlay(), testPlayer())
 
 	if claim.APIVersion != claimAPIVersion || claim.Kind != "ResourceClaim" {
-		t.Errorf("apiVersion = %q, kind = %q", claim.APIVersion, claim.Kind)
+		t.Errorf("apiVersion = %q and kind = %q, want %q and ResourceClaim", claim.APIVersion, claim.Kind, claimAPIVersion)
 	}
 	if claim.Metadata.Name != "movie-devices" {
 		t.Errorf("name = %q, want movie-devices", claim.Metadata.Name)
@@ -203,9 +186,7 @@ func TestBuildClaimNamesTheClaimForThePlayThatOwnsIt(t *testing.T) {
 	}
 }
 
-// A Player that plays sound alone is a whole Player, and its claim
-// asks for nothing else.
-func TestBuildClaimAsksForNothingAPlayerDoesNotHold(t *testing.T) {
+func TestBuildClaimLeavesOutRequestsForDevicesThePlayerLacks(t *testing.T) {
 	player := testPlayer()
 	player.Spec.Display = nil
 	player.Spec.Render = nil
@@ -227,9 +208,8 @@ func TestClaimRequestsReadsTheNamesInClaimOrder(t *testing.T) {
 	}
 }
 
-// Two remotes bound to the player, as the gather hands them to the pod
-// builder. The operator fills the two topics before it builds the
-// command sidecar, so the fixture carries them too.
+// testBoundRemotes returns Remotes with the topics that the operator
+// fills in before it builds the command sidecar.
 func testBoundRemotes() []boundRemote {
 	return []boundRemote{{
 		Name:        "armchair",

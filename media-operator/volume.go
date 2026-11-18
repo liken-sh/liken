@@ -1,22 +1,21 @@
 package main
 
-// The listening level as the screens read it. The operator relays each
-// unit's level on the Player's volume topic as {"level": 0.63, "muted":
-// false}, where the level is the fraction of the device's max
-// (volumeengine.go). A Receiver that draws its own overlay on the TV
-// adds "indicator": "receiver", and the screens draw no bar for it. The
-// playback pod's command sidecar reads the topic and sends each live
-// level to the display, which draws the indicator.
-// mpv plays at unity, its own default, so no level reaches mpv.
+// The operator publishes each Player's level on the Player's volume topic
+// as {"level": 0.63, "muted": false}, where level is a fraction of the
+// device's maximum (volumeengine.go). When a Receiver draws its own
+// overlay on the TV, the payload also has "indicator": "receiver". The
+// playback pod's command sidecar reads the topic and sends each level to
+// the display, which draws the indicator. The sidecar never sets mpv's
+// volume, which stays at its default of 100.
 
 import (
 	"encoding/json"
 	"strconv"
 )
 
-// parseRelayLevel reads one message off the topic. A payload that does
-// not decode is no level at all. A level outside 0 to 1 is held inside
-// it, so another program's message cannot draw a bar past either end.
+// parseRelayLevel decodes one message from the topic, or returns false.
+// It clamps the level to 0 through 1, so a message from another program
+// cannot draw a bar past either end.
 func parseRelayLevel(payload []byte) (relayLevel, bool) {
 	var level relayLevel
 	if err := json.Unmarshal(payload, &level); err != nil {
@@ -26,37 +25,37 @@ func parseRelayLevel(payload []byte) (relayLevel, bool) {
 	return level, true
 }
 
-// volumeChangedMessage is the display's one show trigger for the
-// indicator. It carries the level and the mute, and the display draws
-// the bar from them and not from mpv's volume property, which stays at
-// unity.
+// volumeChangedMessage is the mpv script message that sends a level to
+// the display. The display draws the bar from its arguments, not from
+// mpv's volume property.
 const volumeChangedMessage = "volume-changed"
 
-// volumeChangedCommand is the script message for one live level: the
-// level as a decimal from 0.0 to 1.0, the mute as yes or no, and
-// whether the display draws the bar, as yes or no. The display records
-// the level and the mute either way.
+// volumeChangedCommand builds the mpv command for one level. Its
+// arguments are the level from 0.0 to 1.0, the mute as yes or no, and
+// whether to draw the bar as yes or no. The display records the level
+// and the mute even when it does not draw the bar.
 func volumeChangedCommand(level relayLevel, draw bool) []any {
 	return []any{"script-message", volumeChangedMessage,
 		strconv.FormatFloat(level.Level, 'f', -1, 64), mpvYesNo(level.Muted), mpvYesNo(draw)}
 }
 
-// drawsAfter answers whether a live level draws the bar, given the
-// level held before it. A level the receiver draws on the TV draws no
-// bar, so the TV shows one indicator. A message that changes only the
-// indicator field is the operator republishing the retained level for
-// a changed spec.volume.indicator or a change of device, and no person
-// changed the level, so it draws no bar either. A press at the end of
-// the scale repeats the same payload, indicator included, and draws.
-func (l relayLevel) drawsAfter(before relayLevel, held bool) bool {
+// drawsAfter reports whether the display draws the bar for this level.
+// before is the previous level, and hadBefore is false when there was
+// none. When the Receiver draws its own overlay, the display draws no
+// bar, so the TV does not show two. A message that differs from the
+// previous one only in its indicator field is the operator republishing
+// the retained level after spec.volume.indicator or the device changed.
+// No person changed the level, so the display draws no bar. A press at
+// the end of the scale repeats the previous payload exactly and does
+// draw.
+func (l relayLevel) drawsAfter(before relayLevel, hadBefore bool) bool {
 	if l.Indicator == relayIndicatorReceiver {
 		return false
 	}
-	return !held || l.Indicator == before.Indicator || l.Level != before.Level || l.Muted != before.Muted
+	return !hadBefore || l.Indicator == before.Indicator || l.Level != before.Level || l.Muted != before.Muted
 }
 
-// mpvYesNo writes a flag the way mpv reads one, on the command line
-// and on the IPC socket alike.
+// mpvYesNo returns a boolean as mpv writes it, "yes" or "no".
 func mpvYesNo(value bool) string {
 	if value {
 		return "yes"

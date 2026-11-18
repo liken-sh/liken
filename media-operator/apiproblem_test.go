@@ -1,9 +1,9 @@
 package main
 
-// These tests carry RFC 9457's rules for the API's error bodies: the
-// title about:blank takes, the members each type carries and the
-// order they are written in, and that a HEAD on an error sends no
-// body.
+// These tests check the error bodies against RFC 9457: the status
+// phrase as the title of about:blank, the members of each problem type
+// in the order they are written, and no body on an error response to
+// HEAD.
 
 import (
 	"net/http"

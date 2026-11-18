@@ -63,7 +63,7 @@ func TestOperatorVersionReadsTheImageTag(t *testing.T) {
 	clientset := fake.NewSimpleClientset(labeledDeployment("ghcr.io/liken-sh/media-operator:2026.09.03-007"))
 	got, err := operatorVersion(context.Background(), clientset)
 	if err != nil {
-		t.Fatalf("operatorVersion: %v", err)
+		t.Fatalf("reading the operator version: %v", err)
 	}
 	if got != "2026.09.03-007" {
 		t.Fatalf("operatorVersion = %q, want 2026.09.03-007", got)
@@ -108,7 +108,7 @@ func TestTrustAnchorReadsTheCA(t *testing.T) {
 	clientset := fake.NewSimpleClientset(caConfigMap(map[string]string{trustKey: caPEM(t)}))
 	pool, err := trustAnchor(context.Background(), clientset)
 	if err != nil {
-		t.Fatalf("trustAnchor: %v", err)
+		t.Fatalf("reading the trust anchor: %v", err)
 	}
 	if pool == nil {
 		t.Fatal("trustAnchor returned a nil pool")
@@ -151,7 +151,7 @@ func TestPickReadyPod(t *testing.T) {
 	clientset := fake.NewSimpleClientset(apiPod("down", false), apiPod("up", true))
 	got, err := pickReadyPod(context.Background(), clientset)
 	if err != nil {
-		t.Fatalf("pickReadyPod: %v", err)
+		t.Fatalf("picking a Ready pod: %v", err)
 	}
 	if got != "up" {
 		t.Fatalf("pickReadyPod = %q, want up", got)
@@ -216,7 +216,7 @@ func TestClientCertificate(t *testing.T) {
 	config := &rest.Config{TLSClientConfig: rest.TLSClientConfig{CertData: certPEM, KeyData: keyPEM}}
 	accessor, err := clientCertificate(config)
 	if err != nil {
-		t.Fatalf("clientCertificate: %v", err)
+		t.Fatalf("reading the client certificate: %v", err)
 	}
 	if accessor == nil {
 		t.Fatal("clientCertificate found no certificate in a client-certificate context")
@@ -230,7 +230,7 @@ func TestClientCertificate(t *testing.T) {
 func TestClientCertificateAbsent(t *testing.T) {
 	accessor, err := clientCertificate(&rest.Config{})
 	if err != nil {
-		t.Fatalf("clientCertificate: %v", err)
+		t.Fatalf("reading the client certificate: %v", err)
 	}
 	if accessor != nil {
 		t.Fatal("clientCertificate found a certificate in a context that carries none")

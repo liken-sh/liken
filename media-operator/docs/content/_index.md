@@ -18,8 +18,8 @@ Things you can run this way:
 * an album on a lone speaker,
 * a season of episodes, played in order to the end,
 * any `https://` stream, `nfs://` export, `claim://` volume in the
-  `Play`'s namespace, or a `pattern://` test pattern that the player
-  image carries.
+  `Play`'s namespace, or a `pattern://` test pattern built into the
+  player image.
 
 Start here:
 
@@ -35,11 +35,11 @@ Start here:
 
 ## How it works
 
-The API has five resources:
+The operator defines these resources:
 
-* A `Player` is one unit of equipment in one place: a lone speaker, a TV with its
-  own speakers, or a TV with a receiver. It selects its screen,
-  speakers, and GPU with the same
+* A `Player` is one unit of equipment in one place: a lone speaker, a
+  TV with its own speakers, or a TV with a receiver. It selects its
+  screen, speakers, and GPU with the same
   [CEL](https://kubernetes.io/docs/reference/using-api/cel/) selectors
   that a hand-written `ResourceClaim` uses.
 * A `Play` is one run of media on a player, like a `Job`: a film, an
@@ -52,26 +52,28 @@ The API has five resources:
   languages.
 
 For each `Play`, the operator starts one pod that runs
-[`mpv`](https://mpv.io/), with claims on the `Player`'s devices. It
-claims the speakers and the other devices only while the `Play` runs,
-so other workloads can use them in between. Between plays, each
-`Player`'s idle pod keeps the screen: it shows a clock and the
-player's name, and fades them after a few minutes with no activity.
-You can also have the operator turn the panel off after longer, when
-`display-operator` serves the screen.
+[`mpv`](https://mpv.io/), with claims on the `Player`'s devices. The
+claims on the speakers and the other devices exist only while the
+`Play` runs, so other workloads can use those devices between plays.
+Between plays, each `Player` runs an idle pod on its screen. The idle
+pod shows a clock and the player's name, and fades them after a few
+minutes with no activity. When the screen is a `display-operator`
+`Display`, the operator can also turn the panel off after a longer
+time.
 
-Each `Remote` has its own pod, which sends button presses to the
+Each `Remote` has its own pod, which publishes button presses to the
 cluster's [message bus](/docs/reference/bus/), and the playback pod
-acts on them. Your own programs can use the same bus. The operator
-also ships a capabilities agent, which publishes what each GPU can
-decode, encode, and scale, as `media.liken.sh` devices, so a pod can
-claim a GPU that decodes 10-bit HEVC, for example.
+reads them from there. Your own programs can use the same bus. The
+operator's capabilities agent publishes what each GPU can decode,
+encode, and scale as `media.liken.sh` devices, so a pod can claim,
+for example, a GPU that decodes 10-bit HEVC.
 
 `media-operator` is one of the extension operators for
 [running a home theater](https://liken.sh/docs/concepts/running-a-home-theater/).
-It plays what you name in a `Play`.
+It plays the media that a `Play` points to, and
 [`library-operator`](https://liken.sh/library/) adds a catalog of
-your films and series, and a browser on the screen to pick from it.
+your films and series, and a browser on the screen to choose from
+it.
 
 * [The source](https://github.com/liken-sh/liken/tree/main/media-operator)
 * [The `liken` manual](https://liken.sh/docs/)

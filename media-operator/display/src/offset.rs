@@ -1,6 +1,6 @@
-//! One delay offset control. The strip has two, one for the audio delay and
-//! one for the subtitle delay. Each is a stop beside the track it shifts, and
-//! a select on it opens the adjuster this module draws.
+//! The audio delay and subtitle delay controls of the strip. Selecting
+//! one opens an adjuster panel. This module draws the panel and handles
+//! the remote's keys while it is open.
 
 use iced::{Point, Rectangle, Size};
 use serde_json::json;
@@ -12,16 +12,15 @@ use crate::ipc::Command;
 use crate::presentation::Presentation;
 use crate::theme;
 
-/// The panel the adjuster draws: the label, the delay in large type, and a
-/// nudge hint.
+// The adjuster panel: its position and size, and the hint line that
+// lists the keys.
 const X: f32 = theme::MARGIN_X;
 const W: f32 = 720.0;
 const PAD: f32 = 24.0;
 const H: f32 = 200.0;
 const HINT: &str = "Left and right nudge, up resets, down done";
 
-/// One offset bound to a property. `track` names the track type the offset
-/// needs, when it needs one.
+/// One of the two mpv delay properties the adjuster changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Offset {
     Audio,
@@ -43,9 +42,8 @@ impl Offset {
         }
     }
 
-    /// The offset shows for a playing video. An offset bound to a track type
-    /// also needs a track of that type, so the subtitle offset hides with no
-    /// subtitles.
+    /// Whether the strip shows this control. Neither shows for an image.
+    /// The subtitle offset also needs at least one subtitle track.
     pub fn available(self, presentation: &Presentation, film: &Film) -> bool {
         if presentation.is_image() {
             return false;
@@ -56,10 +54,11 @@ impl Offset {
         }
     }
 
-    /// The nudge step, in seconds. The audio offset corrects the latency of a
-    /// receiver or a television, which a person hears in tens of
-    /// milliseconds, so it moves in fine steps. A person sees subtitle timing
-    /// errors only from about 100 ms, so finer steps only add presses.
+    /// The size of one nudge, in seconds. The audio offset corrects the
+    /// latency of a receiver or a television, and people hear audio that
+    /// is a few tens of milliseconds off, so the audio step is small.
+    /// People notice subtitle timing from about 100 ms off, so a smaller
+    /// subtitle step would only add key presses.
     fn step(self) -> f64 {
         match self {
             Offset::Audio => 0.05,
@@ -67,9 +66,9 @@ impl Offset {
         }
     }
 
-    /// The clamp range, in seconds, in each direction. Receiver latency stays
-    /// well under 5 s. A subtitle track made for a different cut of the video
-    /// can be several seconds off, so its range is longer.
+    /// The largest delay in either direction, in seconds. Receiver latency
+    /// stays well under 5 s. A subtitle track made for a different cut of
+    /// the video can be several seconds off, so its range is larger.
     fn range(self) -> f64 {
         match self {
             Offset::Audio => 5.0,
@@ -77,14 +76,15 @@ impl Offset {
         }
     }
 
-    /// The delay one step from `at`, held inside the range. The delay rounds
-    /// to a whole millisecond, so repeated steps do not collect float error.
+    /// The delay one step from `at` in `direction` (1.0 or -1.0), clamped
+    /// to the range. It rounds to a whole millisecond so that repeated
+    /// steps do not accumulate floating-point error.
     fn nudge(self, at: f64, direction: f64) -> f64 {
         let next = ((at + direction * self.step()) * 1000.0).round() / 1000.0;
         next.clamp(-self.range(), self.range())
     }
 
-    /// The delay as mpv reports it.
+    /// The current delay in seconds, as mpv last reported it.
     pub fn delay(self, film: &Film) -> f64 {
         match self {
             Offset::Audio => film.audio_delay,
@@ -92,14 +92,17 @@ impl Offset {
         }
     }
 
-    /// The cell's word.
+    /// The delay in milliseconds, as the strip cell shows it.
     pub fn value(self, film: &Film) -> String {
         milliseconds(self.delay(film))
     }
 
-    /// left and right nudge the delay by a step, and the nudge applies at
-    /// once, so there is nothing to confirm. up resets the delay to zero. down
-    /// and select close the adjuster, and back closes it through the router.
+    /// The mpv commands for one key press while the adjuster is open.
+    /// Left and right move the delay one step, and up sets it to zero.
+    /// mpv applies a new delay at once, so no key confirms it. Down and
+    /// select return no commands, and the strip closes the adjuster
+    /// because `holds` returns false for them. `Focus` in `focus.rs`
+    /// handles the back key.
     pub fn handle(self, action: Action, film: &Film) -> Vec<Command> {
         let at = self.delay(film);
         let write = |value: f64| {
@@ -117,18 +120,18 @@ impl Offset {
         }
     }
 
-    /// Whether one press leaves the adjuster open.
-    pub fn holds(self, action: Action) -> bool {
+    /// Whether the adjuster stays open after `action`.
+    pub fn stays_open(self, action: Action) -> bool {
         !matches!(action, Action::Down | Action::Select)
     }
 
-    /// The panel's own box, which the adjuster grows upward from the baseline
-    /// every panel hangs on.
+    /// The panel's rectangle. Its bottom edge is `theme::PANEL_BOTTOM`,
+    /// like every other panel of the strip.
     pub fn shape(self) -> Rectangle {
         Rectangle::new(Point::new(X, theme::PANEL_BOTTOM - H), Size::new(W, H))
     }
 
-    /// The three lines of the panel.
+    /// The panel's text: the label, the delay in seconds, and the hint.
     pub fn lines(self, film: &Film) -> Vec<Line> {
         let top = self.shape().y;
         let muted = |content: String, y: f32| {
@@ -161,7 +164,7 @@ impl Offset {
     }
 }
 
-/// Format a delay in seconds with a sign, for the panel.
+/// A signed delay in seconds, as the panel shows it.
 fn seconds(at: f64) -> String {
     if at.abs() < 0.001 {
         return "0.00 s".to_string();
@@ -170,7 +173,7 @@ fn seconds(at: f64) -> String {
     format!("{sign}{:.2} s", at.abs())
 }
 
-/// Format a delay in milliseconds, for the strip cell.
+/// A signed delay in milliseconds, as the strip cell shows it.
 fn milliseconds(at: f64) -> String {
     let count = (at.abs() * 1000.0 + 0.5).floor() as i64;
     if count == 0 {
@@ -276,10 +279,10 @@ mod tests {
         assert!(Offset::Audio.handle(Action::Down, &held).is_empty());
         assert!(Offset::Audio.handle(Action::Select, &held).is_empty());
 
-        assert!(Offset::Audio.holds(Action::Left));
-        assert!(Offset::Audio.holds(Action::Up));
-        assert!(!Offset::Audio.holds(Action::Down));
-        assert!(!Offset::Audio.holds(Action::Select));
+        assert!(Offset::Audio.stays_open(Action::Left));
+        assert!(Offset::Audio.stays_open(Action::Up));
+        assert!(!Offset::Audio.stays_open(Action::Down));
+        assert!(!Offset::Audio.stays_open(Action::Select));
     }
 
     #[test]
@@ -292,10 +295,8 @@ mod tests {
         assert!(!Offset::Subtitle.available(&block(r#"{"type":"image"}"#), &subtitled));
     }
 
-    /// The panel stands where every panel stands, and its three lines read
-    /// down from its own top.
     #[test]
-    fn the_panel_holds_the_label_the_delay_and_the_hint() {
+    fn the_panel_shows_the_label_the_delay_and_the_hint() {
         let lines = Offset::Audio.lines(&film(-0.05, 0.0));
         assert_eq!(
             Offset::Audio.shape(),

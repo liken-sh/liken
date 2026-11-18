@@ -1,10 +1,9 @@
-# The Go build reads the module files and the capabilities package. An
-# allowlist keeps the operator's sources, the Rust crates, the docs, and
-# the deploy manifests out of this build context, so a change to them
+# The build context holds only the module files and `capabilities/`,
+# which Dockerfile.capabilities builds, so a change to any other file
 # does not rebuild this image.
 *
 !go.mod
 !go.sum
 !capabilities/
-# go build never reads a test file, so a test-only edit does not rebuild this image.
+# go build reads no test file.
 **/*_test.go

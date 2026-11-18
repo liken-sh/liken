@@ -1,19 +1,14 @@
 package main
 
-// The home press during a film. The playback pod ends the run and asks
-// on the Player's commands topic, where the client under the film reads
-// the ask as a press of the home key.
+// A home press during a film ends the run, and the playback pod
+// publishes a home command on the Player's commands topic. The client
+// that draws the screen between films then shows its home page.
 
-// The action word for home. The Play's commands topic accepts it, and
-// the Player's commands topic carries it.
 const actionHome = "home"
 
-// home publishes the ask first and ends the run after it, so the client
-// is on its home page before the ending moves the unit to Idle. The
-// ending is the one a back press reaches once mpv closes, so the film
-// ends after the same grace. remote names the Remote whose press asked,
-// and is empty for a home command that a program published on the Play's
-// commands topic.
+// home publishes the home command and then ends the run. remote is the
+// Remote whose press triggered it, or empty when a program published
+// home on the Play's commands topic.
 func (c *commander) home(trigger, remote string) {
-	c.askAndEnd(trigger, mediaCommand{Action: actionHome, Remote: remote})
+	c.publishCommandAndEnd(trigger, mediaCommand{Action: actionHome, Remote: remote})
 }

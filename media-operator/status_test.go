@@ -1,9 +1,5 @@
 package main
 
-// The derivation is a pure function over what the pass read, so
-// these tests are a table of facts and the status each set of facts
-// earns.
-
 import (
 	"encoding/json"
 	"errors"
@@ -45,8 +41,8 @@ func TestDerivePlayStatus(t *testing.T) {
 	unschedulable := playbackPod(podPending)
 	unschedulable.Status.Message = "no machine holds every claimed device"
 
-	parked := playbackPod(podPending)
-	parked.Status.Conditions = []PodCondition{{
+	missingVolume := playbackPod(podPending)
+	missingVolume.Status.Conditions = []PodCondition{{
 		Type:    "PodScheduled",
 		Status:  "False",
 		Message: `0/2 nodes are available: persistentvolumeclaim "films" not found.`,
@@ -61,17 +57,17 @@ func TestDerivePlayStatus(t *testing.T) {
 		want     PlayStatus
 	}{{
 		name:     "a refused URI fails the play before anything exists",
-		buildErr: errors.New("the scheme rtsp:// is not one the operator resolves; it resolves https:// and nfs://"),
+		buildErr: errors.New("the scheme rtsp:// is not one the operator resolves, which are https:// and nfs://"),
 		want: PlayStatus{
 			Phase:   phaseFailed,
-			Message: "the scheme rtsp:// is not one the operator resolves; it resolves https:// and nfs://",
+			Message: "the scheme rtsp:// is not one the operator resolves, which are https:// and nfs://",
 		},
 	}, {
 		name:     "a missing Remote fails the play the same way",
-		buildErr: errors.New("the Player theater names the Remote ghost, which does not exist in this namespace"),
+		buildErr: errors.New("the Player theater lists the Remote ghost in spec.remotes, and no Remote of that name exists in this namespace"),
 		want: PlayStatus{
 			Phase:   phaseFailed,
-			Message: "the Player theater names the Remote ghost, which does not exist in this namespace",
+			Message: "the Player theater lists the Remote ghost in spec.remotes, and no Remote of that name exists in this namespace",
 		},
 	}, {
 		name: "an absent Player is Pending, not Failed",
@@ -95,9 +91,9 @@ func TestDerivePlayStatus(t *testing.T) {
 			Message: "no machine holds every claimed device",
 		},
 	}, {
-		name:   "a pod the scheduler parks reports the condition's message",
+		name:   "a pod the scheduler cannot place reports the condition's message",
 		player: player,
-		pod:    parked,
+		pod:    missingVolume,
 		want: PlayStatus{
 			Phase:   phasePending,
 			Pod:     "movie-playback",
@@ -167,10 +163,9 @@ func TestDerivePlayStatus(t *testing.T) {
 			Message: "the playback pod failed: the node was drained",
 		},
 	}, {
-		// The Play's phase reads from the pod alone. A mark folded into
-		// the phase would make the API say a pod is gone while it exists,
-		// so kubectl keeps listing the Play for the seconds the pod takes
-		// to terminate. Only the Player's presentable state reads the mark.
+		// The phase comes from the pod alone. If Ended changed it, the
+		// Play would show Finished during the seconds its pod takes to
+		// terminate.
 		name:   "a report that carries the ending leaves the phase Running",
 		player: player,
 		pod:    playbackPod(podRunning),
@@ -191,10 +186,7 @@ func TestDerivePlayStatus(t *testing.T) {
 
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			// Every status carries the activity word its phase and
-			// paused flag earn. TestPlayActivity pins that mapping on
-			// its own; here it rides along so the table need not
-			// repeat it.
+			// TestPlayActivity tests the activity.
 			one.want.Activity = playActivity(one.want.Phase, one.want.Paused)
 			got := derivePlayStatus(statusTestPlay(), one.player, one.buildErr, one.pod, one.report, resolvedPreferences{})
 			if !reflect.DeepEqual(got, one.want) {
@@ -204,10 +196,6 @@ func TestDerivePlayStatus(t *testing.T) {
 	}
 }
 
-// A position, once reported, survives a pass that finds no report. The
-// report desk drops a run's report when the pod goes offline, so a
-// recreate reads the place from the status. A blank there restarts the
-// film from the top.
 func TestDerivePlayStatusCarriesTheLastPositionForward(t *testing.T) {
 	player := &Player{Metadata: ObjectMeta{Name: "theater", Namespace: "house"}}
 	play := statusTestPlay()
@@ -237,8 +225,6 @@ func TestDerivePlayStatusCarriesTheLastPositionForward(t *testing.T) {
 	}
 }
 
-// The status reports the resolved preferences and the languages mpv chose, the
-// console-parity record of what resolved and what played.
 func TestDerivePlayStatusReportsPreferencesAndChosenTracks(t *testing.T) {
 	player := &Player{Metadata: ObjectMeta{Name: "theater", Namespace: "house"}}
 	prefs := resolvedPreferences{
@@ -255,18 +241,15 @@ func TestDerivePlayStatusReportsPreferencesAndChosenTracks(t *testing.T) {
 		!reflect.DeepEqual(got.SubtitleLanguages, []string{"en"}) ||
 		got.Subtitles != subtitlesAuto ||
 		got.SDH != sdhAvoid {
-		t.Errorf("resolved preferences = %+v", got)
+		t.Errorf("resolved preferences = %+v, want audio de, subtitles en, auto subtitles, and SDH avoided", got)
 	}
-	// The viewer asked for de audio, and the status shows it fell to eng, so the
-	// cause is visible instead of guessed.
+	// The preference was German audio, and mpv played English.
 	if got.AudioLanguage != "eng" || got.SubtitleLanguage != "eng" {
 		t.Errorf("chosen tracks = audio %q, subtitle %q, want eng and eng",
 			got.AudioLanguage, got.SubtitleLanguage)
 	}
 }
 
-// A pass with no report reads the chosen languages from the Play's own status,
-// so a dropped report does not blank them.
 func TestDerivePlayStatusCarriesTheChosenLanguagesForward(t *testing.T) {
 	player := &Player{Metadata: ObjectMeta{Name: "theater", Namespace: "house"}}
 	play := statusTestPlay()
@@ -284,8 +267,6 @@ func TestDerivePlayStatusCarriesTheChosenLanguagesForward(t *testing.T) {
 	}
 }
 
-// The activity word a person reads is the phase and the paused flag
-// folded into one.
 func TestPlayActivity(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -310,8 +291,8 @@ func TestPlayActivity(t *testing.T) {
 	}
 }
 
-// A small API server that holds one Play and can refuse a stated
-// number of writes with a conflict.
+// statusAPI is a fake API server that stores one Play and returns 409
+// for the first conflicts status writes.
 type statusAPI struct {
 	stored    Play
 	conflicts int
@@ -337,7 +318,7 @@ func (s *statusAPI) handler(t *testing.T) http.Handler {
 			s.stored = written
 			_ = json.NewEncoder(w).Encode(written)
 		default:
-			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			t.Errorf("the API server received %s %s, which the test does not serve", r.Method, r.URL.Path)
 		}
 	})
 }
@@ -349,10 +330,10 @@ func TestAnUnchangedStatusIsNotWritten(t *testing.T) {
 
 	err := writePlayStatus(testAPIClient(t, api.handler(t)), nil, play, play.Status)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing an unchanged status: %v", err)
 	}
 	if len(api.requests) != 0 {
-		t.Errorf("an unchanged status reached the API server: %v", api.requests)
+		t.Errorf("the API server received %v, want no request for an unchanged status", api.requests)
 	}
 }
 
@@ -363,7 +344,7 @@ func TestAChangedStatusIsWrittenOnce(t *testing.T) {
 	desired := PlayStatus{Phase: phaseRunning, Pod: "movie-playback", Item: 1}
 
 	if err := writePlayStatus(testAPIClient(t, api.handler(t)), nil, play, desired); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the changed status: %v", err)
 	}
 	if len(api.writes) != 1 {
 		t.Fatalf("writes = %d, want one: %v", len(api.writes), api.requests)
@@ -373,9 +354,7 @@ func TestAChangedStatusIsWrittenOnce(t *testing.T) {
 	}
 }
 
-// A losing write reads the object again and writes once more; the
-// second attempt is the last.
-func TestAConflictEarnsOneRetryWithTheFreshVersion(t *testing.T) {
+func TestAConflictIsRetriedOnceWithTheFreshVersion(t *testing.T) {
 	api := &statusAPI{conflicts: 1}
 	api.stored = *statusTestPlay()
 	api.stored.Metadata.ResourceVersion = "13"
@@ -384,7 +363,7 @@ func TestAConflictEarnsOneRetryWithTheFreshVersion(t *testing.T) {
 	desired := PlayStatus{Phase: phaseRunning, Pod: "movie-playback"}
 
 	if err := writePlayStatus(testAPIClient(t, api.handler(t)), nil, play, desired); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the changed status: %v", err)
 	}
 	if len(api.writes) != 1 {
 		t.Fatalf("writes = %d, want one accepted write: %v", len(api.writes), api.requests)
@@ -402,8 +381,6 @@ func TestAConflictEarnsOneRetryWithTheFreshVersion(t *testing.T) {
 	}
 }
 
-// The writer that won wrote the same status, so the retry has
-// nothing left to say.
 func TestAConflictWhoseWinnerWroteTheSameStatusStopsThere(t *testing.T) {
 	desired := PlayStatus{Phase: phaseRunning, Pod: "movie-playback"}
 	api := &statusAPI{conflicts: 1}
@@ -413,15 +390,13 @@ func TestAConflictWhoseWinnerWroteTheSameStatusStopsThere(t *testing.T) {
 
 	play := statusTestPlay()
 	if err := writePlayStatus(testAPIClient(t, api.handler(t)), nil, play, desired); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the status after a conflict: %v", err)
 	}
 	if len(api.writes) != 0 {
 		t.Errorf("the retry wrote a status that was already there: %+v", api.writes)
 	}
 }
 
-// Two conflicts in a row are not a race any more; the pass gives up
-// and the next one starts from a fresh read.
 func TestASecondConflictIsReported(t *testing.T) {
 	api := &statusAPI{conflicts: 2}
 	api.stored = *statusTestPlay()

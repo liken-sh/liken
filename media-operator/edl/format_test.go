@@ -1,8 +1,5 @@
 package edl
 
-// These tests cover the timeline format itself: one segment per track, and the
-// quoting that lets a file name or a title carry a comma.
-
 import (
 	"os"
 	"path/filepath"
@@ -10,9 +7,6 @@ import (
 	"testing"
 )
 
-// A segment line parses into the file it plays and the title mpv turns into a
-// chapter name. The quoting states each run's length, so the text inside it
-// survives whatever punctuation it holds.
 func TestParseSegment(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -63,7 +57,7 @@ func TestParseSegment(t *testing.T) {
 			wantOK:   true,
 		},
 		{
-			name: "a quoted run that states no end",
+			name: "a quoted length longer than the rest of the line",
 			line: "%34%one.mp3",
 		},
 		{
@@ -86,8 +80,6 @@ func TestParseSegment(t *testing.T) {
 	}
 }
 
-// The parser reads the timeline and skips what it has no use for: the header,
-// the comments, and the ! directives that carry stream and chapter options.
 func TestParseSkipsTheHeaderAndTheDirectives(t *testing.T) {
 	text := Header + "\n" +
 		"!no_chapters\n" +
@@ -102,8 +94,6 @@ func TestParseSkipsTheHeaderAndTheDirectives(t *testing.T) {
 	mustMatch(t, segments[1].Params["title"], "Masterswarm")
 }
 
-// The album's own directory is where a relative segment path is measured from,
-// and an absolute path stands on its own.
 func TestSegmentPath(t *testing.T) {
 	cases := []struct {
 		name string
@@ -124,9 +114,6 @@ func TestSegmentPath(t *testing.T) {
 	}
 }
 
-// A file the caller names is a timeline only when it opens with the
-// header. Anything else is the media file it names, and the caller plays it as
-// one.
 func TestReadFile(t *testing.T) {
 	dir := t.TempDir()
 	timeline := filepath.Join(dir, "album.edl")

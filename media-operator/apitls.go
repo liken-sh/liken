@@ -1,16 +1,17 @@
 package main
 
-// This file mints and keeps the serving pair. media-api serves HTTPS
-// because a Bearer token travels in every request and the cluster
-// network carries no encryption of its own. It mints its own CA and
-// leaf rather than depending on another controller, so a cluster with
-// no certificate manager still gets an encrypted API on first start,
-// and an owner with a CA replaces both objects and the API serves
-// what it finds. The key and the leaf go to a Secret, media-api-tls,
-// because a private key is read by this process alone. The CA
-// certificate alone goes to a ConfigMap, media-api-ca, because it is
-// public data that a client with no Secret access must read to trust
-// the API.
+// This file creates and renews the TLS certificate that media-api
+// serves. media-api uses HTTPS because every request carries a Bearer
+// token and the cluster network does not encrypt traffic. media-api
+// creates its own CA and leaf certificate, so a cluster with no
+// certificate manager has an encrypted API on first start. A cluster
+// owner who has a CA can replace both objects, and media-api serves
+// what it finds in them.
+//
+// The leaf certificate and its key are in the Secret media-api-tls,
+// because only media-api needs the private key. The CA certificate is
+// also in the ConfigMap media-api-ca, so a client that cannot read
+// Secrets can still trust the API.
 
 import (
 	"crypto/ecdsa"
@@ -31,19 +32,18 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// The names of the two objects, and the one DNS name the leaf serves,
-// the Service in liken-system.
+// The leaf certificate is valid only for apiServiceDNSName, the DNS
+// name of the media-api Service.
 const (
 	apiTLSSecretName   = "media-api-tls"
 	apiCAConfigMapName = "media-api-ca"
 	apiServiceDNSName  = "media-api.liken-system.svc"
 )
 
-// The keys of the Secret. tls.crt and tls.key are the Kubernetes
-// convention for a kubernetes.io/tls Secret, so other tooling reads
-// the pair. ca.crt and ca.key are kept beside them so the keeper can
-// re-mint a leaf under the same CA a year later, and an owner's pair
-// with no ca.key is served unchanged.
+// tls.crt and tls.key are the keys of a kubernetes.io/tls Secret, so
+// other tools can read the pair. The keeper also stores ca.crt and
+// ca.key in the Secret, so it can sign each renewed leaf with the same
+// CA.
 const (
 	apiTLSCertKey    = "tls.crt"
 	apiTLSKeyKey     = "tls.key"
@@ -52,19 +52,18 @@ const (
 	apiTLSSecretType = "kubernetes.io/tls"
 )
 
-// The lifetimes. The CA is valid for ten years, longer than a machine. The
-// leaf is valid for one year, and the keeper re-mints it when under a third
-// of that life remains, so a rotation has months of margin and a
-// clock that is off by days changes nothing.
+// The keeper renews the leaf when less than 1/apiLeafRenewDivisor of
+// its lifetime remains, about four months for a one-year leaf. That
+// gives a failed renewal months to succeed, and a clock that is off by
+// a few days does not matter.
 const (
-	apiAuthorityLife = 10 * 365 * 24 * time.Hour
-	apiLeafLife      = 365 * 24 * time.Hour
-	apiLeafRemint    = 3
+	apiAuthorityLife    = 10 * 365 * 24 * time.Hour
+	apiLeafLife         = 365 * 24 * time.Hour
+	apiLeafRenewDivisor = 3
 )
 
-// Secret is the core Secret as this program reads and writes it. The
-// data values are base64 in JSON, which a []byte field encodes and
-// decodes on its own.
+// Secret is the core Secret. The API server sends data values as
+// base64, which encoding/json decodes into a []byte field.
 type Secret struct {
 	APIVersion string            `json:"apiVersion,omitempty"`
 	Kind       string            `json:"kind,omitempty"`
@@ -95,8 +94,8 @@ func CreateSecret(c *apiclient.Client, secret *Secret) (*Secret, error) {
 	return created, nil
 }
 
-// UpdateSecret writes the whole object back, so a re-minted leaf lands
-// beside the CA that is already there and the CA is never lost.
+// UpdateSecret replaces the whole Secret with a PUT. The caller passes
+// the Secret it read, so the CA keys in it are written back unchanged.
 func UpdateSecret(c *apiclient.Client, secret *Secret) (*Secret, error) {
 	body, err := json.Marshal(secret)
 	if err != nil {
@@ -110,14 +109,13 @@ func UpdateSecret(c *apiclient.Client, secret *Secret) (*Secret, error) {
 	return written, nil
 }
 
-// certificateKeeper owns the serving pair. It mints one at first
-// start, publishes the CA, and afterwards answers the pair it finds,
-// re-minting the leaf as it nears its end.
+// certificateKeeper creates the serving certificate on first start,
+// and after that loads it from the Secret and renews it near expiry.
 type certificateKeeper struct {
 	client    *apiclient.Client
 	namespace string
-	// The clock is a field so a test drives a leaf to the end of its
-	// life without waiting a year.
+	// now is a field so a test can move the clock to the end of a
+	// leaf's lifetime.
 	now func() time.Time
 
 	mu       sync.Mutex
@@ -128,9 +126,10 @@ func newCertificateKeeper(client *apiclient.Client, namespace string) *certifica
 	return &certificateKeeper{client: client, namespace: namespace, now: time.Now}
 }
 
-// ensure is the whole of the start-up and of each later review: read
-// or mint the pair, publish the CA certificate, renew a leaf near its
-// end, and load what stands.
+// ensure returns the certificate to serve. It reads or creates the
+// Secret, creates the CA ConfigMap when it is missing, and renews a
+// leaf that is near expiry. media-api calls it at start, every
+// certificateReview, and each time the Secret changes.
 func (k *certificateKeeper) ensure() (*tls.Certificate, error) {
 	secret, err := k.pair()
 	if err != nil {
@@ -146,9 +145,9 @@ func (k *certificateKeeper) ensure() (*tls.Certificate, error) {
 	return k.load(secret)
 }
 
-// expirySeconds is what the certificate expiry gauge reads: the
-// seconds the loaded leaf has left. A keeper that has loaded nothing
-// answers zero, which an alert reads as expired rather than as fine.
+// expirySeconds returns the seconds until the loaded leaf expires, for
+// the certificate expiry gauge. It returns zero before any certificate
+// is loaded, so an alert on the gauge treats that state as expired.
 func (k *certificateKeeper) expirySeconds() float64 {
 	k.mu.Lock()
 	defer k.mu.Unlock()
@@ -158,17 +157,17 @@ func (k *certificateKeeper) expirySeconds() float64 {
 	return k.notAfter.Sub(k.now()).Seconds()
 }
 
-// pair reads the Secret or mints one. The API never overwrites a pair
-// that exists, so an owner's pair stands. A create that loses the
-// race to another pod reads the winner, so two pods that start at
-// once serve one pair.
+// pair reads the Secret, or creates it when it does not exist. It never
+// overwrites an existing Secret, so an owner's pair is kept. A conflict
+// on create means another media-api pod created the Secret first, and
+// pair reads that one, so both pods serve the same certificate.
 func (k *certificateKeeper) pair() (*Secret, error) {
 	secret, err := GetSecret(k.client, k.namespace, apiTLSSecretName)
 	if err == nil {
 		return secret, nil
 	}
 	if !errors.Is(err, apiclient.ErrNotFound) {
-		return nil, fmt.Errorf("reading secret %s/%s: %w", k.namespace, apiTLSSecretName, err)
+		return nil, fmt.Errorf("reading Secret %s/%s: %w", k.namespace, apiTLSSecretName, err)
 	}
 
 	minted, err := k.mint()
@@ -179,12 +178,12 @@ func (k *certificateKeeper) pair() (*Secret, error) {
 	if errors.Is(err, apiclient.ErrConflict) {
 		won, err := GetSecret(k.client, k.namespace, apiTLSSecretName)
 		if err != nil {
-			return nil, fmt.Errorf("reading secret %s/%s after a conflict: %w", k.namespace, apiTLSSecretName, err)
+			return nil, fmt.Errorf("reading Secret %s/%s after a conflict: %w", k.namespace, apiTLSSecretName, err)
 		}
 		return won, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("creating secret %s/%s: %w", k.namespace, apiTLSSecretName, err)
+		return nil, fmt.Errorf("creating Secret %s/%s: %w", k.namespace, apiTLSSecretName, err)
 	}
 	return created, nil
 }
@@ -213,10 +212,10 @@ func (k *certificateKeeper) mint() (*Secret, error) {
 	}, nil
 }
 
-// publish writes the CA certificate to the ConfigMap, the anchor a
-// client with no Secret access reads. A ConfigMap that exists is left
-// as it is, and a create that meets a conflict is success, because
-// the other writer published the same CA.
+// publish creates the CA ConfigMap when it does not exist, and leaves
+// an existing one unchanged. It does nothing for a Secret with no
+// ca.crt. A conflict on create is not an error, because another
+// media-api pod created the ConfigMap from the same Secret.
 func (k *certificateKeeper) publish(caPEM []byte) error {
 	if len(caPEM) == 0 {
 		return nil
@@ -226,7 +225,7 @@ func (k *certificateKeeper) publish(caPEM []byte) error {
 		return nil
 	}
 	if !errors.Is(err, apiclient.ErrNotFound) {
-		return fmt.Errorf("reading configmap %s/%s: %w", k.namespace, apiCAConfigMapName, err)
+		return fmt.Errorf("reading ConfigMap %s/%s: %w", k.namespace, apiCAConfigMapName, err)
 	}
 
 	_, err = CreateConfigMap(k.client, &ConfigMap{
@@ -239,19 +238,19 @@ func (k *certificateKeeper) publish(caPEM []byte) error {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("creating configmap %s/%s: %w", k.namespace, apiCAConfigMapName, err)
+		return fmt.Errorf("creating ConfigMap %s/%s: %w", k.namespace, apiCAConfigMapName, err)
 	}
 	return nil
 }
 
-// renew re-mints the leaf when under a third of its life remains and
-// writes it back. An owner's pair with no CA key cannot be re-signed
-// and is served as it stands; the expiry gauge is the owner's
-// warning.
+// renew signs a new leaf and updates the Secret when the leaf is near
+// expiry. A Secret with no ca.key came from an owner, and renew returns
+// it unchanged even when it is near expiry. The owner learns of the
+// expiry from the gauge that expirySeconds feeds.
 func (k *certificateKeeper) renew(secret *Secret) (*Secret, error) {
 	leaf, err := parseCertificate(secret.Data[apiTLSCertKey])
 	if err != nil {
-		return nil, fmt.Errorf("reading %s from secret %s/%s: %w", apiTLSCertKey, k.namespace, apiTLSSecretName, err)
+		return nil, fmt.Errorf("reading %s from Secret %s/%s: %w", apiTLSCertKey, k.namespace, apiTLSSecretName, err)
 	}
 	if !k.expiring(leaf) || len(secret.Data[apiCAKeyKey]) == 0 {
 		return secret, nil
@@ -259,7 +258,7 @@ func (k *certificateKeeper) renew(secret *Secret) (*Secret, error) {
 
 	ca, err := authorityFrom(secret.Data[apiCACertKey], secret.Data[apiCAKeyKey])
 	if err != nil {
-		return nil, fmt.Errorf("reading the CA from secret %s/%s: %w", k.namespace, apiTLSSecretName, err)
+		return nil, fmt.Errorf("reading the CA from Secret %s/%s: %w", k.namespace, apiTLSSecretName, err)
 	}
 	now := k.now()
 	certPEM, keyPEM, err := ca.mintLeaf(now, apiServiceDNSName)
@@ -270,26 +269,26 @@ func (k *certificateKeeper) renew(secret *Secret) (*Secret, error) {
 	secret.Data[apiTLSKeyKey] = keyPEM
 	written, err := UpdateSecret(k.client, secret)
 	if err != nil {
-		return nil, fmt.Errorf("updating secret %s/%s: %w", k.namespace, apiTLSSecretName, err)
+		return nil, fmt.Errorf("updating Secret %s/%s: %w", k.namespace, apiTLSSecretName, err)
 	}
 	return written, nil
 }
 
 func (k *certificateKeeper) expiring(leaf *x509.Certificate) bool {
 	life := leaf.NotAfter.Sub(leaf.NotBefore)
-	return leaf.NotAfter.Sub(k.now()) < life/apiLeafRemint
+	return leaf.NotAfter.Sub(k.now()) < life/apiLeafRenewDivisor
 }
 
-// load builds the tls.Certificate and parses its leaf, which the
-// expiry gauge reads, and records the leaf's end.
+// load builds the tls.Certificate from the Secret and records the
+// leaf's expiry for expirySeconds.
 func (k *certificateKeeper) load(secret *Secret) (*tls.Certificate, error) {
 	pair, err := tls.X509KeyPair(secret.Data[apiTLSCertKey], secret.Data[apiTLSKeyKey])
 	if err != nil {
-		return nil, fmt.Errorf("loading the pair from secret %s/%s: %w", k.namespace, apiTLSSecretName, err)
+		return nil, fmt.Errorf("loading the pair from Secret %s/%s: %w", k.namespace, apiTLSSecretName, err)
 	}
 	leaf, err := parseCertificate(secret.Data[apiTLSCertKey])
 	if err != nil {
-		return nil, fmt.Errorf("reading %s from secret %s/%s: %w", apiTLSCertKey, k.namespace, apiTLSSecretName, err)
+		return nil, fmt.Errorf("reading %s from Secret %s/%s: %w", apiTLSCertKey, k.namespace, apiTLSSecretName, err)
 	}
 	pair.Leaf = leaf
 
@@ -299,8 +298,7 @@ func (k *certificateKeeper) load(secret *Secret) (*tls.Certificate, error) {
 	return &pair, nil
 }
 
-// authority is this domain's CA: the certificate, the key that signs
-// a leaf, and each one's PEM as the Secret holds it.
+// authority is the CA, parsed and as the PEM that the Secret stores.
 type authority struct {
 	certificate *x509.Certificate
 	key         *ecdsa.PrivateKey
@@ -308,9 +306,9 @@ type authority struct {
 	keyPEM      []byte
 }
 
-// mintAuthority mints the self-signed CA of the first start: a P-256
-// key, ten years, and a path length of zero, so it signs leaves and
-// no further CA.
+// mintAuthority creates a self-signed CA with a P-256 key. Its path
+// length is zero, so it can sign leaf certificates but no
+// intermediate CAs.
 func mintAuthority(now time.Time) (*authority, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -337,9 +335,8 @@ func mintAuthority(now time.Time) (*authority, error) {
 	return newAuthority(der, key)
 }
 
-// authorityFrom reads the CA back off the Secret, which is what signs
-// every later leaf, so a re-minted leaf verifies against the CA the
-// clients already hold.
+// authorityFrom parses the CA stored in the Secret, so a renewed leaf
+// is signed by the CA that clients already trust.
 func authorityFrom(certPEM, keyPEM []byte) (*authority, error) {
 	certificate, err := parseCertificate(certPEM)
 	if err != nil {
@@ -353,9 +350,9 @@ func authorityFrom(certPEM, keyPEM []byte) (*authority, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading the CA key: %w", err)
 	}
-	key, held := parsed.(*ecdsa.PrivateKey)
-	if !held {
-		return nil, fmt.Errorf("the CA key is %T, not an ECDSA key", parsed)
+	key, isECDSA := parsed.(*ecdsa.PrivateKey)
+	if !isECDSA {
+		return nil, fmt.Errorf("the CA key is a %T, want an ECDSA key", parsed)
 	}
 	return &authority{
 		certificate: certificate,
@@ -382,8 +379,8 @@ func newAuthority(der []byte, key *ecdsa.PrivateKey) (*authority, error) {
 	}, nil
 }
 
-// mintLeaf mints the serving leaf: one DNS name, server
-// authentication only, one year.
+// mintLeaf creates a leaf certificate and key for one DNS name. The
+// certificate is valid for server authentication only.
 func (a *authority) mintLeaf(now time.Time, dnsName string) (certPEM, keyPEM []byte, err error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -414,8 +411,10 @@ func (a *authority) mintLeaf(now time.Time, dnsName string) (certPEM, keyPEM []b
 	return encodePEM("CERTIFICATE", der), keyPEM, nil
 }
 
-// serialNumber draws a random serial under 2^159, large enough that
-// two mints never collide and within the 20 bytes RFC 5280 allows.
+// serialNumber returns a random serial number, so two certificates of
+// one CA are unlikely to share one. It stays below 2^159 so that its
+// DER encoding, with the sign bit, fits in the 20 octets that RFC 5280
+// allows.
 func serialNumber() (*big.Int, error) {
 	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 159))
 	if err != nil {
@@ -436,8 +435,7 @@ func encodePEM(kind string, der []byte) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: kind, Bytes: der})
 }
 
-// parseCertificate reads the first certificate in a PEM file, which
-// is the leaf on a Secret and the current CA on a ConfigMap.
+// parseCertificate parses the first certificate in PEM data.
 func parseCertificate(certPEM []byte) (*x509.Certificate, error) {
 	block, _ := pem.Decode(certPEM)
 	if block == nil {

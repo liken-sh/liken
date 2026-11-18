@@ -1,11 +1,12 @@
-// The flags the idle screen accepts, and the parsers behind them. A headless
-// run has no keyboard and no screenshot tool, so the flags stand in for both.
+// The command-line flags of the idle screen, and their parsers. A headless
+// run has no keyboard and no screenshot tool, so the flags provide scripted
+// key presses and frame capture instead.
 
 #[cfg(feature = "measure")]
 use std::path::PathBuf;
 use std::time::Duration;
 
-/// The help the binary prints for `--help`.
+/// The text printed for `--help`.
 pub fn help() -> String {
     [HEAD, MEASURE, TAIL].concat()
 }
@@ -16,9 +17,8 @@ idle-screen [FLAGS]
   --script \"0.0:p,3.0:o\"   key events at seconds from the first frame
 ";
 
-/// The flags the `measure` feature carries. A build without it parses none of
-/// the three and lists none of them, so a person reading this help reads what
-/// the binary in front of them accepts.
+/// The help for the flags of the `measure` feature. A build without the
+/// feature neither parses nor lists them.
 #[cfg(feature = "measure")]
 const MEASURE: &str = "  --capture DIR            where captured PNGs go
   --capture-at \"0.5,3.2\"   one PNG of the rendered frame at each second listed;
@@ -30,7 +30,7 @@ const MEASURE: &str = "  --capture DIR            where captured PNGs go
 const MEASURE: &str = "";
 
 const TAIL: &str = "  --quit-after SECONDS     when to exit
-  --size WxH               the window size to ask for; the default is 1920x1080
+  --size WxH               the window size to request; the default is 1920x1080
   --help                   print this and exit
 
 The binary takes the same keys from a real keyboard, so it runs on a
@@ -41,37 +41,36 @@ bus, and names them in a legend at the bottom right. local/idle sets that
 variable.
 ";
 
-/// What the command line asked for.
+/// The result of parsing the command line.
 #[derive(Debug, PartialEq)]
 pub enum Invocation {
-    /// Open a window with these options.
     Run(Options),
-    /// Print the help from [`help`] and stop.
+    /// Print the text from [`help`] and exit.
     Help,
 }
 
-/// Everything the harness needs for a run: the flags below, and the two window
-/// facts the container's environment carries. The command line states none of
-/// those two, and [`Options::parse`] leaves both as the default, so the binary
-/// reads the wiring once and fills them in.
+/// Everything the harness needs for a run. `size` and the other fields come
+/// from flags. `window_grace` comes from the environment, so
+/// [`Options::parse`] leaves it at the default and the binary sets it after
+/// reading the environment.
 #[derive(Debug, PartialEq)]
 pub struct Options {
     /// Key events at seconds from the first frame, in the order they fire.
     pub script: Vec<(f64, String)>,
-    /// Where captured PNGs go, and at what seconds.
+    /// The directory for captured PNGs, and the seconds to capture at.
     #[cfg(feature = "measure")]
     pub capture_dir: Option<PathBuf>,
     #[cfg(feature = "measure")]
     pub capture_at: Vec<f64>,
-    /// Where the JSON measurements go at exit.
+    /// The file the JSON measurements are written to at exit.
     #[cfg(feature = "measure")]
     pub stats: Option<PathBuf>,
-    /// When to exit, in seconds. A capture run also exits after its last frame.
+    /// The second at which to exit. A run with captures also exits after
+    /// the last capture.
     pub quit_after: Option<f64>,
-    /// The window size to ask the compositor for.
     pub size: (u32, u32),
     /// How long the run waits for a window before it exits, from
-    /// `IDLE_WINDOW_GRACE_SECONDS`. Nothing leaves the watchdog off.
+    /// `IDLE_WINDOW_GRACE_SECONDS`. `None` disables the watchdog.
     pub window_grace: Option<Duration>,
 }
 
@@ -93,8 +92,9 @@ impl Default for Options {
 }
 
 impl Options {
-    /// Parse the command line. The flags are few and fixed, so the parser is a
-    /// loop over the arguments rather than a dependency.
+    /// Parses the command-line arguments with a plain loop, because the
+    /// flags are few. `--help` returns [`Invocation::Help`] as soon as it is
+    /// read, and the arguments after it are not checked.
     pub fn parse<I>(args: I) -> Result<Invocation, String>
     where
         I: IntoIterator<Item = String>,
@@ -116,14 +116,16 @@ impl Options {
                 "--stats" => options.stats = Some(PathBuf::from(value()?)),
                 "--quit-after" => {
                     let raw = value()?;
-                    options.quit_after = Some(
-                        raw.trim()
-                            .parse()
-                            .map_err(|_| format!("bad --quit-after {raw}"))?,
-                    );
+                    options.quit_after = Some(raw.trim().parse().map_err(|_| {
+                        format!("--quit-after takes a number of seconds, not {raw:?}")
+                    })?);
                 }
                 "--size" => options.size = parse_size(&value()?)?,
-                other => return Err(format!("unknown flag {other}")),
+                other => {
+                    return Err(format!(
+                        "unknown flag {other}, run with --help to list the flags"
+                    ));
+                }
             }
         }
 
@@ -131,8 +133,8 @@ impl Options {
     }
 }
 
-/// A scripted timeline: `SECONDS:KEY` steps, comma separated, sorted by time so
-/// the frame loop reads them in order and never looks back.
+/// Parses a script of comma-separated `SECONDS:KEY` steps and sorts them by
+/// time, so the frame loop reads them in order.
 pub fn parse_script(raw: &str) -> Result<Vec<(f64, String)>, String> {
     let mut script = Vec::new();
 
@@ -143,14 +145,14 @@ pub fn parse_script(raw: &str) -> Result<Vec<(f64, String)>, String> {
         }
         let (at, key) = step
             .split_once(':')
-            .ok_or_else(|| format!("bad script step {step}"))?;
+            .ok_or_else(|| format!("script step {step:?} is not SECONDS:KEY"))?;
         let at: f64 = at
             .trim()
             .parse()
-            .map_err(|_| format!("bad script time {at}"))?;
+            .map_err(|_| format!("script time {at:?} is not a number of seconds"))?;
         let key = key.trim();
         if key.is_empty() {
-            return Err(format!("bad script step {step}"));
+            return Err(format!("script step {step:?} has no key"));
         }
         script.push((at, key.to_string()));
     }
@@ -159,7 +161,8 @@ pub fn parse_script(raw: &str) -> Result<Vec<(f64, String)>, String> {
     Ok(script)
 }
 
-/// A list of seconds, comma separated, sorted for the same reason.
+/// Parses comma-separated seconds and sorts them, so the frame loop can read
+/// them in order.
 #[cfg(feature = "measure")]
 pub fn parse_times(raw: &str) -> Result<Vec<f64>, String> {
     let mut times = Vec::new();
@@ -169,23 +172,30 @@ pub fn parse_times(raw: &str) -> Result<Vec<f64>, String> {
         if at.is_empty() {
             continue;
         }
-        times.push(at.parse().map_err(|_| format!("bad capture time {at}"))?);
+        times.push(
+            at.parse()
+                .map_err(|_| format!("capture time {at:?} is not a number of seconds"))?,
+        );
     }
 
     times.sort_by(f64::total_cmp);
     Ok(times)
 }
 
-/// A window size, written `WIDTHxHEIGHT`.
+/// Parses a window size written `WIDTHxHEIGHT`.
 pub fn parse_size(raw: &str) -> Result<(u32, u32), String> {
     let (width, height) = raw
         .trim()
         .split_once('x')
-        .ok_or_else(|| format!("bad size {raw}"))?;
+        .ok_or_else(|| format!("size {raw:?} is not WIDTHxHEIGHT"))?;
 
     Ok((
-        width.parse().map_err(|_| format!("bad width {width}"))?,
-        height.parse().map_err(|_| format!("bad height {height}"))?,
+        width
+            .parse()
+            .map_err(|_| format!("width {width:?} is not a whole number of pixels"))?,
+        height
+            .parse()
+            .map_err(|_| format!("height {height:?} is not a whole number of pixels"))?,
     ))
 }
 
@@ -221,9 +231,11 @@ mod tests {
             "--size",
             "--help",
         ] {
-            // Each flag stands in an indented column, and the three parts of
-            // the text join without disturbing it.
-            assert!(help().contains(&format!("\n  {flag} ")), "{flag}");
+            // Each flag starts a line, indented two spaces.
+            assert!(
+                help().contains(&format!("\n  {flag} ")),
+                "the help does not list {flag}"
+            );
         }
     }
 
@@ -240,7 +252,7 @@ mod tests {
     fn an_unknown_flag_is_an_error() {
         assert_eq!(
             Options::parse(args("--wallpaper")),
-            Err("unknown flag --wallpaper".to_string())
+            Err("unknown flag --wallpaper, run with --help to list the flags".to_string())
         );
     }
 
@@ -253,7 +265,7 @@ mod tests {
     }
 
     #[test]
-    fn the_flags_land_in_the_options() {
+    fn each_flag_sets_its_option() {
         let Ok(Invocation::Run(options)) = Options::parse(args(
             "--script 1.0:p --capture /frames --capture-at 0.5 \
              --stats /stats.json --quit-after 3 --size 1280x720",
@@ -270,7 +282,7 @@ mod tests {
     }
 
     #[test]
-    fn the_command_line_states_no_window_grace() {
+    fn the_command_line_leaves_window_grace_unset() {
         let Ok(Invocation::Run(options)) = Options::parse(args("--size 1280x720")) else {
             panic!("the flags parse");
         };
@@ -291,16 +303,16 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_script_is_empty() {
+    fn a_blank_script_has_no_steps() {
         assert_eq!(parse_script(""), Ok(Vec::new()));
         assert_eq!(parse_script(" , "), Ok(Vec::new()));
     }
 
     #[test]
     fn a_script_step_needs_a_time_and_a_key() {
-        assert!(parse_script("p").is_err());
-        assert!(parse_script("later:p").is_err());
-        assert!(parse_script("1.0:").is_err());
+        assert!(parse_script("p").is_err(), "a step with no time or key");
+        assert!(parse_script("later:p").is_err(), "a step with a bad time");
+        assert!(parse_script("1.0:").is_err(), "a step with no key");
     }
 
     #[test]
@@ -312,7 +324,7 @@ mod tests {
     fn a_capture_time_must_be_a_number() {
         assert_eq!(
             parse_times("0.5,soon"),
-            Err("bad capture time soon".to_string())
+            Err("capture time \"soon\" is not a number of seconds".to_string())
         );
     }
 
@@ -320,7 +332,7 @@ mod tests {
     fn a_size_is_two_numbers_around_an_x() {
         assert_eq!(parse_size("1920x1080"), Ok((1920, 1080)));
         assert_eq!(parse_size(" 640x480 "), Ok((640, 480)));
-        assert!(parse_size("1920").is_err());
-        assert!(parse_size("widexhigh").is_err());
+        assert!(parse_size("1920").is_err(), "a size with no x");
+        assert!(parse_size("widexhigh").is_err(), "a size with no numbers");
     }
 }

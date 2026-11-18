@@ -1,19 +1,22 @@
-//! The Wayland half of the arranger: the binding of `liken_arrangement_v1` on
-//! the display's own connection, and the thread that reads its events.
+//! The Wayland side of the arranger. It binds `liken_arranger_manager_v1`
+//! from the `liken_arrangement_v1` protocol and reads the arranger's events
+//! on a thread.
 //!
-//! The compositor tells clients apart by their connection, and it grants a
-//! claim's arranger to a client of that claim. A second connection would be
-//! a second client, so the display binds the protocol on the connection that
-//! winit opened for its window. winit reads that connection's default queue
-//! on its own thread, so the binding takes a queue of its own and a thread
-//! that blocks on it. The arranger's requests go out from the frame loop,
-//! because a proxy sends from any thread.
+//! The compositor grants a claim's arranger to the first client that asks on
+//! the claim's socket, and refuses a second client of the claim with `busy`.
+//! A second connection from the display would be that second client, so the
+//! display binds the protocol on the connection that winit opened for its
+//! window. winit dispatches that connection's
+//! default event queue on its own thread, so the binding creates its own
+//! event queue and a thread that blocks on it. The frame loop sends the
+//! arranger's requests directly, because a proxy can send from any thread.
 //!
-//! winit owns the connection, so the binding stops its thread before winit
-//! disconnects: `Link::close` destroys the arranger and waits for a round
-//! trip on the binding's queue, and the thread ends on that answer. If the
-//! process ends without a close, the compositor sees the client go and
-//! returns every surface of the claim to the default.
+//! winit owns the connection, and the binding's thread must end before winit
+//! disconnects. `Link::close` destroys the arranger and sends a
+//! `wl_display.sync` on the binding's queue. The thread ends when the
+//! callback arrives. When the process exits without a close, the client
+//! disconnects, and the compositor returns every surface of the claim to its
+//! default arrangement.
 
 use std::fmt;
 use std::sync::{Arc, Mutex, mpsc};
@@ -29,16 +32,16 @@ use super::protocol::liken_arranger_manager_v1::LikenArrangerManagerV1;
 use super::protocol::liken_arranger_v1::{self, LikenArrangerV1};
 use super::{Commit, Curve, Event, Fit, Refusal};
 
-/// The global the compositor module offers.
+/// The interface name of the global that the compositor advertises.
 const MANAGER: &str = "liken_arranger_manager_v1";
 
-/// How long a close waits for the compositor to answer its round trip. The
-/// answer takes one trip over a local socket, so this bounds a compositor
-/// that stopped reading.
+/// How long `close` waits for the thread to end after it sends its sync.
+/// The callback comes back over a local socket, so the wait runs out only
+/// when the compositor has stopped reading.
 const CLOSE_WAIT: Duration = Duration::from_secs(1);
 
-/// The binding of one connection, which the frame loop holds to send
-/// arrangements and to close.
+/// The arranger binding on one connection. The frame loop uses it to send
+/// arrangements and to close it.
 #[derive(Clone)]
 pub struct Link {
     inner: Arc<Inner>,
@@ -54,12 +57,14 @@ struct Inner {
     connection: Connection,
     queue: QueueHandle<State>,
     shared: Mutex<Shared>,
-    /// Answers once when the thread ends. The first close takes it.
+    /// Receives one message when the thread ends. The first `close` takes it,
+    /// so a later `close` does not wait.
     ended: Mutex<Option<mpsc::Receiver<()>>>,
 }
 
-/// What the thread and the frame loop share: the proxies once bound, and
-/// whether a close has begun, so the thread binds nothing after one.
+/// State shared by the thread and the frame loop: the proxies once they are
+/// bound, and whether a close has started, so that the thread binds nothing
+/// after it.
 #[derive(Default)]
 struct Shared {
     bound: Option<Bound>,
@@ -71,16 +76,16 @@ struct Bound {
     arranger: LikenArrangerV1,
 }
 
-/// Bind the protocol on winit's connection. It runs on winit's thread,
-/// inside `iced::window::run`, so it only wraps the connection and starts
-/// the thread, and the thread makes every blocking round trip.
+/// Binds the arranger on winit's connection. It runs on winit's thread
+/// inside `iced::window::run`, so it only wraps the connection and starts the
+/// binding thread. The thread makes the blocking round trips.
 pub fn attach(
     window: &dyn iced::window::Window,
     events: UnboundedSender<Event>,
 ) -> Result<Link, String> {
     let handle = window
         .display_handle()
-        .map_err(|error| format!("the window gives no display handle: {error}"))?;
+        .map_err(|error| format!("reading the window's display handle: {error}"))?;
     let RawDisplayHandle::Wayland(handle) = handle.as_raw() else {
         return Err(format!(
             "the window is not on Wayland: {:?}",
@@ -88,16 +93,16 @@ pub fn attach(
         ));
     };
     // SAFETY: winit owns the wl_display and keeps it connected while the
-    // event loop runs. The display closes the link before it asks the
-    // toolkit to exit, and the thread ends before the close returns, so
-    // nothing reads the connection after winit disconnects it.
+    // event loop runs. The display calls `Link::close` before it asks winit
+    // to exit, and the thread ends before `close` returns, so nothing reads
+    // the connection after winit disconnects it.
     let backend = unsafe { Backend::from_foreign_display(handle.display.as_ptr().cast()) };
     Link::start(Connection::from_backend(backend), events)
-        .map_err(|error| format!("the arranger's thread did not start: {error}"))
+        .map_err(|error| format!("starting the arranger thread: {error}"))
 }
 
 impl Link {
-    /// Start the thread that binds the arranger on `connection` and sends
+    /// Starts the thread that binds the arranger on `connection` and sends
     /// every event it reads to `events`.
     pub fn start(connection: Connection, events: UnboundedSender<Event>) -> std::io::Result<Self> {
         let queue = connection.new_event_queue::<State>();
@@ -123,15 +128,16 @@ impl Link {
         Ok(Self { inner })
     }
 
-    /// Send one arrangement. It fails before the thread has bound the
-    /// arranger, and when the connection does not take the requests.
+    /// Sends one arrangement: an entry for each surface, then the commit.
+    /// Fails before the thread has bound the arranger, after `close`, and
+    /// when the flush to the compositor fails.
     pub fn commit(&self, commit: &Commit) -> Result<(), String> {
         {
             let shared = self
                 .inner
                 .shared
                 .lock()
-                .expect("no thread panics with the link");
+                .expect("a thread panicked while it held the link's lock");
             let bound = shared.bound.as_ref().ok_or("the arranger is not bound")?;
             for entry in &commit.arrangement.entries {
                 bound.arranger.entry(
@@ -158,16 +164,16 @@ impl Link {
             .map_err(|error| error.to_string())
     }
 
-    /// Destroy the arranger and the manager, and stop the thread. It answers
-    /// whether the thread ended within `CLOSE_WAIT`. A second close only
-    /// answers true.
+    /// Destroys the arranger and the manager and waits for the thread to end.
+    /// Returns whether the thread ended within `CLOSE_WAIT`. A second call
+    /// returns true without waiting.
     pub fn close(&self) -> bool {
         let bound = {
             let mut shared = self
                 .inner
                 .shared
                 .lock()
-                .expect("no thread panics with the link");
+                .expect("a thread panicked while it held the link's lock");
             shared.closing = true;
             shared.bound.take()
         };
@@ -179,13 +185,14 @@ impl Link {
             .inner
             .ended
             .lock()
-            .expect("no thread panics with the link")
+            .expect("a thread panicked while it held the link's lock")
             .take()
         else {
             return true;
         };
-        // The compositor answers requests in order, so the answer to this
-        // sync arrives after it took the destroys, and the thread ends on it.
+        // The compositor processes requests in order, so this sync's callback
+        // arrives after the compositor has handled the destroys. The thread
+        // ends on the callback.
         self.inner
             .connection
             .display()
@@ -195,8 +202,10 @@ impl Link {
     }
 }
 
-/// The thread: list the globals, bind the arranger if the compositor offers
-/// one, and read events until a close's round trip or a failed connection.
+/// The binding thread. It reads the registry, binds the arranger if the
+/// compositor advertises the manager, and dispatches events until the sync
+/// from `close` returns or the connection fails. It sends `Event::Absent`
+/// when there is no manager and `Event::Lost` when the connection fails.
 fn serve(inner: &Inner, mut queue: EventQueue<State>, state: &mut State) {
     let handle = queue.handle();
     let registry = inner.connection.display().get_registry(&handle, ());
@@ -209,7 +218,10 @@ fn serve(inner: &Inner, mut queue: EventQueue<State>, state: &mut State) {
         return;
     };
     {
-        let mut shared = inner.shared.lock().expect("no thread panics with the link");
+        let mut shared = inner
+            .shared
+            .lock()
+            .expect("a thread panicked while it held the link's lock");
         if shared.closing {
             return;
         }
@@ -229,15 +241,16 @@ fn serve(inner: &Inner, mut queue: EventQueue<State>, state: &mut State) {
     }
 }
 
-/// What the thread's queue dispatches into.
+/// The state that the thread's event queue dispatches into.
 struct State {
     events: UnboundedSender<Event>,
-    /// The registry name of the manager global, once the compositor lists it.
+    /// The registry name of the manager global, once the registry lists it.
     manager: Option<u32>,
+    /// Set when the sync callback from `close` arrives.
     stopped: bool,
 }
 
-/// The user data of the close's round trip.
+/// The user data of the sync that `close` sends. Its callback ends the thread.
 struct Stop;
 
 impl Dispatch<wl_registry::WlRegistry, ()> for State {
@@ -297,7 +310,6 @@ impl Dispatch<LikenArrangerV1, ()> for State {
     }
 }
 
-/// One event of the arranger in the display's own terms.
 fn translate(event: liken_arranger_v1::Event) -> Event {
     use liken_arranger_v1::Event as Wire;
     match event {
@@ -336,12 +348,12 @@ mod tests {
     use crate::arranger::fakecompositor::{self, Log, Offer};
     use crate::arranger::{Arranger, VIDEO};
 
-    /// A bound on every wait, so a binding that never answers fails the
-    /// test in seconds.
+    /// The limit on each wait, so a binding that never responds fails the
+    /// test instead of hanging it.
     const WAIT: Duration = Duration::from_secs(5);
 
-    /// A link on one end of a socket pair, with the fake compositor on the
-    /// other.
+    /// A `Link` on one end of a socket pair, with the fake compositor on the
+    /// other end.
     fn linked(offer: Offer) -> (Link, UnboundedReceiver<Event>, Log) {
         let (server, client) = UnixStream::pair().expect("a socket pair");
         let log = fakecompositor::serve(server, offer);
@@ -358,7 +370,7 @@ mod tests {
             .expect("the link is open")
     }
 
-    async fn first(events: &mut UnboundedReceiver<Event>, count: usize) -> Vec<Event> {
+    async fn next_n(events: &mut UnboundedReceiver<Event>, count: usize) -> Vec<Event> {
         let mut read = Vec::new();
         for _ in 0..count {
             read.push(next(events).await);
@@ -374,7 +386,7 @@ mod tests {
     async fn a_grant_reports_the_region_and_the_film() {
         let (link, mut events, _) = linked(Offer::Grant(1920, 1080));
         assert_eq!(
-            first(&mut events, 3).await,
+            next_n(&mut events, 3).await,
             [
                 Event::Granted,
                 Event::Region {
@@ -412,13 +424,13 @@ mod tests {
         assert!(link.close());
     }
 
-    /// The step back reaches the compositor as two entries and a commit,
-    /// and the compositor's landing comes back with the commit's serial.
+    /// Stepping back sends an entry for each surface and then a commit. The
+    /// compositor responds with `landed` and the commit's serial.
     #[tokio::test]
     async fn a_commit_sends_its_entries_and_lands() {
         let (link, mut events, log) = linked(Offer::Grant(1920, 1080));
         let mut arranger = Arranger::default();
-        for event in first(&mut events, 3).await {
+        for event in next_n(&mut events, 3).await {
             arranger.on_event(event);
         }
         let commit = arranger
@@ -440,12 +452,12 @@ mod tests {
         assert!(link.close());
     }
 
-    /// The hand-off reaches the compositor as the film at opacity 0 on the
-    /// ease-in curve, which the protocol numbers 2.
+    /// The hand-off sends the film at opacity 0 on the ease-in curve, which
+    /// the protocol numbers 2.
     #[tokio::test]
     async fn a_hand_off_sends_the_film_at_opacity_zero_on_ease_in() {
         let (link, mut events, log) = linked(Offer::Grant(1920, 1080));
-        first(&mut events, 3).await;
+        next_n(&mut events, 3).await;
         let commit = Commit {
             serial: 2,
             arrangement: crate::arranger::handing_off(1920, 1080),
@@ -465,15 +477,15 @@ mod tests {
         assert!(link.close());
     }
 
-    /// The close destroys the arranger before the manager, and the thread
-    /// ends before the close returns, so winit can disconnect after it.
+    /// `close` destroys the arranger before the manager, and the thread has
+    /// ended when it returns, so winit can disconnect afterwards.
     #[tokio::test]
     async fn a_close_destroys_the_arranger_and_ends_the_thread() {
         let (link, mut events, log) = linked(Offer::Grant(1920, 1080));
-        first(&mut events, 3).await;
+        next_n(&mut events, 3).await;
         assert!(link.close());
         assert_eq!(requests(&log), ["arranger destroy", "manager destroy"]);
-        assert!(link.close(), "a second close answers at once");
+        assert!(link.close(), "a second close returns true without waiting");
         assert!(link.commit(&commit()).is_err());
     }
 

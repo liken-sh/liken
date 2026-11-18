@@ -1,15 +1,10 @@
 package main
 
-// A watch keeps this program's view of a collection current without a
-// timer. The API server sends each change to the collection as it
-// happens, and a watch with no change to send costs nothing. The
-// operator watches the collections its pass reads (clusterwatch.go),
-// and the api role watches the named objects that hold its
-// certificates (informer.WatchOne, with namedwatch.go).
-//
-// The shared informer package runs each watch on client-go's reflector.
-// The program's own client (apiclient.go) still sends every write, and
-// every read that must include this program's own last write.
+// The operator keeps its view of the cluster current with watches, not
+// a timer, so an idle collection costs the API server no requests.
+// informer.Start runs each watch on client-go's reflector. Writes, and
+// reads that must see the operator's own last write, go through the
+// client in apiclient.go.
 
 import (
 	"context"
@@ -23,48 +18,46 @@ import (
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
-// collectionWatch names the part of one collection a watch covers, and
-// what it does with each change.
+// collectionWatch describes one watch: which objects it covers and what
+// it runs for each change.
 type collectionWatch struct {
 	resource schema.GroupVersionResource
-	// namespace is empty for a watch across every namespace, and for a
+	// namespace is empty to watch every namespace, and for a
 	// cluster-scoped resource.
 	namespace string
-	// labels and fields narrow the list and the watch alike. The API
-	// server applies them, so a change outside them never reaches this
-	// process.
+	// labels and fields are selectors that the API server applies to
+	// both the list and the watch.
 	labels string
 	fields string
 
-	// optional marks a collection whose resource another operator
-	// defines, which a cluster may not have installed. The watch reads
-	// the API server's 404 as an empty collection, and finds the
-	// resource when it arrives (informer.Options.Absent).
+	// optional marks a resource that another operator defines and that
+	// the cluster may not have. The watch treats the API server's 404 as
+	// an empty collection and lists again every optionalRecheck.
 	optional bool
 
-	// handler, when it is not nil, takes each change the informer
-	// reports. A watch with no handler only keeps its store current.
+	// handler receives each add, update, and delete. When it is nil, the
+	// watch only keeps the informer's store current.
 	handler cache.ResourceEventHandler
-	// synced, when it is not nil, runs once, after the handler has
-	// taken every object of the first read. It receives the view of the
-	// informer's store, which holds that read and every change after it.
+	// synced runs once, after the handler has received every object of
+	// the first list. It receives a view of the informer's store, which
+	// stays current with later changes.
 	synced func(informer.View)
-	// reopened, when it is not nil, runs each time the API server
-	// accepts a watch after the first one it accepted.
+	// reopened runs each time the API server accepts a watch after the
+	// first one.
 	reopened func()
 }
 
-// watchCollection keeps one collection current until the context ends.
-// It returns after the last call to the handler and to synced, so a
-// caller that closes a channel after it returns never has a send on
-// the closed channel.
+// watchCollection watches one collection until ctx ends. It returns
+// only after the last call to the handler and to synced, so a caller
+// can close a channel that those callbacks send on as soon as it
+// returns.
 func watchCollection(ctx context.Context, client dynamic.Interface, w collectionWatch) {
 	options := informer.Options{Handler: w.handler, Reopened: w.reopened, AbsentRecheck: optionalRecheck}
 	if w.optional {
 		options.Absent = apierrors.IsNotFound
 	}
-	// Synced can run before Start returns the collection, so it takes
-	// the collection's view from a channel that Start's caller fills.
+	// Options.Synced can run before informer.Start returns, so it reads
+	// the view from a channel that is filled after Start returns.
 	started := make(chan informer.View, 1)
 	if w.synced != nil {
 		options.Synced = func() { w.synced(<-started) }
@@ -75,17 +68,16 @@ func watchCollection(ctx context.Context, client dynamic.Interface, w collection
 	<-collection.Done()
 }
 
-// optionalRecheck is how long the watch of an absent optional
-// collection waits before it asks the API server again
-// (informer.Options.AbsentRecheck). A collection arrives when a person
-// installs the operator that defines it, so a wait of minutes costs one
-// request and delays nothing a person waits on.
+// optionalRecheck is how often the watch of an absent optional
+// collection lists it again. The resource appears only when someone
+// installs the operator that defines it, so finding it a few minutes
+// late is acceptable.
 const optionalRecheck = 5 * time.Minute
 
-// poke never blocks, and the wake channel buffers exactly one. A
-// wake already queued says everything a second one would say,
-// because the pass that answers it reads the whole collection.
-func poke(wake chan<- struct{}) {
+// signalWake wakes the pass without blocking. When the channel's one buffered
+// value is already there, signalWake drops the new one, because the pass that
+// it starts reads every collection.
+func signalWake(wake chan<- struct{}) {
 	select {
 	case wake <- struct{}{}:
 	default:

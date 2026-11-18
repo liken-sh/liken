@@ -1,16 +1,14 @@
 package main
 
-// The fake cluster's view: each collection a pass reads, served from
-// the fake cluster's maps the way a watch's store holds it, as an
-// *unstructured.Unstructured. A test that changes a map between two
-// passes changes what the next pass reads, the way a watch delivers a
-// change to the store.
+// The fake cluster's view serves its maps as *unstructured.Unstructured
+// objects, the way an informer's store does, and reads them on each
+// call. So a test that changes a map between two passes changes what the
+// next pass reads, as a watch event would.
 //
-// Two fields of the fake cluster shape what the view answers. unseen
-// names objects the view does not hold yet, the way a watch can still
-// be carrying an object the API server already has. fails names paths
-// whose objects do not convert, the way a list that the API server
-// answered with a bad object failed.
+// The view leaves out each object named in unseen, as when the watch has
+// not yet received an object that the API server has. It returns
+// malformed each object whose collection or object path is in fails, so
+// that the object does not convert to its Go type.
 
 import (
 	"encoding/json"
@@ -23,9 +21,8 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// fakeSource serves one map of the fake cluster. collection is the
-// collection's path and object the path of one object in it, the paths
-// fails is keyed by.
+// fakeSource serves one map of the fake cluster. collection and object
+// return the paths that fails is keyed by.
 type fakeSource[T any] struct {
 	cluster    *fakeCluster
 	objects    func() []*T
@@ -48,9 +45,8 @@ func (s fakeSource[T]) List() ([]any, error) {
 	return items, nil
 }
 
-// fakeStore is a fakeSource in the shape of client-go's cache.Store, for
-// the reads of objectcache.go. A method it does not define is one a
-// read never calls.
+// fakeStore adapts a fakeSource to the cache.Store methods that
+// objectcache.go calls. The other methods are not implemented.
 type fakeStore[T any] struct {
 	cache.Store
 	source fakeSource[T]
@@ -99,9 +95,8 @@ func (s fakeSource[T]) GetByKey(key string) (any, bool, error) {
 	return nil, false, nil
 }
 
-// asUnstructured encodes an object and decodes it the way client-go's
-// dynamic client decodes one from the API server, whole numbers as
-// int64.
+// asUnstructured decodes the object's JSON the way client-go's dynamic
+// client does, with whole numbers as int64.
 func asUnstructured(object any) *unstructured.Unstructured {
 	encoded, err := json.Marshal(object)
 	if err != nil {
@@ -114,8 +109,8 @@ func asUnstructured(object any) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: fields}
 }
 
-// malformed keeps the object's name and gives it a spec and a status of
-// the wrong type, so it does not convert.
+// malformed keeps the object's name and namespace and makes its spec and
+// status strings, so converting it to its Go type fails.
 func malformed(item *unstructured.Unstructured) *unstructured.Unstructured {
 	bad := &unstructured.Unstructured{Object: map[string]any{"spec": "garbled", "status": "garbled"}}
 	bad.SetKind("Garbled")
@@ -138,8 +133,6 @@ func clusterPath(collection string) func(string, string) string {
 	return func(_, name string) string { return collection + "/" + name }
 }
 
-// view answers the fake cluster's view. It reads the maps on every
-// call, so it follows every change a test or a write makes.
 func (f *fakeCluster) view() *clusterView {
 	return &clusterView{
 		plays: informer.Held{
@@ -163,9 +156,8 @@ func (f *fakeCluster) view() *clusterView {
 		preferences: fakeSource[MediaPreferences]{f, valuesOf(f.mediaprefs), mediaPrefsPath, clusterPath(mediaPrefsPath)},
 		peripherals: fakeSource[Peripheral]{f, valuesOf(f.peripherals), peripheralsPath, clusterPath(peripheralsPath)},
 		pods: fakeSource[Pod]{f, func() []*Pod {
-			// The pods watch selects the operator's own pods by their
-			// component label, so a pod without one of its three values
-			// is not in the view.
+			// The operator's pod watch selects these label values
+			// only.
 			var own []*Pod
 			for _, pod := range valuesOf(f.pods)() {
 				switch pod.Metadata.Labels[playbackLabelKey] {
@@ -196,6 +188,4 @@ func (f *fakeCluster) view() *clusterView {
 	}
 }
 
-// televisionsPath is the collection the fake cluster's Televisions are
-// named under.
 const televisionsPath = "/apis/equipment.liken.sh/v1alpha1/televisions"

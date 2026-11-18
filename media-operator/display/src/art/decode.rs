@@ -1,5 +1,5 @@
-//! The display reads its own art: it opens the file or fetches the URL,
-//! decodes it, and scales it into the box the placement formulas give.
+//! Loads a logo, cover, or portrait for the display: reads the file or
+//! fetches the URL, decodes it, and scales it to the box of the layout.
 
 use std::io::{Cursor, Read};
 use std::time::Duration;
@@ -9,25 +9,24 @@ use image::{DynamicImage, ImageReader, RgbaImage};
 
 use super::bitmap::Bitmap;
 
-/// How long a fetch waits for the connection, and how long it waits on a read
-/// that has begun.
+/// How long a fetch waits to connect, and then how long it waits for
+/// each read.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// The one reference form that is not a file the pod mounts.
-const FETCHED: &str = "https://";
+const HTTPS_PREFIX: &str = "https://";
 
-/// Read one picture's bytes. An https reference is a network fetch. Any other
-/// value is a path the resolver rewrote under the media mount.
+/// Read the bytes of one picture. An https reference is a URL to fetch,
+/// and any other reference is a path under the media mount in the pod.
 pub fn open(reference: &str) -> Option<Vec<u8>> {
-    match reference.starts_with(FETCHED) {
+    match reference.starts_with(HTTPS_PREFIX) {
         true => fetch(reference),
         false => std::fs::read(reference).ok(),
     }
 }
 
-/// Fetch one picture over https. A reply with any status but 200 carries no
-/// picture, which `ureq` reports as an error of its own.
+/// `ureq` returns an error for a 4xx or 5xx status, so those responses
+/// give `None`.
 fn fetch(url: &str) -> Option<Vec<u8>> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_connect(Some(CONNECT_TIMEOUT))
@@ -46,8 +45,8 @@ fn fetch(url: &str) -> Option<Vec<u8>> {
     Some(bytes)
 }
 
-/// Decode one picture. The format comes from the bytes and not from the file
-/// name, so a cover named `.jpg` that holds PNG still decodes.
+/// Decode one picture. The format comes from the bytes, not from the
+/// file name, so a `.jpg` file that holds a PNG still decodes.
 pub fn read(bytes: &[u8]) -> Option<DynamicImage> {
     ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
@@ -56,25 +55,22 @@ pub fn read(bytes: &[u8]) -> Option<DynamicImage> {
         .ok()
 }
 
-/// Decode one picture and scale it into the box.
 pub fn fit(bytes: &[u8], box_w: u32, box_h: u32) -> Option<Bitmap> {
     scale(&read(bytes)?, box_w, box_h)
 }
 
-/// Scale one decoded picture to fit inside `box_w` by `box_h`, keeping the
-/// aspect ratio, so the bitmap that comes back may be smaller than the box. A
-/// logo passes the whole picture. A trickplay passes one cell of a sprite
-/// sheet, so the crop and the scale are one step.
+/// Scale one decoded picture to fit inside `box_w` by `box_h` and keep
+/// its aspect ratio, so the bitmap can be smaller than the box on one
+/// axis.
 ///
-/// The blend runs on alpha-premultiplied colour, which keeps a transparent
-/// edge clean: a logo with a clear surround would otherwise draw the surround's
-/// own colour into every edge pixel. The pixels come back straight, because
-/// that is what the toolkit blends on.
+/// The resize runs on premultiplied alpha. With straight alpha, the
+/// color of a logo's transparent pixels would bleed into its edges. The
+/// result is converted back to straight alpha, because iced's wgpu
+/// renderer blends images with straight alpha.
 ///
-/// Triangle is the filter because its kernel widens with the downscale ratio,
-/// so a shrink averages the source pixels like a box filter, at about a third
-/// of Lanczos3's cost. The decode runs once per drawn size, so the cheaper
-/// filter is enough. The library's browser scales its own art the same way.
+/// The Triangle filter's kernel widens with the downscale ratio, so a
+/// shrink averages the source pixels, at less cost than Lanczos3.
+/// `media-browser` uses the same filter for its art.
 pub fn scale(source: &DynamicImage, box_w: u32, box_h: u32) -> Option<Bitmap> {
     let (source_w, source_h) = (source.width(), source.height());
     if source_w == 0 || source_h == 0 || box_w == 0 || box_h == 0 {
@@ -90,17 +86,16 @@ pub fn scale(source: &DynamicImage, box_w: u32, box_h: u32) -> Option<Bitmap> {
     for pixel in scaled.pixels_mut() {
         let alpha = pixel[3];
         for channel in 0..3 {
-            pixel[channel] = straight(pixel[channel], alpha);
+            pixel[channel] = unpremultiply(pixel[channel], alpha);
         }
     }
     Bitmap::from_rgba(width, height, scaled.into_raw())
 }
 
-/// Decode one picture and fill the box with it. The picture scales until it
-/// covers the box, keeping its ratio, and the overflow is cut away: the sides
-/// evenly, and the top and the bottom one to four. A portrait holds the face
-/// in its upper part, so a tall headshot cut to a shorter box keeps the face
-/// and loses the chest.
+/// Decode one picture and scale it to cover the whole box, keeping its
+/// aspect ratio. The overflow is cropped equally from the left and the
+/// right, and one fifth from the top and four fifths from the bottom,
+/// because the face is in the upper part of a portrait.
 pub fn fill(bytes: &[u8], box_w: u32, box_h: u32) -> Option<Bitmap> {
     let source = read(bytes)?;
     let (source_w, source_h) = (source.width(), source.height());
@@ -116,7 +111,7 @@ pub fn fill(bytes: &[u8], box_w: u32, box_h: u32) -> Option<Bitmap> {
     scale(&source.crop_imm(x, y, crop_w, crop_h), box_w, box_h)
 }
 
-/// One picture with every channel scaled by its own alpha.
+/// Multiply each color channel of the picture by its alpha.
 fn premultiplied(source: &DynamicImage) -> RgbaImage {
     let mut pixels = source.to_rgba8();
     for pixel in pixels.pixels_mut() {
@@ -128,9 +123,9 @@ fn premultiplied(source: &DynamicImage) -> RgbaImage {
     pixels
 }
 
-/// One premultiplied channel with its alpha divided back out. A pixel that
-/// covers nothing carries no colour.
-fn straight(channel: u8, alpha: u8) -> u8 {
+/// Divide the alpha back out of one premultiplied channel. A fully
+/// transparent pixel has no color to recover, so it becomes 0.
+fn unpremultiply(channel: u8, alpha: u8) -> u8 {
     match alpha {
         0 => 0,
         _ => ((u32::from(channel) * 255 + u32::from(alpha) / 2) / u32::from(alpha)).min(255) as u8,
@@ -142,8 +137,6 @@ pub(super) mod tests {
     use super::*;
     use image::{ImageFormat, Rgba, RgbaImage};
 
-    /// One picture of a single colour, encoded the way a logo or a cover
-    /// arrives.
     pub(in crate::art) fn encoded(
         width: u32,
         height: u32,
@@ -153,16 +146,14 @@ pub(super) mod tests {
         encoded_from(&RgbaImage::from_pixel(width, height, Rgba(color)), format)
     }
 
-    /// One picture a test drew itself, encoded the same way.
     pub(in crate::art) fn encoded_from(picture: &RgbaImage, format: ImageFormat) -> Vec<u8> {
         let mut bytes = Vec::new();
         DynamicImage::ImageRgba8(picture.clone())
             .write_to(&mut Cursor::new(&mut bytes), format)
-            .expect("a picture the tests can decode");
+            .expect("decoding the test picture");
         bytes
     }
 
-    /// The pixel at the middle of a decoded picture.
     pub(in crate::art) fn centre(bitmap: &Bitmap) -> [u8; 4] {
         let pixels = bitmap.pixels();
         let row = bitmap.width as usize * 4;
@@ -170,13 +161,11 @@ pub(super) mod tests {
         [pixels[at], pixels[at + 1], pixels[at + 2], pixels[at + 3]]
     }
 
-    /// A PNG and a JPEG both decode, the scale fits the box and keeps the
-    /// ratio, and the colour survives.
     #[test]
     fn a_picture_fits_the_box_and_keeps_its_colour() {
         for format in [ImageFormat::Png, ImageFormat::Jpeg] {
             let bytes = encoded(100, 40, format, [10, 200, 30, 255]);
-            let bitmap = fit(&bytes, 50, 50).expect("a picture the display can draw");
+            let bitmap = fit(&bytes, 50, 50).expect("fitting the test picture");
             assert_eq!((bitmap.width, bitmap.height), (50, 20), "{format:?}");
             assert_eq!(bitmap.pixels().len(), 50 * 20 * 4, "{format:?}");
             let [red, green, blue, alpha] = centre(&bitmap);
@@ -187,26 +176,34 @@ pub(super) mod tests {
         }
     }
 
-    /// A picture that covers nothing carries no colour, because the blend runs
-    /// on premultiplied values.
     #[test]
     fn a_fully_transparent_picture_decodes_to_nothing() {
         let bytes = encoded(8, 8, ImageFormat::Png, [255, 255, 255, 0]);
-        let bitmap = fit(&bytes, 8, 8).expect("a picture");
-        assert!(bitmap.pixels().iter().all(|byte| *byte == 0));
+        let bitmap = fit(&bytes, 8, 8).expect("fitting the test picture");
+        assert!(
+            bitmap.pixels().iter().all(|byte| *byte == 0),
+            "a pixel is not zero, want a fully transparent bitmap"
+        );
     }
 
-    /// The format comes from the bytes, so a reader that is handed something
-    /// that is not a picture decodes nothing.
     #[test]
     fn what_is_not_a_picture_decodes_nothing() {
-        assert!(read(&encoded(4, 4, ImageFormat::Png, [0, 0, 255, 255])).is_some());
-        assert!(read(b"not an image").is_none());
-        assert!(fit(b"not an image", 10, 10).is_none());
+        assert!(
+            read(&encoded(4, 4, ImageFormat::Png, [0, 0, 255, 255])).is_some(),
+            "a valid PNG did not decode"
+        );
+        assert!(
+            read(b"not an image").is_none(),
+            "bytes that are not an image decoded"
+        );
+        assert!(
+            fit(b"not an image", 10, 10).is_none(),
+            "bytes that are not an image fit a box"
+        );
     }
 
-    /// The fit is the whole rule: the tight axis fills the box, the other one
-    /// falls short, and a picture smaller than the box grows into it.
+    /// The axis with the smaller ratio fills the box, and a picture
+    /// smaller than the box grows to fit it.
     #[test]
     fn the_fit_keeps_the_ratio_in_both_directions() {
         for (source, box_size, want) in [
@@ -219,15 +216,14 @@ pub(super) mod tests {
             ((10, 10), (110, 220), (110, 110)),
         ] {
             let bytes = encoded(source.0, source.1, ImageFormat::Png, [0, 0, 0, 255]);
-            let bitmap = fit(&bytes, box_size.0, box_size.1).expect("a picture");
+            let bitmap = fit(&bytes, box_size.0, box_size.1).expect("fitting the test picture");
             assert_eq!((bitmap.width, bitmap.height), want, "{source:?}");
         }
     }
 
-    /// A picture with no pixels, and a box with no pixels, decode nothing.
-    /// A tall portrait fills a shorter box to its edges, and the cut keeps
-    /// more of the top than of the bottom: a picture red above its middle
-    /// and blue below comes back red at its middle.
+    /// The crop of a tall portrait keeps more of the top than of the
+    /// bottom, so a picture that is red down to just above its middle and
+    /// blue below comes back red at its center.
     #[test]
     fn a_portrait_fills_the_box_and_keeps_its_upper_part() {
         let mut picture = RgbaImage::from_pixel(60, 120, Rgba([0, 0, 255, 255]));
@@ -237,7 +233,7 @@ pub(super) mod tests {
             }
         }
         let bytes = encoded_from(&picture, ImageFormat::Png);
-        let bitmap = fill(&bytes, 60, 80).expect("a portrait fills the box");
+        let bitmap = fill(&bytes, 60, 80).expect("filling the box with the portrait");
         assert_eq!((bitmap.width, bitmap.height), (60, 80));
         assert_eq!(centre(&bitmap), [255, 0, 0, 255]);
     }
@@ -245,27 +241,32 @@ pub(super) mod tests {
     #[test]
     fn a_source_or_a_box_with_no_pixels_decodes_nothing() {
         let source = DynamicImage::ImageRgba8(RgbaImage::new(0, 0));
-        assert!(scale(&source, 10, 10).is_none());
+        assert!(
+            scale(&source, 10, 10).is_none(),
+            "scaling returned a bitmap, want none"
+        );
         let source = DynamicImage::ImageRgba8(RgbaImage::new(10, 10));
-        assert!(scale(&source, 0, 10).is_none());
-        assert!(scale(&source, 10, 0).is_none());
+        assert!(
+            scale(&source, 0, 10).is_none(),
+            "a box of width 0 returned a bitmap, want none"
+        );
+        assert!(
+            scale(&source, 10, 0).is_none(),
+            "a box of height 0 returned a bitmap, want none"
+        );
     }
 
-    /// A reference that is not https names a file the pod mounts, and a file
-    /// that is not there reads nothing.
     #[test]
-    fn a_reference_that_is_not_https_names_a_file() {
+    fn a_reference_that_is_not_https_is_a_file_path() {
         let path = std::env::temp_dir().join("media-display-open.png");
         let bytes = encoded(4, 4, ImageFormat::Png, [0, 0, 0, 255]);
-        std::fs::write(&path, &bytes).expect("a file to read back");
+        std::fs::write(&path, &bytes).expect("writing the test file");
         assert_eq!(open(&path.to_string_lossy()), Some(bytes));
         assert_eq!(open("/art/nothing.png"), None);
     }
 
-    /// An https reference is a fetch, and a host that answers nothing carries
-    /// no picture.
     #[test]
-    fn an_https_reference_that_answers_nothing_carries_no_picture() {
+    fn an_https_reference_to_an_unreachable_host_reads_as_none() {
         assert_eq!(open("https://127.0.0.1:1/logo.png"), None);
     }
 }

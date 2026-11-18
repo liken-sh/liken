@@ -1,9 +1,6 @@
 package main
 
-// These tests cover what a Play becomes at run time: one pod that runs
-// mpv on the resolved list, holds the claim's every role, and carries
-// the command sidecar that owns the mpv socket and reads every
-// controller the unit owns.
+// These tests cover the playback pod that buildPod returns for a Play.
 
 import (
 	"encoding/json"
@@ -11,7 +8,6 @@ import (
 	"testing"
 )
 
-// initContainer finds one of the pod's init containers by name.
 func initContainer(t *testing.T, pod *Pod, name string) Container {
 	t.Helper()
 	for _, container := range pod.Spec.InitContainers {
@@ -23,7 +19,6 @@ func initContainer(t *testing.T, pod *Pod, name string) Container {
 	return Container{}
 }
 
-// envValue reads one environment variable off a container.
 func envValue(container Container, name string) string {
 	for _, variable := range container.Env {
 		if variable.Name == name {
@@ -33,7 +28,6 @@ func envValue(container Container, name string) string {
 	return ""
 }
 
-// mountsIPC reports whether a container mounts the shared IPC volume.
 func mountsIPC(container Container) bool {
 	for _, mount := range container.VolumeMounts {
 		if mount.Name == ipcVolumeName {
@@ -44,20 +38,17 @@ func mountsIPC(container Container) bool {
 }
 
 const (
-	testPlayerImage = "ghcr.io/liken-sh/media-operator-player:test"
-	// The image every sidecar container runs. It is a different name
-	// from the player image, so a pod that confuses the two fails a
-	// test.
+	// Each image has its own name, so a container that runs the wrong
+	// image fails a test.
+	testPlayerImage  = "ghcr.io/liken-sh/media-operator-player:test"
 	testSidecarImage = "ghcr.io/liken-sh/media-operator-sidecar:test"
-	// The image the display container runs. It is a different name from
-	// the player image, so a pod that confuses the two fails a test.
 	testDisplayImage = "ghcr.io/liken-sh/media-operator-display:test"
 	testBusAddress   = "bus.media.svc:1883"
 	testTopicBase    = "liken/media"
 )
 
-// One playlist that costs a volume, so the pod under test carries a
-// mount as well as arguments.
+// testResolution resolves a playlist with an nfs item, so the pod under
+// test has a volume and a mount as well as arguments.
 func testResolution(t *testing.T) resolution {
 	t.Helper()
 	resolved, err := resolvePlay("house", mediaItems(
@@ -66,7 +57,7 @@ func testResolution(t *testing.T) resolution {
 	), nil, frame{})
 
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("resolving the test play: %v", err)
 	}
 	return resolved
 }
@@ -78,7 +69,8 @@ func testPod(t *testing.T) *Pod {
 	return buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, nil, "")
 }
 
-// The same pod, with two controllers bound to the player.
+// testPodWithRemotes is testPod with two controllers bound to the
+// player.
 func testPodWithRemotes(t *testing.T) *Pod {
 	t.Helper()
 	play := testPlay()
@@ -86,14 +78,14 @@ func testPodWithRemotes(t *testing.T) *Pod {
 	return buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, testBoundRemotes(), resolvedPreferences{}, nil, "")
 }
 
-// restartPolicy is Never, because a finished film is not a failure to
-// restart, and the Play owns the pod so deleting the Play takes it
-// away.
+// restartPolicy is Never because a film that finished is not a failure
+// to restart. The Play owns the pod, so deleting the Play deletes the
+// pod.
 func TestBuildPodNamesThePodForThePlayThatOwnsIt(t *testing.T) {
 	pod := testPod(t)
 
 	if pod.APIVersion != podAPIVersion || pod.Kind != "Pod" {
-		t.Errorf("apiVersion = %q, kind = %q", pod.APIVersion, pod.Kind)
+		t.Errorf("apiVersion = %q, kind = %q, want %q and Pod", pod.APIVersion, pod.Kind, podAPIVersion)
 	}
 	if pod.Metadata.Name != "movie-playback" {
 		t.Errorf("name = %q, want movie-playback", pod.Metadata.Name)
@@ -105,7 +97,7 @@ func TestBuildPodNamesThePodForThePlayThatOwnsIt(t *testing.T) {
 		t.Errorf("restartPolicy = %q, want Never", pod.Spec.RestartPolicy)
 	}
 	if pod.Spec.TerminationGracePeriodSeconds == nil {
-		t.Fatal("the pod states no termination grace period")
+		t.Fatal("terminationGracePeriodSeconds is not set, want 5")
 	}
 	if got := *pod.Spec.TerminationGracePeriodSeconds; got != 5 {
 		t.Errorf("terminationGracePeriodSeconds = %d, want 5", got)
@@ -122,8 +114,9 @@ func TestBuildPodNamesThePodForThePlayThatOwnsIt(t *testing.T) {
 	}
 }
 
-// mpv is the pod's own process, so the player container carries only
-// the resolved list and, with no declared start, no environment.
+// The player container runs mpv with only the resolved list as
+// arguments. With no start declared, its only environment variable is
+// the presentation blocks.
 func TestBuildPodRunsThePlayerOnTheResolvedList(t *testing.T) {
 	pod := testPod(t)
 
@@ -141,16 +134,16 @@ func TestBuildPodRunsThePlayerOnTheResolvedList(t *testing.T) {
 	if !reflect.DeepEqual(container.Args, args) {
 		t.Errorf("args = %v, want %v", container.Args, args)
 	}
-	// The blocks travel on the player container because the shim reads them
-	// to expand a music album, so every run carries them.
+	// The shim reads the blocks to expand a music album, so every run
+	// has them.
 	env := []EnvVar{{Name: presentationsVariable, Value: "[{}]"}}
 	if !reflect.DeepEqual(container.Env, env) {
 		t.Errorf("env = %+v, want %+v", container.Env, env)
 	}
 }
 
-// A declared start reaches the player container as one variable, beside the
-// blocks every run carries.
+// A declared start is an environment variable of the player container,
+// next to the presentation blocks.
 func TestBuildPodCarriesTheDeclaredStart(t *testing.T) {
 	play := testPlay()
 	play.Spec.Start = "0:10:00"
@@ -167,9 +160,9 @@ func TestBuildPodCarriesTheDeclaredStart(t *testing.T) {
 	}
 }
 
-// The operator carries MEDIA_PLAYER_VERBOSE onto the player container,
-// so one `kubectl set env` on the Deployment turns mpv's full output on
-// for every new playback pod.
+// The operator copies MEDIA_PLAYER_VERBOSE to the player container, so
+// one `kubectl set env` on the Deployment turns on mpv's full output in
+// every new playback pod.
 func TestBuildPodPassesTheVerboseSwitchToThePlayer(t *testing.T) {
 	play := testPlay()
 	claim := buildClaim(play, testPlayer())
@@ -180,34 +173,33 @@ func TestBuildPodPassesTheVerboseSwitchToThePlayer(t *testing.T) {
 	}
 }
 
-// An operator with no MEDIA_PLAYER_VERBOSE creates a pod that carries
-// none, so the player keeps mpv quiet.
+// An operator with no MEDIA_PLAYER_VERBOSE creates a pod without it, so
+// mpv's output stays quiet.
 func TestBuildPodCarriesNoVerboseSwitchWhenTheOperatorStatesNone(t *testing.T) {
 	pod := testPod(t)
 
 	for _, entry := range pod.Spec.Containers[0].Env {
 		if entry.Name == playerVerboseVariable {
-			t.Errorf("the player container carries %s", playerVerboseVariable)
+			t.Errorf("the player container sets %s, want it unset", playerVerboseVariable)
 		}
 	}
 }
 
-// A playback pod arms no window watchdog. A Play on an
-// audio-only unit expects no window at all, and an exit there would
-// kill a run that is playing sound correctly.
+// The player container sets no IDLE_WINDOW_GRACE_SECONDS. A Play on an
+// audio-only Player opens no window, and a client that exited for a
+// missing window would end a run that plays sound correctly.
 func TestBuildPodArmsNoWindowWatchdog(t *testing.T) {
 	pod := testPod(t)
 
 	for _, entry := range pod.Spec.Containers[0].Env {
 		if entry.Name == idleWindowGraceVariable {
-			t.Errorf("the player container carries %s", idleWindowGraceVariable)
+			t.Errorf("the player container sets %s, want it unset", idleWindowGraceVariable)
 		}
 	}
 }
 
-// The pod names the claim once and the player container repeats that
-// name for each role, because the playback claim holds the player's
-// roles alone.
+// The pod declares the claim once, and the player container lists one
+// resources.claims entry for each request of the claim.
 func TestBuildPodHoldsEveryRequestTheClaimAsksFor(t *testing.T) {
 	pod := testPod(t)
 
@@ -226,11 +218,8 @@ func TestBuildPodHoldsEveryRequestTheClaimAsksFor(t *testing.T) {
 	}
 }
 
-// A cluster owner taints the machine that drives one screen, so scan
-// jobs and other unrelated work stay off a small box. The playback pod
-// holds that machine's display, so it tolerates the taint. It tolerates
-// that key alone, and for scheduling alone, so a NoExecute taint still
-// moves it away.
+// The playback pod tolerates the player-node taint only for the
+// NoSchedule effect, so a NoExecute taint still evicts it.
 func TestBuildPodToleratesThePlayerNodeTaint(t *testing.T) {
 	pod := testPod(t)
 
@@ -240,9 +229,9 @@ func TestBuildPodToleratesThePlayerNodeTaint(t *testing.T) {
 	}
 }
 
-// The volume belongs to the pod and the mount belongs to the
-// container, so the resolution splits across the two. The IPC volume
-// follows the media in both lists.
+// The resolution's volumes go in the pod spec and its mounts go in the
+// container. The IPC volume and mount come after the media in both
+// lists.
 func TestBuildPodCarriesTheResolvedVolumesAndMounts(t *testing.T) {
 	resolved := testResolution(t)
 	play := testPlay()
@@ -258,15 +247,14 @@ func TestBuildPodCarriesTheResolvedVolumesAndMounts(t *testing.T) {
 	if got := pod.Spec.Containers[0].VolumeMounts; !reflect.DeepEqual(got, mounts) {
 		t.Errorf("volumeMounts = %+v, want %+v", got, mounts)
 	}
-	// The resolution keeps what it resolved; the pod builder appends
-	// into a copy.
+	// The builder appends to copies, so the resolution is unchanged.
 	if len(resolved.Mounts) != 1 || len(resolved.Volumes) != 1 {
-		t.Errorf("the builder wrote into the resolution: %+v", resolved)
+		t.Errorf("the resolution is %+v after the build, want its original one mount and one volume", resolved)
 	}
 }
 
-// A pod with no remotes still carries the IPC volume, because mpv serves
-// its socket at one path either way.
+// A pod with no remotes still has the IPC volume, because mpv serves
+// its socket at the same path either way.
 func TestBuildPodWithNoRemotesCarriesTheIPCVolume(t *testing.T) {
 	pod := testPod(t)
 
@@ -277,17 +265,15 @@ func TestBuildPodWithNoRemotesCarriesTheIPCVolume(t *testing.T) {
 	}
 	written, err := json.Marshal(last)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("encoding the ipc volume: %v", err)
 	}
 	if string(written) != `{"name":"ipc","emptyDir":{}}` {
-		t.Errorf("volume = %s", written)
+		t.Errorf("the ipc volume encodes as %s, want {\"name\":\"ipc\",\"emptyDir\":{}}", written)
 	}
 }
 
-// The command sidecar is the sidecar image in its command mode. It
-// holds no device claim, and it mounts the IPC socket alone, because it
-// drives mpv and opens no media of its own. It carries the play's
-// identity, its own pod's UID, the bus, and the base.
+// The command sidecar uses no device claim and mounts only the IPC
+// volume, because it opens no media itself.
 func TestBuildPodRunsOneCommandSidecar(t *testing.T) {
 	pod := testPod(t)
 
@@ -318,14 +304,13 @@ func TestBuildPodRunsOneCommandSidecar(t *testing.T) {
 		t.Errorf("command = %+v, want %+v", command, want)
 	}
 	if len(command.Resources.Claims) != 0 {
-		t.Errorf("the command sidecar holds a device claim: %+v", command.Resources.Claims)
+		t.Errorf("the command sidecar has resources.claims %+v, want none", command.Resources.Claims)
 	}
 }
 
-// The command sidecar carries every item's presentation block as one JSON
-// array in item order. An item with no presentation is an empty object, and
-// an item with a presentation is its block, so the sidecar forwards index i
-// for playlist-pos i.
+// The command sidecar gets every item's presentation block as one JSON
+// array in item order. An item with no presentation is an empty object,
+// so the sidecar can forward index i for playlist-pos i.
 func TestBuildPodBakesThePresentationBlocks(t *testing.T) {
 	play := testPlay()
 	play.Spec.Items = []PlayItem{
@@ -354,10 +339,10 @@ func TestBuildPodBakesThePresentationBlocks(t *testing.T) {
 	}
 }
 
-// The marks reach the display as the library wrote them: every candidate
-// in order, an absent start or end still absent, and a kind the display
-// does not know still present, because the display interprets the marks
-// and the operator only carries them.
+// The marks reach the display as the library wrote them: every
+// candidate in order, a missing start or end still missing, and an
+// unknown kind still present. The display interprets the marks, and the
+// operator only copies them.
 func TestBuildPodBakesTheMarksAsWritten(t *testing.T) {
 	end, start, later := 107.0, 7.007, 3316.0
 	play := testPlay()
@@ -380,8 +365,8 @@ func TestBuildPodBakesTheMarksAsWritten(t *testing.T) {
 	}
 }
 
-// The command sidecar names every controller the unit owns: their events
-// topics and their focus topics, aligned.
+// The command sidecar gets the events topic and the focus topic of
+// every controller bound to the Player, in the same order.
 func TestBuildPodGivesTheCommandSidecarEveryRemote(t *testing.T) {
 	pod := testPodWithRemotes(t)
 
@@ -393,16 +378,17 @@ func TestBuildPodGivesTheCommandSidecarEveryRemote(t *testing.T) {
 		"liken/media/remotes/house/armchair/focus\nliken/media/remotes/house/sofa/focus")
 }
 
-// A Play on a Player that names no controller carries neither list, so
-// its sidecar subscribes to no controller at all.
+// A Play on a Player with no controller gets neither list, so its
+// sidecar subscribes to no controller.
 func TestBuildPodCarriesNoRemoteListsWithoutRemotes(t *testing.T) {
 	command := initContainer(t, testPod(t), commandContainer)
 	mustMatch(t, envValue(command, remoteEventsTopicsVariable), "")
 	mustMatch(t, envValue(command, remoteFocusTopicsVariable), "")
 }
 
-// The resolved preferences map to mpv flags. A flag rides only for a field that
-// resolved, and --subs-match-os-language=no rides when any other flag does.
+// The resolved preferences become mpv flags. A flag appears only for a
+// preference that has a value, and --subs-match-os-language=no appears
+// when any other flag does.
 func TestMpvPreferenceOptions(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -472,8 +458,8 @@ func TestMpvPreferenceOptions(t *testing.T) {
 	}
 }
 
-// The resolved options reach the player container as one newline-joined
-// variable, which the shim splits back into mpv's argv.
+// The player container gets the resolved options as one variable joined
+// with newlines, which the shim splits into mpv arguments.
 func TestBuildPodCarriesTheResolvedOptions(t *testing.T) {
 	play := testPlay()
 	claim := buildClaim(play, testPlayer())
@@ -487,8 +473,7 @@ func TestBuildPodCarriesTheResolvedOptions(t *testing.T) {
 	}
 }
 
-// A run with no preferences carries no options variable, so an ordinary pod is
-// unchanged.
+// A run with no preferences has no options variable.
 func TestBuildPodWithNoPreferencesCarriesNoOptions(t *testing.T) {
 	pod := testPod(t)
 	if got := envValue(pod.Spec.Containers[0], playerOptionsVariable); got != "" {
@@ -496,8 +481,8 @@ func TestBuildPodWithNoPreferencesCarriesNoOptions(t *testing.T) {
 	}
 }
 
-// The command sidecar chooses the subtitle track in the two modes that show
-// one, so it reads the resolved preferences in those modes and in no other.
+// The command sidecar gets the subtitle preferences only in the two
+// modes that show a track.
 func TestTheCommandSidecarCarriesTheSubtitlePreferences(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -538,15 +523,15 @@ func TestTheCommandSidecarCarriesTheSubtitlePreferences(t *testing.T) {
 	}
 }
 
-// mpv plays at unity, its own default: no level and no mute reach its
-// command line, because the receiver or the sinks set the room's level.
+// mpv plays at its default level: no volume and no mute option reach
+// its command line, because the receiver or the sinks set the level of
+// the room.
 func TestBuildPodCarriesNoVolumeOption(t *testing.T) {
 	mustMatch(t, envValue(testPod(t).Spec.Containers[0], playerOptionsVariable), "")
 }
 
-// The volume topic reaches the command sidecar only for a unit that
-// has speakers. The claim answers that: it holds a sink request only for a
-// Player that states sinks.
+// The command sidecar gets the volume topic only when the Player lists
+// sinks.
 func TestTheCommandSidecarCarriesTheVolumeTopicOnlyWithSpeakers(t *testing.T) {
 	speakerless := &Player{
 		Metadata: ObjectMeta{Name: "theater", Namespace: "house"},
@@ -561,9 +546,9 @@ func TestTheCommandSidecarCarriesTheVolumeTopicOnlyWithSpeakers(t *testing.T) {
 		playerVolumeTopic(testTopicBase, "house", "theater"))
 }
 
-// A Play with a next block passes the whole block to both containers in
-// one variable, with the art at the in-pod path the resolver rewrote it
-// to.
+// A Play with a next block gives the whole block to both containers in
+// one variable, with the art at the path inside the pod that the
+// resolver rewrote it to.
 func TestBuildPodCarriesTheNextBlockToBothContainers(t *testing.T) {
 	play := testPlay()
 	if err := json.Unmarshal([]byte(`{
@@ -574,7 +559,7 @@ func TestBuildPodCarriesTheNextBlockToBothContainers(t *testing.T) {
 		"remainingSeconds": 2160,
 		"request": {"library": "living-room/shows"}
 	}`), &play.Spec.Next); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the next block: %v", err)
 	}
 	resolved, err := resolvePlay("house", play.Spec.Items, play.Spec.Next, frame{})
 	mustSucceed(t, err)
@@ -586,8 +571,7 @@ func TestBuildPodCarriesTheNextBlockToBothContainers(t *testing.T) {
 	mustMatch(t, envValue(initContainer(t, pod, commandContainer), nextVariable), want)
 }
 
-// A Play with no next block sets the variable on neither container, so
-// the pod offers nothing.
+// A Play with no next block sets the variable on neither container.
 func TestBuildPodSetsNoNextBlockWhereThePlayCarriesNone(t *testing.T) {
 	pod := testPod(t)
 
@@ -595,7 +579,6 @@ func TestBuildPodSetsNoNextBlockWhereThePlayCarriesNone(t *testing.T) {
 	mustMatch(t, envValue(initContainer(t, pod, commandContainer), nextVariable), "")
 }
 
-// initContainerNames lists the pod's init containers in order.
 func initContainerNames(pod *Pod) []string {
 	names := make([]string, 0, len(pod.Spec.InitContainers))
 	for _, container := range pod.Spec.InitContainers {
@@ -604,7 +587,6 @@ func initContainerNames(pod *Pod) []string {
 	return names
 }
 
-// The same pod, with the household's resolved preferences.
 func testPodWithPreferences(t *testing.T, prefs resolvedPreferences) *Pod {
 	t.Helper()
 	play := testPlay()
@@ -652,10 +634,8 @@ func TestTheDisplayContainerHoldsThePlayersRequests(t *testing.T) {
 	mustMatchAll(t, display.Resources.Claims, pod.Spec.Containers[0].Resources.Claims)
 }
 
-// The display container mounts the IPC socket and the same media mounts the
-// player holds, because it decodes its own art and a logo, a cover, and a
-// trickplay sheet sit in the film's own folder. The media mounts are
-// read-only, the way the resolution wrote them.
+// The display container mounts the player's media read-only, and the
+// IPC volume.
 func TestTheDisplayContainerMountsTheIPCVolumeAndTheMedia(t *testing.T) {
 	display := initContainer(t, testPod(t), displayContainer)
 
@@ -666,8 +646,8 @@ func TestTheDisplayContainerMountsTheIPCVolumeAndTheMedia(t *testing.T) {
 	}
 }
 
-// The trickplay interval is the display's own now, because the display crops
-// the tile. A Play that states none takes Jellyfin's default.
+// The display crops each trickplay tile by the interval. A Play with no
+// interval gets Jellyfin's default.
 func TestTheDisplayContainerCarriesTheTrickplayInterval(t *testing.T) {
 	display := initContainer(t, testPod(t), displayContainer)
 	mustMatchAll(t, display.Env,
@@ -682,8 +662,8 @@ func TestTheDisplayContainerCarriesTheTrickplayInterval(t *testing.T) {
 		[]EnvVar{{Name: trickplayIntervalVariable, Value: "5s"}})
 }
 
-// A resolved timezone reaches the display container as TZ, so the display clock
-// reads the household's wall-clock zone.
+// A resolved time zone is the TZ variable of the display container, so
+// the display clock shows local time.
 func TestTheDisplayContainerCarriesTheResolvedTimeZone(t *testing.T) {
 	pod := testPodWithPreferences(t, resolvedPreferences{TimeZone: "America/New_York"})
 
@@ -694,8 +674,7 @@ func TestTheDisplayContainerCarriesTheResolvedTimeZone(t *testing.T) {
 	})
 }
 
-// A run with no timezone carries no TZ variable, so an ordinary pod is
-// unchanged.
+// A run with no time zone has no TZ variable.
 func TestTheDisplayContainerWithNoTimeZoneCarriesNoTZ(t *testing.T) {
 	display := initContainer(t, testPod(t), displayContainer)
 

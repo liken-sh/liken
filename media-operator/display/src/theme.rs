@@ -1,68 +1,63 @@
-//! This module holds the look. Every other module draws through it, so the
-//! palette, the type scale, and the geometry constants are defined in one
-//! place.
+//! The palette, type scale, timings, and layout constants. Every other
+//! module draws through these, so a change to the look happens here.
 
 use std::time::Duration;
 
 use iced::{Color, Point, Rectangle, Size};
 
-/// The display draws in one space 1080 rows tall. The canvas module scales
-/// the whole layer to the real output, so the same layout serves 720, 1080,
-/// and 4K with no branch.
+/// The display lays out in a canvas 1080 pixels tall. The canvas module
+/// scales the whole layer to the real output, so the same layout serves
+/// 720p, 1080p, and 4K.
 pub const CANVAS_HEIGHT: f32 = 1080.0;
 
-/// The width a 16:9 surface gives, which is the width this space always
-/// held. The canvas module takes the width from the surface's own ratio, so
-/// a canvas pixel is square.
+/// The canvas width for a 16:9 surface. The canvas module takes the real
+/// width from the surface's own aspect ratio, so a canvas pixel is square.
 pub const CANVAS_WIDTH: f32 = 1920.0;
 
-/// The values are liken brand tokens from the brand theme's `liken.css`. The
-/// accent fill is the dark-scheme lichen green `--link`, the text is
-/// `--ink`, and the muted grey is `--ink-muted`. The bar track is the
-/// light-scheme `--link`, a deep green dark enough that the bright elapsed
-/// fill reads over it.
+/// Colors from the brand theme's `liken.css`. `fill` is the dark scheme's
+/// `--link` (lichen green), `text` is `--ink`, and `muted` is
+/// `--ink-muted`. `track` is the light scheme's `--link`, a deep green
+/// dark enough for the bright elapsed fill to stand out against it.
 pub mod color {
     use super::Color;
 
-    /// The colour of body text.
+    /// The color of body text.
     pub fn text() -> Color {
         liken_iced::palette::dark().ink
     }
 
-    /// The accent, and the colour of the elapsed fill.
+    /// The accent color, also used for the elapsed part of a bar.
     pub fn fill() -> Color {
         liken_iced::palette::dark().link
     }
 
-    /// The bar's unplayed track.
+    /// The unplayed part of a bar.
     pub fn track() -> Color {
         liken_iced::palette::light().link
     }
 
-    /// The colour of text that reads under body text.
+    /// The color of secondary text.
     pub fn muted() -> Color {
         liken_iced::palette::dark().ink_muted
     }
 
-    /// The playhead, which takes the accent.
+    /// The playhead, drawn in the accent color.
     pub fn playhead() -> Color {
         fill()
     }
 
-    /// The underline under the focused stop of the control strip and under
-    /// the focused row of a chooser, which takes the accent.
+    /// The underline of the focused stop of the control strip and of the
+    /// focused row of a chooser, drawn in the accent color.
     pub fn focus() -> Color {
         fill()
     }
 
-    /// The scrim and every shadow.
+    /// The color of the scrim and of every shadow.
     pub const SHADOW: Color = Color::BLACK;
 }
 
-/// How much of the ground each surface covers, from 1 opaque to 0 clear.
-/// Every value states the ASS alpha byte the look was drawn with, so the
-/// display covers what the Lua display covered, and nothing downstream reads
-/// a byte whose 0 means opaque.
+/// Opacities, from 1 for opaque to 0 for clear, each written as the ASS
+/// alpha byte that `opacity` converts.
 pub mod alpha {
     use super::opacity;
 
@@ -72,25 +67,25 @@ pub mod alpha {
     pub const DIM: f32 = opacity(0xA8);
     pub const PANEL: f32 = opacity(0x14);
     pub const HIGHLIGHT: f32 = opacity(0x30);
-    /// The scrim's dark plateau, and the volume row's own surface.
+    /// The opacity of the scrim where it is darkest, and of the volume
+    /// row's background.
     pub const SCRIM_EDGE: f32 = opacity(0x34);
 }
 
-/// One ASS alpha byte as the fraction of the ground it covers. An ASS alpha
-/// runs from 00, opaque, to FF, transparent.
+/// Converts an ASS alpha byte to an opacity. An ASS alpha runs from 00,
+/// opaque, to FF, transparent.
 pub const fn opacity(alpha: u8) -> f32 {
     1.0 - alpha as f32 / 255.0
 }
 
-/// One colour at one coverage. Every drawing call takes a colour that already
-/// carries the fraction it covers.
+/// Returns `color` with its alpha set to `alpha`.
 pub fn at(color: Color, alpha: f32) -> Color {
     Color { a: alpha, ..color }
 }
 
-/// One colour under the fade. The fade scales every alpha the display draws,
-/// so the whole layer fades as one. At a fade of 1 the colour covers what it
-/// states.
+/// Returns `color` with its alpha multiplied by `fade`. Every color the
+/// display draws goes through this, so the whole layer fades together. A
+/// `fade` of 1 leaves the color unchanged.
 pub fn faded(color: Color, fade: f32) -> Color {
     Color {
         a: color.a * fade,
@@ -98,40 +93,35 @@ pub fn faded(color: Color, fade: f32) -> Color {
     }
 }
 
-/// The fade timing lives here because two things fade on clocks of their
-/// own, the OSD and the volume indicator, and the two must look the same. A
-/// fade takes `FADE_IN` to reach full and `FADE_OUT` to reach clear, and the
-/// out is longer than the in, so anything on the display leaves more slowly
-/// than it arrives.
+/// Fade times. The OSD and the volume indicator each run their own fade
+/// timer and must look the same, so both read these. A fade takes
+/// `FADE_IN` to reach full opacity and `FADE_OUT` to reach clear.
 pub const FADE_IN: Duration = Duration::from_millis(350);
 pub const FADE_OUT: Duration = Duration::from_millis(600);
 
-/// A fade steps on this period, about sixty times a second, and redraws on
-/// each step.
+/// A fade advances and redraws on this period, about 60 times a second.
 pub const FADE_TICK: Duration = Duration::from_nanos(16_666_667);
 
-/// A select that takes the up-next offer fades the offer out over this
-/// time. It is shorter than `FADE_OUT`, because the press asks for the next
-/// work and mpv quits soon after, so the screen must be clear by then. The
-/// compositor fades the film out inside its frame over the same time.
+/// How long the up-next offer takes to fade out when the viewer selects it.
+/// It is shorter than `FADE_OUT` because the select requests the next
+/// work and mpv quits soon after, so the screen must be clear by then.
+/// The compositor fades the film out in its frame over the same time.
 pub const HAND_OFF: Duration = Duration::from_millis(300);
 
-/// An element the display summons for one action leaves this many seconds
-/// after the last one. The OSD and the volume indicator wait out the same
-/// window, each on its own timer.
+/// How long after the last action that raised them the OSD and the
+/// volume indicator start to fade out. Each runs its own timer.
 pub const IDLE_HIDE: Duration = Duration::from_secs(4);
 
-/// The up-next card rises on its own near the end of a work, not on a press,
-/// so a viewer may not be looking when it arrives. It stays up for this
-/// window, long enough to notice it and read the title, and then fades so it
-/// does not cover the end of the work. A press that raises the OSD after
-/// that shows the card again.
+/// How long the up-next card stays up after it appears on its own near
+/// the end of a work. No key press raised it, so the viewer may not be
+/// looking when it appears. This is long enough to notice it and read the
+/// title. Then it fades so that it does not cover the end of the work. A
+/// key press that raises the OSD after that shows the card again.
 pub const CARD_HIDE: Duration = Duration::from_secs(5);
 
-/// The type scale, in canvas pixels. The sizes are large enough to read from
-/// a couch at 1080. Each number is a line box, the measure the display
-/// states as an ASS `\\fs`, and [`type_size`] turns one into the size the
-/// toolkit takes.
+/// The type scale, in canvas pixels, large enough to read from across a
+/// room at 1080p. Each number is a line box height, the value an ASS `\fs`
+/// tag takes. [`type_size`] converts it to the font size that iced takes.
 pub mod type_scale {
     pub const TITLE: f32 = 64.0;
     pub const LABEL: f32 = 40.0;
@@ -139,32 +129,28 @@ pub mod type_scale {
     pub const TINY: f32 = 28.0;
 }
 
-/// The face's metric: its bounding height over its em, 1326 units over 1000.
-/// The bounding height is `usWinAscent` plus `usWinDescent` and the em is
-/// `unitsPerEm`, from the `OS/2` and `head` tables of
-/// `SourceSans3-Regular.otf`, the face the brand crate carries and both
-/// renderers draw.
+/// The bounding height of `SourceSans3-Regular.otf`, the font that the
+/// brand crate carries, divided by its em: `usWinAscent` plus
+/// `usWinDescent` from its `OS/2` table, 1326 units, over `unitsPerEm` from
+/// its `head` table, 1000.
 ///
-/// libass scales a face so that its bounding height fills the size an ASS
-/// `\\fs` states, so one `\\fs` number states two measures: the line box the
-/// text draws in, in canvas pixels, and the type size, which is that box
-/// divided by this metric. A layout measure the display writes in `\\fs`
-/// units is a canvas measure here and passes through unchanged; only a type
-/// size goes through the metric.
+/// libass scales a font so that its bounding height equals the `\fs`
+/// size, so a `\fs` number is a line box height in canvas pixels. iced
+/// takes a size per em, which is that height divided by this ratio.
 const FACE_METRIC: f32 = 1326.0 / 1000.0;
 
-/// The type size that draws in a line box `height` canvas pixels tall. A
-/// line's anchor falls on that box in both renderers, so a line placed by its
-/// top or its bottom puts its baseline where libass puts it.
+/// Returns the font size whose line box is `height` canvas pixels tall.
+/// The canvas anchors a line to its line box, so a line placed by its top
+/// or bottom edge has its baseline where libass would put it.
 pub fn type_size(height: f32) -> f32 {
     height / FACE_METRIC
 }
 
-/// The underline that marks where the focus is: the control strip's focused
-/// stop and a chooser's focused row both draw it, so the two marks read as
-/// one. It is a bar under the text and not a box or a fill around it, so the
-/// mark stays as quiet as the text it marks, and it is thick enough to read
-/// from a couch at 1080 rows.
+/// The underline that marks the focus. The control strip's focused stop
+/// and a chooser's focused row both draw it, so the two look the same. It
+/// is a bar under the text instead of a box around it, so the mark stays
+/// as quiet as the text, and it is thick enough to see from across a room
+/// at 1080p.
 pub mod underline {
     /// The bar's thickness, in canvas pixels.
     pub const THICKNESS: f32 = 4.0;
@@ -172,9 +158,9 @@ pub mod underline {
     pub const GAP: f32 = 4.0;
 }
 
-/// The underline under one run of text whose line box ends at `bottom`. It
-/// starts at `left` and is `width` wide, which is the width of the text as it
-/// draws, so the bar ends where the text ends.
+/// Returns the underline rectangle for a run of text whose line box ends
+/// at `bottom`. `left` and `width` are the drawn text's, so the bar ends
+/// where the text ends.
 pub fn underline(left: f32, bottom: f32, width: f32) -> Rectangle {
     Rectangle::new(
         Point::new(left, bottom + underline::GAP),
@@ -182,30 +168,32 @@ pub fn underline(left: f32, bottom: f32, width: f32) -> Rectangle {
     )
 }
 
-/// The side margin every flush-left and flush-right element keeps.
+/// The side margin of every flush-left and flush-right element.
 pub const MARGIN_X: f32 = 96.0;
 
-/// The top margin, which the header, the clock, and the volume row all
-/// measure down from.
+/// The top margin that the header, the clock, and the volume row measure
+/// down from.
 pub const MARGIN_Y: f32 = 90.0;
 
-/// The scrubber bar's center line, which the image counter shares.
+/// The y position of the scrubber bar's center line, which the image
+/// counter shares.
 pub const BAR_Y: f32 = 904.0;
 
-/// The baseline a chooser or an adjuster panel grows upward from.
+/// The y position of the bottom of a chooser or an adjuster panel. The
+/// panel grows upward from it.
 pub const PANEL_BOTTOM: f32 = 876.0;
 
-/// The pitch of one line in the top-right column.
+/// The distance between lines in the top-right column.
 pub const LINE_PITCH: f32 = type_scale::SMALL + 12.0;
 
-/// How far each scrim reaches from its screen edge, in canvas rows. It
-/// holds its peak over the text out to `HOLD`, and is clear at `CLEAR`.
+/// How far each scrim reaches from its screen edge, in canvas pixels. It
+/// stays at its darkest out to `HOLD` and is clear at `CLEAR`.
 pub const SCRIM_TOP_HOLD: f32 = 180.0;
 pub const SCRIM_TOP_CLEAR: f32 = 380.0;
 pub const SCRIM_BOTTOM_HOLD: f32 = 230.0;
 pub const SCRIM_BOTTOM_CLEAR: f32 = 450.0;
-/// The cast row's heading stands 440 rows above the foot, so its scrim holds
-/// to 470 and is clear by 700.
+/// The top of the cast row's heading is 428 pixels above the bottom edge,
+/// so its scrim stays at its darkest to 470 and is clear at 700.
 pub const SCRIM_CAST_HOLD: f32 = 470.0;
 pub const SCRIM_CAST_CLEAR: f32 = 700.0;
 
@@ -213,9 +201,8 @@ pub const SCRIM_CAST_CLEAR: f32 = 700.0;
 mod tests {
     use super::*;
 
-    /// The four tokens the palette reads out of `liken.css`.
     #[test]
-    fn the_palette_holds_the_colours() {
+    fn the_palette_matches_the_brand_tokens() {
         let hex = |color: Color| {
             let byte = |channel: f32| (channel * 255.0).round() as u8;
             format!(
@@ -234,10 +221,8 @@ mod tests {
         assert_eq!(hex(color::SHADOW), "#000000");
     }
 
-    /// Every coverage is the ASS alpha byte the look was drawn with, read as
-    /// the fraction of the ground it covers.
     #[test]
-    fn every_coverage_is_the_ass_alpha_byte_it_was_drawn_with() {
+    fn every_opacity_converts_its_ass_alpha_byte() {
         for (coverage, byte) in [
             (alpha::OPAQUE, 0x00),
             (alpha::SUBDUED, 0x80),
@@ -259,18 +244,14 @@ mod tests {
         assert!((alpha::SCRIM_EDGE - 0.796).abs() < 0.001);
     }
 
-    /// The underline starts under the text's left edge, one gap under its
-    /// line box, and is as wide as the text.
     #[test]
-    fn an_underline_hangs_one_gap_under_the_line_box() {
+    fn an_underline_is_one_gap_below_the_line_box() {
         assert_eq!(
             underline(120.0, 718.0, 300.0),
             Rectangle::new(Point::new(120.0, 722.0), Size::new(300.0, 4.0))
         );
     }
 
-    /// The display states a size as an ASS `\\fs`, which is the line box. The
-    /// toolkit takes the type size, which is that box through the metric.
     #[test]
     fn a_type_size_is_its_line_box_through_the_face_metric() {
         assert!((type_size(type_scale::SMALL) - 25.641).abs() < 0.001);
@@ -280,7 +261,7 @@ mod tests {
     }
 
     #[test]
-    fn a_faded_colour_keeps_its_channels_and_scales_its_alpha() {
+    fn a_faded_color_keeps_its_channels_and_scales_its_alpha() {
         let full = faded(at(color::text(), alpha::OPAQUE), 1.0);
         assert_eq!(
             (full.r, full.g, full.b),

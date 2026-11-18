@@ -1,23 +1,19 @@
 package main
 
-// The bus topic layout. Every message the operator, the playback
-// pod, and the standing remote pod exchange lands on a topic built
-// here, so this file is the public contract of the bus and the one
-// place a Home Assistant integration reads to map a Play or a Remote
-// onto an entity.
+// The MQTT topics of the media bus. Every component of media-operator
+// reads and writes the topics that these functions build, so this file
+// is also the reference for another client of the bus, such as a Home
+// Assistant integration.
 //
-// Each topic extends a base the operator holds as one string,
-// liken/media by default. The data topics stay under this one base,
-// and Home Assistant's own discovery topics stay under
-// homeassistant/, so neither tree constrains the other. A base that
-// carries a cluster's name so several clusters share one broker is a
-// later refinement the string already allows.
+// Every topic starts with one base, liken/media by default. Home
+// Assistant's discovery topics start with homeassistant/, so the two
+// trees do not overlap.
 
 import "strings"
 
-// splitTopicLines splits one of the newline-joined topic lists the
-// operator sets on a pod. Blank lines are kept, because two lists stay
-// aligned by position.
+// splitTopicLines splits a topic list that the operator joins with
+// newlines into a pod's environment variable. It keeps blank entries,
+// because the events and focus lists are paired by position.
 func splitTopicLines(value string) []string {
 	if value == "" {
 		return nil
@@ -25,24 +21,22 @@ func splitTopicLines(value string) []string {
 	return strings.Split(value, "\n")
 }
 
-// defaultTopicBase is the base every topic extends when the operator
-// sets none. zigbee2mqtt uses one configurable base the same way.
 const defaultTopicBase = "liken/media"
 
-// The two words the availability topic carries. The sidecar names its
-// availability topic as the MQTT Last Will with offline as the
-// payload, and publishes online once it connects, so a retained
-// status a killed pod left behind does not read as a live Play.
+// The values of an availability payload. A pod publishes online when it
+// connects, and registers offline as its MQTT Last Will on the same
+// topic. When the pod dies without disconnecting, the broker publishes
+// offline, so readers do not treat the pod's retained status or codes
+// as current.
 const (
 	availabilityOnline  = "online"
 	availabilityOffline = "offline"
 )
 
-// playAvailability is what the playback pod publishes on its availability
-// topic: the word, a space, and the pod's UID. The UID lets the operator
-// refuse the Last Will of a dead pod that the broker publishes after the
-// run's new pod came online. A pod that read no UID publishes the word
-// alone.
+// playAvailability builds a playback pod's availability payload: the
+// word, a space, and the pod's UID, or the word alone when the UID is
+// empty. The broker can publish an old pod's Last Will after the Play's
+// new pod has come online, and the UID lets the operator ignore it.
 func playAvailability(word, pod string) []byte {
 	if pod == "" {
 		return []byte(word)
@@ -50,151 +44,114 @@ func playAvailability(word, pod string) []byte {
 	return []byte(word + " " + pod)
 }
 
-// parsePlayAvailability reads a playback pod's availability: whether it
-// says online, and the pod UID it names, empty for the word alone.
 func parsePlayAvailability(payload []byte) (online bool, pod string) {
 	word, pod, _ := strings.Cut(string(payload), " ")
 	return word == availabilityOnline, pod
 }
 
-// The kind at the end of a plays topic. parsePlayTopic returns one of
-// these so the operator folds a status report and an availability
-// signal through separate paths.
+// The last segment of a plays topic.
 const (
 	playStatusKind       = "status"
 	playAvailabilityKind = "availability"
 )
 
-// The kinds at the end of the remotes topics the operator reads for a
-// controller. They are separate constants from the plays kinds above,
-// because the two trees carry different payloads under the same words.
+// The last segment of a remotes topic.
 const (
 	remoteAvailabilityKind = "availability"
-	// The second retained remotes kind, the codes one controller
-	// declares.
-	remoteCodesKind = "codes"
-	// The third retained remotes kind, the compiled key table the
-	// operator writes and the standing pod reads.
-	remoteKeysKind = "keys"
-	// The events kind one controller's presses travel under. It is not
-	// retained, because a press is an event and not a state.
-	remoteEventsKind = "events"
+	remoteCodesKind        = "codes"
+	remoteKeysKind         = "keys"
+	remoteEventsKind       = "events"
 )
 
-// The last segment of the players topic that carries the panel
-// state, beside the commands and status topics of the same tree.
-const playerPanelKind = "panel"
+// The last segment of a players topic.
+const (
+	playerPanelKind  = "panel"
+	playerVolumeKind = "volume"
+	playerPowerKind  = "power"
+)
 
-// The last segment of the players topic that carries the listening
-// level, beside the panel, commands, and status kinds of the same
-// tree.
-const playerVolumeKind = "volume"
-
-// The last segment of the players topic that carries the room's power
-// asks.
-const playerPowerKind = "power"
-
-// remoteEventsTopic carries one Remote's key events. The standing
-// remote pod publishes {"key": "KEY_UP", "value": 1} to it, not
-// retained, because a press is an event and not a state. The pod
-// normalised the event, so every consumer reads one vocabulary.
+// remoteEventsTopic is where a Remote's reader pod publishes each key
+// event, such as {"key": "KEY_UP", "value": 1}, not retained. The pod
+// translates the controller's codes with the Remote's key table, so
+// every subscriber reads the same key names.
 func remoteEventsTopic(base, namespace, name string) string {
 	return base + "/remotes/" + namespace + "/" + name + "/" + remoteEventsKind
 }
 
-// remoteEventsFilter is the operator's subscription that reaches every
-// controller's key events, so one press can ask the equipment for the
-// unit's input.
+// remoteEventsFilter matches the events topic of every Remote. The
+// operator reads presses there to change a Player's spec.power and to
+// ask the Player's Receiver to select the Player's input.
 func remoteEventsFilter(base string) string {
 	return base + "/remotes/+/+/" + remoteEventsKind
 }
 
-// parseRemoteEventsTopic maps an events topic back to the controller it
-// names.
 func parseRemoteEventsTopic(base, topic string) (namespace, name string, ok bool) {
 	return parseRemoteTopic(base, topic, remoteEventsKind)
 }
 
-// remoteFocusTopic carries the retained focus mark, the bare name of the
-// Player that owns this controller now, in the Remote's own namespace. A
-// mark may name an idle Player. The operator writes it, and every reader
-// of the controller's presses gates on it. It is retained, so a press
-// reaches the owning unit with the operator up or down.
+// remoteFocusTopic holds a Remote's focus mark: the name of the Player,
+// in the Remote's namespace, that the controller's presses go to. The
+// operator publishes it retained, and every reader of the Remote's
+// events checks it before it acts on a press. Because the mark is
+// retained, presses reach the right Player while the operator is down.
 func remoteFocusTopic(base, namespace, name string) string {
 	return base + "/remotes/" + namespace + "/" + name + "/focus"
 }
 
-// remoteFocusCycleTopic carries the cycle request a source press
-// publishes. Only the holder of focus publishes it, the playback pod's
-// command sidecar during a film and the idle screen client between
-// films, and the operator reads it to advance the mark. It is not
-// retained, because a cycle is an event and not a state.
+// remoteFocusCycleTopic receives a request to move the focus mark to
+// the next Player, not retained. The pod of the Player that has focus
+// publishes it when the source key is pressed: the playback pod's
+// command sidecar while a Play runs, and the idle screen client
+// otherwise.
 func remoteFocusCycleTopic(base, namespace, name string) string {
 	return base + "/remotes/" + namespace + "/" + name + "/focus/cycle"
 }
 
-// remoteFocusFilter is the operator's subscription that reaches every
-// controller's focus mark. The operator is the only writer of a mark, so
-// this subscription reads its own retained writes back and recovers the
-// current marks after a restart.
+// remoteFocusFilter matches the focus topic of every Remote. The
+// operator subscribes to its own marks so that after a restart the
+// broker returns the marks it published earlier.
 func remoteFocusFilter(base string) string {
 	return base + "/remotes/+/+/focus"
 }
 
-// remoteFocusCycleFilter is the operator's subscription that reaches every
-// controller's cycle request. Each plus matches one level, so this filter
-// covers the five-level cycle topics alone and stays disjoint from the
-// four-level focus filter.
 func remoteFocusCycleFilter(base string) string {
 	return base + "/remotes/+/+/focus/cycle"
 }
 
-// remoteAvailabilityTopic carries online or offline for the standing
-// remote pod itself, the same two words the plays availability uses. The
-// pod names this topic as its MQTT Last Will, so a pod the kubelet killed
-// reads offline and the retained codes it left behind do not read as a
-// live declaration.
+// remoteAvailabilityTopic is where a Remote's reader pod publishes
+// online or offline, with no pod UID.
 func remoteAvailabilityTopic(base, namespace, name string) string {
 	return base + "/remotes/" + namespace + "/" + name + "/" + remoteAvailabilityKind
 }
 
-// remoteCodesTopic carries the codes one controller declares, as
-// {"keys": [...], "axes": [...]}. The standing remote pod publishes it
-// retained at every node open, because a declared set is a state and
-// not an event, and clears it with an empty payload when the nodes
-// vanish.
+// remoteCodesTopic is where a Remote's reader pod publishes, retained,
+// the key and axis codes that the controller declares, as
+// {"keys": [...], "axes": [...]}. It publishes them each time it opens
+// the controller's input devices, and clears the topic with an empty
+// payload when the devices close.
 func remoteCodesTopic(base, namespace, name string) string {
 	return base + "/remotes/" + namespace + "/" + name + "/" + remoteCodesKind
 }
 
-// remoteCodesFilter is the operator's subscription that reaches every
-// controller's declared codes.
 func remoteCodesFilter(base string) string {
 	return base + "/remotes/+/+/" + remoteCodesKind
 }
 
-// parseRemoteCodesTopic maps a codes topic back to the controller it
-// names.
 func parseRemoteCodesTopic(base, topic string) (namespace, name string, ok bool) {
 	return parseRemoteTopic(base, topic, remoteCodesKind)
 }
 
-// remoteAvailabilityFilter is the operator's subscription that reaches
-// every standing remote pod's availability signal.
 func remoteAvailabilityFilter(base string) string {
 	return base + "/remotes/+/+/" + remoteAvailabilityKind
 }
 
-// parseRemoteAvailabilityTopic maps an availability topic back to the
-// controller whose pod it names.
 func parseRemoteAvailabilityTopic(base, topic string) (namespace, name string, ok bool) {
 	return parseRemoteTopic(base, topic, remoteAvailabilityKind)
 }
 
-// parseRemoteTopic maps one three-segment remotes topic back to the
-// controller it names, for the kind its last segment carries. It matches
-// the segment count as well as the kind, so a cycle topic, which carries a
-// fourth segment, matches no three-segment kind.
+// parseRemoteTopic returns the namespace and name in a remotes topic
+// whose last segment is kind. It requires exactly three segments after
+// remotes/, so it never matches a focus/cycle topic.
 func parseRemoteTopic(base, topic, kind string) (namespace, name string, ok bool) {
 	prefix := base + "/remotes/"
 	if !strings.HasPrefix(topic, prefix) {
@@ -210,9 +167,6 @@ func parseRemoteTopic(base, topic, kind string) (namespace, name string, ok bool
 	return parts[0], parts[1], true
 }
 
-// parseRemoteFocusTopic maps a focus topic back to the controller it
-// names. It matches only the three-segment focus mark, so a cycle topic,
-// which carries a fourth segment, does not read as a mark.
 func parseRemoteFocusTopic(base, topic string) (namespace, name string, ok bool) {
 	prefix := base + "/remotes/"
 	if !strings.HasPrefix(topic, prefix) {
@@ -228,9 +182,6 @@ func parseRemoteFocusTopic(base, topic string) (namespace, name string, ok bool)
 	return parts[0], parts[1], true
 }
 
-// parseRemoteFocusCycleTopic maps a cycle topic back to the controller it
-// names. It matches only the four-segment cycle request, so a plain focus
-// mark does not read as a cycle.
 func parseRemoteFocusCycleTopic(base, topic string) (namespace, name string, ok bool) {
 	prefix := base + "/remotes/"
 	if !strings.HasPrefix(topic, prefix) {
@@ -246,79 +197,63 @@ func parseRemoteFocusCycleTopic(base, topic string) (namespace, name string, ok 
 	return parts[0], parts[1], true
 }
 
-// playCommandsTopic carries the commands any program on the bus may
-// publish to drive one Play: play-pause, a seek, a chapter step, and
-// the rest of the vocabulary in input.go. The level is the unit's and
-// not the Play's, so its asks go on playerVolumeCommandsTopic. It is not retained, because
-// a command is an event and not a state. This is the one open surface
-// a program joins a Play on in media terms, so a phone or a Home
-// Assistant integration reaches the Play the same way the playback
-// pod's own key table does.
+// playCommandsTopic receives the commands that control one Play, such
+// as play-pause and seek, not retained. Any client on the bus can
+// publish them, and the operator publishes a stop when a Player powers
+// off. input.go lists the commands. Volume belongs to the Player, so
+// volume commands go to playerVolumeCommandsTopic.
 func playCommandsTopic(base, namespace, name string) string {
 	return base + "/plays/" + namespace + "/" + name + "/commands"
 }
 
-// playerCommandsTopic carries the ask a person makes on the up-next
-// offer, which the playback pod's command sidecar publishes. It is not
-// retained, because an ask is an event and not a state. The program
-// that wrote the Play reads it there and creates the next Play. It
-// stays off the plays tree because it belongs to the standing unit, not
-// to a Play, and a controller sends nothing on it directly.
-//
-// The home ask travels on the same topic. The client under the film
-// reads it as a press of the home key, so it is on its home page when
-// the film ends.
+// playerCommandsTopic receives commands for a Player, not retained.
+// The playback pod's command sidecar publishes the viewer's answer to
+// the up-next offer here, and the program that created the Play reads
+// it and creates the next Play. A request to go home is published here
+// too. The idle screen client handles it as a press of the home key,
+// and the operator asks the Player's Receiver to show the Player. The
+// topic is under players/ and not plays/ because it outlives each Play.
 func playerCommandsTopic(base, namespace, name string) string {
 	return base + "/players/" + namespace + "/" + name + "/" + playerCommandsKind
 }
 
-// playerCommandsKind is the last segment of a Player's commands topic.
 const playerCommandsKind = "commands"
 
-// playerStatusTopic carries one unit's presentable state: its friendly
-// name, what it is doing, the Play it runs, and its parts with the link
-// and charge of each. The operator is the only writer, and the topic is
-// retained, so an idle pod that just started paints the live state the
-// broker already holds and asks for nothing. It stays off the plays tree
-// because it describes the equipment, which stands whether or not a Play
-// runs.
+// playerStatusTopic is where the operator publishes, retained, the
+// Player's state for the screens: its display name, what it is doing,
+// the Play it runs, and the link and charge of each of its devices. An
+// idle screen client that starts reads the current state from the
+// broker.
 func playerStatusTopic(base, namespace, name string) string {
 	return base + "/players/" + namespace + "/" + name + "/status"
 }
 
-// playerPanelTopic carries the panel state one unit's idle screen client
-// publishes, retained, because the panel is a state and not an event.
-// The client holds no API credentials, so the operator folds this
-// topic into the Player's status.
+// playerPanelTopic is where a Player's idle screen client publishes its
+// panel state, retained. The client has no Kubernetes API credentials,
+// so the operator copies the state into the Player's status.
 func playerPanelTopic(base, namespace, name string) string {
 	return base + "/players/" + namespace + "/" + name + "/" + playerPanelKind
 }
 
-// playerPowerTopic carries the wake and sleep this operator publishes
-// for a unit's screen, not retained, because an ask is an event and not
-// a state. It publishes them when the Player's spec.power changes
-// (playerpower.go), and when the TV asks for the Player's screen over
-// HDMI-CEC (screenask.go). The screen client is the topic's one reader.
+// playerPowerTopic is where the operator publishes wake and sleep
+// requests for a Player's screen, not retained, for the idle screen
+// client. It publishes one when spec.power changes (playerpower.go) and
+// when the television asks for the Player over HDMI-CEC (screenask.go).
 func playerPowerTopic(base, namespace, name string) string {
 	return base + "/players/" + namespace + "/" + name + "/" + playerPowerKind
 }
 
-// playerPanelFilter is the operator's one subscription that reaches
-// every unit's panel topic.
 func playerPanelFilter(base string) string {
 	return base + "/players/+/+/" + playerPanelKind
 }
 
-// parsePlayerPanelTopic maps a panel topic back to the Player it
-// names.
 func parsePlayerPanelTopic(base, topic string) (namespace, name string, ok bool) {
 	return parsePlayerTopic(base, topic, playerPanelKind)
 }
 
-// parsePlayerTopic maps one three-segment players topic back to the
-// unit it names, for the kind its last segment carries. It matches
-// the segment count as well as the kind, the way parseRemoteTopic
-// does, so a deeper topic under the same tree matches no kind.
+// parsePlayerTopic returns the namespace and name in a players topic
+// whose last segment is kind. It requires exactly three segments after
+// players/, so it never matches a volume/commands topic.
 func parsePlayerTopic(base, topic, kind string) (namespace, name string, ok bool) {
 	prefix := base + "/players/"
 	if !strings.HasPrefix(topic, prefix) {
@@ -334,50 +269,38 @@ func parsePlayerTopic(base, topic, kind string) (namespace, name string, ok bool
 	return parts[0], parts[1], true
 }
 
-// playerVolumeTopic carries the unit's listening level and its muted
-// flag, retained, because the level is a state and not an event. The
-// payload is {"level": 0.63, "muted": false}, and the level is the
-// fraction of the device's max. This operator is its only writer: it
-// publishes each target as a press moves it, and each level the device
-// reports while no target is pending (volumeengine.go). The screens
-// read it and draw the indicator for each live message.
+// playerVolumeTopic is where the operator publishes the Player's
+// volume, retained, as {"level": 0.63, "muted": false}. It publishes
+// the target level as key presses move it, and the level that the
+// device reports while no target is pending (volumeengine.go). The
+// screens draw the volume indicator from each message.
 func playerVolumeTopic(base, namespace, name string) string {
 	return base + "/players/" + namespace + "/" + name + "/" + playerVolumeKind
 }
 
-// playerVolumeCommandsTopic carries the asks a program that is not a
-// remote makes of the unit's level, not retained, because an ask is an
-// event: {"step": "up"}, {"step": "down"}, {"mute": "toggle"}, and
-// {"mute": true} or {"mute": false}. This operator treats each message
-// the same as a press of a volume key.
+// playerVolumeCommandsTopic receives volume commands from clients that
+// are not a Remote, not retained: {"step": "up"}, {"step": "down"},
+// {"mute": "toggle"}, {"mute": true}, and {"mute": false}. The operator
+// handles each one as a press of a volume key.
 func playerVolumeCommandsTopic(base, namespace, name string) string {
 	return playerVolumeTopic(base, namespace, name) + "/commands"
 }
 
-// playerVolumeFilter is the operator's subscription across every unit's
-// level. The operator reads its own retained writes back, so after a
-// restart it publishes no level the broker already holds.
+// playerVolumeFilter matches the volume topic of every Player. The
+// operator subscribes to its own levels so that after a restart it does
+// not publish a level that the broker already retains.
 func playerVolumeFilter(base string) string {
 	return base + "/players/+/+/" + playerVolumeKind
 }
 
-// playerVolumeCommandsFilter is the operator's one subscription across
-// every unit's volume asks. The asks are one segment below the level,
-// so playerVolumeFilter matches no ask, and this filter matches no
-// level.
 func playerVolumeCommandsFilter(base string) string {
 	return playerVolumeFilter(base) + "/commands"
 }
 
-// parsePlayerVolumeTopic maps a volume topic back to the Player it
-// names.
 func parsePlayerVolumeTopic(base, topic string) (namespace, name string, ok bool) {
 	return parsePlayerTopic(base, topic, playerVolumeKind)
 }
 
-// parsePlayerVolumeCommandsTopic maps a volume/commands topic back to
-// the Player it names. A level topic has no commands segment, so it is
-// not an ask.
 func parsePlayerVolumeCommandsTopic(base, topic string) (namespace, name string, ok bool) {
 	if !strings.HasSuffix(topic, "/commands") {
 		return "", "", false
@@ -385,23 +308,17 @@ func parsePlayerVolumeCommandsTopic(base, topic string) (namespace, name string,
 	return parsePlayerVolumeTopic(base, strings.TrimSuffix(topic, "/commands"))
 }
 
-// playerCommandsFilter is the operator's one subscription across every
-// unit's commands topic. The operator reads the home asks there, and
-// answers each one that no Remote's press made (ensure.go).
+// playerCommandsFilter matches the commands topic of every Player. The
+// operator acts on each request to go home that does not name a Remote
+// (ensure.go), because it already handled the Remote's press.
 func playerCommandsFilter(base string) string {
 	return base + "/players/+/+/" + playerCommandsKind
 }
 
-// parsePlayerCommandsTopic maps a commands topic back to the Player it
-// names. A volume ask is one segment deeper, so it matches no commands
-// topic.
 func parsePlayerCommandsTopic(base, topic string) (namespace, name string, ok bool) {
 	return parsePlayerTopic(base, topic, playerCommandsKind)
 }
 
-// busFilters is every subscription the operator makes, in one list.
-// The list is what the operator reads off the bus, so it is readable
-// in one place and a test can check it without a broker.
 func busFilters(base string) []string {
 	return []string{
 		playStatusFilter(base),
@@ -418,50 +335,38 @@ func busFilters(base string) []string {
 	}
 }
 
-// remoteKeysTopic carries one Remote's compiled table, the base
-// folded with its Keymap. It is per Remote and not per Keymap, because
-// the standing pod that reads that one controller is the only
-// subscriber, and a Remote with no Keymap still needs the base. It is
-// retained, so the pod reads the current table the instant it
-// connects, and an edit reaches it with no pod restart.
+// remoteKeysTopic is where the operator publishes, retained, a Remote's
+// key table: the base mapping merged with the Remote's Keymap. It is
+// per Remote because a Remote with no Keymap still needs the base
+// mapping. The reader pod receives the current table when it connects,
+// and receives each Keymap edit without a restart.
 func remoteKeysTopic(base, namespace, name string) string {
 	return base + "/remotes/" + namespace + "/" + name + "/" + remoteKeysKind
 }
 
-// playStatusTopic carries one Play's report: the paused flag, the
-// item, the position, and the duration. The playback pod's sidecar
-// publishes it retained, so a restarted operator reads the current
-// position back from the broker and does not lose a running Play's
-// place.
+// playStatusTopic is where the playback pod's command sidecar publishes,
+// retained, the Play's paused flag, item, position, and duration. A
+// restarted operator reads the current position from the broker.
 func playStatusTopic(base, namespace, name string) string {
 	return base + "/plays/" + namespace + "/" + name + "/" + playStatusKind
 }
 
-// playAvailabilityTopic carries online or offline for the sidecar that
-// publishes the status. The broker publishes offline on any disconnect
-// the sidecar does not make cleanly.
+// playAvailabilityTopic is where the command sidecar publishes its
+// availability payload (playAvailability).
 func playAvailabilityTopic(base, namespace, name string) string {
 	return base + "/plays/" + namespace + "/" + name + "/" + playAvailabilityKind
 }
 
-// playStatusFilter is the subscription that reaches every Play's
-// status, whatever namespace and name it carries. The two plus signs
-// are the MQTT single-level wildcards for the namespace and the name.
 func playStatusFilter(base string) string {
 	return base + "/plays/+/+/" + playStatusKind
 }
 
-// playAvailabilityFilter is the subscription that reaches every Play's
-// availability signal.
 func playAvailabilityFilter(base string) string {
 	return base + "/plays/+/+/" + playAvailabilityKind
 }
 
-// parsePlayTopic maps an inbound plays topic back to the Play it names
-// and the kind of message it carries. The operator subscribes to the
-// two plays filters and reads each message's topic to learn which Play
-// it belongs to, because the wildcard subscription carries messages
-// for every Play on one stream.
+// parsePlayTopic returns the namespace, name, and kind of a plays
+// status or availability topic.
 func parsePlayTopic(base, topic string) (namespace, name, kind string, ok bool) {
 	prefix := base + "/plays/"
 	if !strings.HasPrefix(topic, prefix) {

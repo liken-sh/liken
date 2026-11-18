@@ -76,13 +76,13 @@ func TestStreamCaptureWritesOnlyMediaBytes(t *testing.T) {
 		const media = "\x00\x00\x00\x18ftypmp42media-bytes"
 		server := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path != "/v1/media/namespaces/house/players/living-room/media.mp4" {
-				t.Errorf("path = %q", r.URL.Path)
+				t.Errorf("the request path is %q, want the media.mp4 route of the Player", r.URL.Path)
 			}
 			if r.Header.Get("Accept") != "video/mp4" {
-				t.Errorf("Accept = %q", r.Header.Get("Accept"))
+				t.Errorf("the Accept header is %q, want video/mp4", r.Header.Get("Accept"))
 			}
 			if r.Header.Get("Authorization") != "Bearer secret" {
-				t.Errorf("Authorization = %q", r.Header.Get("Authorization"))
+				t.Errorf("the Authorization header is %q, want the bearer token", r.Header.Get("Authorization"))
 			}
 			io.WriteString(w, media)
 		}))
@@ -99,7 +99,7 @@ func TestStreamCaptureWritesOnlyMediaBytes(t *testing.T) {
 	})
 }
 
-func TestStreamCaptureCarriesTheServerWords(t *testing.T) {
+func TestStreamCaptureErrorIncludesTheResponseBody(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusConflict)
@@ -113,10 +113,10 @@ func TestStreamCaptureCarriesTheServerWords(t *testing.T) {
 			t.Fatal("streamCapture returned no error for a 409")
 		}
 		if !strings.Contains(err.Error(), "run a Play on this Player") {
-			t.Fatalf("error %q does not carry the server's words", err)
+			t.Fatalf("the error is %q, want the response body in it", err)
 		}
 		if out.Len() != 0 {
-			t.Fatalf("out carried %q on an error", out.String())
+			t.Fatalf("the output is %q after the error, want none", out.String())
 		}
 	})
 }
@@ -129,11 +129,11 @@ func TestRunCaptureRejectsBadOptionsBeforeTheCluster(t *testing.T) {
 	}
 }
 
-func TestCaptureClientNamesTheServiceDNS(t *testing.T) {
+func TestCaptureClientSetsTheServiceDNSAsTheServerName(t *testing.T) {
 	client := captureClient(nil, nil)
 	transport, ok := client.Transport.(*http.Transport)
 	if !ok {
-		t.Fatalf("transport is %T", client.Transport)
+		t.Fatalf("the client transport is %T, want *http.Transport", client.Transport)
 	}
 	if transport.TLSClientConfig.ServerName != apiServiceDNS {
 		t.Fatalf("ServerName = %q, want %q", transport.TLSClientConfig.ServerName, apiServiceDNS)

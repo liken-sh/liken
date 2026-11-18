@@ -1,63 +1,45 @@
-# The api image: liken's ffmpeg image and the pod build of the program,
-# the same /media-operator-pod the operator image carries, run in its
-# api role alone. The pod build leaves out client-go's leader election,
-# which only the operator needs. The operator's own image
-# cannot serve here, because it is one static binary on scratch and
-# the composed stream is one ffmpeg mux.
+# The api image runs `/media-operator-pod api`. /media-operator-pod is
+# the program built with the `pod` tag, which the operator image also
+# ships. The api cannot run in the operator image, because that image
+# is scratch and the api starts ffmpeg to mux each capture.
 
-# The build stage repeats the operator image's pod build, so every image
-# that carries the pod build carries the same one, built from the same
-# source.
 FROM golang AS build
-# proxy.golang.org sometimes drops a module download partway through
-# the stream. With the default comma, `go` tries the origin only when
-# the proxy answers 404 or 410, so a dropped stream fails the build.
-# With a pipe, `go` fetches the module from its origin after any proxy
-# error, with the git that this image includes. `GOSUMDB` keeps its
-# default, so the checksum database still verifies a module that `go`
-# fetched from its origin.
+# proxy.golang.org sometimes drops a download partway through. With a
+# comma, `go` falls back to the origin only on a 404 or 410, so a
+# dropped download fails the build. With a pipe, it falls back after any
+# proxy error. `GOSUMDB` keeps its default, so the checksum database
+# still verifies a module fetched from its origin.
 ENV GOPROXY="https://proxy.golang.org|direct"
 WORKDIR /src
-# The module files come first, so a source edit reuses the cached
+# Copying the module files first lets a source edit reuse the cached
 # download layer.
 COPY go.mod go.sum ./
-# go.mod replaces the shared kubernetes module with ../kubernetes, and
-# the build takes that directory as a second build context named
-# kubernetes. It lands at /kubernetes, the same place relative to /src
-# that kubernetes/ has relative to this component. Its module file
-# comes first for the same reason as this module's.
+# go.mod replaces the kubernetes module with ../kubernetes, so the
+# build takes that directory as the build context `kubernetes` and
+# copies it to /kubernetes, which is ../kubernetes relative to /src.
+# Its module files come first for the same caching reason.
 COPY --from=kubernetes go.mod go.sum /kubernetes/
 RUN go mod download
 COPY --from=kubernetes . /kubernetes/
 COPY *.go ./
-# The api role embeds the OpenAPI document at build time, so the
-# committed copy has to be in the tree the compiler sees.
+# The api embeds openapi.json.
 COPY openapi.json ./
-# The EDL package builds into the binary, so the source tree it needs
-# is the root files and this one directory.
 COPY edl/ ./edl/
-# CGO_ENABLED=0 with -trimpath is liken's own build discipline: a
-# static binary with no paths from the build machine in it. Static
-# even though this image has a libc, because the same build then serves
-# every image that holds it.
+# The binary is static even though this image has a libc, so that the
+# same build runs in every image that ships /media-operator-pod.
 RUN CGO_ENABLED=0 go build -trimpath -tags pod -ldflags "-s -w" -o /media-operator-pod .
-# The license files of the Go standard library and of each module that
-# the binary links. notices/go.sh says why the image needs them.
+# Collects the license files of the standard library and of each linked
+# module (notices/go.sh).
 COPY --from=notices go.sh /
 RUN CGO_ENABLED=0 GOFLAGS=-tags=pod sh /go.sh /notices .
 
-# The ffmpeg image carries ffmpeg with its demuxers and muxers. The
-# mux uses -c copy alone, so it reads two containers and writes one
-# without decoding a packet, and this image needs no codec and no GPU
-# on its node. The bake file at the top of the repository gives this
-# build the ffmpeg image of the same commit as the named context
-# ffmpeg.
+# The api runs ffmpeg with `-c copy`, which copies the video and audio
+# streams into one file without decoding them, so the node needs no
+# GPU. docker-bake.hcl supplies the ffmpeg image of the same commit as
+# the build context `ffmpeg`.
 FROM ffmpeg
 
 COPY --from=build /media-operator-pod /media-operator-pod
 COPY --from=build /notices /
 
-# The entrypoint is the binary in its api role, so the Deployment
-# names no arguments of its own. ffmpeg is a child process the api
-# starts once per composition and ends with it.
 ENTRYPOINT ["/media-operator-pod", "api"]

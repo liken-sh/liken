@@ -1,10 +1,9 @@
 package main
 
-// The command sidecar's own Prometheus metrics, plan 26's mpv row. The
-// sidecar is the one process that holds mpv's IPC socket, so the three
-// series here read properties no other process ever observes, on
-// baseMetrics' layer 1 alone: the sidecar's reconcile loop is mpv's own
-// socket, not a watch against the API server, so it has no layer 2.
+// The command sidecar serves the base metrics and the metrics that only
+// mpv's IPC socket can give: the decoder, dropped frames, and the A/V
+// offset. The sidecar does not watch the API server, so it serves none
+// of the operator's other metrics.
 
 import (
 	"encoding/json"
@@ -13,34 +12,27 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// commandBuildInfoComponent is the command sidecar's own name in
-// liken_build_info, distinct from the operator's so a panel that lists
-// every process in the cluster tells the two roles of this one binary
-// apart.
+// commandBuildInfoComponent is the sidecar's component label in
+// liken_build_info. The operator and the sidecar are the same binary,
+// so a dashboard tells them apart by this label.
 const commandBuildInfoComponent = "media-command"
 
-// commandMetricsPort is milestone 65's shared port for every process
-// on the cluster network: a Play lives in whatever namespace a
-// household put it in, so the PodMonitor that scrapes this port
-// reaches across every namespace instead of sitting beside one
-// Deployment the way the operator's own PodMonitor does.
+// commandMetricsPort is the port that the sidecar serves /metrics on,
+// the same port as the operator, the API, and the idle pod.
 const commandMetricsPort = 9200
 
-// hardwareYes and hardwareNo are media_decode_info's hardware label.
-// mpv's hwdec-current reports the decoder's own name, such as vaapi or
-// nvdec, or the literal string no for a software decode, so the label
-// folds that whole vocabulary down to the one question a dashboard
-// asks: is this room burning CPU on a decode a GPU could do for free.
+// hardwareYes and hardwareNo are the values of the hardware label of
+// media_decode_info. mpv's hwdec-current is the name of a hardware
+// decoder, such as vaapi or nvdec, or "no" for a software decode. The
+// label keeps only whether a GPU decodes the video.
 const (
 	hardwareYes = "true"
 	hardwareNo  = "false"
 )
 
-// commandMetrics holds the three series plan 26 gives the command
-// sidecar. mpv's own socket delivers every property on its own
-// goroutine, and runReporter's loop is the one reader, so the mutex
-// here is only what lets a test read a value back while the loop still
-// holds it.
+// commandMetrics holds the metrics that the sidecar computes from mpv's
+// properties. observe and clearDecode run on different goroutines, so
+// mu covers the fields below it.
 type commandMetrics struct {
 	baseMetrics
 
@@ -49,28 +41,22 @@ type commandMetrics struct {
 	avDelay       prometheus.Gauge
 
 	mu sync.Mutex
-	// codec and hardware are the two properties as mpv last reported
-	// them; published is what media_decode_info currently shows, which
-	// lags codec and hardware until both sides of publishDecodeLocked
-	// agree there is something to show.
+	// codec and hardware are the last values mpv reported.
+	// publishedCodec and publishedHardware are the labels of the series
+	// that media_decode_info has now, when published is true.
 	codec, hardware                   string
 	haveCodec, haveHardware           bool
 	publishedCodec, publishedHardware string
 	published                         bool
 
-	// framesBaseline is the frame-drop-count mpv reported last, zero
-	// until any file has reported one. A new file resets mpv's own
-	// counter, so a value under the baseline starts a new one instead
-	// of subtracting, and only a rise adds to the Prometheus counter,
-	// which is never allowed to fall.
+	// framesBaseline is the last frame-drop-count that mpv reported, or
+	// zero before any.
 	framesBaseline int64
 }
 
-// newCommandMetrics builds the command sidecar's metrics on a fresh
-// registry. version is what liken_build_info reports: the operator
-// reads the sidecar image's own tag and passes it down the way it
-// does for the idle screen, so a mixed fleet shows the release each
-// running film actually plays under.
+// newCommandMetrics returns the sidecar's metrics on a new registry.
+// version is the sidecar image's tag, which the operator passes to the
+// sidecar, so liken_build_info shows the release that each Play runs.
 func newCommandMetrics(version string) *commandMetrics {
 	base := newBaseMetrics(commandBuildInfoComponent, version)
 	m := &commandMetrics{
@@ -92,10 +78,8 @@ func newCommandMetrics(version string) *commandMetrics {
 	return m
 }
 
-// observe folds one property change from mpv's socket into whichever
-// series it belongs to. A change readEvents never delivers for an
-// unobserved property, and a null value before mpv knows an answer,
-// both leave every series exactly as they were.
+// observe updates the metric of the changed property. It ignores a null
+// value, which mpv sends for a property that has no value yet.
 func (m *commandMetrics) observe(change propertyChange) {
 	if !change.known() {
 		return
@@ -104,17 +88,17 @@ func (m *commandMetrics) observe(change propertyChange) {
 	case codecProperty:
 		var codec string
 		if json.Unmarshal(change.Data, &codec) == nil {
-			m.noteCodec(codec)
+			m.recordCodec(codec)
 		}
 	case hardwareProperty:
 		var hwdec string
 		if json.Unmarshal(change.Data, &hwdec) == nil {
-			m.noteHardware(hwdec)
+			m.recordHardware(hwdec)
 		}
 	case droppedFramesProperty:
 		var count int64
 		if json.Unmarshal(change.Data, &count) == nil {
-			m.noteDroppedFrames(count)
+			m.recordDroppedFrames(count)
 		}
 	case delayProperty:
 		var seconds float64
@@ -124,31 +108,25 @@ func (m *commandMetrics) observe(change propertyChange) {
 	}
 }
 
-// noteCodec records mpv's current-tracks/video/codec and republishes
-// media_decode_info if the published series no longer matches.
-func (m *commandMetrics) noteCodec(codec string) {
+func (m *commandMetrics) recordCodec(codec string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.codec, m.haveCodec = codec, true
 	m.publishDecodeLocked()
 }
 
-// noteHardware records mpv's hwdec-current and republishes
-// media_decode_info if the published series no longer matches.
-func (m *commandMetrics) noteHardware(hwdec string) {
+func (m *commandMetrics) recordHardware(hwdec string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.hardware, m.haveHardware = hwdec, true
 	m.publishDecodeLocked()
 }
 
-// publishDecodeLocked resets media_decode_info to the codec and
-// hardware this run now holds, so exactly one label combination reads
-// 1 at a time, the way an info gauge must. The caller holds mu. It
-// waits for a codec before it publishes anything, because a hardware
-// reading with no codec names nothing a dashboard could show; an
-// unset hwdec-current reads as software, since mpv reports no before
-// it ever reports a decoder's name.
+// publishDecodeLocked replaces the series of media_decode_info with one
+// for the current codec and hardware, so the info metric has one series
+// at a time. The caller holds mu. It publishes nothing until mpv reports
+// a codec, because the hardware label alone tells a dashboard nothing.
+// A hardware value that is unset, empty, or "no" counts as software.
 func (m *commandMetrics) publishDecodeLocked() {
 	if !m.haveCodec {
 		return
@@ -167,18 +145,15 @@ func (m *commandMetrics) publishDecodeLocked() {
 	m.publishedCodec, m.publishedHardware, m.published = m.codec, hardware, true
 }
 
-// noteDroppedFrames folds mpv's own running count into the total this
-// counter has added since the baseline last reset. The baseline starts
-// at zero, so the first count any file reports adds in full: mpv
-// answers observe_property with the current value at once, and a
-// title already mid-decode by the time the sidecar attaches has
-// really dropped whatever it reports.
+// recordDroppedFrames adds the frames dropped since the previous count to
+// media_dropped_frames_total. The baseline starts at zero, so when the
+// sidecar connects during a file, the frames that mpv dropped before it
+// connected count too.
 //
-// mpv resets its own count to zero on every new file in the playlist,
-// so a value under the last one read is not a fact to add against it;
-// it is never subtracted, and it becomes the baseline the next file's
-// deltas measure from instead.
-func (m *commandMetrics) noteDroppedFrames(count int64) {
+// mpv resets its count to zero for each new file. A count below the
+// baseline adds nothing and becomes the new baseline, because a
+// Prometheus counter must not fall.
+func (m *commandMetrics) recordDroppedFrames(count int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if count > m.framesBaseline {
@@ -187,11 +162,10 @@ func (m *commandMetrics) noteDroppedFrames(count int64) {
 	m.framesBaseline = count
 }
 
-// clearDecode drops the published decode series and resets the delay
-// gauge, on the two moments this run's mpv facts stop describing
-// anything live: the file it was about ends, and the socket to mpv
-// drops. The frame baseline resets too, so the file that follows
-// starts its own count instead of measuring against one that is gone.
+// clearDecode deletes the decode series, sets the delay to zero, and
+// resets the frame baseline. The sidecar calls it when the playlist
+// moves to another item and when the connection to mpv closes, because
+// the values describe the file that mpv was playing.
 func (m *commandMetrics) clearDecode() {
 	m.mu.Lock()
 	defer m.mu.Unlock()

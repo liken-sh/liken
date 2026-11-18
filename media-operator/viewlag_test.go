@@ -1,11 +1,11 @@
 package main
 
-// These tests cover a view that is behind the API server. A watch takes
-// a change a moment after the API server writes it, so the pass that
-// follows a create or a delete can read the view before the change has
-// arrived. The pass decides from the view, and before it acts it reads
-// the API server again, so a view that is behind never makes a second
-// create, a second delete, or a line about an act that did not happen.
+// These tests run a pass against a view that is behind the API server.
+// A watch delivers a change shortly after the write, so a pass right
+// after a create or a delete can read a view without it. The pass
+// decides from the view and reads the API server again before it acts,
+// so a stale view causes no second create, no second delete, and no log
+// line about an action that did not happen.
 
 import (
 	"strings"
@@ -14,9 +14,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
-// A playback pod the last pass created, which the view does not hold
-// yet, is read from the API server and kept. The pass creates nothing
-// and writes no line.
 func TestAPlaybackPodTheViewHasNotSeenIsNotCreatedAgain(t *testing.T) {
 	cluster := runningCluster(housePlayer())
 	cluster.unseen["movie-playback"] = true
@@ -30,8 +27,8 @@ func TestAPlaybackPodTheViewHasNotSeenIsNotCreatedAgain(t *testing.T) {
 	mustMatch(t, len(media.recreateBackoff), 0)
 }
 
-// A playback pod the view still shows as Failed, which the API server
-// already holds on its way out, is not replaced a second time, and the
+// The view shows the playback pod as Failed, and the API server shows it
+// with a deletionTimestamp. The pass does not delete it again, and the
 // recreate backoff does not advance.
 func TestAFailedPodTheAPIServerAlreadyReleasedIsNotReplacedAgain(t *testing.T) {
 	cluster := runningCluster(housePlayer())
@@ -47,9 +44,7 @@ func TestAFailedPodTheAPIServerAlreadyReleasedIsNotReplacedAgain(t *testing.T) {
 	mustMatch(t, len(media.recreateBackoff), 0)
 }
 
-// A reader pod the last pass created, which the view does not hold yet,
-// is read from the API server and kept, with no second create and no
-// line.
+// The same holds for a Remote's reader pod.
 func TestAStandingPodTheViewHasNotSeenIsNotCreatedAgain(t *testing.T) {
 	cluster, media := settledHouse(t, make(chan struct{}, 8))
 	cluster.unseen[remotePodName("sofa")] = true
@@ -64,10 +59,10 @@ func TestAStandingPodTheViewHasNotSeenIsNotCreatedAgain(t *testing.T) {
 	mustMatchAll(t, linesAbout(&log, "remote house/sofa"), nil)
 }
 
-// A reader pod an older release created carries the template this pass
-// builds and no component label, so the pods watch does not select it. The
-// pass labels it in place and keeps it running, and the next pass finds
-// it in the view.
+// A reader pod that an older release created has no component label,
+// so the pods watch does not select it. The pass adds the label to the
+// running pod, and the next pass finds the pod in the view and sends no
+// request.
 func TestAReaderPodWithoutTheComponentLabelIsLabeledInPlace(t *testing.T) {
 	cluster, media := settledHouse(t, make(chan struct{}, 8))
 	delete(cluster.pods[remotePodName("sofa")].Metadata.Labels, playbackLabelKey)
@@ -85,8 +80,6 @@ func TestAReaderPodWithoutTheComponentLabelIsLabeledInPlace(t *testing.T) {
 	mustMatchAll(t, cluster.requests, nil)
 }
 
-// The reader pod names its component, so the operator's pod watch
-// selects it beside the playback and idle pods.
 func TestTheReaderPodCarriesTheComponentLabel(t *testing.T) {
 	pod := buildRemotePod(houseRemote("gamepad"), buildRemoteClaim(houseRemote("gamepad")),
 		"registry.example/sidecar:test", "bus.media.svc:1883", defaultTopicBase)
@@ -95,10 +88,10 @@ func TestTheReaderPodCarriesTheComponentLabel(t *testing.T) {
 	mustMatch(t, strings.Contains(ownPodsSelector, remoteLabelValue), true)
 }
 
-// A Play applied in one file with its Player can reach the view first,
-// because each collection has a watch of its own. A run with no pod
-// reads its Player from the API server, so the Play starts instead of
-// waiting on a Player the API server already holds.
+// A Play applied in the same file as its Player can reach the view
+// first, because each resource has its own watch. A run with no pod
+// reads a Player that the view lacks from the API server, so the Play
+// starts.
 func TestAPlayWhosePlayerTheViewHasNotSeenStarts(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
@@ -114,8 +107,7 @@ func TestAPlayWhosePlayerTheViewHasNotSeenStarts(t *testing.T) {
 	mustMatch(t, cluster.plays["movie"].Status.Message, "")
 }
 
-// The same holds for a Remote the Player names: the run reads it from
-// the API server, so the Play does not fail for a Remote that exists.
+// The same holds for the Remote that the Player names.
 func TestAPlayWhoseRemoteTheViewHasNotSeenStarts(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
@@ -132,10 +124,10 @@ func TestAPlayWhoseRemoteTheViewHasNotSeenStarts(t *testing.T) {
 	mustMatch(t, cluster.plays["movie"].Status.Phase, phasePending)
 }
 
-// A pass that reads a Play one write behind, before this operator's own
-// status write has reached the view, meets a conflict, reads the Play
-// again, and finds the status already written. It neither logs the
-// phase change a second time nor counts a second start.
+// A pass can read a Play from the view before the view has the
+// operator's own last status write. Its write then fails with a
+// conflict, it reads the Play again, and it finds the status already
+// written, so it does not log or count the phase change again.
 func TestAPassOneWriteBehindLogsAndCountsNoPhaseChange(t *testing.T) {
 	cluster := runningCluster(housePlayer())
 	cluster.plays["movie"].Metadata.Finalizers = []string{playFinalizer}
@@ -154,25 +146,26 @@ func TestAPassOneWriteBehindLogsAndCountsNoPhaseChange(t *testing.T) {
 	mustMatch(t, cluster.plays["movie"].Status.Phase, phaseRunning)
 }
 
-// An idle pod an older release created without the component label is
-// one the pods watch does not select. When the pass wants no idle pod,
-// because a delegate draws the idle screen, it reads the pod from the
-// API server and deletes it. The next pass reads it once more and finds
-// it gone, and every pass after that reads the view alone.
+// The pods watch does not select an idle pod that an older release
+// created without the component label. When another controller draws
+// the idle screen, the Player needs no idle pod, so the pass reads the
+// pod from the API server and deletes it. The next pass reads the API
+// server once more and finds the pod gone, and later passes send no
+// request.
 func TestAnUnlabeledPodThePassWantsGoneIsDeleted(t *testing.T) {
 	cluster := newFakeCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	media.idleDisplayClass = "display-draw"
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 	claim := buildIdleClaim(player, media.idleDisplayClass)
 	pod := plainIdlePod(player, claim, testBusAddress, testTopicBase, "America/New_York")
 	pod.Metadata.Labels = nil
-	seedStanding(t, cluster, claim, pod)
+	seedPersistent(t, cluster, claim, pod)
 	player.Spec.Idle = &IdlePolicy{Controller: "library.liken.sh/media-browser"}
 
 	mustSucceed(t, media.reconcileIdle(player, "America/New_York", nil))
-	_, stands := cluster.pods["theater-idle"]
-	mustMatch(t, stands, false)
+	_, exists := cluster.pods["theater-idle"]
+	mustMatch(t, exists, false)
 
 	mustSucceed(t, media.reconcileIdle(player, "America/New_York", nil))
 	cluster.requests = nil
@@ -180,10 +173,10 @@ func TestAnUnlabeledPodThePassWantsGoneIsDeleted(t *testing.T) {
 	mustMatchAll(t, cluster.requests, nil)
 }
 
-// A Player edit can reach the view after the pod the edit reshaped. A
-// pass that reads the old Player from the view finds the pod diverged,
-// reads the Player again from the API server, finds the pod already
-// built from the edit, and replaces nothing.
+// A Player edit can reach the view after the pod that the edit changed.
+// The pod does not match the old Player in the view, so the pass reads
+// the Player from the API server, finds that the pod matches the edit,
+// and replaces nothing.
 func TestAPodBuiltFromAPlayerEditTheViewHasNotSeenIsKept(t *testing.T) {
 	cluster := runningCluster(brightPlayer())
 	stale := runningCluster(housePlayer())
@@ -199,10 +192,10 @@ func TestAPodBuiltFromAPlayerEditTheViewHasNotSeenIsKept(t *testing.T) {
 	mustMatch(t, countPathRequests(cluster.requests, "GET "+playerPath("house", "theater")), 1)
 }
 
-// An ending that names the pod the pass replaced labels nothing, even
-// while the view still holds that pod under the name. The merge patch
-// names the pod by its name alone, so a patch on the view's evidence
-// would label the new pod and fade a film that plays.
+// A report that the old pod ended labels no pod, even while the view
+// still has the old pod under the same name. The merge patch selects
+// the pod by name alone, so a patch based on the view would label the
+// new pod and end playback that is still running.
 func TestAnEndingOfAReplacedPodLabelsNothingWhileTheViewLags(t *testing.T) {
 	cluster := runningCluster(housePlayer())
 	cluster.pods["movie-playback"].Metadata.UID = "new-pod"

@@ -1,5 +1,5 @@
-// The binary reads the flags and the wiring. A bad flag stops the run before a
-// window opens.
+// The idle screen binary. It reads the environment and the flags, and
+// exits on an invalid flag before it opens a window.
 
 use idle_screen::client::{CLIENT, Client};
 use idle_screen::harness::options::help;
@@ -8,23 +8,18 @@ use idle_screen::metrics;
 use idle_screen::wiring::Wiring;
 
 fn main() {
-    // The environment is read once here. The client takes the broker, the
-    // topics, and the seeds, and the harness takes the window grace, which
-    // arms the watchdog.
     let wiring = Wiring::from_environment();
 
-    // In a pod, this process runs the client as its child and starts it
-    // again when a compositor restart takes its window (harness/respawn.rs).
-    // It returns before the listener below, so only the child binds the
-    // metrics port.
+    // In a pod, `supervise` runs this binary again as a child process and
+    // starts the child again after each compositor restart
+    // (`harness/respawn.rs`). The parent exits here, before the metrics
+    // listener starts, so only the child binds the metrics port.
     if let Some(status) = harness::respawn::supervise(wiring.window_grace.is_some()) {
         std::process::exit(status);
     }
 
-    // The listener starts before the client opens its own reader, so a
-    // scrape between start and the first bus session still reads a stated
-    // value. A failure here never stops the run: the screen this pod exists
-    // to draw does not depend on a Prometheus reading it.
+    // Start the listener before `Client::open` connects to the bus, so a
+    // scrape before the first bus session returns the metrics.
     if let Some(address) = metrics::address(&wiring.screen.metrics_address) {
         metrics::serve(address, CLIENT, &wiring.screen.version);
     }

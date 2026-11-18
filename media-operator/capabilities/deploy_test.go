@@ -11,8 +11,8 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// documentsOf decodes each document of a manifest file whose kind
-// matches into T.
+// documentsOf decodes every YAML document of kind `kind` in the file
+// into a T, and fails the test when there is none.
 func documentsOf[T any](t *testing.T, path, kind string) []T {
 	t.Helper()
 	raw, err := os.ReadFile(path)
@@ -31,15 +31,17 @@ func documentsOf[T any](t *testing.T, path, kind string) []T {
 		out = append(out, found)
 	}
 	if len(out) == 0 {
-		t.Fatalf("%s holds no %s", path, kind)
+		t.Fatalf("%s has no %s document", path, kind)
 	}
 	return out
 }
 
-// A person keeps the pod off a node with no GPU by one label on that
-// node. NotIn also matches a node with no such label, so the
-// requirement must be the only term and the only expression in it.
-func TestTheDaemonSetStaysOffANodeLabeledNone(t *testing.T) {
+// An administrator labels a node that has no GPU
+// media.liken.sh/gpu=none to keep the pod off it, and every other node
+// must get a pod. Node selector terms are ORed, so a second term could
+// place the pod on a node labeled none. A second expression in the term
+// could keep the pod off an unlabeled node.
+func TestDaemonSetAffinityExcludesOnlyNodesLabeledGpuNone(t *testing.T) {
 	daemonSet := documentsOf[appsv1.DaemonSet](t, "../deploy/capabilities.yaml", "DaemonSet")[0]
 	affinity := daemonSet.Spec.Template.Spec.Affinity
 	if affinity == nil || affinity.NodeAffinity == nil ||
@@ -50,13 +52,13 @@ func TestTheDaemonSetStaysOffANodeLabeledNone(t *testing.T) {
 	want := corev1.NodeSelectorRequirement{Key: "media.liken.sh/gpu", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"none"}}
 	if len(terms) != 1 || len(terms[0].MatchExpressions) != 1 ||
 		!equality.Semantic.DeepEqual(terms[0].MatchExpressions[0], want) {
-		t.Errorf("the node affinity is %+v, want one term that holds only %+v", terms, want)
+		t.Errorf("the node affinity is %+v, want one term with only %+v", terms, want)
 	}
 }
 
-// The agent finds its claim in its pod's status by the name the pod
-// spec gives it.
-func TestThePodNamesTheClaimTheAgentReads(t *testing.T) {
+// The agent finds its claim in the pod's status by claimName, so the
+// pod spec must declare its claim under that name.
+func TestPodDeclaresTheClaimTheAgentReads(t *testing.T) {
 	daemonSet := documentsOf[appsv1.DaemonSet](t, "../deploy/capabilities.yaml", "DaemonSet")[0]
 	claims := daemonSet.Spec.Template.Spec.ResourceClaims
 	if len(claims) != 1 || claims[0].Name != claimName {

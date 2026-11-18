@@ -1,20 +1,15 @@
 package main
 
-// What a TV remote's Stop Function does to a running film. HDMI-CEC
-// 1.3a, CEC 13.13.3, says it stops the media and keeps it stopped when
-// repeated, and a Play that ended has nothing left to stop.
-
 import (
 	"testing"
 	"testing/synctest"
 )
 
-// A stop ends the run the way the display's exit does, and asks the
-// client nothing, so the unit returns to its idle screen.
+// A KEY_STOPCD press publishes the run's ending and quits mpv.
 func TestAStopPressEndsTheRun(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, broker, lines := keyTestCommander(t)
-		c.statusTopic = playStatusTopic(defaultTopicBase, keyTestPlayNS, keyTestPlayrun)
+		c.statusTopic = playStatusTopic(defaultTopicBase, keyTestPlayNS, keyTestPlay)
 		c.playerCommandsTopic = playerCommandsTopic(defaultTopicBase, keyTestPlayNS, keyTestPlayer)
 		c.lastReport = playReport{Item: 1, Position: "0:20:00"}
 		c.haveReport = true

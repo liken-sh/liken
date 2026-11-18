@@ -1,84 +1,76 @@
 ---
 name: record
-description: "Capture a Player's screen and sound as one MP4 or MKV with the kubectl liken media capture command, or over HTTP with kubectl and curl. Use to record what a media unit is playing right now."
+description: "Capture a Player's screen and sound as one MP4 or MKV with the kubectl liken media capture command, or over HTTP with kubectl and curl. Use to record what a Player is playing right now."
 ---
 
 This skill is the guide at https://liken.sh/media/docs/guides/record/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
 # Record what a player is playing
 
-This guide shows you how to record a `Player`: the screen and the
-sound of one unit, muxed into one MP4 or MKV file. It also shows the
-plain screen and audio routes, which redirect to the operator that
-owns the hardware. You need the operator
+This guide shows you how to record a `Player`'s screen and sound
+into one MP4 or MKV file. You need the operator
 [installed](https://liken.sh/media/docs/guides/install/) on your
 [`liken`](https://liken.sh/docs/) cluster and a
 [`Player`](https://liken.sh/media/docs/reference/players/) that has a screen.
 
-`media-api` serves the routes for a `Player`. It is one `Deployment`
-per cluster, in `liken-system`, next to the operator. Its screen
-routes redirect to `display-api` and its audio routes redirect to
-`audio-api`, because those operators own the hardware. Its media
-routes combine the two into one muxed stream, which no other API
-does. The [API reference](https://liken.sh/media/docs/reference/api/) has the full
-contract. This guide is the short path through it.
+`media-api` serves the recording routes of every `Player`. It is a
+`Deployment` in `liken-system`, next to the operator. Its `media`
+routes mux the screen and the sound into one stream. Its `screen`
+routes redirect to `display-api` and its `audio` routes redirect to
+`audio-api`, because those operators own the hardware. The
+[API reference](https://liken.sh/media/docs/reference/api/) has the full contract.
 
 ## The `kubectl liken media capture` command
 
-The short path is the CLI. `kubectl liken media capture` streams a
-`Player`'s composed video and sound to stdout as one MP4, so a file
-or a pipe is a single command:
+The quickest way to record is the CLI. `kubectl liken media capture`
+writes a `Player`'s video and sound to stdout as one MP4:
 
     kubectl liken media capture living-room -n media > living-room.mp4
     kubectl liken media capture living-room -n media | mpv -
 
-`--format mkv` writes Matroska instead, and `-n` (or `--namespace`)
-names the `Player`'s namespace.
+`--format mkv` writes Matroska instead. `-n` (or `--namespace`) sets
+the `Player`'s namespace.
 
-The CLI authenticates with the client certificate in your
-kubeconfig, the same subject `kubectl` uses, so the grant that step
-1 describes is all it needs. It opens its own port-forward to
-`media-api` and reads the composed stream through it, so it needs no
-in-cluster routing and runs from a laptop.
+The CLI sends the bearer token or the client certificate of your
+current kubeconfig context, so it records as the same user as
+`kubectl`, and it needs only the grant in step 1. It opens its own
+port-forward to `media-api`, so it works from a laptop outside the
+cluster.
 
-The `Player` argument completes to the names the cluster reports.
-`kubectl` runs the plugin's completion shim on its own, so
 `kubectl liken media capture <TAB>` lists the `Player`s in the
-namespace. For a direct call to `kubectl-liken-media`, load the
-script with `source <(kubectl liken media completion bash)`.
+namespace. To complete a direct call to `kubectl-liken-media`, load
+the script with `source <(kubectl liken media completion bash)`.
 
-The numbered steps below are the HTTP contract the CLI calls, for an
-application in the cluster or a capture the CLI does not cover.
+The numbered steps below use the HTTP routes that the CLI calls. Use
+them from an application in the cluster, or for a capture that the
+CLI does not offer, such as a still or a cropped frame.
 
 ## 1. Who may record
 
-You can identify yourself with a client certificate or with a
-Bearer token. `media-api` checks for a certificate first, then for
-a token, in the same order as the Kubernetes API server.
+You identify yourself with a client certificate or a bearer token.
+`media-api` checks for a certificate first, as the Kubernetes API
+server does.
 
-If your connection presents a client certificate signed by the
-cluster's own certificate authority, you are that certificate's
-subject. Your user name is the subject's common name, and your
-groups are its organization values. The credentials in your
-kubeconfig identify you here the same way they identify you to
-`kubectl`. A certificate from any other authority ends the TLS
-handshake.
+A client certificate must be signed by the cluster's certificate
+authority. A certificate from any other authority fails the TLS
+handshake. Your user name is the certificate's common name, and your
+groups are its organization values, as they are for `kubectl`.
 
-If you present no certificate, send a Bearer token. `media-api`
-verifies it with a `TokenReview` for the audience `media-api` and
-checks `status.audiences`. A pod's default API server token does
-not have that audience, so it does not work here.
+Without a certificate, send a bearer token for the audience
+`media-api`. `media-api` checks it with a `TokenReview` and refuses a
+token whose `status.audiences` does not include `media-api`. A pod's
+default service account token has the API server's audience, so it
+does not work here.
 
-After it identifies you, `media-api` sends a
-`SubjectAccessReview` for the verb `get` on `players/screen`,
-`players/audio`, or `players/media` in the group `media.liken.sh`,
-with the `Player`'s namespace from the path.
+`media-api` then sends a `SubjectAccessReview` for the verb `get` on
+`players/screen`, `players/audio`, or `players/media` in the group
+`media.liken.sh`, in the `Player`'s namespace.
 
-The operator ships the `ClusterRole` `media-capture-viewer`, with
+The operator ships the `ClusterRole` `media-capture-viewer`. It grants
 `get` on those three subresources and on `players`, so one binding
-covers the info route and the captures together. A `Player` is
-namespaced, so bind the role per namespace. Read your own subject
-from your kubeconfig:
+covers the info route and every capture. Bind it in each namespace
+whose `Player`s you record. To find your user name, read the subject
+of your kubeconfig's certificate:
 
     kubectl config view --raw --minify \
       -o jsonpath='{.users[0].user.client-certificate-data}' \
@@ -125,26 +117,25 @@ An application gets the grant through its `ServiceAccount`:
         name: media-viewer
         namespace: media
 
-The composed route needs `players/media` and nothing else, because
-`media-api` calls the sibling APIs under its own `ServiceAccount`. A
-redirect includes no credentials. You must follow the 307 with your
-own credentials. `display-api` then checks `displays/screen` for your
-subject. To use the plain screen and audio routes, you also need a
-grant on the `Display` and on each `Sink`. The
+The `media` routes need only `players/media`, because `media-api`
+reads the `Display` and the `Sink`s with its own `ServiceAccount`. So
+a grant on `players/media` lets the subject record the `Player`'s
+`Display` and `Sink`s even without a grant on them. The `screen` and
+`audio` routes are different. They redirect, and you follow the
+redirect with your own credentials, so `display-api` and `audio-api`
+check your own grant on the `Display` and on each `Sink`. The
 [display](https://liken.sh/display/docs/guides/screenshot/) and
-[audio](https://liken.sh/audio/docs/guides/listen/) guides show
-those grants.
+[audio](https://liken.sh/audio/docs/guides/listen/) guides show those
+grants.
 
-`players/media` on a `Player` is in effect a grant on that
-`Player`'s `Display` and `Sink`s. A role that grants
-`resources: ["*"]` in `media.liken.sh` already includes every
-capture, and so does `cluster-admin`.
+A role that grants `resources: ["*"]` in `media.liken.sh` already
+allows every capture, and so does `cluster-admin`.
 
-Every request that returned bytes writes a `Captured` `Event` on the
+Each request that returns bytes posts a `Captured` `Event` on the
 `Player`, with the subject and the aspect in its message. A redirect
-and a 503 return no bytes, so they write none. The same subject who
-takes the same capture again within ten minutes adds to the count of
-one `Event`.
+and a 503 return no bytes, so they post none. When the same subject
+takes the same capture again within ten minutes, the count of the
+existing `Event` goes up.
 
 ## 2. Reach the API
 
@@ -155,12 +146,10 @@ certificate authority. That authority's certificate is in the
 `ca.crt`. `display-api` and `audio-api` publish theirs the same way,
 in `display-api-ca` and `audio-api-ca`.
 
-A port-forward is a single TCP connection through the API server.
-The composed route works through one, because `media-api` fetches
-the upstream streams itself. A redirect does not. Its `Location`
-names another `Service`, so you would need a second port-forward to
-that `Service`. Record from a pod on the cluster network instead,
-which is what the rest of this guide does.
+The `media` routes work through a port-forward, because `media-api`
+fetches the screen and the sound itself. A redirect does not work
+through one, because its `Location` names another `Service`. So the
+rest of this guide records from a pod in the cluster.
 
 Put your client certificate and its key in a `Secret` that the pod
 can mount:
@@ -212,22 +201,20 @@ follow a redirect to a sibling API:
             secretName: media-client
 
 The pod is in `liken-system` because a volume can only read a
-`ConfigMap` or a `Secret` from the pod's own namespace. The pod
-sleeps for an hour and then exits, so a pod you forget does not run
-forever.
+`ConfigMap` or a `Secret` from the pod's own namespace. It exits after
+an hour, so a pod you forget does not run forever.
 
     kubectl apply -f record-pod.yaml
     kubectl -n liken-system wait --for=condition=Ready pod/record --timeout 60s
 
-`curl` takes one `--cacert` file, and a redirect crosses from one
-API to another. Join the three certificates into one bundle inside
-the pod, once:
+`curl` takes one `--cacert` file, and a redirect goes from one API to
+another, so join the three certificates into one file inside the pod:
 
     kubectl -n liken-system exec record -- sh -c 'cat /ca/*.crt > /tmp/ca.crt'
 
 An application needs no `Secret`. It runs as the `ServiceAccount`
-you bound in step 1, mounts a token for the API's audience, and
-sends it as `Authorization: Bearer`:
+that you bound in step 1, mounts a token for the audience
+`media-api`, and sends it as `Authorization: Bearer`:
 
     volumes:
       - name: token
@@ -238,14 +225,12 @@ sends it as `Authorization: Bearer`:
                 expirationSeconds: 3600
                 path: token
 
-Follow a redirect in two steps, never with `curl -L`. `curl` 8.22.0
-sends no client certificate after a redirect to another host, and it
-drops `Authorization` there too, so the sibling API returns 401. The
-credential itself is valid at the sibling: your certificate
-identifies the same subject at `display-api` as it does here,
-because the three APIs read the same authority. A token is for one
-audience only, so a token caller mints a second token for the
-sibling's audience.
+Follow a redirect in two steps, not with `curl -L`. `curl` 8.22.0
+sends no client certificate and no `Authorization` header after a
+redirect to another host, so the other API returns 401. Your
+certificate is valid there, because the three APIs trust the same
+certificate authority. A token is valid for one audience only, so
+mint a second token for the other API's audience.
 
 ## 3. Take the recording
 
@@ -253,17 +238,17 @@ List the players and pick one:
 
     kubectl -n media get players
 
-Before you record, ask what the `Player` has. The info route returns
-the `Display` name and node, each `Sink` name, whether a `Play` is
-running, and the number of streams:
+Before you record, check what the `Player` has. The info route returns
+the `Display` and its node, the `Sink`s, whether a `Play` is running,
+and `streams`, the number of streams a recording would mux:
 
     kubectl -n liken-system exec record -- curl -sS --fail-with-body \
       --cacert /tmp/ca.crt --cert /client/tls.crt --key /client/tls.key \
       https://media-api.liken-system.svc/v1/media/namespaces/media/players/living-room
 
-Every command below runs in the pod from step 2 and writes its file
+Each command below runs in the pod from step 2 and writes its file
 there. `--fail-with-body` makes `curl` exit non-zero on an error and
-still write the problem document, which step 4 reads.
+still write the error document to the file, which step 4 reads.
 
 Ten seconds of the screen with its sound, as MP4:
 
@@ -279,30 +264,28 @@ The same span as Matroska, scaled to 960 pixels wide:
       -o /tmp/living-room.mkv \
       'https://media-api.liken-system.svc/v1/media/namespaces/media/players/living-room/media.mkv?t=0,10&width=960'
 
-`media.mp4` is H.264 in fragmented MP4 with Opus audio: one video
-track if the `Player` has a screen, and one audio track per `Sink`
-in `spec.sinks` order. `media.mkv` is the same streams through the
-Matroska muxer.
+`media.mp4` is H.264 video in fragmented MP4 with Opus audio. It has
+one video track if the `Player` has a screen, and one audio track for
+each `Sink`, in the order of `spec.sinks`. `media.mkv` has the same
+tracks in a Matroska container.
 
-Check `streams` on the info route before you run either command. A
-`Player` with only one stream returns 307 to that stream instead of
-composing, and a `Player` with no running `Play` has its screen
-alone. A 307 is not an error, so `--fail-with-body` does not catch
-it. The command then exits 0 and leaves an empty file. Follow the
-redirect as the next section shows.
+When `streams` is 0, both commands return 409. A `Player` with no
+running `Play` has only its screen, so its file has a video track and
+no audio track. The `media` routes never redirect, even for one
+stream.
 
 ### The routes that redirect
 
-The plain screen and audio routes return 307 to the sibling API that
-owns the hardware. Read the redirect first:
+The `screen` and `audio` routes return 307 to the API that owns the
+hardware. To see the redirect:
 
     kubectl -n liken-system exec record -- curl -sS -i \
       --cacert /tmp/ca.crt --cert /client/tls.crt --key /client/tls.key \
       https://media-api.liken-system.svc/v1/media/namespaces/media/players/living-room/screen.png
 
 `Location` is the `display-api` route for this `Player`'s `Display`,
-and `Link` points to the composed `media.mp4` as `related`. Read
-that `Location` into a variable, then request it:
+and `Link` points to `media.mp4` as `related`. Read the `Location`
+into a variable, then request it:
 
     kubectl -n liken-system exec record -- sh -c '
       url=$(curl -sS -o /dev/null -w "%{redirect_url}" --cacert /tmp/ca.crt \
@@ -320,10 +303,9 @@ Five seconds of the sound alone, which redirects to `audio-api`:
       curl -sS --fail-with-body --cacert /tmp/ca.crt \
         --cert /client/tls.crt --key /client/tls.key -o /tmp/living-room.wav "$url"'
 
-An empty `url` means the route returned something other than a 307.
-A `Player` with no running `Play` returns 409 on its audio routes.
-In that case, drop the second `curl` and read the first response
-with `-i`.
+An empty `url` means the route returned something other than a 307,
+such as the 409 of an `audio` route when no `Play` is running. Run the
+first `curl` alone with `-i` to read that response.
 
 ### The query parameters
 
@@ -336,11 +318,12 @@ with `-i`.
 | `quality=` | JPEG quality of a still. |
 | `bitrate=` | Opus bitrate of the sound. |
 
-Each parameter goes to the sibling API that serves that half of the
-recording. The extensions are `.mp4` and `.mkv` on `media`, the
-display operator's four on `screen`, and the audio operator's three
-on `audio`. A path with no extension negotiates on `Accept`, and
-`media` returns `video/mp4` if you send none.
+`media-api` passes each parameter on to the API that serves the
+screen or the sound. The `media` routes take `.mp4` and `.mkv`, the
+`screen` routes take `.png`, `.jpg`, `.mp4`, and `.mjpeg`, and the
+`audio` routes take `.wav`, `.flac`, and `.opus`. A path with no
+extension chooses the format from `Accept`, and `media` returns
+`video/mp4` when you send no `Accept`.
 
 ## 4. Check what you got
 
@@ -349,40 +332,37 @@ Copy a file out of the pod and read it with `ffprobe`:
     kubectl -n liken-system cp record:/tmp/living-room.mp4 living-room.mp4
     ffprobe living-room.mp4
 
-A composed file has two streams: `h264` at the size of the screen,
-and `opus` at the sink's sample rate. The duration is the `t=` span.
+A composed file from a `Player` with one `Sink` has two streams:
+`h264` at the size of the screen, and `opus` at the sink's sample rate.
+The duration is the `t=` span.
 
-The first byte arrives after a lead-in of one second plus the slower
-sibling's first keyframe. The muxer writes nothing until it has a
-keyframe from the video and a packet from each sink, and a screen
-capture at the default 15 frames per second has a keyframe every
-second. In our tests, `media.mp4?t=0,10` took 4.09 to 4.34 s to
-first byte over ten runs, and `media.mkv` took 4.18 s.
+The first bytes arrive a few seconds after the request, because the
+muxer writes nothing until it has a video keyframe and a packet from
+each sink. The screen capture sends a keyframe every second.
 
-The cluster's own record of the recording is an `Event` on the
-`Player`, in the `Player`'s namespace:
+Each recording also leaves a `Captured` `Event` on the `Player`:
 
     kubectl -n media get events --field-selector reason=Captured
 
-`kubectl -n media describe player` tells you who recorded which
-unit, in which form, and when.
+`kubectl -n media describe player` shows who recorded the `Player`,
+which part of it, in which format, and when.
 
 ### When a recording is refused
 
-Every error is an `application/problem+json` document with `type`,
-`title`, `status`, `detail`, and `instance`. A problem relayed from a
-sibling API has that sibling's own `detail` and an `upstream` member
-with its URL. `curl` wrote the document to the output file, so read
-that file:
+Each error is an `application/problem+json` document with `type`,
+`title`, `status`, `detail`, and `instance`. An error that
+`media-api` passes on from `display-api` or `audio-api` keeps that
+API's `detail` and adds an `upstream` member with its URL. `curl`
+wrote the document to the output file, so read that file:
 
     kubectl -n liken-system exec record -- cat /tmp/living-room.mp4
 
 | Status | What it means | What to do |
 | --- | --- | --- |
 | 401 | No client certificate and no token, or the `TokenReview` refused the token | Check that the `Secret` has the certificate and key from the kubeconfig you use, or mint a token for the audience `media-api` |
-| 403 | The `SubjectAccessReview` said no | Bind `media-capture-viewer` in the `Player`'s namespace, as step 1 shows. For a followed redirect, bind the sibling's role too |
-| 409 | The `Player` has no `status.screen`, or no `Play` is running for an audio route | `detail` says what to do |
-| 503 | An upstream is busy or refused the connection, or this API is at its composition limit | The response has `Retry-After: 5`, relayed from the upstream. Wait and try again |
+| 403 | The `SubjectAccessReview` denied the request | Bind `media-capture-viewer` in the `Player`'s namespace, as step 1 shows. For a followed redirect, get a grant on the `Display` or the `Sink` too |
+| 409 | A `screen` route on a `Player` with no `status.screen`, an `audio` route with no running `Play`, or a `media` route with neither | `detail` says what to do |
+| 503 | `display-api` or `audio-api` is busy or refused the connection, or `media-api` is running as many recordings as it allows | Wait for the `Retry-After` time and try again |
 
 ## 5. Clean up
 
@@ -390,7 +370,7 @@ that file:
     kubectl -n liken-system delete secret media-client
     rm client.crt client.key
 
-The `RoleBinding` from step 1 is a standing grant. If the recording
-was a one-off, delete it too:
+The `RoleBinding` from step 1 stays until you delete it. If you do
+not need it again, delete it too:
 
     kubectl -n media delete rolebinding media-viewer

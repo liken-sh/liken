@@ -1,14 +1,12 @@
 package main
 
-// The media layer's half of the equipment operator's Receiver: the
-// match from a unit's screen to a Receiver input, the session this
-// operator applies for as long as the unit matches, the active flag on
-// that session that follows a standing Play, and the lift when the unit
-// stops matching or goes away.
-//
-// The session also carries an awake flag, which follows spec.power and
-// the panel desire and not the Play, so a Player that is off, and the
-// idle timers that darken the panel, reach the equipment too.
+// This file is media-operator's side of the Receiver resource that
+// equipment-operator serves. While a Player's screen is connected to a
+// Receiver input, media-operator writes a session to that Receiver's
+// status.session. The session tells equipment-operator which input to
+// select, whether a Play is running, and whether the Player's panel
+// should be on. When the Player no longer matches an input, or is
+// deleted, media-operator removes the session.
 
 import (
 	"errors"
@@ -19,23 +17,23 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// The group the equipment operator serves. A Receiver is cluster-
-// scoped, because equipment is physical and belongs to no namespace.
+// A Receiver is cluster-scoped, because the equipment is physical and
+// belongs to no namespace.
 const receiverAPIVersion = "equipment.liken.sh/v1alpha1"
 
-// The condition the equipment operator sets from a round trip to the
-// equipment. The Player status folds it to one word.
+// receiverReachableCondition is the condition that equipment-operator
+// sets from a round trip to the equipment. media-operator copies its
+// status into the Player's status.
 const receiverReachableCondition = "Reachable"
 
-// The condition the equipment operator sets while the receiver reports
-// the session's input. An ensure ask goes out only while it is not
-// True, so a press on a room that already shows the unit writes
-// nothing to the API server.
+// receiverInputSelectedCondition is the condition that
+// equipment-operator sets while the receiver reports the session's input
+// as selected. media-operator writes an inputAsk of ensure only while
+// the condition is not True, so a button press in a room that already
+// shows the Player writes nothing to the API server.
 const receiverInputSelectedCondition = "InputSelected"
 
-// A Receiver carries only what this operator reads or writes: the
-// wiring it matches on, the session it applies, and the observed values
-// it folds into the Player's status.
+// Receiver has only the fields that media-operator reads or writes.
 type Receiver struct {
 	APIVersion string         `json:"apiVersion,omitempty"`
 	Kind       string         `json:"kind,omitempty"`
@@ -44,62 +42,64 @@ type Receiver struct {
 	Status     ReceiverStatus `json:"status"`
 }
 
-// The cluster owner states the inputs and the volume scale. The
-// equipment operator reads spec.session when the status holds no
-// session, so this operator reads it to adopt it, and releases it once
-// status.session holds the session.
+// ReceiverSpec is what the cluster owner declares: the inputs and the
+// volume scale. Earlier versions of media-operator wrote the session to
+// spec.session, and equipment-operator still reads that field when
+// status.session is empty. So media-operator reads spec.session to adopt
+// it, and releases it once status.session has the session.
 type ReceiverSpec struct {
 	Inputs  []ReceiverInput  `json:"inputs,omitempty"`
 	Session *ReceiverSession `json:"session,omitempty"`
 	Volume  *ReceiverVolume  `json:"volume,omitempty"`
 }
 
-// ReceiverVolume is the receiver's volume scale for a press, in the
-// receiver's own units: the loudest level an ask may set, and the
-// distance one press moves the level. A Denon counts 0 to 98 in half
-// steps. Indicator names who draws the volume indicator: the Player's
-// screens, or the receiver's own overlay on the TV.
+// ReceiverVolume is the receiver's volume scale for button presses, in
+// the receiver's own units. Max is the loudest level a volume request may
+// set, and Step is how far one press moves the level. A Denon counts
+// from 0 to 98 in half steps. Indicator selects what draws the volume
+// indicator: the Player's screens, or the receiver's own overlay on the
+// TV.
 type ReceiverVolume struct {
 	Max       float64 `json:"max,omitempty"`
 	Step      float64 `json:"step,omitempty"`
 	Indicator string  `json:"indicator,omitempty"`
 }
 
-// receiverIndicatorReceiver is the spec.volume.indicator value of a
+// receiverIndicatorReceiver is the spec.volume.indicator value for a
 // receiver that draws its own volume overlay on the TV. The CRD defaults
-// the field to Player, and an absent field reads the same.
+// the field to Player, and media-operator treats an absent field the
+// same way.
 const receiverIndicatorReceiver = "Receiver"
 
-// One input of the equipment, and the machine and monitor id wired into
-// it. The monitor id alone names no input, because one receiver
-// forwards one EDID on every input.
+// ReceiverInput is one input of the equipment, with the machine and
+// the monitor id that are connected to it. The monitor id alone does
+// not identify an input, because a receiver forwards the same EDID on
+// every input.
 type ReceiverInput struct {
 	Name    string `json:"name,omitempty"`
 	Machine string `json:"machine,omitempty"`
 	Monitor string `json:"monitor,omitempty"`
 }
 
-// The session one Player holds on the equipment: the unit that holds
-// it, the input it plays through, and the asks the unit made.
+// ReceiverSession is what one Player writes to a Receiver: the Player,
+// the input it plays through, two flags, and its requests: volumeAsk,
+// powerAsk, and inputAsk.
 //
-// Active says whether a Play stands on the unit. The session itself
-// stands at the idle screen too, so a volume press moves the room while
-// nothing plays, and the equipment operator reads Active to tell a
-// playing room from an idle one.
+// Active is true while a Play is running on the Player. The session
+// exists while the Player shows its idle screen too, so a volume press
+// changes the room's volume when nothing plays.
 //
-// Awake says whether the unit's panel is up. It is false while the
-// Player's spec.power is Off, and otherwise follows the panel desire the
-// idle client publishes: the off desire is a dark room, and the on
-// desire is a room that is awake. A unit with no desire yet keeps the
-// flag its session already carries.
+// Awake is true while the Player's panel should be on. awake explains
+// how media-operator computes it.
 //
-// The three asks are events. The equipment operator acts on an ask
-// once for each new time in its at field, and it does not act on an
-// ask it finds in its first pass after a start (receiverasks.go).
+// Each request is a one-time action, not state. equipment-operator sends
+// a request to the receiver once for each new value of its At field. On its
+// first pass after it starts, it records each At without sending
+// (receiverasks.go).
 //
-// VolumeTopic and PowerTopic are read and never written. A session
-// that still names either topic is applied again without it, so the
-// equipment operator stops reading the bus for that unit.
+// VolumeTopic and PowerTopic are read and never written. When a session
+// still has either one, media-operator applies the session again without
+// it, so equipment-operator stops reading the bus for that Player.
 type ReceiverSession struct {
 	Player      string          `json:"player,omitempty"`
 	Input       string          `json:"input,omitempty"`
@@ -112,15 +112,15 @@ type ReceiverSession struct {
 	PowerTopic  string          `json:"powerTopic,omitempty"`
 }
 
-// base is the part of a session the pass decides: the unit, the
-// input, and the two flags. Two sessions with the same base and no
-// topics are the same session to the pass, whatever asks they carry.
+// base returns the fields of a session that the reconcile pass sets.
+// Two sessions with the same base and no topics count as the same
+// session, whatever requests they have.
 func (s ReceiverSession) base() ReceiverSession {
 	return ReceiverSession{Player: s.Player, Input: s.Input, Active: s.Active, Awake: s.Awake}
 }
 
-// The session is this operator's block of the status. Every other
-// field is the equipment operator's.
+// media-operator writes Session, and equipment-operator writes the
+// other fields of ReceiverStatus.
 type ReceiverStatus struct {
 	Power      string                  `json:"power,omitempty"`
 	Input      string                  `json:"input,omitempty"`
@@ -130,8 +130,7 @@ type ReceiverStatus struct {
 	Conditions []ReceiverCondition     `json:"conditions,omitempty"`
 }
 
-// ReceiverZone is what one zone of the receiver last reported. The
-// volume is a string in the receiver's own scale, such as 45.5.
+// Volume is a string in the receiver's own scale, such as 45.5.
 type ReceiverZone struct {
 	Volume string `json:"volume,omitempty"`
 	Mute   bool   `json:"mute,omitempty"`
@@ -143,9 +142,9 @@ type ReceiverCondition struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// The body of a session apply carries the status alone, and the
-// session alone inside it. The rest of the status is the equipment
-// operator's, so this manager never touches it.
+// receiverStatusApply is the body of a server-side apply of the
+// session. It sets only status.session, so media-operator's field
+// manager owns no other field of the status.
 type receiverStatusApply struct {
 	APIVersion string                `json:"apiVersion"`
 	Kind       string                `json:"kind"`
@@ -157,9 +156,10 @@ type receiverSessionStatus struct {
 	Session *ReceiverSession `json:"session,omitempty"`
 }
 
-// The body of the spec release carries an empty spec. The inputs are
-// the cluster owner's, and an apply that states no field releases only
-// the fields this manager owned.
+// receiverSpecApply is the body of the apply that releases
+// spec.session. It sets no spec field. A server-side apply removes only
+// the fields that the same field manager owned before, so the cluster
+// owner's inputs stay.
 type receiverSpecApply struct {
 	APIVersion string       `json:"apiVersion"`
 	Kind       string       `json:"kind"`
@@ -167,21 +167,19 @@ type receiverSpecApply struct {
 	Spec       ReceiverSpec `json:"spec"`
 }
 
-// standingSession is the session the equipment operator acts on: the
-// one in status, or the one in spec when the status holds none. An
-// equipment operator reads the two in that order.
-func standingSession(receiver *Receiver) *ReceiverSession {
+// currentSession returns the session equipment-operator acts on:
+// status.session, or spec.session when status.session is empty.
+func currentSession(receiver *Receiver) *ReceiverSession {
 	if receiver.Status.Session != nil {
 		return receiver.Status.Session
 	}
 	return receiver.Spec.Session
 }
 
-// receivers reads the cluster's Receivers from the view at most once a
-// pass, and only for a unit whose screen resolved. A cluster that runs
-// no equipment operator has no Receivers in the view. failed records a
-// read that failed, which matches no unit but says nothing about the
-// wiring.
+// receivers lists the cluster's Receivers from the view at most once
+// per pass, and only when a Player's screen has resolved. failed
+// records that the list returned an error. A failed list matches no
+// Player, but it does not show that the wiring changed.
 type receivers struct {
 	view   *clusterView
 	items  []Receiver
@@ -193,8 +191,8 @@ func newReceivers(view *clusterView) *receivers {
 	return &receivers{view: view}
 }
 
-// receiverLookup is the pass's one receivers. It is built on first use
-// and dropped when the pass ends.
+// receiverLookup returns the receivers cache of the current pass. The
+// pass clears the cache when it ends.
 func (o *operator) receiverLookup() *receivers {
 	if o.receiverCache == nil {
 		o.receiverCache = newReceivers(o.view)
@@ -202,9 +200,9 @@ func (o *operator) receiverLookup() *receivers {
 	return o.receiverCache
 }
 
-// matchFor finds the Receiver and the input name wired to this node and
-// monitor id. No match is the normal case: a unit plays straight into a
-// panel, or the cluster declares no equipment.
+// matchFor returns the Receiver and input name connected to this node
+// and monitor id. Finding none is normal: a Player may be connected
+// straight to a panel, or the cluster may run no equipment-operator.
 func (r *receivers) matchFor(node, monitor string) (*Receiver, string, bool) {
 	if node == "" || monitor == "" {
 		return nil, "", false
@@ -213,7 +211,7 @@ func (r *receivers) matchFor(node, monitor string) (*Receiver, string, bool) {
 		r.listed = true
 		items, err := r.view.Receivers()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "reading receivers: %v\n", err)
+			fmt.Fprintf(os.Stderr, "reading the Receivers: %v\n", err)
 			r.failed = true
 			return nil, "", false
 		}
@@ -228,8 +226,8 @@ func (r *receivers) matchFor(node, monitor string) (*Receiver, string, bool) {
 	return nil, "", false
 }
 
-// An entry matches on both values. The machine names which input
-// carries the cable, and the monitor id proves the cable is there.
+// matchReceiverInput returns the name of the input whose machine and
+// monitor id both match. ReceiverInput says why both must match.
 func matchReceiverInput(receiver *Receiver, node, monitor string) (string, bool) {
 	for _, input := range receiver.Spec.Inputs {
 		if input.Name == "" || input.Machine != node || input.Monitor != monitor {
@@ -240,14 +238,12 @@ func matchReceiverInput(receiver *Receiver, node, monitor string) (string, bool)
 	return "", false
 }
 
-// The Reachable condition's status word, empty for a Receiver that
-// carries no such condition.
 func receiverReachable(receiver *Receiver) string {
 	return receiverCondition(receiver, receiverReachableCondition)
 }
 
-// receiverCondition reads one condition's status word, empty for a
-// Receiver that carries no such condition.
+// receiverCondition returns the status of the condition of the given
+// type, or an empty string when the Receiver has no such condition.
 func receiverCondition(receiver *Receiver, kind string) string {
 	for _, condition := range receiver.Status.Conditions {
 		if condition.Type == kind {
@@ -257,39 +253,35 @@ func receiverCondition(receiver *Receiver, kind string) string {
 	return ""
 }
 
-// The session this operator last applied for one unit, and the Receiver
-// it applied it to. The name is held because a deleted Player takes the
-// path from the unit to its equipment with it, and the lift still needs
-// a Receiver to write.
+// receiverSession is the session media-operator last applied for one
+// Player, and the Receiver it applied it to. The Receiver name is
+// stored because a deleted Player's screen matches no Receiver, and
+// removing the session needs the Receiver to write to.
 type receiverSession struct {
 	receiver string
 	session  ReceiverSession
 }
 
-// reconcileReceiver builds the Player's receiver status block, and
-// applies the session on every pass the unit matches an input. The
-// session is active only while a Play stands on the unit.
+// reconcileReceiver applies the session when the Player matches a
+// Receiver input, and returns the Player's status.receiver.
 //
-// The awake flag comes from spec.power and the panel desk on every pass,
-// so a change of either reaches the equipment as the same session with
-// one flag changed.
-//
-// The pass that turns the Player off asks the Receiver for off before
-// it applies the session whose awake flag is false, so the equipment
-// operator puts the room in standby before it reads the room asleep.
-// A session this run has not applied or adopted yet takes no ask, so
-// on the first pass after a start the ask follows the session. outcome
-// records what a change of spec.power asked of the Receiver.
-func (o *operator) reconcileReceiver(player *Player, standing bool, step powerStep, outcome *powerOutcome) *PlayerReceiverStatus {
+// In the pass that turns the Player off, the powerAsk of off is written
+// before the session with awake false. In that order equipment-operator
+// puts the room in standby before it reads the session that marks the
+// room asleep. A request can only be written beside a session that this
+// process has already applied or adopted, so when there is none yet,
+// as on the first pass after the operator starts, the request is written
+// after the session. outcome records the result of the powerAsk.
+func (o *operator) reconcileReceiver(player *Player, unfinished bool, step powerStep, outcome *powerOutcome) *PlayerReceiverStatus {
 	receiver, input, matched := o.matchReceiver(player)
 	key := playerKey(player.Metadata.Namespace, player.Metadata.Name)
 	if !matched {
-		// A failed read of the Receivers says nothing about the wiring,
-		// so the unit keeps the entry the last pass left on the ensure
-		// desk. Recording it as unwired would drop every input ask and
-		// every Television's ask for the unit for one pass.
+		// When listing the Receivers failed, the wiring is unknown, so
+		// the Player keeps its entry in o.playerReceivers from the last pass.
+		// Clearing the entry would drop every input request and every
+		// Television screen request for this Player until the next pass.
 		if !o.receiverLookup().failed {
-			o.ensure.set(key, unitReceiver{})
+			o.playerReceivers.set(key, receiverWiring{})
 		}
 		return nil
 	}
@@ -300,22 +292,21 @@ func (o *operator) reconcileReceiver(player *Player, standing bool, step powerSt
 		askErr = o.askReceiverPower(name, receiverPowerOff)
 		asked = !errors.Is(askErr, errNoSession)
 	}
-	o.applySession(player, receiver, input, standing, o.awake(player, receiver))
+	o.applySession(player, receiver, input, unfinished, o.awake(player, receiver))
 	if step.turningOff() && !asked {
 		askErr = o.askReceiverPower(name, receiverPowerOff)
 	}
 	switch {
 	case step.turningOff() && askErr != nil:
 		outcome.fail(powerReasonReceiverAskFailed,
-			fmt.Sprintf("writing powerAsk %s on receiver %s failed: %v", receiverPowerOff, name, askErr))
+			fmt.Sprintf("writing powerAsk %s to Receiver %s: %v", receiverPowerOff, name, askErr))
 	case step.turningOff():
-		outcome.ask("asked receiver %s for %s", name, receiverPowerOff)
+		outcome.record("requested %s from Receiver %s", receiverPowerOff, name)
 	}
-	// A unit that matches a receiver keeps the receiver on the ensure
-	// desk, so a press on its controller asks that receiver for the
-	// unit's input, and a Television's ask for the unit's screen is
-	// relayed.
-	o.ensure.set(key, unitReceiver{
+	// The bus reader finds this Player's Receiver in o.playerReceivers. It uses
+	// the entry to write an input request for a controller button press,
+	// and to relay a Television's request for the Player's screen.
+	o.playerReceivers.set(key, receiverWiring{
 		name:          receiver.Metadata.Name,
 		inputSelected: receiverCondition(receiver, receiverInputSelectedCondition) == conditionTrue,
 	})
@@ -326,16 +317,17 @@ func (o *operator) reconcileReceiver(player *Player, standing bool, step powerSt
 	}
 }
 
-// awake reads the awake flag from spec.power and the panel desire. A
-// Player that is off is asleep whatever its client states. An off
-// desire from before the Player's last turn-on is no statement
-// (panelDesk.desireFor). A unit with
-// no desire yet keeps the flag its session on this Receiver already
-// carries, because no desire is not a statement that the room is lit:
-// an operator that starts before the bus delivers the desire would
-// otherwise power the equipment on in a dark room. A unit with no
-// desire and no session there is awake, the flag a new session starts
-// with.
+// awake computes the session's awake flag. It is false while spec.power
+// is Off. Otherwise it follows the panel desire, the on or off message
+// that the Player's idle client publishes on the bus when its panel
+// should be lit or dark. An off desire from before the Player's last
+// turn-on does not count (panelCache.desireFor).
+//
+// When no desire has arrived, awake keeps the flag of the session this
+// Player already has on this Receiver. The operator can start before
+// the bus delivers the retained desire, and a default of true would
+// then power the equipment on in a dark room. With no desire and no
+// session, awake returns true.
 func (o *operator) awake(player *Player, receiver *Receiver) bool {
 	if specPower(player) == playerPowerOff {
 		return false
@@ -344,18 +336,17 @@ func (o *operator) awake(player *Player, receiver *Receiver) bool {
 	case panelDesireOff:
 		return false
 	case "":
-		held := standingSession(receiver)
-		if held != nil && held.Player == player.Metadata.Namespace+"/"+player.Metadata.Name {
-			return held.Awake
+		current := currentSession(receiver)
+		if current != nil && current.Player == player.Metadata.Namespace+"/"+player.Metadata.Name {
+			return current.Awake
 		}
 	}
 	return true
 }
 
-// matchReceiver resolves the unit's screen and finds the input it is
-// wired to. Both reads come from the caches this pass already holds.
-// The screen holds through a short gap in the claim's allocation, and
-// screengap.go says why.
+// matchReceiver finds the Receiver input connected to the Player's
+// screen. matchedScreen keeps the screen through a short gap in the
+// claim's allocation, and screengap.go explains why.
 func (o *operator) matchReceiver(player *Player) (*Receiver, string, bool) {
 	found, resolved := o.matchedScreen(player)
 	if !resolved {
@@ -364,15 +355,15 @@ func (o *operator) matchReceiver(player *Player) (*Receiver, string, bool) {
 	return o.receiverLookup().matchFor(found.node, found.monitor)
 }
 
-// applyReceiverSession applies the session before the playback pod is
-// created, so the equipment is on and on the right input by the time
-// mpv draws.
+// applyReceiverSession applies an active session before the playback
+// pod is created, so the equipment is on and set to the right input by
+// the time mpv draws.
 //
-// A Play that starts wakes the room, so the creating pass applies an
-// awake session, and the next pass reads the panel desire. The pass
-// turns a Player that is off on first (turnOnForPlay). A Player whose
-// apply the API server refused is still off, so its session stays
-// asleep.
+// A Play that starts wakes the room, so awake is true unless spec.power
+// is Off. Before this call, turnOnForPlay turns on a Player that is
+// off. When the API server rejected that change, the Player is still
+// off, and the session is applied with awake false. The next pass
+// computes awake from the panel desire again.
 func (o *operator) applyReceiverSession(player *Player) {
 	receiver, input, matched := o.matchReceiver(player)
 	if !matched {
@@ -381,27 +372,22 @@ func (o *operator) applyReceiverSession(player *Player) {
 	o.applySession(player, receiver, input, true, specPower(player) == playerPowerOn)
 }
 
-// askReceiverPower writes one powerAsk on a Receiver, beside the
-// session this operator holds there.
+// askReceiverPower writes a powerAsk with the given action to a
+// Receiver, in the same apply as media-operator's session there.
 func (o *operator) askReceiverPower(receiver, action string) error {
 	return o.sessions.ask(o.client, receiver, func(asks *receiverAsks) {
 		asks.power = &ReceiverAction{Action: action, At: nextAskTime(previousAt(asks.power), time.Now())}
 	})
 }
 
-// applySession writes status.session under this operator's field
-// manager, and only when the session differs from the one this operator
-// last applied. Power and input are one-shots the equipment answers
-// once, so an unchanged session is not sent again. A unit that moved to
-// another Receiver lifts the session on the old one first, so no
-// equipment keeps a session nothing holds.
-//
-// The tracking compares the whole session, so a Play that starts or
-// ends changes only the active flag, and the session is applied again
-// for that.
-//
-// A panel a person turns off or on changes only the awake flag, and the
-// session is applied again for that too.
+// applySession writes status.session under media-operator's field
+// manager when the session differs from the one this process last
+// applied. equipment-operator acts once on each change of power or
+// input, so it must not receive an unchanged session again. A Play that
+// starts or ends, and a panel that turns on or off, each change one
+// flag, and that change is applied. When the Player has moved to
+// another Receiver, applySession first removes the session from the
+// old one.
 func (o *operator) applySession(player *Player, receiver *Receiver, input string, active, awake bool) {
 	namespace, name := player.Metadata.Namespace, player.Metadata.Name
 	key := playerKey(namespace, name)
@@ -411,61 +397,61 @@ func (o *operator) applySession(player *Player, receiver *Receiver, input string
 		Active: active,
 		Awake:  awake,
 	}
-	held, tracked := o.receiverSessions[key]
-	standing := standingSession(receiver)
-	statusHolds := receiver.Status.Session != nil
+	previous, tracked := o.receiverSessions[key]
+	current := currentSession(receiver)
+	statusHasSession := receiver.Status.Session != nil
 	switch {
-	case tracked && held.receiver == receiver.Metadata.Name && held.session == session:
-		// The session this run applied still stands, so nothing is sent.
-	case !tracked && sameSession(standing, session) && statusHolds:
-		// A session the Receiver already carries is the one an earlier
-		// run of this operator applied. The equipment acts on power and
-		// input once, so the same session is recorded and not sent again.
+	case tracked && previous.receiver == receiver.Metadata.Name && previous.session == session:
+		// This process already applied this session.
+	case !tracked && sameSession(current, session) && statusHasSession:
+		// An earlier process of media-operator applied this session, so
+		// record it as applied and do not send it again.
 		o.receiverSessions[key] = receiverSession{receiver: receiver.Metadata.Name, session: session}
 		o.sessions.adopt(receiver.Metadata.Name, session)
-	case !tracked && sameSession(standing, session):
-		// The same session, held in spec by an earlier build of this
-		// operator. It moves to the status once, so the old spec field can
-		// be released and later dropped from the schema. The equipment
-		// operator reads a session that moves unchanged from spec to status
-		// as the same session, so the move sends the receiver nothing.
-		if !o.writeSession(player, receiver, session, held, tracked) {
+	case !tracked && sameSession(current, session):
+		// An earlier version of media-operator wrote this session to
+		// spec.session. Copy it to status.session, so that spec.session
+		// can be released. equipment-operator treats a session that
+		// moves unchanged from spec to status as the same session, so
+		// the receiver gets no command.
+		if !o.writeSession(player, receiver, session, previous, tracked) {
 			return
 		}
-		statusHolds = true
+		statusHasSession = true
 	default:
-		if !o.writeSession(player, receiver, session, held, tracked) {
+		if !o.writeSession(player, receiver, session, previous, tracked) {
 			return
 		}
-		statusHolds = true
+		statusHasSession = true
 	}
-	o.releaseSpecSession(key, receiver, statusHolds)
+	o.releaseSpecSession(key, receiver, statusHasSession)
 }
 
-// sameSession answers whether a session the Receiver holds is the one
-// this operator would apply. A held session that still names a topic
-// is not, so the apply that follows removes the topic.
-func sameSession(standing *ReceiverSession, session ReceiverSession) bool {
-	if standing == nil || standing.VolumeTopic != "" || standing.PowerTopic != "" {
+// sameSession reports whether the session the Receiver already has is
+// the one media-operator would apply. A session that still has a topic
+// is not the same, so the apply that follows removes the topic.
+func sameSession(current *ReceiverSession, session ReceiverSession) bool {
+	if current == nil || current.VolumeTopic != "" || current.PowerTopic != "" {
 		return false
 	}
-	return standing.base() == session
+	return current.base() == session
 }
 
-// writeSession lifts the session a moved unit left on its old Receiver,
-// then applies the new one. It answers whether the new session landed.
-func (o *operator) writeSession(player *Player, receiver *Receiver, session ReceiverSession, held receiverSession, tracked bool) bool {
+// writeSession removes the session a moved Player left on its old
+// Receiver, then applies the new session. It returns true when the new
+// session was written.
+func (o *operator) writeSession(player *Player, receiver *Receiver, session ReceiverSession, previous receiverSession, tracked bool) bool {
 	key := playerKey(player.Metadata.Namespace, player.Metadata.Name)
-	if tracked && held.receiver != receiver.Metadata.Name {
-		if !o.liftSession(held.receiver) {
+	if tracked && previous.receiver != receiver.Metadata.Name {
+		if !o.removeSession(previous.receiver) {
 			return false
 		}
 		delete(o.receiverSessions, key)
-		logLine(o.log, "player %s: lifted the session on receiver %s, because the unit moved to receiver %s",
-			key, held.receiver, receiver.Metadata.Name)
+		logLine(o.log, "player %s: removed the session from Receiver %s, because the Player moved to Receiver %s",
+			key, previous.receiver, receiver.Metadata.Name)
 	}
 	if err := o.sessions.apply(o.client, receiver.Metadata.Name, session); err != nil {
-		fmt.Fprintf(os.Stderr, "applying the session on receiver %s: %v\n",
+		fmt.Fprintf(os.Stderr, "writing the session on Receiver %s: %v\n",
 			receiver.Metadata.Name, err)
 		if !o.receiverFaults[key] {
 			if o.receiverFaults == nil {
@@ -473,14 +459,14 @@ func (o *operator) writeSession(player *Player, receiver *Receiver, session Rece
 			}
 			o.receiverFaults[key] = true
 			o.recorder.Warning(playerRef(player), reasonReceiverWriteFailed,
-				fmt.Sprintf("writing the session on receiver %s failed, and each pass writes it again: %v", receiver.Metadata.Name, err))
+				fmt.Sprintf("Writing the session to Receiver %s failed, and the operator writes it again on each pass: %v", receiver.Metadata.Name, err))
 		}
 		return false
 	}
 	if o.receiverFaults[key] {
 		delete(o.receiverFaults, key)
 		o.recorder.Normal(playerRef(player), reasonReceiverWriteRecovered,
-			fmt.Sprintf("wrote the session on receiver %s: input %s", receiver.Metadata.Name, session.Input))
+			fmt.Sprintf("Wrote the session to Receiver %s: input %s", receiver.Metadata.Name, session.Input))
 	}
 	o.receiverSessions[key] = receiverSession{receiver: receiver.Metadata.Name, session: session}
 	logLine(o.log, "player %s: applied the session on receiver %s: input %s, active %t, awake %t",
@@ -488,26 +474,26 @@ func (o *operator) writeSession(player *Player, receiver *Receiver, session Rece
 	return true
 }
 
-// releaseSpecSession removes a session this operator applied to
-// spec.session, once status.session holds the session. The order
-// matters: an equipment operator falls back to spec.session when the
-// status holds none, so a release before the status write would end the
-// session for a moment.
+// releaseSpecSession removes the spec.session that an earlier version of
+// media-operator wrote, once status.session has the session.
+// equipment-operator uses spec.session when status.session is empty, so
+// releasing first would briefly end the session.
 //
-// The release is sent at most once a run for each Receiver. The API
-// server removes only a field this manager owns, so a spec.session
-// another manager wrote stays, and a second apply would change nothing.
-func (o *operator) releaseSpecSession(key string, receiver *Receiver, statusHolds bool) {
+// The release is sent at most once per process for each Receiver. The
+// API server removes only fields that this field manager owns, so a
+// spec.session written by another manager stays, and a second apply
+// would change nothing.
+func (o *operator) releaseSpecSession(key string, receiver *Receiver, statusHasSession bool) {
 	name := receiver.Metadata.Name
 	if receiver.Spec.Session == nil {
 		o.specReleased[name] = true
 		return
 	}
-	if !statusHolds || o.specReleased[name] {
+	if !statusHasSession || o.specReleased[name] {
 		return
 	}
 	if err := ReleaseReceiverSpecSession(o.client, name); err != nil {
-		fmt.Fprintf(os.Stderr, "releasing spec.session on receiver %s: %v\n", name, err)
+		fmt.Fprintf(os.Stderr, "releasing spec.session on Receiver %s: %v\n", name, err)
 		return
 	}
 	o.specReleased[name] = true
@@ -515,53 +501,52 @@ func (o *operator) releaseSpecSession(key string, receiver *Receiver, statusHold
 		key, name)
 }
 
-// liftSession removes this operator's session from one Receiver: the
-// spec.session a run that wrote spec left there, then the status. A
-// Receiver that is gone carries no session, so the lift it refuses has
-// already landed. It answers whether the lift landed.
-func (o *operator) liftSession(name string) bool {
+// removeSession removes media-operator's session from one Receiver,
+// first the spec.session that an earlier version wrote, then
+// status.session. It returns true when the session is gone. A Receiver
+// that no longer exists has no session, so not found counts as success.
+func (o *operator) removeSession(name string) bool {
 	if !o.specReleased[name] {
 		err := ReleaseReceiverSpecSession(o.client, name)
 		if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
-			fmt.Fprintf(os.Stderr, "releasing spec.session on receiver %s: %v\n", name, err)
+			fmt.Fprintf(os.Stderr, "releasing spec.session on Receiver %s: %v\n", name, err)
 			return false
 		}
 		o.specReleased[name] = true
 	}
 	err := o.sessions.lift(o.client, name)
 	if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
-		fmt.Fprintf(os.Stderr, "lifting the session on receiver %s: %v\n", name, err)
+		fmt.Fprintf(os.Stderr, "lifting the session on Receiver %s: %v\n", name, err)
 		return false
 	}
 	return true
 }
 
-// retainSessions lifts the session of every unit that no longer matches
-// a Receiver input, the way retainPanels lifts an override. A Play that
-// ends is no lift: the session stands and its active flag goes false. A
-// lift that fails keeps the entry, so the next pass writes it again.
+// retainSessions removes the session of every Player that is not in
+// matched. A Play that ends does not remove the session. It only sets
+// the active flag to false. When removing a session fails, the entry
+// stays in receiverSessions, so the next pass tries again.
 func (o *operator) retainSessions(matched map[string]bool) {
-	for key, held := range o.receiverSessions {
+	for key, previous := range o.receiverSessions {
 		if matched[key] {
 			continue
 		}
-		if !o.liftSession(held.receiver) {
+		if !o.removeSession(previous.receiver) {
 			continue
 		}
 		delete(o.receiverSessions, key)
-		logLine(o.log, "player %s: lifted the session on receiver %s, because the unit matches no receiver input now",
-			key, held.receiver)
+		logLine(o.log, "player %s: removed the session from Receiver %s, because the Player matches no Receiver input now",
+			key, previous.receiver)
 	}
 }
 
-// A unit holds a standing run while a Play names it and that Play has
-// not finished. This is the same condition that keeps its playback pod:
-// a Play created this pass carries no phase yet, and a failed Play
-// keeps its pod until it is recreated.
-//
-// A Pending-or-Running test would report the room idle while its film
-// is still up, which is why the test is the unfinished phase.
-func playerHasStandingPlay(player *Player, plays []Play) bool {
+// playerHasUnfinishedPlay reports whether a Play in the Player's
+// namespace names this Player and has any phase except Finished, which
+// is the same test that keeps the playback pod. A Play created in this
+// pass has no phase yet, and a Failed Play keeps its pod until it is
+// recreated, so a test for Pending or Running would report the room
+// idle while the pod is still up.
+func playerHasUnfinishedPlay(player *Player, plays []Play) bool {
 	for index := range plays {
 		play := &plays[index]
 		if play.Metadata.Namespace != player.Metadata.Namespace {

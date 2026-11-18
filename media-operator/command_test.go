@@ -1,8 +1,8 @@
 package main
 
-// These tests cover the command sidecar: a named command on the commands
-// topic becomes the right mpv command, and the report side folds mpv's
-// property changes and throttles the position.
+// These tests cover the command sidecar. mpv's socket is a net.Pipe, so a
+// test reads each line that the sidecar writes to mpv, and writes the
+// events that mpv would send.
 
 import (
 	"bufio"
@@ -18,8 +18,8 @@ import (
 	"time"
 )
 
-// readLines reads n newline-delimited lines from the connection, under a
-// deadline, so a writer that sends too few does not hang the test.
+// readLines reads n lines from the connection. It sets a deadline, so a
+// writer that sends too few lines fails the test and does not hang it.
 func readLines(t *testing.T, conn net.Conn, n int) []string {
 	t.Helper()
 	mustSucceed(t, conn.SetReadDeadline(time.Now().Add(2*time.Second)))
@@ -31,9 +31,6 @@ func readLines(t *testing.T, conn net.Conn, n int) []string {
 	return lines
 }
 
-// A named command on the commands topic becomes mpv's own command words.
-// mpv is a pipe here, so the test reads the line the command sidecar
-// writes.
 func TestACommandOnTheCommandsTopicBecomesAnMpvCommand(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server, client := net.Pipe()
@@ -50,12 +47,12 @@ func TestACommandOnTheCommandsTopicBecomesAnMpvCommand(t *testing.T) {
 		c := &commander{mpv: client}
 		payload, err := json.Marshal(mediaCommand{Action: actionSeek, Amount: 30})
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("encoding the seek command: %v", err)
 		}
 		c.handle(c.commandsTopic, payload)
 
-		// A seek writes two commands: the no-osd seek, then the summon that
-		// makes the display draw the new position.
+		// A seek writes two commands: the seek with no-osd, and then the
+		// summon that makes the display draw the new position.
 		want := []string{
 			`{"command":["no-osd","seek",30],"request_id":1}`,
 			`{"command":["script-message","summon"]}`,
@@ -73,8 +70,6 @@ func TestACommandOnTheCommandsTopicBecomesAnMpvCommand(t *testing.T) {
 	})
 }
 
-// A payload that does not decode, and an action the sidecar has no case
-// for, write nothing to mpv.
 func TestACommandThatDoesNotDecodeOrHasNoCaseWritesNothing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server, client := net.Pipe()
@@ -92,7 +87,7 @@ func TestACommandThatDoesNotDecodeOrHasNoCaseWritesNothing(t *testing.T) {
 		c.handle(c.commandsTopic, []byte("not json"))
 		newer, err := json.Marshal(mediaCommand{Action: "brightness", Amount: 1})
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("encoding the brightness command: %v", err)
 		}
 		c.handle(c.commandsTopic, newer)
 
@@ -104,10 +99,8 @@ func TestACommandThatDoesNotDecodeOrHasNoCaseWritesNothing(t *testing.T) {
 	})
 }
 
-// The command sidecar forwards the current item's presentation block to
-// the display over the mpv socket: on the first item it knows and again
-// on every advance. The block is the one baked for that playlist
-// position, and it travels as one string argument.
+// The sidecar sends the display the presentation block of each item as
+// the playlist reaches it, as one string argument.
 func TestTheSidecarForwardsThePresentationOnEachItem(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server, client := net.Pipe()
@@ -154,8 +147,8 @@ func TestTheSidecarForwardsThePresentationOnEachItem(t *testing.T) {
 	})
 }
 
-// An item the sidecar has no baked block for forwards {}, so the display
-// always receives a definite value.
+// An item with no block sends {}, so the display always receives a
+// value.
 func TestTheSidecarForwardsEmptyForAMissingBlock(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server, client := net.Pipe()
@@ -188,10 +181,11 @@ func TestTheSidecarForwardsEmptyForAMissingBlock(t *testing.T) {
 }
 
 // The display broadcasts the exit press, and the sidecar publishes the
-// ending before it quits mpv. The order is the whole point of the path, so
-// the test proves it: nothing reads mpv's socket until the publish reaches
-// the broker, and net.Pipe blocks a write nobody reads, so a sidecar that
-// quit first would publish nothing and the wait would fail.
+// ending before it sends mpv the quit. The test checks that order by
+// reading nothing from mpv's socket until the publish reaches the broker.
+// net.Pipe blocks a write that nobody reads, so a sidecar that sent the
+// quit first would never publish, and the wait for the publish would
+// fail.
 func TestTheExitPressPublishesTheEndingBeforeTheQuitReachesMpv(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		bus, brokers, connected := startBus(t, 1, nil, nil)
@@ -221,11 +215,8 @@ func TestTheExitPressPublishesTheEndingBeforeTheQuitReachesMpv(t *testing.T) {
 	})
 }
 
-// The grace between the ending and the quit is what a fade runs under:
-// the operator labels the pod off the ending, and mpv keeps drawing the
-// film until the quit arrives. The test proves the quit waits the whole
-// grace by reading nothing off mpv's socket inside it, and the quit at
-// its end.
+// mpv keeps drawing the film for the grace between the ending and the
+// quit, so the compositor can fade it out.
 func TestTheQuitWaitsOutTheGraceAfterTheEnding(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		bus, brokers, connected := startBus(t, 1, nil, nil)
@@ -254,11 +245,9 @@ func TestTheQuitWaitsOutTheGraceAfterTheEnding(t *testing.T) {
 	})
 }
 
-// The grace is one window per run. A second exit on a run that already
-// ended publishes the mark the topic already holds, waits nothing, and
-// quits at once, so a signal and the socket that closes behind it do not
-// hold the pod for two graces. The grace here is a second, which the
-// test would spend if the guard were missing.
+// A second exit publishes the same ending and sends the quit at once,
+// so a SIGTERM followed by the socket closing does not delay the pod by
+// two graces.
 func TestASecondExitOnAnEndedRunWaitsNoGrace(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		bus, brokers, connected := startBus(t, 1, nil, nil)
@@ -288,10 +277,8 @@ func TestASecondExitOnAnEndedRunWaitsNoGrace(t *testing.T) {
 	})
 }
 
-// The two endings the sidecar observes on mpv's socket: mpv reaches the end
-// of the last item and closes it, and the kubelet's SIGTERM ends the run's
-// context. Each publishes the ending with the position the last report
-// carried, before runCommand clears the retained status.
+// mpv closing its socket at the end of the playlist and SIGTERM each
+// publish the ending with the position of the last report.
 func TestTheSidecarPublishesTheEndingWhenTheRunEnds(t *testing.T) {
 	cases := []struct {
 		name string
@@ -310,9 +297,8 @@ func TestTheSidecarPublishesTheEndingWhenTheRunEnds(t *testing.T) {
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				// conn is mpv's end of the socket. The sidecar writes its
-				// observe commands first, and a pipe holds no buffer, so
-				// mpv's end reads and discards them.
+				// conn is mpv's end of the socket. A pipe has no buffer, so
+				// this goroutine reads and discards the observe requests.
 				sidecar, conn := net.Pipe()
 				t.Cleanup(func() {
 					sidecar.Close()
@@ -335,9 +321,8 @@ func TestTheSidecarPublishesTheEndingWhenTheRunEnds(t *testing.T) {
 					c.reportOver(ctx, sidecar)
 				}()
 
-				// The position arrives first, which reports nothing because mpv
-				// has not named an item, and the item arrives second and sends
-				// the one report of this run.
+				// The position sends no report, because mpv has not reported
+				// an item yet. The item sends the only report of this run.
 				writeEvent(t, conn, `{"event":"property-change","name":"time-pos","data":1200.0}`)
 				writeEvent(t, conn, `{"event":"property-change","name":"playlist-pos","data":0}`)
 				running := waitForPublish(t, brokers[0].pubs)
@@ -355,8 +340,6 @@ func TestTheSidecarPublishesTheEndingWhenTheRunEnds(t *testing.T) {
 	}
 }
 
-// The mark stays set for the rest of the run, so a subscriber that reads
-// any later report reads the same ending.
 func TestEveryReportAfterTheEndingCarriesTheMark(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		bus, brokers, connected := startBus(t, 1, nil, nil)
@@ -377,8 +360,9 @@ func TestEveryReportAfterTheEndingCarriesTheMark(t *testing.T) {
 	})
 }
 
-// Every report names the pod that sent it, the ending included, so the
-// operator can refuse the ending of a pod it has already replaced.
+// Every report, the ending included, carries the UID of the pod that
+// sent it, so the operator can refuse the ending of a pod that it has
+// already replaced.
 func TestEveryReportNamesThePodThatSentIt(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		bus, brokers, connected := startBus(t, 1, nil, nil)
@@ -399,9 +383,8 @@ func TestEveryReportNamesThePodThatSentIt(t *testing.T) {
 	})
 }
 
-// The availability names the pod too, the online the sidecar publishes
-// and the Last Will the broker publishes for a dead pod, so the operator
-// can refuse a late offline from a pod that is gone.
+// The online message and the Last Will carry the pod's UID too, so the
+// operator can refuse a late offline message from a replaced pod.
 func TestTheAvailabilityNamesThePodThatSentIt(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		bus, brokers, connected := startBus(t, 1, nil, nil)
@@ -418,9 +401,8 @@ func TestTheAvailabilityNamesThePodThatSentIt(t *testing.T) {
 	})
 }
 
-// A run that never reported publishes no ending, the rule the reporter
-// follows: mpv never named an item, so there are no numbers to carry and
-// the pod's own death is what ends such a run.
+// A run that never reported publishes no ending, because it has no item
+// or position to send.
 func TestARunThatNeverReportedPublishesNoEnding(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		bus, brokers, connected := startBus(t, 1, nil, nil)
@@ -437,8 +419,8 @@ func TestARunThatNeverReportedPublishesNoEnding(t *testing.T) {
 }
 
 // A live level on the volume topic reaches the display as one script
-// message with the level and the mute, and sets nothing in mpv, which
-// plays at unity.
+// message with the level and the mute state. It changes nothing in mpv,
+// which keeps its default volume.
 func TestALiveLevelSendsTheDisplayTheLevel(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server, client := net.Pipe()
@@ -455,9 +437,9 @@ func TestALiveLevelSendsTheDisplayTheLevel(t *testing.T) {
 	})
 }
 
-// The level the broker delivers at subscribe is the level the room
-// already had, so it draws no indicator. A retained focus mark still
-// reaches the gate.
+// The retained level that the broker sends at subscribe time is the
+// volume from before the pod started, so it draws no indicator. A
+// retained focus mark still reaches the focus check.
 func TestARetainedLevelDrawsNothing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		events, focus := keyTestTopics()
@@ -478,10 +460,10 @@ func TestARetainedLevelDrawsNothing(t *testing.T) {
 	})
 }
 
-// The volume and mute actions are gone from the Play's commands topic.
-// A program that asks for a level publishes on the Player's
-// volume/commands topic, so an action here writes nothing to mpv and
-// publishes nothing.
+// The Play's commands topic has no volume or mute actions. A program that
+// sets a level publishes on the Player's volume/commands topic, so a
+// volume action on the Play's topic writes nothing to mpv and publishes
+// nothing.
 func TestAVolumeActionOnThePlaysCommandsTopicDoesNothing(t *testing.T) {
 	for _, action := range []string{"volume", "mute", "unmute"} {
 		t.Run(action, func(t *testing.T) {
@@ -507,8 +489,8 @@ func TestAVolumeActionOnThePlaysCommandsTopicDoesNothing(t *testing.T) {
 	}
 }
 
-// bridgeToMPV is a commander wired to a socket a test reads, so a message the
-// sidecar sends comes back as the line mpv would receive.
+// bridgeToMPV returns a commander connected to a pipe, and a channel of
+// the lines that mpv would receive from it.
 func bridgeToMPV(t *testing.T) (*commander, <-chan string) {
 	t.Helper()
 	server, client := net.Pipe()
@@ -535,8 +517,8 @@ func waitForLine(t *testing.T, lines <-chan string) string {
 	}
 }
 
-// mustNoLine fails when the sidecar wrote anything to mpv by the time
-// every goroutine in the test's synctest bubble has settled.
+// mustNoLine fails when the sidecar has written anything to mpv once
+// every goroutine in the synctest bubble is blocked.
 func mustNoLine(t *testing.T, lines <-chan string) {
 	t.Helper()
 	synctest.Wait()
@@ -547,8 +529,6 @@ func mustNoLine(t *testing.T, lines <-chan string) {
 	}
 }
 
-// mustEncode marshals one message the way a program on the bus publishes
-// it.
 func mustEncode(t *testing.T, value any) []byte {
 	t.Helper()
 	payload, err := json.Marshal(value)
@@ -556,8 +536,8 @@ func mustEncode(t *testing.T, value any) []byte {
 	return payload
 }
 
-// readAsync hands each line the sidecar writes to mpv's socket to the
-// channel, so a test reads them in order.
+// readAsync sends each line that the sidecar writes to mpv's socket to
+// the returned channel, in order.
 func readAsync(conn net.Conn) chan string {
 	lines := make(chan string, 8)
 	go func() {
@@ -569,8 +549,8 @@ func readAsync(conn net.Conn) chan string {
 	return lines
 }
 
-// mustWriteNothing proves the sidecar wrote nothing to mpv's socket in the
-// window a write would have taken.
+// mustWriteNothing fails when the sidecar writes to mpv's socket within
+// 100 ms.
 func mustWriteNothing(t *testing.T, conn net.Conn) {
 	t.Helper()
 	mustSucceed(t, conn.SetReadDeadline(time.Now().Add(100*time.Millisecond)))
@@ -581,15 +561,14 @@ func mustWriteNothing(t *testing.T, conn net.Conn) {
 	}
 }
 
-// writeEvent hands mpv's socket one event line, the newline-delimited JSON
-// the reader reads.
+// writeEvent writes one event to the socket as a line of JSON, as mpv
+// does.
 func writeEvent(t *testing.T, conn net.Conn, line string) {
 	t.Helper()
 	_, err := conn.Write([]byte(line + "\n"))
 	mustSucceed(t, err)
 }
 
-// reportOf decodes one published payload as a report.
 func reportOf(t *testing.T, payload []byte) playReport {
 	t.Helper()
 	var report playReport
@@ -597,16 +576,15 @@ func reportOf(t *testing.T, payload []byte) playReport {
 	return report
 }
 
-// endedReport decodes a published payload and proves the mark travels as
-// the field it is, so a subscriber reads the ending and not an empty
-// status.
+// endedReport decodes a published payload and fails unless it has
+// "ended":true.
 func endedReport(t *testing.T, payload []byte) playReport {
 	t.Helper()
 	mustMatch(t, bytes.Contains(payload, []byte(`"ended":true`)), true)
 	return reportOf(t, payload)
 }
 
-func TestFormatPosition(t *testing.T) {
+func TestFormatPositionWritesHoursMinutesSecondsAndFloorsTheFraction(t *testing.T) {
 	cases := []struct {
 		seconds float64
 		want    string
@@ -629,7 +607,7 @@ func TestFormatPosition(t *testing.T) {
 	}
 }
 
-func TestApplyOnePropertyChange(t *testing.T) {
+func TestApplyUpdatesTheStateAndReportsWhetherTheChangeNeedsAReportAtOnce(t *testing.T) {
 	playing := playbackState{item: 1, position: "0:00:10", duration: "0:30:00"}
 
 	cases := []struct {
@@ -722,7 +700,7 @@ func TestApplyOnePropertyChange(t *testing.T) {
 			want:   playbackState{item: 1, audioLanguage: "eng"},
 		},
 		{
-			name:   "a property the command sidecar does not fold",
+			name:   "a property that no report contains",
 			start:  playing,
 			change: changeOf("volume", "70"),
 			want:   playing,
@@ -822,8 +800,8 @@ func TestReporterSendsChangesAtOnceAndThrottlesThePosition(t *testing.T) {
 	})
 }
 
-// recordReports is a reportSender that keeps every report, so a test
-// reads back which reports the loop sent with no broker at all.
+// recordReports returns a reportSender that records every report, so a
+// test can read the reports with no broker.
 func recordReports() (reportSender, func() []playReport) {
 	var reports []playReport
 	send := func(report playReport) error {
@@ -840,8 +818,8 @@ func feedChanges(changes chan<- propertyChange, list ...propertyChange) {
 	close(changes)
 }
 
-// itemsAndPauses renders each report to the two fields the throttling
-// tests are about, which reports were sent, not every field in them.
+// itemsAndPauses reduces each report to its item and paused fields,
+// which are all that the throttling tests check.
 func itemsAndPauses(reports []playReport) []string {
 	rendered := make([]string, 0, len(reports))
 	for _, report := range reports {
@@ -865,10 +843,8 @@ func positions(reports []playReport) []string {
 	return rendered
 }
 
-// The display broadcasts one request for the current block when it loads,
-// because the sidecar's own send races the display's connection: a block sent
-// before the display connected reaches nobody, and the display would then
-// never learn the item's type or ask for its art.
+// The display requests the current block when its script loads, because
+// a block that the sidecar sent before then reached no one.
 func TestTheSidecarAnswersThePresentationRequest(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		bridge, lines := bridgeToMPV(t)
@@ -890,9 +866,8 @@ func TestTheSidecarAnswersThePresentationRequest(t *testing.T) {
 	})
 }
 
-// Before mpv says which item plays there is no block to answer with, and the
-// reporter presents the first item the moment it does, so the request goes
-// unanswered rather than forwarding a block for no item.
+// Before mpv reports an item, the sidecar ignores the request, because
+// it sends the first block when mpv reports the item.
 func TestThePresentationRequestBeforeTheFirstItem(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		bridge, lines := bridgeToMPV(t)
@@ -908,8 +883,8 @@ func TestThePresentationRequestBeforeTheFirstItem(t *testing.T) {
 	})
 }
 
-// requestFor is one broadcast on a closed channel, the shape the reader hands
-// the message goroutine for a display message with no arguments.
+// requestFor returns a closed channel that holds one display message
+// whose only argument is name, as the reader passes to serveMessages.
 func requestFor(name string) <-chan clientMessage {
 	messages := make(chan clientMessage, 1)
 	messages <- clientMessage{Args: []string{name}}
@@ -917,8 +892,8 @@ func requestFor(name string) <-chan clientMessage {
 	return messages
 }
 
-// mpv plays at unity, so a socket that opens gets no level: the sidecar
-// writes its observe requests and nothing about the volume.
+// mpv keeps its default volume, so the sidecar sends it no level when
+// the socket opens. It writes only its observe requests.
 func TestASocketThatOpensGetsNoLevel(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server, client := net.Pipe()
@@ -934,8 +909,8 @@ func TestASocketThatOpensGetsNoLevel(t *testing.T) {
 	})
 }
 
-// driveInBackground runs the socket loop against a connection the
-// test reads, and ends it when the test ends.
+// driveInBackground runs the socket loop on a connection that the test
+// reads, and stops it when the test ends.
 func driveInBackground(t *testing.T, c *commander, conn net.Conn) {
 	t.Helper()
 	ctx, stop := context.WithCancel(context.Background())
@@ -946,8 +921,8 @@ func driveInBackground(t *testing.T, c *commander, conn net.Conn) {
 	go c.drive(ctx, conn, func(playReport) error { return nil })
 }
 
-// skipObserves reads the observe requests attach writes, so the next
-// read is the first command the sidecar sent of its own.
+// skipObserves reads the observe requests that attach writes, so the
+// next read returns the first command that the sidecar sends after them.
 func skipObserves(t *testing.T, lines <-chan string) {
 	t.Helper()
 	for index, name := range observedProperties {

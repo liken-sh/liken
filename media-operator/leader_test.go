@@ -2,12 +2,10 @@
 
 package main
 
-// These tests cover how the operator uses kubernetes/election: the
-// order of a shutdown, the Lease a bus session that does not stop
-// keeps, the prefix of the election's lines, and the write guard on
-// the operator's client. The package's own tests cover the election.
-// These run against the fake Lease server of electiontest, in a
-// synctest bubble, on the fake clock.
+// These tests cover how the operator uses kubernetes/election. The
+// tests of kubernetes/election cover the election itself. These tests
+// run against the fake Lease server of electiontest in a synctest
+// bubble.
 
 import (
 	"context"
@@ -27,8 +25,8 @@ import (
 
 const testLeaseNamespace = "liken-system"
 
-// candidate is one operator process under test, with the lines it
-// reported.
+// candidate is one operator process under test, with the log lines it
+// wrote.
 type candidate struct {
 	*leadership
 	lines sync.Mutex
@@ -41,8 +39,7 @@ func (c *candidate) reported() []string {
 	return append([]string(nil), c.lined...)
 }
 
-// newLeader is a candidate that holds the Lease, which nobody held
-// before.
+// newLeader is a candidate that takes a Lease that nobody held.
 func newLeader(t *testing.T, server *electiontest.Server) *candidate {
 	t.Helper()
 	c := &candidate{}
@@ -58,8 +55,8 @@ func newLeader(t *testing.T, server *electiontest.Server) *candidate {
 	mustSucceed(t, err)
 	c.leadership = &leadership{Lead: lead, report: report}
 	lead.Run()
-	// The step down ends the election, so the bubble has no goroutine
-	// left when the test ends. A second step down writes nothing.
+	// StepDown ends the election goroutines, so the synctest bubble can
+	// end. A second StepDown in a test writes nothing.
 	t.Cleanup(func() {
 		c.StepDown()
 		for _, line := range c.reported() {
@@ -73,9 +70,9 @@ func newLeader(t *testing.T, server *electiontest.Server) *candidate {
 	return c
 }
 
-// A shutdown stops the bus session while the Lease still names this
-// process, and releases the Lease after, so no bus message is handled
-// once another copy can lead.
+// A shutdown stops the bus session while this process still holds the
+// Lease, and releases the Lease afterwards, so the operator handles no
+// bus message once another copy can lead.
 func TestAStepDownQuietsTheBusBeforeItReleasesTheLease(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := electiontest.New(leaseName, testLeaseNamespace)
@@ -92,8 +89,8 @@ func TestAStepDownQuietsTheBusBeforeItReleasesTheLease(t *testing.T) {
 	})
 }
 
-// A bus session that does not stop in time keeps the Lease, so no
-// other copy leads while the session can still write.
+// When the bus session does not stop in time, the process keeps the
+// Lease, so no other copy leads while the session can still write.
 func TestAStepDownWhoseBusDoesNotStopKeepsTheLease(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := electiontest.New(leaseName, testLeaseNamespace)
@@ -104,13 +101,13 @@ func TestAStepDownWhoseBusDoesNotStopKeepsTheLease(t *testing.T) {
 		mustMatch(t, server.Holder(), leader.Identity())
 		lines := leader.reported()
 		mustMatch(t, lines[len(lines)-1],
-			"media.liken.sh: the bus session did not stop; leaving the Lease to expire")
+			"media.liken.sh: the bus session did not stop, so the Lease is left to expire")
 	})
 }
 
-// heldEvents is an Event recorder whose API server holds each write
-// until the test lets it through, and notes the Lease's holder as each
-// write lands.
+// heldEvents is an Event recorder whose API server blocks each write
+// until the test closes through, and records the Lease holder when each
+// write arrives.
 type heldEvents struct {
 	recorder *events.Recorder
 	through  chan struct{}
@@ -139,9 +136,9 @@ func (h *heldEvents) landedWhileHeldBy() []string {
 	return append([]string(nil), h.holders...)
 }
 
-// A shutdown waits for the Event the recorder is writing, and releases
-// the Lease after it lands, so no Event of this copy lands while another
-// copy leads.
+// A shutdown releases the Lease only after the recorder's Event write
+// completes, so no Event from this copy is written while another copy
+// leads.
 func TestAStepDownReleasesTheLeaseAfterTheRecordersLastWrite(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := electiontest.New(leaseName, testLeaseNamespace)
@@ -166,8 +163,9 @@ func TestAStepDownReleasesTheLeaseAfterTheRecordersLastWrite(t *testing.T) {
 	})
 }
 
-// A recorder whose last write does not return in time keeps the Lease,
-// so the write can land before another copy leads.
+// When the recorder's last write does not return in time, the process
+// keeps the Lease, so the write can complete before another copy
+// leads.
 func TestAStepDownWhoseRecorderDoesNotStopKeepsTheLease(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := electiontest.New(leaseName, testLeaseNamespace)
@@ -186,12 +184,12 @@ func TestAStepDownWhoseRecorderDoesNotStopKeepsTheLease(t *testing.T) {
 		mustMatch(t, server.Holder(), leader.Identity())
 		lines := leader.reported()
 		mustMatch(t, lines[len(lines)-1],
-			"media.liken.sh: the Event recorder's last write had not returned: context deadline exceeded; leaving the Lease to expire")
+			"media.liken.sh: the Event recorder's last write had not returned: context deadline exceeded, so the Lease is left to expire")
 	})
 }
 
-// The election's lines carry the operator's prefix, and name the Lease
-// in the operator's namespace.
+// The election's log lines have the operator's prefix and name the
+// Lease in the operator's namespace.
 func TestTheElectionReportsWithTheOperatorsPrefix(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		leader := newLeader(t, electiontest.New(leaseName, testLeaseNamespace))
@@ -201,9 +199,8 @@ func TestTheElectionReportsWithTheOperatorsPrefix(t *testing.T) {
 	})
 }
 
-// The operator's client sends writes while this copy leads, and sends
-// none once it has stepped down, so a write that a timer starts after
-// the bus session ended never reaches the API server.
+// The guarded client sends writes while this copy leads and sends none
+// after stepDown. Reads still go through.
 func TestTheGuardedClientSendsNoWriteAfterTheStepDown(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		leader := newLeader(t, electiontest.New(leaseName, testLeaseNamespace))

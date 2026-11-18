@@ -1,9 +1,7 @@
 package main
 
-// The volume engine inside the operator: the devices the pass chooses
-// for a unit, the asks it writes into the Receiver and the Sinks, the
-// relay a pass publishes, and the presses and asks off the bus. The fake
-// API server and the fake broker are in operate_test.go and bus_test.go.
+// These tests run the volume engine inside the operator, against the
+// fake API server of operate_test.go and the fake broker of bus_test.go.
 
 import (
 	"testing"
@@ -12,8 +10,9 @@ import (
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
-// denonReceiver is the house Receiver with a volume scale, reporting a
-// level of 45.5 on the unit's input, so a press writes no input ask.
+// denonReceiver is the house Receiver with a volume scale and a level
+// of 45.5. Its InputSelected condition is True, so a press writes no
+// input request.
 func denonReceiver() *Receiver {
 	receiver := houseReceiver()
 	receiver.Status.Conditions = append(receiver.Status.Conditions,
@@ -23,15 +22,15 @@ func denonReceiver() *Receiver {
 	return receiver
 }
 
-// frontSink is the Sink the house unit's first spec.sinks entry
-// resolved to, reporting 40 percent.
+// frontSink is the house Player's Sink, at a volume of 40.
 func frontSink() *Sink {
 	level := 40
 	return &Sink{Metadata: ObjectMeta{Name: "front"}, Status: SinkStatus{Observed: SinkObserved{Volume: &level}}}
 }
 
-// volumeCluster is the house unit wired into the Denon, with the front
-// Sink remembered on the Player.
+// volumeCluster returns a cluster where the house Player's screen is
+// connected to denonReceiver and frontSink is in the Player's
+// status.sinks.
 func volumeCluster() *fakeCluster {
 	cluster := receiverCluster()
 	cluster.receivers["den-receiver"] = denonReceiver()
@@ -44,8 +43,6 @@ func houseSinks() []PlayerSinkStatus {
 	return []PlayerSinkStatus{{Request: "audio0", Name: "front"}}
 }
 
-// The Receiver sets the unit's level while its Reachable condition is
-// True. Otherwise every Sink the unit plays through sets it.
 func TestTheDevicesFollowTheReceiversReachableCondition(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -75,8 +72,6 @@ func TestTheDevicesFollowTheReceiversReachableCondition(t *testing.T) {
 	}
 }
 
-// Each device's scale and report reach the engine in the device's own
-// units, with the defaults for what a spec leaves out.
 func TestADevicesScaleAndReport(t *testing.T) {
 	maxPercent, stepPercent, muted := 80, 2, true
 	stated := frontSink()
@@ -112,10 +107,6 @@ func TestADevicesScaleAndReport(t *testing.T) {
 	}
 }
 
-// A Receiver that states no spec.volume.max steps against the top of its
-// driver's own scale: 100 for a WiiM. A driver with no fixed top, or no
-// driver yet, gives no max, and a press writes nothing. A stated max
-// wins, and a step the spec leaves out is one unit.
 func TestAReceiversMaxFallsBackToItsDriversScale(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -145,8 +136,8 @@ func TestAReceiversMaxFallsBackToItsDriversScale(t *testing.T) {
 	}
 }
 
-// An audio operator that still serves the integer spec.volume leaves a
-// Sink the view converts, with the integer as the resting level.
+// An audio-operator that serves spec.volume as an integer still gives
+// a Sink that converts, with the integer as spec.volume.level.
 func TestASinkWithAnIntegerVolumeConverts(t *testing.T) {
 	object := asUnstructured(map[string]any{
 		"apiVersion": sinkAPIVersion, "kind": "Sink",
@@ -163,8 +154,8 @@ func TestASinkWithAnIntegerVolumeConverts(t *testing.T) {
 	mustMatch(t, step, 5.0)
 }
 
-// A volume ask on a Receiver goes into the session block beside the
-// session the pass applied, so the apply removes none of it.
+// A volume request on a Receiver is applied together with the session
+// that the pass applied, so the apply does not remove either.
 func TestAVolumeAskKeepsTheReceiversSession(t *testing.T) {
 	media, cluster := askOperator(t)
 
@@ -180,8 +171,7 @@ func TestAVolumeAskKeepsTheReceiversSession(t *testing.T) {
 	mustMatch(t, *applied.session.VolumeAsk, VolumeAsk{Level: 45, At: "2026-10-04T12:15:25.164Z"})
 }
 
-// A volume ask on a Sink names the Player whose ask it is, and carries
-// the level in whole percent.
+// A volume request on a Sink rounds the level to a whole number.
 func TestAVolumeAskOnASinkNamesThePlayer(t *testing.T) {
 	cluster := volumeCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
@@ -198,17 +188,16 @@ func TestAVolumeAskOnASinkNamesThePlayer(t *testing.T) {
 	mustMatch(t, *applied.session.VolumeAsk, SinkVolumeAsk{Level: 45, Mute: true, At: "2026-10-04T12:15:25.164Z"})
 }
 
-// A press of a volume key on the controller that drives the unit, and a
-// message on the unit's volume/commands topic, each move the Receiver
-// one step from its report.
-func TestAPressAndAnAskReachTheReceiver(t *testing.T) {
+// A key press, a repeat, and a volume/commands message each move the
+// Receiver one step down from the level it reports.
+func TestAKeyPressAndAVolumeCommandMoveTheReceiver(t *testing.T) {
 	cases := []struct {
 		name string
 		send func(*operator)
 	}{
 		{name: "a key", send: func(media *operator) { press(media, "KEY_VOLUMEDOWN", 1) }},
 		{name: "a repeat", send: func(media *operator) { press(media, "KEY_VOLUMEDOWN", 2) }},
-		{name: "an ask", send: func(media *operator) {
+		{name: "a volume command", send: func(media *operator) {
 			media.handleBusMessage(playerVolumeCommandsTopic(defaultTopicBase, "house", "theater"), []byte(`{"step":"down"}`))
 		}},
 	}
@@ -231,16 +220,14 @@ func TestAPressAndAnAskReachTheReceiver(t *testing.T) {
 	}
 }
 
-// A press on a controller pointed at another unit, and the release of a
-// key, move nothing.
 func TestAPressThatMovesNoLevel(t *testing.T) {
 	cases := []struct {
 		name  string
-		mark  string
+		focus string
 		value int
 	}{
-		{name: "a mark on another unit", mark: "studio", value: 1},
-		{name: "a release", mark: "theater", value: 0},
+		{name: "focus on another unit", focus: "studio", value: 1},
+		{name: "a release", focus: "theater", value: 0},
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
@@ -248,7 +235,7 @@ func TestAPressThatMovesNoLevel(t *testing.T) {
 				cluster := volumeCluster()
 				media := testOperator(t, cluster, make(chan struct{}, 1))
 				runPlayers(media, []Player{*cluster.players["theater"]}, nil)
-				media.focus.setMark(controllerKey("house", "sofa"), each.mark)
+				media.focus.setMark(controllerKey("house", "sofa"), each.focus)
 				cluster.sessions = nil
 
 				press(media, "KEY_VOLUMEDOWN", each.value)
@@ -260,8 +247,8 @@ func TestAPressThatMovesNoLevel(t *testing.T) {
 	}
 }
 
-// A pass after the broker's catch-up publishes the unit's level,
-// retained, as a fraction of the device's max.
+// The published level is a fraction of the device's max: 36 of 72 is
+// 0.5.
 func TestAPassPublishesTheUnitsLevel(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cluster := volumeCluster()
@@ -276,9 +263,9 @@ func TestAPassPublishesTheUnitsLevel(t *testing.T) {
 	})
 }
 
-// A level the broker already holds is not published again, so an
-// operator restart draws no indicator on the screens.
-func TestAPassPublishesNoLevelTheBrokerHolds(t *testing.T) {
+// A pass does not publish a level that the broker already retains, so
+// a restart of the operator does not draw a volume bar on the screens.
+func TestAPassPublishesNoLevelTheBrokerRetains(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cluster := volumeCluster()
 		cluster.receivers["den-receiver"].Status.Zones[mainZone] = ReceiverZone{Volume: "36"}
@@ -291,8 +278,8 @@ func TestAPassPublishesNoLevelTheBrokerHolds(t *testing.T) {
 	})
 }
 
-// screenAskOn is a Television whose node workload asked for the house
-// theater's screen at the given time.
+// screenAskOn returns a Television whose status.screenAsk, written at
+// the given time, requests the given screen for house/theater.
 func screenAskOn(at, screen string) *Television {
 	return &Television{
 		Metadata: ObjectMeta{Name: "den-tv"},
@@ -302,15 +289,15 @@ func screenAskOn(at, screen string) *Television {
 	}
 }
 
-// An ask the first pass finds is older than this operator's start, so
-// the pass relays nothing for it. Each new ask after that goes once to
-// the Player's power topic, not retained.
-func TestTheScreenAsksAreRelayedOnce(t *testing.T) {
+// The first read only records the request, because it was written
+// before the operator started. A later request is published once, not
+// retained, however many reads find it.
+func TestAScreenRequestIsRelayedOnce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cluster := newFakeCluster()
 		cluster.televisions["den-tv"] = screenAskOn("2026-10-04T12:00:00.000Z", "Wake")
 		media, broker := caughtUpOperator(t, cluster)
-		media.ensure.set(playerKey("house", "theater"), unitReceiver{name: "den-receiver"})
+		media.playerReceivers.set(playerKey("house", "theater"), receiverWiring{name: "den-receiver"})
 
 		media.relayScreenAsks()
 		mustPublishNothing(t, broker)
@@ -327,16 +314,16 @@ func TestTheScreenAsksAreRelayedOnce(t *testing.T) {
 	})
 }
 
-// A screen client in the screen mode handles power itself, so an ask for
-// a unit whose screen is wired through no Receiver reaches no screen. A
-// late ask after the Receiver is removed is the case this guards.
-func TestAScreenAskForAUnitWithNoReceiverIsNotRelayed(t *testing.T) {
+// equipment-operator writes a request only for a Player with a
+// Receiver, so a request for a Player that has none is late, such as
+// one written before the Receiver was deleted, and is not relayed.
+func TestAScreenRequestForAUnitWithNoReceiverIsNotRelayed(t *testing.T) {
 	cases := []struct {
 		name  string
 		shape func(*operator)
 	}{
 		{name: "a unit the pass placed with no receiver", shape: func(media *operator) {
-			media.ensure.set(playerKey("house", "theater"), unitReceiver{})
+			media.playerReceivers.set(playerKey("house", "theater"), receiverWiring{})
 		}},
 		{name: "a unit the pass has not placed", shape: func(*operator) {}},
 	}

@@ -1,50 +1,46 @@
-# The capabilities agent's image: the agent on liken's vaapi base, which
-# carries libva, libva-drm, and the Intel media driver on scratch. The
-# agent queries each render node's driver through libva, so it needs
-# both libraries and the driver, and none of ffmpeg.
+# The capabilities agent queries each render node's driver through
+# libva, so its image builds on the vaapi base, which has libva,
+# libva-drm, and the Intel media driver.
 
 FROM golang AS build
-# proxy.golang.org sometimes drops a module download partway through
-# the stream. With the default comma, `go` tries the origin only when
-# the proxy answers 404 or 410, so a dropped stream fails the build.
-# With a pipe, `go` fetches the module from its origin after any proxy
-# error, with the git that this image includes. `GOSUMDB` keeps its
-# default, so the checksum database still verifies a module that `go`
-# fetched from its origin.
+# proxy.golang.org sometimes drops a download partway through. With a
+# comma, `go` falls back to the origin only on a 404 or 410, so a
+# dropped download fails the build. With a pipe, it falls back after any
+# proxy error. `GOSUMDB` keeps its default, so the checksum database
+# still verifies a module fetched from its origin.
 ENV GOPROXY="https://proxy.golang.org|direct"
 WORKDIR /src
-# The module files come first, so a source edit reuses the cached
+# Copying the module files first lets a source edit reuse the cached
 # download layer.
 COPY go.mod go.sum ./
-# go.mod replaces the shared kubernetes module with ../kubernetes, and
-# the build takes that directory as a second build context named
-# kubernetes. It lands at /kubernetes, the same place relative to /src
-# that kubernetes/ has relative to this component. Its module file
-# comes first for the same reason as this module's.
+# go.mod replaces the kubernetes module with ../kubernetes, so the
+# build takes that directory as the build context `kubernetes` and
+# copies it to /kubernetes, which is ../kubernetes relative to /src.
+# Its module files come first for the same caching reason.
 COPY --from=kubernetes go.mod go.sum /kubernetes/
 RUN go mod download
 COPY --from=kubernetes . /kubernetes/
 COPY capabilities/ ./capabilities/
-# CGO_ENABLED=0 with -trimpath is liken's build discipline. purego calls
-# libva with no cgo, so the build needs no C toolchain and no libva
-# headers. The binary names the system's dynamic loader, which the base
-# carries for libva itself.
+# purego calls libva without cgo, so the build needs no C toolchain and
+# no libva headers. The binary is still dynamically linked and needs
+# the system's dynamic loader, which the vaapi base has.
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /media-capabilities ./capabilities
-# The license files of the Go standard library and of each module that
-# the binary links. notices/go.sh says why the image needs them.
+# Collects the license files of the standard library and of each linked
+# module (notices/go.sh).
 COPY --from=notices go.sh /
 RUN CGO_ENABLED=0 sh /go.sh /notices ./capabilities
 
-# purego's build with no cgo names libdl.so.2 and libpthread.so.0 as
-# well as libc.so.6. Since glibc 2.34 both are empty stubs whose symbols
-# libc.so.6 holds, and the vaapi base carries only the libraries its
-# programs load, so neither stub is there. The two files come from the
-# Debian image that every base on Debian builds from, by the same
-# digest, so they are the stubs of the glibc release the base carries.
+# purego makes the binary depend on libdl.so.2 and libpthread.so.0 as
+# well as libc.so.6. Since glibc 2.34 those two files are empty stubs
+# whose symbols are in libc.so.6, but the dynamic loader refuses to
+# start a program when a library it depends on is missing. The vaapi
+# base has only the libraries that its programs load, so this image
+# copies the two stubs from the Debian image that the base's build
+# starts from.
 FROM debian AS glibc
 
-# The bake file at the top of the repository gives this build the vaapi
-# image of the same commit as the named context vaapi.
+# docker-bake.hcl supplies the vaapi image of the same commit as the
+# build context `vaapi`.
 FROM vaapi
 COPY --from=glibc /usr/lib/x86_64-linux-gnu/libdl.so.2 \
      /usr/lib/x86_64-linux-gnu/libpthread.so.0 \

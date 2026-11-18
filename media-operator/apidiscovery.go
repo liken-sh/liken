@@ -1,13 +1,7 @@
 package main
 
-// This file serves the three documents of the API: discovery at
-// /v1/media, the OpenAPI document, and the info document of one
-// Player. The first two are compiled into the binary, so the build
-// version is their validator and a client revalidates them with one
-// conditional request per release. The screen and audio lists in
-// discovery are copied from the siblings' own documents at request
-// time, because a screen or audio request redirects to a sibling and
-// the forms this API can promise are the forms that sibling serves.
+// This file serves the discovery document at /v1/media, the OpenAPI
+// document, and the info document of one Player.
 
 import (
 	"context"
@@ -18,17 +12,16 @@ import (
 	"strings"
 )
 
-// The media type of each document. application/openapi+json is
-// provisional: draft-ietf-httpapi-rest-api-mediatypes registers it and
-// IANA does not list it yet.
+// The media type of each document. application/openapi+json comes from
+// draft-ietf-httpapi-rest-api-mediatypes, and IANA does not list it yet.
 const (
 	jsonDocumentType    = "application/json"
 	openAPIDocumentType = "application/openapi+json"
 )
 
-// discoveryDocument is the discovery shape the three capture APIs
-// share, keyed by the resource's plural, so one client reads all
-// three the same way.
+// discoveryDocument is the discovery format that this API, the display
+// API, and the audio API share. Resources are keyed by their plural name,
+// so one client can read all three.
 type discoveryDocument struct {
 	Resources map[string]discoveryResource `json:"resources"`
 	OpenAPI   string                       `json:"openapi"`
@@ -47,8 +40,8 @@ type discoveryAspect struct {
 	LeadIn     string   `json:"leadIn,omitempty"`
 }
 
-// The query keys each aspect's template offers, as the RFC 6570 form
-// expansion at the end of the template.
+// The query parameters of each aspect's URI template, written as the
+// RFC 6570 form-style query expansion that ends the template.
 const (
 	screenTemplateKeys = "{?t,xywh,width,height,framerate,quality}"
 	audioTemplateKeys  = "{?t,bitrate}"
@@ -62,12 +55,12 @@ func (s *apiServer) serveDiscovery(e *apiExchange) {
 	e.document(marshaled(s.discovery(e.request.Context())), jsonDocumentType, e.buildTag())
 }
 
-// discovery builds the document. The screen and audio lists start as
-// this API's own copies of what the siblings serve and are replaced by
-// the siblings' lists at request time, so a sibling that gains a form
-// shows it here without a release of this API. A sibling that does
-// not answer leaves this API's own list in place, because a discovery
-// document with an empty aspect would tell a client the aspect serves
+// discovery builds the discovery document. A screen or audio request
+// redirects to the display API or the audio API, so those two aspects
+// list the forms that the sibling API serves. Each starts with this API's
+// built-in list of forms, and copySibling replaces it with the sibling's
+// list when the sibling responds. The built-in list stays when it does
+// not, because an empty list would tell a client that the aspect serves
 // nothing.
 func (s *apiServer) discovery(ctx context.Context) discoveryDocument {
 	screen := discoveryAspect{
@@ -105,12 +98,11 @@ func (s *apiServer) discovery(ctx context.Context) discoveryDocument {
 	}
 }
 
-// copySibling reads one aspect out of a sibling's discovery document
-// and takes its media types and extensions, the two lists a redirect
-// depends on. The template and the redirects flag stay this API's
-// own, because they describe this API's route and not the sibling's.
-// A sibling that fails, or answers a document with no such aspect,
-// changes nothing.
+// copySibling fetches a sibling's discovery document and copies the media
+// types and extensions of one aspect into into. It keeps the template and
+// the redirects flag, because they describe this API's route. When the
+// request fails, or the sibling lists no media types for the aspect,
+// copySibling changes nothing.
 func (s *apiServer) copySibling(ctx context.Context, upstream, target, plural, aspect string, into *discoveryAspect) {
 	stream, fault := s.upstream.open(ctx, upstream, target, upstreamHeaderTimeout)
 	if fault != nil {
@@ -121,8 +113,8 @@ func (s *apiServer) copySibling(ctx context.Context, upstream, target, plural, a
 	if err := json.NewDecoder(stream.body).Decode(&document); err != nil {
 		return
 	}
-	found, held := document.Resources[plural].Aspects[aspect]
-	if !held || len(found.MediaTypes) == 0 {
+	found, ok := document.Resources[plural].Aspects[aspect]
+	if !ok || len(found.MediaTypes) == 0 {
 		return
 	}
 	into.MediaTypes = found.MediaTypes
@@ -145,9 +137,9 @@ func formExtensions(forms []mediaForm) []string {
 	return extensions
 }
 
-// serveOpenAPI answers the committed document with one change: the
-// servers list names the origin this request reached, or the
-// configured public base, in place of the committed placeholder.
+// serveOpenAPI serves the committed OpenAPI document with its servers list
+// replaced by the origin that the request reached, or by the configured
+// public base when there is one.
 func (s *apiServer) serveOpenAPI(e *apiExchange) {
 	if _, ok := e.authenticate(); !ok {
 		return
@@ -155,12 +147,11 @@ func (s *apiServer) serveOpenAPI(e *apiExchange) {
 	e.document(servedOpenAPI(s.origin(e)), openAPIDocumentType, e.buildTag())
 }
 
-// playerInfoDocument is what a client reads before it asks for a
-// capture: the Display and its node, each Sink the Player remembers,
-// whether a Play runs, and the stream count. The count is the
-// stream-count rule applied for the client, so the client reads
-// whether media.mp4 will compose a stream or answer 409 before it
-// asks.
+// playerInfoDocument is what a client can read before it requests a
+// capture: the Display and its node, the Sinks in the Player's status,
+// whether a Play is running, and how many streams a capture would
+// combine. The client can use the count to tell whether media.mp4 will
+// compose a stream or fail with 409.
 type playerInfoDocument struct {
 	Namespace string             `json:"namespace"`
 	Name      string             `json:"name"`
@@ -205,24 +196,23 @@ func (s *apiServer) serveInfo(e *apiExchange) {
 	e.document(body, jsonDocumentType, bodyTag(body))
 }
 
-// bodyTag is the info document's validator, a digest of its own body
-// and not the build version. A revalidation must answer 304 only while
-// the Player's facts stand, and the facts change when a claim moves.
+// bodyTag is the ETag of the info document: a SHA-256 digest of its body,
+// because the document changes with the Player's status.
 func bodyTag(body []byte) string {
 	digest := sha256.Sum256(body)
 	return `"` + hex.EncodeToString(digest[:]) + `"`
 }
 
-// buildTag is the validator of the two documents the router compiles
-// in. They change only with a release, so the build version is the
-// exact validator.
+// buildTag is the ETag of the discovery and OpenAPI documents: the build
+// version. The committed OpenAPI document changes only with a release.
+// The discovery document's screen and audio lists come from the sibling
+// APIs, so it can change without a release while its ETag stays the same.
 func (e *apiExchange) buildTag() string {
 	return `"` + e.server.version + `"`
 }
 
-// marshaled encodes a document. The documents are strings, slices,
-// and maps, so the encoding cannot fail, and a nil body is never
-// answered.
+// marshaled encodes a document as JSON. The documents hold only strings,
+// numbers, slices, and maps, so encoding cannot fail.
 func marshaled(payload any) []byte {
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -231,21 +221,21 @@ func marshaled(payload any) []byte {
 	return body
 }
 
-// document answers a document route: an ETag, no-cache so a client
-// revalidates on every read, and 304 with no body on a matching
-// If-None-Match. It carries none of the capture fields, no file name,
-// no range statement, and no chunking, because a document is not a
-// capture and a cache may hold it.
+// document writes a document response with an ETag and
+// Cache-Control: no-cache, so a client revalidates on every read. A
+// matching If-None-Match gets 304 with no body. Unlike a capture, the
+// response has no file name, no range information, and no chunked
+// encoding.
 func (e *apiExchange) document(body []byte, contentType, tag string) {
 	header := e.writer.Header()
 	header.Set("ETag", tag)
 	header.Set("Cache-Control", "no-cache")
 	if matchesETag(e.request.Header.Get("If-None-Match"), tag) {
-		e.answer(http.StatusNotModified)
+		e.writeStatus(http.StatusNotModified)
 		return
 	}
 	header.Set("Content-Type", contentType)
-	e.answer(http.StatusOK)
+	e.writeStatus(http.StatusOK)
 	if e.head {
 		return
 	}
@@ -253,9 +243,9 @@ func (e *apiExchange) document(body []byte, contentType, tag string) {
 	e.bytes = int64(written)
 }
 
-// matchesETag reads an If-None-Match field: a list of validators, a
-// weak validator with its W/ prefix, or the wildcard, which matches
-// any current representation.
+// matchesETag reports whether an If-None-Match field matches tag. The
+// field is a comma-separated list. An entry can have a W/ weak prefix,
+// and * matches any current representation.
 func matchesETag(field, tag string) bool {
 	if field == "" {
 		return false
@@ -270,22 +260,22 @@ func matchesETag(field, tag string) bool {
 	return false
 }
 
-// serveHealth answers the two probe paths. /healthz answers 200 while
-// the process runs. /readyz is a latching startup check: it answers
-// 503 until the TLS pair is loaded and one TokenReview of the API's
-// own token has succeeded, then 200 for the life of the process. It
-// never calls the API server per probe; a later failure is a metric
-// and a log line, not a pod the kubelet takes out of the Service.
+// serveHealth serves /healthz and /readyz. /healthz returns 200 while the
+// process runs. /readyz returns 503 until startup sets s.ready, after a
+// TokenReview of this API's own token gets a response from the API server,
+// and then 200 for the life of the process. A probe does not call the API
+// server, so a later TokenReview failure shows only in a metric and a log
+// line and does not remove the pod from the Service.
 func (s *apiServer) serveHealth(e *apiExchange) {
 	e.writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	if e.route == readyTemplate && !s.ready.Load() {
-		e.answer(http.StatusServiceUnavailable)
+		e.writeStatus(http.StatusServiceUnavailable)
 		if !e.head {
 			_, _ = e.writer.Write([]byte("not ready\n"))
 		}
 		return
 	}
-	e.answer(http.StatusOK)
+	e.writeStatus(http.StatusOK)
 	if !e.head {
 		_, _ = e.writer.Write([]byte("ok\n"))
 	}

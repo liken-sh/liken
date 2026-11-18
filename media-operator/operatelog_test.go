@@ -1,8 +1,7 @@
 package main
 
-// These tests cover the operator's lines: one line per operation a
-// person caused, and none for a pass that finds everything as it wants
-// it.
+// These tests check the operator's log lines: one line for each change
+// the operator makes, and none for a pass that changes nothing.
 
 import (
 	"strings"
@@ -20,7 +19,7 @@ func loggingOperator(t *testing.T, cluster *fakeCluster) (*operator, *logBuffer)
 }
 
 // linesAbout keeps the lines about one subject, so a test of a Play
-// reads past the lines the same pass writes about its Remotes.
+// ignores the lines that the same pass writes about Remotes and Players.
 func linesAbout(log *logBuffer, subject string) []string {
 	var kept []string
 	for _, line := range log.lines() {
@@ -31,8 +30,6 @@ func linesAbout(log *logBuffer, subject string) []string {
 	return kept
 }
 
-// A new Play is two lines, the pod and the phase, and a second pass over
-// the same Play writes none.
 func TestANewPlayLogsItsPodAndItsPhaseOnce(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
@@ -48,8 +45,6 @@ func TestANewPlayLogsItsPodAndItsPhaseOnce(t *testing.T) {
 	})
 }
 
-// A Play the operator cannot run says why, in the words its status
-// carries, once.
 func TestARefusedPlayLogsItsFailureOnce(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("ftp://nas/film.mkv")
@@ -131,14 +126,13 @@ func TestARecreatedPodLogsWhy(t *testing.T) {
 
 			lines := linesAbout(log, "play house/movie")
 			if len(lines) == 0 || lines[0] != each.want {
-				t.Errorf("lines = %q, want the first to be %q", lines, each.want)
+				t.Errorf("the lines about the play are %q, want the first to be %q", lines, each.want)
 			}
 		})
 	}
 }
 
-// A newer Play on the same Player replaces the running one, and the
-// line names the unit it ran on.
+// A newer Play on the same Player replaces the running one.
 func TestASupersededPlayLogsItsDelete(t *testing.T) {
 	cluster := runningCluster(housePlayer())
 	cluster.plays["movie"].Metadata.CreationTimestamp = "2026-01-01T00:00:00Z"
@@ -155,8 +149,6 @@ func TestASupersededPlayLogsItsDelete(t *testing.T) {
 	})
 }
 
-// A Play a person deleted is released once its pod is gone, and the
-// release is its one line.
 func TestADeletedPlayLogsItsRelease(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cluster := newFakeCluster()
@@ -176,8 +168,6 @@ func TestADeletedPlayLogsItsRelease(t *testing.T) {
 	})
 }
 
-// A moving mark writes one line with its reason, and a mark that stands
-// writes none.
 func TestAFocusMoveLogsItsReason(t *testing.T) {
 	topic := remoteFocusTopic(defaultTopicBase, "house", "sofa")
 	key := controllerKey("house", "sofa")
@@ -200,7 +190,7 @@ func TestAFocusMoveLogsItsReason(t *testing.T) {
 			mark:    "aaa",
 			cycle:   true,
 			players: []Player{focusPlayer("aaa", "sofa")},
-			want:    []string{"remote house/sofa: asked to cycle focus, focus stays on player aaa, the one player that lists the remote"},
+			want:    []string{"remote house/sofa: asked to cycle focus, focus stays on player aaa, the only Player that lists the Remote"},
 		},
 		{
 			name:    "a cycle with no player",
@@ -226,7 +216,7 @@ func TestAFocusMoveLogsItsReason(t *testing.T) {
 			want:    []string{"remote house/sofa: focus cleared from player aaa, because no player lists the remote, published the empty mark to " + topic},
 		},
 		{
-			name:    "a mark that stands",
+			name:    "a mark that stays",
 			mark:    "bbb",
 			players: []Player{focusPlayer("aaa", "sofa"), focusPlayer("bbb", "sofa")},
 		},
@@ -252,7 +242,7 @@ func TestAFocusMoveLogsItsReason(t *testing.T) {
 	}
 }
 
-// A fresh Play takes its controllers, and the line names the Play.
+// A new Play moves the focus of its Player's controllers to that Player.
 func TestAFreshPlayLogsTheFocusItTakes(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
@@ -269,8 +259,8 @@ func TestAFreshPlayLogsTheFocusItTakes(t *testing.T) {
 			remoteFocusTopic(defaultTopicBase, "house", "sofa"))
 }
 
-// A press on a controller whose unit has a receiver asks it for the
-// unit's input, and the line names the press and the ask.
+// A key press on a controller whose Player is wired to a Receiver makes
+// the operator write an inputAsk on the Receiver. A repeat logs nothing.
 func TestAPressLogsTheInputAskItSent(t *testing.T) {
 	media, _ := askOperator(t)
 	var log logBuffer
@@ -282,8 +272,8 @@ func TestAPressLogsTheInputAskItSent(t *testing.T) {
 	mustLogOnce(t, &log, "remote house/sofa: KEY_UP pressed with focus on player theater, wrote inputAsk ensure on receiver den-receiver")
 }
 
-// A new key table writes one line, and the same table republished after
-// a fresh broker session writes none.
+// Publishing the same key table again after a broker reconnect logs
+// nothing.
 func TestAKeyTableLogsOnceUntilItChanges(t *testing.T) {
 	media := testOperator(t, newFakeCluster(), make(chan struct{}, 1))
 	media.bus = connectedBus(t)
@@ -300,8 +290,8 @@ func TestAKeyTableLogsOnceUntilItChanges(t *testing.T) {
 		", the base with Keymap gamepad, to "+topic)
 }
 
-// A Keymap that does not compile is refused in the compiler's words, once
-// for as long as it stands.
+// A Keymap that does not compile logs the compile error once, however
+// many times the operator publishes the key table.
 func TestARefusedKeymapLogsOnce(t *testing.T) {
 	media := testOperator(t, newFakeCluster(), make(chan struct{}, 1))
 	var log logBuffer
@@ -317,9 +307,7 @@ func TestARefusedKeymapLogsOnce(t *testing.T) {
 		"BTN_NOPE")
 }
 
-// A unit that starts or ends a run writes one line, and a republish of
-// the same activity writes none.
-func TestAnActivityMoveLogsOnce(t *testing.T) {
+func TestAnActivityChangeLogsOnce(t *testing.T) {
 	cluster := runningCluster(housePlayer())
 	media, log := loggingOperator(t, cluster)
 	player := housePlayer()
@@ -333,8 +321,7 @@ func TestAnActivityMoveLogsOnce(t *testing.T) {
 		playerStatusTopic(defaultTopicBase, "house", "theater"))
 }
 
-// A controller whose link changes between passes writes one line, and
-// the first read of a link writes none.
+// The first read of a controller's link logs nothing.
 func TestALinkChangeLogsOnce(t *testing.T) {
 	media, log := loggingOperator(t, newFakeCluster())
 	named := map[string]string{"house/sofa": "aa-bb"}
@@ -347,7 +334,7 @@ func TestALinkChangeLogsOnce(t *testing.T) {
 
 	for _, status := range []string{conditionTrue, conditionTrue, "False", "False", conditionTrue} {
 		before := media.peripherals.links()
-		media.peripherals.hold(linked(status), named)
+		media.peripherals.replace(linked(status), named)
 		media.logLinks(before, media.peripherals.links())
 	}
 
@@ -357,14 +344,14 @@ func TestALinkChangeLogsOnce(t *testing.T) {
 	})
 }
 
-// A standing pod whose template changed is replaced over two passes,
-// and each step writes its line with the reason.
-func TestAStandingPodReplacedByAnEditLogsEachStep(t *testing.T) {
+// A Remote's pod whose template changed is deleted on one pass and
+// created on the next, and each step logs one line.
+func TestARemotePodReplacedByAnEditLogsEachStep(t *testing.T) {
 	cluster := newFakeCluster()
 	media, log := loggingOperator(t, cluster)
-	remote := standingRemote()
+	remote := remoteWithController()
 	claim := buildRemoteClaim(remote)
-	seedStanding(t, cluster, claim,
+	seedPersistent(t, cluster, claim,
 		buildRemotePod(remote, claim, "registry.example/sidecar:old", media.busAddress, media.topicBase))
 
 	mustSucceed(t, media.reconcileRemote(remote, claimRead{}))
@@ -377,13 +364,13 @@ func TestAStandingPodReplacedByAnEditLogsEachStep(t *testing.T) {
 	})
 }
 
-// A claim that diverged takes its pods with it, and the line says so.
-func TestAStandingClaimReplacedByAnEditLogsBoth(t *testing.T) {
+// A claim whose template changed is replaced together with its pods.
+func TestARemoteClaimReplacedByAnEditLogsBoth(t *testing.T) {
 	cluster := newFakeCluster()
 	media, log := loggingOperator(t, cluster)
-	remote := standingRemote()
+	remote := remoteWithController()
 	claim := buildRemoteClaim(remote)
-	seedStanding(t, cluster, claim,
+	seedPersistent(t, cluster, claim,
 		buildRemotePod(remote, claim, media.sidecarImage, media.busAddress, media.topicBase))
 	remote.Spec.Device.Class = "another-class"
 
@@ -397,15 +384,15 @@ func TestAStandingClaimReplacedByAnEditLogsBoth(t *testing.T) {
 	})
 }
 
-// Handing the idle screen to a delegate removes this operator's pod, and
-// the line names the controller that took it.
+// Handing the idle screen to another controller deletes this operator's
+// idle pod.
 func TestAnIdleScreenHandedToADelegateLogsTheHandOver(t *testing.T) {
 	cluster := newFakeCluster()
 	media, log := loggingOperator(t, cluster)
 	media.idleDisplayClass = "display-draw"
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 	claim := buildIdleClaim(player, media.idleDisplayClass)
-	seedStanding(t, cluster, claim, plainIdlePod(player, claim, testBusAddress, testTopicBase, "America/New_York"))
+	seedPersistent(t, cluster, claim, plainIdlePod(player, claim, testBusAddress, testTopicBase, "America/New_York"))
 
 	player.Spec.Idle = &IdlePolicy{Controller: "library.liken.sh/media-browser"}
 	mustSucceed(t, media.reconcileIdle(player, "America/New_York", nil))
@@ -416,19 +403,19 @@ func TestAnIdleScreenHandedToADelegateLogsTheHandOver(t *testing.T) {
 	})
 }
 
-// A session applied and a session lifted each write one line, and a pass
-// that applies the session it already holds writes none.
+// A pass that applies a receiver session that is already applied logs
+// nothing.
 func TestAReceiverSessionLogsItsApplyAndItsLift(t *testing.T) {
 	cluster := receiverCluster()
 	media, log := loggingOperator(t, cluster)
 
-	runPlayers(media, []Player{*housePlayer()}, standingPlays())
-	runPlayers(media, []Player{*housePlayer()}, standingPlays())
+	runPlayers(media, []Player{*housePlayer()}, runningPlays())
+	runPlayers(media, []Player{*housePlayer()}, runningPlays())
 	runPlayers(media, nil, nil)
 
 	mustMatchAll(t, linesAbout(log, "player house/theater"), []string{
 		"player house/theater: applied the session on receiver den-receiver: input GAME, active true, awake true",
-		"player house/theater: lifted the session on receiver den-receiver, because the unit matches no receiver input now",
+		"player house/theater: removed the session from Receiver den-receiver, because the Player matches no Receiver input now",
 	})
 }
 
@@ -439,32 +426,31 @@ func TestAUnitThatMovesReceiverLogsTheLiftAndTheApply(t *testing.T) {
 		Spec:     ReceiverSpec{Inputs: []ReceiverInput{{Name: "MPLAY", Machine: "node-6", Monitor: testMonitor}}},
 	}
 	media, log := loggingOperator(t, cluster)
-	runPlayers(media, []Player{*housePlayer()}, standingPlays())
+	runPlayers(media, []Player{*housePlayer()}, runningPlays())
 	cluster.receivers["den-receiver"].Spec.Inputs[1].Machine = "node-6"
 	cluster.receivers["den-denon"].Spec.Inputs[0].Machine = testNode
 
-	runPlayers(media, []Player{*housePlayer()}, standingPlays())
+	runPlayers(media, []Player{*housePlayer()}, runningPlays())
 
 	mustMatchAll(t, linesAbout(log, "player house/theater")[1:], []string{
-		"player house/theater: lifted the session on receiver den-receiver, because the unit moved to receiver den-denon",
+		"player house/theater: removed the session from Receiver den-receiver, because the Player moved to Receiver den-denon",
 		"player house/theater: applied the session on receiver den-denon: input MPLAY, active true, awake true",
 	})
 }
 
-// The idle screen's desire reaches the panel once per change, and the
-// line names the override and the display.
+// A change in the panel state that the idle screen asks for logs once.
 func TestAPanelDesireLogsTheOverrideOnce(t *testing.T) {
 	cluster := screenCluster()
 	media, log := loggingOperator(t, cluster)
 	players := []Player{*housePlayer()}
 
-	statePanel(media, players, panelDesireOff, nil)
-	statePanel(media, players, panelDesireOff, nil)
-	statePanel(media, players, "on", nil)
+	sendPanelDesireAndReconcile(media, players, panelDesireOff, nil)
+	sendPanelDesireAndReconcile(media, players, panelDesireOff, nil)
+	sendPanelDesireAndReconcile(media, players, "on", nil)
 
 	mustMatchAll(t, linesAbout(log, "player house/theater"), []string{
-		"player house/theater: the idle screen asked for panel off, applied backlight Off to display " + testMonitor,
-		"player house/theater: the idle screen asked for panel on, applied no override to display " + testMonitor,
+		"player house/theater: the idle screen requested panel off, applied backlight Off to Display " + testMonitor,
+		"player house/theater: the idle screen requested panel on, applied no override to Display " + testMonitor,
 	})
 }
 
@@ -472,14 +458,15 @@ func TestDescribeOverrideNamesTheBlock(t *testing.T) {
 	mustMatch(t, describeOverride(&DisplayOverride{Power: displayPowerOff}), "power Off")
 }
 
-// A unit that is gone lifts the override it left, and the line says so.
+// When a Player is gone, the operator removes the panel override that it
+// set for the Player's idle screen, and logs it.
 func TestAGoneUnitLogsTheLiftOfItsOverride(t *testing.T) {
 	cluster := screenCluster()
 	media, log := loggingOperator(t, cluster)
-	statePanel(media, []Player{*housePlayer()}, panelDesireOff, nil)
+	sendPanelDesireAndReconcile(media, []Player{*housePlayer()}, panelDesireOff, nil)
 
-	media.retainPanels(map[string]bool{})
+	media.removeGonePanelOverrides(map[string]bool{})
 
 	mustMatch(t, linesAbout(log, "player house/theater")[1],
-		"player house/theater: lifted the override on display "+testMonitor+", because the player is gone")
+		"player house/theater: removed the override from Display "+testMonitor+", because the Player was deleted")
 }

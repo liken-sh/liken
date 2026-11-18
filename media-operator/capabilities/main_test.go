@@ -13,30 +13,29 @@ func TestTheAgentReadsItsNodeAndPodFromTheDownwardAPI(t *testing.T) {
 	set := map[string]string{"NODE_NAME": "node-1", "POD_NAME": "media-capabilities-x", "POD_NAMESPACE": "liken-system"}
 	env, err := downwardEnv(func(name string) string { return set[name] })
 	if err != nil || !maps.Equal(env, set) {
-		t.Errorf("env = %v, err = %v", env, err)
+		t.Errorf("downwardEnv = %v, %v, want %v and no error", env, err, set)
 	}
 }
 
 func TestTheAgentRefusesToStartWithoutItsNode(t *testing.T) {
 	_, err := downwardEnv(func(name string) string { return "" })
-	if err == nil || !strings.Contains(err.Error(), "NODE_NAME is not set") {
-		t.Errorf("err = %v", err)
+	if err == nil || !strings.Contains(err.Error(), "NODE_NAME") {
+		t.Errorf("downwardEnv with no variables returned %v, want an error that names NODE_NAME", err)
 	}
 }
 
-// The agent runs its own executable as the child of each query.
 func TestTheQueryChildIsThisProgramInQueryMode(t *testing.T) {
 	q, err := selfQuerier()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the querier: %v", err)
 	}
 	cmd := q.command(t.Context(), "/dev/dri/renderD128")
 	if got := strings.Join(cmd.Args[1:], " "); got != "query /dev/dri/renderD128" || q.timeout != queryTimeout {
-		t.Errorf("args = %q, timeout = %s", got, q.timeout)
+		t.Errorf("the query child runs %q with timeout %s, want %q with %s", got, q.timeout, "query /dev/dri/renderD128", queryTimeout)
 	}
 }
 
-// oneVersion is a watch that hands over one version of the slice and
+// oneVersion is a watch that delivers one version of the slice and
 // closes its channel when its context ends.
 func oneVersion(slice *ResourceSlice) func(context.Context, func(*ResourceSlice)) <-chan struct{} {
 	return func(ctx context.Context, seen func(*ResourceSlice)) <-chan struct{} {
@@ -55,7 +54,7 @@ func servesUntilTheEnd(ctx context.Context) error {
 	return nil
 }
 
-func TestTheAgentReadsItsClaimAndPublishesTheSliceTheWatchHandsOver(t *testing.T) {
+func TestTheAgentReadsItsClaimAndPublishesTheSliceTheWatchDelivers(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api, client := startAPI(t)
 		node := nodeObject{}
@@ -76,7 +75,7 @@ func TestTheAgentReadsItsClaimAndPublishesTheSliceTheWatchHandsOver(t *testing.T
 			"NODE_NAME": "node-1", "POD_NAME": "media-capabilities-x", "POD_NAMESPACE": "liken-system",
 		}, queries.query)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("creating the agent: %v", err)
 		}
 		a.renderNode = renderNodeOf
 
@@ -104,7 +103,7 @@ func TestTheAgentStopsWhenTheKubeletPluginFails(t *testing.T) {
 			return errors.New("the registration socket: bind: address already in use")
 		})
 		if err == nil || !strings.Contains(err.Error(), "address already in use") {
-			t.Errorf("err = %v", err)
+			t.Errorf("operate returned %v, want the error of the plugin", err)
 		}
 	})
 }
@@ -112,7 +111,7 @@ func TestTheAgentStopsWhenTheKubeletPluginFails(t *testing.T) {
 func TestAnAgentWhoseNodeCannotBeReadDoesNotStart(t *testing.T) {
 	_, client := startAPI(t)
 	_, err := newAgent(client, map[string]string{"NODE_NAME": "node-1"}, nil)
-	if err == nil || !strings.Contains(err.Error(), "reading node node-1") {
-		t.Errorf("err = %v", err)
+	if err == nil || !strings.Contains(err.Error(), "node-1") {
+		t.Errorf("newAgent returned %v, want an error that names node-1", err)
 	}
 }

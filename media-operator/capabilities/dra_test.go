@@ -12,7 +12,7 @@ import (
 	regv1 "k8s.io/kubelet/pkg/apis/pluginregistration/v1"
 )
 
-func TestAPrepareAnswersEachClaimWithNoDevice(t *testing.T) {
+func TestAPrepareReturnsAnEntryWithNoDeviceForEachClaim(t *testing.T) {
 	resp, err := draPlugin{}.NodePrepareResources(context.Background(), &drav1.NodePrepareResourcesRequest{
 		Claims: []*drav1.Claim{
 			{Namespace: "media", Name: "worker-gpu", Uid: "uid-1"},
@@ -20,7 +20,7 @@ func TestAPrepareAnswersEachClaimWithNoDevice(t *testing.T) {
 		},
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("NodePrepareResources: %v", err)
 	}
 	if len(resp.Claims) != 2 {
 		t.Fatalf("claims = %v, want an entry for each", resp.Claims)
@@ -32,12 +32,12 @@ func TestAPrepareAnswersEachClaimWithNoDevice(t *testing.T) {
 	}
 }
 
-func TestAnUnprepareAnswersEachClaimWithSuccess(t *testing.T) {
+func TestAnUnprepareSucceedsForEachClaim(t *testing.T) {
 	resp, err := draPlugin{}.NodeUnprepareResources(context.Background(), &drav1.NodeUnprepareResourcesRequest{
 		Claims: []*drav1.Claim{{Namespace: "media", Name: "worker-gpu", Uid: "uid-1"}},
 	})
 	if err != nil || resp.Claims["uid-1"] == nil || resp.Claims["uid-1"].Error != "" {
-		t.Errorf("resp = %+v, err = %v", resp, err)
+		t.Errorf("NodeUnprepareResources = %+v, %v, want an entry for uid-1 with no error", resp, err)
 	}
 }
 
@@ -55,24 +55,24 @@ func TestTheKubeletFindsThePluginThroughTheRegistrationSocket(t *testing.T) {
 
 	info := waitForInfo(t, filepath.Join(dir, DriverName+"-reg.sock"))
 	if info.Name != DriverName || info.Type != regv1.DRAPlugin {
-		t.Errorf("info = %+v", info)
+		t.Errorf("info = %+v, want name %q and type %q", info, DriverName, regv1.DRAPlugin)
 	}
 	plugin := dial(t, info.Endpoint)
 	resp, err := drav1.NewDRAPluginClient(plugin).NodePrepareResources(ctx, &drav1.NodePrepareResourcesRequest{
 		Claims: []*drav1.Claim{{Uid: "uid-1"}},
 	})
 	if err != nil || resp.Claims["uid-1"] == nil {
-		t.Errorf("prepare over the socket = %+v, %v", resp, err)
+		t.Errorf("NodePrepareResources over the socket = %+v, %v, want an entry for uid-1", resp, err)
 	}
 
 	cancel()
 	select {
 	case err := <-served:
 		if err != nil {
-			t.Errorf("serve returned %v after its context ended", err)
+			t.Errorf("serveDRAPlugin returned %v after its context ended, want nil", err)
 		}
 	case <-time.After(10 * time.Second):
-		t.Fatal("serve did not return after its context ended")
+		t.Fatal("serveDRAPlugin did not return within 10 seconds of its context ending")
 	}
 }
 
@@ -80,14 +80,15 @@ func dial(t *testing.T, socket string) *grpc.ClientConn {
 	t.Helper()
 	conn, err := grpc.NewClient("unix://"+socket, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the client for %s: %v", socket, err)
 	}
 	t.Cleanup(func() { conn.Close() })
 	return conn
 }
 
-// waitForInfo calls GetInfo until the socket answers, for up to ten
-// seconds, because the servers start on their own goroutine.
+// waitForInfo calls GetInfo with WaitForReady, because serveDRAPlugin
+// creates the socket on another goroutine. It fails the test after ten
+// seconds.
 func waitForInfo(t *testing.T, socket string) *regv1.PluginInfo {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -99,14 +100,14 @@ func waitForInfo(t *testing.T, socket string) *regv1.PluginInfo {
 	return info
 }
 
-func TestTheRegistrarAnswersEitherRegistrationStatus(t *testing.T) {
+func TestTheRegistrarAcceptsEitherRegistrationStatus(t *testing.T) {
 	registrar := &draRegistrar{}
 	for _, status := range []*regv1.RegistrationStatus{
 		{PluginRegistered: true},
 		{PluginRegistered: false, Error: "a plugin of this name is registered"},
 	} {
 		if _, err := registrar.NotifyRegistrationStatus(context.Background(), status); err != nil {
-			t.Errorf("status %+v: %v", status, err)
+			t.Errorf("NotifyRegistrationStatus(%+v) returned %v, want nil", status, err)
 		}
 	}
 }
@@ -116,6 +117,6 @@ func TestAPluginDirectoryThatCannotBeMadeFailsTheServe(t *testing.T) {
 	draPluginDir = "/dev/null/media.liken.sh"
 	t.Cleanup(func() { draPluginDir = saved })
 	if err := serveDRAPlugin(context.Background()); err == nil {
-		t.Error("serve made a directory under /dev/null")
+		t.Error("serveDRAPlugin returned no error for a plugin directory under /dev/null")
 	}
 }

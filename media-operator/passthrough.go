@@ -1,21 +1,22 @@
 package main
 
-// Passthrough sends a film's Dolby or DTS track to the AV receiver as the
-// encoded bitstream, so the receiver decodes it itself. That is the only
-// way a receiver's height speakers play Dolby Atmos or DTS:X, because
-// mpv's decoders keep the channel bed and drop the height objects.
+// Passthrough sends a film's Dolby or DTS track to the A/V receiver as an
+// encoded bitstream, and the receiver decodes it. A receiver plays the
+// height channels of Dolby Atmos or DTS:X only from the bitstream,
+// because mpv's decoders output the channel bed and drop the height
+// objects.
 //
-// mpv passes a track through only when --audio-spdif names its codec, and
-// it decodes every other track. mpv does not decode a track again when the
-// PipeWire sink refuses its bitstream: the film plays with no sound. So
-// mpv gets the codecs that the remembered Sink reports in
-// status.passthrough, and no other codec.
+// mpv passes a track through when its codec is in --audio-spdif, and
+// decodes every other track. When the PipeWire sink refuses a
+// bitstream, mpv does not fall back to decoding, and the film plays with
+// no sound. So the option lists only the codecs in status.passthrough of
+// the Player's Sink.
 //
-// PipeWire cannot scale a bitstream, so the sink's level and mute do
-// nothing while one plays. Only the receiver's own volume works. So a
-// Player passes through only when a reachable Receiver sets its level, the
-// same Receiver that volumeDevices sends its presses to. A Player with
-// more than one sink decodes too, because one mpv stream goes to one sink.
+// PipeWire cannot scale a bitstream, so the Sink's volume and mute do
+// nothing while one plays. A Player therefore passes through only when
+// a reachable Receiver handles its volume presses (levelReceiver), so
+// the receiver's own volume works. A Player with more than one sink
+// decodes, because mpv sends one stream to one sink.
 
 import (
 	"errors"
@@ -26,17 +27,16 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// The values of spec.passthrough. An absent field is Off, because
-// passthrough moves control of the level from the cluster to the
-// receiver.
+// The values of spec.passthrough. An absent field means Off, because
+// passthrough moves volume control from the cluster to the receiver.
 const (
 	passthroughOn  = "On"
 	passthroughOff = "Off"
 )
 
-// spdifFormats pairs each encoded format that the audio operator reports,
-// in PipeWire's IEC958 codec names, with mpv's name for its codec. The
-// order is the order the option names them in.
+// spdifFormats maps each encoded format that a Sink reports, in
+// PipeWire's IEC958 names, to mpv's codec name. The option lists codecs
+// in this order.
 var spdifFormats = []struct{ sink, mpv string }{
 	{"AC3", "ac3"},
 	{"EAC3", "eac3"},
@@ -45,9 +45,9 @@ var spdifFormats = []struct{ sink, mpv string }{
 	{"TrueHD", "truehd"},
 }
 
-// spdifCodecs maps a Sink's status.passthrough to mpv's codec names. A
-// name that is not one of the five is dropped, so a format that a newer
-// audio operator reports never reaches mpv as a codec it does not know.
+// spdifCodecs drops a format that is not in spdifFormats, so a format
+// that a newer audio-operator reports cannot reach mpv as an unknown
+// codec.
 func spdifCodecs(formats []string) []string {
 	var codecs []string
 	for _, format := range spdifFormats {
@@ -58,69 +58,68 @@ func spdifCodecs(formats []string) []string {
 	return codecs
 }
 
-// spdifOption is the mpv option that passes the codecs through.
 func spdifOption(codecs []string) string {
 	return "--audio-spdif=" + strings.Join(codecs, ",")
 }
 
-// passthroughDecision is what one play start passes through. codecs is
-// empty when mpv decodes. reason says why a Player that states On
-// decodes, and it is empty for a Player that does not state On.
+// passthroughDecision is the result for one play start. requested is
+// true when spec.passthrough is On. When requested is true and codecs is
+// empty, mpv decodes and reason says why.
 type passthroughDecision struct {
-	asked  bool
-	codecs []string
-	sink   string
-	reason string
+	requested bool
+	codecs    []string
+	sink      string
+	reason    string
 }
 
-// passthroughFor decides what mpv passes through on one Player, from its
-// spec, the Receiver that sets its level, and its remembered Sink. The
-// remembered Sink is the one the last allocated playback claim resolved
-// (playersinks.go). A Player's first play has no remembered Sink, because
-// the operator creates the pod before the scheduler allocates its claim.
+// passthroughFor decides which codecs mpv passes through for a Player.
+// It reads the Sink from status.sinks, which records the Sink of the
+// Player's last allocated playback claim (playersinks.go). So the first
+// play of a Player decodes, because the operator creates its pod before
+// the scheduler allocates the claim.
 func (o *operator) passthroughFor(player *Player) passthroughDecision {
 	if player.Spec.Passthrough != passthroughOn {
 		return passthroughDecision{}
 	}
 	decodes := func(reason string) passthroughDecision {
-		return passthroughDecision{asked: true, reason: reason}
+		return passthroughDecision{requested: true, reason: reason}
 	}
 	if count := len(player.Spec.Sinks); count != 1 {
-		return decodes(fmt.Sprintf("passthrough needs exactly one entry in spec.sinks, and the player states %d", count))
+		return decodes(fmt.Sprintf("spec.sinks has %d entries, and passthrough needs exactly one", count))
 	}
 	if _, sets := o.levelReceiver(player); !sets {
-		return decodes("no Receiver with a Reachable condition of True sets the unit's level")
+		return decodes("no Receiver matches the Player's screen with a Reachable condition of True, and passthrough needs one to set the volume")
 	}
 	if len(player.Status.Sinks) == 0 || player.Status.Sinks[0].Name == "" {
-		return decodes("status.sinks names no Sink yet, which is the case until the player's first playback claim is allocated")
+		return decodes("status.sinks lists no Sink, and stays empty until the Player's first playback claim is allocated")
 	}
 	name := player.Status.Sinks[0].Name
 	sink, err := o.view.Sink(name)
 	if errors.Is(err, apiclient.ErrNotFound) {
-		return decodes("the operator holds no Sink " + name)
+		return decodes("Sink " + name + " does not exist")
 	}
 	if err != nil {
-		return decodes(fmt.Sprintf("reading Sink %s failed: %v", name, err))
+		return decodes(fmt.Sprintf("reading Sink %s: %v", name, err))
 	}
 	codecs := spdifCodecs(sink.Status.Passthrough)
 	if len(codecs) == 0 {
-		return decodes("sink " + name + " accepts no encoded format in status.passthrough")
+		return decodes("Sink " + name + " lists no encoded format in status.passthrough")
 	}
-	return passthroughDecision{asked: true, codecs: codecs, sink: name}
+	return passthroughDecision{requested: true, codecs: codecs, sink: name}
 }
 
-// logPassthrough writes the decision's line for one play start. A Player
-// that does not state On writes none.
+// logPassthrough logs nothing when the Player did not request
+// passthrough.
 func (o *operator) logPassthrough(play *Play, player *Player, decision passthroughDecision) {
-	if !decision.asked {
+	if !decision.requested {
 		return
 	}
 	key := runKey(play.Metadata.Namespace, play.Metadata.Name)
 	if len(decision.codecs) == 0 {
-		logLine(o.log, "play %s: mpv decodes every track, although player %s states passthrough On, because %s",
+		logLine(o.log, "play %s: mpv decodes every track, although Player %s sets spec.passthrough to On, because %s",
 			key, player.Metadata.Name, decision.reason)
 		return
 	}
-	logLine(o.log, "play %s: mpv passes %s through to sink %s, because player %s states passthrough On",
+	logLine(o.log, "play %s: mpv passes %s through to sink %s, because Player %s sets spec.passthrough to On",
 		key, strings.Join(decision.codecs, ","), decision.sink, player.Metadata.Name)
 }

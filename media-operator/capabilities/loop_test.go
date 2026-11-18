@@ -8,9 +8,9 @@ import (
 	"time"
 )
 
-// A pass that fails runs again after a backoff that doubles, and a
-// pass that succeeds waits for the next wake.
-func TestAFailedPassRunsAgainAfterABackoffThatGrows(t *testing.T) {
+// A pass that fails runs again after a wait that doubles, and a pass
+// that succeeds waits for the next wake.
+func TestAFailedPassRunsAgainAfterADoublingBackoff(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		wakes := make(chan struct{}, 1)
@@ -37,7 +37,7 @@ func TestAFailedPassRunsAgainAfterABackoffThatGrows(t *testing.T) {
 
 		want := []time.Duration{0, time.Second, 3 * time.Second, 7 * time.Second}
 		if len(runs) != len(want) {
-			t.Fatalf("runs at %v, want %v", runs, want)
+			t.Fatalf("the pass ran at %v, want %v", runs, want)
 		}
 		for i := range want {
 			if runs[i] != want[i] {
@@ -64,7 +64,7 @@ func TestABurstOfWakesRunsOnePass(t *testing.T) {
 		cancel()
 		<-done
 		if passes != 1 {
-			t.Errorf("%d passes, want one", passes)
+			t.Errorf("the pass ran %d times, want once", passes)
 		}
 	})
 }

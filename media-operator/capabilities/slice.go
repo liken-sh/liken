@@ -1,20 +1,16 @@
 package main
 
-// Publishing each render node's capabilities as this driver's own
-// ResourceSlice.
+// This file publishes the capabilities of each render node on a node
+// in a ResourceSlice under this program's own DRA driver name, beside
+// the slice that `liken` publishes for the same node. A DRA device is
+// identified by <driver>/<pool>/<device>, and the slice name ends with
+// the driver name, so the two slices of a node are <node>-liken.sh and
+// <node>-media.liken.sh and do not collide.
 //
-// A device operator publishes under its own driver name, in its own
-// slice, beside what `liken` publishes on the same node. A device's
-// identity is the triple <driver>/<pool>/<device>, and the slice name
-// ends with the driver name, so this node's two slices are
-// <node>-liken.sh and <node>-media.liken.sh, and the two never
-// collide.
-//
-// These structs hold only the part of the upstream API that this
-// program reads and writes. One slice holds the node's whole
-// inventory, so the pool protocol reduces to a version counter: the
-// generation goes up on every change, and the one slice is always a
-// consistent snapshot.
+// The structs here have only the fields of the upstream API that this
+// program reads and writes. Each node's pool is one slice that holds
+// all of the node's devices, so the scheduler never reads a pool whose
+// slices have different generations.
 
 import (
 	"encoding/json"
@@ -26,16 +22,14 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// DriverName identifies this program as a DRA driver. A device
-// operator's driver name is <domain>.liken.sh.
+// DriverName is the DRA driver name of this program. The driver name of
+// a device operator is <domain>.liken.sh.
 const DriverName = "media.liken.sh"
 
-// likenDriver is the driver whose render nodes this program measures.
+// likenDriver is the DRA driver name under which `liken` publishes the
+// render nodes that this program describes.
 const likenDriver = "liken.sh"
 
-// resourceSlicesPath names the URL of the DRA inventory. Slices are
-// cluster-scoped, like Nodes, because hardware belongs to the machine
-// and not to any tenant.
 const resourceSlicesPath = "/apis/resource.k8s.io/v1/resourceslices"
 
 type ResourceSlice struct {
@@ -51,9 +45,10 @@ type ResourceSliceMeta struct {
 	OwnerReferences []OwnerReference `json:"ownerReferences,omitempty"`
 }
 
-// OwnerReference ties the slice's lifetime to the Node's. The UID names
-// one instance of the Node, so a Node that registers again under the
-// same name does not inherit the old one's slice.
+// OwnerReference makes the Node the owner of the slice, so Kubernetes
+// deletes the slice with the Node. The UID identifies one Node object,
+// so a Node that registers again under the same name does not own the
+// old Node's slice.
 type OwnerReference struct {
 	APIVersion string `json:"apiVersion"`
 	Kind       string `json:"kind"`
@@ -74,17 +69,17 @@ type ResourcePool struct {
 	ResourceSliceCount int64  `json:"resourceSliceCount"`
 }
 
-// SliceDevice is one device. An attribute name with no domain belongs
-// to the publishing driver, so a selector reads this program's
-// attributes as device.attributes["media.liken.sh"].<name>.
+// SliceDevice is one device in a slice. An attribute name without a
+// domain belongs to the publishing driver, so a CEL selector reads this
+// program's attributes as device.attributes["media.liken.sh"].<name>.
 type SliceDevice struct {
 	Name                     string                     `json:"name"`
 	Attributes               map[string]DeviceAttribute `json:"attributes,omitempty"`
 	AllowMultipleAllocations *bool                      `json:"allowMultipleAllocations,omitempty"`
 }
 
-// DeviceAttribute holds exactly one typed value. A selector compares a
-// boolean as a boolean, not against the string "true".
+// DeviceAttribute holds one value, of one type. A selector compares a
+// bool attribute as a boolean, not as the string "true".
 type DeviceAttribute struct {
 	Bool   *bool   `json:"bool,omitempty"`
 	String *string `json:"string,omitempty"`
@@ -93,7 +88,7 @@ type DeviceAttribute struct {
 func attrString(s string) DeviceAttribute { return DeviceAttribute{String: &s} }
 func attrBool(b bool) DeviceAttribute     { return DeviceAttribute{Bool: &b} }
 
-// stringAttribute reads a string attribute, and "" when it is absent.
+// stringAttribute returns a string attribute, or "" when it is absent.
 func (d SliceDevice) stringAttribute(name string) string {
 	if value := d.Attributes[name].String; value != nil {
 		return *value
@@ -105,20 +100,23 @@ func sliceName(nodeName, driver string) string {
 	return nodeName + "-" + driver
 }
 
-// ensureResourceSlice makes this driver's slice for the node hold
-// exactly the devices. It creates the slice on the first publish,
-// replaces it when a device changed, deletes it when there is no
-// device, and writes nothing when nothing changed. Each ResourceSlice
-// write wakes every pod in the cluster that waits on DRA, so a write
-// with no change is a cost to the whole cluster.
+// ensureResourceSlice makes this driver's slice for the node list
+// exactly devices. It creates the slice when none exists and there are
+// devices, replaces it with a higher generation when the devices
+// changed, deletes it when there are no devices, and writes nothing when
+// nothing changed. Each ResourceSlice write makes the scheduler try
+// again every pod that waits for a device, so a write that changes
+// nothing costs the whole cluster.
 //
-// The Node owns the slice, not the agent's pod. The pod restarts for a
-// new image while claims stay prepared, and a slice that went with the
-// pod would take every device away from the scheduler for that time.
+// The Node owns the slice, not the agent's pod. The pod restarts on an
+// image update while claims stay prepared, and a slice deleted with the
+// pod would remove every device from the scheduler until the pod
+// returned.
 //
-// The write carries the resourceVersion of the read, so a conflicting
-// writer gets apiclient.ErrConflict, and the agent's retry reads and
-// writes again.
+// The replace sends the resourceVersion that the read returned. When
+// another writer changed the slice in between, the replace fails with
+// apiclient.ErrConflict, and the agent's next pass reads the slice
+// again.
 func ensureResourceSlice(c *apiclient.Client, nodeName string, owner OwnerReference, devices []SliceDevice) error {
 	name := sliceName(nodeName, DriverName)
 	path := resourceSlicesPath + "/" + name
@@ -156,7 +154,7 @@ func ensureResourceSlice(c *apiclient.Client, nodeName string, owner OwnerRefere
 		if err != nil && err != apiclient.ErrNotFound {
 			return err
 		}
-		fmt.Fprintf(os.Stderr, "slice: deleted %s, because this node holds no render node\n", name)
+		fmt.Fprintf(os.Stderr, "slice: deleted %s, because this node has no render node\n", name)
 		return nil
 	}
 	if reflect.DeepEqual(current.Spec.Devices, devices) {
@@ -178,8 +176,7 @@ func ensureResourceSlice(c *apiclient.Client, nodeName string, owner OwnerRefere
 	return nil
 }
 
-// nodeObject holds the one fact this program reads from its Node: the
-// UID that the slice's owner reference needs.
+// nodeObject has the only fields this program reads from its Node.
 type nodeObject struct {
 	Metadata struct {
 		Name string `json:"name"`
@@ -187,7 +184,6 @@ type nodeObject struct {
 	} `json:"metadata"`
 }
 
-// nodeOwner reads the node and builds the owner reference of its slice.
 func nodeOwner(c *apiclient.Client, nodeName string) (OwnerReference, error) {
 	node, err := apiclient.Get[nodeObject](c, "/api/v1/nodes/"+nodeName)
 	if err != nil {

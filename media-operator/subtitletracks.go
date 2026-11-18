@@ -1,19 +1,14 @@
 package main
 
-// The subtitle rule of plan 90. mpv chooses a subtitle track from its
-// flags and the --slang order, and the flags in a real catalog are not
-// reliable: a forced track often carries the default flag, and some forced
-// tracks carry no marker at all. So the command sidecar gives each
-// subtitle track one role and chooses by role.
+// mpv picks a subtitle track from the track flags and the --slang order.
+// Real files often have wrong flags: a forced track often has the default
+// flag, and some forced tracks have no marker at all. So the command
+// sidecar gives each subtitle track a role from its flags, title, file
+// name, and event count, and chooses a track by role.
 //
-// A forced track translates the parts of the audio that are not in the
-// audio's own language, so it belongs to the audio track. A full or SDH
-// track belongs to the reader. The rule takes a full or SDH track in the
-// order of the subtitle languages first. When no such track exists, it
-// takes the forced track of the audio that plays, if a person in the
-// household hears that language. A commentary track is the last choice,
-// because its text follows the commentary audio and not the film. An
-// empty track is never a choice.
+// A forced track translates only the parts of the audio that are in
+// another language, so it is chosen by the language of the audio that
+// plays. A full or SDH track is chosen by the subtitle languages.
 
 import (
 	"cmp"
@@ -25,14 +20,12 @@ import (
 	"golang.org/x/text/language"
 )
 
-// The track types of mpv's track-list that the rule reads.
 const (
 	trackTypeAudio = "audio"
 	trackTypeSub   = "sub"
 )
 
-// The roles a subtitle track takes. The words appear in the sidecar's log
-// line, so a person reads why a track was chosen.
+// The values of subtitleTrack.role.
 const (
 	roleEmpty      = "empty"
 	roleForced     = "forced"
@@ -41,22 +34,20 @@ const (
 	roleFull       = "full"
 )
 
-// The two values of the sdh preference. An absent value is no preference,
-// and the full and SDH roles then rank the same.
+// The values of subtitlePreferences.SDH.
 const (
 	sdhPrefer = "prefer"
 	sdhAvoid  = "avoid"
 )
 
-// forcedShare sets the fraction of the largest track in the same language,
-// one fifth, below which a track counts as forced. Plan 90 holds the
-// survey of event counts that the fraction separates.
+// A track with fewer than 1/forcedShare of the events of the largest track
+// in its language counts as forced, even when no flag or title says so.
 const forcedShare = 5
 
-// mpvTrack is one entry of mpv's track-list property, with the fields the
-// rule reads. FFIndex is the stream's index in its container, which is the
-// index ffprobe gives the same stream. An external file is a container of
-// its own, so its FFIndex is 0 and only its file name identifies it.
+// mpvTrack is one entry of mpv's track-list property. FFIndex is the
+// stream's index in its container, the same index that ffprobe reports.
+// An external file is its own container, so its FFIndex is 0 and only its
+// file name identifies it.
 type mpvTrack struct {
 	ID               int    `json:"id"`
 	Type             string `json:"type"`
@@ -71,24 +62,24 @@ type mpvTrack struct {
 	Selected         bool   `json:"selected"`
 }
 
-// subtitleTrack is one subtitle track with its role. The language is the
-// canonical base language, such as en for eng and en-US, and it is empty
-// when neither mpv nor the file name names one. The events are nil when
-// the presentation carries no count for the track.
+// subtitleTrack is one subtitle track with its role. language is the base
+// language, such as en for eng and en-US, and is empty when neither mpv
+// nor the file name gives one. events is nil when the presentation has no
+// count for the track.
 type subtitleTrack struct {
 	track    mpvTrack
 	language string
 	role     string
 	events   *int64
 
-	// The markers that the flags, the title, and the file name give.
+	// Markers read from the flags, the title, and the file name.
 	forced     bool
 	sdh        bool
 	commentary bool
 }
 
-// classifySubtitleTracks gives each subtitle track of track-list its role,
-// in track order. The counts are the item's presentation.subtitles.
+// classifySubtitleTracks returns the subtitle tracks of track-list in
+// order, each with its role. counts is the item's presentation.subtitles.
 func classifySubtitleTracks(tracks []mpvTrack, counts []PlaySubtitle) []subtitleTrack {
 	var subtitles []subtitleTrack
 	for _, track := range tracks {
@@ -97,8 +88,8 @@ func classifySubtitleTracks(tracks []mpvTrack, counts []PlaySubtitle) []subtitle
 		}
 		subtitles = append(subtitles, describeSubtitleTrack(track, counts))
 	}
-	// The forced test by count compares each track with the largest track
-	// in its language, so it runs after every track has its count.
+	// A track's role depends on the largest event count in its language,
+	// so every track's count is read before any role is set.
 	largest := map[string]int64{}
 	for _, one := range subtitles {
 		if one.events != nil {
@@ -112,11 +103,11 @@ func classifySubtitleTracks(tracks []mpvTrack, counts []PlaySubtitle) []subtitle
 	return subtitles
 }
 
-// describeSubtitleTrack reads one track's language, markers, and count.
-// mpv reads the language and the markers from the name of an external file,
-// except from a name that ends in a number, such as Movie.eng.0.srt. So the
-// sidecar reads the name too, and uses what it finds where mpv's own fields
-// are empty.
+// describeSubtitleTrack reads one track's language, markers, and event
+// count. mpv reads the language and markers of an external file from its
+// name, but not when the name ends in a number, as in Movie.eng.0.srt. So
+// the sidecar parses the name too, and uses its language when mpv gives
+// none and its markers in addition to mpv's flags.
 func describeSubtitleTrack(track mpvTrack, counts []PlaySubtitle) subtitleTrack {
 	one := subtitleTrack{
 		track:    track,
@@ -133,10 +124,9 @@ func describeSubtitleTrack(track mpvTrack, counts []PlaySubtitle) subtitleTrack 
 		}
 		one.forced = one.forced || fromName.forced
 		one.sdh = one.sdh || fromName.sdh
-		// mpv titles a file with no title of its own by the end of its
-		// name, so the title says nothing that the name has not said, and a
-		// word of the film's own name, such as Force, would read as a
-		// marker.
+		// mpv titles a file that has no title of its own with the end of
+		// its file name. Ignore such a title, because a word from the
+		// film's name, such as Force, would match as a marker.
 		if strings.HasSuffix(name, title) {
 			title = ""
 		}
@@ -153,11 +143,11 @@ func describeSubtitleTrack(track mpvTrack, counts []PlaySubtitle) subtitleTrack 
 	return one
 }
 
-// subtitleRole is the one role of a track, in the order of plan 90: a
-// track with no events is empty whatever its flags say, and a forced marker
-// outranks a commentary title and an SDH marker. The count test applies
-// only when both counts are known, because an absent count differs from
-// zero.
+// subtitleRole returns the role of a track. A track with no events is
+// empty whatever its flags say. A forced marker, or fewer than
+// 1/forcedShare of the largest count, outranks a commentary title and an
+// SDH marker. A track with no count is not empty, and its role comes from
+// its markers alone.
 func subtitleRole(one subtitleTrack, largest int64) string {
 	switch {
 	case one.events != nil && *one.events == 0:
@@ -174,10 +164,10 @@ func subtitleRole(one subtitleTrack, largest int64) string {
 	return roleFull
 }
 
-// subtitleEvents finds a track's count in the presentation. An embedded
-// track matches by its container index, and an external file by its base
-// name, because the resolver rewrites the media's path for the pod and
-// leaves the base name as it is.
+// subtitleEvents returns a track's event count from the presentation, or
+// nil. An embedded track matches by its container index. An external file
+// matches by base name, because the resolver rewrites the media's path for
+// the pod but keeps the base name.
 func subtitleEvents(track mpvTrack, counts []PlaySubtitle) *int64 {
 	for _, count := range counts {
 		switch {
@@ -190,16 +180,17 @@ func subtitleEvents(track mpvTrack, counts []PlaySubtitle) *int64 {
 	return nil
 }
 
-// titleWords splits a title into its words, so a marker matches only as a
-// whole word: SDH in "English SDH", and not hi in "Chinese".
+// titleWords splits a title into words, so a marker matches only as a
+// whole word: sdh in "English SDH", but not hi in "Chinese".
 func titleWords(title string) []string {
 	return strings.FieldsFunc(title, func(r rune) bool {
 		return !unicode.IsLetter(r)
 	})
 }
 
-// isHearingImpairedWord names the three markers that Bazarr, mpv, and
-// release groups write for a track with sound descriptions.
+// isHearingImpairedWord reports whether the word is sdh, cc, or hi, the
+// markers that Bazarr, mpv, and release groups use for a track with sound
+// descriptions for the hearing impaired.
 func isHearingImpairedWord(word string) bool {
 	switch strings.ToLower(word) {
 	case "sdh", "cc", "hi":
@@ -208,21 +199,21 @@ func isHearingImpairedWord(word string) bool {
 	return false
 }
 
-// subtitleFileName is what the segments of an external file's name say.
 type subtitleFileName struct {
 	language string
 	forced   bool
 	sdh      bool
 }
 
-// parseSubtitleFileName reads the segments of a name from the end, after
-// the extension: numbers, the markers forced, sdh, hi, cc, and default, and
-// then one language. The media's own name can hold dots, so the walk stops
-// at the first segment that is none of these.
+// parseSubtitleFileName reads the dot-separated segments of a name from
+// the end, before the extension. It skips numbers and records the markers
+// forced, sdh, hi, cc, and default. The first other segment is the
+// language, or no language when it is not a language code. The media's own
+// name can contain dots, so the parse stops at that segment.
 func parseSubtitleFileName(name string) subtitleFileName {
 	var parsed subtitleFileName
 	segments := strings.Split(strings.TrimSuffix(name, path.Ext(name)), ".")
-	// The first segment is the media's name, never a language or a marker.
+	// Segment 0 is the media's name, not a language or a marker.
 	for index := len(segments) - 1; index > 0; index-- {
 		segment := strings.ToLower(segments[index])
 		switch {
@@ -240,8 +231,9 @@ func parseSubtitleFileName(name string) subtitleFileName {
 	return parsed
 }
 
-// fileNameLanguage reads one segment as a language when its primary subtag
-// has two or three letters, the shape that mpv accepts in a file name.
+// fileNameLanguage returns the base language of a segment, or empty when
+// its primary subtag is not two or three letters, which is the shape mpv
+// accepts as a language in a file name.
 func fileNameLanguage(segment string) string {
 	primary, _, _ := strings.Cut(segment, "-")
 	if len(primary) < 2 || len(primary) > 3 {
@@ -250,11 +242,10 @@ func fileNameLanguage(segment string) string {
 	return canonicalLanguage(segment)
 }
 
-// canonicalLanguage is the base language of a tag, in one form for each
-// language: en for en, eng, and en-US, and de for de, deu, and ger. The
-// golang.org/x/text tables hold the ISO 639-1 codes, both ISO 639-2
-// codes, and the BCP 47 grammar. A tag that names no language, such as
-// und, an empty string, or a word that is not a code, has none.
+// canonicalLanguage returns the base language of a tag, so that en, eng,
+// and en-US all give en, and de, deu, and ger all give de. It returns
+// empty for und, for an empty tag, and for a word that is not a language
+// code.
 func canonicalLanguage(tag string) string {
 	if tag == "" {
 		return ""
@@ -270,16 +261,17 @@ func canonicalLanguage(tag string) string {
 	return base.String()
 }
 
-// sameLanguage reports whether two tags name the same base language. A tag
-// that names no language matches nothing, itself included.
+// sameLanguage reports whether two tags have the same base language. A tag
+// with no language matches nothing, not even itself.
 func sameLanguage(a, b string) bool {
 	canonical := canonicalLanguage(a)
 	return canonical != "" && canonical == canonicalLanguage(b)
 }
 
-// subtitlePreferences is what the command sidecar reads of the resolved
-// preferences. The operator writes it into the pod as JSON only for the two
-// modes that choose a track, on and auto.
+// subtitlePreferences is the part of the resolved preferences that the
+// command sidecar reads. The operator writes it into the pod as JSON only
+// in the modes on and auto, because in the other modes the sidecar
+// chooses no track.
 type subtitlePreferences struct {
 	Subtitles         string   `json:"subtitles"`
 	SDH               string   `json:"sdh,omitempty"`
@@ -287,22 +279,26 @@ type subtitlePreferences struct {
 	SubtitleLanguages []string `json:"subtitleLanguages,omitempty"`
 }
 
-// subtitleChoice is the track the rule chose, and the reason as a clause for
-// the log line. A nil track is no subtitles. A choice that keeps mpv's own
-// track sets nothing.
+// subtitleChoice is the result of chooseSubtitle. reason is a clause for
+// the log line. A nil track means no subtitles. keep means that the sidecar
+// leaves mpv's own choice in place.
 type subtitleChoice struct {
 	track  *mpvTrack
 	reason string
 	keep   bool
 }
 
-// chooseSubtitle applies the rule to the classified tracks of one file.
-// audioLanguage is the language of the audio track mpv selected.
+// chooseSubtitle chooses from the classified tracks of one file.
+// audioLanguage is the language of the audio track that mpv selected. The
+// languages to read are subtitleLanguages, or audioLanguages when
+// subtitleLanguages is empty. When both are empty, mpv's own choice stays.
 //
-// The reading languages are subtitleLanguages. A household that states none
-// reads the languages it hears, so audioLanguages take their place. With
-// neither list, the rule has no language to choose by, and mpv's own choice
-// stands.
+// In auto mode, audio in the first of audioLanguages gets only its forced
+// track, or no subtitles. Otherwise it chooses, in order, a full or SDH
+// track in a language to read, the forced track of the audio when
+// audioLanguages has the audio's language, a forced track in a language
+// to read, a full or SDH track with no language, and a commentary track in
+// a language to read. It never chooses an empty track.
 func chooseSubtitle(tracks []subtitleTrack, audioLanguage string, prefs subtitlePreferences) subtitleChoice {
 	reading := prefs.SubtitleLanguages
 	if len(reading) == 0 {
@@ -312,8 +308,6 @@ func chooseSubtitle(tracks []subtitleTrack, audioLanguage string, prefs subtitle
 		return subtitleChoice{keep: true, reason: "neither subtitleLanguages nor audioLanguages names a language"}
 	}
 	forced := forcedTrackOf(tracks, audioLanguage)
-	// In auto, audio in the household's first language needs only the
-	// forced track that translates the rest of it.
 	if prefs.Subtitles == subtitlesAuto && len(prefs.AudioLanguages) > 0 &&
 		sameLanguage(audioLanguage, prefs.AudioLanguages[0]) {
 		if forced != nil {
@@ -331,20 +325,18 @@ func chooseSubtitle(tracks []subtitleTrack, audioLanguage string, prefs subtitle
 	}) {
 		return subtitleChoice{track: forced, reason: "no full or SDH track is in a subtitle language, and it is the forced track of the audio"}
 	}
-	// A forced track in a language the household reads, under audio in
-	// another language, translates less than the film needs. It still
-	// shows some of the film's text, and a track flagged forced is often
-	// the full translation of a foreign show with a wrong flag.
+	// A track flagged forced is often the full translation of a foreign
+	// show with the wrong flag, so a forced track in a language to read is
+	// better than none.
 	for _, wanted := range reading {
 		if pick := bestTrack(tracks, wanted, readerRank(""), roleForced); pick != nil {
 			return subtitleChoice{track: pick, reason: "no full or SDH track is in a subtitle language, and it is the forced track in " + wanted}
 		}
 	}
-	// A track that names no language is usually in the language of the
-	// release: a file that a person named after the video alone, or a
-	// track whose muxer wrote no tag. It is a better choice than none, and
-	// a commentary track in a known language follows the commentary audio
-	// and not the film.
+	// A track with no language, such as a file named after the video alone,
+	// is usually in the language of the release. It ranks above a
+	// commentary track, because commentary text follows the commentary
+	// audio and not the film.
 	if pick := untaggedTrack(tracks, readerRank(prefs.SDH)); pick != nil {
 		return subtitleChoice{track: pick, reason: "no track is in a subtitle language, and it is a full or SDH track that names no language"}
 	}
@@ -356,13 +348,12 @@ func chooseSubtitle(tracks []subtitleTrack, audioLanguage string, prefs subtitle
 	return subtitleChoice{reason: "no track is in a subtitle language or names no language"}
 }
 
-// forcedTrackOf is the forced track in the language of the audio, or nil.
 func forcedTrackOf(tracks []subtitleTrack, audioLanguage string) *mpvTrack {
 	return bestTrack(tracks, audioLanguage, readerRank(""), roleForced)
 }
 
-// readerRank orders the full and SDH roles by the sdh preference. The two
-// rank the same with no preference.
+// readerRank ranks the full and SDH roles for the SDH preference, lower
+// first. With no preference the two roles rank the same.
 func readerRank(sdh string) func(role string) int {
 	return func(role string) int {
 		switch {
@@ -375,21 +366,17 @@ func readerRank(sdh string) func(role string) int {
 	}
 }
 
-// bestTrack is the first track in the language with one of the roles: by
-// the rank of its role, then the default flag, then track order.
 func bestTrack(tracks []subtitleTrack, wanted string, rank func(string) int, roles ...string) *mpvTrack {
 	return bestOf(tracks, func(language string) bool { return sameLanguage(language, wanted) }, rank, roles)
 }
 
-// untaggedTrack is the first full or SDH track that names no language, by
-// the same order as bestTrack.
 func untaggedTrack(tracks []subtitleTrack, rank func(string) int) *mpvTrack {
 	return bestOf(tracks, func(language string) bool { return language == "" }, rank, []string{roleFull, roleSDH})
 }
 
-// bestOf is the first track whose language matches and whose role is one of
-// the roles: by the rank of its role, then the default flag, then track
-// order.
+// bestOf returns the track whose language matches and whose role is one
+// of roles, or nil. It orders by the rank of the role, then the default
+// flag, then track order.
 func bestOf(tracks []subtitleTrack, matches func(string) bool, rank func(string) int, roles []string) *mpvTrack {
 	var candidates []subtitleTrack
 	for _, one := range tracks {
@@ -409,7 +396,6 @@ func bestOf(tracks []subtitleTrack, matches func(string) bool, rank func(string)
 	return &candidates[0].track
 }
 
-// defaultOrder puts a track with the default flag first.
 func defaultOrder(track mpvTrack) int {
 	if track.Default {
 		return 0
@@ -417,8 +403,6 @@ func defaultOrder(track mpvTrack) int {
 	return 1
 }
 
-// selectedAudioLanguage is the language of the audio track mpv selected,
-// or empty when it selected none or the track names no language.
 func selectedAudioLanguage(tracks []mpvTrack) string {
 	for _, track := range tracks {
 		if track.Type == trackTypeAudio && track.Selected {

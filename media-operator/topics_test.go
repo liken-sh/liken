@@ -1,9 +1,5 @@
 package main
 
-// These tests cover the topic layout: every builder against a known
-// base, and the parse that maps an inbound plays topic back to the
-// Play it names.
-
 import "testing"
 
 func TestTopicBuildersExtendTheBase(t *testing.T) {
@@ -82,7 +78,7 @@ func TestParsePlayTopicNamesThePlayAndTheKind(t *testing.T) {
 		t.Run(each.name, func(t *testing.T) {
 			namespace, play, kind, ok := parsePlayTopic(base, each.topic)
 			if ok != each.ok {
-				t.Fatalf("ok = %v, want %v", ok, each.ok)
+				t.Fatalf("parsing %q: ok is %v, want %v", each.topic, ok, each.ok)
 			}
 			if !ok {
 				return
@@ -95,8 +91,6 @@ func TestParsePlayTopicNamesThePlayAndTheKind(t *testing.T) {
 	}
 }
 
-// The focus parser matches only a focus mark and the cycle parser only a
-// cycle request. Neither matches the other or the events topic.
 func TestTheFocusParsersDoNotCrossMatch(t *testing.T) {
 	base := defaultTopicBase
 	focus := remoteFocusTopic(base, "house", "sofa")
@@ -124,9 +118,6 @@ func TestTheFocusParsersDoNotCrossMatch(t *testing.T) {
 	}
 }
 
-// The availability parser matches only an availability topic, and the
-// codes parser only a codes topic. Each of the remotes parsers keys on its
-// own kind, so the operator folds each message down one path.
 func TestTheRemoteParsersMatchTheirOwnTopicAlone(t *testing.T) {
 	base := defaultTopicBase
 	availability := remoteAvailabilityTopic(base, "house", "sofa")
@@ -160,8 +151,6 @@ func TestTheRemoteParsersMatchTheirOwnTopicAlone(t *testing.T) {
 	}
 }
 
-// The panel topic maps back to the unit whose sidecar published it,
-// and no other players topic reads as one.
 func TestParsePlayerPanelTopicNamesThePlayer(t *testing.T) {
 	base := defaultTopicBase
 	cases := []struct {
@@ -196,8 +185,6 @@ func TestParsePlayerPanelTopicNamesThePlayer(t *testing.T) {
 	}
 }
 
-// The volume topic maps back to the unit whose level it carries,
-// and no other players topic reads as one.
 func TestParsePlayerVolumeTopicNamesThePlayer(t *testing.T) {
 	base := defaultTopicBase
 	cases := []struct {
@@ -232,8 +219,6 @@ func TestParsePlayerVolumeTopicNamesThePlayer(t *testing.T) {
 	}
 }
 
-// The volume/commands topic maps back to the unit whose level it asks
-// for, and no other players topic reads as one.
 func TestParsePlayerVolumeCommandsTopicNamesThePlayer(t *testing.T) {
 	base := defaultTopicBase
 	cases := []struct {
@@ -267,9 +252,8 @@ func TestParsePlayerVolumeCommandsTopicNamesThePlayer(t *testing.T) {
 	}
 }
 
-// The operator reads its own levels back and the volume asks, so its
-// filter list carries both beside the rest. It reads nothing on the power
-// topic, which carries only its own wake and sleep for the screen.
+// The operator does not subscribe to the power topic, because it is
+// the only publisher there and reads nothing back from it.
 func TestTheOperatorSubscribesToEveryFilterItReads(t *testing.T) {
 	base := defaultTopicBase
 	want := []string{

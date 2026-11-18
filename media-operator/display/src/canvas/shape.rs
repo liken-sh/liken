@@ -1,5 +1,5 @@
-//! The paths the display draws. Each one is placed at its own top-left, so
-//! the numbers here are the shape's own local box offset to where it stands.
+//! The paths the display draws on its canvas. Each function takes the
+//! top-left corner of the box that holds the shape.
 
 use iced::widget::canvas::Path;
 use iced::{Point, Rectangle, Size};
@@ -7,11 +7,10 @@ use iced::{Point, Rectangle, Size};
 /// The half-width of a pointy-top hexagon, which is cos(30 degrees).
 const HEXAGON_HALF_WIDTH: f32 = 0.866_025_4;
 
-/// One rounded rectangle. A radius wider than half the shape has no meaning,
-/// so a bar with a few pixels of fill rounds by what it has.
-// Each corner is a cubic Bezier whose two control points are the corner
-// point itself. That curve runs tighter than a circular arc, so the corners
-// keep their shape.
+/// A rounded rectangle. The radius is limited to half the width and half
+/// the height, so a bar with only a few pixels of fill is still drawn.
+// Each corner is a cubic Bezier whose two control points are both the
+// corner of the rectangle. That curve is tighter than a circular arc.
 pub fn rounded(shape: Rectangle, radius: f32) -> Path {
     let r = radius.min(shape.width / 2.0).min(shape.height / 2.0);
     let (x, y, w, h) = (shape.x, shape.y, shape.width, shape.height);
@@ -30,12 +29,12 @@ pub fn rounded(shape: Rectangle, radius: f32) -> Path {
     })
 }
 
-/// A pointy-top regular hexagon in a 2r box, its centre at (r, r) from the
-/// point given. `radius` is the distance from the centre to a vertex.
+/// A regular hexagon with a vertex at the top, centered in the square of
+/// side `2 * radius` whose top-left corner is `at`. `radius` is the
+/// distance from the center to a vertex.
 ///
-/// The shape needs no counter-stretch. The canvas holds the screen's own
-/// ratio, so a hexagon drawn regular on the canvas lands regular on the
-/// screen.
+/// The canvas has the same aspect ratio as the screen, so a regular
+/// hexagon on the canvas is regular on the screen and needs no correction.
 pub fn hexagon(at: Point, radius: f32) -> Path {
     let a = HEXAGON_HALF_WIDTH * radius;
     let (x, y, r) = (at.x, at.y, radius);
@@ -50,7 +49,8 @@ pub fn hexagon(at: Point, radius: f32) -> Path {
     })
 }
 
-/// The box one hexagon covers, `2a` wide by `2r` tall.
+/// The bounding box of the hexagon, `2a` wide by `2r` tall, where `a` is
+/// `HEXAGON_HALF_WIDTH * radius`.
 pub fn hexagon_bounds(at: Point, radius: f32) -> Rectangle {
     let a = HEXAGON_HALF_WIDTH * radius;
     Rectangle::new(
@@ -59,10 +59,10 @@ pub fn hexagon_bounds(at: Point, radius: f32) -> Rectangle {
     )
 }
 
-// Where the outline of a hexagon stands so a stroke of that width covers
-// the ground an ASS border covers. libass draws a border outside the
-// shape, and the toolkit centers a stroke on its path, so the path moves
-// out by half the width.
+/// The position and radius of the hexagon path to stroke at `width` so
+/// the stroke covers the same pixels as an ASS border of that width.
+/// libass draws a border outside the shape, and the canvas centers a
+/// stroke on its path, so the path moves out by half the width.
 pub fn outside_hexagon(at: Point, radius: f32, width: f32) -> (Point, f32) {
     let grown = radius + width / 2.0 / HEXAGON_HALF_WIDTH;
     (
@@ -71,8 +71,7 @@ pub fn outside_hexagon(at: Point, radius: f32, width: f32) -> (Point, f32) {
     )
 }
 
-// The same outline for a rounded rectangle, for the reason outside_hexagon
-// states.
+/// The same adjustment as `outside_hexagon`, for a rounded rectangle.
 pub fn outside_rounded(shape: Rectangle, radius: f32, width: f32) -> (Rectangle, f32) {
     let out = width / 2.0;
     (
@@ -88,27 +87,40 @@ pub fn outside_rounded(shape: Rectangle, radius: f32, width: f32) -> (Rectangle,
 mod tests {
     use super::*;
 
-    /// The hexagon the playhead draws: a radius of 15 canvas pixels gives a
-    /// box 25.98 wide by 30 tall, centred on the point it marks.
+    /// The playhead hexagon: a radius of 15 canvas pixels gives a box 25.98
+    /// wide by 30 tall.
     #[test]
-    fn a_hexagon_stands_in_a_box_two_radii_tall() {
+    fn a_hexagon_is_two_radii_tall() {
         let bounds = hexagon_bounds(Point::new(100.0, 200.0), 15.0);
-        assert!((bounds.width - 25.98).abs() < 0.01);
+        assert!(
+            (bounds.width - 25.98).abs() < 0.01,
+            "the hexagon is {} wide, want 25.98",
+            bounds.width
+        );
         assert_eq!(bounds.height, 30.0);
-        assert!((bounds.x - 102.01).abs() < 0.01);
+        assert!(
+            (bounds.x - 102.01).abs() < 0.01,
+            "the hexagon starts at x {}, want 102.01",
+            bounds.x
+        );
         assert_eq!(bounds.y, 200.0);
         assert_eq!(bounds.center().x, 115.0);
         assert_eq!(bounds.center().y, 215.0);
     }
 
-    /// A border of 2 covers the 2 canvas pixels outside the shape on every
-    /// side, and nothing inside it.
+    /// A border of width 2 covers the 2 canvas pixels outside the shape on
+    /// every side and none inside it.
     #[test]
-    fn a_border_covers_the_ground_outside_the_shape_alone() {
+    fn a_border_covers_only_the_pixels_outside_the_shape() {
         let (at, radius) = outside_hexagon(Point::new(100.0, 200.0), 15.0, 2.0);
         let outline = hexagon_bounds(at, radius);
         let shape = hexagon_bounds(Point::new(100.0, 200.0), 15.0);
-        assert!((outline.width - (shape.width + 2.0)).abs() < 0.01);
+        assert!(
+            (outline.width - (shape.width + 2.0)).abs() < 0.01,
+            "the outline is {} wide, want the shape width {} plus 2",
+            outline.width,
+            shape.width
+        );
         assert_eq!(outline.center(), shape.center());
 
         let (grown, radius) = outside_rounded(

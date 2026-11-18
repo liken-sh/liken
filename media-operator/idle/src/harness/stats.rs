@@ -1,4 +1,5 @@
-// What the harness measures, and the JSON it writes at exit.
+// The measurements of a run (`--stats`) and the JSON report written at
+// exit.
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -8,28 +9,28 @@ use serde_json::json;
 pub struct Stats {
     /// Where the report goes at exit, from `--stats`.
     path: PathBuf,
-    /// When the process began, for the time to the first frame.
+    /// When the process started, to measure the time to the first
+    /// frame.
     launched: Instant,
     backend: String,
     adapter: String,
     size: (u32, u32),
     frames: u64,
     first_frame: Option<f64>,
-    /// Milliseconds to build, draw, and submit a frame, one entry per frame.
+    /// Milliseconds to build, draw, and submit each counted frame.
     build_ms: Vec<f64>,
-    /// Milliseconds for the whole loop pass, which adds the wait for the next
-    /// swapchain image. Under a compositor that waits for the display, this is
-    /// the frame interval and the build time is the work inside it.
+    /// Milliseconds for each counted pass of the loop, which includes
+    /// the wait for the next swapchain image. When the compositor paces
+    /// frames to the display, this is the frame interval, and
+    /// `build_ms` is the work within it.
     loop_ms: Vec<f64>,
     rss_mib: Vec<f64>,
     next_rss_at: f64,
 }
 
 impl Stats {
-    /// The collector for a run, or nothing when `--stats` named no file. The
-    /// file is the only reader of these numbers, and every sample stays in
-    /// memory until the process writes it, so a run that names no file
-    /// measures nothing and holds nothing.
+    /// Returns `None` when `--stats` named no file, so a run without the
+    /// flag keeps no samples.
     pub fn requested(
         path: Option<PathBuf>,
         launched: Instant,
@@ -52,24 +53,25 @@ impl Stats {
         })
     }
 
-    /// The surface changed size. The frame times collected so far belong to
-    /// another size, and the frames around the change pay for a new swapchain,
-    /// so the series starts again here.
+    /// Records a new surface size and discards the frame times
+    /// collected so far. Those times were measured at the old size, and
+    /// the frames around a resize include the cost of creating a new
+    /// swapchain.
     pub fn resized(&mut self, size: (u32, u32)) {
         self.size = size;
         self.build_ms.clear();
         self.loop_ms.clear();
     }
 
-    /// The first frame arrived. The seconds run from the launch, so the number
-    /// covers the whole life of the process: the wgpu setup, the first window,
-    /// and the first draw.
+    /// Records the time of the first frame, measured from process
+    /// start, so it includes the wgpu setup, the first window, and the
+    /// first draw.
     pub fn first_frame(&mut self) {
         self.first_frame = Some(self.launched.elapsed().as_secs_f64());
     }
 
-    /// Record one frame. `counted` is false for a captured frame, which draws
-    /// twice and waits on a readback.
+    /// Records one frame. When `counted` is false, the frame counts
+    /// toward `frames` and its times are not recorded.
     pub fn frame(&mut self, build_ms: f64, loop_ms: f64, counted: bool) {
         self.frames += 1;
         if counted {
@@ -78,9 +80,8 @@ impl Stats {
         }
     }
 
-    /// Take one resident-set sample a second. The value is the VmRSS line of
-    /// this process's own status file, which is what a machine with a gigabyte
-    /// of memory has to fit.
+    /// Records the process's resident set size, at most once a second.
+    /// The value is the `VmRSS` line of `/proc/self/status`.
     pub fn sample_rss(&mut self, at: f64) {
         if at < self.next_rss_at {
             return;
@@ -91,7 +92,6 @@ impl Stats {
         }
     }
 
-    /// The measurements, as the file holds them.
     pub fn report(&self) -> serde_json::Value {
         json!({
             "backend": self.backend,
@@ -110,22 +110,23 @@ impl Stats {
         })
     }
 
-    /// Write the report to the file the run named.
+    /// Writes the report to the `--stats` file and prints an error if
+    /// that fails.
     pub fn write(&self) {
         let json = format!("{:#}\n", self.report());
         if let Err(error) = std::fs::write(&self.path, json) {
-            eprintln!("stats {}: {error}", self.path.display());
+            eprintln!("writing the stats file {}: {error}", self.path.display());
         }
     }
 }
 
-/// A measured duration in milliseconds, the unit the frame numbers are kept in.
 pub fn millis(elapsed: std::time::Duration) -> f64 {
     elapsed.as_secs_f64() * 1000.0
 }
 
-/// The nearest-rank percentile of a sample. The sample is copied and sorted
-/// here, because this runs once at exit and the frame path must not sort.
+/// The nearest-rank percentile of `values`, or NaN when there are none.
+/// It sorts a copy, which is acceptable because it runs once at exit
+/// and never on the frame path.
 pub fn percentile(values: &[f64], fraction: f64) -> f64 {
     if values.is_empty() {
         return f64::NAN;
@@ -136,9 +137,8 @@ pub fn percentile(values: &[f64], fraction: f64) -> f64 {
     sorted[rank]
 }
 
-/// A number at the precision the file reports it, so a reader is not given
-/// digits the measurement does not carry. A value that is not a number reads as
-/// JSON's null, which is what serde_json does with a NaN.
+/// Rounds `value` to `places` decimal places. A NaN becomes JSON
+/// `null`, which is how `serde_json` serializes it.
 fn rounded(value: f64, places: u32) -> serde_json::Value {
     let scale = 10_f64.powi(places as i32);
     json!((value * scale).round() / scale)
@@ -161,7 +161,7 @@ mod tests {
     }
 
     #[test]
-    fn a_percentile_takes_the_nearest_rank() {
+    fn a_percentile_is_the_nearest_rank() {
         let sample: Vec<f64> = (1..=101).map(f64::from).collect();
         assert_eq!(percentile(&sample, 0.0), 1.0);
         assert_eq!(percentile(&sample, 0.50), 51.0);
@@ -170,7 +170,7 @@ mod tests {
     }
 
     #[test]
-    fn a_percentile_sorts_first() {
+    fn a_percentile_is_taken_from_the_sorted_values() {
         assert_eq!(percentile(&[9.0, 1.0, 5.0], 0.50), 5.0);
         assert_eq!(percentile(&[9.0, 1.0, 5.0], 1.0), 9.0);
     }
@@ -183,7 +183,10 @@ mod tests {
 
     #[test]
     fn an_empty_sample_has_no_percentile() {
-        assert!(percentile(&[], 0.50).is_nan());
+        assert!(
+            percentile(&[], 0.50).is_nan(),
+            "the percentile of no samples is a number, want NaN"
+        );
     }
 
     fn collector() -> Stats {
@@ -207,7 +210,8 @@ mod tests {
                 "an adapter".into(),
                 (1920, 1080),
             )
-            .is_none()
+            .is_none(),
+            "a run with no file measures, want no Stats"
         );
     }
 
@@ -230,18 +234,21 @@ mod tests {
     }
 
     #[test]
-    fn the_first_frame_is_counted_from_the_launch() {
+    fn the_time_to_the_first_frame_is_measured_from_the_launch() {
         let mut stats = collector();
         assert_eq!(stats.report()["seconds_to_first_frame"], json!(null));
 
         stats.first_frame();
 
         let seconds = stats.report()["seconds_to_first_frame"].as_f64();
-        assert!(seconds.is_some_and(|seconds| seconds >= 0.0));
+        assert!(
+            seconds.is_some_and(|seconds| seconds >= 0.0),
+            "seconds_to_first_frame is {seconds:?}, want a number of at least 0"
+        );
     }
 
     #[test]
-    fn a_resize_drops_the_frame_times_before_it() {
+    fn a_resize_discards_the_frame_times_before_it() {
         let mut stats = measured();
         stats.resized((1280, 720));
         let report = stats.report();
@@ -251,7 +258,7 @@ mod tests {
     }
 
     #[test]
-    fn a_resident_set_sample_lands_once_a_second() {
+    fn a_resident_set_sample_is_taken_once_a_second() {
         let mut stats = collector();
         for step in 0..30 {
             stats.sample_rss(f64::from(step) * 0.1);

@@ -16,8 +16,8 @@ import (
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 )
 
-// stubLister records the parse it is asked with and returns a fixed set
-// of names, so a test drives completeArgs without a cluster.
+// stubLister returns a playerLister that returns names, and a pointer to
+// the completionParse it was last called with.
 func stubLister(names ...string) (playerLister, *completionParse) {
 	var seen completionParse
 	return func(parse completionParse) []string {
@@ -157,33 +157,33 @@ func TestLookupCompletionFlag(t *testing.T) {
 		t.Fatalf("lookupCompletionFlag(--format) = (%+v, %v), want a value flag", flag, ok)
 	}
 	if _, ok := lookupCompletionFlag("--nope"); ok {
-		t.Fatal("lookupCompletionFlag(--nope) found an unknown flag")
+		t.Fatal("lookupCompletionFlag(--nope) found a flag, want none")
 	}
 }
 
 func TestRunCompleteWritesTheProtocol(t *testing.T) {
 	var stdout strings.Builder
 	if err := runComplete(context.Background(), []string{""}, &stdout); err != nil {
-		t.Fatalf("runComplete: %v", err)
+		t.Fatalf("running the completion command: %v", err)
 	}
 	got := stdout.String()
 	if !strings.Contains(got, "capture\n") {
-		t.Fatalf("output %q does not offer the verb", got)
+		t.Fatalf("output is %q, want it to offer the verb", got)
 	}
 	if !strings.HasSuffix(got, ":4\n") {
-		t.Fatalf("output %q does not end with the directive line", got)
+		t.Fatalf("output is %q, want it to end with the directive line", got)
 	}
 }
 
 func TestCompletionScript(t *testing.T) {
 	var stdout strings.Builder
 	if err := completionScript("bash", &stdout); err != nil {
-		t.Fatalf("completionScript(bash): %v", err)
+		t.Fatalf("writing the bash completion script: %v", err)
 	}
 	got := stdout.String()
 	for _, want := range []string{"__complete", "complete -o default", "kubectl-liken-media"} {
 		if !strings.Contains(got, want) {
-			t.Fatalf("the script does not contain %q", want)
+			t.Fatalf("the script is missing %q", want)
 		}
 	}
 }
@@ -191,7 +191,7 @@ func TestCompletionScript(t *testing.T) {
 func TestCompletionScriptRejectsAnOtherShell(t *testing.T) {
 	var stdout strings.Builder
 	if err := completionScript("zsh", &stdout); err == nil {
-		t.Fatal("completionScript(zsh) returned no error")
+		t.Fatal("completionScript(zsh) returned no error, want one that refuses a shell other than bash")
 	}
 }
 
@@ -220,7 +220,7 @@ func TestListPlayers(t *testing.T) {
 	)
 	got, err := listPlayers(context.Background(), client, "default")
 	if err != nil {
-		t.Fatalf("listPlayers: %v", err)
+		t.Fatalf("listing the Players: %v", err)
 	}
 	want := []string{"kitchen", "living-room"}
 	if !reflect.DeepEqual(got, want) {
@@ -232,7 +232,7 @@ func TestListPlayersEmptyNamespace(t *testing.T) {
 	client := newPlayerClient()
 	got, err := listPlayers(context.Background(), client, "default")
 	if err != nil {
-		t.Fatalf("listPlayers: %v", err)
+		t.Fatalf("listing the Players: %v", err)
 	}
 	if len(got) != 0 {
 		t.Fatalf("listPlayers with no players = %v, want none", got)
@@ -269,6 +269,6 @@ func TestKubeClientFactoryReportsAnUnreachableConfig(t *testing.T) {
 		t.Fatalf("writing the kubeconfig: %v", err)
 	}
 	if _, _, err := kubeClientFactory(completionParse{kubeconfig: file, namespace: "default"}); err == nil {
-		t.Fatal("kubeClientFactory returned no error for a config with no cluster")
+		t.Fatal("kubeClientFactory returned no error, want one for a kubeconfig with no cluster")
 	}
 }

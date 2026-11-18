@@ -1,81 +1,70 @@
-// The variables the operator sets on the idle container that this client
-// reads for itself. `media-operator` names them in `wire.go` on the writing
-// side, so the two files are one contract and a name here matches a name
-// there.
-//
-// Everything about the bus, the two windows, and the unit's controllers
-// is the `media-screen` crate's contract, and `media_screen::Wiring`
-// reads it from the same environment. What is left here is what this
-// client alone draws with: the seeds for the first frame, its window
-// watchdog, and the preview keys.
-//
-// A pod cannot discover the broker in front of it or the topic base its
-// cluster chose. The operator holds both and passes them down, so every
-// value below arrives in the environment and none is guessed.
+// The environment variables that only the idle screen reads.
+// `wire.go` in `media-operator` declares the names that the operator
+// sets, so a name here must match the name there. The `media-screen`
+// crate reads the rest of the environment through
+// `media_screen::Wiring`.
 
 use std::time::Duration;
 
-/// The unit's friendly name, and its parts joined with newlines. They seed the
-/// identity block, so the first frame is never blank and a workstation needs no
-/// broker. The first status replaces both.
+/// The Player's display name, and its components joined with newlines.
+/// The screen draws them until the first status message replaces them,
+/// so the first frame is not blank and a run on a workstation needs no
+/// broker.
 pub const PLAYER_NAME: &str = "IDLE_PLAYER_NAME";
 pub const PLAYER_COMPONENTS: &str = "IDLE_PLAYER_COMPONENTS";
 
-/// The seconds the client waits for a window before it exits. An unset or
-/// non-positive value leaves the watchdog off, so a run outside a pod never
-/// exits for a missing window.
+/// The seconds the client waits for a window before it exits. An unset
+/// or non-positive value turns the watchdog off, so a run outside a pod
+/// does not exit when it has no window.
 pub const WINDOW_GRACE: &str = "IDLE_WINDOW_GRACE_SECONDS";
 
-/// The variable that binds the preview keys, which stand in for the bus on a
-/// workstation. `local/idle` sets it, and the operator sets it on no pod, so a
-/// cluster's idle screen binds no key and draws no legend.
+/// Set to `1` to bind the preview keys, which change the screen's state
+/// from the keyboard in place of bus messages. `local/idle` sets it for
+/// a run on a workstation. The operator never sets it, so an idle
+/// screen in a cluster binds no preview keys and draws no key legend.
 pub const PREVIEW: &str = "IDLE_PREVIEW";
 
-/// Everything the operator told this container.
+/// The configuration this process reads from its environment.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Wiring {
-    /// The broker, the topics, the controllers, and the two windows, as the
-    /// `media-screen` crate reads them.
+    /// The variables that `media_screen::Wiring` reads.
     pub screen: media_screen::Wiring,
     pub player_name: String,
     pub components: Vec<String>,
     pub window_grace: Option<Duration>,
-    /// Whether the preview keys stand in for the bus. It is true only where
-    /// [`PREVIEW`] is `1`.
     pub preview: bool,
 }
 
 impl Wiring {
-    /// What this process runs under.
+    /// Reads the configuration from this process's environment.
     pub fn from_environment() -> Self {
         Self::read(|name| std::env::var(name).ok())
     }
 
-    /// The same read against any source of values. The environment is global to
-    /// a process, so a test states the variables here instead of setting them
-    /// and racing every other test in the binary.
+    /// Reads the configuration from `value` instead of the environment.
+    /// The environment is shared by every test in the binary, so a test
+    /// passes its variables here and does not set them.
     pub fn read(value: impl Fn(&str) -> Option<String>) -> Self {
         let read = |name| value(name).unwrap_or_default();
 
         Self {
-            // The crate reads the same source, so one environment answers both
-            // halves and neither one names the other's variables.
+            // `media_screen::Wiring` reads its own variables through the
+            // same lookup, so this file does not list them.
             screen: media_screen::Wiring::read(&value),
             player_name: read(PLAYER_NAME),
             components: split_lines(&read(PLAYER_COMPONENTS)),
             window_grace: grace(&read(WINDOW_GRACE)),
-            // One exact value binds the keys. Anything else, an unset variable
-            // included, leaves them unbound, so a variable that survives into
-            // a pod by accident cannot put a legend on a screen in a house.
+            // Only the exact value `1` binds the keys, so a stray
+            // `IDLE_PREVIEW` in a pod's environment cannot put the key
+            // legend on a real screen.
             preview: read(PREVIEW) == "1",
         }
     }
 }
 
-/// The parts, one per line. The operator joins them with newlines and sets the
-/// variable only for a unit that lists any, so an absent value is a unit with
-/// no parts and not an error. A blank line names no part and draws nothing, so
-/// it is dropped here rather than left as an empty row in the identity block.
+/// Splits the newline-joined components and drops blank lines, so the
+/// identity block draws no empty row. The operator leaves the variable
+/// unset for a Player with no components, which gives an empty list.
 pub fn split_lines(text: &str) -> Vec<String> {
     text.lines()
         .filter(|line| !line.is_empty())
@@ -83,8 +72,8 @@ pub fn split_lines(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// The window grace, in seconds. Anything but a positive number leaves the
-/// watchdog off.
+/// Parses the window grace in seconds. Anything but a positive, finite
+/// number gives `None`, which turns the watchdog off.
 fn grace(text: &str) -> Option<Duration> {
     let seconds: f64 = text.trim().parse().ok()?;
     if seconds <= 0.0 || !seconds.is_finite() {
@@ -111,7 +100,7 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_environment_wires_nothing() {
+    fn an_empty_environment_gives_the_default_wiring() {
         assert_eq!(Wiring::read(|_| None), Wiring::default());
     }
 
@@ -121,7 +110,7 @@ mod tests {
     }
 
     #[test]
-    fn every_variable_this_client_reads_lands_in_the_wiring() {
+    fn every_variable_this_client_reads_is_read_into_the_wiring() {
         let read = wiring(&[
             (PLAYER_NAME, "The Den"),
             (PLAYER_COMPONENTS, "The screen\nThe speakers"),
@@ -134,7 +123,7 @@ mod tests {
     }
 
     #[test]
-    fn the_crates_own_variables_reach_the_crates_wiring() {
+    fn the_media_screen_variables_are_read_into_its_wiring() {
         let read = wiring(&[
             (media_screen::wiring::BUS_ADDRESS, "broker:1883"),
             (
@@ -150,13 +139,16 @@ mod tests {
     }
 
     #[test]
-    fn a_unit_with_no_parts_lists_none() {
-        assert!(split_lines("").is_empty());
+    fn an_empty_value_has_no_components() {
+        assert!(
+            split_lines("").is_empty(),
+            "split_lines of an empty string returns lines, want none"
+        );
         assert_eq!(split_lines("The screen"), ["The screen"]);
     }
 
     #[test]
-    fn a_blank_line_names_no_part() {
+    fn a_blank_line_is_dropped_from_the_components() {
         assert_eq!(
             split_lines("The screen\n\nA remote\n"),
             ["The screen", "A remote"]
@@ -164,13 +156,13 @@ mod tests {
     }
 
     #[test]
-    fn a_positive_grace_arms_the_watchdog() {
+    fn a_positive_grace_is_parsed() {
         assert_eq!(grace("30"), Some(Duration::from_secs(30)));
         assert_eq!(grace(" 1.5 "), Some(Duration::from_secs_f64(1.5)));
     }
 
     #[test]
-    fn anything_but_a_positive_grace_leaves_it_off() {
+    fn anything_but_a_positive_grace_gives_none() {
         assert_eq!(grace(""), None);
         assert_eq!(grace("0"), None);
         assert_eq!(grace("-5"), None);
@@ -179,9 +171,18 @@ mod tests {
     }
 
     #[test]
-    fn one_exact_value_binds_the_preview_keys() {
-        assert!(wiring(&[(PREVIEW, "1")]).preview);
-        assert!(!wiring(&[(PREVIEW, "true")]).preview);
-        assert!(!wiring(&[]).preview);
+    fn only_the_value_1_binds_the_preview_keys() {
+        assert!(
+            wiring(&[(PREVIEW, "1")]).preview,
+            "preview is off when the variable is 1"
+        );
+        assert!(
+            !wiring(&[(PREVIEW, "true")]).preview,
+            "preview is on when the variable is true, want only 1 to turn it on"
+        );
+        assert!(
+            !wiring(&[]).preview,
+            "preview is on when the variable is not set"
+        );
     }
 }

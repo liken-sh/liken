@@ -1,6 +1,5 @@
-//! The dark shade at the top and the foot of the screen, behind the header
-//! and the scrubber, so their text reads against one background whatever
-//! the frame behind it.
+//! The dark gradients at the top and bottom of the screen, behind the header
+//! and the scrubber, so their text is readable over any video frame.
 
 use iced::advanced::image::Handle;
 use iced::{Point, Rectangle, Size};
@@ -8,28 +7,31 @@ use iced::{Point, Rectangle, Size};
 use super::Canvas;
 use crate::theme;
 
-/// Which side of the screen a scrim is dark on. The far side fades to clear.
+/// The screen edge where a scrim is darkest. It fades to clear away from
+/// that edge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Edge {
     Top,
     Bottom,
 }
 
-/// One scrim: the shade holds at its peak from the screen edge over the
-/// text, then eases to clear with one smoothstep over the rest of its reach.
-/// One ease over the whole fade has no flat spot inside it, and the eye
-/// reads every flat spot in a fade as the edge of a band.
+/// One scrim. Its opacity stays at the peak from the screen edge out to
+/// `hold`, then falls to zero at `clear` along a single smoothstep curve.
+/// The curve has no flat section inside the fade, because a flat section
+/// shows as the edge of a band.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Scrim {
     edge: Edge,
-    /// How far from the screen edge the peak holds, in canvas rows.
+    /// The distance from the screen edge, in canvas rows, up to which the
+    /// opacity stays at its peak.
     hold: f32,
-    /// How far from the screen edge the shade is clear, in canvas rows.
+    /// The distance from the screen edge, in canvas rows, at which the
+    /// opacity reaches zero.
     clear: f32,
 }
 
 impl Scrim {
-    /// The scrim behind the header and the clock.
+    /// The scrim behind the header and the clock, at the top edge.
     pub fn top() -> Self {
         Self {
             edge: Edge::Top,
@@ -38,7 +40,8 @@ impl Scrim {
         }
     }
 
-    /// The scrim behind the scrubber and the strip.
+    /// The scrim behind the scrubber and the control strip, at the bottom
+    /// edge.
     pub fn bottom() -> Self {
         Self {
             edge: Edge::Bottom,
@@ -47,9 +50,10 @@ impl Scrim {
         }
     }
 
-    /// The scrim behind the cast row, which the display draws in place of the
-    /// bottom scrim while the row shows. It holds its peak up past the row's
-    /// heading, so the heading and the names read over a bright frame.
+    /// The scrim behind the cast row, which the display draws instead of the
+    /// bottom scrim while the cast row shows. Its peak reaches above the
+    /// row's heading, so the heading and the names are readable over a
+    /// bright frame.
     pub fn cast() -> Self {
         Self {
             edge: Edge::Bottom,
@@ -58,7 +62,8 @@ impl Scrim {
         }
     }
 
-    /// The fraction of the ground the scrim covers at one canvas row.
+    /// The opacity of the scrim at one canvas row, from 0 to the peak,
+    /// `alpha::SCRIM_EDGE`.
     pub fn opacity_at(&self, row: f32) -> f32 {
         let from_edge = match self.edge {
             Edge::Top => row,
@@ -68,16 +73,15 @@ impl Scrim {
         theme::alpha::SCRIM_EDGE * (1.0 - t * t * (3.0 - 2.0 * t))
     }
 
-    /// The scrim as the picture the display draws: one texel wide, with one
-    /// row for each output row it covers, stretched across the width. A
-    /// picture costs one texture read per pixel, where the toolkit's gradient
-    /// fill searches its stops at every pixel, and the scrims cover about
-    /// half the screen.
+    /// The scrim as an image one texel wide and one texel per output row,
+    /// which the display stretches across the width. An image costs one
+    /// texture read per pixel, while iced's gradient fill searches its color
+    /// stops for every pixel.
     ///
-    /// `density` is the window's scale factor, the output pixels one logical
-    /// pixel covers. The picture starts at the screen edge, so each of its
-    /// rows lands on one output row and carries the value at that row's
-    /// middle.
+    /// `density` is the window's scale factor, in output pixels per logical
+    /// pixel. The image starts at the screen edge, so each texel lines up
+    /// with one output row and holds the opacity at the middle of that row.
+    /// Returns `None` when the scrim covers less than one output row.
     pub fn picture(&self, canvas: &Canvas, density: f32) -> Option<Picture> {
         let per_row = canvas.scale() * density;
         let rows = (self.clear * per_row).ceil();
@@ -108,9 +112,10 @@ impl Scrim {
     }
 }
 
-/// The pictures of the scrims, for one canvas and one scale factor. Only the
-/// fade changes between two frames, and the picture takes the fade as its
-/// opacity, so the pictures are resolved once per surface.
+/// The scrim images for one canvas and one scale factor. The fade level
+/// changes between frames, but the brush applies it as the opacity of the
+/// whole image, so the images are built again only when the canvas or the
+/// scale factor changes.
 #[derive(Debug, Clone, Default)]
 pub struct Scrims {
     pub top: Option<Picture>,
@@ -128,8 +133,7 @@ impl Scrims {
     }
 }
 
-/// One scrim as the toolkit draws it: the column of texels, and the canvas
-/// rectangle it stretches over.
+/// One scrim image and the canvas rectangle it stretches over.
 #[derive(Debug, Clone)]
 pub struct Picture {
     pub handle: Handle,
@@ -137,9 +141,9 @@ pub struct Picture {
 }
 
 impl Picture {
-    /// The alpha byte of each row, top to bottom. A test reads the picture
-    /// through this and not through the handle, because a handle takes an id
-    /// of its own on every call.
+    /// The alpha byte of each row, top to bottom. Tests read the image this
+    /// way because an image handle takes a new id on every call, so two
+    /// handles of the same pixels differ.
     pub fn rows(&self) -> Vec<u8> {
         match &self.handle {
             Handle::Rgba { pixels, .. } => pixels.chunks(4).map(|pixel| pixel[3]).collect(),
@@ -156,10 +160,10 @@ mod tests {
         Canvas::for_output(Size::new(1920.0, 1080.0))
     }
 
-    /// Each scrim holds its peak over the text at the screen edge and is
-    /// clear by the end of its reach.
+    /// Each scrim is at its peak from the screen edge to `hold` and is clear
+    /// from `clear` on.
     #[test]
-    fn a_scrim_holds_its_peak_at_the_edge_and_clears_by_its_reach() {
+    fn a_scrim_is_at_its_peak_to_hold_and_clear_from_clear() {
         let peak = theme::alpha::SCRIM_EDGE;
         let (top, bottom) = (Scrim::top(), Scrim::bottom());
         assert_eq!(top.opacity_at(0.0), peak);
@@ -170,18 +174,17 @@ mod tests {
         assert_eq!(bottom.opacity_at(1080.0 - theme::SCRIM_BOTTOM_CLEAR), 0.0);
     }
 
-    /// The cast row's scrim holds its peak over the row's heading, and covers
-    /// at least what the bottom scrim covers at every row.
+    /// The cast scrim is at its peak at the row's heading, and is at least as
+    /// opaque as the bottom scrim at every row.
     #[test]
-    fn the_cast_scrim_holds_over_the_heading_and_covers_the_bottom() {
+    fn the_cast_scrim_is_at_its_peak_over_the_heading_and_covers_the_bottom() {
         let (cast, bottom) = (Scrim::cast(), Scrim::bottom());
         assert_eq!(cast.opacity_at(640.0), theme::alpha::SCRIM_EDGE);
         assert!((0..1080).all(|row| cast.opacity_at(row as f32) >= bottom.opacity_at(row as f32)));
     }
 
-    /// Across the fade, the change from one output row to the next grows to
-    /// one steepest row and then shrinks, with no flat spot between. A flat
-    /// spot inside a fade reads as the edge of a band.
+    /// Across the fade, the step in opacity from one output row to the next
+    /// grows to a maximum and then shrinks, with no flat section between.
     #[test]
     fn the_fade_steepens_once_and_eases_once() {
         let rows: Vec<i32> = Scrim::top()
@@ -204,7 +207,7 @@ mod tests {
         assert!(steps[5..steps.len() - 5].iter().all(|step| *step > 0));
     }
 
-    /// The picture is one texel of the shadow colour per row.
+    /// The image is one texel wide, in the shadow color, for each row.
     #[test]
     fn the_picture_is_one_shadow_texel_per_row() {
         let picture = Scrim::bottom()
@@ -217,11 +220,11 @@ mod tests {
         assert!(pixels.chunks(4).all(|pixel| pixel[..3] == [0, 0, 0]));
     }
 
-    /// The picture covers the whole width from the screen edge, one row per
-    /// output row, and a window at twice the scale carries twice the rows
-    /// over the same canvas rows.
+    /// The image covers the whole width from the screen edge with one row
+    /// per output row, so a window at twice the scale has twice the rows over
+    /// the same canvas rows.
     #[test]
-    fn the_picture_lands_on_whole_output_rows_from_the_screen_edge() {
+    fn the_picture_covers_whole_output_rows_from_the_screen_edge() {
         let top = Scrim::top().picture(&canvas(), 1.0).expect("the top scrim");
         assert_eq!(top.bounds.y, 0.0);
         assert_eq!(top.bounds.width, 1920.0);
@@ -238,9 +241,9 @@ mod tests {
         assert_eq!(doubled.bounds.height, top.bounds.height);
     }
 
-    /// Both scrims of one surface are the pictures its two scrims resolve to.
+    /// `Scrims::for_canvas` holds the same images that each scrim builds.
     #[test]
-    fn the_scrims_of_one_surface_are_its_pictures() {
+    fn for_canvas_builds_the_picture_of_each_scrim() {
         let scrims = Scrims::for_canvas(&canvas(), 1.0);
         for (held, scrim) in [
             (scrims.top, Scrim::top()),
@@ -254,10 +257,9 @@ mod tests {
         }
     }
 
-    /// A scale of nothing would divide every row of the picture away, so it
-    /// makes no picture.
+    /// A scale of zero leaves no output rows, so there is no image.
     #[test]
-    fn a_scale_of_nothing_makes_no_picture() {
+    fn a_scale_of_zero_makes_no_picture() {
         assert!(Scrim::top().picture(&canvas(), 0.0).is_none());
     }
 }

@@ -1,36 +1,29 @@
 package main
 
-// Each Remote reconciles into one standing pod, owned by the Remote
-// through an owner reference, so deleting the Remote tears the pod
-// down. The pod holds the controller's device claim, which pins it to
-// the machine that owns the radio and runs it whether or not anything
-// plays.
-//
-// The container is the sidecar image in its reader mode, which reads
-// the claim's event nodes and publishes each event to the Remote's
-// events topic.
+// Each Remote becomes one long-running pod that runs whether or not
+// anything is playing. The pod's claim for the controller's device
+// schedules it on the machine that has the radio. Its container runs the
+// sidecar image in reader mode, which reads the event nodes of the
+// claimed device and publishes each event to the Remote's events topic.
 
-// The one container in the standing pod. The pod runs a single reader,
-// so its name is the job it does.
 const remoteReaderContainer = "reader"
 
-// remotePodName is the name of a Remote's standing pod, the Remote's
-// name plus its job, so a person reading either object finds the other.
+// remotePodName is the name of a Remote's pod. It is the Remote's name
+// with a suffix, so a person can find one object from the other.
 func remotePodName(remote string) string {
 	return remote + "-remote"
 }
 
-// remoteClaimName is the standing pod's claim, the pod's name plus the
-// suffix the playback claim uses, so a person reading either object
-// finds the other.
+// remoteClaimName is the name of the pod's claim: the pod's name plus
+// the "-devices" suffix, which the playback claim also uses.
 func remoteClaimName(remote string) string {
 	return remotePodName(remote) + "-devices"
 }
 
-// remoteOwner is the ownerReference that makes deleting the Remote the
-// whole teardown: the garbage collector deletes the claim and the pod
-// the Remote owns. The operator deletes either one itself only to
-// replace an object that no longer matches the template.
+// remoteOwner makes the Remote the controller owner of its claim and
+// pod, so the garbage collector deletes both when the Remote is deleted.
+// The operator deletes either object itself only to replace one that no
+// longer matches its template.
 func remoteOwner(remote *Remote) OwnerReference {
 	return OwnerReference{
 		APIVersion: mediaAPIVersion,
@@ -41,15 +34,14 @@ func remoteOwner(remote *Remote) OwnerReference {
 	}
 }
 
-// buildRemoteClaim turns one Remote into the standing claim for its
-// controller: one request, named for the Remote behind the remote
-// prefix, for the device the Remote's spec selects.
+// buildRemoteClaim builds the claim for a Remote's controller. It has
+// one request, for the device that the Remote's spec selects.
 //
-// The claim tolerates bluetooth.liken.sh/disconnected with no limit, so
-// a controller that sleeps keeps its allocation and the pod keeps
-// running. It does not tolerate bluetooth.liken.sh/no-input-node, which
-// is NoSchedule, so the pod stays Pending until the controller first
-// connects, then runs across every sleep after.
+// The request tolerates the taint bluetooth.liken.sh/disconnected with
+// no time limit, so a controller that goes to sleep keeps its allocation
+// and the pod keeps running. It does not tolerate the NoSchedule taint
+// bluetooth.liken.sh/no-input-node, so the pod stays Pending until the
+// controller connects for the first time.
 func buildRemoteClaim(remote *Remote) *ResourceClaim {
 	claim := &ResourceClaim{
 		APIVersion: claimAPIVersion,
@@ -65,9 +57,9 @@ func buildRemoteClaim(remote *Remote) *ResourceClaim {
 		PlayerDevice{
 			Class:    remote.Spec.Device.Class,
 			Selector: remote.Spec.Device.Selector,
-			// The parameters reach the claim as the Remote wrote them.
-			// This operator never reads them; the input driver defines
-			// them and validates its own block.
+			// The parameters are copied as the Remote has them. The
+			// input driver defines and validates them, and this
+			// operator does not read them.
 			Parameters: remote.Spec.Device.Parameters,
 		},
 		tolerateForever(remoteDisconnectedTaint),
@@ -75,13 +67,9 @@ func buildRemoteClaim(remote *Remote) *ResourceClaim {
 	return claim
 }
 
-// buildRemotePod writes the standing pod: the sidecar image in its
-// reader mode, holding the controller's claim and publishing to the
-// bus.
-//
-// restartPolicy is Always because the pod is a service and not a job: a
-// crash restarts it, and the pod ends only when the Remote is deleted.
-// It carries no IPC volume, because the reader drives no mpv socket.
+// buildRemotePod builds the Remote's reader pod. restartPolicy is Always
+// because the pod runs until the Remote is deleted. Unlike the playback
+// pod, it has no IPC volume, because the reader uses no mpv socket.
 func buildRemotePod(remote *Remote, claim *ResourceClaim, sidecarImage, busAddress, topicBase string) *Pod {
 	container := Container{
 		Name:    remoteReaderContainer,
@@ -94,15 +82,13 @@ func buildRemotePod(remote *Remote, claim *ResourceClaim, sidecarImage, busAddre
 			{Name: topicBaseVariable, Value: topicBase},
 		},
 	}
-	// The discovery variable is set only where the Remote asks for the
-	// mode, so an ordinary Remote's pod carries the spec it always
-	// carried and does not roll for a field it does not use.
+	// The variable is set only when discovery is on, so the pod spec of
+	// a Remote without discovery does not change and its pod is not
+	// replaced.
 	if remote.Spec.Discovery {
 		container.Env = append(container.Env,
 			EnvVar{Name: remoteDiscoveryVariable, Value: discoveryOn})
 	}
-	// The one container holds the claim's one request, the controller
-	// this Remote selects.
 	container.Resources.Claims = claimEntries(claim)
 
 	return &Pod{
@@ -127,20 +113,14 @@ func buildRemotePod(remote *Remote, claim *ResourceClaim, sidecarImage, busAddre
 	}
 }
 
-// reconcileRemote reconciles one Remote into its standing claim and
-// pod, both owned by the Remote.
-//
-// The pair follows the template: an edit to the Remote's device
-// selector, or a release that changes the sidecar image, deletes the
-// stale object and the next pass creates the replacement.
-//
-// The reader pod drops controller input for the few seconds the
-// replacement takes, and it holds no other state a rebuild would have to
-// recover. A guard that held the roll while a person watched a film would
-// trade those seconds for a pod of unpredictable age, so the pass rolls
-// the pod whenever the template changes.
+// reconcileRemote creates the claim and the pod of one Remote. When the
+// Remote's device spec or the sidecar image changes, the existing object
+// no longer matches its template, so this pass deletes it and the next
+// pass creates the replacement. The pass replaces the reader pod at once,
+// even while something plays, because the pod has no state to recover
+// and loses only the controller's input until the new pod starts.
 func (o *operator) reconcileRemote(remote *Remote, known claimRead) error {
 	claim := buildRemoteClaim(remote)
 	pod := o.resources.apply(buildRemotePod(remote, claim, o.sidecarImage, o.busAddress, o.topicBase))
-	return o.reconcileStanding(standingPair("remote "+remote.Metadata.Namespace+"/"+remote.Metadata.Name, claim, pod), known)
+	return o.reconcilePersistent(newPersistentPair("remote "+remote.Metadata.Namespace+"/"+remote.Metadata.Name, claim, pod), known)
 }

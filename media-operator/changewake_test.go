@@ -1,9 +1,7 @@
 package main
 
-// These tests cover the wake rules of the claims, the ResourceSlices,
-// the Displays, and the Receivers: a change to a field the pass reads
-// wakes it, and this operator's own write and every other change do
-// not.
+// A change to a field that the pass reads wakes the pass. A change to any
+// other field, and a write by this operator, does not.
 
 import (
 	"testing"
@@ -13,8 +11,6 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// allocatedClaim is a claim of the house Play with its playback device
-// allocated.
 func allocatedClaim() *ResourceClaim {
 	claim := buildClaim(housePlay("https://nas/film.mkv"), housePlayer())
 	claim.Metadata.UID = "claim-uid"
@@ -68,8 +64,8 @@ func TestAClaimWakesThePassWhenItsAllocationChanges(t *testing.T) {
 	}
 }
 
-// handChange hands one change to a handler: an addition when before is
-// nil, and an update otherwise.
+// handChange sends an add event when before is nil, and an update event
+// otherwise.
 func handChange[T any](t *testing.T, handler cache.ResourceEventHandler, before, after *T) {
 	t.Helper()
 	if before == nil {
@@ -161,7 +157,7 @@ func TestADisplayWakesThePassWhenItsStatusChanges(t *testing.T) {
 }
 
 func TestAReceiverWakesThePassWhenTheEquipmentOrItsWiringChanges(t *testing.T) {
-	held := houseReceiver()
+	baseline := houseReceiver()
 	sessioned := houseReceiver()
 	sessioned.Status.Session = &ReceiverSession{Player: "house/theater", Input: "GAME", Active: true}
 	specSessioned := houseReceiver()
@@ -172,12 +168,12 @@ func TestAReceiverWakesThePassWhenTheEquipmentOrItsWiringChanges(t *testing.T) {
 	rewired.Spec.Inputs = rewired.Spec.Inputs[:1]
 	unreachable := houseReceiver()
 	unreachable.Status.Conditions[0].Status = "False"
-	turned := houseReceiver()
-	turned.Status.Zones = map[string]ReceiverZone{mainZone: {Volume: "46.5"}}
+	newLevel := houseReceiver()
+	newLevel.Status.Zones = map[string]ReceiverZone{mainZone: {Volume: "46.5"}}
 	rescaled := houseReceiver()
 	rescaled.Spec.Volume = &ReceiverVolume{Max: 60}
-	asked := houseReceiver()
-	asked.Status.Session = &ReceiverSession{Player: "house/theater", Input: "GAME",
+	withVolumeAsk := houseReceiver()
+	withVolumeAsk.Status.Session = &ReceiverSession{Player: "house/theater", Input: "GAME",
 		VolumeAsk: &VolumeAsk{Level: 45, At: "2026-10-04T12:15:25.164Z"}}
 
 	cases := []struct {
@@ -186,14 +182,14 @@ func TestAReceiverWakesThePassWhenTheEquipmentOrItsWiringChanges(t *testing.T) {
 		after  *Receiver
 		want   bool
 	}{
-		{name: "this operator applies the status session", before: held, after: sessioned, want: false},
-		{name: "this operator releases the spec session", before: specSessioned, after: held, want: false},
-		{name: "the receiver changes input", before: held, after: switched, want: true},
-		{name: "a person rewires the inputs", before: held, after: rewired, want: true},
-		{name: "the receiver stops answering", before: held, after: unreachable, want: true},
-		{name: "the receiver reports a level", before: held, after: turned, want: true},
-		{name: "a person changes the volume scale", before: held, after: rescaled, want: true},
-		{name: "this operator writes a volume ask", before: held, after: asked, want: false},
+		{name: "this operator applies the status session", before: baseline, after: sessioned, want: false},
+		{name: "this operator releases the spec session", before: specSessioned, after: baseline, want: false},
+		{name: "the receiver changes input", before: baseline, after: switched, want: true},
+		{name: "a person rewires the inputs", before: baseline, after: rewired, want: true},
+		{name: "the receiver stops answering", before: baseline, after: unreachable, want: true},
+		{name: "the receiver reports a level", before: baseline, after: newLevel, want: true},
+		{name: "a person changes the volume scale", before: baseline, after: rescaled, want: true},
+		{name: "this operator writes a volume ask", before: baseline, after: withVolumeAsk, want: false},
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
@@ -207,15 +203,15 @@ func TestAReceiverWakesThePassWhenTheEquipmentOrItsWiringChanges(t *testing.T) {
 }
 
 func TestASinkWakesThePassWhenItsScaleOrItsReportChanges(t *testing.T) {
-	held := frontSink()
+	baseline := frontSink()
 	reported := frontSink()
 	level := 45
 	reported.Status.Observed.Volume = &level
 	rescaled := frontSink()
 	maxPercent := 80
 	rescaled.Spec.Volume = &SinkVolume{Max: &maxPercent}
-	asked := frontSink()
-	asked.Status.Session = &SinkSession{Player: "house/theater",
+	withVolumeAsk := frontSink()
+	withVolumeAsk.Status.Session = &SinkSession{Player: "house/theater",
 		VolumeAsk: &SinkVolumeAsk{Level: 45, At: "2026-10-04T12:15:25.164Z"}}
 
 	cases := []struct {
@@ -224,9 +220,9 @@ func TestASinkWakesThePassWhenItsScaleOrItsReportChanges(t *testing.T) {
 		after  *Sink
 		want   bool
 	}{
-		{name: "the sink reports a level", before: held, after: reported, want: true},
-		{name: "a person changes the volume scale", before: held, after: rescaled, want: true},
-		{name: "this operator writes a volume ask", before: held, after: asked, want: false},
+		{name: "the sink reports a level", before: baseline, after: reported, want: true},
+		{name: "a person changes the volume scale", before: baseline, after: rescaled, want: true},
+		{name: "this operator writes a volume ask", before: baseline, after: withVolumeAsk, want: false},
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
@@ -262,8 +258,7 @@ func TestATelevisionWakesThePassForANewScreenAsk(t *testing.T) {
 	}
 }
 
-// Through the reflector: a Display the display-operator rewrites wakes
-// the pass, and the override this operator applies does not.
+// The same rule holds for events that come through client-go's reflector.
 func TestADisplayWakesThePassThroughTheReflector(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := newCollectionServer()

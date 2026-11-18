@@ -1,9 +1,5 @@
 package main
 
-// These tests cover the standing pod a Remote becomes: one claim that
-// holds the controller across every sleep, one pod that runs the reader
-// in its remote mode, and the reconcile that creates each once.
-
 import (
 	"encoding/json"
 	"net/http"
@@ -12,9 +8,7 @@ import (
 	"testing"
 )
 
-// One Remote with the identity the claim and the pod both copy, and a
-// selector so the claim carries one.
-func standingRemote() *Remote {
+func remoteWithController() *Remote {
 	return &Remote{
 		Metadata: ObjectMeta{Name: "sofa", Namespace: "house", UID: "remote-uid"},
 		Spec: RemoteSpec{
@@ -27,11 +21,12 @@ func standingRemote() *Remote {
 	}
 }
 
-// The claim holds one request for the controller, tolerates the
-// disconnected taint forever, and is owned by the Remote. It does not
-// tolerate the no-input-node taint, which the single toleration proves.
-func TestBuildRemoteClaimHoldsTheControllerForever(t *testing.T) {
-	claim := buildRemoteClaim(standingRemote())
+// The claim has one request for the controller, tolerates the
+// disconnected taint with no time limit, and is owned by the Remote. The
+// request has no toleration for the no-input-node taint, so the pod
+// stays Pending until the controller connects.
+func TestBuildRemoteClaimToleratesTheDisconnectedTaintWithoutLimit(t *testing.T) {
+	claim := buildRemoteClaim(remoteWithController())
 
 	if claim.APIVersion != claimAPIVersion || claim.Kind != "ResourceClaim" {
 		t.Errorf("apiVersion = %q, kind = %q", claim.APIVersion, claim.Kind)
@@ -78,11 +73,8 @@ func TestBuildRemoteClaimHoldsTheControllerForever(t *testing.T) {
 	}
 }
 
-// The pod runs the reader in the remote mode, carries the Remote's
-// identity in the environment, holds the claim's one request, restarts
-// on a crash, and is owned by the Remote. It carries no IPC volume.
 func TestBuildRemotePodRunsTheReaderInTheRemoteMode(t *testing.T) {
-	remote := standingRemote()
+	remote := remoteWithController()
 	claim := buildRemoteClaim(remote)
 	pod := buildRemotePod(remote, claim, testSidecarImage, testBusAddress, testTopicBase)
 
@@ -139,12 +131,8 @@ func TestBuildRemotePodRunsTheReaderInTheRemoteMode(t *testing.T) {
 	}
 }
 
-// The reader pod holds a controller that is paired to one machine, so
-// it tolerates the taint that keeps unrelated work off that machine. It
-// tolerates that key alone, and for scheduling alone, so a NoExecute
-// taint still moves it away.
 func TestBuildRemotePodMountsNoServiceAccountToken(t *testing.T) {
-	remote := standingRemote()
+	remote := remoteWithController()
 	pod := buildRemotePod(remote, buildRemoteClaim(remote),
 		testSidecarImage, testBusAddress, testTopicBase)
 
@@ -152,8 +140,10 @@ func TestBuildRemotePodMountsNoServiceAccountToken(t *testing.T) {
 	mustMatch(t, *pod.Spec.AutomountServiceAccountToken, false)
 }
 
-func TestBuildRemotePodToleratesThePlayerNodeTaint(t *testing.T) {
-	remote := standingRemote()
+// The reader pod tolerates the player-node taint only with the
+// NoSchedule effect, so a NoExecute taint still evicts it.
+func TestBuildRemotePodToleratesOnlyThePlayerNodeTaint(t *testing.T) {
+	remote := remoteWithController()
 	pod := buildRemotePod(remote, buildRemoteClaim(remote), testSidecarImage, testBusAddress, testTopicBase)
 
 	want := []Toleration{{Key: "media.liken.sh/player", Operator: "Exists", Effect: "NoSchedule"}}
@@ -162,9 +152,9 @@ func TestBuildRemotePodToleratesThePlayerNodeTaint(t *testing.T) {
 	}
 }
 
-// A Remote that asks for discovery carries the mode to its reader as
-// one variable, and a Remote that does not carries none, so an
-// ordinary Remote's pod spec is what it always was.
+// A Remote with discovery enabled passes the mode to its reader in one
+// environment variable. A Remote without discovery has no such
+// variable, so its pod spec is unchanged.
 func TestTheDiscoveryModeReachesTheReaderAsOneVariable(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -178,30 +168,30 @@ func TestTheDiscoveryModeReachesTheReaderAsOneVariable(t *testing.T) {
 
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
-			remote := standingRemote()
+			remote := remoteWithController()
 			remote.Spec.Discovery = each.discovery
 			pod := buildRemotePod(remote, buildRemoteClaim(remote),
 				testSidecarImage, testBusAddress, testTopicBase)
 
 			container := pod.Spec.Containers[0]
-			held := false
+			found := false
 			for _, entry := range container.Env {
 				if entry.Name == remoteDiscoveryVariable {
-					held = true
+					found = true
 					mustMatch(t, entry.Value, each.want)
 				}
 			}
-			mustMatch(t, held, each.set)
+			mustMatch(t, found, each.set)
 		})
 	}
 }
 
-// Turning discovery on changes the pod's template and not the claim's,
-// so the pass replaces the reader pod alone and the controller keeps
+// Enabling discovery changes the pod's template hash and not the
+// claim's, so the pass replaces only the pod and the controller keeps
 // its allocation.
-func TestTurningDiscoveryOnRollsThePodAndNotTheClaim(t *testing.T) {
-	ordinary := standingRemote()
-	discovering := standingRemote()
+func TestEnablingDiscoveryChangesThePodHashAndNotTheClaimHash(t *testing.T) {
+	ordinary := remoteWithController()
+	discovering := remoteWithController()
 	discovering.Spec.Discovery = true
 
 	ordinaryPod := buildRemotePod(ordinary, buildRemoteClaim(ordinary),
@@ -214,7 +204,7 @@ func TestTurningDiscoveryOnRollsThePodAndNotTheClaim(t *testing.T) {
 	discoveringHash, err := templateHash(discoveringPod.Spec)
 	mustSucceed(t, err)
 	if podHash == discoveringHash {
-		t.Errorf("the pod template hash did not change, so the reader would not roll")
+		t.Errorf("the pod template hash is %s with and without discovery, want a different hash so that the pod is replaced", podHash)
 	}
 
 	claimHash, err := templateHash(buildRemoteClaim(ordinary).Spec)
@@ -224,31 +214,31 @@ func TestTurningDiscoveryOnRollsThePodAndNotTheClaim(t *testing.T) {
 	mustMatch(t, discoveringClaimHash, claimHash)
 }
 
-// The first reconcile creates the claim and the standing pod. A second
-// reconcile creates nothing, because both are already there.
+// The first reconcile creates the claim and the pod. A second reconcile
+// creates nothing, because both already exist.
 func TestReconcileRemoteCreatesTheClaimAndThePodOnce(t *testing.T) {
 	cluster := newFakeCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
-	remote := standingRemote()
+	remote := remoteWithController()
 
 	if err := media.reconcileRemote(remote, claimRead{}); err != nil {
-		t.Fatalf("first reconcile: %v", err)
+		t.Fatalf("reconciling the Remote the first time: %v", err)
 	}
 
-	claim, held := cluster.claims["sofa-remote-devices"]
-	if !held {
-		t.Fatalf("no claim was created: %v", cluster.requests)
+	claim, found := cluster.claims["sofa-remote-devices"]
+	if !found {
+		t.Fatalf("the requests are %v, want one that creates the claim", cluster.requests)
 	}
 	if got := claim.Spec.Devices.Requests[0].Name; got != "remote-sofa" {
 		t.Errorf("request = %q, want remote-sofa", got)
 	}
-	if _, held := cluster.pods["sofa-remote"]; !held {
-		t.Fatalf("no standing pod was created: %v", cluster.requests)
+	if _, found := cluster.pods["sofa-remote"]; !found {
+		t.Fatalf("the requests are %v, want one that creates the reader pod", cluster.requests)
 	}
 
 	created := len(cluster.requests)
 	if err := media.reconcileRemote(remote, claimRead{}); err != nil {
-		t.Fatalf("second reconcile: %v", err)
+		t.Fatalf("reconciling the Remote the second time: %v", err)
 	}
 	posts := 0
 	for _, request := range cluster.requests[created:] {
@@ -257,15 +247,15 @@ func TestReconcileRemoteCreatesTheClaimAndThePodOnce(t *testing.T) {
 		}
 	}
 	if posts != 0 {
-		t.Errorf("the second reconcile created objects: %v", cluster.requests[created:])
+		t.Errorf("the second reconcile sent %v, want no request that creates an object", cluster.requests[created:])
 	}
 }
 
-// The Remote's parameters reach its claim as one opaque block for the
-// controller's request, byte for byte, because this operator reads
-// none of the values.
+// The Remote's parameters are copied unchanged into one opaque config
+// block for the controller's request, because this operator does not
+// read the values.
 func TestTheDeviceParametersReachTheRemoteClaim(t *testing.T) {
-	remote := standingRemote()
+	remote := remoteWithController()
 	remote.Spec.Device.Parameters = &DeviceParameters{
 		Driver: "bluetooth.liken.sh",
 		Values: json.RawMessage(`{"inputs":["joystick"]}`),
@@ -283,19 +273,17 @@ func TestTheDeviceParametersReachTheRemoteClaim(t *testing.T) {
 	mustMatch(t, string(config[0].Opaque.Parameters), `{"inputs":["joystick"]}`)
 }
 
-// A Remote without parameters carries no configuration block, so a
-// claim that needs none is the same claim as before the field existed.
-func TestARemoteWithNoParametersCarriesNoConfiguration(t *testing.T) {
-	mustMatch(t, len(buildRemoteClaim(standingRemote()).Spec.Devices.Config), 0)
+func TestARemoteWithNoParametersGetsNoConfigBlock(t *testing.T) {
+	mustMatch(t, len(buildRemoteClaim(remoteWithController()).Spec.Devices.Config), 0)
 }
 
-// A claim is immutable, so a changed parameters block is a
-// replacement: the pass deletes the claim and the pod that holds it,
-// and the next pass creates both with the new block.
+// A claim is immutable, so changed parameters require a new claim. The
+// pass deletes the claim and the pod that uses it, and the next pass
+// creates both with the new parameters.
 func TestChangingTheParametersReplacesTheClaim(t *testing.T) {
 	cluster := newFakeCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
-	remote := standingRemote()
+	remote := remoteWithController()
 	mustSucceed(t, media.reconcileRemote(remote, claimRead{}))
 
 	remote.Spec.Device.Parameters = &DeviceParameters{
@@ -303,17 +291,17 @@ func TestChangingTheParametersReplacesTheClaim(t *testing.T) {
 		Values: json.RawMessage(`{"inputs":["joystick","touchpad"]}`),
 	}
 	mustSucceed(t, media.reconcileRemote(remote, claimRead{}))
-	if _, held := cluster.claims["sofa-remote-devices"]; held {
-		t.Fatalf("the claim was not deleted: %v", cluster.requests)
+	if _, found := cluster.claims["sofa-remote-devices"]; found {
+		t.Fatalf("after the parameters changed, the claim remains (requests %v), want it deleted", cluster.requests)
 	}
-	if _, held := cluster.pods["sofa-remote"]; held {
-		t.Fatalf("the pod that holds the claim was not deleted: %v", cluster.requests)
+	if _, found := cluster.pods["sofa-remote"]; found {
+		t.Fatalf("after the parameters changed, the pod remains (requests %v), want it deleted", cluster.requests)
 	}
 
 	mustSucceed(t, media.reconcileRemote(remote, claimRead{}))
-	claim, held := cluster.claims["sofa-remote-devices"]
-	if !held {
-		t.Fatalf("the claim did not come back: %v", cluster.requests)
+	claim, found := cluster.claims["sofa-remote-devices"]
+	if !found {
+		t.Fatalf("after the next reconcile, the claim is missing (requests %v), want it created again", cluster.requests)
 	}
 	config := claim.Spec.Devices.Config
 	if len(config) != 1 || config[0].Opaque == nil {

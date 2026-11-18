@@ -9,193 +9,192 @@ toc: true
 # `Play`
 
 A `Play` is one run of media on a [Player](/docs/reference/players/):
-a film, an album, or a season of episodes, played in order. Its
-lifecycle is analogous to a `Job`'s: it runs once to completion, and
-it stays for its status until `ttlSecondsAfterFinished` passes or a
-person deletes it. Create a `Play` to start it, delete it to stop it
-early, and `kubectl get plays` lists what plays right now.
+a film, an album, or a season of episodes, played in order. It works
+like a `Job`: it runs once to completion, and then it stays, so that
+you can read its status, until `ttlSecondsAfterFinished` passes or you
+delete it. Create a `Play` to start it, and delete it to stop it early.
+`kubectl get plays` shows the status, item, and position of each run,
+finished runs included.
 
-The operator reconciles a `Play` into one playback pod and the
-claims that pod needs, all owned by the `Play`, so deleting the
-`Play` is the whole teardown: the garbage collector takes the pod
-and the claims with it. A `Finished` run leaves nothing running.
+The operator creates a playback pod for a `Play`, and the claims that
+the pod needs. The `Play` owns the pod and the claims, so the
+Kubernetes garbage collector deletes them with the `Play`. A
+`Finished` `Play` has no pod running.
 
-The operator holds the finalizer `media.liken.sh/bus-topics` on every
-`Play`, so a delete completes only after the operator has torn the run
-down. Inside that window it deletes the playback pod, waits until the
-pod is gone, and clears the run's retained `status` and `availability`
-topics on the bus. The finalizer owns the clear because a `Play` must
-never be gone from the API server while its topics still stand on the
-broker, and because the pod's own closing messages have to land before
-the operator's clear or they would overwrite it. A `Play` that stays
-deleting for longer than a few seconds has a pod that will not go, and
-`kubectl describe` on the pod says why.
+The operator adds the finalizer `media.liken.sh/bus-topics` to every
+`Play`, so a deleted `Play` stays in the API server until the operator
+has stopped the run. The operator deletes the playback pod, waits
+until the pod is gone, and then clears the run's retained `status` and
+`availability` topics on the bus. It waits because the pod publishes
+closing messages as it ends, and those would overwrite an earlier
+clear. When a `Play` stays in deletion for more than a few seconds,
+its pod does not stop. Run `kubectl describe` on the pod to see why.
 
-The spec is immutable, like a `Job`'s template. A `Play` whose
-player or media changed mid-run would describe a different run;
-delete the `Play` and create another.
+The spec is immutable, like the template of a `Job`, because a changed
+`Play` would no longer describe the run that is playing. To change the
+player or the media, delete the `Play` and create another.
 
-One `Player` runs one `Play`. When two unfinished `Play`s name the
-same `Player`, the newest one by creation time, and then by name, is
-the one that runs, and the operator deletes every older one. So a
-`Play` created while a film plays ends that film. The deleted `Play`
-reports its last position before its pod ends, and a `Play` that
-resumes it names that position in `spec.start`.
+A `Player` runs one `Play` at a time. When two unfinished `Play`
+objects name the same `Player`, the newest one runs, by creation time
+and then by name, and the operator deletes every older one. So a
+`Play` that you create while a film plays ends that film. The deleted
+`Play` reports its last position before its pod ends. To resume from
+that position, create a `Play` with the position in `spec.start`.
 
-`spec.next` names the work that follows this run. The display offers
-it on the scrubber, and when a person takes the offer the program that
-wrote the `Play` creates the next one. The `Play` carries the offer
-because the display reads no catalog, and the program that wrote it
-decides what follows.
+`spec.next` describes the work that follows this run, and the
+on-screen display offers it on the scrubber. When a person accepts the
+offer, the program that wrote the `Play` creates the next one. The
+offer is in the `Play` because the program that created the `Play`
+decides what follows, and the on-screen display reads no catalog.
 
     apiVersion: media.liken.sh/v1alpha1
     kind: Play
     metadata:
-      name: dune
+      name: nosferatu
       namespace: media
     spec:
       players: [studio]
       items:
-        - uri: nfs://nas/media/movies/Dune (2021)/Dune.mkv
+        - uri: nfs://nas/media/movies/Nosferatu (1922)/Nosferatu.mkv
           presentation:
             type: video
             hint: movie
-            title: Dune
-            year: 2021
+            title: Nosferatu
+            year: 1922
       start: "0:10:00"
 
-A Play is one run of media on a Player: a film, an album, or a season of episodes, played in order. Create a Play to start it; delete the Play to stop it early.
+A Play is one run of media on a Player: a film, an album, or a season of episodes, played in order. Create a Play to start it. Delete the Play to stop it early.
 
 ## spec
 
-What to play and where. The spec is immutable: a different film or a different player is a different Play.
+What to play and where. The spec is immutable. To play something else, or on another Player, create another Play.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="spec--players"></span>`players` | []string | yes | The Players this Play runs on, by name, in this namespace. One entry today. |
-| <span id="spec--items"></span>`items` | [\[\]object](#specitems) | yes | The media to play in order. Each entry is a URI and an optional presentation that declares how the display should render it. |
-| <span id="spec--start"></span>`start` | string | no | Where in the first item the run begins, as a time the player accepts, such as 0:10:00 or 600. Omitted, the run begins at the start. Later items always begin at their own start. This is also how a run resumes: a new Play with the position a finished or deleted one reported. |
-| <span id="spec--next"></span>`next` | [object](#specnext) | no | The work that follows this run. The display offers it on the scrubber as a chip, and as a card near the end of the run. The card stays up for five seconds, and the OSD shows it again after that. When the item's marks place credits in its second half, the card rises at the start of the credits, or after the scene that follows them, as the marks field describes. Otherwise a film's card rises when four percent of the item or four minutes remain, whichever is less, and an episode's card, for an item whose presentation names a series, rises when two and a half percent of the item or two minutes remain, whichever is less. Both rules raise the card no earlier than the point where the work counts as watched, five percent or five minutes before its end, whichever is less. With the OSD down, the risen card shows focused, and select takes it, unless a skip control is up beside it. Then select does what it does for the skip control alone. On a screen whose compositor offers the liken_arrangement_v1 protocol, a film or an episode steps back when its card rises: the compositor scales the film into a frame on the left half of the screen over 900 milliseconds, and the display then draws the next work in the right half in place of the card. The column stays until a press or the end of the file. back with the OSD down returns the film to the whole screen over 600 milliseconds and leaves it playing, and the next back ends the run. A select on the column fades the column out over 300 milliseconds, and the compositor fades the film out in its frame over the same time. A screen without the protocol shows the card as above, and a select on it fades the card out over 300 milliseconds. Either select also pauses the film, so its sound stops at the press, and the display draws nothing once mpv exits. A select on the offer publishes the request below on the Player's commands topic, where the program that wrote the Play reads it back and creates the next Play. A Play with no next block offers nothing. |
-| <span id="spec--trickplayinterval"></span>`trickplayInterval` | string | no | The seconds one trickplay tile covers, as a Go duration like 10s. Jellyfin writes no manifest beside the sheets, so the Play declares it. Omitted, it defaults to 10s, the Jellyfin default. |
-| <span id="spec--ttlsecondsafterfinished"></span>`ttlSecondsAfterFinished` | integer | no | How long this Play remains after it finishes, in seconds, the meaning a Job gives the name. While it remains, kubectl get plays still shows what just played and where it stopped; deleting the Play deletes that record. Omitted, it is 300 seconds. Zero deletes the Play as soon as it finishes. The playback pod does not wait for this window: it is deleted as soon as the run finishes. |
-| <span id="spec--audiolanguages"></span>`audioLanguages` | []string | no | A per-Play override of the audio language order. Omit it to use the Player's. |
-| <span id="spec--subtitlelanguages"></span>`subtitleLanguages` | []string | no | A per-Play override of the subtitle language order. Omit it to use the Player's. |
-| <span id="spec--subtitles"></span>`subtitles` | string | no | A per-Play override of when subtitles show. Omit it to use the Player's. One of: `on`, `off`, `auto`. |
-| <span id="spec--sdh"></span>`sdh` | string | no | A per-Play override of whether an SDH track ranks ahead of a full track in the same language. Omit it to use the Player's. One of: `prefer`, `avoid`. |
+| <span id="spec--players"></span>`players` | []string | yes | The name of the `Player` in the Play's namespace that this Play runs on. The list has exactly one entry. |
+| <span id="spec--items"></span>`items` | [\[\]object](#specitems) | yes | The media to play, in order. |
+| <span id="spec--start"></span>`start` | string | no | Where the first item starts, as a time that mpv accepts, such as `0:10:00` or `600`. When omitted, the first item starts at its beginning. Later items always start at their beginning. To resume, create a Play with the `status.position` that the earlier Play reported. |
+| <span id="spec--next"></span>`next` | [object](#specnext) | no | The work to offer after this run, such as the next episode. The display shows it as a chip on the scrubber and as a card near the end of the run, and a Play with no `next` offers nothing. When a person selects the offer, the display publishes `request` on the Player's commands topic, and the program that wrote the Play reads it there and creates the next Play. The card appears at the start of the credits, or after the scene that follows them, when the item's `marks` put the credits in its second half. Otherwise it appears when 4% of a film or 4 minutes remain, or 2.5% of an episode or 2 minutes remain, whichever is less. An episode is an item whose presentation sets `series`. The card never appears before the point where the work counts as watched, 5% or 5 minutes before the end, whichever is less. It hides after 5 seconds, and a press that shows the OSD shows it again. With the OSD hidden, select takes the card, unless a skip control is also showing. When the compositor supports the `liken_arrangement_v1` protocol, the film moves into the left half of the screen when its card appears, and the display shows the next work in the right half until a press or the end of the file. Back with the OSD hidden returns the film to the whole screen, and a second back ends the run. In either layout, select fades the offer out and pauses the film, so its sound stops at the press. |
+| <span id="spec--trickplayinterval"></span>`trickplayInterval` | string | no | How many seconds one trickplay tile covers, as a Go duration such as `10s`. Jellyfin writes no manifest beside the sheets, so the Play declares it. When omitted, it is `10s`, the Jellyfin default. |
+| <span id="spec--ttlsecondsafterfinished"></span>`ttlSecondsAfterFinished` | integer | no | How many seconds the Play remains after it finishes, as for a Job, so `kubectl get plays` shows what just played and where it stopped. The default is 300, and 0 deletes the Play as soon as it finishes. The operator deletes the playback pod when the run finishes, whatever this value is. |
+| <span id="spec--audiolanguages"></span>`audioLanguages` | []string | no | Overrides the Player's audio language order for this Play. Omit it to use the Player's. |
+| <span id="spec--subtitlelanguages"></span>`subtitleLanguages` | []string | no | Overrides the Player's subtitle language order for this Play. Omit it to use the Player's. |
+| <span id="spec--subtitles"></span>`subtitles` | string | no | Overrides the Player's setting for when subtitles show. Omit it to use the Player's. One of: `on`, `off`, `auto`. |
+| <span id="spec--sdh"></span>`sdh` | string | no | Overrides the Player's setting for whether an SDH track ranks ahead of a full track in the same language. Omit it to use the Player's. One of: `prefer`, `avoid`. |
 
 ### spec.items[]
 
-One entry in the playlist: the URI to play and, optionally, how it should look.
+One entry of the playlist: the URI to play and, optionally, how the display shows it.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specitems--uri"></span>`uri` | string | yes | The operator resolves https:// to a stream the player reads directly, and nfs://host/export/path and claim://namespace/claim/path to a mount on the playback pod. The player verifies an https:// server's certificate against the CA bundle in its image, and does not play from a server whose certificate is expired, self-signed, or for another host. A claim URI names the Play's own namespace, because a pod mounts only a claim in its own namespace. pattern://white, pattern://bars, and pattern://speakers play a test pattern the player image carries, at the frame the URI names, such as pattern://bars/1920x1080, or at the frame of the Player's screen when it names none. A URI whose scheme the operator does not know, a claim URI that names no namespace or another namespace, or a pattern or frame the image does not carry, fails the Play before any pod exists. |
-| <span id="specitems--presentation"></span>`presentation` | [object](#specitemspresentation) | no | How the item should look, for the fields the display cannot read from the file. The library that fed the item supplies these, and the display prefers them over the container's tags. Omit the block for a loose file, and the display falls back to the file's own tags. |
+| <span id="specitems--uri"></span>`uri` | string | yes | Where the media is. mpv streams an `https://` URI directly. It checks the certificate against the CA bundle in its image, so it refuses a certificate that is expired, self-signed, or for another host. The playback pod mounts `nfs://host/export/path` and `claim://namespace/claim/path`. A `claim://` URI must name the Play's own namespace, because a pod can mount a claim only in its own namespace. `pattern://white`, `pattern://bars`, and `pattern://speakers` play a test pattern from the player image, at the frame size in the URI, such as `pattern://bars/1920x1080`, or else at the frame size of the Player's screen. The Play fails before any pod starts when the scheme is unknown, when a `claim://` URI names no namespace or another namespace, or when the image has no such pattern or frame size. |
+| <span id="specitems--presentation"></span>`presentation` | [object](#specitemspresentation) | no | What the display shows about the item. A library that supplies the item sets these fields, and the display uses them in place of the file's own tags. Omit the block to show only the file's tags. |
 
 #### spec.items[].presentation
 
-How the item should look, for the fields the display cannot read from the file. The library that fed the item supplies these, and the display prefers them over the container's tags. Omit the block for a loose file, and the display falls back to the file's own tags.
+What the display shows about the item. A library that supplies the item sets these fields, and the display uses them in place of the file's own tags. Omit the block to show only the file's tags.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specitemspresentation--type"></span>`type` | string | no | The media type the display tunes its layout by. mpv cannot infer this, and the display does not read it from the file name. One of: `video`, `music`, `image`. |
-| <span id="specitemspresentation--hint"></span>`hint` | string | no | The finer kind within the type. A video is a movie or a series, and music is an album. It selects the layout the display draws. An album also declares that the item's URI names a directory, which the playback pod expands into one timeline of the audio files it holds. The directory must hold at least one audio file, or the run fails. One of: `movie`, `series`, `album`. |
-| <span id="specitemspresentation--role"></span>`role` | string | no | What the item is, when it is not the work itself. The only value is trailer, and the display marks a trailer on the line under the title. Omit it for the work itself. One of: `trailer`. |
-| <span id="specitemspresentation--title"></span>`title` | string | no | The item's name, which overrides the file's own tag. Set it when the tag is wrong or absent. |
+| <span id="specitemspresentation--type"></span>`type` | string | no | The media type, which selects the layout of the display. The display does not guess it from the file. One of: `video`, `music`, `image`. |
+| <span id="specitemspresentation--hint"></span>`hint` | string | no | The kind of video or music, which also selects the layout: `movie` or `series` for video, and `album` for music. With `album`, the item's URI is a directory, and the playback pod plays its audio files as one timeline. The run fails when the directory has no audio file. One of: `movie`, `series`, `album`. |
+| <span id="specitemspresentation--role"></span>`role` | string | no | Set `trailer` when the item is a trailer and not the work itself. The display then says so on the line under the title. One of: `trailer`. |
+| <span id="specitemspresentation--title"></span>`title` | string | no | The item's title, in place of the file's title tag. |
 | <span id="specitemspresentation--series"></span>`series` | string | no | The series this episode belongs to. |
 | <span id="specitemspresentation--season"></span>`season` | integer | no | The season number of the episode. |
 | <span id="specitemspresentation--episode"></span>`episode` | integer | no | The episode number within its season. |
 | <span id="specitemspresentation--episodetitle"></span>`episodeTitle` | string | no | The title of the episode. |
-| <span id="specitemspresentation--year"></span>`year` | integer | no | The release year, shown under a movie's title beside the film's length. |
-| <span id="specitemspresentation--date"></span>`date` | string | no | The air date of an episode, shown on its line. Give it as an ISO date like 2017-03-05, and the display formats it. |
-| <span id="specitemspresentation--artist"></span>`artist` | string | no | The artist of a music item, shown in the header under the title. For an album this field is the one source; a standalone track can also leave it unset and let its own tags supply it. |
-| <span id="specitemspresentation--album"></span>`album` | string | no | The record a music item belongs to, shown in the header beside the year. It fills in the same way the artist does. |
-| <span id="specitemspresentation--art"></span>`art` | string | no | The cover art URI, claim://, nfs:// or https://, resolved the way the media URI is. It is the first place the cover is looked for; a picture embedded in the file and a cover.jpg beside it follow, and the pod reads both of those itself. |
-| <span id="specitemspresentation--logo"></span>`logo` | string | no | The logo art URI, claim://, nfs:// or https://, resolved the way the media URI is. The display shows it in the header in place of the title. |
-| <span id="specitemspresentation--trickplay"></span>`trickplay` | string | no | The X.trickplay directory URI, claim://, nfs:// or https://, resolved the way the media URI is. The display shows a tile from it on the scrub cursor. |
-| <span id="specitemspresentation--appearances"></span>`appearances` | string | no | The URI of the item's spans file, claim://, nfs:// or https://, resolved the way the media URI is. library-operator writes it as X.spans.json in .liken/appearances/ beside the video. When the film pauses, the display shows the credited people on screen at the playhead. |
-| <span id="specitemspresentation--contributors"></span>`contributors` | string | no | The URI of the library's .contributors directory, claim://, nfs:// or https://, resolved the way the media URI is. The spans file names each portrait by its path under it. |
-| <span id="specitemspresentation--marks"></span>`marks` | [\[\]object](#specitemspresentationmarks) | no | The spans in the file where the intro, the recap, the credits, the scene after the credits, and the preview are. A database can give several candidate spans for one kind, and the list carries every one. The display merges the candidates that overlap into one span, from the median start and the median end. It offers a skip control while the playhead is inside an intro or a recap. With the OSD down, the control shows focused, and select skips. The credits count when they start in the second half of the item. A scene after them is a post-credits span, or the gap between two credits spans. Inside the credits before a scene, the display offers a skip to the scene, and select takes it only while the OSD is up. The up-next card rises at the start of the credits, or, when a scene follows them, at the later of the start of the last credits span and the end of the last scene. A card after a scene never rises later than it would with no marks. An item with no marks plays with no skip control, and its card rises by the time that remains, as the next field describes. |
-| <span id="specitemspresentation--subtitles"></span>`subtitles` | [\[\]object](#specitemspresentationsubtitles) | no | How many subtitle events each subtitle track of the item holds, the one fact about a track that mpv cannot read. library-operator writes it from its probe. When mpv loads the item, the command sidecar gives each track a role, empty, forced, commentary, sdh, or full, from its flags, its title, its file name, and this count, and chooses the track to show by role. A track with no events is empty. A track with fewer events than a fifth of the largest track in its language is forced, even with no flag or title that says so. A track with no entry here takes its role from the other three. |
+| <span id="specitemspresentation--year"></span>`year` | integer | no | The release year. The display shows it under a movie's title, beside the length of the film. |
+| <span id="specitemspresentation--date"></span>`date` | string | no | The air date of an episode, as an ISO date such as `2017-03-05`. The display formats it for the screen. |
+| <span id="specitemspresentation--artist"></span>`artist` | string | no | The artist of a music item, shown under the title. When it is unset, the display shows the artist tag that mpv reads from the file. Set it for an album, which mpv plays as a timeline of its files and not as one tagged file. |
+| <span id="specitemspresentation--album"></span>`album` | string | no | The album of a music item, shown beside the year. It falls back to the file's tag as `artist` does. |
+| <span id="specitemspresentation--art"></span>`art` | string | no | The URI of the cover art, as `claim://`, `nfs://`, or `https://`, resolved like `uri`. When it is unset, the pod uses a picture embedded in the file, or else a `cover.jpg` beside it. |
+| <span id="specitemspresentation--logo"></span>`logo` | string | no | The URI of the logo art, as `claim://`, `nfs://`, or `https://`, resolved like `uri`. The display shows it in the header in place of the title. |
+| <span id="specitemspresentation--trickplay"></span>`trickplay` | string | no | The URI of the `X.trickplay` directory, as `claim://`, `nfs://`, or `https://`, resolved like `uri`. While you scrub, the display shows the tile for the position under the cursor. |
+| <span id="specitemspresentation--appearances"></span>`appearances` | string | no | The URI of the file that lists when each credited person is on screen, as `claim://`, `nfs://`, or `https://`, resolved like `uri`. library-operator writes it as `X.spans.json` in `.liken/appearances/` beside the video. When the film pauses, the display shows the people on screen at that moment. |
+| <span id="specitemspresentation--contributors"></span>`contributors` | string | no | The URI of the library's `.contributors` directory, as `claim://`, `nfs://`, or `https://`, resolved like `uri`. The `appearances` file names each person's portrait by its path under this directory. |
+| <span id="specitemspresentation--marks"></span>`marks` | [\[\]object](#specitemspresentationmarks) | no | Where the intro, the recap, the credits, a scene after the credits, and a preview are in the file. The list can hold several spans of one kind, and the display merges spans that overlap into one, from their median start and median end. While the playhead is in an intro or a recap, the display shows a skip control, and with the OSD hidden, select skips. Credits count only when they start in the second half of the item. A scene after the credits is a `post-credits` span or the gap between two `credits` spans, and during the credits before it the display offers to skip to the scene. Select takes that offer only while the OSD is visible. The marks also set when the up-next card appears, as the `next` field describes. |
+| <span id="specitemspresentation--subtitles"></span>`subtitles` | [\[\]object](#specitemspresentationsubtitles) | no | The number of subtitle events in each subtitle track of the item, which library-operator writes from its probe because mpv does not report it. The command sidecar uses the counts to choose a subtitle track when the file's flags are wrong. It never chooses a track with no events. It treats a track with fewer than a fifth as many events as the largest track in its language as forced, even when no flag or title says so. A track with no entry here is judged by its flags, title, and file name alone. |
 
 #### spec.items[].presentation.marks[]
 
-The spans in the file where the intro, the recap, the credits, the scene after the credits, and the preview are. A database can give several candidate spans for one kind, and the list carries every one. The display merges the candidates that overlap into one span, from the median start and the median end. It offers a skip control while the playhead is inside an intro or a recap. With the OSD down, the control shows focused, and select skips. The credits count when they start in the second half of the item. A scene after them is a post-credits span, or the gap between two credits spans. Inside the credits before a scene, the display offers a skip to the scene, and select takes it only while the OSD is up. The up-next card rises at the start of the credits, or, when a scene follows them, at the later of the start of the last credits span and the end of the last scene. A card after a scene never rises later than it would with no marks. An item with no marks plays with no skip control, and its card rises by the time that remains, as the next field describes.
+Where the intro, the recap, the credits, a scene after the credits, and a preview are in the file. The list can hold several spans of one kind, and the display merges spans that overlap into one, from their median start and median end. While the playhead is in an intro or a recap, the display shows a skip control, and with the OSD hidden, select skips. Credits count only when they start in the second half of the item. A scene after the credits is a `post-credits` span or the gap between two `credits` spans, and during the credits before it the display offers to skip to the scene. Select takes that offer only while the OSD is visible. The marks also set when the up-next card appears, as the `next` field describes.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specitemspresentationmarks--kind"></span>`kind` | string | yes | What the span holds: intro, recap, credits, post-credits, or preview. post-credits is the scene after the credits. The display ignores a kind it does not know. |
+| <span id="specitemspresentationmarks--kind"></span>`kind` | string | yes | What the span is: `intro`, `recap`, `credits`, `post-credits` (the scene after the credits), or `preview`. The display ignores any other kind. |
 | <span id="specitemspresentationmarks--start"></span>`start` | number | no | Where the span starts, in seconds from the start of the file. Omit it for a span that starts with the file. |
 | <span id="specitemspresentationmarks--end"></span>`end` | number | no | Where the span ends, in seconds from the start of the file. Omit it for a span that ends with the file. |
-| <span id="specitemspresentationmarks--source"></span>`source` | string | no | The database the span came from, such as theintrodb. The display does not read it. |
+| <span id="specitemspresentationmarks--source"></span>`source` | string | no | The database that the span came from, such as `theintrodb`. The display does not read it. |
 
 #### spec.items[].presentation.subtitles[]
 
-The count of one track. Exactly one of stream and file names the track.
+The event count of one track. Set exactly one of `stream` and `file` to identify the track.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specitemspresentationsubtitles--stream"></span>`stream` | integer | no | The index of an embedded track in its container: the index ffprobe gives the stream, and mpv's ff-index. |
-| <span id="specitemspresentationsubtitles--file"></span>`file` | string | no | The base name of an external subtitle file beside the media, such as Movie.en.hi.srt. The operator passes it as written and does not resolve it. |
-| <span id="specitemspresentationsubtitles--events"></span>`events` | integer | no | How many subtitle events the track holds. Omit it when the count is not known, which differs from 0. |
+| <span id="specitemspresentationsubtitles--stream"></span>`stream` | integer | no | The index of an embedded track in its container: the stream index from ffprobe, which is mpv's `ff-index`. |
+| <span id="specitemspresentationsubtitles--file"></span>`file` | string | no | The base name of an external subtitle file beside the media, such as `Movie.en.hi.srt`, matched against the track's file name as written. |
+| <span id="specitemspresentationsubtitles--events"></span>`events` | integer | no | The number of subtitle events in the track. Omit it when the count is unknown, which is not the same as 0. |
 
 ### spec.next
 
-The work that follows this run. The display offers it on the scrubber as a chip, and as a card near the end of the run. The card stays up for five seconds, and the OSD shows it again after that. When the item's marks place credits in its second half, the card rises at the start of the credits, or after the scene that follows them, as the marks field describes. Otherwise a film's card rises when four percent of the item or four minutes remain, whichever is less, and an episode's card, for an item whose presentation names a series, rises when two and a half percent of the item or two minutes remain, whichever is less. Both rules raise the card no earlier than the point where the work counts as watched, five percent or five minutes before its end, whichever is less. With the OSD down, the risen card shows focused, and select takes it, unless a skip control is up beside it. Then select does what it does for the skip control alone. On a screen whose compositor offers the liken_arrangement_v1 protocol, a film or an episode steps back when its card rises: the compositor scales the film into a frame on the left half of the screen over 900 milliseconds, and the display then draws the next work in the right half in place of the card. The column stays until a press or the end of the file. back with the OSD down returns the film to the whole screen over 600 milliseconds and leaves it playing, and the next back ends the run. A select on the column fades the column out over 300 milliseconds, and the compositor fades the film out in its frame over the same time. A screen without the protocol shows the card as above, and a select on it fades the card out over 300 milliseconds. Either select also pauses the film, so its sound stops at the press, and the display draws nothing once mpv exits. A select on the offer publishes the request below on the Player's commands topic, where the program that wrote the Play reads it back and creates the next Play. A Play with no next block offers nothing.
+The work to offer after this run, such as the next episode. The display shows it as a chip on the scrubber and as a card near the end of the run, and a Play with no `next` offers nothing. When a person selects the offer, the display publishes `request` on the Player's commands topic, and the program that wrote the Play reads it there and creates the next Play. The card appears at the start of the credits, or after the scene that follows them, when the item's `marks` put the credits in its second half. Otherwise it appears when 4% of a film or 4 minutes remain, or 2.5% of an episode or 2 minutes remain, whichever is less. An episode is an item whose presentation sets `series`. The card never appears before the point where the work counts as watched, 5% or 5 minutes before the end, whichever is less. It hides after 5 seconds, and a press that shows the OSD shows it again. With the OSD hidden, select takes the card, unless a skip control is also showing. When the compositor supports the `liken_arrangement_v1` protocol, the film moves into the left half of the screen when its card appears, and the display shows the next work in the right half until a press or the end of the file. Back with the OSD hidden returns the film to the whole screen, and a second back ends the run. In either layout, select fades the offer out and pauses the film, so its sound stops at the press.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specnext--reason"></span>`reason` | string | no | The first line of the card, which says why this work follows: "Next in The Saga", for one. The display draws it as given, in uppercase. |
-| <span id="specnext--title"></span>`title` | string | no | The second line of the card, the name of the work that follows. The chip draws this line alone. |
+| <span id="specnext--reason"></span>`reason` | string | no | The first line of the card: why this work follows, such as "Next in The Saga". The display draws it in uppercase. |
+| <span id="specnext--title"></span>`title` | string | no | The second line of the card: the name of the work that follows. The chip shows only this line. |
 | <span id="specnext--detail"></span>`detail` | string | no | The third line of the card, under the title: the series and the season, or the year and the runtime. The display draws it as given. |
-| <span id="specnext--remainingseconds"></span>`remainingSeconds` | integer | no | How long a play of the work that follows runs, in seconds, from where that play starts: the length of its file, less the position where the audience stopped in it before. The card, and the column beside a stepped-back film, draw a line under the detail, "46m · ends at 10:42 pm": these seconds in hours and minutes, then the wall clock when they draw plus these seconds, in the format of the display's clock. Under a minute, the line is the end time alone, "Ends at 10:42 pm". The line changes when the wall minute turns. Omitted, neither draws the line. |
-| <span id="specnext--art"></span>`art` | string | no | The art of the work that follows, as a claim://, nfs://, or https:// URI, resolved the way an item's art is. The display fits it inside the card's box and keeps its ratio, so a poster is letterboxed. |
-| <span id="specnext--request"></span>`request` | object | no | An object the operator never reads. When a person takes the offer, it is published byte for byte on the Player's commands topic, so the program that wrote the Play gets its own words back and needs no other record of what it offered. |
+| <span id="specnext--remainingseconds"></span>`remainingSeconds` | integer | no | How long the work that follows will run, in seconds, from where it would start: the length of its file, minus the position where the viewer stopped in it before. The offer shows a line under the detail, such as "46m · ends at 10:42 pm", with the time of day the work would end if it started now. Under 60 seconds, the line shows only the end time. When omitted, the offer shows no such line. |
+| <span id="specnext--art"></span>`art` | string | no | The art of the work that follows, as a `claim://`, `nfs://`, or `https://` URI, resolved like an item's art. The display fits it inside the card's box and keeps its aspect ratio, so a poster is letterboxed. |
+| <span id="specnext--request"></span>`request` | object | no | Any object. The operator does not read it. When a person selects the offer, the display publishes it unchanged on the Player's commands topic, so the program that wrote the Play gets back what it offered and needs no record of its own. |
 
 ## status
 
-What the playback pod reports, written only by the media operator. The playback pod itself holds no API credentials; it reports to the operator, and the operator writes here.
+What the playback pod is doing. media-operator writes this from what the pod reports to it.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="status--phase"></span>`phase` | string | no | Where the run is in its life, in the words Jobs and Pods use. Pending is declared but not yet performing, Running is the pod performing the play, paused or not, and Finished and Failed are the two ends. The word is Running rather than Playing because a phase moves forward only, and a phase of Playing would switch back and forth each time a film paused. The paused field reports the pause. One of: `Pending`, `Running`, `Finished`, `Failed`. |
-| <span id="status--activity"></span>`activity` | string | no | The one word for what the Play does right now, the phase and the paused flag folded together. Starting is Pending, Playing and Paused both mean Running, and Finished and Failed match the phase. The phase is the lifecycle; the activity is what a person reads at a glance. One of: `Starting`, `Playing`, `Paused`, `Finished`, `Failed`. |
-| <span id="status--paused"></span>`paused` | boolean | no | True while the player holds the current item still. The phase stays Running, because a pause does not advance the lifecycle. |
-| <span id="status--item"></span>`item` | integer | no | Which URI plays now, counting from 1 in spec order. The third of five episodes shows 3. |
-| <span id="status--position"></span>`position` | string | no | The playhead inside the current item, as H:MM:SS. |
-| <span id="status--duration"></span>`duration` | string | no | The length of the current item, as H:MM:SS, once the player has read it. |
-| <span id="status--pod"></span>`pod` | string | no | The playback pod's name, for kubectl describe and logs. The pod is owned by this Play and is deleted with it. |
-| <span id="status--message"></span>`message` | string | no | The reason for the phase, as one line of text: the resolver refused a URI, the Player does not exist, the pod failed. |
-| <span id="status--finishedat"></span>`finishedAt` | string | no | When the operator first read this run's phase as Finished. The time-to-live after finishing counts from here and not from the Play's creation, so the window measures the end of the film. It is written here rather than held in the operator, so an operator that restarts reads the clock back. |
-| <span id="status--audiolanguages"></span>`audioLanguages` | []string | no | The audio language order this run applied, after the operator combined the Play, the Player, and MediaPreferences. |
-| <span id="status--subtitlelanguages"></span>`subtitleLanguages` | []string | no | The resolved subtitle language order this run applied. |
-| <span id="status--subtitles"></span>`subtitles` | string | no | The resolved subtitle setting this run applied, one of on, off, or auto. |
-| <span id="status--sdh"></span>`sdh` | string | no | The resolved SDH preference this run applied, prefer or avoid. Empty when no tier states one. |
-| <span id="status--audiolanguage"></span>`audioLanguage` | string | no | The language of the audio track mpv chose, so you can see when a code matched no track. The value is the track's own tag as the file contains it, for Matroska the three-letter ISO 639-2 code, whatever form the preference used. |
-| <span id="status--subtitlelanguage"></span>`subtitleLanguage` | string | no | The language of the subtitle track mpv chose; empty when none plays. The value is the track's own tag as the file contains it, the way audioLanguage reports its track. |
-| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | The run's conditions. There is one, DisplayAlive, and it reports the playback pod's display container, the native sidecar that draws the on-screen display. It is True with reason Running while the container runs, at any restart count, and False with reason Restarting only while the container is down after an exit the kubelet recorded. The message states the restart count with the reason and exit code of the last termination, and a display that has never restarted has no message. More than two restarts in one run set the phase to Finished with the same message, and the run retires the way a finished film does. The condition is absent while the pod reports no display container or the container has not started yet. lastTransitionTime moves only when the status does. |
+| <span id="status--phase"></span>`phase` | string | no | Where the run is in its lifecycle. `Pending` means not yet playing, `Running` means playing or paused, and `Finished` and `Failed` are the ends. The phase only moves forward, so a pause shows in `paused` and `activity`, not here. One of: `Pending`, `Running`, `Finished`, `Failed`. |
+| <span id="status--activity"></span>`activity` | string | no | What the Play is doing now, for reading at a glance. `Starting` is the `Pending` phase, `Playing` and `Paused` are the `Running` phase, and `Finished` and `Failed` match the phase. One of: `Starting`, `Playing`, `Paused`, `Finished`, `Failed`. |
+| <span id="status--paused"></span>`paused` | boolean | no | True while the current item is paused. |
+| <span id="status--item"></span>`item` | integer | no | The position in `spec.items` of the item that plays now, counting from 1. |
+| <span id="status--position"></span>`position` | string | no | The playhead in the current item, as H:MM:SS. |
+| <span id="status--duration"></span>`duration` | string | no | The length of the current item, as H:MM:SS, once mpv has read it. |
+| <span id="status--pod"></span>`pod` | string | no | The name of the playback pod, for `kubectl describe` and `kubectl logs`. |
+| <span id="status--message"></span>`message` | string | no | Why the Play is in its phase, such as a URI that the operator refused, a `Player` that does not exist, or a pod that failed. |
+| <span id="status--finishedat"></span>`finishedAt` | string | no | When the operator first read the run's phase as `Finished`. `ttlSecondsAfterFinished` counts from this time, and a restarted operator reads it back from here. |
+| <span id="status--audiolanguages"></span>`audioLanguages` | []string | no | The audio language order that this run used, after the operator combined the Play, the Player, and MediaPreferences. |
+| <span id="status--subtitlelanguages"></span>`subtitleLanguages` | []string | no | The subtitle language order that this run used, after the same combination. |
+| <span id="status--subtitles"></span>`subtitles` | string | no | The subtitle setting that this run used: `on`, `off`, or `auto`. |
+| <span id="status--sdh"></span>`sdh` | string | no | The SDH preference that this run used, `prefer` or `avoid`. Empty when no Play, Player, or MediaPreferences sets one. |
+| <span id="status--audiolanguage"></span>`audioLanguage` | string | no | The language tag of the audio track that mpv chose, as the file has it, such as the ISO 639-2 code `eng` in a Matroska file. Compare it with `audioLanguages` to see whether a preference matched a track. |
+| <span id="status--subtitlelanguage"></span>`subtitleLanguage` | string | no | The language tag of the subtitle track that mpv chose, as the file has it. Empty when no subtitles show. |
+| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | The run's conditions. `DisplayAlive` reports the playback pod's display container, the sidecar that draws the on-screen display. It is `True` with reason `Running` while the container runs, and `False` with reason `Restarting` while the container is down after an exit. After the first restart, the message gives the restart count and the reason and exit code of the last exit. After more than two restarts in one run, the operator sets the phase to `Finished` with the same message. The condition is absent until the display container starts. |
 
 ### status.conditions[]
 
-The run's conditions. There is one, DisplayAlive, and it reports the playback pod's display container, the native sidecar that draws the on-screen display. It is True with reason Running while the container runs, at any restart count, and False with reason Restarting only while the container is down after an exit the kubelet recorded. The message states the restart count with the reason and exit code of the last termination, and a display that has never restarted has no message. More than two restarts in one run set the phase to Finished with the same message, and the run retires the way a finished film does. The condition is absent while the pod reports no display container or the container has not started yet. lastTransitionTime moves only when the status does.
+The run's conditions. `DisplayAlive` reports the playback pod's display container, the sidecar that draws the on-screen display. It is `True` with reason `Running` while the container runs, and `False` with reason `Restarting` while the container is down after an exit. After the first restart, the message gives the restart count and the reason and exit code of the last exit. After more than two restarts in one run, the operator sets the phase to `Finished` with the same message. The condition is absent until the display container starts.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="statusconditions--type"></span>`type` | string | yes | The condition's name, DisplayAlive. |
+| <span id="statusconditions--type"></span>`type` | string | yes | The condition's type, `DisplayAlive`. |
 | <span id="statusconditions--status"></span>`status` | string | yes | The condition's status. One of: `True`, `False`, `Unknown`. |
-| <span id="statusconditions--reason"></span>`reason` | string | no | One word for the status: Running or Restarting. |
-| <span id="statusconditions--message"></span>`message` | string | no | The restart count, with the reason and exit code of the last termination the kubelet recorded. |
-| <span id="statusconditions--lasttransitiontime"></span>`lastTransitionTime` | string | no | When the status last changed, so a reader can tell how long the display has been down or up. |
-| <span id="statusconditions--observedgeneration"></span>`observedGeneration` | integer | no | The Play's metadata.generation the condition was derived from, so a reader can tell a condition on the current spec from a stale one. |
+| <span id="statusconditions--reason"></span>`reason` | string | no | `Running` or `Restarting`. |
+| <span id="statusconditions--message"></span>`message` | string | no | The restart count, with the reason and exit code of the last termination that the kubelet recorded. |
+| <span id="statusconditions--lasttransitiontime"></span>`lastTransitionTime` | string | no | When the status last changed between `True` and `False`. |
+| <span id="statusconditions--observedgeneration"></span>`observedGeneration` | integer | no | The `metadata.generation` of the Play when the operator set the condition. |
 
 ## Test patterns
 
-A test pattern gives the display a known picture under it, so a check
-of the OSD, the scrims, or the color does not depend on a scene in a
-film. The player image carries each pattern as a ten-minute file with a
-chapter each minute, so the scrubber, the chapter marks, and the time
-left behave as they do for a film. A pattern needs no storage and no
-network.
+A test pattern is a video with a known picture. Use one to check the
+on-screen display or the screen's colors without hunting for a suitable
+scene in a film. The pattern files are in the player image, so a
+pattern needs no volume and no network. `white` and `bars` are
+ten-minute files with a chapter every minute, so the scrubber and the
+chapter marks look the same as for a film.
 
     apiVersion: media.liken.sh/v1alpha1
     kind: Play
@@ -208,21 +207,21 @@ network.
 
 | Pattern | What it shows |
 |---|---|
-| `white` | a white screen, the worst case for the dark scrims behind the OSD |
-| `bars` | the SMPTE HD color bars, which show a color or a range error |
-| `speakers` | a walk of a 7.1 layout: pink noise from one speaker at a time, named on the screen |
+| `white` | a white screen, which is the hardest background for the dark backing behind the on-screen display |
+| `bars` | the SMPTE HD color bars, which show a color error or a range error |
+| `speakers` | pink noise from each speaker of a 7.1 layout in turn, with the speaker's name on the screen |
 
-`speakers` plays pink noise for 5 seconds from each speaker in turn:
-front left, center, front right, side right, back right, back left, side
-left, and then the subwoofer, whose noise stops at 120 Hz. The screen
-names the speaker that should play, and each speaker is a chapter, so a
-chapter skip moves to the next one. The file is 7.1, so a system with
-fewer speakers plays a downmix, and the walk shows where each missing
-speaker's channel lands. The walk is 40 seconds long and carries the
-one frame `1280x720`.
+`speakers` is 40 seconds long, at one frame size, `1280x720`. It plays
+pink noise for 5 seconds from each speaker in this order: front left,
+center, front right, side right, back right, back left, side left, and
+the subwoofer, whose noise stops at 120 Hz. Each speaker is a chapter,
+so a chapter skip moves to the next speaker. On a system with fewer
+than eight speakers, the downmix shows which speaker each missing
+channel goes to.
 
-The URI can name a frame after the pattern, as in
-`pattern://bars/1920x1080`. `white` and `bars` carry every frame below:
+To choose a frame size, add it after the pattern, as in
+`pattern://bars/1920x1080`. `white` and `bars` come in every frame size
+in this table:
 
 | Frame | Shape | What it matches |
 |---|---|---|
@@ -233,152 +232,145 @@ The URI can name a frame after the pattern, as in
 | `3840x1600` | 2.4:1 | a wide 1600-row screen |
 | `1920x804` | 2.39:1 | a scope film, which letterboxes on a 16:9 screen |
 
-A URI with no frame takes the frame of the `Player`'s screen: the
-largest frame of the screen's shape that fits on the compositor's
-canvas, which the screen's `Display` reports. A screen whose shape
-matches no frame, or a `Player` whose screen is not known yet, plays
-`1920x1080`, and mpv scales it. The operator chooses the frame when it
-creates the playback pod, so a `Display` that changes mode later does
-not change the run.
+When the URI gives no frame size, the operator picks the largest one
+that has the same shape as the `Player`'s screen and fits the canvas
+size that the screen's `Display` reports. When no frame size has the
+screen's shape, or the operator does not know the screen yet, the
+pattern plays at `1920x1080` and `mpv` scales it. The operator picks
+the frame size when it creates the playback pod, so a later mode change
+on the `Display` does not affect a run that is already playing.
 
 ## Events
 
-The operator posts a Kubernetes `Event` on the `Play` for each phase
-it moves to, for each playback pod it creates again, and for the delete
-that ends the `Play`. `kubectl describe play` prints them. The API
-server deletes an `Event` one hour after its last write, so the phase,
-the conditions, and the operator's log hold the facts after that.
+The operator posts a Kubernetes `Event` on the `Play` each time its
+phase changes, each time it creates the playback pod again, and when it
+deletes the `Play`. `kubectl describe play` prints them. The API server
+deletes an `Event` one hour after its last write, so after that hour,
+read the phase, the conditions, and the operator's log.
 
 | Reason | Type | When |
 |---|---|---|
 | `PlaybackStarted` | Normal | The phase moved to `Running`. |
 | `PlaybackFinished` | Normal | The phase moved to `Finished`. The message gives the item and the position. |
-| `PlaybackFailed` | Warning | The phase moved to `Failed` because the playback pod failed. The message is the pod's own. |
-| `InvalidSpec` | Warning | The phase moved to `Failed` because the `Play` can never run as written: it names no `Player`, an item does not resolve, or a `Remote` the pod needs does not exist. |
-| `PodRecreated` | Warning or Normal | The operator created the playback pod again. A pod that failed or is gone is a Warning, and a spec edit that reshaped the pod is Normal. The message gives the position the new pod starts at. |
-| `ResumeBackoff` | Warning | The playback pod failed again soon after a recreate. The message gives the count and the wait before the next recreate. |
+| `PlaybackFailed` | Warning | The phase moved to `Failed` because the playback pod failed. The message is the pod's failure message. |
+| `InvalidSpec` | Warning | The phase moved to `Failed` because the `Play` can never run as written: it names no `Player`, an item does not resolve, or a `Remote` that the pod needs does not exist. |
+| `PodRecreated` | Warning or Normal | The operator created the playback pod again. The type is Warning when the old pod failed or is gone, and Normal when an edit to the spec changed the pod. The message gives the position where the new pod starts. |
+| `ResumeBackoff` | Warning | The playback pod failed again soon after the operator created it again. The message gives the number of failures and the wait before the next attempt. |
 | `Restarting`, `Running` | Warning, Normal | The `DisplayAlive` condition changed, with the condition's message. |
-| `Superseded` | Normal | The operator deleted the `Play`, because a newer `Play` on the same `Player` replaces it. |
-| `Retired` | Normal | The operator deleted the `Play`, because its `ttlSecondsAfterFinished` passed after it finished. |
+| `Superseded` | Normal | The operator deleted the `Play` because a newer `Play` on the same `Player` replaced it. |
+| `Retired` | Normal | The operator deleted the `Play` because `ttlSecondsAfterFinished` passed after it finished. |
 
-`Superseded` and `Retired` also go on the `Player`, because the
-`Play`'s own `Event`s leave `kubectl describe` with it.
+The operator posts `Superseded` and `Retired` on the `Player` as well,
+because `kubectl describe` stops showing the `Play`'s own `Event`s when
+the `Play` is deleted.
 
 ## On the bus
 
-The `plays` tree contains one run's commands, report, and availability.
-[The media bus](/docs/reference/bus/) gives the rules
-every topic follows and lists every writer and reader of each.
+Each run has a commands topic, a status topic, and an availability
+topic. [The media bus](/docs/reference/bus/) gives the rules that every
+topic follows and lists the writers and readers of each topic.
 
 | Topic | Writer | Retained | Carries |
 |---|---|---|---|
 | `plays/{namespace}/{name}/commands` | any program | no | one named command |
-| `plays/{namespace}/{name}/status` | the playback pod | yes | the run's report |
+| `plays/{namespace}/{name}/status` | the playback pod | yes | the run's status report |
 | `plays/{namespace}/{name}/availability` | the playback pod | yes | `online` or `offline` |
 
 ### `commands`
 
-The topic any program publishes to drive the run. A phone and a
-Home Assistant integration reach the run the same way: publish one
-JSON command, and the playback pod applies it. A controller does not
-reach this topic. The playback pod's command sidecar reads the
-`Remote`'s events topic itself and binds the key names there, so a
-press becomes one of these commands inside the pod.
+Any program, such as a phone app or a Home Assistant integration, can
+publish one JSON command here to control the run. A `Remote` does not
+publish here. The playback pod's command sidecar reads the `Remote`'s
+events topic itself and maps each key name to one of these commands.
 
     {"action": "seek", "amount": -30}
 
-`action` names a word from the vocabulary below. `amount` belongs
-only to the two actions that move by one, and its sign is the
-direction: seconds for `seek`, and chapters for `chapter`.
+`action` is one of the words in the table below. Only `seek` and
+`chapter` take `amount`. For `seek` it is in seconds, and for `chapter`
+it is in chapters. A negative `amount` moves backward.
 
 | Action | What it does |
 |---|---|
-| `pause` | toggles pause |
-| `play` | plays, and leaves a film that plays playing |
-| `hold` | pauses, and leaves a paused film paused |
-| `stop` | ends the run, the way the display's exit ends it |
-| `seek` | moves the playhead by `amount` seconds |
-| `chapter` | jumps by `amount` chapters |
-| `subtitles` | cycles the subtitle track |
-| `audio` | cycles the audio track |
-| `info` | shows the file name and position for a few seconds |
-| `up`, `down`, `left`, `right`, `select`, `back` | drive the on-screen display |
-| `home` | asks the unit's client for its home page, then ends the run |
+| `pause` | switches between paused and playing |
+| `play` | starts playing, and does nothing when the film is already playing |
+| `hold` | pauses, and does nothing when the film is already paused |
+| `stop` | ends the run, the same as exiting the display |
+| `seek` | moves the playback position by `amount` seconds |
+| `chapter` | moves by `amount` chapters |
+| `subtitles` | switches to the next subtitle track |
+| `audio` | switches to the next audio track |
+| `info` | shows the file name and the position for a few seconds |
+| `up`, `down`, `left`, `right`, `select`, `back` | navigate the on-screen display |
+| `home` | asks the `Player`'s client to show its home page, then ends the run |
 
-Two parts of the on-screen display answer these actions. When an item
-names an `appearances` file and the on-screen display is up, playing
-or paused, the display draws a row of cards above the skip control and
-the chip, one for each credited person in the scene. `up`, `left`,
-and `right` move the focus along it, and `select` on a card plays or
-pauses the film. When an item's `marks` place the playhead inside an
-intro or a recap, or inside the credits before a post-credits scene,
-the display offers a skip control, and `select` takes it. A skip to a
-post-credits scene takes `select` only while the on-screen display is
-up. The display never skips on its own.
+When an item sets an `appearances` file and the on-screen display is
+showing, whether the film is playing or paused, the display draws a row
+of cards above the skip control and the up-next chip. There is one card
+for each credited person in the scene. `up`, `left`, and `right` move
+the focus along the row, and `select` on a card pauses or resumes the
+film.
 
-In a track chooser, the row the focus is on reads bright and has an
-underline in the accent, the same mark the focused stop of the strip
-under the bar has. A track chooser also puts a dot before the track
-that plays now, so the dot stays where it is when the focus moves.
-While a chooser or an adjuster is open, the on-screen display stays
-up, and it hides on its own again only after the chooser or adjuster
-closes.
+When an item's `marks` put the playback position inside an intro, a
+recap, or the credits before a post-credits scene, the display shows a
+skip control, and `select` skips. Skipping to a post-credits scene
+works only while the on-screen display is showing. The display never
+skips by itself.
 
-The subtitles stay readable while the on-screen display is up. mpv
-draws them under the display, so the display moves them up until
-their lowest line ends a small gap above the highest thing it draws at
-the foot of the frame: the time over the scrubber, the up-next chip
-or the skip control, the row of cards, a scan's thumbnail, or an open
-chooser or adjuster. They move with the display's fade in and return
-to their place with its fade out. The
-display sets mpv's `sub-pos` for this, which moves text tracks, ASS
-tracks, and image tracks such as PGS. An ASS sign that the track
-places at a fixed point does not move, and neither does the part of an
-image track that draws in the upper half of the picture. mpv moves an
-image track's cue by a share of the picture's height, not the
-frame's, so on a letterboxed film the cue moves a shorter way, from a
-place inside the picture that is already higher than a text cue's. The display
-moves no subtitles while no subtitle track plays.
+In a track chooser, the focused row is bright and underlined in the
+accent color, and a dot marks the track that plays now. The on-screen
+display stays visible while a chooser or an adjuster is open.
 
-`back` has one meaning for each state, tried in order. It closes an
-open chooser, cancels a scan's preview, and hides the on-screen
-display. With the display hidden and the film stepped back beside the
-up-next column ([`next`](#spec--next)), it returns the film to the
-whole screen and the film plays on. At the bare video it ends the run,
-the way `stop` does. So over a stepped-back film, the first `back`
-keeps watching and the second one leaves.
+While the on-screen display is showing, it moves the subtitles up so
+that the lowest line stays just above whatever the display draws at the
+bottom of the frame. It does this with `mpv`'s `sub-pos`, which moves
+text tracks, ASS tracks, and image tracks such as PGS. An ASS sign that
+the track places at a fixed point does not move, and neither does an
+image cue in the upper half of the picture. On a letterboxed film, an
+image cue moves a shorter distance than a text cue, because `mpv` moves
+it by a share of the picture's height and not of the frame's.
 
-The display finds the film's window by its xdg app_id when it asks the
-compositor for the step back. mpv's window carries `liken-media-video`
-and the display's own window carries `liken-media-overlay`.
+`back` does the first of these that applies:
 
-`play`, `hold`, and `stop` set the state they name, so a second one
-changes nothing. The playback pod binds them to the names the kernel's
-`rc-cec` keymap gives a TV remote's deterministic functions (HDMI-CEC
-1.3a, CEC 13.13.3): `KEY_PLAYCD`, `KEY_PAUSECD`, and `KEY_STOPCD`. The
-playback pod binds no power key. The operator reads the power keys
-and turns the `Player` off, which publishes `stop` here
-([Turning a Player off and on](/docs/reference/players/#turning-a-player-off-and-on)). The keymap also gives the Pause-Play
-Function the name `KEY_PLAYPAUSE`, which a Bluetooth remote's play
-button sends too, so it stays a toggle. A `Keymap` row on the
-`Remote` that holds the CEC adapter's input device can name the
-Pause-Play Function `KEY_PAUSECD`.
+1. It closes an open chooser.
+2. It cancels a scan's preview.
+3. It hides the on-screen display.
+4. When the display is hidden and the film is stepped back beside the
+   up-next column ([`next`](#spec--next)), it returns the film to the
+   whole screen, and the film keeps playing.
+5. When only the video is showing, it ends the run, the same as `stop`.
 
-The level belongs to the unit and not to the run, so this topic
-carries no volume action. The operator reads the volume keys from the
-`Remote`'s events topic, and a program that is not a remote asks on
-the [Player's `volume/commands` topic](/docs/reference/players/#volumecommands).
-An action this build has no case for does nothing, so a command from a
-newer program has no effect rather than a crash. A focus cycle never
-travels here: the key that asks for one, `KEY_CYCLEWINDOWS`, becomes
-a request on the [Remote's tree](/docs/reference/remotes/) instead.
+The display steps the film back by asking the compositor to move the
+window whose xdg `app_id` is `liken-media-video`. The display's own
+window has the `app_id` `liken-media-overlay`.
+
+Sending `play`, `hold`, or `stop` twice changes nothing. The playback
+pod binds them to the key names that
+the kernel's `rc-cec` keymap gives the deterministic functions of a TV
+remote (HDMI-CEC 1.3a, CEC 13.13.3): `KEY_PLAYCD`, `KEY_PAUSECD`, and
+`KEY_STOPCD`. The playback pod binds no power key. The operator reads
+the power keys and turns the `Player` off, which publishes `stop` here
+([Turning a Player off and on](/docs/reference/players/#turning-a-player-off-and-on)).
+The keymap also gives the Pause-Play Function the name `KEY_PLAYPAUSE`,
+which the play button of a Bluetooth remote sends too, so that key
+switches between paused and playing. A `Keymap` row on the `Remote` of
+the CEC adapter's input device can map the Pause-Play Function to
+`KEY_PAUSECD` instead.
+
+This topic has no volume action, because the volume belongs to the
+`Player` and not to the run. The operator reads the volume keys from the
+`Remote`'s events topic, and any other program publishes to the
+[Player's `volume/commands` topic](/docs/reference/players/#volumecommands).
+The playback pod ignores an action that it does not know. The key that
+cycles the focus, `KEY_CYCLEWINDOWS`, becomes a request on the
+[Remote's topics](/docs/reference/remotes/), not a command here.
 
 ### `status`
 
-The run's report, as the playback pod reads it from the player. The
-pod publishes it on every change, and every few seconds while the
-position advances. It is retained, so a restarted operator reads a
-running `Play`'s place back from the broker.
+The playback pod publishes the run's status from `mpv`. It publishes a
+pause, a resume, a new item, or a new track language at once, and a
+change of position at most once a second. The message is retained, so a
+restarted operator reads the position of a running `Play` from the
+broker.
 
     {
       "paused": false,
@@ -390,66 +382,65 @@ running `Play`'s place back from the broker.
       "pod": "5f0c7a52-8e1d-4c3b-9a27-2d6b1e4f8c90"
     }
 
-`item` counts from 1 in spec order. `duration` is empty until the
-player has read the item's header, and the two language fields are
-absent while no track of that kind plays. The language values are
-the track's own tags as the file carries them, for Matroska the
-three-letter ISO 639-2 codes, whatever form the preference used. The
-`ended` field appears when the run is over and remains set in every later report of
-the same run. The pod takes seconds to terminate, so the operator
-reads this mark and returns the unit to idle at once instead of
-waiting out the pod.
+`item` counts from 1 in the order of `spec.items`. `duration` is empty
+until the player has read the item's header. `audioLanguage` and
+`subtitleLanguage` are absent while no track of that kind plays. Their
+values are the track's own language tags from the file, which for
+Matroska are the three-letter ISO 639-2 codes, whatever form the
+language preference used.
 
-`pod` is the UID of the playback pod that sent the report. A run's pod
-can stop while the `Play` goes on: the operator recreates it after an
-edit to the `Player`, resumes the run after the player crashes, or
-replaces a pod that something else deleted, such as an eviction. The
-new pod has the same name, and the old pod reports the `ended` field
-when it stops. The operator refuses a report from a pod that its pod
-watch shows deleting, from a pod other than the one the watch shows
-standing, and from a pod it knows is gone or replaced. So the old pod's
-ending does not move the unit to `Idle`, and the new pod's ending is
-marked and labeled on its own. While the watch shows no pod for the
-run, the operator takes a report from any pod it does not know is gone,
-because the new pod can report before the watch shows it.
+The `ended` field appears when the run is over, and it stays in every
+later report of the same run. The operator returns the `Player` to idle
+when it reads `ended`, without waiting for the pod to stop.
 
-The operator takes a report with no `pod` field as the run's, so a pod
-that runs an older sidecar image still reports. Two such pods of one
-run look the same to the operator, so the limits above do not apply to
-them.
+`pod` is the UID of the playback pod that sent the report. One `Play`
+can have several pods in turn: the operator creates the pod again after
+an edit to the `Player`, after `mpv` crashes, and after something else
+deletes the pod, such as an eviction. The new pod has the same name, and
+the old pod reports `ended` when it stops. So the operator ignores a
+report from a pod that is being deleted, from a pod that is not the
+run's current pod, and from a pod that it knows is gone or replaced,
+and the old pod's ending does not move the `Player` to `Idle`. While the
+operator's pod watch shows no pod for the run, it accepts a report from
+any pod that it does not know is gone, because the new pod can report
+before the watch shows it.
 
-The operator folds each report into the `Play`'s Kubernetes status,
-so a program that only needs the current position can read either
-one.
+The operator treats a report with no `pod` field as coming from the
+run's pod, so a pod that runs an older sidecar image still reports. The
+operator cannot tell two such pods of one run apart, so the rules above
+do not apply to them.
 
-Two writers clear the topic. The pod clears it with an empty retained
-payload when its run ends cleanly. The operator clears it as well, which
-is what a pod that died uncleanly needs, and it does so on its
-finalizer: it adds `media.liken.sh/bus-topics` to every `Play`, and
-when the `Play` is deleted it deletes the pod, waits for the pod to be
-gone, publishes an empty retained payload on `status` and on
-`availability`, and only then takes its finalizer off. So the `Play` is
-never gone while its topics remain, and a deleted `Play` leaves no
-report on the broker.
+The operator copies the reports into the `Play`'s status, but when only
+the position changed, it writes the status about every 10 seconds. A program that shows a
+position that advances every second reads this topic.
+
+The pod publishes an empty retained payload here when its run ends
+cleanly. The operator clears the topic too, in case a pod died without
+clearing it. It adds the finalizer `media.liken.sh/bus-topics` to every
+`Play`. When the `Play` is deleted, the operator deletes the pod, waits
+until the pod is gone, publishes an empty retained payload on `status`
+and on `availability`, and then removes the finalizer. So a deleted
+`Play` leaves no report on the broker.
 
 ### `availability`
 
-`online` or `offline`, a space, and the pod's UID, retained, the
-[availability](/docs/reference/bus/#availability) signal for the
-report above. For example, `offline 5f0c7a52-8e1d-4c3b-9a27-2d6b1e4f8c90`.
-The pod names this topic as its MQTT Last Will with `offline` and its
-UID as the payload, publishes `online` and its UID once it connects,
-and publishes `offline` and its UID itself when its run ends cleanly.
+The payload is `online` or `offline`, a space, and the pod's UID, for
+example `offline 5f0c7a52-8e1d-4c3b-9a27-2d6b1e4f8c90`. The message is
+retained, and it tells a reader whether the status report comes from a
+running pod ([availability](/docs/reference/bus/#availability)). The
+pod registers `offline` and its UID as its MQTT Last Will, publishes
+`online` and its UID after it connects, and publishes `offline` and its
+UID itself when its run ends cleanly.
 
-The broker publishes a dead pod's Last Will only when the pod's
-keepalive runs out, which can be after the run's new pod is online.
-The operator takes an availability on the same terms as a report, so
-a late `offline` from an old pod does not drop the new pod's report.
-It takes the word with no UID as the run's. An operator that has just
-started knows no pod as gone until its pod watch has read the cluster,
-so the retained `offline` of an old pod can drop the report it read.
-The new pod reports again within a second.
+The broker publishes the Last Will of a dead pod only when the pod's
+MQTT keepalive runs out, which can be after the run's new pod is online.
+So the operator applies the same rules to an availability message as to
+a status report, and a late `offline` from the old pod does not discard
+the new pod's report. It treats a message with no UID as coming from
+the run's pod. Until a newly started operator's pod watch has listed the
+cluster, the retained `offline` of an old pod can make it discard the
+report that it read. The new pod's next report restores it.
 
 The operator clears this topic with an empty retained payload on the
-same terms as `status`: on its finalizer, once the `Play` is deleted and
-its pod is gone.
+same terms as `status`: on its finalizer, after the `Play` is deleted
+and its pod is gone.

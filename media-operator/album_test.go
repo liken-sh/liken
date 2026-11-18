@@ -1,9 +1,5 @@
 package main
 
-// These tests cover what the shim does before mpv sees an argument: an album
-// directory becomes one written timeline, and a run of nothing but music draws
-// no video.
-
 import (
 	"encoding/json"
 	"os"
@@ -15,8 +11,7 @@ import (
 	"github.com/liken-sh/liken/media-operator/edl/edltest"
 )
 
-// useAlbumDir moves the directory the shim writes timelines into for the
-// length of one test, the way useSocket moves the IPC socket.
+// useAlbumDir points albumTimelineDir at path for the length of one test.
 func useAlbumDir(t *testing.T, path string) {
 	t.Helper()
 	was := albumTimelineDir
@@ -24,8 +19,8 @@ func useAlbumDir(t *testing.T, path string) {
 	albumTimelineDir = path
 }
 
-// albumFixture writes one album folder: two tracks, one tagged and one not,
-// and a cover file that is no track.
+// albumFixture writes an album directory with two tracks, one with a
+// title tag and one without, and a cover image that is not a track.
 func albumFixture(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -35,9 +30,10 @@ func albumFixture(t *testing.T) string {
 	return dir
 }
 
-// An album item becomes one playlist entry: the timeline the shim wrote, with
-// one segment per track in name order and the title mpv turns into a chapter.
-func TestExpandItemsWritesTheAlbumsTimeline(t *testing.T) {
+// A timeline has one segment per track in file name order, and each
+// segment's title becomes an mpv chapter. An untagged track gets a title
+// from its file name, without the leading track number.
+func TestExpandItemsWritesATimelineForAnAlbum(t *testing.T) {
 	album := albumFixture(t)
 	written := t.TempDir()
 	useAlbumDir(t, written)
@@ -59,8 +55,6 @@ func TestExpandItemsWritesTheAlbumsTimeline(t *testing.T) {
 	mustMatch(t, lines[2], edl.Quote(filepath.Join(album, "02 - Masterswarm.mp3"))+",title=%11%Masterswarm")
 }
 
-// A Play mixes albums and tracks freely: only the item its block marks as an
-// album expands, and every other item is the path the resolver settled.
 func TestExpandItemsLeavesEveryOtherItemAlone(t *testing.T) {
 	album := albumFixture(t)
 	written := t.TempDir()
@@ -82,9 +76,7 @@ func TestExpandItemsLeavesEveryOtherItemAlone(t *testing.T) {
 	})
 }
 
-// An album with no audio files in it fails the run, the way any item the pod
-// cannot play fails it.
-func TestExpandItemsRefusesAnEmptyAlbum(t *testing.T) {
+func TestExpandItemsFailsForAnEmptyOrMissingAlbum(t *testing.T) {
 	useAlbumDir(t, t.TempDir())
 
 	cases := []struct {
@@ -110,8 +102,6 @@ func TestExpandItemsRefusesAnEmptyAlbum(t *testing.T) {
 	}
 }
 
-// The music item that is one file passes through, because a track is already
-// one playlist entry.
 func TestExpandItemsPassesAStandaloneTrackThrough(t *testing.T) {
 	useAlbumDir(t, t.TempDir())
 
@@ -122,8 +112,6 @@ func TestExpandItemsPassesAStandaloneTrackThrough(t *testing.T) {
 	mustMatchAll(t, entries, []string{"/media/1/track.flac"})
 }
 
-// A run of nothing but music draws no video, so the display owns the frame.
-// One item that is not music keeps video on for the whole run.
 func TestAllMusic(t *testing.T) {
 	cases := []struct {
 		name   string

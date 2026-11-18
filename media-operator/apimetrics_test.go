@@ -1,9 +1,5 @@
 package main
 
-// These tests cover the api role's own series: every observer answers
-// on a nil receiver, and each one records what its name says under the
-// labels the plan's table states.
-
 import (
 	"strconv"
 	"strings"
@@ -13,26 +9,24 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
-// A test builds no registry where it has no use for one, so every
-// observer must answer on a nil receiver rather than panic.
-func TestTheApiSeriesAnswerOnANilReceiver(t *testing.T) {
+func TestTheApiSeriesDoNothingOnANilReceiver(t *testing.T) {
 	var absent *apiMetrics
 
 	absent.observeRequest(apiPlayerTemplate, "GET", 200, time.Second)
 	absent.observeUpstream(upstreamDisplay, "200")
 	absent.observeOffset(0.04)
 	absent.observeExpiry(3600)
-	absent.holdStream(mediaAspectName)()
+	absent.trackStream(mediaAspectName)()
 }
 
-func TestTheApiSeriesRecordWhatTheyName(t *testing.T) {
+func TestTheApiSeriesRecordTheirObservations(t *testing.T) {
 	metrics := newAPIMetrics("test")
 
 	metrics.observeRequest(apiPlayerTemplate, "GET", 200, 250*time.Millisecond)
 	metrics.observeUpstream(upstreamDisplay, "503")
 	metrics.observeOffset(-0.04)
 	metrics.observeExpiry(3600)
-	release := metrics.holdStream(mediaAspectName)
+	release := metrics.trackStream(mediaAspectName)
 
 	mustMatch(t, testutil.ToFloat64(metrics.streamsActive.WithLabelValues(mediaAspectName)), 1.0)
 	release()
@@ -60,10 +54,7 @@ func TestTheApiSeriesRecordWhatTheyName(t *testing.T) {
 	})
 }
 
-// A correction runs either way, so the histogram carries its size and
-// the gauge carries its sign. The drill found every negative offset in
-// the first bucket of a histogram that had no room below zero.
-func TestTheOffsetHistogramCarriesTheSizeAndTheGaugeTheSign(t *testing.T) {
+func TestTheOffsetHistogramRecordsTheSizeAndTheGaugeTheSign(t *testing.T) {
 	metrics := newAPIMetrics("test")
 
 	metrics.observeOffset(-0.86)
@@ -76,8 +67,8 @@ func TestTheOffsetHistogramCarriesTheSizeAndTheGaugeTheSign(t *testing.T) {
 	})
 }
 
-// offsetBuckets reads each bucket's upper bound and its count, so a
-// test names the buckets the histogram was built with.
+// offsetBuckets returns each bucket of the offset histogram as
+// "upper bound:cumulative count".
 func offsetBuckets(t *testing.T, metrics *apiMetrics) []string {
 	t.Helper()
 	gathered, err := metrics.registry.Gather()

@@ -1,16 +1,12 @@
 package main
 
-// The MQTT 3.1.1 wire codec, written straight against the protocol
-// the way apiclient.go writes the Kubernetes client. The broker is
-// Mosquitto and the protocol is a published standard, so a client
-// that speaks the few packets this operator needs costs less than a
-// third-party library and its release cadence. This operator uses
-// QoS 0 alone: input events are momentary and a report is republished
-// on every reconnect, so the delivery guarantees of QoS 1 and QoS 2
-// buy nothing here.
+// An MQTT 3.1.1 codec for the few packet types the operator uses, in
+// place of a client library. The functions build and parse whole
+// packets and keep no connection state. bus.go owns the socket.
 //
-// The functions below build and read whole packets and hold no
-// connection state. bus.go owns the socket and drives them.
+// Everything is QoS 0. Input events are momentary, and the operator
+// publishes its reports again after every reconnect, so QoS 1 and 2
+// would add nothing.
 
 import (
 	"bufio"
@@ -18,9 +14,8 @@ import (
 	"io"
 )
 
-// The MQTT control packet types, in the high nibble of a fixed
-// header's first byte. The low nibble carries per-type flags, which
-// matter here only for a PUBLISH, where bit 0 is the retain flag.
+// The MQTT control packet types, in the high nibble of the first byte of
+// the fixed header. The low nibble holds flags that depend on the type.
 const (
 	mqttConnect   = 0x10
 	mqttConnack   = 0x20
@@ -34,41 +29,34 @@ const (
 // mqttRetainFlag is bit 0 of a PUBLISH's first byte.
 const mqttRetainFlag = 0x01
 
-// The MQTT 3.1.1 protocol name and level. The name is the literal
-// string "MQTT" and the level is 4, which together tell the broker
-// which version of the protocol this client speaks.
+// The protocol name and level of MQTT 3.1.1, sent in CONNECT.
 const (
 	mqttProtocolName  = "MQTT"
 	mqttProtocolLevel = 0x04
 )
 
-// The CONNECT flag bits this client sets. Clean session starts every
-// connection with no server-side state, which is correct because the
-// client re-subscribes and re-publishes on each connect. The will
-// bits arrive only when the caller states a will. Username and
-// password stay unset, because the in-cluster network is the trust
-// boundary and the broker accepts the cluster's own pods.
+// The CONNECT flag bits this client sets. Clean session asks the broker
+// to keep no session state, because the client subscribes and publishes
+// again after every connect. The client sends no username or password.
 const (
 	connectCleanSession = 0x02
 	connectWillFlag     = 0x04
 	connectWillRetain   = 0x20
 )
 
-// mqttMaxRemainingLength is the largest body one control packet can
-// carry. The remaining length has at most four bytes of seven bits
-// each, so a longer body has no encoding that a broker accepts.
+// mqttMaxRemainingLength is the largest body a control packet can
+// have, because the remaining length is at most four bytes of seven bits
+// each.
 const mqttMaxRemainingLength = 268_435_455
 
-// mqttMaxFieldLength is the longest string or byte field the protocol
-// can carry. MQTT 3.1.1 section 1.5.3 gives a string two bytes of
-// length, and section 3.1.3.3 gives the will payload the same two
-// bytes, so 65,535 is the most that the prefix can state.
+// mqttMaxFieldLength is the longest string or binary field, because
+// MQTT 3.1.1 sections 1.5.3 and 3.1.3.3 give a string and the will
+// payload a two-byte length.
 const mqttMaxFieldLength = 65_535
 
-// encodeRemainingLength writes the packet length in the variable-byte
-// form the protocol uses: seven bits of length per byte, and the high
-// bit set on every byte but the last. One byte covers up to 127, and
-// four bytes cover the 268435455 the protocol allows.
+// encodeRemainingLength encodes the protocol's variable-length integer:
+// seven bits of the length in each byte, least significant first, with
+// the high bit set on every byte except the last.
 func encodeRemainingLength(length int) []byte {
 	var encoded []byte
 	for {
@@ -84,9 +72,9 @@ func encodeRemainingLength(length int) []byte {
 	}
 }
 
-// decodeRemainingLength reads the variable-byte length back. It reads
-// at most four bytes, because a fifth would exceed the protocol's
-// limit and marks a stream that has lost frame alignment.
+// decodeRemainingLength reads a variable-length integer. It fails after
+// four bytes, because the protocol allows no more, and a fifth byte
+// means the reader has lost its place in the stream.
 func decodeRemainingLength(reader io.ByteReader) (int, error) {
 	length := 0
 	multiplier := 1
@@ -101,35 +89,28 @@ func decodeRemainingLength(reader io.ByteReader) (int, error) {
 		}
 		multiplier *= 128
 	}
-	return 0, fmt.Errorf("mqtt: remaining length runs past four bytes")
+	return 0, fmt.Errorf("mqtt: the remaining length is longer than four bytes")
 }
 
-// appendField writes one length-prefixed field: two bytes of length,
-// most significant first, then the bytes. The protocol uses this shape
-// for a UTF-8 string, such as a topic, a filter, or the client
-// identifier, and for the will payload. A value past
-// mqttMaxFieldLength is refused, because its length would wrap in two
-// bytes and the broker would read the rest of the value as the next
-// field. The field names the value in the error, so the person who
-// reads the log knows which value is too long.
+// appendField appends a value with a two-byte big-endian length prefix,
+// the form of every UTF-8 string and of the will payload. It refuses a
+// value longer than mqttMaxFieldLength, because the length would
+// overflow and the broker would read the rest of the value as the next
+// field. field is the value's name in the error message.
 func appendField[Value string | []byte](buffer []byte, field string, value Value) ([]byte, error) {
 	if len(value) > mqttMaxFieldLength {
-		return nil, fmt.Errorf("mqtt: a %s of %d bytes is longer than the %d bytes the protocol allows", field, len(value), mqttMaxFieldLength)
+		return nil, fmt.Errorf("mqtt: the %s is %d bytes, and the protocol allows at most %d", field, len(value), mqttMaxFieldLength)
 	}
 	buffer = append(buffer, byte(len(value)>>8), byte(len(value)))
 	return append(buffer, value...), nil
 }
 
-// packet frames one control packet: a fixed-header first byte, then
-// the remaining length, then the body. Every encode function ends
-// here, so the length is computed once from the finished body. A body
-// past mqttMaxRemainingLength is refused before the frame is
-// allocated, because its length would encode to a fifth byte that the
-// broker reads as a malformed packet. The frame holds the first byte,
-// at most four bytes of length, and the body.
+// packet builds a control packet from the first byte of its fixed
+// header and its body. It refuses a body longer than
+// mqttMaxRemainingLength before it allocates the frame.
 func packet(first byte, body []byte) ([]byte, error) {
 	if len(body) > mqttMaxRemainingLength {
-		return nil, fmt.Errorf("mqtt: a packet body of %d bytes is longer than the %d bytes the protocol allows", len(body), mqttMaxRemainingLength)
+		return nil, fmt.Errorf("mqtt: the packet body is %d bytes, and the protocol allows at most %d", len(body), mqttMaxRemainingLength)
 	}
 	frame := make([]byte, 0, 5+len(body))
 	frame = append(frame, first)
@@ -137,12 +118,8 @@ func packet(first byte, body []byte) ([]byte, error) {
 	return append(frame, body...), nil
 }
 
-// encodeConnect builds the first packet the client sends. The body is
-// the protocol name and level, one flags byte, the keepalive in
-// seconds, and the payload: the client identifier and, when the caller
-// states one, the will topic and payload. The client authenticates
-// with nothing more than its identifier, because the broker accepts
-// the cluster's own pods.
+// encodeConnect builds the CONNECT packet. keepalive is in seconds, and
+// will may be nil.
 func encodeConnect(clientID string, keepalive uint16, will *busWill) ([]byte, error) {
 	flags := byte(connectCleanSession)
 	if will != nil {
@@ -172,13 +149,11 @@ func encodeConnect(clientID string, keepalive uint16, will *busWill) ([]byte, er
 	return packet(mqttConnect, body)
 }
 
-// encodePublish builds a QoS 0 PUBLISH. The retain flag is bit 0 of
-// the first byte, and a retained publish tells the broker to hold this
-// payload as the topic's last value and deliver it to every later
-// subscriber. QoS 0 carries no packet identifier, so the body is the
-// length-prefixed topic and then the raw payload. MQTT 3.1.1 section
-// 3.3.3 gives the payload no length of its own, because it is the rest
-// of the body, so only the remaining length limits it.
+// encodePublish builds a QoS 0 PUBLISH. When retained is true, the
+// broker stores the payload as the topic's last value and sends it to
+// every later subscriber. A QoS 0 PUBLISH has no packet identifier, and
+// the payload has no length field of its own (MQTT 3.1.1 section 3.3.3),
+// so only the remaining length limits the payload.
 func encodePublish(topic string, payload []byte, retained bool) ([]byte, error) {
 	first := byte(mqttPublish)
 	if retained {
@@ -192,11 +167,9 @@ func encodePublish(topic string, payload []byte, retained bool) ([]byte, error) 
 	return packet(first, body)
 }
 
-// encodeSubscribe builds a SUBSCRIBE for one topic filter at QoS 0.
-// The fixed header is 0x82, because bit 1 is reserved and must be set
-// on a SUBSCRIBE. The body is the packet identifier the broker echoes
-// in its SUBACK, then the length-prefixed filter and one byte of
-// requested QoS.
+// encodeSubscribe builds a SUBSCRIBE for one topic filter at QoS 0. The
+// protocol requires bit 1 of a SUBSCRIBE's first byte to be set. The
+// broker repeats packetID in its SUBACK.
 func encodeSubscribe(packetID uint16, filter string) ([]byte, error) {
 	body, err := appendField([]byte{byte(packetID >> 8), byte(packetID)}, "topic filter", filter)
 	if err != nil {
@@ -206,16 +179,12 @@ func encodeSubscribe(packetID uint16, filter string) ([]byte, error) {
 	return packet(mqttSubscribe|0x02, body)
 }
 
-// encodePingreq builds the keepalive packet. It carries no body, so it
-// is the two bytes 0xC0 0x00, and the broker answers with a PINGRESP.
 func encodePingreq() []byte {
 	return []byte{mqttPingreq, 0x00}
 }
 
-// readPacket reads one whole control packet: the fixed-header first
-// byte, the remaining length, and that many bytes of body. It returns
-// the first byte so the caller reads both the packet type in the high
-// nibble and the flags in the low nibble.
+// readPacket reads one control packet and returns the first byte of its
+// fixed header and its body.
 func readPacket(reader *bufio.Reader) (byte, []byte, error) {
 	first, err := reader.ReadByte()
 	if err != nil {
@@ -232,12 +201,11 @@ func readPacket(reader *bufio.Reader) (byte, []byte, error) {
 	return first, body, nil
 }
 
-// parseConnack reads the broker's answer to a CONNECT. The body is one
-// byte of acknowledge flags and one byte of return code, and a return
-// code other than zero is the broker refusing the connection.
+// parseConnack returns an error when the CONNACK's return code, its
+// second byte, is not zero.
 func parseConnack(body []byte) error {
 	if len(body) < 2 {
-		return fmt.Errorf("mqtt: a CONNACK carried %d bytes, want 2", len(body))
+		return fmt.Errorf("mqtt: the CONNACK body is %d bytes, and it must be 2", len(body))
 	}
 	if body[1] != 0x00 {
 		return fmt.Errorf("mqtt: the broker refused the connection with code %d", body[1])
@@ -245,25 +213,24 @@ func parseConnack(body []byte) error {
 	return nil
 }
 
-// parseSuback reads the broker's answer to a SUBSCRIBE. The body is the
-// echoed packet identifier and one return code per filter, and a
-// return code of 0x80 is the broker refusing that subscription.
+// parseSuback returns an error when any return code after the packet
+// identifier is 0x80, the code for a refused subscription.
 func parseSuback(body []byte) error {
 	if len(body) < 3 {
-		return fmt.Errorf("mqtt: a SUBACK carried %d bytes, want at least 3", len(body))
+		return fmt.Errorf("mqtt: the SUBACK body is %d bytes, and it must be at least 3", len(body))
 	}
 	for _, code := range body[2:] {
 		if code == 0x80 {
-			return fmt.Errorf("mqtt: the broker refused a subscription")
+			return fmt.Errorf("mqtt: the broker refused the subscription")
 		}
 	}
 	return nil
 }
 
-// parsePublish reads an inbound PUBLISH body into its topic and
-// payload. The client subscribes at QoS 0 alone, so an inbound publish
-// carries no packet identifier and the payload begins right after the
-// length-prefixed topic.
+// parsePublish splits the body of a received PUBLISH into its topic and
+// payload. The client subscribes at QoS 0 only, so the broker sends no
+// packet identifier and the payload starts right after the topic. ok is
+// false when the body is shorter than its topic length says.
 func parsePublish(body []byte) (topic string, payload []byte, ok bool) {
 	if len(body) < 2 {
 		return "", nil, false

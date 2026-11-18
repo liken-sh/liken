@@ -5,10 +5,9 @@ import (
 	"testing"
 )
 
-// meteorLake is the report of the Meteor Lake GPU the query read with
-// the iHD driver 26.1.2, cut to the profiles the capabilities name. It
-// lists encode with EncSlice alone, AV1 decode at 8 and 10 bits, and no
-// VC-1 decode.
+// meteorLake is the report of the iHD driver 26.1.2 for a Meteor Lake
+// GPU, cut to the profiles that the rules read. It lists EncSlice
+// encoders only, AV1 decoding at 8 and 10 bits, and no VC-1 decoding.
 func meteorLake() report {
 	return report{
 		Vendor: "Intel iHD driver for Intel(R) Gen Graphics - 26.1.2 ()",
@@ -57,9 +56,7 @@ func TestTheCapabilitiesOfAMeteorLakeDriver(t *testing.T) {
 	}
 }
 
-// A driver that lists an encoder on the low-power entrypoint alone
-// states the low-power capability and not the full one, because a
-// transcoder set to the full encoder cannot use it.
+// A transcoder set to the full encoder cannot use a low-power one.
 func TestALowPowerEncoderIsItsOwnCapability(t *testing.T) {
 	facts := report{Configs: []config{
 		{Profile: profileH264High, Entrypoint: entrypointEncSliceLP, RTFormat: rtFormatYUV420},
@@ -85,8 +82,8 @@ func TestALowPowerEncoderIsItsOwnCapability(t *testing.T) {
 	}
 }
 
-// Each case takes one fact out of the report and names the one
-// capability that must go false with it, and only that one.
+// Each case removes one fact from the report, and only the capability
+// in falls becomes false.
 func TestEachCapabilityFollowsTheFactsTheDriverAdvertises(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -121,18 +118,17 @@ func TestEachCapabilityFollowsTheFactsTheDriverAdvertises(t *testing.T) {
 	}
 }
 
-// A render node that libva could not open states no fact, so every
-// capability is published as false rather than left out. A selector
-// that reads an absent attribute fails to evaluate, and false is what
-// a claim can select against.
+// A render node that libva could not open gives an empty report. Every
+// capability is still published as false, because a selector that
+// reads a missing attribute fails to evaluate.
 func TestAnEmptyReportPublishesEveryCapabilityAsFalse(t *testing.T) {
 	got := capabilitiesOf(report{})
 	if len(got) != len(capabilityRules) {
-		t.Fatalf("capabilities = %v, want one entry for each of %d rules", got, len(capabilityRules))
+		t.Fatalf("capabilities has %d entries, want one for each of the %d rules", len(got), len(capabilityRules))
 	}
 	for name, value := range got {
 		if value {
-			t.Errorf("%s = true from an empty report", name)
+			t.Errorf("%s is true for an empty report, want false", name)
 		}
 	}
 }

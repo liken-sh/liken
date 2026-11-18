@@ -1,7 +1,7 @@
 package edl
 
-// The tests build an album folder under t.TempDir(), with the tags each case
-// names, and check the timeline written for it.
+// These tests build album folders in t.TempDir() with tracks that
+// edltest writes, tagged or not.
 
 import (
 	"os"
@@ -16,19 +16,19 @@ import (
 func mustSucceed(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
-		t.Fatalf("wanted no error, got %v", err)
+		t.Fatalf("the setup returned the error %v, want none", err)
 	}
 }
 
 func mustMatch[T comparable](t *testing.T, got, want T) {
 	t.Helper()
 	if got != want {
-		t.Errorf("got %+v, want %+v", got, want)
+		t.Errorf("the value is %+v, want %+v", got, want)
 	}
 }
 
-// Every value the timeline carries is quoted by its length in bytes, so a path
-// or a title that holds a space, a bracket, or a comma arrives whole.
+// Quote prefixes a value with its length in bytes, so a path or title
+// with a space, bracket, or comma stays one value.
 func TestQuote(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -49,9 +49,8 @@ func TestQuote(t *testing.T) {
 	}
 }
 
-// A track's title is its tag. A file with no title tag falls back to its own
-// name, without the extension and without the track number a library writes in
-// front of it.
+// A track's title is its title tag. Without a tag, it is the file name
+// without the extension and the leading track number.
 func TestTitleOf(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -99,8 +98,8 @@ func TestTitleOf(t *testing.T) {
 	}
 }
 
-// The timeline is the header and one segment per track, in name order, with
-// every path absolute.
+// The timeline is the header and one segment per track, in name order,
+// with absolute paths.
 func TestTheTimeline(t *testing.T) {
 	dir := t.TempDir()
 	edltest.WriteTrack(t, filepath.Join(dir, "02 - Masterswarm.mp3"), edltest.TextFrame("TIT2", "Masterswarm"))
@@ -118,8 +117,8 @@ func TestTheTimeline(t *testing.T) {
 	mustMatch(t, lines[2], Quote(filepath.Join(dir, "02 - Masterswarm.mp3"))+",title=%11%Masterswarm")
 }
 
-// An album's own extensions are the ones mpv decodes, whatever case the
-// library wrote them in.
+// AlbumFiles keeps the files with an audio extension, in any letter
+// case, and skips other files.
 func TestAlbumFilesTakeTheAudioNames(t *testing.T) {
 	dir := t.TempDir()
 	mustSucceed(t, os.MkdirAll(filepath.Join(dir, "scans"), 0o755))
@@ -132,8 +131,8 @@ func TestAlbumFilesTakeTheAudioNames(t *testing.T) {
 	mustMatch(t, len(files), 6)
 }
 
-// The album's words come from the first file that carries tags, and a field no
-// file states stays empty.
+// The facts come from the first file that has tags, and a field that no
+// tag sets is empty.
 func TestAlbumFacts(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -172,8 +171,8 @@ func TestAlbumFacts(t *testing.T) {
 	}
 }
 
-// A person writes track 2 and track 10 without padding, so the order is the
-// natural one and not the byte order the file system gives.
+// Track 2 sorts before track 10 even without zero padding, which byte
+// order would not do.
 func TestTheTrackOrderIsNatural(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -213,9 +212,9 @@ func TestTheTrackOrderIsNatural(t *testing.T) {
 	}
 }
 
-// A multi-disc album is a folder of folders, so the walk descends. The whole
-// relative path settles the order, so CD1 plays before CD2 and each disc keeps
-// its own track order.
+// The walk enters disc folders and sorts by the whole relative path,
+// so CD1 comes before CD2 and each disc keeps its own track order. It
+// skips hidden folders.
 func TestAlbumFilesWalksTheDiscFolders(t *testing.T) {
 	dir := t.TempDir()
 	mustSucceed(t, os.MkdirAll(filepath.Join(dir, "CD1"), 0o755))
@@ -236,8 +235,9 @@ func TestAlbumFilesWalksTheDiscFolders(t *testing.T) {
 	})
 }
 
-// A title that holds a newline would end its segment early and the rest of it
-// would read as another segment, so every control byte becomes one space.
+// A newline in a title would end its segment early, so each run of
+// control bytes becomes one space and the timeline still parses as one
+// segment.
 func TestTitleOfFlattensAControlByte(t *testing.T) {
 	dir := t.TempDir()
 	edltest.WriteTrack(t, filepath.Join(dir, "01.mp3"), edltest.TextFrame("TIT2", "Oh No\r\nPart Two\tand Three"))
@@ -252,8 +252,8 @@ func TestTitleOfFlattensAControlByte(t *testing.T) {
 	mustMatch(t, segments[0].Params["title"], "Oh No Part Two and Three")
 }
 
-// writeTracks writes one tagless file per name, so a case states the names
-// alone and the order under test is the file names' own.
+// writeTracks writes one file without tags for each name, so the order
+// under test comes from the file names alone.
 func writeTracks(t *testing.T, dir string, names ...string) {
 	t.Helper()
 	for _, name := range names {
@@ -261,8 +261,6 @@ func writeTracks(t *testing.T, dir string, names ...string) {
 	}
 }
 
-// baseNames is the file names alone, for a case that asserts one folder's
-// order.
 func baseNames(dir string, files []string) []string {
 	names := make([]string, len(files))
 	for index, file := range files {
@@ -271,8 +269,6 @@ func baseNames(dir string, files []string) []string {
 	return names
 }
 
-// relativeNames is each file's path below the album, for a case that asserts
-// the order across the disc folders.
 func relativeNames(dir string, files []string) []string {
 	names := make([]string, len(files))
 	for index, file := range files {
@@ -284,13 +280,11 @@ func relativeNames(dir string, files []string) []string {
 func mustMatchAll[T comparable](t *testing.T, got, want []T) {
 	t.Helper()
 	if !slices.Equal(got, want) {
-		t.Errorf("got %+v, want %+v", got, want)
+		t.Errorf("the value is %+v, want %+v", got, want)
 	}
 }
 
-// The album's facts come from the first file that carries tags. A folder
-// whose files carry none has no facts, and the caller then names the album by
-// its folder.
+// Files that have no readable tags, or do not exist, give empty Facts.
 func TestAlbumFactsFromFilesThatCarryNoTags(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"01.flac", "02.flac"} {

@@ -1,19 +1,19 @@
-//! The clock, the top-right element, and the spellings of a time that the
-//! other regions share. It reads the wall-clock time and the time the film
-//! ends, now plus the time left, so a viewer reads the hour without leaving
-//! the film. The current time reads bright, and the end time reads dim.
+//! The clock at the top right of the screen, and the time and length
+//! formats that other parts of the display reuse. The clock shows the
+//! current time in bright text, and under it, in dim text, the time the
+//! film ends.
 //!
-//! The reading holds one box. It hangs from the top margin and ends on the side
-//! margin, whether or not the film has a duration. The idle screen and the
-//! library browser draw their own clock in the same box. The three screens
-//! follow each other on one panel, and a reading that moved would make the hour
-//! jump when one screen replaces another. The end time therefore draws on the
-//! line under the reading, where the idle screen draws its activity line. An end
-//! time beside the reading would push the reading left by its own width.
+//! The clock draws at the same place whether or not the film has a
+//! duration: hung from the top margin, ending at the right margin. The idle
+//! screen and the library browser draw their clock there too, and each
+//! screen replaces the previous one on the same panel, so a clock that
+//! moved would seem to jump. The end time goes on the line under the clock,
+//! where the idle screen draws its activity line, because beside the clock
+//! it would push the clock left.
 //!
-//! Rust's standard library has no time zones, so the reading goes through
-//! `jiff`. `jiff` reads `TZ` and falls back to `/etc/localtime`, and it resolves
-//! the name against the image's own `/usr/share/zoneinfo`, which the `tzdata`
+//! The standard library has no time zones, so the clock uses `jiff`.
+//! `jiff` reads `TZ`, falls back to `/etc/localtime`, and looks up the
+//! zone name in the image's `/usr/share/zoneinfo`, which the `tzdata`
 //! package installs.
 
 use std::time::Duration;
@@ -25,30 +25,27 @@ use crate::canvas::{Anchor, Canvas, Line};
 use crate::film::Film;
 use crate::theme;
 
-/// The row the reading hangs from, and the row the end time draws on.
 const TOP_Y: f32 = theme::MARGIN_Y;
 const ENDS_Y: f32 = theme::MARGIN_Y + theme::LINE_PITCH;
 
-/// The wall clock now, in the zone `TZ` names.
 pub fn now() -> Zoned {
     Zoned::now()
 }
 
-/// How long until the wall minute turns. The minute tick sleeps this long
-/// before each redraw, so the reading and every end time change when the
-/// minute does, and not up to a minute later.
+/// How long until the minute changes. The display sleeps this long before
+/// each redraw, so the clock changes at the start of the minute.
 pub fn until_next_minute(now: &Zoned) -> Duration {
     let into = now.timestamp().as_millisecond().rem_euclid(60_000);
     Duration::from_millis((60_000 - into) as u64)
 }
 
-/// The wall minute, which is the third part of the position signature.
+/// Whole minutes since the Unix epoch.
 pub fn minute(now: &Zoned) -> i64 {
     now.timestamp().as_second().div_euclid(60)
 }
 
-/// Format a wall-clock time as "3:01 pm", a twelve-hour clock with no leading
-/// zero and a lowercase suffix.
+/// Format a time as "3:01 pm": twelve-hour, no leading zero, lowercase
+/// suffix.
 pub fn reading(at: &Zoned) -> String {
     let hour = at.hour();
     let suffix = if hour < 12 { "am" } else { "pm" };
@@ -59,10 +56,9 @@ pub fn reading(at: &Zoned) -> String {
     format!("{twelve}:{:02} {suffix}", at.minute())
 }
 
-/// The wall clock `seconds` from `now`, as "ends 2:15 pm". The time left
-/// rounds to the nearest minute, the same rounding as the "1h 36m left" on
-/// the scrubber's time line, so the clock reading plus that time left gives
-/// the end time on the screen.
+/// The time `seconds` after `now`, as "ends 2:15 pm". It rounds to the
+/// nearest minute, as the scrubber's "1h 36m left" does, so the clock plus
+/// the time left on screen equals the end time on screen.
 pub fn ends(now: &Zoned, seconds: f64) -> String {
     let minutes = (seconds.max(0.0) / 60.0 + 0.5).floor() as i64;
     format!(
@@ -71,8 +67,8 @@ pub fn ends(now: &Zoned, seconds: f64) -> String {
     )
 }
 
-/// Whole minutes as the browser spells a runtime: "46m", "1h", "1h 30m".
-/// Nothing under a minute.
+/// Format the whole minutes of `seconds` as "46m", "1h", or "1h 30m".
+/// Returns `None` for less than a minute.
 pub fn runtime(seconds: i64) -> Option<String> {
     let minutes = seconds / 60;
     match (minutes / 60, minutes % 60) {
@@ -83,17 +79,15 @@ pub fn runtime(seconds: i64) -> Option<String> {
     }
 }
 
-/// A length in seconds as a runtime, to the nearest minute, so a film of
-/// 2:05:59 reads "2h 6m".
+/// Format a length in seconds as a runtime, rounded to the nearest minute.
+/// A film of 2:05:59 reads "2h 6m".
 pub fn length(seconds: f64) -> Option<String> {
     runtime(((seconds.max(0.0) / 60.0 + 0.5).floor() as i64) * 60)
 }
 
-/// The lines of the top-right column. With a duration it adds the end time,
-/// now plus the time left, on the line under the reading. A paused film reads
-/// the hour it would end from where it sits, which is close enough to read at
-/// a glance. The current time draws bright and the end time draws dim, so the
-/// two tell apart.
+/// The clock, and under it the end time when the film has a positive
+/// duration and a position. While the film is paused, the end time is when
+/// it would end if it resumed now.
 pub fn lines(canvas: &Canvas, film: &Film, now: &Zoned) -> Vec<Line> {
     let right = canvas.right();
     let mut lines = vec![Line::new(
@@ -123,7 +117,7 @@ pub fn lines(canvas: &Canvas, film: &Film, now: &Zoned) -> Vec<Line> {
     lines
 }
 
-/// One wall clock a test states, read in UTC so the numbers hold in any zone.
+/// A time for a test, in UTC so the results do not depend on the local zone.
 #[cfg(test)]
 pub fn at(unix: i64) -> Zoned {
     jiff::Timestamp::from_second(unix)
@@ -136,7 +130,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    /// 1970-01-01 15:01:00 UTC, and the hours around it.
+    /// A time of day on 1970-01-01, in UTC.
     fn wall(hour: i64, minute: i64) -> Zoned {
         at(hour * 3600 + minute * 60)
     }
@@ -162,10 +156,10 @@ mod tests {
         film
     }
 
-    /// The reading hangs from the top margin at the right, and a film with
-    /// no duration adds no line under it.
+    /// The clock hangs from the top margin at the right, and a film with no
+    /// duration adds no line under it.
     #[test]
-    fn the_reading_hangs_from_the_top_margin_at_the_right() {
+    fn the_clock_hangs_from_the_top_margin_at_the_right() {
         let lines = lines(&Canvas::default(), &film(None, None), &wall(15, 1));
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].at, Point::new(1824.0, 90.0));
@@ -175,10 +169,10 @@ mod tests {
         assert_eq!(lines[0].content, "3:01 pm");
     }
 
-    /// The end time draws dim on the line under the reading, in the same
-    /// box, so the reading stays where the other screens draw theirs.
+    /// The end time draws dim on the line under the clock, so the clock stays
+    /// where the other screens draw theirs.
     #[test]
-    fn the_end_time_draws_dim_on_the_line_under_the_reading() {
+    fn the_end_time_draws_dim_on_the_line_under_the_clock() {
         let lines = lines(
             &Canvas::default(),
             &film(Some(7559.0), Some(1807.0)),
@@ -193,9 +187,8 @@ mod tests {
         assert_eq!(lines[1].color.a, theme::alpha::SUBDUED);
     }
 
-    /// A film whose duration is not above zero has no end to name.
     #[test]
-    fn a_film_with_no_length_names_no_end() {
+    fn a_film_with_zero_duration_has_no_end_time() {
         let lines = lines(
             &Canvas::default(),
             &film(Some(0.0), Some(0.0)),
@@ -204,11 +197,11 @@ mod tests {
         assert_eq!(lines.len(), 1);
     }
 
-    /// 4801 seconds after 3:01 pm is one hour and twenty minutes later, and a
-    /// time already past ends now. 5752 seconds read as "1h 36m left" on the
-    /// time line, so the end time is 96 minutes after the reading, not 95.
+    /// 4801 seconds is 80 minutes after 3:01 pm, and a negative time left
+    /// ends now. 5752 seconds shows as "1h 36m left", so the end time is 96
+    /// minutes after the clock, not 95.
     #[test]
-    fn an_end_time_is_the_reading_plus_the_time_left() {
+    fn the_end_time_is_the_clock_plus_the_time_left() {
         assert_eq!(ends(&wall(15, 1), 4801.0), "ends 4:21 pm");
         assert_eq!(ends(&wall(15, 1), 5752.0), "ends 4:37 pm");
         assert_eq!(ends(&wall(15, 1), -30.0), "ends 3:01 pm");
@@ -227,18 +220,15 @@ mod tests {
         assert_eq!(length(30.0), Some("1m".to_string()));
     }
 
-    /// The reading hangs off the right edge of a wider canvas.
     #[test]
-    fn the_reading_follows_the_side_margin_of_a_wider_canvas() {
+    fn the_clock_follows_the_side_margin_of_a_wider_canvas() {
         let wide = Canvas::for_output(iced::Size::new(2560.0, 1080.0));
         let lines = lines(&wide, &film(None, None), &wall(15, 1));
         assert_eq!(lines[0].at, Point::new(2464.0, 90.0));
     }
 
-    /// The tick lands when the wall minute turns, so a reading never lags
-    /// the minute by up to a minute.
     #[test]
-    fn the_wait_ends_when_the_wall_minute_turns() {
+    fn the_wait_ends_when_the_minute_changes() {
         let cases = [
             ("on the minute", at(15 * 60), Duration::from_secs(60)),
             (
@@ -265,7 +255,7 @@ mod tests {
     }
 
     #[test]
-    fn the_wall_minute_counts_whole_minutes_from_the_epoch() {
+    fn the_minute_counts_whole_minutes_from_the_epoch() {
         assert_eq!(minute(&at(0)), 0);
         assert_eq!(minute(&at(59)), 0);
         assert_eq!(minute(&at(60)), 1);

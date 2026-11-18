@@ -7,17 +7,18 @@ This skill is the guide at https://liken.sh/media/docs/guides/claim-a-gpu-by-cap
 
 # Claim a GPU by what it decodes
 
-A `liken` render node states the GPU's identity, and nothing about
-what its media driver can do. On a fleet of mixed GPUs, a claim on any
-render node can land on a GPU whose driver cannot decode the file's
-codec, or cannot scale its 10-bit frames. The workload then falls
-back to a slower path, or fails.
+A `liken` render node identifies a GPU, but it does not say what the
+GPU's media driver can do. On a fleet with different GPUs, a claim on
+any render node can be allocated a GPU whose driver cannot decode the
+file's codec or scale its 10-bit frames. The workload then uses a
+slower path or fails.
 
 The capabilities agent of `media-operator` publishes what each GPU's
-driver states, as a `media.liken.sh` device for each render node. A
-claim asks for that device beside the render node, and a constraint
-keeps the two on one GPU. The scheduler then places the pod only on a
-GPU whose driver states what the claim asks for.
+driver supports, as a `media.liken.sh` device for each render node. A
+claim requests that device together with the render node, and a
+constraint requires both to be on the same GPU. The scheduler then
+places the pod only on a node with a GPU whose driver supports what the
+claim needs.
 
 You need:
 
@@ -27,7 +28,7 @@ You need:
   on its render nodes. On an older release, the claim below never
   allocates.
 
-## 1. See what each GPU states
+## 1. See what each GPU supports
 
     kubectl get resourceslices
     kubectl get resourceslice <node>-media.liken.sh -o yaml
@@ -64,17 +65,17 @@ Each device is one GPU:
         vendor: {string: "8086"}
 
 [Render node capabilities](https://liken.sh/media/docs/reference/capabilities/) describes
-each attribute, and where its value comes from.
+each attribute and where its value comes from.
 
 ## 2. Write the classes
 
-`media-operator` ships no class for a capability. A class encodes a
-deployment's purposes, so you write the classes that your workloads
-claim through. Two classes are enough here.
+`media-operator` does not ship a class for a capability. Each cluster
+needs different classes for its workloads, so you write them. This
+guide uses two.
 
 The first selects the `media.liken.sh` devices of GPUs that decode
-10-bit HEVC and scale 10-bit frames on the video processor, which is
-the whole path of a 10-bit film from the decoder to a scaled frame:
+10-bit HEVC and scale 10-bit frames on the video processor. A 10-bit
+HEVC film needs both:
 
 ```yaml
 apiVersion: resource.k8s.io/v1
@@ -93,9 +94,8 @@ spec:
 ```
 
 The second selects the render nodes that `liken` publishes. If you
-have a class like it, such as `display-render` from
-`display-operator`, use that class and skip this one. It works the
-same way:
+already have a class like it, such as `display-render` from
+`display-operator`, use that class and skip this one:
 
 ```yaml
 apiVersion: resource.k8s.io/v1
@@ -110,16 +110,16 @@ spec:
           has(device.attributes["liken.sh"].renderNode)
 ```
 
-`media-render` is not for workloads. It is the class of the agent's
-own claim, and the install ships it as wiring.
+Do not use `media-render` for your workloads. The install ships it for
+the capabilities agent's own claim.
 
 ## 3. Claim the render node and the capability together
 
 The claim has two requests: the render node from `liken`, and the
-`media.liken.sh` device of a GPU that states what the workload needs.
+`media.liken.sh` device of a GPU that supports what the workload needs.
 The constraint requires both devices to have the same
-`resource.kubernetes.io/pciBusID`, which is the GPU's PCI address, so
-both are the same GPU:
+`resource.kubernetes.io/pciBusID`, the GPU's PCI address, so both
+devices are on the same GPU:
 
 ```yaml
 apiVersion: resource.k8s.io/v1
@@ -141,8 +141,8 @@ spec:
           matchAttribute: resource.kubernetes.io/pciBusID
 ```
 
-The pod names the claim, and the container receives the render node
-of the GPU the scheduler chose:
+The pod references the claim, and the container receives the render
+node of the GPU that the scheduler chose:
 
 ```yaml
 spec:
@@ -156,19 +156,21 @@ spec:
           - name: gpu
 ```
 
-The `media.liken.sh` device delivers nothing into the container. It
-is a statement about the GPU, and any number of claims can allocate
-it at once. The render node is shareable too, so several workloads
-decode on one GPU at the same time.
+The `media.liken.sh` device gives the container nothing. It only
+describes the GPU, and any number of claims can allocate it at the same
+time. The render node can be shared too, so several workloads can decode
+on one GPU at the same time.
 
-## 4. Ask for another set
+## 4. Claim a different set of capabilities
 
-For a set that `decode-10bit` does not state, add a selector to the
-request. It narrows the class, so it works on any class that selects
-`media.liken.sh` devices. This request asks for a GPU that decodes VP9
-and scales 8-bit frames, through a class of your own that selects
-every `media.liken.sh` device (`device.driver == "media.liken.sh"`),
-here named `media-gpu`:
+For capabilities that `decode-10bit` does not select, add a selector to
+the request. A selector narrows the class, so it works with any class
+that selects `media.liken.sh` devices. This request needs a GPU that
+decodes VP9 and scales 8-bit frames. It uses a class that you write,
+here named `media-gpu`, which selects every `media.liken.sh` device
+with `device.driver == "media.liken.sh"`. Every device has every
+capability attribute, `true` or `false`, so the selector needs no
+`has()` check:
 
 ```yaml
         - name: decodes
@@ -181,34 +183,30 @@ here named `media-gpu`:
                     device.attributes["media.liken.sh"].scale8bit
 ```
 
-A selector on `decode-10bit` works the same way and requires the
-10-bit capabilities as well. To reuse a set, write another class with
-the expression in it.
+A selector on a request that uses `decode-10bit` works the same way,
+and the device must also have the 10-bit capabilities. To reuse a
+selector, put its expression in another class.
 
-Every device has every capability attribute, `true` or `false`, so a
-selector needs no `has()` check.
+## 5. Fall back when no GPU matches
 
-## 5. Fall back when no GPU qualifies
-
-A claim that no GPU satisfies stays unallocated, and its pod stays
-`Pending`:
+When no GPU matches a claim, the claim is not allocated and its pod
+stays `Pending`:
 
     kubectl describe pod <pod>
 
-The events name the claim that cannot allocate. Such a workload has
-two ways forward: a second claim on any render node, which the
-workload uses with its own fallback path, or no claim at all and work
-on the CPU. The scheduler does not choose between them; the workload's
-controller does.
+The events name the claim that cannot be allocated. The scheduler does
+not fall back on its own, so the workload's controller must choose: use
+a second claim on any render node with its own slower code path, or use
+no claim and decode on the CPU.
 
-## When a GPU states false for a capability it has
+## When a GPU reports false for a capability it has
 
-The values are the driver's own statements, read through libva. The
-agent does not test them. A capability that the GPU has but the
-driver in the agent's image does not list publishes as `false`. The
+The agent publishes the values that the driver returns through libva,
+and does not test them. If the GPU has a capability but the driver in
+the agent's image does not list it, the agent publishes `false`. The
 agent's log has the driver's name and every value for each GPU:
 
     kubectl -n liken-system logs ds/media-capabilities
 
-A query that failed has the failure there, word for word, and the
-device then has every capability `false` and no `vaDriver`.
+When a query fails, the log has libva's error text, and the device has
+every capability `false` and no `vaDriver`.

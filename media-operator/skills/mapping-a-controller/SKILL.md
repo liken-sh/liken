@@ -7,38 +7,38 @@ This skill is the guide at https://liken.sh/media/docs/guides/mapping-a-controll
 
 # Map a new controller
 
-A controller works before it has a `Keymap`. The `Remote`'s pod
-passes every `KEY_*` code through under the kernel's own name, turns
-the hat axes into the arrows, and reads a gamepad's south and east
-buttons as enter and back. This guide finds the codes that a
-controller sends, and writes a `Keymap` row only for each button that
-this default mapping gets wrong or leaves out. At the end, every
-button on the controller does what its label says.
+A controller works before it has a `Keymap`. The `Remote`'s pod passes
+every `KEY_*` code through with the kernel's name for it, turns the hat
+axes into the arrow keys, and maps a gamepad's south and east buttons to
+enter and back. In this guide you find the codes that your controller
+sends, and write a `Keymap` row only for the buttons that this default
+mapping gets wrong or leaves out. At the end, every button on the
+controller does what its label says.
 
 You need:
 
 * The operator and its bus, from the
   [install](https://liken.sh/media/docs/guides/install/).
 * The [`bluetooth-operator`](https://liken.sh/bluetooth/), with the
-  controller paired to a machine. A TV remote reaches a machine
-  through a USB CEC adapter instead: `liken` publishes the adapter's
-  input device, with the `subsystem` attribute `input`, and the
-  kernel names the remote's buttons with its `rc-cec` keymap. The
-  adapter delivers them only while its `CECBus` is in `Control`. An
-  infrared remote has no device to claim, because no hardware operator
-  publishes one.
+  controller paired to a machine. A TV remote sends its buttons through
+  a USB CEC adapter instead. `liken` publishes the adapter's input
+  device with the `subsystem` attribute `input`, and the kernel names
+  the remote's buttons with its `rc-cec` keymap. The adapter passes
+  them on only while its `CECBus` has `spec.mode: Control`. You cannot claim an
+  infrared remote, because no hardware operator publishes it as a
+  device.
 * `kubectl` access to the namespace.
 
-The controller keeps working while you map it. Discovery changes
-what the pod logs and leaves what it publishes the same, so a
-controller in discovery still drives its unit.
+Discovery changes only what the `Remote`'s pod logs, not what it
+publishes, so the controller keeps controlling its `Player` while you
+map it.
 
 ## Declare the Remote
 
-A `Remote` needs no `Keymap` to work. Declare it with the device
-alone, using your cluster's class for controllers. The arrows, OK,
-back, the volume keys, and every other control the controller reports
-under a kernel name already work:
+Declare the `Remote` with only the device, using your cluster's device
+class for controllers, here `bluetooth-input`. The arrow keys, OK,
+back, the volume keys, and every other control that the controller
+reports under a kernel name already work:
 
     kubectl apply -f - <<EOF
     apiVersion: media.liken.sh/v1alpha1
@@ -56,9 +56,9 @@ under a kernel name already work:
     kubectl patch remote den-remote --type=merge \
       -p '{"spec":{"discovery":true}}'
 
-The patch replaces the controller pod, which drops controller input
-for a few seconds. The new pod stays `Pending` until the controller
-connects for the first time, so press a button to wake it.
+The patch replaces the controller pod, so controller input stops for a
+few seconds. The new pod stays `Pending` until the controller connects,
+so press a button to wake the controller.
 
 ## Press every button
 
@@ -66,8 +66,8 @@ Follow the pod's log and press each button in turn:
 
     kubectl logs -f den-remote-remote
 
-The pod logs one verdict line per input node, then the node
-connecting, then each press:
+The pod logs one line for each input node of the controller, then a
+line when the controller connects, then the lines for each press:
 
     remote: event3 "Handheld Remote" keep: 58 key codes, no hat axes
     remote: controller connected on event3 "Handheld Remote": 58 key codes, no hat axes
@@ -77,59 +77,58 @@ connecting, then each press:
     remote: event3 "Handheld Remote": BTN_SOUTH (304) pressed, published KEY_ENTER to liken/media/remotes/media/den-remote/events
 
 The two indented lines are a `Keymap` row. Paste it under
-`spec.buttons`, or under `spec.axes` for a hat direction. Then
-replace the key line with the kernel name the control should report,
-or with `none` to drop the control. The last line names what the pod
-published for the press, so check it before you paste the row: it
-already publishes `KEY_ENTER` for `BTN_SOUTH` above, the base
-mapping's own answer for a gamepad's south button, so that row is not
-needed. Only a press earns this last line. A release or a repeat logs
-the raw line above it instead, naming the code and saying a Keymap
-binds the press alone.
+`spec.buttons`, or under `spec.axes` for a hat direction, and replace
+the value of `key` with the kernel name that the control should report,
+or with `none` to drop the control.
+
+The last line shows what the pod published for the press. Read it
+before you write a row, because the base mapping may already do what
+you want. In the example, the pod already publishes `KEY_ENTER` for
+`BTN_SOUTH`, so that button needs no row. A release or a repeat logs
+only the raw event line, with a note that a `Keymap` binds only the
+press.
 
 Some Bluetooth LE remotes, such as a T6, do not send the press that
-woke them from sleep. `bluetooth-operator` writes a press of
-`KEY_UNKNOWN` (code 240) in its place, so discovery logs that press
-after each wake of such a remote. An X6 air-mouse remote sends the
-press that woke it, so discovery logs the button itself. `KEY_UNKNOWN`
-is not a button to map. A `Keymap` row on `KEY_UNKNOWN` acts
-on every wake, and on any real button that the kernel also reports as
-`KEY_UNKNOWN`, so do not bind it.
+woke them from sleep. Instead, `bluetooth-operator` writes a press of
+`KEY_UNKNOWN` (code 240), so discovery logs that press each time such a
+remote wakes. An X6 air-mouse remote does send the press that
+woke it, so discovery logs the button itself. Do not map
+`KEY_UNKNOWN`. A `Keymap` row on it acts on every wake, and on any real
+button that the kernel also reports as `KEY_UNKNOWN`.
 
-A press on a sleeping idle screen lifts the shade and acts on the
-screen in the same press, except back, and except while the panel is
-off. A press while the panel is off, after the off window ran out or
-after the `Player` or the TV turned off, only lights the screen,
-because nobody could see what the press would act on. A button that
-reaches the screen as `KEY_BACK`, `KEY_ESC`, `KEY_EXIT`, or
-`KEY_BACKSPACE`, from the base mapping or from a `Keymap` row, only
-lifts the shade, on every screen. The stock idle screen lowers the
-shade on back, and one rule for every screen keeps a press of back
-from undoing the wake there.
+When the idle screen has dimmed, the press that wakes it also acts on
+the screen, with two exceptions. When the panel is off, the press only
+turns the screen on, because you cannot see what it would act on. The
+panel is off after the idle screen's `offAfterSeconds` has passed, or after the
+`Player` or the TV turned off. And a press that reaches the screen as
+`KEY_BACK`, `KEY_ESC`, `KEY_EXIT`, or `KEY_BACKSPACE`, from the base
+mapping or from a `Keymap` row, only wakes the screen. The idle screen
+dims when it receives back, so without this rule the waking press would
+dim the screen again.
 
 If the controller has modes, press every button in every mode. A
-combined remote can emit different codes for one button per mode. An
-air-mouse shell emits `BTN_LEFT` for its OK button in mouse mode, and
-`KEY_ENTER` in keys mode. `KEY_ENTER` passes on its own. `BTN_LEFT`
-is a mouse button and means nothing to a screen, so it needs a row
-that makes it `KEY_ENTER`.
+combined remote can send a different code for the same button in each
+mode. For example, an air-mouse remote sends `BTN_LEFT` for its OK
+button in mouse mode, and `KEY_ENTER` in keys mode. `KEY_ENTER` works
+without a row. `BTN_LEFT` is a mouse button, and a screen ignores it, so
+it needs a row that maps it to `KEY_ENTER`.
 
 ## Read the codes you did not press
 
     kubectl get remote den-remote -o yaml
 
-`status.unbound` lists every declared control that the base and the
-`Keymap` together map to nothing. It includes a hat axis with no row,
-a control whose row sets `none`, and a code the kernel gives no name.
-A declared `KEY_*` code passes as itself, so it never appears in the
-list. A keyboard remote starts with an empty list. Each entry has the
-code, its evdev name, and its event type.
+`status.unbound` lists every control that the controller declares and
+that neither the base mapping nor the `Keymap` maps to a key: a hat
+axis with no row, a control whose row sets `none`, and a code that the
+kernel has no name for. A `KEY_*` code passes through as itself, so it
+is never in the list, and a keyboard remote starts with an empty list.
+Each entry has the code, its evdev name, and its event type.
 
 ## Write the Keymap
 
-Collect the rows into a `Keymap` for the model and apply it. This one
-renames the air-mouse click and gives the shell's escape key nothing
-to do:
+Collect the rows into a `Keymap` for the controller model and apply
+it. This one maps the air-mouse click to `KEY_ENTER` and drops the
+escape key:
 
     kubectl apply -f - <<EOF
     apiVersion: media.liken.sh/v1alpha1
@@ -144,14 +143,16 @@ to do:
           key: none
     EOF
 
-Once the table reaches the pod, a press of the escape key logs what it
-drops instead of what it would otherwise pass through:
+When the pod has received the new key table, a press of the escape key
+logs that the pod dropped it:
 
     remote: event3 "Handheld Remote": KEY_ESC (1) pressed, published nothing, because the key table maps it to none
 
-A row on a gamepad button that a person holds, a bumper that seeks
-for example, adds a `repeat` block, because a gamepad never
-autorepeats in the kernel:
+For a gamepad button that you hold down, such as a bumper that seeks,
+add a `repeat` block to the row, because the kernel does not autorepeat
+gamepad buttons. The pod sends the press, waits for `delay`, and then
+sends the key every `interval` until you release the button. The
+defaults are `400ms` and `300ms`:
 
     - press: BTN_TR
       key: KEY_FASTFORWARD
@@ -159,11 +160,10 @@ autorepeats in the kernel:
         delay: 400ms
         interval: 250ms
 
-Then name it on the `Remote` and turn discovery off:
+Then set the `Keymap` on the `Remote` and turn discovery off:
 
     kubectl patch remote den-remote --type=merge \
       -p '{"spec":{"keymap":"handheld-remote","discovery":false}}'
 
-`status.unbound` remains after discovery ends, so it continues to show
-which controller controls do nothing. On a keyboard remote, it lists
-only the controls you dropped with `none`.
+`status.unbound` is kept up to date after discovery ends, so it still
+shows which controls of the controller do nothing.

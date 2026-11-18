@@ -1,8 +1,9 @@
 package main
 
-// These tests cover the container resource settings: the file a cluster
-// owner patches, the default each value falls back to, and the requests
-// and limits that reach every container the operator builds.
+// These tests cover the container resource settings: parsing the file
+// that a cluster owner edits, the default that each invalid value falls
+// back to, and the requests and limits set on every container the
+// operator builds.
 
 import (
 	"maps"
@@ -13,7 +14,7 @@ import (
 )
 
 // customSettings differs from the defaults in every value, so a test
-// that reads a value back proves where it came from.
+// that reads one back shows it came from the file and not the defaults.
 func customSettings() resourceSettings {
 	return resourceSettings{
 		playerContainer:       {CPU: "101m", Memory: "501Mi", MemoryLimit: "1501Mi"},
@@ -49,7 +50,7 @@ func withPlayer(entry string) string {
 	return customSettingsFile[:start] + entry + customSettingsFile[end:]
 }
 
-// settingsWithPlayer is the custom settings with the player's values
+// settingsWithPlayer is the custom settings with the player's settings
 // replaced.
 func settingsWithPlayer(player containerResources) resourceSettings {
 	settings := customSettings()
@@ -77,7 +78,7 @@ func TestParseResourceSettings(t *testing.T) {
 			want: settingsWithPlayer(containerResources{
 				CPU: "101m", Memory: "501Mi", MemoryLimit: defaultPlayer.MemoryLimit,
 			}),
-			lines: []string{"player: limits.memory is unset; using the default " + defaultPlayer.MemoryLimit},
+			lines: []string{"player: limits.memory is unset, so it uses the default " + defaultPlayer.MemoryLimit},
 		},
 		{
 			name: "a quantity that does not parse",
@@ -85,13 +86,13 @@ func TestParseResourceSettings(t *testing.T) {
 			want: settingsWithPlayer(containerResources{
 				CPU: defaultPlayer.CPU, Memory: "501Mi", MemoryLimit: "1501Mi",
 			}),
-			lines: []string{`player: requests.cpu "fast" is not a quantity; using the default ` + defaultPlayer.CPU},
+			lines: []string{`player: requests.cpu "fast" is not a quantity, so it uses the default ` + defaultPlayer.CPU},
 		},
 		{
 			name:  "a cpu limit",
 			file:  withPlayer("player:\n  requests: {cpu: 101m, memory: 501Mi}\n  limits: {cpu: 500m, memory: 1501Mi}\n"),
 			want:  customSettings(),
-			lines: []string{"player: limits.cpu is ignored, because no container states a cpu limit"},
+			lines: []string{"player: limits.cpu is ignored, because no container sets a cpu limit"},
 		},
 		{
 			name: "a memory request above its limit",
@@ -99,7 +100,7 @@ func TestParseResourceSettings(t *testing.T) {
 			want: settingsWithPlayer(containerResources{
 				CPU: "101m", Memory: defaultPlayer.Memory, MemoryLimit: defaultPlayer.MemoryLimit,
 			}),
-			lines: []string{"player: requests.memory 2Gi is above limits.memory 1501Mi; using the defaults " +
+			lines: []string{"player: requests.memory 2Gi is above limits.memory 1501Mi, so both use the defaults " +
 				defaultPlayer.Memory + " and " + defaultPlayer.MemoryLimit},
 		},
 		{
@@ -115,13 +116,13 @@ func TestParseResourceSettings(t *testing.T) {
 			want: settingsWithPlayer(containerResources{
 				CPU: defaultPlayer.CPU, Memory: "501Mi", MemoryLimit: "1501Mi",
 			}),
-			lines: []string{"player: requests.cpu is unset; using the default " + defaultPlayer.CPU},
+			lines: []string{"player: requests.cpu is unset, so it uses the default " + defaultPlayer.CPU},
 		},
 		{
 			name:  "an entry that is not a map",
 			file:  withPlayer("player: 3\n"),
 			want:  settingsWithPlayer(defaultPlayer),
-			lines: []string{"player: is not a map of requests and limits; using its defaults"},
+			lines: []string{"player: is not a map of requests and limits, so it uses its defaults"},
 		},
 		{
 			name: "a block that is not a map",
@@ -129,7 +130,7 @@ func TestParseResourceSettings(t *testing.T) {
 			want: settingsWithPlayer(containerResources{
 				CPU: "101m", Memory: "501Mi", MemoryLimit: defaultPlayer.MemoryLimit,
 			}),
-			lines: []string{"player: limits is not a map; using the default limits"},
+			lines: []string{"player: limits is not a map, so it uses the default limits"},
 		},
 		{
 			name: "a negative quantity",
@@ -137,7 +138,7 @@ func TestParseResourceSettings(t *testing.T) {
 			want: settingsWithPlayer(containerResources{
 				CPU: defaultPlayer.CPU, Memory: "501Mi", MemoryLimit: "1501Mi",
 			}),
-			lines: []string{"player: requests.cpu -1 is below zero; using the default " + defaultPlayer.CPU},
+			lines: []string{"player: requests.cpu -1 is below zero, so it uses the default " + defaultPlayer.CPU},
 		},
 		{
 			name: "a memory limit of zero",
@@ -145,13 +146,13 @@ func TestParseResourceSettings(t *testing.T) {
 			want: settingsWithPlayer(containerResources{
 				CPU: "101m", Memory: "0", MemoryLimit: defaultPlayer.MemoryLimit,
 			}),
-			lines: []string{"player: limits.memory is zero; using the default " + defaultPlayer.MemoryLimit},
+			lines: []string{"player: limits.memory is zero, so it uses the default " + defaultPlayer.MemoryLimit},
 		},
 		{
 			name:  "a container the operator does not build",
 			file:  customSettingsFile + "mixer:\n  requests: {cpu: 1m}\n",
 			want:  customSettings(),
-			lines: []string{"mixer: is not a container this operator builds; ignored"},
+			lines: []string{"mixer: is not a container that media-operator builds, so it is ignored"},
 		},
 		{
 			name:  "a file that is not YAML",
@@ -166,37 +167,37 @@ func TestParseResourceSettings(t *testing.T) {
 			got := parseResourceSettings([]byte(tc.file), func(line string) { lines = append(lines, line) })
 
 			if !maps.Equal(got, tc.want) {
-				t.Errorf("settings = %v, want %v", got, tc.want)
+				t.Errorf("settings are %v, want %v", got, tc.want)
 			}
 			if len(lines) != len(tc.lines) {
-				t.Fatalf("lines = %q, want %q", lines, tc.lines)
+				t.Fatalf("the report is %q, want lines that contain %q", lines, tc.lines)
 			}
 			for index, line := range lines {
 				if !strings.Contains(line, tc.lines[index]) {
-					t.Errorf("line = %q, want it to say %q", line, tc.lines[index])
+					t.Errorf("report line %d is %q, want it to contain %q", index, line, tc.lines[index])
 				}
 			}
 		})
 	}
 }
 
-// An empty file sets no value, so every value is its default, and each
-// one says so on its own line.
+// An empty file sets no value, so every value falls back to its default
+// and each fallback is reported on its own line.
 func TestAnEmptySettingsFileUsesEveryDefault(t *testing.T) {
 	var lines []string
 	got := parseResourceSettings(nil, func(line string) { lines = append(lines, line) })
 
 	if !maps.Equal(got, defaultResourceSettings()) {
-		t.Errorf("settings = %v, want the defaults", got)
+		t.Errorf("settings are %v, want the defaults", got)
 	}
 	if want := 3 * len(defaultResourceSettings()); len(lines) != want {
-		t.Errorf("%d lines, want one for each of the %d values: %q", len(lines), want, lines)
+		t.Errorf("the report has %d lines, want one for each of the %d values: %q", len(lines), want, lines)
 	}
 }
 
-// The file the base ships states every default, so a cluster owner who
-// copies it starts from the values the operator uses, and a start with
-// the base logs nothing.
+// The file in the kustomize base sets every default value. A cluster
+// owner who copies it starts from the values the operator already uses,
+// and starting with the base's file logs nothing.
 func TestTheShippedSettingsFileStatesEveryDefault(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("deploy", "container-resources.yaml"))
 	mustSucceed(t, err)
@@ -205,12 +206,12 @@ func TestTheShippedSettingsFileStatesEveryDefault(t *testing.T) {
 	got := parseResourceSettings(data, func(line string) { lines = append(lines, line) })
 
 	if !maps.Equal(got, defaultResourceSettings()) || len(lines) != 0 {
-		t.Errorf("settings = %v with lines %q, want the defaults and no line", got, lines)
+		t.Errorf("settings are %v with report lines %q, want the defaults and no line", got, lines)
 	}
 }
 
-// A missing file is one line and every default, so the operator starts
-// with no ConfigMap mounted.
+// A missing file reports one line and uses every default, so the
+// operator starts with no ConfigMap mounted.
 func TestAMissingSettingsFileUsesEveryDefault(t *testing.T) {
 	var lines []string
 
@@ -218,7 +219,7 @@ func TestAMissingSettingsFileUsesEveryDefault(t *testing.T) {
 		func(line string) { lines = append(lines, line) })
 
 	if !maps.Equal(got, defaultResourceSettings()) || len(lines) != 1 {
-		t.Errorf("settings = %v with lines %q, want the defaults and one line", got, lines)
+		t.Errorf("settings are %v with report lines %q, want the defaults and one line", got, lines)
 	}
 }
 
@@ -243,7 +244,7 @@ func TestEveryContainerGetsItsConfiguredRequestsAndMemoryLimit(t *testing.T) {
 			containers: []string{idleContainer},
 			created: func(t *testing.T, media *operator, cluster *fakeCluster) *Pod {
 				media.idleDisplayClass = "display-draw"
-				mustSucceed(t, media.reconcileIdle(standingIdlePlayer(), "", nil))
+				mustSucceed(t, media.reconcileIdle(playerWithDisplay(), "", nil))
 				return cluster.pods["theater-idle"]
 			},
 		},
@@ -251,7 +252,7 @@ func TestEveryContainerGetsItsConfiguredRequestsAndMemoryLimit(t *testing.T) {
 			name:       "the remote pod",
 			containers: []string{remoteReaderContainer},
 			created: func(t *testing.T, media *operator, cluster *fakeCluster) *Pod {
-				mustSucceed(t, media.reconcileRemote(standingRemote(), claimRead{}))
+				mustSucceed(t, media.reconcileRemote(remoteWithController(), claimRead{}))
 				return cluster.pods["sofa-remote"]
 			},
 		},
@@ -266,23 +267,24 @@ func TestEveryContainerGetsItsConfiguredRequestsAndMemoryLimit(t *testing.T) {
 			pod := tc.created(t, media, cluster)
 
 			if pod == nil {
-				t.Fatalf("no pod was created: %v", cluster.requests)
+				t.Fatalf("the operator created no pod, requests were %v", cluster.requests)
 			}
 			for _, name := range tc.containers {
 				want := settings[name]
 				got := podContainer(t, pod, name).Resources
 				if !maps.Equal(got.Requests, ResourceList{"cpu": want.CPU, "memory": want.Memory}) {
-					t.Errorf("%s requests = %v, want %+v", name, got.Requests, want)
+					t.Errorf("%s requests are %v, want %+v", name, got.Requests, want)
 				}
 				if !maps.Equal(got.Limits, ResourceList{"memory": want.MemoryLimit}) {
-					t.Errorf("%s limits = %v, want memory %s and no cpu", name, got.Limits, want.MemoryLimit)
+					t.Errorf("%s limits are %v, want memory %s and no cpu", name, got.Limits, want.MemoryLimit)
 				}
 			}
 		})
 	}
 }
 
-// podContainer finds one container of a pod, ordinary or init, by name.
+// podContainer returns the container of the pod with the given name,
+// whether it is an init container or a regular one.
 func podContainer(t *testing.T, pod *Pod, name string) Container {
 	t.Helper()
 	for _, container := range append(pod.Spec.Containers, pod.Spec.InitContainers...) {
@@ -294,14 +296,14 @@ func podContainer(t *testing.T, pod *Pod, name string) Container {
 	return Container{}
 }
 
-// An operator built with no settings, as most tests build one, gives
-// every container the defaults.
+// A nil resourceSettings, which is what most tests build the operator
+// with, applies the defaults to every container.
 func TestAnOperatorWithNoSettingsUsesTheDefaults(t *testing.T) {
 	pod := resourceSettings(nil).apply(testPod(t))
 	want := defaultResourceSettings()[playerContainer]
 
 	got := podContainer(t, pod, playerContainer).Resources
 	if got.Requests["memory"] != want.Memory || got.Limits["memory"] != want.MemoryLimit {
-		t.Errorf("player resources = %+v, want the default %+v", got, want)
+		t.Errorf("player resources are %+v, want the default %+v", got, want)
 	}
 }

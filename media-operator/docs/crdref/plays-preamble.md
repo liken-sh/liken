@@ -1,55 +1,54 @@
 A `Play` is one run of media on a [Player](/docs/reference/players/):
-a film, an album, or a season of episodes, played in order. Its
-lifecycle is analogous to a `Job`'s: it runs once to completion, and
-it stays for its status until `ttlSecondsAfterFinished` passes or a
-person deletes it. Create a `Play` to start it, delete it to stop it
-early, and `kubectl get plays` lists what plays right now.
+a film, an album, or a season of episodes, played in order. It works
+like a `Job`: it runs once to completion, and then it stays, so that
+you can read its status, until `ttlSecondsAfterFinished` passes or you
+delete it. Create a `Play` to start it, and delete it to stop it early.
+`kubectl get plays` shows the status, item, and position of each run,
+finished runs included.
 
-The operator reconciles a `Play` into one playback pod and the
-claims that pod needs, all owned by the `Play`, so deleting the
-`Play` is the whole teardown: the garbage collector takes the pod
-and the claims with it. A `Finished` run leaves nothing running.
+The operator creates a playback pod for a `Play`, and the claims that
+the pod needs. The `Play` owns the pod and the claims, so the
+Kubernetes garbage collector deletes them with the `Play`. A
+`Finished` `Play` has no pod running.
 
-The operator holds the finalizer `media.liken.sh/bus-topics` on every
-`Play`, so a delete completes only after the operator has torn the run
-down. Inside that window it deletes the playback pod, waits until the
-pod is gone, and clears the run's retained `status` and `availability`
-topics on the bus. The finalizer owns the clear because a `Play` must
-never be gone from the API server while its topics still stand on the
-broker, and because the pod's own closing messages have to land before
-the operator's clear or they would overwrite it. A `Play` that stays
-deleting for longer than a few seconds has a pod that will not go, and
-`kubectl describe` on the pod says why.
+The operator adds the finalizer `media.liken.sh/bus-topics` to every
+`Play`, so a deleted `Play` stays in the API server until the operator
+has stopped the run. The operator deletes the playback pod, waits
+until the pod is gone, and then clears the run's retained `status` and
+`availability` topics on the bus. It waits because the pod publishes
+closing messages as it ends, and those would overwrite an earlier
+clear. When a `Play` stays in deletion for more than a few seconds,
+its pod does not stop. Run `kubectl describe` on the pod to see why.
 
-The spec is immutable, like a `Job`'s template. A `Play` whose
-player or media changed mid-run would describe a different run;
-delete the `Play` and create another.
+The spec is immutable, like the template of a `Job`, because a changed
+`Play` would no longer describe the run that is playing. To change the
+player or the media, delete the `Play` and create another.
 
-One `Player` runs one `Play`. When two unfinished `Play`s name the
-same `Player`, the newest one by creation time, and then by name, is
-the one that runs, and the operator deletes every older one. So a
-`Play` created while a film plays ends that film. The deleted `Play`
-reports its last position before its pod ends, and a `Play` that
-resumes it names that position in `spec.start`.
+A `Player` runs one `Play` at a time. When two unfinished `Play`
+objects name the same `Player`, the newest one runs, by creation time
+and then by name, and the operator deletes every older one. So a
+`Play` that you create while a film plays ends that film. The deleted
+`Play` reports its last position before its pod ends. To resume from
+that position, create a `Play` with the position in `spec.start`.
 
-`spec.next` names the work that follows this run. The display offers
-it on the scrubber, and when a person takes the offer the program that
-wrote the `Play` creates the next one. The `Play` carries the offer
-because the display reads no catalog, and the program that wrote it
-decides what follows.
+`spec.next` describes the work that follows this run, and the
+on-screen display offers it on the scrubber. When a person accepts the
+offer, the program that wrote the `Play` creates the next one. The
+offer is in the `Play` because the program that created the `Play`
+decides what follows, and the on-screen display reads no catalog.
 
     apiVersion: media.liken.sh/v1alpha1
     kind: Play
     metadata:
-      name: dune
+      name: nosferatu
       namespace: media
     spec:
       players: [studio]
       items:
-        - uri: nfs://nas/media/movies/Dune (2021)/Dune.mkv
+        - uri: nfs://nas/media/movies/Nosferatu (1922)/Nosferatu.mkv
           presentation:
             type: video
             hint: movie
-            title: Dune
-            year: 2021
+            title: Nosferatu
+            year: 1922
       start: "0:10:00"

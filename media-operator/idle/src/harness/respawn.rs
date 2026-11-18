@@ -1,30 +1,32 @@
-// Starting the client again inside its container when its compositor
-// restarts.
+// Restarts the client inside its container when the compositor restarts.
 //
-// A compositor restart takes the client's window, and nothing inside the
-// process can open the connection again, so the window watchdog ends the
-// process with `NO_WINDOW`. The display operator restarts its compositor
-// inside the compositor's container, so the compositor is back within a
-// second or two. If the client's exit ended its container, the kubelet would
-// count the exit as a crash, and a second restart within ten minutes would
-// leave the screen dark for 10 seconds, then 20, and so on up to 5 minutes.
+// When the compositor restarts, the client's window is gone and the process
+// cannot reconnect, so the window watchdog exits with `NO_WINDOW`. The display
+// operator restarts the compositor inside the compositor's own container. If
+// the client's exit also ended the client's container, the kubelet would count
+// a crash, and a second restart within ten minutes would leave the screen dark
+// for the kubelet's backoff: 10 seconds, then 20, doubling up to 5 minutes.
 //
-// So in a pod, the container's first process runs the client as its child.
-// When the child exits with `NO_WINDOW` because a new compositor replaced the
-// one that gave its window, the first process waits for the new compositor's
-// socket to accept a connection and starts the child again. Each compositor
-// binds the socket again, so a new compositor is a new file at the socket's
-// path. A child that got no window from a compositor that still runs ends
-// the container with `NO_WINDOW`, because starting it again would get the
-// same answer. Any other exit ends the container with the child's status, so the kubelet's
-// backoff still bounds a crash loop, and the container's restart count is
-// the count of crashes. A compositor that does not come back within
-// `COMPOSITOR_RETURN_LIMIT` also ends the container, with `NO_WINDOW`, and
-// the kubelet takes over the wait.
+// So in a pod the container's first process runs the client as a child. When
+// the child exits with `NO_WINDOW` and a new compositor has replaced the one
+// that was running when the child started, the first process waits until the
+// new compositor's socket accepts a connection and starts the child again.
+// Each compositor binds a new socket file at the same path, and `Identity`
+// tells the two files apart.
 //
-// The window grace arms this, as it arms the watchdog: the operator sets it
-// on the idle container alone, and a run by hand sets nothing, so it runs the
-// client in place.
+// The container exits in the other cases:
+// - The child exits with `NO_WINDOW`, and the compositor is the same one or
+//   no compositor answered when the child started. A new child would get the
+//   same result.
+// - The child exits with any other status. The container exits with that
+//   status, so the kubelet's backoff still limits a crash loop.
+// - No compositor accepts a connection within `COMPOSITOR_RETURN_LIMIT`. The
+//   container exits with `NO_WINDOW`, and the kubelet's restarts do the
+//   waiting.
+//
+// `IDLE_WINDOW_GRACE_SECONDS` turns this on, as it turns on the watchdog. The
+// operator sets it on the idle container only, so a run by hand runs the
+// client directly.
 
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::net::UnixStream;
@@ -36,26 +38,25 @@ use std::time::{Duration, Instant};
 
 use super::watchdog::NO_WINDOW;
 
-/// The variable that marks the child, so the child runs the client and not a
-/// second first process.
+/// Set in the child's environment, so the child runs the client instead of
+/// supervising a second child.
 const CHILD_VARIABLE: &str = "LIKEN_SCREEN_CHILD";
 
-/// How long the first process waits for the compositor to answer before it
-/// hands the wait to the kubelet. A compositor that crashed waits in the
-/// kubelet's crash backoff, which doubles up to 5 minutes, so the limit is
-/// past that cap.
+/// How long the first process waits for a compositor before it exits. A
+/// compositor container in the kubelet's crash backoff can wait up to 5
+/// minutes for its restart, so the limit is longer than that.
 const COMPOSITOR_RETURN_LIMIT: Duration = Duration::from_secs(6 * 60);
 
-/// The first and the longest pause between two looks at the compositor's
-/// socket while it does not answer. The compositor writes no event a client
-/// can wait on while it is down, so each look is one connect.
+/// The first and the longest pause between connection attempts while the
+/// compositor is down. The pause doubles after each attempt. A down
+/// compositor sends no event that a client can wait on, so each attempt is a
+/// connect.
 const FIRST_PAUSE: Duration = Duration::from_millis(100);
 const LONGEST_PAUSE: Duration = Duration::from_secs(2);
 
-/// Runs the client as a child of this process when the window grace is armed
-/// and this process is not the child already. It returns the status the
-/// container exits with, or nothing when this process should run the client
-/// itself.
+/// Runs the client as a child process when the window grace is armed and this
+/// process is not already the child. Returns the status for the container to
+/// exit with, or `None` when this process should run the client itself.
 pub fn supervise(armed: bool) -> Option<i32> {
     if !armed || std::env::var_os(CHILD_VARIABLE).is_some() {
         return None;
@@ -63,7 +64,9 @@ pub fn supervise(armed: bool) -> Option<i32> {
     let program = match std::env::current_exe() {
         Ok(program) => program,
         Err(error) => {
-            eprintln!("idle-screen: finding this program to run it as a child: {error}");
+            eprintln!(
+                "idle-screen: reading the path of this program to run the client as a child process: {error}"
+            );
             return None;
         }
     };
@@ -83,10 +86,9 @@ pub fn supervise(armed: bool) -> Option<i32> {
     Some(status)
 }
 
-/// The loop under [`supervise`]: wait for the compositor, start the child,
-/// and start it again after each `NO_WINDOW` exit that a new compositor
-/// caused. The steps are parameters so a test runs the loop over real
-/// processes and no socket.
+/// The loop of [`supervise`]. Returns the status for the container to exit
+/// with. The steps are parameters, so that tests can run the loop with real
+/// child processes and no socket.
 pub fn respawn(
     mut start: impl FnMut() -> std::io::Result<Child>,
     mut compositor_answers: impl FnMut() -> bool,
@@ -95,16 +97,16 @@ pub fn respawn(
     loop {
         if !compositor_answers() {
             eprintln!(
-                "idle-screen: the compositor did not answer within {}s; exiting {NO_WINDOW} so the kubelet restarts this container",
+                "idle-screen: the compositor did not respond within {}s, so the container exits with status {NO_WINDOW} and the kubelet restarts it",
                 COMPOSITOR_RETURN_LIMIT.as_secs()
             );
             return NO_WINDOW;
         }
-        let gave_window = compositor();
+        let compositor_at_start = compositor();
         let mut child = match start() {
             Ok(child) => child,
             Err(error) => {
-                eprintln!("idle-screen: starting the client: {error}");
+                eprintln!("idle-screen: starting the client process: {error}");
                 return 1;
             }
         };
@@ -114,27 +116,27 @@ pub fn respawn(
         let code = match status {
             Ok(status) => exit_code(status),
             Err(error) => {
-                eprintln!("idle-screen: waiting for the client: {error}");
+                eprintln!("idle-screen: waiting for the client process: {error}");
                 return 1;
             }
         };
         if code != NO_WINDOW || STOPPING.load(Ordering::SeqCst) {
             return code;
         }
-        if gave_window.is_none() || compositor() == gave_window {
+        if compositor_at_start.is_none() || compositor() == compositor_at_start {
             eprintln!(
-                "idle-screen: the client got no window from a compositor that still runs; exiting {NO_WINDOW} so the kubelet restarts this container"
+                "idle-screen: the compositor is running and did not give the client a window, so the container exits with status {NO_WINDOW} and the kubelet restarts it"
             );
             return NO_WINDOW;
         }
         eprintln!(
-            "idle-screen: the client lost its window, and it starts again when the compositor answers"
+            "idle-screen: the client lost its window, and the supervisor starts it again when the compositor responds"
         );
     }
 }
 
-/// The status a shell reports: the child's exit code, or 128 and the signal
-/// that ended it.
+/// The status that a shell reports: the exit code, or 128 plus the number of
+/// the signal that ended the child.
 fn exit_code(status: ExitStatus) -> i32 {
     match (status.code(), status.signal()) {
         (Some(code), _) => code,
@@ -143,8 +145,9 @@ fn exit_code(status: ExitStatus) -> i32 {
     }
 }
 
-/// The compositor's socket, as a Wayland client finds it: `WAYLAND_DISPLAY`
-/// when it is a path, or the name inside `XDG_RUNTIME_DIR`.
+/// The path of the compositor's socket, found as a Wayland client finds it:
+/// `WAYLAND_DISPLAY` when it is an absolute path, otherwise that name inside
+/// `XDG_RUNTIME_DIR`. Returns `None` when the variables it needs are not set.
 fn compositor_socket() -> Option<PathBuf> {
     let display = PathBuf::from(std::env::var_os("WAYLAND_DISPLAY")?);
     if display.is_absolute() {
@@ -153,13 +156,13 @@ fn compositor_socket() -> Option<PathBuf> {
     Some(PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR")?).join(display))
 }
 
-/// One compositor: the device, the inode, and the change time of the socket it
-/// bound. The kernel can give a new socket the inode of the one it replaced, so
-/// the change time is what tells them apart.
+/// Identifies one compositor by the device, inode, and change time (seconds
+/// and nanoseconds) of the socket it bound. A new socket can reuse the inode
+/// of the one it replaced, so the change time is what tells them apart.
 pub type Identity = (u64, u64, i64, i64);
 
-/// The compositor that answers on the socket now, or nothing when none
-/// answers or the container names no socket.
+/// The identity of the compositor that accepts connections on the socket now,
+/// or `None` when none does or the container has no socket path.
 fn compositor_identity(socket: Option<&PathBuf>) -> Option<Identity> {
     let socket = socket?;
     UnixStream::connect(socket).ok()?;
@@ -172,9 +175,9 @@ fn compositor_identity(socket: Option<&PathBuf>) -> Option<Identity> {
     ))
 }
 
-/// Waits until the compositor accepts a connection, up to the limit. A
-/// container with no socket to name has nothing to look at, so the child
-/// starts and its own connect decides.
+/// Waits up to `limit` for the compositor to accept a connection, and returns
+/// whether it did. With no socket path it returns true, and the child's own
+/// connect decides.
 fn await_compositor(socket: Option<&PathBuf>, limit: Duration) -> bool {
     let Some(socket) = socket else {
         return true;
@@ -191,15 +194,17 @@ fn await_compositor(socket: Option<&PathBuf>, limit: Duration) -> bool {
     true
 }
 
-/// The running child's pid, and whether the kubelet asked the container to
-/// stop. The signal handler reads both, so they are atomics.
+/// The running child's pid, or 0, and whether a stop signal has arrived. The
+/// signal handler reads both, so they are atomics.
 static CHILD: AtomicI32 = AtomicI32::new(0);
 static STOPPING: AtomicBool = AtomicBool::new(false);
 
-/// Passes the kubelet's SIGTERM, and a SIGINT, to the child. The first
-/// process of a container is pid 1 in the container's own process namespace,
-/// and the kernel delivers no signal to pid 1 that it does not handle, so
-/// without the handler the stop would wait out the grace period.
+/// Forwards SIGTERM (from the kubelet) and SIGINT to the child, and records
+/// that a stop was requested so the loop does not start the child again. The
+/// first process of a container is pid 1 in the container's process
+/// namespace, and the kernel does not deliver a signal to pid 1 unless it has
+/// a handler. Without this handler, a stop would wait out the pod's
+/// termination grace period.
 fn forward_stops() {
     extern "C" fn pass(signal: libc::c_int) {
         STOPPING.store(true, Ordering::SeqCst);
@@ -226,26 +231,26 @@ fn forward_stops() {
 mod tests {
     use super::*;
 
-    // A child that exits with the code it is given.
+    /// A child process that exits with `code`.
     fn exits(code: i32) -> std::io::Result<Child> {
         Command::new("sh")
             .args(["-c", &format!("exit {code}")])
             .spawn()
     }
 
-    // The compositors the loop reads, one per read, so a test states each
-    // compositor restart.
+    /// A reader that returns each given identity in turn, then `None`, so a
+    /// test scripts each compositor restart.
     fn compositors(identities: Vec<Option<Identity>>) -> impl FnMut() -> Option<Identity> {
         let mut identities = identities.into_iter();
         move || identities.next().flatten()
     }
 
     #[test]
-    fn a_child_that_a_new_compositor_took_the_window_from_starts_again() {
+    fn a_child_that_lost_its_window_to_a_new_compositor_is_started_again() {
         let mut codes = vec![NO_WINDOW, NO_WINDOW, 0].into_iter();
         let mut starts = 0;
 
-        // Each child's compositor is replaced while it runs.
+        // A new compositor replaces the old one while each child runs.
         let status = respawn(
             || {
                 starts += 1;
@@ -284,7 +289,7 @@ mod tests {
     }
 
     #[test]
-    fn a_child_with_no_window_from_a_compositor_that_still_runs_ends_the_container() {
+    fn a_child_that_got_no_window_from_a_running_compositor_ends_the_container() {
         let mut starts = 0;
 
         let status = respawn(
@@ -301,7 +306,7 @@ mod tests {
     }
 
     #[test]
-    fn a_container_that_names_no_socket_hands_a_lost_window_to_the_kubelet() {
+    fn a_container_with_no_socket_path_exits_with_no_window_when_the_child_does() {
         let mut starts = 0;
 
         let status = respawn(
@@ -335,7 +340,7 @@ mod tests {
     }
 
     #[test]
-    fn a_compositor_that_does_not_come_back_hands_the_wait_to_the_kubelet() {
+    fn a_compositor_that_never_returns_exits_with_no_window_and_starts_no_child() {
         let mut starts = 0;
 
         let status = respawn(

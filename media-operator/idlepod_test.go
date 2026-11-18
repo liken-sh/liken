@@ -1,10 +1,5 @@
 package main
 
-// These tests cover the standing idle pod a Player becomes: one claim
-// that holds the shared draw device and the render node, one pod that
-// runs the idle client, and the reconcile
-// that creates each once and builds nothing when the idle screen is off.
-
 import (
 	"net/http"
 	"reflect"
@@ -14,9 +9,8 @@ import (
 	"testing"
 )
 
-// One Player that drives a screen, with a display selector the idle claim
-// copies and a render node the idle client draws through.
-func standingIdlePlayer() *Player {
+// playerWithDisplay returns a Player with a display and a render node.
+func playerWithDisplay() *Player {
 	return &Player{
 		Metadata: ObjectMeta{Name: "theater", Namespace: "house", UID: "player-uid"},
 		Spec: PlayerSpec{
@@ -29,8 +23,6 @@ func standingIdlePlayer() *Player {
 	}
 }
 
-// containerEnv is one container's environment as a map, for a test that
-// reads the whole of it rather than one variable.
 func containerEnv(container Container) map[string]string {
 	env := map[string]string{}
 	for _, entry := range container.Env {
@@ -39,26 +31,20 @@ func containerEnv(container Container) map[string]string {
 	return env
 }
 
-// testIdleImage is the client IDLE_IMAGE names, which every idle
-// container runs where no tier of the idle policy names an image.
+// testIdleImage stands for IDLE_IMAGE, the image a Player runs when no
+// idle policy sets one.
 const testIdleImage = "ghcr.io/liken-sh/media-operator-idle:2026.09.01-001"
 
-// plainIdlePod builds the idle client pod of a Player that states no
-// idle policy and owns no remotes, for the tests that are about neither.
 func plainIdlePod(player *Player, claim *ResourceClaim, busAddress, topicBase, timeZone string) *Pod {
 	return buildIdlePod(player, claim, busAddress, topicBase, timeZone,
 		resolveIdle(nil, nil, testIdleImage), nil)
 }
 
-// The claim holds two requests, the draw device on the Player's own
-// screen and the render node, and is owned by the Player. The draw
-// request carries the class from config and the Player's display
-// selector, so the idle client draws to the same screen a Play does.
-func TestBuildIdleClaimHoldsTheDrawDeviceAndRenderNode(t *testing.T) {
-	claim := buildIdleClaim(standingIdlePlayer(), "display-draw")
+func TestBuildIdleClaimRequestsTheDrawDeviceAndRenderNode(t *testing.T) {
+	claim := buildIdleClaim(playerWithDisplay(), "display-draw")
 
 	if claim.APIVersion != claimAPIVersion || claim.Kind != "ResourceClaim" {
-		t.Errorf("apiVersion = %q, kind = %q", claim.APIVersion, claim.Kind)
+		t.Errorf("apiVersion = %q, kind = %q, want %q and ResourceClaim", claim.APIVersion, claim.Kind, claimAPIVersion)
 	}
 	if claim.Metadata.Name != "theater-idle-devices" {
 		t.Errorf("name = %q, want theater-idle-devices", claim.Metadata.Name)
@@ -109,10 +95,8 @@ func TestBuildIdleClaimHoldsTheDrawDeviceAndRenderNode(t *testing.T) {
 	}
 }
 
-// A Player with no render node yields the draw request alone, the way an
-// idle screen driven by a machine with no separate GPU still draws.
 func TestBuildIdleClaimOmitsTheRenderRequestWithoutARenderNode(t *testing.T) {
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 	player.Spec.Render = nil
 
 	requests := buildIdleClaim(player, "display-draw").Spec.Devices.Requests
@@ -124,12 +108,8 @@ func TestBuildIdleClaimOmitsTheRenderRequestWithoutARenderNode(t *testing.T) {
 	}
 }
 
-// The pod runs the image IDLE_IMAGE names, with that image's own
-// entrypoint. It carries the household timezone, the unit's identity, and
-// the bus in its environment, holds the draw and render requests,
-// restarts on a crash, and is owned by the Player.
 func TestBuildIdlePodRunsTheIdleImage(t *testing.T) {
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 	claim := buildIdleClaim(player, "display-draw")
 	pod := plainIdlePod(player, claim, testBusAddress, testTopicBase, "America/New_York")
 
@@ -194,12 +174,8 @@ func TestBuildIdlePodRunsTheIdleImage(t *testing.T) {
 	}
 }
 
-// A household's own idle image may carry no tag, by digest or by
-// naming a floating tag some other tool moves. The client reports no
-// version rather than a guessed one, the way operatorVersion answers
-// the empty string for its own untagged pod.
 func TestBuildIdlePodOmitsTheVersionForAnUntaggedImage(t *testing.T) {
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 	pod := buildIdlePod(player, buildIdleClaim(player, "display-draw"),
 		testBusAddress, testTopicBase, "",
 		resolveIdle(nil, nil, "ghcr.io/liken-sh/media-operator-idle@sha256:abc"), nil)
@@ -210,11 +186,10 @@ func TestBuildIdlePodOmitsTheVersionForAnUntaggedImage(t *testing.T) {
 	}
 }
 
-// The idle pod names its component, so a Layout region in
-// display-operator selects it. The value is not the playback value, so
-// the operator's own pod watch still reads playback pods alone.
-func TestBuildIdlePodNamesItsComponent(t *testing.T) {
-	player := standingIdlePlayer()
+// The label value differs from the playback pod's, so isPlaybackPod does
+// not match the idle pod.
+func TestBuildIdlePodHasTheIdleComponentLabel(t *testing.T) {
+	player := playerWithDisplay()
 	pod := plainIdlePod(player, buildIdleClaim(player, "display-draw"),
 		testBusAddress, testTopicBase, "America/New_York")
 
@@ -224,12 +199,11 @@ func TestBuildIdlePodNamesItsComponent(t *testing.T) {
 	}
 }
 
-// The idle client draws on the screen machine and has nowhere else to
-// run, so it tolerates the taint that keeps unrelated work off that
-// machine. It tolerates that key alone, and for scheduling alone, so a
-// NoExecute taint still moves it away.
+// The idle pod tolerates the NoSchedule taint that keeps other workloads
+// off a screen machine, and nothing else, so a NoExecute taint still
+// evicts it.
 func TestBuildIdlePodToleratesThePlayerNodeTaint(t *testing.T) {
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 	pod := plainIdlePod(player, buildIdleClaim(player, "display-draw"),
 		testBusAddress, testTopicBase, "America/New_York")
 
@@ -239,12 +213,8 @@ func TestBuildIdlePodToleratesThePlayerNodeTaint(t *testing.T) {
 	}
 }
 
-// The idle client pod runs the client alone. The client holds the
-// timers, the focus gate, the shade, the volume step, and the panel
-// desire in its own process, so no unit's client pod carries a second
-// container.
 func TestBuildIdlePodMountsNoServiceAccountToken(t *testing.T) {
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 	pod := plainIdlePod(player, buildIdleClaim(player, "display-draw"),
 		testBusAddress, testTopicBase, "America/New_York")
 
@@ -252,8 +222,8 @@ func TestBuildIdlePodMountsNoServiceAccountToken(t *testing.T) {
 	mustMatch(t, *pod.Spec.AutomountServiceAccountToken, false)
 }
 
-func TestBuildIdlePodCarriesNoSecondContainer(t *testing.T) {
-	player := standingIdlePlayer()
+func TestBuildIdlePodHasOnlyTheClientContainer(t *testing.T) {
+	player := playerWithDisplay()
 	pod := plainIdlePod(player, buildIdleClaim(player, "display-draw"),
 		testBusAddress, testTopicBase, "America/New_York")
 
@@ -265,12 +235,8 @@ func TestBuildIdlePodCarriesNoSecondContainer(t *testing.T) {
 	}
 }
 
-// The idle client holds a window for its whole life, so its container
-// carries the grace it waits for one. The client exits non-zero when the
-// window never arrives, and the kubelet restarts the container until the
-// compositor is back.
 func TestBuildIdlePodArmsTheWindowWatchdog(t *testing.T) {
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 	pod := plainIdlePod(player, buildIdleClaim(player, "display-draw"),
 		testBusAddress, testTopicBase, "")
 
@@ -278,24 +244,17 @@ func TestBuildIdlePodArmsTheWindowWatchdog(t *testing.T) {
 		strconv.Itoa(idleWindowGraceSeconds))
 }
 
-// An unset household zone carries no TZ, so the clock stays on UTC. The
-// identity variables still travel, because they name the unit and do not
-// depend on the zone.
 func TestBuildIdlePodOmitsTheTimeZoneWhenUnset(t *testing.T) {
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 	pod := plainIdlePod(player, buildIdleClaim(player, "display-draw"), testBusAddress, testTopicBase, "")
 
 	env := containerEnv(pod.Spec.Containers[0])
 	if _, held := env[timeZoneVariable]; held {
-		t.Errorf("env carries %s, want it omitted: %+v", timeZoneVariable, env)
+		t.Errorf("env has %s, want it omitted: %+v", timeZoneVariable, env)
 	}
 	mustMatch(t, env[idlePlayerNameVariable], "theater")
 }
 
-// The idle pod carries the unit's friendly name and its parts, resolved from
-// spec.displayName and each selection's displayName. The parts join with
-// newlines in display, sink, remote order, so the client splits them into
-// the bottom-left list.
 func TestBuildIdlePodCarriesTheIdentity(t *testing.T) {
 	player := &Player{
 		Metadata: ObjectMeta{Name: "theater", Namespace: "house", UID: "player-uid"},
@@ -318,10 +277,8 @@ func TestBuildIdlePodCarriesTheIdentity(t *testing.T) {
 	}
 }
 
-// The friendly name falls back to the object name when spec.displayName is
-// unset, so an unnamed Player still shows a name on the idle screen.
 func TestIdlePlayerNameFallsBackToTheObjectName(t *testing.T) {
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 	if got := idlePlayerName(player); got != "theater" {
 		t.Errorf("idlePlayerName = %q, want theater", got)
 	}
@@ -332,10 +289,6 @@ func TestIdlePlayerNameFallsBackToTheObjectName(t *testing.T) {
 	}
 }
 
-// idleComponents lists the display, then the sinks, then the remotes, in spec
-// order. Each name resolves to its displayName when set, and to a plain
-// fallback when unset: the DeviceClass for a device, the referenced Remote for
-// a controller.
 func TestIdleComponentsOrderAndFallback(t *testing.T) {
 	player := &Player{
 		Spec: PlayerSpec{
@@ -363,8 +316,6 @@ func TestIdleComponentsOrderAndFallback(t *testing.T) {
 	}
 }
 
-// A Player with no display and no parts yields no components, so buildIdlePod
-// sends no parts variable and the idle screen draws the name alone.
 func TestBuildIdlePodOmitsTheComponentsWhenThereAreNone(t *testing.T) {
 	player := &Player{Metadata: ObjectMeta{Name: "solo", Namespace: "house"}}
 	if got := idleComponents(player); len(got) != 0 {
@@ -378,23 +329,21 @@ func TestBuildIdlePodOmitsTheComponentsWhenThereAreNone(t *testing.T) {
 		env[entry.Name] = entry.Value
 	}
 	if _, held := env[idlePlayerComponentsVariable]; held {
-		t.Errorf("env carries %s, want it omitted: %+v", idlePlayerComponentsVariable, env)
+		t.Errorf("env has %s, want it omitted: %+v", idlePlayerComponentsVariable, env)
 	}
 	if env[idlePlayerNameVariable] != "solo" {
 		t.Errorf("%s = %q, want solo", idlePlayerNameVariable, env[idlePlayerNameVariable])
 	}
 }
 
-// The first reconcile creates the idle claim and the standing idle pod. A
-// second reconcile creates nothing, because both are already there.
 func TestReconcileIdleCreatesTheClaimAndThePodOnce(t *testing.T) {
 	cluster := newFakeCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	media.idleDisplayClass = "display-draw"
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 
 	if err := media.reconcileIdle(player, "America/New_York", nil); err != nil {
-		t.Fatalf("first reconcile: %v", err)
+		t.Fatalf("reconciling the idle pod the first time: %v", err)
 	}
 
 	claim, held := cluster.claims["theater-idle-devices"]
@@ -405,12 +354,12 @@ func TestReconcileIdleCreatesTheClaimAndThePodOnce(t *testing.T) {
 		t.Errorf("request = %q, want draw", got)
 	}
 	if _, held := cluster.pods["theater-idle"]; !held {
-		t.Fatalf("no standing idle pod was created: %v", cluster.requests)
+		t.Fatalf("no idle pod was created: %v", cluster.requests)
 	}
 
 	created := len(cluster.requests)
 	if err := media.reconcileIdle(player, "America/New_York", nil); err != nil {
-		t.Fatalf("second reconcile: %v", err)
+		t.Fatalf("reconciling the idle pod the second time: %v", err)
 	}
 	posts := 0
 	for _, request := range cluster.requests[created:] {
@@ -419,47 +368,40 @@ func TestReconcileIdleCreatesTheClaimAndThePodOnce(t *testing.T) {
 		}
 	}
 	if posts != 0 {
-		t.Errorf("the second reconcile created objects: %v", cluster.requests[created:])
+		t.Errorf("the second reconcile sent POST requests %v, want none", cluster.requests[created:])
 	}
 }
 
-// A Player that drives no screen gets no idle pod, so an audio-only unit
-// creates nothing.
 func TestReconcileIdleBuildsNothingWithoutADisplay(t *testing.T) {
 	cluster := newFakeCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	media.idleDisplayClass = "display-draw"
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 	player.Spec.Display = nil
 
 	if err := media.reconcileIdle(player, "America/New_York", nil); err != nil {
-		t.Fatalf("reconcile: %v", err)
+		t.Fatalf("reconciling the idle pod: %v", err)
 	}
 	if len(cluster.claims) != 0 || len(cluster.pods) != 0 {
 		t.Errorf("built claims %v and pods %v, want none", cluster.claims, cluster.pods)
 	}
 }
 
-// An unset display class turns the idle screen off, so every Player
-// creates nothing however it is shaped.
 func TestReconcileIdleBuildsNothingWhenTheClassIsUnset(t *testing.T) {
 	cluster := newFakeCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 
 	if err := media.reconcileIdle(player, "America/New_York", nil); err != nil {
-		t.Fatalf("reconcile: %v", err)
+		t.Fatalf("reconciling the idle pod: %v", err)
 	}
 	if len(cluster.claims) != 0 || len(cluster.pods) != 0 {
 		t.Errorf("built claims %v and pods %v, want none", cluster.claims, cluster.pods)
 	}
 }
 
-// The idle client pod carries the resolved quiet window and the two
-// remote lists, one per line and aligned by position, so the client
-// pairs each controller's presses with the mark that gates them.
 func TestBuildIdlePodCarriesTheFadePolicyAndTheRemotes(t *testing.T) {
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 	player.Spec.Remotes = []PlayerRemote{{Name: "sofa"}, {Name: "armchair"}}
 	pod := buildIdlePod(player, buildIdleClaim(player, "display-draw"),
 		testBusAddress, testTopicBase, "", resolveIdle(fadeAfter(60), nil, testIdleImage),
@@ -473,12 +415,8 @@ func TestBuildIdlePodCarriesTheFadePolicyAndTheRemotes(t *testing.T) {
 		"liken/media/remotes/house/sofa/focus\nliken/media/remotes/house/armchair/focus")
 }
 
-// The idle client gates every press on the mark, so its container
-// carries the Player's own object name beside the friendly name the
-// screen draws. A mark never carries the friendly name, so the two
-// variables differ on a Player that states a displayName.
-func TestTheIdlePodCarriesBothNames(t *testing.T) {
-	player := standingIdlePlayer()
+func TestBuildIdlePodHasBothTheObjectNameAndTheDisplayName(t *testing.T) {
+	player := playerWithDisplay()
 	player.Spec.DisplayName = "The Theater"
 	client := plainIdlePod(player, buildIdleClaim(player, "display-draw"),
 		testBusAddress, testTopicBase, "")
@@ -487,11 +425,8 @@ func TestTheIdlePodCarriesBothNames(t *testing.T) {
 	mustMatch(t, envValue(client.Spec.Containers[0], idlePlayerNameVariable), "The Theater")
 }
 
-// The commands topic and the panel topic reach every idle client,
-// because a delegate answers the ask on the commands topic and every
-// client states the panel desire, whatever the unit is made of.
 func TestBuildIdlePodCarriesTheCommandsAndPanelTopics(t *testing.T) {
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 	pod := plainIdlePod(player, buildIdleClaim(player, "display-draw"),
 		testBusAddress, testTopicBase, "")
 
@@ -502,11 +437,8 @@ func TestBuildIdlePodCarriesTheCommandsAndPanelTopics(t *testing.T) {
 		playerPanelTopic(testTopicBase, "house", "theater"))
 }
 
-// The power topic travels on every idle client pod, wired through a
-// Receiver or not, so the retained status and not the pod says which
-// way a power press goes.
 func TestBuildIdlePodCarriesThePowerTopic(t *testing.T) {
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 	pod := plainIdlePod(player, buildIdleClaim(player, "display-draw"),
 		testBusAddress, testTopicBase, "")
 
@@ -514,10 +446,9 @@ func TestBuildIdlePodCarriesThePowerTopic(t *testing.T) {
 		playerPowerTopic(testTopicBase, "house", "theater"))
 }
 
-// Wiring a Receiver to a unit, or removing one, leaves the idle pod's
-// spec as it was, so the pod is not replaced and the screen does not go
-// blank while its replacement starts.
-func TestTheIdlePodIsTheSameWithAndWithoutAReceiver(t *testing.T) {
+// Adding or removing a Receiver must not change the idle pod's spec,
+// because a changed spec replaces the pod and blanks the screen.
+func TestBuildIdlePodIsTheSameWithAndWithoutAReceiver(t *testing.T) {
 	idlePod := func(cluster *fakeCluster) PodSpec {
 		claim := cluster.claims[idleClaimName("theater")]
 		mustSucceed(t, stampTemplateHash(&claim.Metadata, claim.Spec))
@@ -535,10 +466,8 @@ func TestTheIdlePodIsTheSameWithAndWithoutAReceiver(t *testing.T) {
 	}
 }
 
-// A Player that owns no controller sends neither remote list, so its idle
-// screen fades on the window alone and wakes on a Play.
 func TestBuildIdlePodOmitsTheRemoteListsWithoutRemotes(t *testing.T) {
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 	pod := plainIdlePod(player, buildIdleClaim(player, "display-draw"),
 		testBusAddress, testTopicBase, "")
 
@@ -551,10 +480,8 @@ func TestBuildIdlePodOmitsTheRemoteListsWithoutRemotes(t *testing.T) {
 	}
 }
 
-// The gather reads spec.remotes in spec order and builds each
-// controller's two topics, so the pod pairs them by position.
 func TestGatherIdleRemotesBuildsEachControllersTopics(t *testing.T) {
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 	player.Spec.Remotes = []PlayerRemote{{Name: "sofa"}, {Name: "armchair"}}
 
 	remotes := gatherIdleRemotes(player, testTopicBase)
@@ -574,11 +501,10 @@ func TestGatherIdleRemotesBuildsEachControllersTopics(t *testing.T) {
 	}
 }
 
-// A Remote a Player names that does not exist still gets its topics, so
-// a missing object breaks nothing: the controller that is not there
-// publishes nothing on them.
+// A Remote that does not exist still gets topics. Nothing publishes on
+// them, so the missing Remote causes no error.
 func TestGatherIdleRemotesBuildsTopicsForAMissingRemote(t *testing.T) {
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 	player.Spec.Remotes = []PlayerRemote{{Name: "ghost"}}
 
 	remotes := gatherIdleRemotes(player, testTopicBase)
@@ -592,11 +518,8 @@ func TestGatherIdleRemotesBuildsTopicsForAMissingRemote(t *testing.T) {
 	}
 }
 
-// The off window is set on every idle client pod, because the resolver
-// settles it for every Player and zero is a policy the client reads.
-// The off mode stays with the operator, so the pod carries none.
 func TestBuildIdlePodCarriesTheOffWindow(t *testing.T) {
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 	idle := resolveIdle(&IdlePolicy{
 		OffAfterSeconds: ptr(int64(1800)),
 		OffMode:         offModePower,
@@ -608,26 +531,18 @@ func TestBuildIdlePodCarriesTheOffWindow(t *testing.T) {
 	mustMatch(t, envValue(pod.Spec.Containers[0], idleOffAfterSecondsVariable), "1800")
 }
 
-// namedIdleImage is the image a tier names for the idle client in these
-// tests. It is not the client IDLE_IMAGE gives every screen, so a pod
-// that runs it tells the override and the fallback apart.
+// namedIdleImage differs from testIdleImage, so a pod's image shows
+// whether the policy or the default supplied it.
 const namedIdleImage = "ghcr.io/liken-sh/media-browser:2026.09.01-001"
 
-// namedIdlePod builds the idle pod of a Player whose idle policy names
-// an image, with no household default under it.
 func namedIdlePod(player *Player, image string) *Pod {
 	return buildIdlePod(player, buildIdleClaim(player, "display-draw"),
 		testBusAddress, testTopicBase, "America/New_York",
 		resolveIdle(&IdlePolicy{Image: image}, nil, testIdleImage), nil)
 }
 
-// A Player that names an image runs that image in place of the one
-// IDLE_IMAGE gives it, and the image alone changes. A client that draws a
-// screen needs the same things whoever wrote it, so the container keeps
-// every claim and every variable, and it starts with its own entrypoint
-// either way.
 func TestBuildIdlePodRunsTheNamedImageAndChangesNothingElse(t *testing.T) {
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 	player.Spec.Sinks = []PlayerDevice{{Class: "audio-sink"}}
 	fallback := plainIdlePod(player, buildIdleClaim(player, "display-draw"),
 		testBusAddress, testTopicBase, "America/New_York")
@@ -649,15 +564,13 @@ func TestBuildIdlePodRunsTheNamedImageAndChangesNothingElse(t *testing.T) {
 	}
 }
 
-// The volume topic is the speaker gate: a unit with speakers has a
-// level to draw and step, and a unit without has none.
-func TestBuildIdlePodCarriesTheVolumeTopicToTheClientOnlyWithSinks(t *testing.T) {
-	speakerless := standingIdlePlayer()
+func TestBuildIdlePodSetsTheVolumeTopicOnlyWithSinks(t *testing.T) {
+	speakerless := playerWithDisplay()
 	pod := plainIdlePod(speakerless, buildIdleClaim(speakerless, "display-draw"),
 		testBusAddress, testTopicBase, "")
 	mustMatch(t, envValue(pod.Spec.Containers[0], playerVolumeTopicVariable), "")
 
-	speakered := standingIdlePlayer()
+	speakered := playerWithDisplay()
 	speakered.Spec.Sinks = []PlayerDevice{{Class: "audio-sink"}}
 	pod = plainIdlePod(speakered, buildIdleClaim(speakered, "display-draw"),
 		testBusAddress, testTopicBase, "")
@@ -665,8 +578,8 @@ func TestBuildIdlePodCarriesTheVolumeTopicToTheClientOnlyWithSinks(t *testing.T)
 		playerVolumeTopic(testTopicBase, "house", "theater"))
 }
 
-// idleObjects names the claims and pods the cluster holds, sorted, so a
-// case states the whole of what one controller stands up.
+// idleObjects returns the sorted names of every claim and pod in the
+// cluster.
 func idleObjects(cluster *fakeCluster) []string {
 	var names []string
 	for name := range cluster.claims {
@@ -679,11 +592,7 @@ func idleObjects(cluster *fakeCluster) []string {
 	return names
 }
 
-// The resolved controller decides which objects stand. This operator's
-// own name stands the claim and the idle client pod. A delegate stands
-// the claim alone, and the delegate's own operator builds the pod that
-// draws. Under media.liken.sh/none nothing stands.
-func TestReconcileIdleStandsWhatTheControllerCallsFor(t *testing.T) {
+func TestReconcileIdleCreatesWhatTheControllerNeeds(t *testing.T) {
 	cases := []struct {
 		name       string
 		controller string
@@ -710,7 +619,7 @@ func TestReconcileIdleStandsWhatTheControllerCallsFor(t *testing.T) {
 			cluster := newFakeCluster()
 			media := testOperator(t, cluster, make(chan struct{}, 1))
 			media.idleDisplayClass = "display-draw"
-			player := standingIdlePlayer()
+			player := playerWithDisplay()
 			if one.controller != "" {
 				player.Spec.Idle = &IdlePolicy{Controller: one.controller}
 			}
@@ -722,48 +631,39 @@ func TestReconcileIdleStandsWhatTheControllerCallsFor(t *testing.T) {
 	}
 }
 
-// a household that names a delegate on the MediaPreferences and
-// nothing on the Player takes the delegate, because the controller
-// resolves through the same tiers the image does.
-func TestReconcileIdleReadsTheHouseholdController(t *testing.T) {
+func TestReconcileIdleUsesTheControllerFromMediaPreferences(t *testing.T) {
 	cluster := newFakeCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	media.idleDisplayClass = "display-draw"
 
-	mustSucceed(t, media.reconcileIdle(standingIdlePlayer(), "America/New_York",
+	mustSucceed(t, media.reconcileIdle(playerWithDisplay(), "America/New_York",
 		&IdlePolicy{Controller: "library.liken.sh/media-browser"}))
 
 	mustMatchAll(t, idleObjects(cluster), []string{"claim/theater-idle-devices"})
 }
 
-// A unit switched to media.liken.sh/none loses the claim, its holders,
-// and the idle client pod, so nothing draws and the screen shows the
-// compositor's background.
-func TestReconcileIdleClearsWhatStandsUnderNone(t *testing.T) {
+func TestReconcileIdleDeletesTheObjectsUnderNone(t *testing.T) {
 	cluster := newFakeCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	media.idleDisplayClass = "display-draw"
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 	mustSucceed(t, media.reconcileIdle(player, "America/New_York", nil))
 
 	player.Spec.Idle = &IdlePolicy{Controller: idleControllerNone}
-	// One pass clears both. The claim takes its holders with it, and
-	// the idle client pod is one of them.
+	// One pass deletes both, because deleting the claim also deletes the
+	// pods that use it.
 	mustSucceed(t, media.reconcileIdle(player, "America/New_York", nil))
 
 	if got := idleObjects(cluster); len(got) != 0 {
-		t.Errorf("objects stand under none: %v", got)
+		t.Errorf("objects remain after the idle controller is none: %v, want none", got)
 	}
 }
 
-// A cluster on an older release carries a <player>-idle-command pod
-// that nothing builds any more. The pass deletes it, so it stops
-// stepping the volume beside the client that holds those rules.
-func TestReconcileIdleDeletesThePodAnOlderReleaseStood(t *testing.T) {
+func TestReconcileIdleDeletesTheRetiredCommandPod(t *testing.T) {
 	cluster := newFakeCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	media.idleDisplayClass = "display-draw"
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 	retired := idlePodName(player.Metadata.Name) + retiredIdleCommandPodSuffix
 	cluster.pods[retired] = &Pod{
 		Metadata: ObjectMeta{Name: retired, Namespace: player.Metadata.Namespace},
@@ -775,14 +675,14 @@ func TestReconcileIdleDeletesThePodAnOlderReleaseStood(t *testing.T) {
 		"claim/theater-idle-devices", "pod/theater-idle"})
 }
 
-// A cluster that never ran the older release holds no such pod. The
-// pods watch does not select that pod, so the operator reads it from the API
-// server, once for each Player, and writes nothing.
+// The pods watch does not see the retired command pod, so the operator
+// reads it from the API server once for each Player and not on every
+// pass.
 func TestReconcileIdleReadsTheRetiredPodOnceWhenNoneStands(t *testing.T) {
 	cluster := newFakeCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	media.idleDisplayClass = "display-draw"
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 	retired := idlePodName(player.Metadata.Name) + retiredIdleCommandPodSuffix
 
 	mustSucceed(t, media.reconcileIdle(player, "America/New_York", nil))

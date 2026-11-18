@@ -1,8 +1,8 @@
 package main
 
-// These tests run whole passes against a small API server that holds
-// the kinds this operator reads and writes, so a pass is proved by what
-// it left behind.
+// These tests run whole passes against a fake API server that holds the
+// kinds this operator reads and writes, and check what each pass left
+// behind.
 
 import (
 	"encoding/json"
@@ -22,9 +22,10 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events/eventstest"
 )
 
-// The fake cluster: one map per kind, and the list of requests a pass
-// made. The Events a pass posts go to events, in front of the cluster's
-// own handler, so requests holds no Event.
+// fakeCluster holds one map for each kind that the operator reads and
+// writes, and the list of requests that the passes made. The Events
+// that a pass posts go to events, in front of the cluster's own
+// handler, so requests has no Event.
 type fakeCluster struct {
 	events *eventstest.Events
 
@@ -37,109 +38,115 @@ type fakeCluster struct {
 	pods       map[string]*Pod
 	requests   []string
 
-	// podsLinger names the pods this server leaves standing after a
-	// delete, with a deletionTimestamp on them, the way a real pod stays
-	// Terminating while its containers stop.
+	// podsLinger names the pods that this server keeps after a delete,
+	// with a deletionTimestamp set, as a real pod stays Terminating
+	// while its containers stop.
 	podsLinger map[string]bool
 
-	// claimsLinger names the claims this server leaves standing after a
-	// delete, the way a real claim stays until no pod holds it.
+	// claimsLinger names the claims that this server keeps after a
+	// delete, as a real claim stays until no pod uses it.
 	claimsLinger map[string]bool
 
-	// The hardware the display-operator publishes: one Display
-	// per panel, and the slices that name each allocated device. applies
-	// is every apply this operator sent, in order, the refused ones
-	// included.
+	// The hardware that display-operator publishes: one Display for
+	// each panel, and the ResourceSlices that name each allocated
+	// device. applies is every apply that this operator sent, in order,
+	// including the refused ones.
 	displays map[string]*Display
 	slices   []ResourceSlice
 	applies  []displayApplied
 
-	// The bonded devices the bluetooth-operator publishes, one per
-	// controller, keyed by the device's address in its lowercase dashed
-	// form.
+	// The bonded devices that bluetooth-operator publishes, one for
+	// each controller, keyed by the device address in lowercase with
+	// dashes.
 	peripherals map[string]*Peripheral
 
-	// The equipment the equipment operator publishes, one Receiver per
-	// piece of equipment, and every session apply this operator sent, in
-	// order, the refused ones included.
+	// The equipment that equipment-operator publishes, one Receiver for
+	// each piece of equipment. sessions is every status.session apply
+	// that this operator sent, and specReleases is every spec apply
+	// that removes spec.session, in order, including the refused ones.
 	receivers       map[string]*Receiver
 	sessions        []receiverApplied
 	specReleases    []receiverApplied
 	sessionsFail    bool
 	receiversAbsent bool
 
-	// The Sinks the audio operator publishes, and every session apply
-	// this operator sent to one, in order. The Televisions the equipment
-	// operator publishes, whose screen asks the pass relays.
+	// The Sinks that audio-operator publishes, and every session apply
+	// that this operator sent to a Sink, in order. The Televisions that
+	// equipment-operator publishes, whose screenAsk requests the pass
+	// relays.
 	sinks        map[string]*Sink
 	sinkSessions []sinkApplied
 	televisions  map[string]*Television
 
-	// podPatchFails is a pod label patch the API server refuses, the
-	// failure a pass answers by leaving the pod unlabeled and patching
-	// again on the next pass.
+	// podPatchFails makes the API server refuse a pod label patch. A
+	// pass leaves the pod unlabeled and patches it again on the next
+	// pass.
 	podPatchFails bool
 
-	// podDeleteFails is a pod delete the API server refuses, so the pod
-	// stands and runs on.
+	// podDeleteFails makes the API server refuse a pod delete, so the
+	// pod stays and keeps running.
 	podDeleteFails bool
 
-	// Every apply of spec.power this operator sent, and a switch that
-	// makes the API server refuse the next ones.
+	// playerApplies is every apply of spec.power that this operator
+	// sent. playerApplyFails makes the API server refuse the next ones.
 	playerApplies    []playerApplied
 	playerApplyFails bool
 
-	// applyFails is a Display the API server refuses to write,
-	// the failure a pass answers by leaving the panel where it stands
-	// and trying again.
+	// applyFails makes the API server refuse to write a Display. A pass
+	// leaves the panel as it is and tries again.
 	applyFails bool
 
-	// The collection paths this server refuses, and whose objects the
-	// view answers in a form that does not convert, so a test proves
-	// what a pass does with a read it cannot make.
+	// fails names the paths that this server answers with a 500, and
+	// whose objects the view returns malformed, so they do not convert
+	// to their Go type. A test uses it to show what a pass does with a
+	// read that fails.
 	fails map[string]bool
 
-	// unseen names the objects the view does not hold yet, the way a
-	// watch can still be carrying an object the API server already has.
+	// unseen names the objects that the view does not have yet, as when
+	// a watch has not received an object that the API server already
+	// has.
 	unseen map[string]bool
 
-	// The requests this server answers only once the test releases them,
-	// keyed the way requests holds them. A held request is a slow API
-	// server, so a test proves what a pass did before it reached that
-	// request and not merely what the pass left behind.
+	// held has the requests that this server answers only after the
+	// test releases them, keyed as requests records them. A held request
+	// acts as a slow API server, so a test can check what a pass did
+	// before it reached that request.
 	held map[string]chan struct{}
 
 	// arrived, when a test sets it, receives each held request as the
-	// server starts to hold it, so the test acts while the pass waits.
+	// server starts to hold it, so the test can act while the pass
+	// waits.
 	arrived chan string
 }
 
-// One apply the operator made: the Display it named, the block
-// it wrote, and the field manager it wrote under.
+// displayApplied is one apply that the operator made: the Display it
+// named, the override block it wrote, and the field manager it wrote
+// under.
 type displayApplied struct {
 	name     string
 	override *DisplayOverride
 	manager  string
 }
 
-// One apply of a Player's spec the operator made: the fields of the
-// spec it stated, as JSON, the field manager, and whether it forced
-// the fields away from another manager.
+// playerApplied is one apply of a Player's spec that the operator made:
+// the fields of the spec that it set, as JSON, the field manager, and
+// whether it forced the fields away from another manager.
 type playerApplied struct {
 	fields  string
 	manager string
 	force   bool
 }
 
-// One session apply the operator made on a Sink.
+// sinkApplied is one session apply that the operator made on a Sink.
 type sinkApplied struct {
 	name    string
 	session *SinkSession
 	manager string
 }
 
-// One session apply the operator made: the Receiver it named, the block
-// it wrote, and the field manager it wrote under.
+// receiverApplied is one session apply that the operator made: the
+// Receiver it named, the block it wrote, and the field manager it wrote
+// under.
 type receiverApplied struct {
 	name    string
 	session *ReceiverSession
@@ -171,11 +178,10 @@ func newFakeCluster() *fakeCluster {
 	}
 }
 
-// hold makes the server answer one request only once the test calls the
-// release this answers with. The key is the request as requests records
-// it, the method and the path. The release runs at most once, so a caller
-// defers it against a failure and calls it again at the moment it means
-// to let the request through.
+// hold makes the server answer one request, named by its method and
+// path, only after the test calls the returned function. The function
+// releases the request at most once, so a test can both defer it and
+// call it.
 func (f *fakeCluster) hold(request string) func() {
 	held := make(chan struct{})
 	f.held[request] = held
@@ -198,11 +204,11 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 		name := path.Base(r.URL.Path)
 		switch {
 		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/players/") && strings.HasSuffix(r.URL.Path, "/status"):
-			// A Player status write answers 409 from a stale read and moves
-			// the version on, the same terms as a Play's below.
+			// A Player status write answers 409 for a stale read and
+			// moves the version on, as for a Play below.
 			var written Player
 			_ = json.NewDecoder(r.Body).Decode(&written)
-			if held, standing := f.players[written.Metadata.Name]; standing &&
+			if held, exists := f.players[written.Metadata.Name]; exists &&
 				held.Metadata.ResourceVersion != written.Metadata.ResourceVersion {
 				w.WriteHeader(http.StatusConflict)
 				return
@@ -217,13 +223,13 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 			f.remotes[written.Metadata.Name] = &written
 			_ = json.NewEncoder(w).Encode(written)
 		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/status"):
-			// A status write names the resourceVersion it read, and a Play
-			// written since answers 409, the way the API server refuses a
-			// write from a stale read. An accepted write moves the version
-			// on.
+			// A status write names the resourceVersion that it read,
+			// and the server answers 409 when the Play was written
+			// since, as the API server refuses a write from a stale
+			// read. An accepted write moves the version on.
 			var written Play
 			_ = json.NewDecoder(r.Body).Decode(&written)
-			if held, standing := f.plays[written.Metadata.Name]; standing &&
+			if held, exists := f.plays[written.Metadata.Name]; exists &&
 				held.Metadata.ResourceVersion != written.Metadata.ResourceVersion {
 				w.WriteHeader(http.StatusConflict)
 				return
@@ -233,11 +239,11 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 			f.plays[written.Metadata.Name] = &written
 			_ = json.NewEncoder(w).Encode(written)
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/plays/"):
-			answer(w, f.plays[name])
+			writeObject(w, f.plays[name])
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/players/"):
-			answer(w, f.players[name])
+			writeObject(w, f.players[name])
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/remotes/"):
-			answer(w, f.remotes[name])
+			writeObject(w, f.remotes[name])
 		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/plays/"):
 			f.patchPlay(w, r, name)
 		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/players/"):
@@ -251,26 +257,27 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/displays/"):
 			f.apply(w, r, name)
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/resourceclaims/"):
-			answer(w, f.claims[name])
+			writeObject(w, f.claims[name])
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/resourceclaims"):
 			claim := &ResourceClaim{}
 			_ = json.NewDecoder(r.Body).Decode(claim)
 			f.claims[claim.Metadata.Name] = claim
 			_ = json.NewEncoder(w).Encode(claim)
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/pods/"):
-			answer(w, f.pods[name])
+			writeObject(w, f.pods[name])
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/pods"):
 			pod := &Pod{}
 			_ = json.NewDecoder(r.Body).Decode(pod)
-			// A name that is taken answers 409, the lingering pod's name
-			// included, the way the API server refuses a create until a
+			// A name that is taken answers 409, including the name of a
+			// lingering pod, as the API server refuses a create until a
 			// deleted pod is gone.
 			if _, taken := f.pods[pod.Metadata.Name]; taken {
 				w.WriteHeader(http.StatusConflict)
 				return
 			}
-			// The API server gives each pod its own UID, so a pod recreated
-			// under a name the old pod held is a different object.
+			// The API server gives each pod its own UID, so a pod that
+			// is recreated under the name of an old pod is a different
+			// object.
 			if pod.Metadata.UID == "" {
 				pod.Metadata.UID = "pod-uid-" + strconv.Itoa(len(f.requests))
 			}
@@ -284,33 +291,33 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/pods/") && f.podDeleteFails:
 			w.WriteHeader(http.StatusInternalServerError)
 		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/pods/"):
-			if pod, standing := f.pods[name]; standing && f.podsLinger[name] {
+			if pod, exists := f.pods[name]; exists && f.podsLinger[name] {
 				pod.Metadata.DeletionTimestamp = "2026-09-09T10:30:00Z"
 			} else {
 				delete(f.pods, name)
 			}
 			w.WriteHeader(http.StatusOK)
 		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/resourceclaims/"):
-			if claim, standing := f.claims[name]; standing && f.claimsLinger[name] {
+			if claim, exists := f.claims[name]; exists && f.claimsLinger[name] {
 				claim.Metadata.DeletionTimestamp = "2026-09-09T10:30:00Z"
 			} else {
 				delete(f.claims, name)
 			}
 			w.WriteHeader(http.StatusOK)
 		default:
-			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			t.Errorf("the fake API server received %s %s, which it does not serve", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 		}
 	})
 }
 
-// patchPlay folds one merge patch onto a Play's finalizer list, on the
-// API server's own terms: the resourceVersion the patch names must be the
-// one the object carries, the write moves that version on, and a deleting
-// Play whose last finalizer went is one the server removes.
+// patchPlay applies one merge patch to a Play's finalizer list, as the
+// API server does: the resourceVersion in the patch must equal the
+// object's, the write moves that version on, and a deleting Play whose
+// last finalizer was removed is deleted by the server.
 func (f *fakeCluster) patchPlay(w http.ResponseWriter, r *http.Request, name string) {
-	held, standing := f.plays[name]
-	if !standing {
+	held, exists := f.plays[name]
+	if !exists {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -334,12 +341,12 @@ func (f *fakeCluster) patchPlay(w http.ResponseWriter, r *http.Request, name str
 	_ = json.NewEncoder(w).Encode(held)
 }
 
-// patchPodLabels folds one merge patch onto a pod's labels, on the API
-// server's own terms: the labels the patch names join the ones the pod
-// carries, and every other field of the pod stands.
+// patchPodLabels applies one merge patch to a pod's labels, as the API
+// server does: the labels in the patch are added to the pod's labels,
+// and every other field of the pod stays.
 func (f *fakeCluster) patchPodLabels(w http.ResponseWriter, r *http.Request, name string) {
-	held, standing := f.pods[name]
-	if !standing {
+	held, exists := f.pods[name]
+	if !exists {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -362,10 +369,10 @@ func (f *fakeCluster) patchPodLabels(w http.ResponseWriter, r *http.Request, nam
 	_ = json.NewEncoder(w).Encode(held)
 }
 
-// applyPlayer folds one server-side apply of spec.power onto a Player.
+// applyPlayer applies one server-side apply of spec.power to a Player.
 // The API server would refuse to create a Player from the apply alone,
-// because the schema needs a display or a sink, so an absent Player is a
-// 404 here. An accepted apply moves the version on.
+// because the schema requires a display or a sink, so an absent Player
+// gets a 404 here. An accepted apply moves the version on.
 func (f *fakeCluster) applyPlayer(w http.ResponseWriter, r *http.Request, name string) {
 	var applied struct {
 		Spec json.RawMessage `json:"spec"`
@@ -376,12 +383,12 @@ func (f *fakeCluster) applyPlayer(w http.ResponseWriter, r *http.Request, name s
 		manager: r.URL.Query().Get("fieldManager"),
 		force:   r.URL.Query().Get("force") == "true",
 	})
-	held, standing := f.players[name]
+	held, exists := f.players[name]
 	switch {
 	case f.playerApplyFails:
 		w.WriteHeader(http.StatusInternalServerError)
 		return
-	case !standing:
+	case !exists:
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -395,13 +402,13 @@ func (f *fakeCluster) applyPlayer(w http.ResponseWriter, r *http.Request, name s
 	_ = json.NewEncoder(w).Encode(held)
 }
 
-// apply folds one server-side apply onto a Display. The
-// override the body carries replaces the one the Display holds, and an
-// apply with no override lifts it, which is what the API server does
-// with a field the applying manager owned and no longer states.
+// apply applies one server-side apply to a Display. The override in the
+// body replaces the Display's override, and an apply with no override
+// removes it, as the API server removes a field that the applying
+// manager owned and no longer sets.
 func (f *fakeCluster) apply(w http.ResponseWriter, r *http.Request, name string) {
-	held, standing := f.displays[name]
-	if !standing {
+	held, exists := f.displays[name]
+	if !exists {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -425,12 +432,12 @@ func (f *fakeCluster) apply(w http.ResponseWriter, r *http.Request, name string)
 	_ = json.NewEncoder(w).Encode(held)
 }
 
-// applySession folds one server-side apply of the status onto a
-// Receiver. The session the body carries replaces the one the status
-// holds, and an apply with no session lifts it.
+// applySession applies one server-side apply of the status to a
+// Receiver. The session in the body replaces the session in the status,
+// and an apply with no session removes it.
 func (f *fakeCluster) applySession(w http.ResponseWriter, r *http.Request, name string) {
-	held, standing := f.receivers[name]
-	if !standing {
+	held, exists := f.receivers[name]
+	if !exists {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -449,11 +456,11 @@ func (f *fakeCluster) applySession(w http.ResponseWriter, r *http.Request, name 
 	_ = json.NewEncoder(w).Encode(held)
 }
 
-// applySinkSession folds one server-side apply of the status onto a
-// Sink. The session the body carries replaces the one the status holds.
+// applySinkSession applies one server-side apply of the status to a
+// Sink. The session in the body replaces the session in the status.
 func (f *fakeCluster) applySinkSession(w http.ResponseWriter, r *http.Request, name string) {
-	held, standing := f.sinks[name]
-	if !standing {
+	held, exists := f.sinks[name]
+	if !exists {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -468,12 +475,12 @@ func (f *fakeCluster) applySinkSession(w http.ResponseWriter, r *http.Request, n
 	_ = json.NewEncoder(w).Encode(held)
 }
 
-// releaseSpecSession folds one server-side apply of the spec onto a
-// Receiver. The apply states no session, so the API server removes the
-// spec.session this manager owned.
+// releaseSpecSession applies one server-side apply of the spec to a
+// Receiver. The apply has no session, so the API server removes the
+// spec.session that this manager owned.
 func (f *fakeCluster) releaseSpecSession(w http.ResponseWriter, r *http.Request, name string) {
-	held, standing := f.receivers[name]
-	if !standing {
+	held, exists := f.receivers[name]
+	if !exists {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -492,9 +499,10 @@ func (f *fakeCluster) releaseSpecSession(w http.ResponseWriter, r *http.Request,
 	_ = json.NewEncoder(w).Encode(held)
 }
 
-// An object the cluster does not hold is a 404, which is the answer the
-// operator creates against.
-func answer[T any](w http.ResponseWriter, held *T) {
+// writeObject writes the object as JSON, or a 404 when the cluster does not
+// have it, which is the answer that makes the operator create the
+// object.
+func writeObject[T any](w http.ResponseWriter, held *T) {
 	if held == nil {
 		w.WriteHeader(http.StatusNotFound)
 		return
@@ -522,19 +530,20 @@ func testOperator(t *testing.T, cluster *fakeCluster, wake chan struct{}) *opera
 		sidecarImage: "registry.example/sidecar:test",
 		busAddress:   "bus.media.svc:1883",
 		topicBase:    defaultTopicBase,
-		// The bus is never Run, so a publish finds a nil write queue and
-		// drops, which is what a pass wants with no broker under the test.
+		// The bus is never run, so a publish finds a nil write queue
+		// and is dropped. That is what a pass needs when the test has
+		// no broker.
 		bus:              newBus("bus.media.svc:1883", "media-operator-test", nil, nil, nil),
 		reports:          newReports(wake),
-		focus:            newFocusDesk(wake),
-		ensure:           newEnsureDesk(),
-		peripherals:      newPeripheralDesk(),
-		codes:            newCodesDesk(wake),
-		panels:           newPanelDesk(wake),
+		focus:            newFocusCache(wake),
+		playerReceivers:  newPlayerReceivers(),
+		peripherals:      newPeripheralCache(),
+		codes:            newCodesCache(wake),
+		panels:           newPanelCache(wake),
 		panelOverrides:   map[string]panelOverride{},
 		panelFaults:      map[string]string{},
 		receiverSessions: map[string]receiverSession{},
-		heldScreens:      map[string]heldScreen{},
+		lastScreens:      map[string]lastScreen{},
 		specReleased:     map[string]bool{},
 		endingLabeled:    map[string]string{},
 		positionWrites:   map[string]time.Time{},
@@ -575,8 +584,8 @@ func housePlayer() *Player {
 	}
 }
 
-// housePlaybackPod builds the pod a running Play already has, the way a
-// previous pass or a previous operator left it.
+// housePlaybackPod builds the pod that a running Play already has, as
+// an earlier pass or an earlier operator left it.
 func housePlaybackPod() *Pod {
 	play := housePlay("https://nas/film.mkv")
 	pod := buildPod(play, buildClaim(play, housePlayer()),
@@ -587,8 +596,8 @@ func housePlaybackPod() *Pod {
 	return pod
 }
 
-// A pass writes each Player's status from the Plays it read. A player
-// with a running play reads Playing and names the play.
+// A pass writes each Player's status from the Plays it read. A Player
+// with a running Play shows Playing and the name of that Play.
 func TestAPassWritesThePlayerStatusFromItsRunningPlay(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
@@ -606,8 +615,9 @@ func TestAPassWritesThePlayerStatusFromItsRunningPlay(t *testing.T) {
 	}
 }
 
-// A Player no Play names reads Idle, and the pass writes it, so an idle
-// unit is not blank in kubectl. The pass adopts the Player's power too.
+// A Player that no Play names shows Idle, and the pass writes that
+// status, so an idle Player has a status in kubectl. The pass also
+// adopts the Player's power.
 func TestAPassMarksAPlayerWithNoPlayIdle(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.players["theater"] = housePlayer()
@@ -635,23 +645,23 @@ func TestAPassCreatesTheClaimAndThePodAndReportsPending(t *testing.T) {
 		t.Fatalf("no claim was created: %v", cluster.requests)
 	}
 	if got := claimRequests(claim); strings.Join(got, ",") != "screen,audio0,render" {
-		t.Errorf("requests = %v", got)
+		t.Errorf("claim requests = %v, want screen, audio0, render", got)
 	}
 	pod, held := cluster.pods["movie-playback"]
 	if !held {
 		t.Fatalf("no pod was created: %v", cluster.requests)
 	}
 	if got := pod.Spec.Containers[0].Args; len(got) != 1 || got[0] != "/media/1/film.mkv" {
-		t.Errorf("args = %v", got)
+		t.Errorf("pod args = %v, want [/media/1/film.mkv]", got)
 	}
 	status := cluster.plays["movie"].Status
 	if status.Phase != phasePending || status.Pod != "movie-playback" {
-		t.Errorf("status = %+v", status)
+		t.Errorf("Play status = %+v, want phase Pending and pod movie-playback", status)
 	}
 }
 
-// A second pass over the same Play creates nothing; the claim and the
-// pod are already there.
+// A second pass over the same Play creates nothing, because the claim
+// and the pod already exist.
 func TestASecondPassCreatesNothingNew(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
@@ -685,16 +695,16 @@ func TestAPlayWhosePlayerIsAbsentStaysPending(t *testing.T) {
 		t.Errorf("phase = %q, want Pending", status.Phase)
 	}
 	if status.Message != "the Player theater does not exist in this namespace" {
-		t.Errorf("message = %q", status.Message)
+		t.Errorf("message = %q, want that the Player theater does not exist in this namespace", status.Message)
 	}
 	if len(cluster.claims) != 0 || len(cluster.pods) != 0 {
 		t.Errorf("a Play with no Player created objects: claims %v pods %v", cluster.claims, cluster.pods)
 	}
 }
 
-// The resolver refuses before any object exists, so a Play that names a
-// scheme this operator does not resolve, or a claim in another namespace,
-// leaves nothing behind.
+// The resolver refuses the Play before any object exists, so a Play
+// that names a scheme that this operator does not resolve, or a claim
+// in another namespace, leaves no object.
 func TestAPlayWithAURIItCannotResolveFailsAndCreatesNothing(t *testing.T) {
 	cases := []struct {
 		name string
@@ -704,13 +714,13 @@ func TestAPlayWithAURIItCannotResolveFailsAndCreatesNothing(t *testing.T) {
 		{
 			name: "an unknown scheme",
 			uri:  "rtsp://camera/front",
-			want: "the scheme rtsp:// is not one the operator resolves; it resolves https://, nfs://, claim://, and pattern://",
+			want: "the scheme rtsp:// is not one the operator resolves, which are https://, nfs://, claim://, and pattern://",
 		},
 		{
 			name: "a claim in another namespace",
 			uri:  "claim://studio/films/movies/film.mkv",
-			want: `the URI "claim://studio/films/movies/film.mkv" names a claim in the namespace studio; ` +
-				"a Play in the namespace house mounts only a claim in its own namespace",
+			want: `the URI "claim://studio/films/movies/film.mkv" names a claim in the namespace studio, ` +
+				"and a Play in the namespace house mounts only a claim in its own namespace",
 		},
 	}
 	for _, one := range cases {
@@ -736,11 +746,9 @@ func TestAPlayWithAURIItCannotResolveFailsAndCreatesNothing(t *testing.T) {
 	}
 }
 
-// A Play the operator already retired, still inside its window, is read
-// and left alone. The one write the first pass makes about it is the
-// finalizer, which every later pass reads as already there, so a later
-// pass reads the collections from the view and sends the API server
-// nothing.
+// A retired Play inside its time to live is left alone. The first pass
+// adds only the finalizer, and every later pass sends the API server no
+// request.
 func TestARetiredPlayInsideItsWindowIsLeftAlone(t *testing.T) {
 	cluster := newFakeCluster()
 	finished := housePlay("https://nas/film.mkv")
@@ -759,21 +767,20 @@ func TestARetiredPlayInsideItsWindowIsLeftAlone(t *testing.T) {
 	mustMatchAll(t, cluster.requests, nil)
 }
 
-// stampAgo is a finishedAt the given time before now, in the form the
-// operator writes and reads back.
 func stampAgo(ago time.Duration) string {
 	return time.Now().Add(-ago).UTC().Format(time.RFC3339)
 }
 
-// ttlSeconds is a spec's ttlSecondsAfterFinished. The field is a pointer,
-// so a test that means zero says so with this and not with a nil.
+// ttlSeconds returns a spec's ttlSecondsAfterFinished. The field is a
+// pointer, so a test that needs zero uses this function and not nil.
 func ttlSeconds(seconds int64) *int64 {
 	return &seconds
 }
 
-// The film ended, so the playback pod and its claim go and the Play stands
-// with the record of what played. The first pass folds the run to Finished,
-// and the pass that reads that phase retires it.
+// The film ended, so the playback pod and its claim are deleted, and
+// the Play remains as the record of what played. The first pass sets
+// the run's phase to Finished, and the pass that reads that phase
+// retires it.
 func TestAFinishedRunLosesItsPodAndItsClaimAndKeepsItsPlay(t *testing.T) {
 	cluster := runningCluster(housePlayer())
 	cluster.pods["movie-playback"].Status.Phase = podSucceeded
@@ -790,24 +797,22 @@ func TestAFinishedRunLosesItsPodAndItsClaimAndKeepsItsPlay(t *testing.T) {
 	}
 	play, held := cluster.plays["movie"]
 	if !held {
-		t.Fatal("the Play went with its pod, and the record of the run with it")
+		t.Fatal("the Play was deleted along with its pod, and its record of the run went with it")
 	}
 	mustMatch(t, play.Status.Phase, phaseFinished)
 	mustMatch(t, play.Status.Pod, "movie-playback")
 	if play.Status.FinishedAt == "" {
-		t.Error("a retired Play carries no finishedAt, so its window has no clock")
+		t.Error("a retired Play has no status.finishedAt, so its retention window has no start time")
 	}
 }
 
-// A Failed pod stands. Its log is the evidence a person debugs from, and
-// the run resumes rather than ends, so nothing about a Failed Play is
-// retired.
+// A Failed Play is not retired, so its pod and the pod's log remain for
+// a person to debug from.
 func TestAFailedRunKeepsItsPod(t *testing.T) {
 	cluster := runningCluster(housePlayer())
 	cluster.pods["movie-playback"].Status.Phase = podFailed
 	media := testOperator(t, cluster, make(chan struct{}, 1))
-	// The run already recreated once, so the backoff holds the next
-	// recreate off and this pass leaves the dead pod where it is.
+	// The backoff blocks a recreate, so the pass leaves the failed pod.
 	media.recreateBackoff[runKey("house", "movie")] = backoffState{
 		count: 1,
 		last:  time.Now(),
@@ -817,7 +822,7 @@ func TestAFailedRunKeepsItsPod(t *testing.T) {
 	media.pass()
 
 	if _, held := cluster.pods["movie-playback"]; !held {
-		t.Error("a failed run lost the pod whose log is the evidence")
+		t.Error("a failed run deleted its pod, and the pod log is the only record of the failure")
 	}
 	if got := countMethod(cluster.requests, http.MethodDelete); got != 0 {
 		t.Errorf("a failed run deleted objects: %d deletes in %v", got, cluster.requests)
@@ -827,11 +832,11 @@ func TestAFailedRunKeepsItsPod(t *testing.T) {
 	mustMatch(t, status.FinishedAt, "")
 }
 
-// The stamp is written on the pass that first reads the Finished phase, and
-// every pass after it reads that stamp instead of writing a fresh one. The
-// window counts from the end of the film, so a stamp that moved would hold
-// a Finished Play forever.
-func TestTheFinishedStampIsWrittenOnceAndNotOverwritten(t *testing.T) {
+// finishedAt is written by the first pass that reads the Finished
+// phase, and every later pass reads it and does not write a new one.
+// The time to live counts from finishedAt, so a finishedAt that moved
+// would keep a Finished Play forever.
+func TestFinishedAtIsWrittenOnceAndNotOverwritten(t *testing.T) {
 	cluster := newFakeCluster()
 	finished := housePlay("https://nas/film.mkv")
 	finished.Status = PlayStatus{Phase: phaseFinished, Pod: "movie-playback"}
@@ -851,8 +856,8 @@ func TestTheFinishedStampIsWrittenOnceAndNotOverwritten(t *testing.T) {
 	mustMatch(t, cluster.plays["movie"].Status.FinishedAt, stamped)
 }
 
-// The window is the seconds the spec states, and 300 when it states none.
-// Zero is a value a spec may hold, so it reads as zero and not as absent.
+// The time to live is spec.ttlSecondsAfterFinished, or 300 seconds when
+// the spec sets none. A spec that sets zero gets zero.
 func TestThePlayWindowTakesTheSpecOverTheDefault(t *testing.T) {
 	cases := []struct {
 		name string
@@ -872,8 +877,8 @@ func TestThePlayWindowTakesTheSpecOverTheDefault(t *testing.T) {
 	}
 }
 
-// A window of zero has already passed the moment the run finishes, so the
-// Play and its pod go together on the pass that reads the Finished phase.
+// With a time to live of zero, the pass that reads the Finished phase
+// deletes the Play and its pod together.
 func TestAWindowOfZeroDeletesThePlayOnThePassThatReadsItFinished(t *testing.T) {
 	cluster := newFakeCluster()
 	finished := housePlay("https://nas/film.mkv")
@@ -888,17 +893,16 @@ func TestAWindowOfZeroDeletesThePlayOnThePassThatReadsItFinished(t *testing.T) {
 	media.pass()
 
 	if _, held := cluster.plays["movie"]; held {
-		t.Error("a Play with a zero window stood after it finished")
+		t.Error("a Play with a zero retention window still exists after it finished, want it deleted")
 	}
 	if _, held := cluster.pods["movie-playback"]; held {
-		t.Error("the pod of a Play with a zero window stood")
+		t.Error("the pod of a Play with a zero retention window still exists, want it deleted")
 	}
 }
 
-// The window is measured from the finishedAt stamp. The two cases are the
-// same Play with the same spec, and only the stamp differs, so nothing but
-// the stamp puts one Play past its window and leaves the other inside it.
-func TestThePlayGoesOnceItsStampIsOlderThanItsWindow(t *testing.T) {
+// The time to live counts from finishedAt. The cases differ only in
+// finishedAt.
+func TestThePlayGoesOnceItsFinishedAtIsOlderThanItsWindow(t *testing.T) {
 	cases := []struct {
 		name     string
 		finished time.Duration
@@ -971,10 +975,8 @@ func TestAPodThatSucceededFinishesThePlay(t *testing.T) {
 	}
 }
 
-// The command sidecar publishes a live position to the bus every second,
-// but the operator writes a bare position advance to the resource no
-// more than once per positionWriteInterval, so a status write does not
-// wake the operator's own watch a second later and spin the loop.
+// A bare position advance is written at most once per
+// positionWriteInterval.
 func TestABarePositionAdvanceIsThrottled(t *testing.T) {
 	cluster := newFakeCluster()
 	running := PlayStatus{
@@ -987,30 +989,31 @@ func TestABarePositionAdvanceIsThrottled(t *testing.T) {
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	key := runKey("house", "movie")
 
-	// A position write just happened, so the next second's advance waits.
+	// A position write just happened, so the advance one second later
+	// waits.
 	media.positionWrites[key] = time.Now()
 	advanced := running
 	advanced.Position = "0:01:01"
 	if err := media.writePlay(play, advanced); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the Play status: %v", err)
 	}
 	if got := cluster.plays["movie"].Status.Position; got != "0:01:00" {
 		t.Errorf("a bare advance wrote through the throttle: %q", got)
 	}
 
-	// Past the interval, the advance writes.
+	// Past the interval, the advance is written.
 	media.positionWrites[key] = time.Now().Add(-2 * positionWriteInterval)
 	advanced.Position = "0:01:12"
 	if err := media.writePlay(play, advanced); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the Play status: %v", err)
 	}
 	if got := cluster.plays["movie"].Status.Position; got != "0:01:12" {
 		t.Errorf("position = %q, want the advance to write past the interval", got)
 	}
 }
 
-// A pause is what a person waits to see, so it writes at once even when a
-// position write just happened.
+// A pause is what a person waits to see, so it is written at once, even
+// when a position write just happened.
 func TestAPauseWritesThroughTheThrottle(t *testing.T) {
 	cluster := newFakeCluster()
 	running := PlayStatus{
@@ -1028,14 +1031,14 @@ func TestAPauseWritesThroughTheThrottle(t *testing.T) {
 	paused.Activity = activityPaused
 	paused.Position = "0:01:01"
 	if err := media.writePlay(play, paused); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the Play status: %v", err)
 	}
 	if !cluster.plays["movie"].Status.Paused {
 		t.Error("a pause did not write through the throttle")
 	}
 }
 
-// A Play that left the cluster leaves nothing on the report desk.
+// A Play that left the cluster leaves nothing in the report cache.
 func TestAPassForgetsAPlayThatIsGone(t *testing.T) {
 	cluster := newFakeCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
@@ -1044,12 +1047,12 @@ func TestAPassForgetsAPlayThatIsGone(t *testing.T) {
 	media.pass()
 
 	if got := media.reports.latestFor("house", "movie"); got != nil {
-		t.Errorf("report = %+v, want the desk to have forgotten it", *got)
+		t.Errorf("report = %+v, want the operator to have dropped it", *got)
 	}
 }
 
-// A Remote in the namespace, named by the house player through its
-// spec.remotes.
+// houseRemote returns a Remote in the namespace that the house Player
+// names in spec.remotes.
 func houseRemote(keymap string) *Remote {
 	return &Remote{
 		Metadata: ObjectMeta{Name: "sofa", Namespace: "house"},
@@ -1060,17 +1063,17 @@ func houseRemote(keymap string) *Remote {
 	}
 }
 
-// The house player, naming the "sofa" Remote, so a Play on it wires
-// that controller.
+// housePlayerWithRemote returns the house Player with the Remote sofa
+// in spec.remotes, so a Play on it wires that controller.
 func housePlayerWithRemote() *Player {
 	player := housePlayer()
 	player.Spec.Remotes = []PlayerRemote{{Name: "sofa"}}
 	return player
 }
 
-// A bound Remote reconciles into its own standing pod, and the playback
-// pod's command sidecar names the same events topic the standing pod
-// publishes to, so the two meet on the bus.
+// A bound Remote is reconciled into its own persistent pod, and the
+// command sidecar of the playback pod names the same events topic that
+// the persistent pod publishes to, so the two meet on the bus.
 func TestAPassWiresABoundRemote(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
@@ -1081,22 +1084,22 @@ func TestAPassWiresABoundRemote(t *testing.T) {
 
 	media.pass()
 
-	// The standing remote pod and its claim, one reader owned by the
-	// Remote and pinned to the controller by the claim.
+	// The persistent remote pod and its claim: one reader that the
+	// Remote owns and that the claim ties to the controller.
 	remotePod, held := cluster.pods["sofa-remote"]
 	if !held {
-		t.Fatalf("no standing remote pod was created: %v", cluster.requests)
+		t.Fatalf("no reader pod was created: %v", cluster.requests)
 	}
 	if got := remotePod.Spec.Containers[0].Command; len(got) != 2 || got[1] != remoteMode {
-		t.Errorf("standing pod command = %v, want the reader mode", got)
+		t.Errorf("reader pod command = %v, want the reader mode", got)
 	}
 	if _, held := cluster.claims["sofa-remote-devices"]; !held {
-		t.Errorf("no standing remote claim was created: %v", cluster.requests)
+		t.Errorf("no Remote claim was created: %v", cluster.requests)
 	}
 
-	// The playback pod's command sidecar carries the remote's events and
-	// focus topics, so it reads what the standing pod publishes and gates
-	// on the mark the operator writes.
+	// The command sidecar of the playback pod has the Remote's events
+	// and focus topics, so it reads what the persistent pod publishes
+	// and is gated by the mark that the operator writes.
 	playback, held := cluster.pods["movie-playback"]
 	if !held {
 		t.Fatalf("no playback pod was created: %v", cluster.requests)
@@ -1108,10 +1111,10 @@ func TestAPassWiresABoundRemote(t *testing.T) {
 		remoteFocusTopic(defaultTopicBase, "house", "sofa"))
 }
 
-// connectedBus is a bus with a session to a fake broker that takes every
-// publish, for a test that reads what the operator records as published.
-// The operator records a payload only when the bus queued it, and a bus
-// with no session queues nothing.
+// connectedBus returns a bus with a session to a fake broker that
+// accepts every publish, for a test that reads what the operator
+// records as published. The operator records a payload only when the
+// bus queued it, and a bus with no session queues nothing.
 func connectedBus(t *testing.T) *Bus {
 	t.Helper()
 	bus, brokers, connected := startBus(t, 1, nil, nil)
@@ -1128,9 +1131,9 @@ func connectedBus(t *testing.T) *Bus {
 	return bus
 }
 
-// The operator publishes each Remote's compiled table on that Remote's
-// own keys topic, retained, so the standing pod reads it the instant it
-// connects.
+// The operator publishes each Remote's compiled table, retained, on
+// that Remote's keys topic, so the persistent pod reads it as soon as
+// it connects.
 func TestAPassPublishesEachRemotesKeyTable(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.players["theater"] = housePlayerWithRemote()
@@ -1150,8 +1153,8 @@ func TestAPassPublishesEachRemotesKeyTable(t *testing.T) {
 	mustMatch(t, table[0], compiledBinding{EventType: evKey, Code: 0x130, Value: 1, Key: "KEY_PLAYPAUSE"})
 }
 
-// A Remote that is gone leaves no retained table behind: the pass
-// clears the topic it wrote.
+// A Remote that is gone leaves no retained table: the pass clears the
+// topic that it wrote.
 func TestAPassClearsTheKeyTableOfADepartedRemote(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.players["theater"] = housePlayerWithRemote()
@@ -1166,8 +1169,8 @@ func TestAPassClearsTheKeyTableOfADepartedRemote(t *testing.T) {
 	mustMatch(t, len(media.keysPublished), 0)
 }
 
-// A pass writes the focused Player onto the Remote's status, so
-// kubectl answers which unit a controller drives.
+// A pass writes the focused Player into the Remote's status, so kubectl
+// shows which Player a controller drives.
 func TestAPassWritesTheFocusedPlayerOntoTheRemote(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cluster := newFakeCluster()
@@ -1182,10 +1185,11 @@ func TestAPassWritesTheFocusedPlayerOntoTheRemote(t *testing.T) {
 	})
 }
 
-// A pass writes the Peripheral of the device the Remote's standing claim
-// allocated, so kubectl reaches the record of the controller's link from
-// the Remote. A controller whose claim carries no allocation names none,
-// and one allocated from another driver names none either.
+// A pass writes the Peripheral of the device that the Remote's
+// persistent claim allocated, so kubectl shows the record of the
+// controller's link from the Remote. A controller whose claim has no
+// allocation gets no Peripheral name, and neither does one that was
+// allocated from another driver.
 func TestAPassNamesTheRemotesPeripheral(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -1231,8 +1235,9 @@ func TestAPassNamesTheRemotesPeripheral(t *testing.T) {
 	}
 }
 
-// bondedRemote is the cluster a bonded controller makes: a unit that
-// lists it, the Remote, its allocated claim, and the device's Peripheral.
+// bondedRemote returns the cluster that a bonded controller makes: a
+// Player that lists the Remote, the Remote, its allocated claim, and
+// the device's Peripheral.
 func bondedRemote(t *testing.T) *fakeCluster {
 	t.Helper()
 	cluster := newFakeCluster()
@@ -1253,9 +1258,10 @@ func bondedRemote(t *testing.T) *fakeCluster {
 	return cluster
 }
 
-// A pass reads a Remote's standing claim from the view, and the read
-// that resolves the controller's Peripheral is the read the standing
-// reconcile uses, so a settled controller costs the API server nothing.
+// A pass reads a Remote's persistent claim from the view. The read that
+// finds the controller's Peripheral is the read that the persistent
+// reconcile uses, so a settled controller costs the API server no
+// request.
 func TestAPassReadsARemotesClaimFromTheView(t *testing.T) {
 	cluster, media := settledHouse(t, make(chan struct{}, 8))
 	cluster.requests = nil
@@ -1266,9 +1272,9 @@ func TestAPassReadsARemotesClaimFromTheView(t *testing.T) {
 	mustMatch(t, cluster.remotes["sofa"].Status.Peripheral, "aa-bb-cc-dd-ee-ff")
 }
 
-// A claim read that fails carries no entry, so the standing reconcile
-// makes its own read rather than acting on a claim nothing read. The
-// controller names no Peripheral on that pass.
+// A claim read that fails leaves no entry, so the persistent reconcile
+// makes its own read and does not act on a claim that nothing read. The
+// controller gets no Peripheral name in that pass.
 func TestAPassNamesNoPeripheralWhenTheClaimReadFailed(t *testing.T) {
 	cluster := bondedRemote(t)
 	cluster.fails[claimsPath("house")+"/"+remoteClaimName("sofa")] = true
@@ -1279,10 +1285,10 @@ func TestAPassNamesNoPeripheralWhenTheClaimReadFailed(t *testing.T) {
 	mustMatch(t, cluster.remotes["sofa"].Status.Peripheral, "")
 }
 
-// A peripherals list that fails leaves the desk holding what the last
-// pass read, so one failed read does not blank every controller on the
-// idle screen.
-func TestAPassKeepsThePeripheralsItHeldWhenTheListFails(t *testing.T) {
+// When the Peripherals list fails, the cache keeps what the last pass
+// read, so one failed read does not blank every controller on the idle
+// screen.
+func TestAPassKeepsThePeripheralsOfTheLastReadWhenTheListFails(t *testing.T) {
 	cluster := bondedRemote(t)
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	media.pass()
@@ -1295,8 +1301,8 @@ func TestAPassKeepsThePeripheralsItHeldWhenTheListFails(t *testing.T) {
 	mustMatch(t, connected, true)
 }
 
-// A remotes list that fails skips the whole Remote half of the pass, so
-// no desk shrinks to a collection the operator could not read.
+// When the Remotes list fails, the pass skips the whole Remote half, so
+// no cache shrinks to a collection that the operator could not read.
 func TestAPassSkipsTheRemotesWhenTheirListFails(t *testing.T) {
 	cluster := bondedRemote(t)
 	media := testOperator(t, cluster, make(chan struct{}, 1))
@@ -1312,8 +1318,8 @@ func TestAPassSkipsTheRemotesWhenTheirListFails(t *testing.T) {
 	mustMatch(t, len(media.keysPublished), 1)
 }
 
-// A status that already reads the current Player is not written
-// again, so a settled Remote costs the API server nothing per pass.
+// A status that already shows the current Player is not written again,
+// so a settled Remote costs the API server no request on each pass.
 func TestAPassSkipsAnUnchangedRemoteStatus(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.players["theater"] = housePlayerWithRemote()
@@ -1330,8 +1336,9 @@ func TestAPassSkipsAnUnchangedRemoteStatus(t *testing.T) {
 	}
 }
 
-// The pass reports the gap against the compiled table on the Remote,
-// and a status that already reads the same gap is not written again.
+// The pass reports the codes that the compiled table leaves unbound in
+// the Remote's status, and a status that already has the same codes is
+// not written again.
 func TestAPassWritesTheUnboundCodesOntoTheRemote(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.players["theater"] = housePlayerWithRemote()
@@ -1360,9 +1367,9 @@ func TestAPassWritesTheUnboundCodesOntoTheRemote(t *testing.T) {
 	}
 }
 
-// A Remote with no Keymap runs on the base, and the base leaves
-// nothing unbound: every key code passes as itself and the hats are
-// the arrows.
+// A Remote with no Keymap uses the base table, and the base leaves
+// nothing unbound: every key code maps to itself and the hats are the
+// arrows.
 func TestARemoteWithNoKeymapReportsNothingUnbound(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.players["theater"] = housePlayerWithRemote()
@@ -1380,11 +1387,11 @@ func TestARemoteWithNoKeymapReportsNothingUnbound(t *testing.T) {
 	}
 }
 
-// A codes document reaches the desk through the bus alone, and the
-// pod's own clear empties it.
-func TestTheCodesTopicReachesTheDeskAndItsClearEmptiesIt(t *testing.T) {
+// A codes document reaches the codes cache only through the bus, and
+// the pod's own clear empties it.
+func TestTheCodesTopicReachesTheCodesCacheAndItsClearEmptiesIt(t *testing.T) {
 	wake := make(chan struct{}, 1)
-	media := &operator{topicBase: defaultTopicBase, codes: newCodesDesk(wake)}
+	media := &operator{topicBase: defaultTopicBase, codes: newCodesCache(wake)}
 	topic := remoteCodesTopic(defaultTopicBase, "house", "sofa")
 
 	media.handleBusMessage(topic, []byte(`{"keys":[304]}`))
@@ -1397,9 +1404,8 @@ func TestTheCodesTopicReachesTheDeskAndItsClearEmptiesIt(t *testing.T) {
 	mustMatch(t, stillHeld, false)
 }
 
-// A Keymap edit is bus state, not pod shape. The container set is fixed
-// once the pod runs, so a Keymap changed after the film started recreates
-// no pod and the run keeps its status.
+// The Keymap is not part of the pod, so a Keymap edit during a film
+// recreates no pod and the run keeps its status.
 func TestAKeymapEditAfterTheRunStartedLeavesThePlayAlone(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
@@ -1425,14 +1431,14 @@ func TestAKeymapEditAfterTheRunStartedLeavesThePlayAlone(t *testing.T) {
 	}
 }
 
-// A Player edit that reshapes the pod reaches a running Play. The
-// container set is immutable, so the operator recreates the pod, and it
-// recreates gracefully so the film keeps its place. These tests seed a
-// running Play with the pod and claim a previous pass built, change the
-// Player, and prove what the reconcile does.
+// A pod's containers cannot change, so a Player edit that changes the
+// pod's claim or Remotes makes the operator recreate the pod at the
+// film's position. The tests below start from a running Play, change
+// the Player, and check what the reconcile does.
 
-// runningCluster seeds a Play already running on the given Player: the
-// play, the player, and the pod and claim a previous pass built from it.
+// runningCluster returns a cluster with a Play that is already running
+// on the given Player: the Play, the Player, and the pod and claim that
+// an earlier pass built from it.
 func runningCluster(player *Player) *fakeCluster {
 	cluster := newFakeCluster()
 	play := housePlay("https://nas/film.mkv")
@@ -1449,8 +1455,9 @@ func runningCluster(player *Player) *fakeCluster {
 	return cluster
 }
 
-// brightPlayer is the house player with a display parameter the house
-// player does not carry, so the claim it produces diverges.
+// brightPlayer is the house Player with a display parameter that the
+// house Player does not have, so the claim that it produces differs
+// from the existing one.
 func brightPlayer() *Player {
 	player := housePlayer()
 	player.Spec.Display = &PlayerDevice{
@@ -1463,8 +1470,8 @@ func brightPlayer() *Player {
 	return player
 }
 
-// podStart reads the start the player container carries, which is empty
-// on an ordinary run and set to the stashed position on a recreate.
+// podStart returns the start that the player container has: empty on an
+// ordinary run and the saved position on a recreate.
 func podStart(pod *Pod) string {
 	for _, variable := range pod.Spec.Containers[0].Env {
 		if variable.Name == playStartVariable {
@@ -1474,7 +1481,6 @@ func podStart(pod *Pod) string {
 	return ""
 }
 
-// countMethod counts the requests that used one HTTP method.
 func countMethod(requests []string, method string) int {
 	count := 0
 	for _, request := range requests {
@@ -1486,8 +1492,9 @@ func countMethod(requests []string, method string) int {
 }
 
 // A changed device parameter reshapes the claim, so the operator
-// recreates the pod, and it starts mpv at the position the bus reported.
-func TestAPlayerParameterChangeRecreatesThePodAtTheStashedPosition(t *testing.T) {
+// recreates the pod, and mpv starts at the position that the bus
+// reported.
+func TestAPlayerParameterChangeRecreatesThePodAtThePositionTheBusReported(t *testing.T) {
 	cluster := runningCluster(housePlayer())
 	cluster.players["theater"] = brightPlayer()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
@@ -1497,7 +1504,7 @@ func TestAPlayerParameterChangeRecreatesThePodAtTheStashedPosition(t *testing.T)
 
 	pod, held := cluster.pods["movie-playback"]
 	if !held {
-		t.Fatalf("the pod is gone: %v", cluster.requests)
+		t.Fatalf("the playback pod does not exist: %v", cluster.requests)
 	}
 	if got := podStart(pod); got != "0:15:00" {
 		t.Errorf("recreated start = %q, want the stashed 0:15:00", got)
@@ -1507,13 +1514,13 @@ func TestAPlayerParameterChangeRecreatesThePodAtTheStashedPosition(t *testing.T)
 	}
 	claim := cluster.claims["movie-devices"]
 	if len(claim.Spec.Devices.Config) == 0 {
-		t.Errorf("the recreated claim carries no parameters: %+v", claim.Spec.Devices)
+		t.Errorf("the recreated claim has no device configuration: %+v, want parameters", claim.Spec.Devices)
 	}
 }
 
-// The recreate reads the film's place from the first source that has it:
-// the retained bus status, then the last written status, then the Play's
-// own spec.start when a pod that never reported is reshaped at startup.
+// A recreate starts at the position from the first source that has one:
+// the bus report, then the Play's status, then spec.start for a run
+// that never reported a position.
 func TestARecreatePreservesTheFilmsPlaceFromEachSource(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -1557,8 +1564,8 @@ func TestARecreatePreservesTheFilmsPlaceFromEachSource(t *testing.T) {
 	}
 }
 
-// A Player edit that changes neither the claim nor the remote set, a
-// spec.zone rename, recreates nothing.
+// A Player edit that changes neither the claim nor the Remote set, such
+// as a change of spec.zone, recreates nothing.
 func TestANonShapingPlayerEditRecreatesNothing(t *testing.T) {
 	cluster := runningCluster(housePlayer())
 	zoned := housePlayer()
@@ -1576,9 +1583,9 @@ func TestANonShapingPlayerEditRecreatesNothing(t *testing.T) {
 	}
 }
 
-// remoteChangeCluster seeds a Play running with the sofa controller,
-// under a Player that a person has since edited to name the armchair
-// controller in its place.
+// remoteChangeCluster returns a cluster with a Play that runs with the
+// sofa controller, under a Player that a person has since edited to
+// name the armchair controller instead.
 func remoteChangeCluster() *fakeCluster {
 	cluster := newFakeCluster()
 	play := housePlay("https://nas/film.mkv")
@@ -1611,9 +1618,9 @@ func remoteChangeCluster() *fakeCluster {
 	return cluster
 }
 
-// A Player that now names a different controller reshapes the remote set,
-// so the operator recreates the pod at the film's place with the new
-// controller's sidecar wiring.
+// A Player that now names a different controller changes the Remote
+// set, so the operator recreates the pod at the film's position, with
+// the wiring of the new controller's sidecar.
 func TestAPlayerRemoteChangeRecreatesThePodOnTheChangedRemoteSet(t *testing.T) {
 	cluster := remoteChangeCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
@@ -1632,8 +1639,8 @@ func TestAPlayerRemoteChangeRecreatesThePodOnTheChangedRemoteSet(t *testing.T) {
 
 // Kubernetes removed the playback pod of a running Play: a device taint
 // evicted it, or its node was lost. The Play is not Finished, so the
-// operator recreates the pod at the film's saved place.
-func TestAMissingPodForALiveRunIsRecreatedAtTheStashedPosition(t *testing.T) {
+// operator recreates the pod at the film's saved position.
+func TestAMissingPodForALiveRunIsRecreatedAtTheSavedPosition(t *testing.T) {
 	cluster := runningCluster(housePlayer())
 	cluster.plays["movie"].Status.Position = "0:41:00"
 	delete(cluster.pods, "movie-playback")
@@ -1650,9 +1657,9 @@ func TestAMissingPodForALiveRunIsRecreatedAtTheStashedPosition(t *testing.T) {
 	}
 }
 
-// mpv exited non-zero and the pod is Failed. The operator recreates it at
-// the film's place, the way a Job restarts a failed pod.
-func TestAFailedPodIsRecreatedAtTheStashedPosition(t *testing.T) {
+// mpv exited with a non-zero status and the pod is Failed. The operator
+// recreates it at the film's position, as a Job restarts a failed pod.
+func TestAFailedPodIsRecreatedAtTheSavedPosition(t *testing.T) {
 	cluster := runningCluster(housePlayer())
 	cluster.pods["movie-playback"].Status.Phase = podFailed
 	media := testOperator(t, cluster, make(chan struct{}, 1))
@@ -1668,9 +1675,9 @@ func TestAFailedPodIsRecreatedAtTheStashedPosition(t *testing.T) {
 	}
 }
 
-// mpv exited zero and the pod Succeeded: the film ended. A finished film
-// is terminal, so the operator recreates nothing and the Play reads
-// Finished.
+// mpv exited with status zero and the pod Succeeded, so the film ended.
+// A finished film is final, so the operator recreates nothing and the
+// Play shows Finished.
 func TestASucceededPodIsNotRecreated(t *testing.T) {
 	cluster := runningCluster(housePlayer())
 	cluster.pods["movie-playback"].Status.Phase = podSucceeded
@@ -1686,7 +1693,7 @@ func TestASucceededPodIsNotRecreated(t *testing.T) {
 	}
 }
 
-// A Finished Play whose pod the garbage collector already took is left
+// A Finished Play whose pod garbage collection already removed is left
 // alone. The film ended, so the operator does not bring the pod back.
 func TestAMissingPodForAFinishedPlayIsNotRecreated(t *testing.T) {
 	cluster := newFakeCluster()
@@ -1706,18 +1713,16 @@ func TestAMissingPodForAFinishedPlayIsNotRecreated(t *testing.T) {
 	}
 }
 
-// A genuinely new run steals its controllers, the most-recent-steals
-// default. A resume holds them already, so it steals nothing. The fresh
-// bool ensurePlayback returns is what the steal keys on, and only a run
-// with a resume point is a resume.
-func TestOnlyANewRunStealsAndAResumeDoesNot(t *testing.T) {
+// ensurePlayback reports a new run, which takes over its controllers'
+// focus, only when the run has no resume point.
+func TestOnlyANewRunTakesOverControllersAndAResumeDoesNot(t *testing.T) {
 	cases := []struct {
 		name      string
 		position  string
 		wantFresh bool
 	}{
-		{name: "a new run steals", position: "", wantFresh: true},
-		{name: "a resume does not steal", position: "0:10:00", wantFresh: false},
+		{name: "a new run takes over the controllers", position: "", wantFresh: true},
+		{name: "a resume does not take them", position: "0:10:00", wantFresh: false},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
@@ -1732,7 +1737,7 @@ func TestOnlyANewRunStealsAndAResumeDoesNot(t *testing.T) {
 			_, fresh, err := media.ensurePlayback(play, housePlayer(), claim,
 				resolution{Items: []string{"https://nas/film.mkv"}}, resolvedPreferences{}, nil, false)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("ensuring the playback pod: %v", err)
 			}
 			if fresh != one.wantFresh {
 				t.Errorf("fresh = %v, want %v", fresh, one.wantFresh)
@@ -1741,9 +1746,10 @@ func TestOnlyANewRunStealsAndAResumeDoesNot(t *testing.T) {
 	}
 }
 
-// The recreate backoff bounds how fast a pod that keeps failing comes
-// back. The first recreate is immediate, a rapid second one is blocked,
-// and the delay doubles from the base up to the cap and stays there.
+// The recreate backoff limits how fast a pod that keeps failing comes
+// back. The first recreate is immediate, a quick second one is blocked,
+// and the delay doubles from the base up to the cap and stays at the
+// cap.
 func TestTheBackoffBoundsTheRecreateRate(t *testing.T) {
 	media := testOperator(t, newFakeCluster(), make(chan struct{}, 1))
 	key := runKey("house", "movie")
@@ -1755,8 +1761,8 @@ func TestTheBackoffBoundsTheRecreateRate(t *testing.T) {
 		t.Error("a rapid second recreate was allowed, want it blocked by backoff")
 	}
 
-	// Each recreate after its deadline grows the count, and the delay
-	// doubles to the cap and holds there.
+	// Each recreate after its deadline raises the count, and the delay
+	// doubles up to the cap and stays there.
 	for range 10 {
 		state := media.recreateBackoff[key]
 		state.next = time.Now().Add(-time.Millisecond)
@@ -1769,7 +1775,8 @@ func TestTheBackoffBoundsTheRecreateRate(t *testing.T) {
 		t.Errorf("delay after a long loop = %v, want the cap %v", got, recreateBackoffCap)
 	}
 
-	// A run that stayed up past the reset window starts over at once.
+	// A run with no recreate for recreateBackoffReset starts the count
+	// again.
 	state := media.recreateBackoff[key]
 	state.last = time.Now().Add(-2 * recreateBackoffReset)
 	media.recreateBackoff[key] = state
@@ -1798,11 +1805,12 @@ func TestBackoffDelayDoublesToTheCap(t *testing.T) {
 	}
 }
 
-// The command sidecar clears the retained status on termination and marks
-// the run offline, which drops the desk's latest report. The Play's own
-// status still carries the last position, so a resume after an eviction
-// starts where the film was and does not fall back to the start.
-func TestStashedPositionFallsBackToTheStatusWhenTheReportIsCleared(t *testing.T) {
+// The command sidecar clears the retained status when it terminates and
+// marks the run offline, which drops the latest report in reports. The
+// Play's own status still has the last position, so a resume after an
+// eviction starts where the film was and does not fall back to the
+// start.
+func TestTheStartPositionFallsBackToThePlayStatusWhenTheReportIsCleared(t *testing.T) {
 	cluster := newFakeCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	play := housePlay("https://nas/film.mkv")
@@ -1811,19 +1819,20 @@ func TestStashedPositionFallsBackToTheStatusWhenTheReportIsCleared(t *testing.T)
 	media.reports.availability("house", "movie", false, "")
 
 	if got := media.reports.latestFor("house", "movie"); got != nil {
-		t.Fatalf("the desk still holds a report: %+v", *got)
+		t.Fatalf("the operator still holds a report: %+v, want none", *got)
 	}
 	position, ok := media.resumePoint(play)
 	if !ok || position != "0:41:00" {
 		t.Errorf("resumePoint = %q, %v, want 0:41:00, true", position, ok)
 	}
-	if got := media.stashedPosition(play); got != "0:41:00" {
+	if got := media.savedPosition(play); got != "0:41:00" {
 		t.Errorf("stashedPosition = %q, want the status position 0:41:00", got)
 	}
 }
 
-// A Player that names a Remote nobody wrote fails the Play before any pod
-// exists, and the message names the Player and the missing Remote.
+// A Player that names a Remote that does not exist fails the Play
+// before any pod exists, and the message names the Player and the
+// missing Remote.
 func TestAPlayWhosePlayerNamesAMissingRemoteFailsBeforeItsPod(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
@@ -1838,7 +1847,7 @@ func TestAPlayWhosePlayerNamesAMissingRemoteFailsBeforeItsPod(t *testing.T) {
 	if status.Phase != phaseFailed {
 		t.Errorf("phase = %q, want Failed", status.Phase)
 	}
-	want := "the Player theater names the Remote ghost, which does not exist in this namespace"
+	want := "the Player theater lists the Remote ghost in spec.remotes, and no Remote of that name exists in this namespace"
 	if status.Message != want {
 		t.Errorf("message = %q, want %q", status.Message, want)
 	}
@@ -1847,35 +1856,34 @@ func TestAPlayWhosePlayerNamesAMissingRemoteFailsBeforeItsPod(t *testing.T) {
 	}
 }
 
-// An empty availability payload is a cleared retained topic, not an
-// offline signal, so the operator does not mark the run seen for it. The
-// operator publishes that empty value itself when it reclaims a deleted
-// Play, so reading it back as offline would make the run stale again and
-// reclaim it forever. A real offline payload still marks the run seen.
+// An empty availability payload is the clear of a retained topic, so it
+// does not mark the run as seen (handleBusMessage). An offline payload
+// does.
 func TestAnEmptyAvailabilityDoesNotMarkARunSeen(t *testing.T) {
 	wake := make(chan struct{}, 1)
 	media := &operator{
 		topicBase: defaultTopicBase,
 		reports:   newReports(wake),
-		focus:     newFocusDesk(wake),
+		focus:     newFocusCache(wake),
 	}
 	topic := playAvailabilityTopic(defaultTopicBase, "den", "old")
 
 	media.handleBusMessage(topic, nil)
 	if got := media.reports.stale(map[string]bool{}); len(got) != 0 {
-		t.Errorf("an empty availability marked runs seen: %v", got)
+		t.Errorf("an empty availability message marked runs %v as stale, want none", got)
 	}
 
 	media.handleBusMessage(topic, []byte(availabilityOffline))
 	if got := media.reports.stale(map[string]bool{}); len(got) != 1 || got[0] != runKey("den", "old") {
-		t.Errorf("a real offline signal did not mark the run seen: %v", got)
+		t.Errorf("an offline availability message marked runs %v as stale, want the run den/old", got)
 	}
 }
 
-// A fresh broker session may hold none of the operator's retained state,
-// so a reconnect clears the record of published key tables, which makes
-// the next pass write them again. The focus marks are not written here;
-// reconcileFocus restores only the marks the session did not deliver.
+// A new broker session may have none of the operator's retained state,
+// so a reconnect clears the record of published key tables, and the
+// next pass writes them again. It does not write the focus marks:
+// reconcileFocus publishes only the marks that the session did not send
+// back.
 func TestAReconnectRewritesTheKeyTablesAndNoMark(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		bus, brokers, connected := startBus(t, 1, nil, nil)
@@ -1885,7 +1893,7 @@ func TestAReconnectRewritesTheKeyTablesAndNoMark(t *testing.T) {
 		media := &operator{
 			topicBase: defaultTopicBase,
 			bus:       bus,
-			focus:     newFocusDesk(wake),
+			focus:     newFocusCache(wake),
 			keysPublished: map[string]string{
 				remoteKeysTopic(defaultTopicBase, "house", "sofa"): "already-published",
 			},
@@ -1895,14 +1903,15 @@ func TestAReconnectRewritesTheKeyTablesAndNoMark(t *testing.T) {
 		media.reestablishRetained()
 
 		if len(media.keysPublished) != 0 {
-			t.Errorf("keysPublished still holds %v, want it cleared for a rewrite", media.keysPublished)
+			t.Errorf("keysPublished is %v, want it empty so the key tables are published again", media.keysPublished)
 		}
 		mustPublishNothing(t, broker)
 	})
 }
 
-// keysOperator wires an operator with a bus to a fake broker, so a
-// test reads what the pass publishes on a Remote's keys topic.
+// keysOperator returns an operator with a bus connected to a fake
+// broker, so a test reads what the pass publishes on a Remote's keys
+// topic.
 func keysOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker) {
 	t.Helper()
 	bus, brokers, connected := startBus(t, 1, nil, nil)
@@ -1916,8 +1925,8 @@ func keysOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker) {
 	}, brokers[0]
 }
 
-// keysRemote is the fixture the publish tests press: one Remote and
-// the Keymap it names, with the table already compiled.
+// keysRemote is the fixture of the publish tests: one Remote and the
+// Keymap it names, which compiles to a table.
 func keysRemote(cluster *fakeCluster) *Remote {
 	cluster.keymaps["gamepad"] = testKeymap()
 	remote := houseRemote("gamepad")
@@ -1926,7 +1935,7 @@ func keysRemote(cluster *fakeCluster) *Remote {
 }
 
 // The pass compiles a Remote's table and publishes it retained, so the
-// standing pod reads the current table the instant it connects.
+// persistent pod reads the current table as soon as it connects.
 func TestPublishKeysPublishesARetainedTable(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cluster := newFakeCluster()
@@ -1943,9 +1952,9 @@ func TestPublishKeysPublishesARetainedTable(t *testing.T) {
 	})
 }
 
-// The keys topic is retained, so an unchanged table republishes nothing
-// on a later pass and the broker keeps serving the one it holds. A
-// changed Keymap does publish.
+// The keys topic is retained, so an unchanged table is not published
+// again on a later pass, and the broker keeps sending the table that it
+// has. A changed Keymap is published.
 func TestPublishKeysRepublishesOnlyOnChange(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cluster := newFakeCluster()
@@ -1971,8 +1980,8 @@ func TestPublishKeysRepublishesOnlyOnChange(t *testing.T) {
 	})
 }
 
-// A Keymap that will not compile publishes nothing, so the last good
-// retained table stays in place and the controller keeps working.
+// A Keymap that does not compile publishes nothing, so the last good
+// retained table stays and the controller keeps working.
 func TestPublishKeysPublishesNothingForAKeymapThatWillNotCompile(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cluster := newFakeCluster()
@@ -1996,38 +2005,37 @@ func TestPublishKeysPublishesNothingForAKeymapThatWillNotCompile(t *testing.T) {
 	})
 }
 
-// playersOperator wires an operator with a bus to a fake broker, so a
-// test reads what the player reconcile publishes. The idle display class
-// stays unset, so reconcileIdle builds nothing and the test reads the
-// status publish alone.
+// playersOperator returns an operator with a bus connected to a fake
+// broker, so a test reads what the Player reconcile publishes. The idle
+// display class is unset, so reconcileIdle builds nothing and the test
+// reads only the status publish.
 func playersOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker) {
 	t.Helper()
 	bus, brokers, connected := startBus(t, 1, nil, nil)
 	waitForConnect(t, connected)
 	return &operator{
-		client:      testAPIClient(t, cluster.handler(t)),
-		view:        cluster.view(),
-		topicBase:   defaultTopicBase,
-		bus:         bus,
-		reports:     newReports(nil),
-		focus:       newFocusDesk(nil),
-		ensure:      newEnsureDesk(),
-		peripherals: newPeripheralDesk(),
-		codes:       newCodesDesk(nil),
-		panels:      newPanelDesk(nil),
+		client:          testAPIClient(t, cluster.handler(t)),
+		view:            cluster.view(),
+		topicBase:       defaultTopicBase,
+		bus:             bus,
+		reports:         newReports(nil),
+		focus:           newFocusCache(nil),
+		playerReceivers: newPlayerReceivers(),
+		peripherals:     newPeripheralCache(),
+		codes:           newCodesCache(nil),
+		panels:          newPanelCache(nil),
 		// These tests read what the status publish leaves on the bus.
-		// catchUpEnds stays zero, so the operator reads the broker as not
-		// caught up and publishes no level. The relay tests run their own
-		// operator with the grace elapsed.
+		// catchUpEnds stays zero, so the operator treats the broker as
+		// not caught up and publishes no level. The relay tests build
+		// their own operator with the grace over.
 		levels: newVolumeEngine(nil, func(string, []byte) {}, io.Discard),
 	}, brokers[0]
 }
 
-// The sidecar's ending reaches the operator on the play status topic, and
-// the pass it wakes reads the unit as idle while the pod still runs and the
-// Play still reads Running. That is the whole point of the mark: the idle
-// status goes out in bus time, seconds before the pod terminates, so the
-// idle screen draws over the dying film.
+// The sidecar's ending report makes the operator publish the Player as
+// Idle while the pod still runs and the Play still shows Running, so
+// the idle screen draws over the film as it ends and does not wait for
+// the pod to terminate.
 func TestAReportedEndingPublishesTheIdleStatus(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cluster := newFakeCluster()
@@ -2053,15 +2061,15 @@ func TestAReportedEndingPublishesTheIdleStatus(t *testing.T) {
 		mustMatch(t, state.Activity, playerIdle)
 		mustMatch(t, state.Play == nil, true)
 
-		// The Play is still what the API server holds it to be, so kubectl
-		// still lists the run for the seconds the pod takes to terminate.
+		// The Play is still what the API server has, so kubectl still
+		// lists the run for the seconds that the pod takes to
+		// terminate.
 		mustMatch(t, play.Status.Phase, phaseRunning)
 	})
 }
 
-// Every pass publishes each unit's presentable state to its retained
-// status topic, so an idle pod that just started reads the current state
-// from the broker.
+// A pass publishes each Player's bus status retained, so an idle pod
+// that just started reads the current state from the broker.
 func TestAPassPublishesTheRetainedPlayerStatus(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cluster := newFakeCluster()
@@ -2082,10 +2090,10 @@ func TestAPassPublishesTheRetainedPlayerStatus(t *testing.T) {
 	})
 }
 
-// The status topic is retained, so a settled unit republishes nothing on
-// the next pass: the broker still holds the payload, and a new subscriber
-// reads it from there. An edit to the Player does publish, which is how a
-// renamed part reaches the screen with no pod restart.
+// A Player whose bus status did not change is not published again,
+// because the broker keeps the retained payload. A new
+// spec.displayName is published, so a rename reaches the screen without
+// a pod restart.
 func TestThePlayerStatusRepublishesOnlyOnChange(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cluster := newFakeCluster()
@@ -2105,10 +2113,9 @@ func TestThePlayerStatusRepublishesOnlyOnChange(t *testing.T) {
 	})
 }
 
-// A controller's Peripheral reaches the unit's status on the bus: the
-// link it reports and the charge it reports, on the one remote part. The
-// device that sleeps reads away on the next pass, so the screen dims the
-// name it drew.
+// The link and the charge that a controller's Peripheral reports reach
+// the remote component of the Player's bus status. A device that
+// disconnects shows as disconnected on the next pass.
 func TestAPeripheralReachesThePublishedPlayerStatus(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cluster := newFakeCluster()
@@ -2137,9 +2144,9 @@ func TestAPeripheralReachesThePublishedPlayerStatus(t *testing.T) {
 	})
 }
 
-// A Player the cluster no longer holds has its retained status cleared
-// with an empty publish, so a deleted unit leaves nothing on the bus for a
-// subscriber to draw.
+// A Player that the cluster no longer has gets its retained status
+// cleared with an empty publish, so a deleted Player leaves nothing on
+// the bus for a subscriber to draw.
 func TestADeletedPlayerClearsItsRetainedStatus(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cluster := newFakeCluster()
@@ -2157,9 +2164,10 @@ func TestADeletedPlayerClearsItsRetainedStatus(t *testing.T) {
 	})
 }
 
-// caughtUpOperator wires a whole operator to a fake broker, with the
-// broker's catch-up already over, so a test reads the levels and the focus
-// marks a pass publishes for units the broker holds nothing for.
+// caughtUpOperator returns a whole operator connected to a fake broker,
+// with the broker's catch-up already over, so a test reads the levels
+// and focus marks that a pass publishes for Players that the broker has
+// nothing for.
 func caughtUpOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker) {
 	t.Helper()
 	bus, brokers, connected := startBus(t, 1, nil, nil)
@@ -2170,14 +2178,15 @@ func caughtUpOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroke
 	return media, brokers[0]
 }
 
-// theaterVolumeTopic is the one unit the relay tests publish for.
+// theaterVolumeTopic is the volume topic of the Player that the relay
+// tests publish for.
 func theaterVolumeTopic() string {
 	return playerVolumeTopic(defaultTopicBase, "house", "theater")
 }
 
-// mustPublishVolume reads publishes until the unit's level arrives, and
-// answers it. A whole pass publishes each unit's presentable state as
-// well, so a test that waits for a level reads past what is not one.
+// mustPublishVolume reads publishes until the Player's level arrives,
+// and returns it, skipping the Player status messages that a pass also
+// publishes.
 func mustPublishVolume(t *testing.T, broker *fakeBroker) brokerPublish {
 	t.Helper()
 	for {
@@ -2190,7 +2199,7 @@ func mustPublishVolume(t *testing.T, broker *fakeBroker) brokerPublish {
 
 // mustPublishNoVolume drains the broker once every goroutine in the
 // test's synctest bubble has settled, and fails on any message that
-// reached the unit's volume topic.
+// reached the Player's volume topic.
 func mustPublishNoVolume(t *testing.T, broker *fakeBroker) {
 	t.Helper()
 	synctest.Wait()
@@ -2206,15 +2215,15 @@ func mustPublishNoVolume(t *testing.T, broker *fakeBroker) {
 	}
 }
 
-// settledPlayer is a Player already idle, so a pass over it crosses no
-// play-end edge and publishes its status alone.
+// settledPlayer returns a Player that is already idle, so a pass over
+// it sees no Play end and publishes only its status.
 func settledPlayer(player *Player) Player {
 	player.Status = PlayerStatus{Activity: playerIdle}
 	return *player
 }
 
-// mustPublishNothing proves nothing reached the broker once every
-// goroutine in the test's synctest bubble has settled.
+// mustPublishNothing checks that nothing reached the broker, after
+// every goroutine in the test's synctest bubble has settled.
 func mustPublishNothing(t *testing.T, broker *fakeBroker) {
 	t.Helper()
 	synctest.Wait()
@@ -2225,9 +2234,9 @@ func mustPublishNothing(t *testing.T, broker *fakeBroker) {
 	}
 }
 
-// A Play on the named Player, created at the stated moment. The name and
-// the creation time are what the pass orders on when two Plays name one
-// unit.
+// playOnPlayer returns a Play on the named Player, created at the given
+// time. The pass orders two Plays on one Player by the creation time
+// and then the name.
 func playOnPlayer(name, player, created string) *Play {
 	play := housePlay("https://nas/film.mkv")
 	play.Metadata.Name = name
@@ -2237,8 +2246,8 @@ func playOnPlayer(name, player, created string) *Play {
 	return play
 }
 
-// Two unfinished Plays on one Player are one run too many. The newest one
-// runs, and the pass deletes the other.
+// A Player runs one Play, so when two unfinished Plays name it, the
+// newest runs and the pass deletes the other.
 func TestAPassDeletesEveryOlderPlayOnOnePlayer(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -2275,8 +2284,8 @@ func TestAPassDeletesEveryOlderPlayOnOnePlayer(t *testing.T) {
 
 			media.pass()
 
-			if _, standing := cluster.plays[one.wanted]; !standing {
-				t.Errorf("the pass deleted %q, and it is the newest", one.wanted)
+			if _, exists := cluster.plays[one.wanted]; !exists {
+				t.Errorf("the pass deleted the newest Play %q, want it kept", one.wanted)
 			}
 			if len(cluster.plays) != 1 {
 				t.Errorf("plays = %v, want only %q", sortedNames(cluster.plays), one.wanted)
@@ -2285,7 +2294,7 @@ func TestAPassDeletesEveryOlderPlayOnOnePlayer(t *testing.T) {
 	}
 }
 
-// The only Play on a Player is the newest one, so nothing deletes it.
+// The only Play on a Player is the newest, so nothing deletes it.
 func TestAPassKeepsTheOnlyPlayOnAPlayer(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = playOnPlayer("movie", "theater", "2026-09-08T10:00:00Z")
@@ -2294,13 +2303,13 @@ func TestAPassKeepsTheOnlyPlayOnAPlayer(t *testing.T) {
 
 	media.pass()
 
-	if _, standing := cluster.plays["movie"]; !standing {
+	if _, exists := cluster.plays["movie"]; !exists {
 		t.Error("the pass deleted the only Play on the unit")
 	}
 }
 
-// Each unit is ordered on its own. Two Plays on two Players are two runs,
-// and neither ends the other.
+// Each Player is ordered on its own. Two Plays on two Players are two
+// runs, and neither ends the other.
 func TestAPassLeavesPlaysOnOtherPlayersAlone(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.plays["theater-film"] = playOnPlayer("theater-film", "theater", "2026-09-08T10:00:00Z")
@@ -2316,10 +2325,9 @@ func TestAPassLeavesPlaysOnOtherPlayersAlone(t *testing.T) {
 	mustMatchAll(t, sortedNames(cluster.plays), []string{"kitchen-film", "theater-film"})
 }
 
-// A deleting Play still owns a pod while a finalizer keeps it, and
-// garbage collection does not delete that pod until the finalizer
-// clears. The operator deletes the pod itself, so the claim frees and the
-// next run's pod starts.
+// Garbage collection keeps a deleting Play's pod until the finalizer
+// clears, so the operator deletes the pod itself, and the pod of the
+// next run can take the claim.
 func TestAPassDeletesThePodOfADeletingPlay(t *testing.T) {
 	cluster := newFakeCluster()
 	play := playOnPlayer("movie", "theater", "2026-09-08T10:00:00Z")
@@ -2331,20 +2339,20 @@ func TestAPassDeletesThePodOfADeletingPlay(t *testing.T) {
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
 	media.pass()
-	if _, standing := cluster.pods["movie-playback"]; standing {
-		t.Fatal("the deleting Play's pod stands")
+	if _, exists := cluster.pods["movie-playback"]; exists {
+		t.Fatal("the pod of the Play with a deletion timestamp still exists after the pass, want it deleted")
 	}
 
-	// A second pass proves the reconcile does not build the pod again for a
-	// Play that is on its way out.
+	// A second pass shows that the reconcile does not build the pod
+	// again for a Play that is being deleted.
 	media.pass()
-	if _, standing := cluster.pods["movie-playback"]; standing {
-		t.Error("the pass recreated the deleting Play's pod")
+	if _, exists := cluster.pods["movie-playback"]; exists {
+		t.Error("the pass recreated the pod of a Play that has a deletion timestamp, want none")
 	}
 }
 
-// A deleting Play is not the run on its unit, so the Play that follows it
-// is kept and gets its own pod.
+// A deleting Play is not the run on its Player, so the Play that
+// follows it is kept and gets its own pod.
 func TestADeletingPlayDoesNotSupersedeTheNextOne(t *testing.T) {
 	cluster := newFakeCluster()
 	leaving := playOnPlayer("leaving", "theater", "2026-09-08T11:00:00Z")
@@ -2356,10 +2364,10 @@ func TestADeletingPlayDoesNotSupersedeTheNextOne(t *testing.T) {
 
 	media.pass()
 
-	if _, standing := cluster.plays["arriving"]; !standing {
-		t.Fatal("the pass deleted the Play that stands")
+	if _, exists := cluster.plays["arriving"]; !exists {
+		t.Fatal("the pass deleted the Play arriving, want it kept")
 	}
 	if _, held := cluster.pods["arriving-playback"]; !held {
-		t.Error("the standing Play reached no pod")
+		t.Error("the Play arriving has no pod, want one created")
 	}
 }

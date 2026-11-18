@@ -1,85 +1,79 @@
 package main
 
-// A unit's Receiver match holds through a short gap in its screen.
+// A Player's screen comes from the allocation of its idle claim. The
+// claim has no allocation while the pod that holds it is replaced,
+// between the delete of the old pod and the scheduling of the new one.
+// If the Receiver match followed the claim through that gap, the pass
+// would remove the session from the Receiver and write it again after
+// the gap, and the equipment would turn off and on each time a screen
+// pod is replaced. A press during the gap would also not switch the
+// Receiver's input, and a Television's screen request would not be
+// relayed. So for up to screenGapBound the pass matches the Receivers
+// against the last screen that the Player resolved.
 //
-// The screen resolves from the idle claim's allocation, and the claim
-// loses its allocation while the pod that holds it is replaced: the old
-// pod is gone, and the scheduler has not placed the new one. A match
-// that followed the claim through that gap would lift the session on
-// the equipment, and the pass after the gap would apply it again, so
-// the room would turn off and on each time a screen pod is replaced.
-// A press during the gap would also ask no input of the Receiver, and a
-// Television's ask for the screen would not be relayed. So the pass keeps the last screen a unit resolved for
-// screenGapBound, and matches the Receivers against that screen.
-//
-// The pass matches the held screen against the Receivers it reads now,
-// so a person who rewires a Receiver during a gap still moves the
-// session.
+// The pass matches that screen against the Receivers as it reads them
+// now, so rewiring a Receiver during a gap still moves the session.
 
 import "time"
 
-// screenGapBound is how long a unit keeps its last screen after the
-// claim loses its allocation.
+// screenGapBound is how long a Player keeps its last screen after the
+// idle claim loses its allocation.
 //
 // The scheduler writes the allocation when it binds the new pod, before
-// the kubelet pulls the image, so a slow pull does not make the gap
-// longer. On a home cluster, the pass after a pod replacement found
-// the claim allocated again 20 to 110 ms after the pass that found it
-// unallocated. The gap is longer in two cases: the
-// scheduler retries a pod it could not place with a backoff that grows
-// to 10 s, and a delegate operator that stops between its delete and
-// its create leaves the create to a new leader, which takes over within
-// a 30-second Lease. 90 s covers both. A screen that is really gone
-// keeps its session for up to 90 s more, and then the pass lifts it.
+// the kubelet pulls the image, so a slow pull does not lengthen the gap.
+// The gap is longer when the scheduler retries a pod it could not place,
+// with a backoff of up to 10 s, and when another operator that replaces
+// the screen pod stops between its delete and its create, so that a new
+// leader makes the create after its 30-second Lease. The cost is that a
+// screen that is really gone keeps its Receiver session for up to 90 s.
 const screenGapBound = 90 * time.Second
 
-// heldScreen is the last screen one unit resolved in this run. lostAt
-// is zero while the screen resolves, and is the moment the pass first
-// found it unresolved.
-type heldScreen struct {
+// lastScreen is the last screen that one Player resolved since this
+// operator started. lostAt is zero while the screen resolves, and
+// otherwise the time the pass first found it unresolved.
+type lastScreen struct {
 	screen screen
 	lostAt time.Time
 }
 
-// matchedScreen answers the screen a unit's Receiver match reads: the
-// screen the claim resolves to now, or the held one while the gap is
-// inside the bound. A unit with no screen held in this run has none to
-// keep, so an operator that starts during a gap matches nothing until
-// the claim is allocated again.
+// matchedScreen returns the screen to match a Player's Receivers
+// against: the screen the claim resolves to now, or the last one while
+// the gap is shorter than screenGapBound. The last screen is kept only
+// in memory, so an operator that starts during a gap matches nothing
+// until the claim is allocated again.
 //
-// The first pass of a gap schedules one wake at the bound, so the pass
-// that lifts the session runs when the bound ends and not at the next
-// unrelated event.
+// The first pass of a gap requeues a pass at the end of the bound, so
+// the session is removed then and not at the next unrelated event.
 func (o *operator) matchedScreen(player *Player) (screen, bool) {
 	key := playerKey(player.Metadata.Namespace, player.Metadata.Name)
 	if found, resolved := o.screenLookup().screenFor(player); resolved {
-		o.heldScreens[key] = heldScreen{screen: found}
+		o.lastScreens[key] = lastScreen{screen: found}
 		return found, true
 	}
-	held, holds := o.heldScreens[key]
-	if !holds {
+	last, ok := o.lastScreens[key]
+	if !ok {
 		return screen{}, false
 	}
 	now := o.now()
-	if held.lostAt.IsZero() {
-		held.lostAt = now
-		o.heldScreens[key] = held
+	if last.lostAt.IsZero() {
+		last.lostAt = now
+		o.lastScreens[key] = last
 		o.requeueAfter(screenGapBound)
 	}
-	if now.Sub(held.lostAt) >= screenGapBound {
-		delete(o.heldScreens, key)
+	if now.Sub(last.lostAt) >= screenGapBound {
+		delete(o.lastScreens, key)
 		return screen{}, false
 	}
-	return held.screen, true
+	return last.screen, true
 }
 
-// retainHeldScreens drops the held screen of every unit the cluster no
-// longer holds, so a Player created again under the same name starts
-// with no screen to keep.
+// retainHeldScreens forgets the screen of every Player that is not in
+// live, so a Player that is deleted and created again under the same
+// name does not match through a gap it never had.
 func (o *operator) retainHeldScreens(live map[string]bool) {
-	for key := range o.heldScreens {
+	for key := range o.lastScreens {
 		if !live[key] {
-			delete(o.heldScreens, key)
+			delete(o.lastScreens, key)
 		}
 	}
 }

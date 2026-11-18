@@ -1,24 +1,24 @@
 package main
 
-// This file lists every Event reason the media operator and media-api
-// post, and the references that name the objects they post on. The
+// This file lists the Event reasons that media-operator and media-api
+// post, and builds the references to the objects they post on. The
 // reasons are part of the published interface: the troubleshooting
-// guide names each one, and an alert or a person's search reads them.
+// guide lists each one, and alerts and searches match on them.
 //
-// An Event records what just happened, for a person, and the API
-// server deletes it an hour after its last write. The Play's phase,
-// its conditions, and the Player's Screen condition hold what is true
-// now. So each phase move and each condition transition posts one
-// Event, and so does each action the operator takes on its own, such
-// as a pod it creates again. A press, a position report, a volume
-// step, and each pass of a retry loop post none: those go to the log.
+// An Event tells a person what just happened, and the API server
+// deletes it an hour after its last write. What is true now is in the
+// Play's phase and conditions and in the Player's Screen condition. So
+// the operator posts one Event for each phase change, each condition
+// transition, and each action it takes on its own, such as creating a
+// pod again. It posts none for a key press, a position report, a volume
+// step, or a retry attempt. Those go to the log.
 
 import (
 	"github.com/liken-sh/liken/kubernetes/conditions"
 	"github.com/liken-sh/liken/kubernetes/events"
 )
 
-// The reportingComponent of each Event: the operator, and the HTTP API
+// The reporting component of an Event: the operator, or the HTTP API
 // that runs in its own Deployment.
 const (
 	operatorComponent = "media-operator"
@@ -27,46 +27,49 @@ const (
 
 // The reasons of the Events on a Play.
 const (
-	// The phase moved to Running, Finished, or Failed. A Failed phase
-	// whose cause is the Play's own spec is InvalidSpec instead.
+	// The phase changed to Running, Finished, or Failed. When the cause
+	// of a Failed phase is the Play's own spec, the reason is
+	// InvalidSpec instead.
 	reasonPlaybackStarted  = "PlaybackStarted"
 	reasonPlaybackFinished = "PlaybackFinished"
 	reasonPlaybackFailed   = "PlaybackFailed"
-	// The Play can never run as written: it names no Player, an item
-	// does not resolve, or a Remote the pod needs does not exist.
+	// The Play cannot run as written: it names no Player, an item does
+	// not resolve, or a Remote the pod needs does not exist.
 	reasonInvalidSpec = "InvalidSpec"
-	// The operator created the playback pod again: the old one failed,
-	// vanished, or no longer matched the Player's spec.
+	// The operator created the playback pod again because the old pod
+	// failed, was deleted, or no longer matched the Player's spec.
 	reasonPodRecreated = "PodRecreated"
-	// The pod failed again soon after a recreate, so the next recreate
-	// waits longer.
+	// The pod failed again soon after being recreated, so the operator
+	// waits longer before the next recreate.
 	reasonResumeBackoff = "ResumeBackoff"
-	// The operator deleted the Play: a newer Play on the same Player
-	// replaced it, or its time to live after it finished passed. The
-	// same Event goes on the Player, because the Play is gone.
+	// The operator deleted the Play, either because a newer Play on the
+	// same Player replaced it (Superseded) or because its time to live
+	// after finishing ran out (Retired). The operator posts the same
+	// Event on the Player too, because `kubectl describe` cannot show a
+	// deleted Play.
 	reasonSuperseded = "Superseded"
 	reasonRetired    = "Retired"
 )
 
-// The reasons of the Events on a Player. The Screen condition's own
-// reasons, such as Present and PanelAway, are the reasons of its
-// transitions, so they are listed in screen.go with the condition.
+// The reasons of the Events on a Player. A transition of the Screen
+// condition posts an Event with the condition's own reason, such as
+// Present or PanelAway. Those reasons are in screen.go.
 const (
-	// Writing the session on the unit's Receiver failed, and the
-	// write that landed after one or more failures.
+	// Writing the session to the Player's Receiver failed, or a write
+	// succeeded after earlier failures.
 	reasonReceiverWriteFailed    = "ReceiverWriteFailed"
 	reasonReceiverWriteRecovered = "ReceiverWriteRecovered"
 )
 
 // The reasons of the Events on a Remote.
 const (
-	// The Remote's Keymap does not compile, so the last good key table
-	// stays on the bus.
+	// The Remote's Keymap does not compile, so the last key table that
+	// compiled stays published on the bus.
 	reasonKeymapRefused = "KeymapRefused"
 )
 
-// The reason of the Event media-api posts on a Player for each request
-// that produced bytes.
+// The reason of the Event that media-api posts on a Player for each
+// request that returned captured data.
 const reasonCaptured = "Captured"
 
 func playRef(play *Play) events.ObjectReference {
@@ -91,11 +94,11 @@ func objectRef(kind string, meta ObjectMeta) events.ObjectReference {
 	}
 }
 
-// transitions answers the conditions of next that transitioned from
-// held: each one that is new, or whose status or reason changed. A
-// status write composes its conditions from the copy the pass read,
-// and the write compares them with the copy the API server held, so
-// the Events follow what the API server stored.
+// transitions returns the conditions in next that are new or whose
+// status or reason differ from the same type in held. Each caller
+// passes as held the conditions of the copy that its status write
+// replaced, which after a conflict is the copy read again from the API
+// server, so each Event matches a change that the API server stored.
 func transitions(held, next []conditions.Condition) []conditions.Condition {
 	var moved []conditions.Condition
 	list := append([]conditions.Condition(nil), held...)

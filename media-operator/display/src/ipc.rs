@@ -1,8 +1,7 @@
-//! The display is an IPC client of mpv, on the socket the command sidecar
-//! already drives. It reads properties over that socket. Every message the
-//! sidecar sends the display arrives as a `client-message` event, because
-//! mpv delivers a `script-message` to every client and an IPC client cannot
-//! be named.
+//! The display connects to mpv's JSON IPC socket, the same socket that
+//! the command sidecar uses, and observes mpv's properties there. The
+//! sidecar sends the display its messages as `script-message` commands,
+//! and mpv sends each one to every IPC client as a `client-message` event.
 
 use std::collections::HashSet;
 use std::io;
@@ -17,25 +16,19 @@ use tokio::sync::mpsc::Sender;
 
 use crate::record::{self, Notes};
 
-/// mpv serves its JSON IPC socket on an emptyDir the playback pod always
-/// carries, rather than in the player container's private `/tmp`, because
-/// the command sidecar drives the same socket and a volume is the only thing
-/// two containers share.
+/// mpv serves its socket on an `emptyDir` volume of the playback pod, not
+/// in the player container's `/tmp`, because the command sidecar is a
+/// second container that connects to the same socket.
 pub const SOCKET_PATH: &str = "/ipc/mpv.sock";
 
-/// The display reads a socket path on top of the default, for the reason the
-/// bridge's own decode mode reads one: a local mpv serves its socket
-/// somewhere other than the pod's fixed path. It takes a default, so the pod
-/// sets nothing.
+/// Overrides `SOCKET_PATH`, for a local mpv that serves its socket
+/// somewhere else. The pod does not set it.
 pub const SOCKET_VARIABLE: &str = "MEDIA_MPV_SOCKET";
 
-/// The properties the display observes. mpv pushes each one once at
-/// registration and then on every change, so the display runs no timer of its
-/// own for these values.
-///
-/// The two delays are observed here. An IPC client reads a property over the
-/// same socket it draws from, so the display holds every value it draws and
-/// asks for nothing inside a frame.
+/// mpv sends each observed property when the observer registers and again
+/// on every change, so the display reads none of them on a timer. The
+/// display keeps the latest value of each, so drawing a frame sends no
+/// request to mpv.
 pub const OBSERVED: [&str; 14] = [
     "duration",
     "time-pos",
@@ -53,14 +46,15 @@ pub const OBSERVED: [&str; 14] = [
     "sub-delay",
 ];
 
-/// The message that shows the display, arms the idle hide, and moves no
-/// focus.
+/// The message that shows the display and arms the idle hide timer. It
+/// does not move focus.
 pub const SUMMON: &str = "summon";
 
-/// The command sidecar can present an item before the display attaches, and a
-/// block sent then reaches nobody. So the display asks once, with every
-/// property observed, and the sidecar answers by sending the current item's
-/// block again.
+/// The display sends this script message once, after it registers its
+/// observers. mpv does not keep a message for a client that connects
+/// later, so the sidecar can send the current item's block before the
+/// display is there to receive it. The sidecar sends the block again when
+/// it receives this message.
 pub const PRESENTATION_REQUEST: &str = "liken-presentation-request";
 
 /// The message the sidecar sends with the current item's block, as one JSON
@@ -68,55 +62,54 @@ pub const PRESENTATION_REQUEST: &str = "liken-presentation-request";
 pub const PRESENTATION: &str = "presentation";
 
 /// The message the sidecar sends with the Play's up-next block, as one JSON
-/// string, once at start and again on every presentation replay. No message
-/// means the Play names no next work, and the display draws nothing for it.
+/// string. It sends it at start and again each time it resends the
+/// presentation. When the Play has no next work the sidecar sends none, and
+/// the display draws no up-next card.
 pub const NEXT: &str = "next";
 
-/// The message the sidecar sends for each live message on the `Player`'s
-/// volume topic, with the level from 0.0 to 1.0, `yes` or `no` for the mute,
-/// and `yes` or `no` for whether the display draws the row:
-/// `volume-changed 0.63 no yes`. The sidecar sends none for the retained
-/// value it reads when it connects, which a starting pod restores and no
-/// person changed, so the indicator stays off screen for it.
+/// The message the sidecar sends when a new message arrives on the
+/// `Player`'s volume topic. Its arguments are the level from 0.0 to 1.0,
+/// `yes` or `no` for mute, and `yes` or `no` for whether the display draws
+/// the volume row, as in `volume-changed 0.63 no yes`. The sidecar does not
+/// send it for the retained message it receives when it subscribes,
+/// because that message restores the volume of a starting pod and is not a
+/// change that a person made.
 pub const VOLUME_CHANGED: &str = "volume-changed";
 
-// The request id every command the display sends carries. No observe uses
-// it, so a reply to a command reads apart from a property push.
-const SENT: u64 = 0;
+/// The request id of a command whose reply the display does not match to
+/// its sender. Observes and the commands of key presses use other ids.
+const UNMATCHED_ID: u64 = 0;
 
-/// How long a dial waits before it counts as a socket that does not answer.
+/// How long a connection attempt, or the gate's read of its properties,
+/// waits before it fails.
 const DIAL_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// How long the loop waits between two tries at the socket.
+/// How long to wait between connection attempts.
 const DIAL_DELAY: Duration = Duration::from_secs(1);
 
-/// The two properties the window gate reads, and the request id each one
-/// comes back under. `time-pos` says the film is playing. `vo-configured`
-/// says mpv's video output is up, which is when mpv's own surface exists.
-///
-/// The gate reads both because the first is not enough. mpv answers
-/// `time-pos` with a number before it maps its surface, and a display that
-/// opened its window on that answer alone arrived first, so the layout
-/// stacked it under the film. The compositor stacks the newest surface on
-/// top, and this gate is what makes the display's surface the newest.
+/// The properties that `Ipc::playing` reads, each with the request id of
+/// its reply. `time-pos` is a number once the film plays, and
+/// `vo-configured` is true once mpv has created its video surface. The
+/// gate reads both, because mpv reports a `time-pos` before it maps its
+/// surface.
 const GATE: [(u64, &str); 2] = [(1, "time-pos"), (2, "vo-configured")];
 
 /// What the display reads off the socket.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
-    /// One observed property carries a new value.
+    /// An observed property has a new value.
     Property { name: String, value: Value },
-    /// One `script-message` reached every client.
+    /// A `script-message` arrived, with its arguments.
     Message(Vec<String>),
-    /// The socket closed. The loop dials again.
+    /// The socket closed. `Ipc::serve` connects again.
     Detached,
 }
 
-/// One line mpv wrote.
+/// One line read from mpv's socket.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Incoming {
-    /// One answer to a command, and what mpv made of it. `success` is the
-    /// word for a command mpv ran.
+    /// The reply to a command. `error` is `success` when mpv ran the
+    /// command.
     Reply {
         id: u64,
         data: Value,
@@ -125,36 +118,36 @@ pub enum Incoming {
     Event(Event),
 }
 
-/// One command the display sends mpv, as the words mpv's own command takes.
+/// A command for mpv: the command name followed by its arguments.
 pub type Command = Vec<Value>;
 
-// One command as the line the display writes. The frame loop hands it to
-// the socket reader over a channel, because the loop holds no socket.
+/// The line for a command whose reply is not matched to its sender. The
+/// frame loop has no socket, so it sends the line to the socket task over
+/// a channel.
 pub fn line(command: &Command) -> String {
-    self::command(SENT, command.clone())
+    self::command(UNMATCHED_ID, command.clone())
 }
 
-/// One command as the line mpv's socket takes: newline-delimited JSON,
-/// carrying the request id the reply comes back under.
+/// One command as a line of newline-delimited JSON. mpv copies `id` into
+/// the reply as `request_id`.
 pub fn command(id: u64, arguments: Vec<Value>) -> String {
     format!("{}\n", json!({ "command": arguments, "request_id": id }))
 }
 
-/// The command that asks mpv to push one property now and on every change.
+/// The command that makes mpv send a property now and on every change.
 pub fn observe(id: u64, name: &str) -> String {
     command(id, vec![json!("observe_property"), json!(id), json!(name)])
 }
 
-/// The command that reads one property once.
 pub fn get_property(id: u64, name: &str) -> String {
     command(id, vec![json!("get_property"), json!(name)])
 }
 
-/// One line mpv wrote, as the display reads it. A line that is not JSON, and
-/// an event this display has no case for, read as nothing.
+/// Parse one line from mpv. It returns `None` for a line that is not JSON
+/// and for an event the display does not use.
 pub fn decode(line: &str) -> Option<Incoming> {
-    // The line is this reader's own, so every field is taken out of it
-    // rather than copied: a `track-list` push carries the whole list.
+    // Fields are moved out of the parsed value instead of cloned, because a
+    // `track-list` change carries the whole list.
     let Value::Object(mut message) = serde_json::from_str::<Value>(line).ok()? else {
         return None;
     };
@@ -193,11 +186,11 @@ pub fn decode(line: &str) -> Option<Incoming> {
     }
 }
 
-/// The word mpv answers a command it ran with. Every other word is a command
-/// it refused.
-const RAN: &str = "success";
+/// The `error` of a reply to a command that mpv ran. Any other value is
+/// mpv's reason for refusing the command.
+const SUCCESS: &str = "success";
 
-/// The mpv socket the display reads.
+/// The mpv socket the display connects to.
 #[derive(Debug, Clone)]
 pub struct Ipc {
     path: PathBuf,
@@ -210,7 +203,7 @@ impl Default for Ipc {
 }
 
 impl Ipc {
-    /// The socket the environment names, or the pod's own.
+    /// The socket at `SOCKET_VARIABLE` if it is set, otherwise `SOCKET_PATH`.
     pub fn from_environment() -> Self {
         match std::env::var(SOCKET_VARIABLE) {
             Ok(path) if !path.is_empty() => Self::at(path),
@@ -224,20 +217,19 @@ impl Ipc {
         }
     }
 
-    /// The socket this client dials. It names the subscription that reads
-    /// the socket, so the frame loop opens one reader and no more.
+    /// The socket path. The frame loop uses it as the identity of its
+    /// subscription, so it opens one reader per path.
     pub fn path(&self) -> &Path {
         &self.path
     }
 
-    /// Wait until mpv answers, reports a position, and has its video output
-    /// up. The display opens its window after that, so its surface arrives
-    /// after mpv's and the compositor's controller, which stacks a claim's
-    /// surfaces newest on top, puts the display above the film.
+    /// Waits until mpv reports a playback position and has created its video
+    /// surface. The compositor stacks a claim's surfaces with the newest on
+    /// top, so the display must open its window after mpv's surface exists
+    /// to be drawn above the film.
     ///
-    /// The wait ends at the deadline whatever the socket does, so a player
-    /// that never starts leaves the container to exit rather than stand
-    /// windowless.
+    /// Returns false at the deadline, so that a player that never starts
+    /// makes the container exit instead of running with no window.
     pub async fn playing(&self, within: Duration) -> bool {
         let deadline = tokio::time::Instant::now() + within;
         while tokio::time::Instant::now() < deadline {
@@ -252,10 +244,10 @@ impl Ipc {
         false
     }
 
-    /// Dial the socket, observe every property, and send on until the
-    /// process ends. A socket that closes reports `Detached` and the loop
-    /// dials again, because mpv restarting is the pod's own business and the
-    /// display outlives it.
+    /// Connect to the socket, observe every property, and forward commands
+    /// until the receiver of `events` is dropped. When the socket closes it
+    /// sends `Detached` and connects again, because the display keeps
+    /// running when mpv restarts.
     pub async fn serve(
         &self,
         events: Sender<Event>,
@@ -266,8 +258,8 @@ impl Ipc {
             match tokio::time::timeout(DIAL_TIMEOUT, UnixStream::connect(&self.path)).await {
                 Ok(Ok(stream)) => {
                     let _ = session(stream, &events, &mut commands.subscribe(), notes).await;
-                    // mpv answers nothing on a closed socket, so every press
-                    // line still waiting is written now, with that reason.
+                    // mpv cannot reply on a closed socket, so print the
+                    // log line of each command still waiting for a reply.
                     for line in record::abandoned(notes) {
                         eprintln!("{line}");
                     }
@@ -286,13 +278,11 @@ impl Ipc {
     }
 }
 
-/// One attachment: observe every property, then read lines until the socket
+/// Observe every property on a connected socket, then read lines until it
 /// closes.
 ///
-/// The read of an attached socket carries no deadline, while every dial
-/// does. A paused film writes nothing for as long as it stands, so silence
-/// on an attached socket is not a failure. The socket closing is, and that
-/// is what ends the session.
+/// Reads have no timeout. A paused film writes nothing, so a quiet socket
+/// is normal, and only the socket closing ends the session.
 pub async fn session<S>(
     stream: S,
     events: &Sender<Event>,
@@ -312,11 +302,11 @@ where
         .write_all(line(&vec![json!("script-message"), json!(PRESENTATION_REQUEST)]).as_bytes())
         .await?;
 
-    // A command a press made carries a request id of its own, and its answer
-    // completes the line the frame loop left in the notes. Every other
-    // command carries id 0, so its refusal cannot be traced back to what sent
-    // it. The kind of refusal can, and one line per kind says what mpv would
-    // not do without a line per frame.
+    // The command of a key press has its own request id, and its reply
+    // completes the log line that the frame loop saved in `notes`. Any other
+    // reply cannot be matched to a press, so print each distinct error once,
+    // and a command that the frame loop repeats every frame does not flood
+    // the log.
     let mut refused: HashSet<String> = HashSet::new();
     let mut lines = BufReader::new(reader).lines();
     loop {
@@ -335,7 +325,7 @@ where
                         }
                     }
                     Some(Incoming::Reply { error, .. })
-                        if error != RAN && refused.insert(error.clone()) =>
+                        if error != SUCCESS && refused.insert(error.clone()) =>
                     {
                         eprintln!("media-display: mpv refused a command: {error}");
                     }
@@ -353,8 +343,8 @@ where
     }
 }
 
-/// Ask for both gate properties once and answer whether mpv is playing with
-/// its video output up.
+/// Read both gate properties once. Returns true when `time-pos` is a
+/// number and `vo-configured` is true.
 async fn showing<S>(stream: S) -> io::Result<bool>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -465,7 +455,7 @@ mod tests {
     }
 
     #[test]
-    fn a_line_this_display_has_no_case_for_reads_as_nothing() {
+    fn a_line_the_display_does_not_use_decodes_as_none() {
         assert_eq!(decode("not json at all"), None);
         assert_eq!(decode(r#"{"event":"seek"}"#), None);
         assert_eq!(decode(r#"{"event":"property-change","id":1}"#), None);
@@ -473,9 +463,6 @@ mod tests {
         assert_eq!(decode("{}"), None);
     }
 
-    /// The session opens on one half of a pipe and mpv's half reads back
-    /// every observe the display sent, in the order the list names them, and
-    /// the ask for the current item's block after them.
     #[tokio::test]
     async fn a_session_observes_every_property_and_asks_for_the_block() {
         let (display, mut mpv) = tokio::io::duplex(8192);
@@ -497,11 +484,11 @@ mod tests {
 
         drop(commands);
         drop(mpv);
-        session.await.expect("the session ends with the socket");
+        session
+            .await
+            .expect("ending the session by closing the socket");
     }
 
-    /// Every command the frame loop sends reaches mpv on the socket the
-    /// display already reads.
     #[tokio::test]
     async fn a_command_the_frame_loop_sends_reaches_mpv() {
         let (display, mut mpv) = tokio::io::duplex(8192);
@@ -518,20 +505,22 @@ mod tests {
                 json!(12.5),
                 json!("absolute+exact"),
             ]))
-            .expect("the session reads the channel");
+            .expect("sending the command to the session");
         assert_eq!(
             read_lines(&mut mpv, 1).await,
             vec!["{\"command\":[\"seek\",12.5,\"absolute+exact\"],\"request_id\":0}"]
         );
 
         drop(commands);
-        session.await.expect("the session ends with the channel");
+        session
+            .await
+            .expect("ending the session by closing the channel");
     }
 
-    /// mpv's answer to a press's command takes that press's line out of the
-    /// notes, and an answer to the display's own command leaves it.
+    /// A reply with a press's request id removes that press's line from
+    /// the notes. A reply to a command with id 0 leaves them alone.
     #[tokio::test]
-    async fn an_answer_completes_the_line_its_press_left() {
+    async fn a_reply_completes_the_log_line_of_its_press() {
         let (display, mut mpv) = tokio::io::duplex(8192);
         let (sender, _events) = mpsc::channel(64);
         let (_commands, mut receiver) = broadcast::channel(64);
@@ -539,7 +528,7 @@ mod tests {
         for id in [record::FIRST_ID, record::FIRST_ID + 1] {
             notes
                 .lock()
-                .expect("the notes")
+                .expect("locking the notes")
                 .insert(id, format!("line {id}"));
         }
         let held = notes.clone();
@@ -552,14 +541,16 @@ mod tests {
             b"{\"request_id\":1000,\"error\":\"success\"}\n{\"request_id\":0,\"error\":\"success\"}\n",
         )
         .await
-        .expect("mpv answers");
+        .expect("writing the replies to the session");
         drop(mpv);
-        session.await.expect("the session ends with the socket");
+        session
+            .await
+            .expect("ending the session by closing the socket");
 
         assert_eq!(
             notes
                 .lock()
-                .expect("the notes")
+                .expect("locking the notes")
                 .keys()
                 .copied()
                 .collect::<Vec<_>>(),
@@ -567,8 +558,7 @@ mod tests {
         );
     }
 
-    /// Read whole lines off mpv's half of the pipe until it has as many as the
-    /// caller waits for.
+    /// Read lines from mpv's end of the pipe until there are `count`.
     async fn read_lines<S>(mpv: &mut S, count: usize) -> Vec<String>
     where
         S: AsyncRead + Unpin,
@@ -576,7 +566,10 @@ mod tests {
         let mut buffer = vec![0u8; 8192];
         let mut sent = String::new();
         while sent.lines().count() < count {
-            let read = mpv.read(&mut buffer).await.expect("mpv reads the line");
+            let read = mpv
+                .read(&mut buffer)
+                .await
+                .expect("reading the line the session wrote");
             if read == 0 {
                 break;
             }
@@ -585,10 +578,10 @@ mod tests {
         sent.lines().map(str::to_string).collect()
     }
 
-    /// Every line mpv writes on an attached socket reaches the display as an
-    /// event, and the stream ends when the socket closes.
+    /// The session forwards each event that the display uses, skips the
+    /// rest, and ends when the socket closes.
     #[tokio::test]
-    async fn a_session_carries_every_event_mpv_writes() {
+    async fn a_session_forwards_every_event_mpv_writes() {
         let (display, mut mpv) = tokio::io::duplex(8192);
         let (sender, mut events) = mpsc::channel(64);
         let (_commands, mut receiver) = broadcast::channel(64);
@@ -605,7 +598,7 @@ mod tests {
             .as_bytes(),
         )
         .await
-        .expect("mpv writes its events");
+        .expect("writing the events to the session");
 
         assert_eq!(
             events.recv().await,
@@ -620,14 +613,14 @@ mod tests {
         );
 
         drop(mpv);
-        session.await.expect("the session ends with the socket");
+        session
+            .await
+            .expect("ending the session by closing the socket");
         assert_eq!(events.recv().await, None);
     }
 
-    /// The window gate asks for both properties and opens the window only
-    /// when the film is playing and mpv's video output is up.
     #[tokio::test]
-    async fn the_gate_holds_until_the_film_plays_and_the_output_is_up() {
+    async fn the_gate_needs_a_position_and_the_video_output() {
         for (position, output, want) in [
             ("12.5", "true", true),
             ("null", "true", false),
@@ -638,7 +631,10 @@ mod tests {
             let gate = tokio::spawn(showing(display));
 
             let mut read = vec![0u8; 512];
-            let count = mpv.read(&mut read).await.expect("mpv reads the requests");
+            let count = mpv
+                .read(&mut read)
+                .await
+                .expect("reading the requests the gate wrote");
             assert_eq!(
                 String::from_utf8_lossy(&read[..count]),
                 format!(
@@ -656,29 +652,32 @@ mod tests {
                 .as_bytes(),
             )
             .await
-            .expect("mpv answers");
+            .expect("writing the replies to the session");
 
-            assert_eq!(gate.await.expect("the gate ends").ok(), Some(want));
+            assert_eq!(gate.await.expect("joining the gate task").ok(), Some(want));
         }
     }
 
-    /// A socket nothing listens on never answers, and the gate gives up at
-    /// its deadline rather than waiting on a player that never starts.
+    /// With no socket to connect to, the gate returns false at its
+    /// deadline.
     #[tokio::test]
     async fn the_gate_gives_up_at_its_deadline() {
         let ipc = Ipc::at("/nonexistent/mpv.sock");
-        assert!(!ipc.playing(Duration::from_millis(1)).await);
+        assert!(
+            !ipc.playing(Duration::from_millis(1)).await,
+            "the gate reports playing with no socket, want false"
+        );
     }
 
-    /// The loop attaches, carries what mpv writes, reports the socket
-    /// closing, and dials again.
+    /// `serve` forwards mpv's events, sends `Detached` when the socket
+    /// closes, and connects again.
     #[tokio::test]
-    async fn the_loop_attaches_reports_the_close_and_dials_again() {
+    async fn serve_forwards_events_reports_the_close_and_connects_again() {
         let dir = std::env::temp_dir().join(format!("media-display-serve-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("a directory for the socket");
+        std::fs::create_dir_all(&dir).expect("creating the directory for the socket");
         let path = dir.join("mpv.sock");
-        let listener = tokio::net::UnixListener::bind(&path).expect("a socket to dial");
+        let listener = tokio::net::UnixListener::bind(&path).expect("binding the socket");
 
         let ipc = Ipc::at(&path);
         let (sender, mut events) = mpsc::channel(64);
@@ -686,16 +685,22 @@ mod tests {
         let serving =
             tokio::spawn(async move { ipc.serve(sender, &commands, &Notes::default()).await });
 
-        let (mut mpv, _) = listener.accept().await.expect("the display dials");
+        let (mut mpv, _) = listener
+            .accept()
+            .await
+            .expect("accepting the first connection");
         let mut read = vec![0u8; 4096];
         let mut sent = String::new();
         while sent.lines().count() < OBSERVED.len() {
-            let count = mpv.read(&mut read).await.expect("mpv reads the observes");
+            let count = mpv
+                .read(&mut read)
+                .await
+                .expect("reading the observe requests");
             sent.push_str(&String::from_utf8_lossy(&read[..count]));
         }
         mpv.write_all(b"{\"event\":\"client-message\",\"args\":[\"summon\"]}\n")
             .await
-            .expect("mpv writes one message");
+            .expect("writing one message to the display");
         assert_eq!(
             events.recv().await,
             Some(Event::Message(vec!["summon".to_string()]))
@@ -706,15 +711,15 @@ mod tests {
 
         tokio::time::timeout(Duration::from_secs(5), listener.accept())
             .await
-            .expect("the loop dials again")
-            .expect("the display dials again");
+            .expect("waiting for the second connection")
+            .expect("accepting the second connection");
 
         serving.abort();
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// The loop ends when the frame loop stops reading, so a display that
-    /// closed its window leaves no reader behind.
+    /// `serve` returns when the receiver of `events` is dropped, so a
+    /// closed window leaves no reader task behind.
     #[tokio::test]
     async fn the_loop_ends_when_the_display_stops_reading() {
         let ipc = Ipc::at("/nonexistent/mpv.sock");
@@ -727,22 +732,22 @@ mod tests {
             ipc.serve(sender, &commands, &Notes::default()),
         )
         .await
-        .expect("the loop ends");
+        .expect("ending the dial loop");
     }
 
     #[test]
-    fn the_socket_is_the_one_the_command_sidecar_drives() {
+    fn the_default_socket_is_the_pod_path() {
         assert_eq!(SOCKET_PATH, "/ipc/mpv.sock");
         assert_eq!(Ipc::default().path, PathBuf::from(SOCKET_PATH));
     }
 
-    /// The tests read one process environment, so this one runs alone and
-    /// puts back what it found.
+    /// No other test in the crate reads or writes `SOCKET_VARIABLE`, so
+    /// changing it here races no other test. The test restores its value.
     #[test]
-    fn a_named_socket_wins_over_the_pod_path() {
+    fn the_socket_variable_overrides_the_pod_path() {
         let found = std::env::var(SOCKET_VARIABLE).ok();
 
-        // SAFETY: the crate's tests set this variable in one test alone.
+        // SAFETY: no other test reads or writes this variable.
         unsafe { std::env::set_var(SOCKET_VARIABLE, "/tmp/local.sock") };
         assert_eq!(
             Ipc::from_environment().path,

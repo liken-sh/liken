@@ -1,52 +1,42 @@
 package main
 
-// A pass reads the Plays and the Players from their watches' stores,
-// through the shared informer package. The view (clusterview.go) holds
-// the stores, and each store holds its whole kind, so a settled pass
-// sends the API server no read of a Play or a Player. The view exists
-// only after every watch has read its collection once. While the API
-// server forbids a watch, its store is not ready, and the shared reads
-// read from the API server each Play or Player that the store holds.
+// A pass reads Plays and Players from the stores of their watches
+// (clusterview.go), so a pass on a settled cluster sends the API server
+// no read of either kind.
 //
-// A copy in a store can be older than this operator's own last write,
-// because the watch delivers the write a moment after the API server
-// answers it, and later still while the watch is down. The operator
-// writes the status of both kinds, and a pass acts on what that status
-// holds:
+// A store's copy can be older than this operator's last write, because
+// the watch delivers the write after the API server has responded to
+// it, and later still while the watch is down. A pass acts on the status
+// of both kinds, which this operator writes, so an old copy causes
+// faults a person can see:
 //
-//   - The pass derives a unit's activity from each Play's phase, and
-//     publishes it on the bus before it reads anything else. A pass that
-//     read the copy its own write replaced would publish the phase the
-//     Play already left, and then, when the reconcile wrote the phase
-//     again, the phase it had moved to: Playing, Starting, Playing on a
-//     subscriber's screen.
-//   - A Player's status remembers the unit's screen and its Sinks, which
-//     the pass carries forward when no claim says better. A pass that
-//     read the copy its own write replaced would carry forward the older
-//     memory and write it back, and the unit would forget the screen or
-//     the Sinks it learned.
+//   - The pass publishes each Player's activity, from its Play's phase, on
+//     the bus before it reads anything else. From an old copy it would
+//     publish the phase the Play already left, and a screen would show
+//     Playing, Starting, Playing.
+//   - A Player's status records the Player's screen and Sinks, and the
+//     pass keeps them when no claim has newer information. From an old
+//     copy it would write back the older record, and the Player would lose
+//     the screen or Sinks it had found.
 //
-// So the memo of each kind records the version of the newest copy this
-// operator wrote or read, and the shared reads read an object from the
-// API server when the store's copy has another version. Once the watch
-// delivers the write, the versions match and the store answers again.
+// So the memo of each kind (kubernetes/memo) records the resourceVersion
+// of the newest copy of each object that this operator wrote or read,
+// and a read goes to the API server while the store's copy has a
+// different version. When the watch delivers the write, the versions
+// match and the store serves the read again.
 //
-// A status write from a copy that another writer changed since carries
-// an older resourceVersion, and the API server answers 409 Conflict.
-// informer.SettleStatus then reads the object from the API server, and
-// writes once more if the fresh copy still needs the write. Only this
-// operator writes the status of either kind, and the memo keeps each
-// pass on a copy at least as new as the operator's last write, so the
-// status on the fresh copy is the one the pass composed from. The
-// conflict comes from a change to the spec or the metadata. The status
-// the retry writes can still carry what the pass derived from the older
-// spec, such as a Player's idle controller. The spec edit's own watch
-// event wakes the next pass, and that pass writes the status the new
-// spec derives.
+// A status write from a copy that someone else changed has an old
+// resourceVersion, and the API server returns 409 Conflict.
+// informer.SettleStatus then reads the object again and writes once
+// more if the fresh copy still needs the write. Only this operator
+// writes the status of these kinds, so the conflict comes from a change
+// to the spec or the metadata, and the status written on the retry can
+// still reflect the older spec. The watch event of that spec change
+// starts the next pass, which writes the status of the new spec.
 //
-// The Remotes' store answers through clusterview.go with no memo. The
-// pass reads no memory back from a Remote's status: it composes the
-// whole status from the claim and the Peripherals each pass.
+// Remotes are read through clusterview.go with no memo, because the pass
+// composes a Remote's whole status from its claim and the Peripherals,
+// and reads nothing back from it.
 
 import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
@@ -54,8 +44,8 @@ import (
 	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
-// The three getters are the metadata the shared cache reads from each
-// of this operator's kinds.
+// The informer and memo packages read the name, namespace, and
+// resourceVersion of Plays and Players through these methods.
 func (m *ObjectMeta) GetName() string            { return m.Name }
 func (m *ObjectMeta) GetNamespace() string       { return m.Namespace }
 func (m *ObjectMeta) GetResourceVersion() string { return m.ResourceVersion }
@@ -63,11 +53,10 @@ func (m *ObjectMeta) GetResourceVersion() string { return m.ResourceVersion }
 func (p *Play) GetObjectMeta() informer.Meta   { return &p.Metadata }
 func (p *Player) GetObjectMeta() informer.Meta { return &p.Metadata }
 
-// currentKind answers every object of one kind through
-// informer.CurrentList, and forgets the memo's record of each object
-// that is gone. Plays come and go with every film, and a Player can be
-// deleted, so without that the memo would keep a record of every object
-// for the life of the process.
+// currentKind lists every object of one kind through
+// informer.CurrentList, and drops the memo's record of each object that
+// no longer exists. Plays are created and deleted often, so without this
+// the memo would grow for the life of the process.
 func currentKind[T any, P informer.Object[T]](c *apiclient.Client, held informer.Held, path func(namespace, name string) string) ([]T, error) {
 	objects, err := informer.CurrentList[T, P](c, held, memo.NamespacedPath(path))
 	if err != nil {
@@ -81,29 +70,28 @@ func currentKind[T any, P informer.Object[T]](c *apiclient.Client, held informer
 	return objects, nil
 }
 
-// playKey is the store key of one Play.
 func playKey(play *Play) string { return informer.Key(&play.Metadata) }
 
-// Plays answers every Play: the store's copy of each Play when it holds
-// a current one, and the API server's copy when it does not. A Play the
-// API server no longer holds is left out.
+// Plays returns every Play, from the store when its copy is current and
+// from the API server otherwise. A Play that the API server returns 404
+// for is left out.
 func (v *clusterView) Plays(c *apiclient.Client) ([]Play, error) {
 	return currentKind[Play](c, v.plays, playPath)
 }
 
-// Players answers every Player the same way.
+// Players returns every Player, the same way as Plays.
 func (v *clusterView) Players(c *apiclient.Client) ([]Player, error) {
 	return currentKind[Player](c, v.players, playerPath)
 }
 
-// Player answers one Player: the store's copy when it holds a current
-// one, and the API server's copy when it does not.
+// Player returns one Player, from the store when its copy is current and
+// from the API server otherwise.
 func (v *clusterView) Player(c *apiclient.Client, namespace, name string) (*Player, error) {
 	return informer.ReadOne[Player](c, v.players, namespacedKey(namespace, name), playerPath(namespace, name))
 }
 
-// FreshPlayer reads one Player from the API server, and notes its
-// version.
+// FreshPlayer reads one Player from the API server and records its
+// version in the memo.
 func (v *clusterView) FreshPlayer(c *apiclient.Client, namespace, name string) (*Player, error) {
 	return informer.ReadFresh[Player](c, v.players.Versions, namespacedKey(namespace, name), playerPath(namespace, name))
 }

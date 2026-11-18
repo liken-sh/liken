@@ -1,21 +1,18 @@
-// The wall clock the screen draws, in the unit's own zone.
+// The wall clock that the screen draws.
 //
-// Rust's standard library has no time zones, so the reading goes through
-// `jiff`. `jiff` reads `TZ` and falls back to `/etc/localtime`, and it resolves
-// the name against the image's own `/usr/share/zoneinfo`, which the `tzdata`
-// package installs. The operator sets `TZ` on the pod when the household
-// states a zone, so the clock shows the household's own hour. A pod with no
-// zone reads UTC.
+// Rust's standard library has no time zones, so this reads the time through
+// `jiff`. `jiff` reads `TZ`, falls back to `/etc/localtime`, and resolves the
+// zone name in the image's `/usr/share/zoneinfo`, which the `tzdata` package
+// installs. `media-operator` sets `TZ` on the pod from `spec.timeZone` of the
+// `MediaPreferences` named `default`. With no zone, the clock shows UTC.
 
-/// A wall-clock reading, to the minute. The screen redraws when the minute
-/// turns, and at no other time for the clock.
+/// The wall-clock time to the minute.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Time {
     pub hour: u8,
     pub minute: u8,
 }
 
-/// The time now, in the zone `TZ` names.
 pub fn now() -> Time {
     let now = jiff::Zoned::now();
     Time {
@@ -24,17 +21,16 @@ pub fn now() -> Time {
     }
 }
 
-/// How far the wall clock is into its current minute, in seconds with the
-/// fraction. The screen's clock counts from its first frame and not from the
-/// wall clock, so this is what tells it when the next minute turns.
+/// The seconds, with the fraction, that the wall clock is into its current
+/// minute. The screen's own clock counts from its first frame, so the screen
+/// needs this to schedule the frame at the minute turn.
 pub fn into_minute() -> f64 {
     let now = jiff::Zoned::now();
     f64::from(now.second()) + f64::from(now.subsec_nanosecond()) / 1e9
 }
 
 impl Time {
-    /// A twelve-hour clock with no leading zero and a lowercase suffix, as in
-    /// "3:01 pm".
+    /// The time on a twelve-hour clock, such as "3:01 pm".
     pub fn twelve_hour(self) -> String {
         let suffix = if self.hour < 12 { "am" } else { "pm" };
         let twelve = match self.hour % 12 {
@@ -54,25 +50,28 @@ mod tests {
     }
 
     #[test]
-    fn the_afternoon_reads_with_no_leading_zero() {
+    fn an_afternoon_time_has_no_leading_zero() {
         assert_eq!(at(15, 1), "3:01 pm");
         assert_eq!(at(13, 45), "1:45 pm");
     }
 
     #[test]
-    fn the_morning_reads_the_same_way() {
+    fn a_morning_time_has_the_same_format() {
         assert_eq!(at(9, 30), "9:30 am");
         assert_eq!(at(11, 59), "11:59 am");
     }
 
     #[test]
-    fn the_wall_clock_is_always_inside_its_minute() {
+    fn the_seconds_into_the_minute_are_below_sixty() {
         let into = into_minute();
-        assert!((0.0..60.0).contains(&into), "{into}");
+        assert!(
+            (0.0..60.0).contains(&into),
+            "the seconds into the minute are {into}, want 0 up to 60"
+        );
     }
 
     #[test]
-    fn both_ends_of_the_day_read_twelve() {
+    fn midnight_and_noon_show_hour_twelve() {
         assert_eq!(at(0, 0), "12:00 am");
         assert_eq!(at(12, 0), "12:00 pm");
     }

@@ -1,12 +1,12 @@
 package main
 
-// This file parses the query a capture route takes: the t= and xywh=
-// dimensions of W3C Media Fragments 1.0, and the knobs width=,
-// height=, framerate=, quality=, and bitrate=. The specification
+// This file parses the query of a capture route: the t= and xywh=
+// dimensions of W3C Media Fragments 1.0, and the width=, height=,
+// framerate=, quality=, and bitrate= parameters. The specification
 // tells a user agent to ignore an invalid, unknown, or non-existent
-// dimension (sections 6.2, 6.2.1, and 6.3.1). This API answers 400
-// instead, because a query produces a new resource (sections 3.1 and
-// 7.4), and a client that asked for a region must not silently get
+// dimension (sections 6.2, 6.2.1, and 6.3.1). This API responds with
+// 400 instead, because a query produces a new resource (sections 3.1
+// and 7.4), and a client that asked for a region must not silently get
 // the whole screen.
 
 import (
@@ -17,11 +17,11 @@ import (
 	"strings"
 )
 
-// captureQuery is one parsed capture query. The times are numbers,
+// captureQuery is a parsed capture query. The times are numbers,
 // because the composed route adds the lead-in to them and compares
-// begin with end. The knobs stay the strings the caller wrote, because
-// this API only checks their form and passes them to the sibling that
-// gives them meaning.
+// begin with end. The other parameters stay strings, because this API
+// only checks their form and passes them to the display or audio API
+// that interprets them.
 type captureQuery struct {
 	HasBegin  bool
 	Begin     float64
@@ -35,28 +35,26 @@ type captureQuery struct {
 	Bitrate   string
 }
 
-// captureBeginMax bounds t= begin at 60 s. A sidecar discards frames
-// or samples until begin with a running pipeline, so every second of
-// begin is a second of capture the sidecar runs for nobody, and the
-// header timeout grows by begin as well.
+// captureBeginMax is the largest t= begin, in seconds. A sidecar runs
+// its pipeline and discards frames or samples until the begin time, so
+// each second of begin costs a second of work for no output. The
+// timeout for upstream response headers also grows by the begin time.
 const captureBeginMax = 60.0
 
-// The query keys each aspect accepts. Each aspect names its own set,
-// because a key travels to the sibling that gives it meaning: a
-// bitrate= on the screen aspect would reach the display API, which
-// refuses it, so this API refuses it first.
+// The query keys that each aspect accepts. Each key goes to the
+// upstream API of the aspect, so a key that the upstream rejects, such
+// as bitrate= for the display API, is refused here.
 var (
 	screenCaptureKeys = []string{"t", "xywh", "width", "height", "framerate", "quality"}
 	audioCaptureKeys  = []string{"t", "bitrate"}
 	mediaCaptureKeys  = []string{"t", "xywh", "width", "height", "framerate", "quality", "bitrate"}
 )
 
-// parseCaptureQuery reads the raw query the way Media Fragments
-// section 5.1.1 says to: split on & and on the first = first, and
-// percent-decode second. In that order t=10%2C20 is the interval
-// 10,20, and t=%6ept:10 and t=npt%3a10 are both npt:10, as section
-// 6.1.1 requires. net/url decodes first and splits second, so an
-// encoded & or = inside a value would split there.
+// parseCaptureQuery parses the raw query as Media Fragments section
+// 5.1.1 describes: it splits on & and on the first =, and then
+// percent-decodes each name and value. So t=10%2C20 is the interval
+// 10,20, and t=%6ept:10 is npt:10. It does not use url.ParseQuery,
+// which accepts a key with no = and decodes + as a space.
 func parseCaptureQuery(rawQuery string, allowed []string) (captureQuery, error) {
 	var query captureQuery
 	var seen []string
@@ -64,23 +62,23 @@ func parseCaptureQuery(rawQuery string, allowed []string) (captureQuery, error) 
 		if pair == "" {
 			continue
 		}
-		rawName, rawValue, marked := strings.Cut(pair, "=")
-		if !marked {
-			return captureQuery{}, fmt.Errorf("the query part %q carries no value", pair)
+		rawName, rawValue, hasValue := strings.Cut(pair, "=")
+		if !hasValue {
+			return captureQuery{}, fmt.Errorf("the query part %q has no =", pair)
 		}
 		name, err := url.PathUnescape(rawName)
 		if err != nil {
-			return captureQuery{}, fmt.Errorf("the query key %q cannot be decoded: %w", rawName, err)
+			return captureQuery{}, fmt.Errorf("decoding the query key %q: %w", rawName, err)
 		}
 		value, err := url.PathUnescape(rawValue)
 		if err != nil {
-			return captureQuery{}, fmt.Errorf("the %s= value %q cannot be decoded: %w", name, rawValue, err)
+			return captureQuery{}, fmt.Errorf("decoding the %s= value %q: %w", name, rawValue, err)
 		}
 		if !slices.Contains(allowed, name) {
-			return captureQuery{}, fmt.Errorf("the query key %q is not one of %s", name, strings.Join(allowed, ", "))
+			return captureQuery{}, fmt.Errorf("the query key %q is not one of the allowed keys: %s", name, strings.Join(allowed, ", "))
 		}
 		if slices.Contains(seen, name) {
-			return captureQuery{}, fmt.Errorf("the query gives the key %q twice", name)
+			return captureQuery{}, fmt.Errorf("the query repeats the key %q", name)
 		}
 		seen = append(seen, name)
 		if err := query.setDimension(name, value); err != nil {
@@ -88,19 +86,19 @@ func parseCaptureQuery(rawQuery string, allowed []string) (captureQuery, error) 
 		}
 	}
 	// A capture takes width= or height= and scales the other side to
-	// keep the frame's shape. Both together would name a shape the
-	// frame does not have, so the pair is refused rather than passed
-	// to the sidecar to pick one.
+	// keep the aspect ratio. Both together could contradict the ratio of
+	// the frame, so this API refuses the pair instead of leaving the
+	// sidecar to choose one.
 	if query.Width != "" && query.Height != "" {
-		return captureQuery{}, fmt.Errorf("the query gives width=%s with height=%s, and a capture takes one of them", query.Width, query.Height)
+		return captureQuery{}, fmt.Errorf("the query sets width=%s and height=%s, and a capture takes only one of them", query.Width, query.Height)
 	}
 	return query, nil
 }
 
-// setDimension reads one key into the query. A key the allowed list
-// admits but no case names is a refusal rather than a value the parser
-// drops, so a key added to a list without a parser is a 400 a test
-// sees and not a silent no-op.
+// setDimension parses one key and value into the query. A key that is
+// in an allowed list but has no case here returns an error, so a key
+// added to a list without a parser fails a test and does not silently
+// do nothing.
 func (q *captureQuery) setDimension(name, value string) error {
 	switch name {
 	case "t":
@@ -118,32 +116,31 @@ func (q *captureQuery) setDimension(name, value string) error {
 	case "bitrate":
 		return setCount(&q.Bitrate, name, value)
 	}
-	return fmt.Errorf("the query key %q names no capture dimension", name)
+	return fmt.Errorf("the query key %q has no parser", name)
 }
 
-// setTemporal reads t=, an optional npt: prefix and a begin, an end,
-// or begin,end in normal play time. The interval is half-open per
-// section 6.1.1: the begin is part of it and the end is the first
-// instant that is not. An end at or before the begin names an empty
-// interval, which would ask an upstream to capture nothing, so it is
-// refused. A begin over captureBeginMax is refused too.
+// setTemporal parses t=: an optional npt: prefix, then a begin, an end,
+// or begin,end in normal play time. The interval includes the begin
+// and excludes the end (section 4.2.1), so an end at or before the
+// begin is an empty interval and returns an error. A begin over
+// captureBeginMax also returns an error.
 func (q *captureQuery) setTemporal(value string) error {
 	interval := value
 	if len(value) >= 4 && strings.EqualFold(value[:4], "npt:") {
 		interval = value[4:]
 	}
-	beginText, endText, marked := strings.Cut(interval, ",")
+	beginText, endText, hasEnd := strings.Cut(interval, ",")
 	if beginText != "" {
 		begin, err := parseNPT("t= begin", beginText)
 		if err != nil {
 			return err
 		}
 		if begin > captureBeginMax {
-			return fmt.Errorf("the t= begin %s is over the %s second limit", formatNPT(begin), formatNPT(captureBeginMax))
+			return fmt.Errorf("the t= begin %s is over the limit of %s seconds", formatNPT(begin), formatNPT(captureBeginMax))
 		}
 		q.HasBegin, q.Begin = true, begin
 	}
-	if marked && endText != "" {
+	if hasEnd && endText != "" {
 		end, err := parseNPT("t= end", endText)
 		if err != nil {
 			return err
@@ -151,7 +148,7 @@ func (q *captureQuery) setTemporal(value string) error {
 		q.HasEnd, q.End = true, end
 	}
 	if !q.HasBegin && !q.HasEnd {
-		return fmt.Errorf("the t= value %q names no time", value)
+		return fmt.Errorf("the t= value %q has no begin and no end", value)
 	}
 	if q.HasBegin && q.HasEnd && q.Begin >= q.End {
 		return fmt.Errorf("the t= end %s is not after the begin %s", formatNPT(q.End), formatNPT(q.Begin))
@@ -159,11 +156,8 @@ func (q *captureQuery) setTemporal(value string) error {
 	return nil
 }
 
-// parseNPT reads the three normal play time forms of section 4.2.1:
+// parseNPT parses the three normal play time forms of section 4.2.1:
 // ss, mm:ss, and hh:mm:ss, with an optional fraction on the seconds.
-// It reads the fields from the seconds up, because the seconds field
-// is always the last one and its rules change when a field stands
-// beside it.
 func parseNPT(label, text string) (float64, error) {
 	refused := fmt.Errorf("the %s %q is not a time in ss, mm:ss, or hh:mm:ss form", label, text)
 	fields := strings.Split(text, ":")
@@ -192,11 +186,10 @@ func parseNPT(label, text string) (float64, error) {
 	return seconds + hours*3600, nil
 }
 
-// parseSeconds reads the seconds field. It alone takes a fraction,
-// because NPT puts the fraction on the seconds. A seconds field beside
-// a minutes field must be two digits under sixty, per the grammar, so
-// 1:75 is refused rather than read as 135 seconds.
-func parseSeconds(text string, beside bool) (float64, bool) {
+// parseSeconds parses the seconds field, the only field that can have
+// a fraction. After a minutes field, the grammar requires two digits
+// below sixty, so 1:75 is an error and not 135 seconds.
+func parseSeconds(text string, afterMinutes bool) (float64, bool) {
 	whole, fraction, _ := strings.Cut(text, ".")
 	if !digits(whole) || !digitsOrEmpty(fraction) {
 		return 0, false
@@ -205,16 +198,16 @@ func parseSeconds(text string, beside bool) (float64, bool) {
 	if err != nil {
 		return 0, false
 	}
-	if beside && (len(whole) != 2 || seconds >= 60) {
+	if afterMinutes && (len(whole) != 2 || seconds >= 60) {
 		return 0, false
 	}
 	return seconds, true
 }
 
-// parseWhole reads a minutes or hours field. The minutes field is two
-// digits under sixty, per the grammar. The hours field is any number
-// of digits, because the grammar bounds it nowhere.
-func parseWhole(text string, bounded bool) (float64, bool) {
+// parseWhole parses a minutes or hours field. The grammar requires the
+// minutes field to be two digits below sixty, and puts no limit on the
+// hours field.
+func parseWhole(text string, isMinutes bool) (float64, bool) {
 	if !digits(text) {
 		return 0, false
 	}
@@ -222,17 +215,17 @@ func parseWhole(text string, bounded bool) (float64, bool) {
 	if err != nil {
 		return 0, false
 	}
-	if bounded && (len(text) != 2 || value >= 60) {
+	if isMinutes && (len(text) != 2 || value >= 60) {
 		return 0, false
 	}
 	return value, true
 }
 
-// setSpatial checks xywh=, four whole numbers under an optional
-// pixel: or percent: prefix, and keeps the value as it was written.
-// This API does not know the frame's size, so it passes the region
-// through, and the display sidecar that owns the frame clips a region
-// the frame does not hold, per section 6.1.2.
+// setSpatial validates xywh=, which is four whole numbers with an
+// optional pixel: or percent: prefix, and keeps the value as written.
+// This API has no frame size to check against, so it passes the region
+// on, and the display sidecar clips a region that extends past the
+// frame (section 6.1.2).
 func (q *captureQuery) setSpatial(value string) error {
 	refused := fmt.Errorf("the xywh= value %q is not four whole numbers under an optional pixel: or percent: prefix", value)
 	region := value
@@ -255,10 +248,8 @@ func (q *captureQuery) setSpatial(value string) error {
 	return nil
 }
 
-// setCount checks a knob: a positive whole number, since a zero width
-// or a zero bitrate names no capture. It stays a string, because this
-// API passes it to the sibling that gives it meaning and never does
-// arithmetic on it.
+// setCount validates a parameter that must be a positive whole number,
+// because a width or bitrate of zero is not a capture.
 func setCount(target *string, name, value string) error {
 	if !digits(value) || strings.TrimLeft(value, "0") == "" {
 		return fmt.Errorf("the %s= value %q is not a positive whole number", name, value)
@@ -267,10 +258,9 @@ func setCount(target *string, name, value string) error {
 	return nil
 }
 
-// digits checks the characters itself rather than letting strconv
-// decide, because strconv accepts a sign, an exponent, an infinity,
-// and a hexadecimal form, and none of those is a time or a size a
-// sibling should be asked for.
+// digits reports whether text is one or more ASCII digits. It does not
+// use strconv, which also accepts a sign, an exponent, an infinity, and
+// a hexadecimal form, and none of those is a valid time or size.
 func digits(text string) bool {
 	return text != "" && digitsOrEmpty(text)
 }
@@ -284,14 +274,12 @@ func digitsOrEmpty(text string) bool {
 	return true
 }
 
-// shiftedTemporal is the caller's interval with the lead-in added to
-// each end, so the composed route asks each upstream for
-// t=begin+L,end+L and both sidecars have a running pipeline before
-// their zero. An absent begin is zero, which the lead-in moves the same
-// way it moves a begin the caller wrote, so t=,10 and t=0,10 both ask
-// the upstream for t=1,11. A query with no t= asks the upstream for
-// none, which is the upstream's own default, an unbounded capture from
-// its zero.
+// shiftedTemporal returns the t= value for an upstream request: the
+// caller's interval with lead added to each end. The composed route
+// passes a lead so that both sidecars have a running pipeline before
+// the caller's time zero. An absent begin counts as zero, so t=,10
+// with a lead of 1 gives 1,11. With no t= in the query it returns an
+// empty string, and the upstream request has no t=.
 func (q captureQuery) shiftedTemporal(lead float64) string {
 	if !q.HasBegin && !q.HasEnd {
 		return ""
@@ -303,9 +291,8 @@ func (q captureQuery) shiftedTemporal(lead float64) string {
 	return begin + "," + formatNPT(q.End+lead)
 }
 
-// formatNPT writes a time in the shortest form that reads back as the
-// same number, so t=0,10 stays 0,10 in a Location and 1.5 does not
-// become 1.500000.
+// formatNPT formats a time with the fewest digits that parse back to
+// the same number, so t=0,10 stays 0,10 in a Location header.
 func formatNPT(seconds float64) string {
 	return strconv.FormatFloat(seconds, 'f', -1, 64)
 }

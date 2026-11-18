@@ -1,9 +1,8 @@
 package main
 
-// This file posts the Events of a run: each move of its phase, each
-// pod the operator creates again, and the delete that ends a Play. The
-// reasons are in events.go. Each Event here is also a log line, and
-// the line keeps the detail an Event leaves out after an hour.
+// This file posts the Kubernetes Events of a Play: each phase change,
+// each recreate of its playback pod, and the delete that ends it. The
+// reasons are declared in events.go.
 
 import (
 	"fmt"
@@ -12,12 +11,11 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events"
 )
 
-// postPhase posts the Event of one phase move, after the write that
-// moved it landed. A move to Pending posts nothing: a new run waits
-// for its pod, and a recreate posts PodRecreated on its own.
-// failReason is the reason a move to Failed posts, so a Play that can
-// never run reads InvalidSpec and a pod that failed reads
-// PlaybackFailed.
+// postPhase posts the Event for a Play's new phase. The caller calls it
+// only after the status write succeeded. A change to Pending posts
+// nothing, because a recreated pod already posts PodRecreated.
+// failReason is the reason to post for a change to Failed: InvalidSpec
+// or PlaybackFailed.
 func (o *operator) postPhase(play *Play, status PlayStatus, failReason string) {
 	object := playRef(play)
 	switch status.Phase {
@@ -36,11 +34,11 @@ func (o *operator) postPhase(play *Play, status PlayStatus, failReason string) {
 	}
 }
 
-// notePodRecreated writes the line and posts the Event of a playback
-// pod the operator created again. fault marks a pod that failed or
-// vanished, which is a Warning, apart from a spec edit, which is
-// Normal. A run whose pod keeps failing also posts ResumeBackoff,
-// with the wait the next recreate takes.
+// notePodRecreated logs and posts PodRecreated for a recreated playback
+// pod. fault is true when the old pod failed or disappeared, and makes
+// the Event a Warning. A recreate after a spec edit is Normal. After a
+// fault, once the run's recreate count reaches backoffNoteThreshold, it
+// also posts ResumeBackoff with the delay before the next recreate.
 func (o *operator) notePodRecreated(play *Play, message string, fault bool) {
 	key := runKey(play.Metadata.Namespace, play.Metadata.Name)
 	logLine(o.log, "play %s: %s", key, message)
@@ -54,14 +52,13 @@ func (o *operator) notePodRecreated(play *Play, message string, fault bool) {
 		return
 	}
 	o.recorder.Warning(playRef(play), reasonResumeBackoff,
-		fmt.Sprintf("the playback pod failed %d times in a row; the next recreate waits at least %s",
+		fmt.Sprintf("Recreated the playback pod %d times in a row, so the next recreate waits at least %s",
 			state.count, backoffDelay(state.count).Round(time.Second)))
 }
 
-// postEnded posts the Event of a Play the operator deleted on the Play
-// and on its Player. The Play is gone a moment later, and its Events
-// with it in `kubectl describe`, so the Player keeps the record of
-// which run ended and why.
+// postEnded posts the Event for a Play that the operator deleted, on the
+// Play and on its Player. `kubectl describe` cannot show a deleted Play,
+// so a person reads the Event on the Player.
 func (o *operator) postEnded(play *Play, reason, message string) {
 	o.recorder.Normal(playRef(play), reason, message)
 	if player, found := o.playerOf(play); found {
@@ -69,9 +66,9 @@ func (o *operator) postEnded(play *Play, reason, message string) {
 	}
 }
 
-// playerOf answers the reference of the Player a Play names, from the
-// Players the last pass listed. `kubectl describe` matches an Event to
-// its object by UID, so a Player the pass has not listed gets no Event.
+// playerOf returns the reference to the Play's Player from the Players
+// that the last pass listed. The reference needs the Player's UID, so
+// playerOf returns false for a Player that is not in that list.
 func (o *operator) playerOf(play *Play) (events.ObjectReference, bool) {
 	_, players := o.snapshot.lists()
 	for index := range players {

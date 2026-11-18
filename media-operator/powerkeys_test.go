@@ -1,16 +1,9 @@
 package main
 
-// The power keys: a press on a controller whose mark names a unit
-// writes the unit's spec.power, by server-side apply under a field
-// manager that owns that one field. The pass then turns the hardware
-// off or on (playerpower_test.go).
-
 import (
 	"testing"
 )
 
-// The spec.power each press sets, from each state. A power key acts on
-// the press alone, and any other key turns a Player that is off on.
 func TestEachPressSetsThePower(t *testing.T) {
 	cases := []struct {
 		key   string
@@ -40,8 +33,8 @@ func TestEachPressSetsThePower(t *testing.T) {
 	}
 }
 
-// powerOperator is askOperator with the house theater in the fake
-// cluster at the given power, so a press reads the Player from the view.
+// powerOperator is askOperator with the theater Player's spec.power
+// set to power in the fake cluster.
 func powerOperator(t *testing.T, power string) (*operator, *fakeCluster) {
 	t.Helper()
 	media, cluster := askOperator(t)
@@ -49,9 +42,6 @@ func powerOperator(t *testing.T, power string) (*operator, *fakeCluster) {
 	return media, cluster
 }
 
-// A press that moves the power applies spec.power alone, under the
-// operator's power field manager, so a GitOps copy of the Player that
-// leaves the field out never takes it back.
 func TestAPowerPressAppliesSpecPowerUnderItsOwnManager(t *testing.T) {
 	media, cluster := powerOperator(t, "")
 
@@ -64,9 +54,6 @@ func TestAPowerPressAppliesSpecPowerUnderItsOwnManager(t *testing.T) {
 	mustMatch(t, cluster.players["theater"].Spec.Power, playerPowerOff)
 }
 
-// A press that does not move the power writes nothing: a repeat, a
-// release, a press from a controller pointed at another unit, and a
-// deterministic key on a Player already in its state.
 func TestAPressThatMovesNoPowerWritesNothing(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -97,9 +84,8 @@ func TestAPressThatMovesNoPowerWritesNothing(t *testing.T) {
 	}
 }
 
-// A press that turns the Player on does nothing else. The wake that
-// follows claims the input, so the press writes no input ask, and a
-// volume key moves no level on a room that is off.
+// Turning the Player on selects its input, so the press itself writes
+// no input request, and a volume key does not change the level.
 func TestThePressThatTurnsThePlayerOnAsksNothingElse(t *testing.T) {
 	for _, key := range []string{"KEY_UP", "KEY_HOMEPAGE", "KEY_VOLUMEUP"} {
 		t.Run(key, func(t *testing.T) {
@@ -114,8 +100,8 @@ func TestThePressThatTurnsThePlayerOnAsksNothingElse(t *testing.T) {
 	}
 }
 
-// A Player the view cannot read takes no write, and the press asks
-// for its input as it would with no power at all.
+// When the focused Player is gone, the press writes no power and still
+// requests the input.
 func TestAPressOnAPlayerTheViewCannotReadWritesNoPower(t *testing.T) {
 	media, cluster := powerOperator(t, playerPowerOff)
 	delete(cluster.players, "theater")
@@ -126,8 +112,6 @@ func TestAPressOnAPlayerTheViewCannotReadWritesNoPower(t *testing.T) {
 	mustMatch(t, lastInputAsk(cluster), inputEnsure)
 }
 
-// An apply the API server refuses moves nothing, and the press does
-// the rest of what it does.
 func TestARefusedPowerApplyMovesNothing(t *testing.T) {
 	media, cluster := powerOperator(t, playerPowerOff)
 	cluster.playerApplyFails = true

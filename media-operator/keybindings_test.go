@@ -1,12 +1,7 @@
 package main
 
-// These tests cover the playback pod's table from key names to what
-// it does with them, which is the pod's whole answer to a controller.
-
 import "testing"
 
-// Each key the playback pod binds becomes its own command, and the
-// amounts are this pod's defaults.
 func TestEachBoundKeyBecomesItsCommand(t *testing.T) {
 	cases := []struct {
 		key  string
@@ -50,9 +45,7 @@ func TestEachBoundKeyBecomesItsCommand(t *testing.T) {
 	}
 }
 
-// A seek, a chapter step, and an arrow act on the repeat as well,
-// because those are the kinds a person holds.
-func TestTheHeldKindsActOnARepeat(t *testing.T) {
+func TestOnlyHeldKindsOfKeyActOnARepeat(t *testing.T) {
 	cases := []struct {
 		key  string
 		want bool
@@ -79,8 +72,7 @@ func TestTheHeldKindsActOnARepeat(t *testing.T) {
 	}
 }
 
-// A release does nothing, and so does a key this pod has no row for.
-func TestAReleaseAndAnUnboundKeyDoNothing(t *testing.T) {
+func TestAReleaseAndAnUnboundKeyRunNothing(t *testing.T) {
 	cases := []struct {
 		name  string
 		event keyEvent
@@ -89,13 +81,12 @@ func TestAReleaseAndAnUnboundKeyDoNothing(t *testing.T) {
 		{name: "the mode button", event: keyEvent{Key: "BTN_MODE", Value: 1}},
 		{name: "a letter on a keyboard remote", event: keyEvent{Key: "KEY_Q", Value: 1}},
 		{name: "a value no kernel reports", event: keyEvent{Key: "KEY_PLAYPAUSE", Value: 7}},
-		// The volume keys are the operator's, which sets the room's level.
+		// The operator handles the volume keys.
 		{name: "volume up", event: keyEvent{Key: "KEY_VOLUMEUP", Value: 1}},
 		{name: "volume down", event: keyEvent{Key: "KEY_VOLUMEDOWN", Value: 2}},
 		{name: "mute", event: keyEvent{Key: "KEY_MUTE", Value: 1}},
 		{name: "unmute", event: keyEvent{Key: "KEY_UNMUTE", Value: 1}},
-		// The power keys are the operator's, which turns the Player off
-		// and stops the run.
+		// The operator handles the power keys.
 		{name: "power", event: keyEvent{Key: "KEY_POWER", Value: 1}},
 		{name: "the second power", event: keyEvent{Key: "KEY_POWER2", Value: 1}},
 		{name: "power off", event: keyEvent{Key: "KEY_SLEEP", Value: 1}},

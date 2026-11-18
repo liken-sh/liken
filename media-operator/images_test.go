@@ -1,14 +1,9 @@
 package main
 
-// These tests prove the derivation against reference strings, and
-// the start-up against a pod the fake API server serves.
-
 import (
 	"testing"
 )
 
-// A tagged reference gives every companion image the operator's
-// repository with a suffix, at the operator's tag.
 func TestDeriveCompanionImages(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -65,8 +60,6 @@ func TestDeriveCompanionImages(t *testing.T) {
 	}
 }
 
-// A reference with no tag has no version to share, so the
-// derivation fails and says so.
 func TestDeriveCompanionImagesNeedsATag(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -105,10 +98,10 @@ func TestDeriveCompanionImagesNeedsATag(t *testing.T) {
 	}
 }
 
-// operatorPodAPI serves one operator pod, the way the API server serves
-// the pod the downward API names.
+// operatorPodAPI serves the operator pod that the tests set in POD_NAME
+// and POD_NAMESPACE.
 func operatorPodAPI(image string) *cannedAPI {
-	return &cannedAPI{answers: map[string]any{
+	return &cannedAPI{responses: map[string]any{
 		"GET /api/v1/namespaces/liken-system/pods/media-operator-59f4c8d7b5-2xk9q": Pod{
 			Metadata: ObjectMeta{Name: "media-operator-59f4c8d7b5-2xk9q", Namespace: "liken-system"},
 			Spec: PodSpec{Containers: []Container{
@@ -118,8 +111,6 @@ func operatorPodAPI(image string) *cannedAPI {
 	}}
 }
 
-// At start the operator reads its own pod and derives the four
-// companion images from the operator container's image.
 func TestResolveImagesReadsTheOperatorsOwnPod(t *testing.T) {
 	t.Setenv(podNameVariable, "media-operator-59f4c8d7b5-2xk9q")
 	t.Setenv(podNamespaceVariable, "liken-system")
@@ -136,9 +127,8 @@ func TestResolveImagesReadsTheOperatorsOwnPod(t *testing.T) {
 	})
 }
 
-// A variable that is set wins for its one image, and the other three
-// still derive.
-func TestResolveImagesTakesOneEnvironmentOverride(t *testing.T) {
+// A set variable overrides its image, and the others are still derived.
+func TestResolveImagesUsesOneEnvironmentOverride(t *testing.T) {
 	t.Setenv(podNameVariable, "media-operator-59f4c8d7b5-2xk9q")
 	t.Setenv(podNamespaceVariable, "liken-system")
 	t.Setenv(idleImageVariable, "ghcr.io/liken-sh/media-browser:2026.09.03-004")
@@ -155,9 +145,8 @@ func TestResolveImagesTakesOneEnvironmentOverride(t *testing.T) {
 	})
 }
 
-// When every variable is set, the operator reads no pod at all. That
-// is the way out for a pod whose image names a digest.
-func TestResolveImagesTakesEveryEnvironmentOverrideWithNoPod(t *testing.T) {
+// With every variable set, an operator image named by digest can start.
+func TestResolveImagesUsesEveryEnvironmentOverrideWithoutReadingAPod(t *testing.T) {
 	t.Setenv(playerImageVariable, "ghcr.io/liken-sh/media-operator-player:2026.09.03-007")
 	t.Setenv(idleImageVariable, "ghcr.io/liken-sh/media-operator-idle:2026.09.03-007")
 	t.Setenv(sidecarImageVariable, "ghcr.io/liken-sh/media-operator-sidecar:2026.09.03-007")
@@ -176,8 +165,6 @@ func TestResolveImagesTakesEveryEnvironmentOverrideWithNoPod(t *testing.T) {
 	mustMatch(t, len(api.requests), 0)
 }
 
-// A pod whose operator container names its image by digest has no
-// tag to share, so start-up fails.
 func TestResolveImagesFailsOnAPodWithNoTag(t *testing.T) {
 	t.Setenv(podNameVariable, "media-operator-59f4c8d7b5-2xk9q")
 	t.Setenv(podNamespaceVariable, "liken-system")
@@ -188,12 +175,10 @@ func TestResolveImagesFailsOnAPodWithNoTag(t *testing.T) {
 	mustFail(t, err)
 }
 
-// A pod with no container named operator gives no image to derive
-// from, so start-up fails.
 func TestResolveImagesFailsWithNoOperatorContainer(t *testing.T) {
 	t.Setenv(podNameVariable, "media-operator-59f4c8d7b5-2xk9q")
 	t.Setenv(podNamespaceVariable, "liken-system")
-	api := &cannedAPI{answers: map[string]any{
+	api := &cannedAPI{responses: map[string]any{
 		"GET /api/v1/namespaces/liken-system/pods/media-operator-59f4c8d7b5-2xk9q": Pod{
 			Metadata: ObjectMeta{Name: "media-operator-59f4c8d7b5-2xk9q", Namespace: "liken-system"},
 			Spec:     PodSpec{Containers: []Container{{Name: "bus", Image: "eclipse-mosquitto:2.1.2-alpine"}}},
@@ -205,9 +190,8 @@ func TestResolveImagesFailsWithNoOperatorContainer(t *testing.T) {
 	mustFail(t, err)
 }
 
-// Without the downward API variables the operator cannot name its
-// own pod, and with no variable set it has nothing else to go on, so
-// start-up fails before it asks the API for anything.
+// With neither the downward API variables nor the image variables set,
+// startup fails before it sends a request.
 func TestResolveImagesFailsWithoutTheDownwardAPI(t *testing.T) {
 	api := &cannedAPI{}
 
@@ -217,9 +201,6 @@ func TestResolveImagesFailsWithoutTheDownwardAPI(t *testing.T) {
 	mustMatch(t, len(api.requests), 0)
 }
 
-// operatorVersion reads the same pod resolveImages derives the
-// companion images from, so liken_build_info names the release this
-// operator actually runs.
 func TestOperatorVersionReadsTheOperatorsOwnTag(t *testing.T) {
 	t.Setenv(podNameVariable, "media-operator-59f4c8d7b5-2xk9q")
 	t.Setenv(podNamespaceVariable, "liken-system")
@@ -228,11 +209,7 @@ func TestOperatorVersionReadsTheOperatorsOwnTag(t *testing.T) {
 	mustMatch(t, operatorVersion(testAPIClient(t, api.handler())), "2026.09.03-007")
 }
 
-// A version is a courtesy metrics carries, never a startup
-// requirement, so every way it can go missing answers the empty
-// string instead of an error: no downward API, no pod, and an image
-// named by digest with no tag to report.
-func TestOperatorVersionAnswersEmptyWhenItCannotBeRead(t *testing.T) {
+func TestOperatorVersionIsEmptyWhenItCannotBeRead(t *testing.T) {
 	cases := []struct {
 		name string
 		env  bool
@@ -253,13 +230,12 @@ func TestOperatorVersionAnswersEmptyWhenItCannotBeRead(t *testing.T) {
 	}
 }
 
-// The api role reads its release the way the operator does, off the tag
-// of the container deploy/api.yaml names, and asking for a container
-// the pod does not hold answers the empty string.
-func TestTheApiRoleReadsItsOwnContainersTag(t *testing.T) {
+// The api role reads its version from the tag of its own container, the
+// one that deploy/api.yaml declares.
+func TestContainerVersionReadsTheTagOfTheNamedContainer(t *testing.T) {
 	t.Setenv(podNameVariable, "media-api-6c7d9f4b88-t4r2m")
 	t.Setenv(podNamespaceVariable, "liken-system")
-	api := &cannedAPI{answers: map[string]any{
+	api := &cannedAPI{responses: map[string]any{
 		"GET /api/v1/namespaces/liken-system/pods/media-api-6c7d9f4b88-t4r2m": Pod{
 			Metadata: ObjectMeta{Name: "media-api-6c7d9f4b88-t4r2m", Namespace: "liken-system"},
 			Spec: PodSpec{Containers: []Container{

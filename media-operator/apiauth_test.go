@@ -1,8 +1,5 @@
 package main
 
-// These tests drive the authorizer against a stand-in API server that
-// answers the two review paths and records what it was asked.
-
 import (
 	"encoding/base64"
 	"encoding/json"
@@ -14,9 +11,9 @@ import (
 	"time"
 )
 
-// reviewServer answers both review paths with the verdicts a test sets
-// and keeps every body it was sent, so a test reads what the
-// authorizer asked.
+// reviewServer is a fake API server for the review paths. It returns
+// the results that a test sets and records every review it receives, so
+// a test can check what the authorizer sent.
 type reviewServer struct {
 	tokenStatus   TokenReviewStatus
 	allowed       bool
@@ -49,8 +46,8 @@ func (s *reviewServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// acceptedStatus is the status a real API server writes for a
-// ServiceAccount token minted with this API's audience.
+// acceptedStatus is the status a real API server returns for a
+// ServiceAccount token minted for this API's audience.
 func acceptedStatus() TokenReviewStatus {
 	return TokenReviewStatus{
 		Authenticated: true,
@@ -92,24 +89,24 @@ func TestAPIAuthRefusesATokenTheReviewDidNotAccept(t *testing.T) {
 		words  string
 	}{
 		{
-			name:   "the review refuses it in its own words",
+			name:   "the review refuses it with an error message",
 			status: TokenReviewStatus{Error: "[invalid bearer token, token is expired]"},
 			words:  "[invalid bearer token, token is expired]",
 		},
 		{
-			name:   "the review refuses it and says nothing",
+			name:   "the review refuses it with no error message",
 			status: TokenReviewStatus{},
 			words:  "the token review did not authenticate the token",
 		},
 		{
-			name:   "the review carries no audiences",
+			name:   "the review returns no audiences",
 			status: TokenReviewStatus{Authenticated: true},
-			words:  `the token does not carry the audience "media-api"`,
+			words:  `the audiences of the token do not include "media-api"`,
 		},
 		{
-			name:   "the review carries another API's audience",
+			name:   "the review returns another API's audience",
 			status: TokenReviewStatus{Authenticated: true, Audiences: []string{"https://kubernetes.default.svc"}},
-			words:  `the token does not carry the audience "media-api"`,
+			words:  `the audiences of the token do not include "media-api"`,
 		},
 	}
 	for _, each := range cases {
@@ -121,21 +118,22 @@ func TestAPIAuthRefusesATokenTheReviewDidNotAccept(t *testing.T) {
 			mustFail(t, err)
 			refused := unauthenticatedError{}
 			if !errors.As(err, &refused) {
-				t.Fatalf("got %v, want an unauthenticatedError", err)
+				t.Fatalf("authenticate returned %v, want an unauthenticatedError", err)
 			}
-			mustMatch(t, refused.Words, each.words)
+			mustMatch(t, refused.Message, each.words)
 			mustMatch(t, err.Error(), each.words)
 		})
 	}
 }
 
-// A subject in the shape a credential names one, for a test that
-// drives authorize without authenticating first.
+// namedSubject returns a subject with a key and an expiry, as
+// authenticate would, for a test that calls authorize without
+// authenticating first.
 func namedSubject(user string) captureSubject {
-	return captureSubject{User: user, key: tokenKey(user), lapses: time.Now().Add(verdictWindow)}
+	return captureSubject{User: user, key: tokenKey(user), expires: time.Now().Add(verdictWindow)}
 }
 
-func TestAPIAuthCarriesTheAPIServersOwnWords(t *testing.T) {
+func TestAPIAuthReturnsTheAPIServersErrorMessage(t *testing.T) {
 	cases := []struct {
 		name string
 		call func(*authorizer) error
@@ -161,19 +159,19 @@ func TestAPIAuthCarriesTheAPIServersOwnWords(t *testing.T) {
 			mustFail(t, err)
 			refused := unauthenticatedError{}
 			if errors.As(err, &refused) {
-				t.Fatalf("got an unauthenticatedError %v, want an ordinary error", err)
+				t.Fatalf("authenticate returned the unauthenticatedError %v, want an ordinary error", err)
 			}
 			if !strings.Contains(err.Error(), "is forbidden: User") {
-				t.Errorf("got %v, want the API server's own words", err)
+				t.Errorf("authenticate returned %v, want the API server's error message", err)
 			}
 			if strings.Contains(err.Error(), "a-minted-token") {
-				t.Errorf("got %v, want no token in the error", err)
+				t.Errorf("authenticate returned %v, want no token in the error", err)
 			}
 		})
 	}
 }
 
-func TestAPIAuthAsksForGetOnPlayersMedia(t *testing.T) {
+func TestAPIAuthReviewsGetOnPlayersMedia(t *testing.T) {
 	reviews := &reviewServer{tokenStatus: acceptedStatus(), allowed: true}
 	auth := newTestAuthorizer(t, reviews)
 	subject, err := auth.authenticate("a-minted-token")
@@ -197,7 +195,7 @@ func TestAPIAuthAsksForGetOnPlayersMedia(t *testing.T) {
 	mustMatch(t, asked.ResourceAttributes.Name, "studio")
 }
 
-func TestAPIAuthAsksForThePlayerItselfWithNoSubresource(t *testing.T) {
+func TestAPIAuthReviewsThePlayerItselfWithNoSubresource(t *testing.T) {
 	reviews := &reviewServer{tokenStatus: acceptedStatus(), allowed: true}
 	auth := newTestAuthorizer(t, reviews)
 
@@ -233,9 +231,8 @@ func TestAPIAuthCachesAPositiveVerdictPerPlayerAndSubresource(t *testing.T) {
 	mustMatch(t, len(reviews.accessReviews), 4)
 }
 
-// A grant may carry resourceNames, so a verdict for one Player is no
-// verdict for the next one in the same namespace. The cached answer for
-// studio must not open kitchen.
+// A Role can limit access with resourceNames, so the cached verdict for
+// studio must not allow kitchen in the same namespace.
 func TestAPIAuthDoesNotServeOnePlayersVerdictForAnother(t *testing.T) {
 	reviews := &reviewServer{tokenStatus: acceptedStatus(), allowed: true}
 	auth := newTestAuthorizer(t, reviews)
@@ -268,9 +265,9 @@ func TestAPIAuthNeverCachesADenial(t *testing.T) {
 	mustMatch(t, len(reviews.accessReviews), 3)
 }
 
-// signedToken builds a token in the JWT's three-part shape, so the
-// authorizer reads its exp claim the way it reads a real
-// ServiceAccount token. The signature is not checked here.
+// signedToken returns a token in the form of a JWT, so the authorizer
+// reads its exp claim. The signature is not valid, because the fake
+// TokenReview does not check it.
 func signedToken(t *testing.T, claims string) string {
 	t.Helper()
 	encode := base64.RawURLEncoding.EncodeToString

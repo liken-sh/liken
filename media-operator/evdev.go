@@ -1,21 +1,17 @@
 package main
 
-// The kernel publishes every input device as a character node under
-// /dev/input, and a read on one returns fixed-width event records:
-// a button went down, an axis moved. The records are a stable
-// kernel ABI, so the sidecar reads them directly rather than through
-// an input library, which would be the player image's only reason to
-// carry one.
+// The kernel exposes each input device as a character node under
+// /dev/input, and a read on a node returns fixed-size event records.
+// The record layout is a stable kernel ABI, so this file parses it
+// without an input library.
 //
-// One controller publishes several nodes. A DualSense publishes
-// three: the buttons and sticks, the touchpad, and the motion
-// sensors. The kernel also publishes each node's capability bitmaps,
-// one bit per event code it can report, and the node's name. The
-// standing pod carries no keymap, so it keeps any node that declares a
-// key code or a hat axis, which is every node a Keymap could bind: a
-// gamepad's buttons and a media remote's keys alike. It logs one
-// verdict line per node, so a node the rule rejects is legible in the
-// pod log.
+// One controller can have several nodes. A DualSense has one for the
+// buttons and sticks, one for the touchpad, and one for the motion
+// sensors. The reader in remote.go keeps every node whose capability
+// bitmaps include a key code or a hat axis, because those are the only
+// codes a Keymap can bind. The test does not look at any Keymap,
+// because one pod can serve two Players that map the same controller
+// differently.
 
 import (
 	"encoding/binary"
@@ -28,10 +24,9 @@ import (
 	"unsafe"
 )
 
-// inputEvent is the kernel's struct input_event on a 64-bit
-// machine: a timestamp, the event type, the code, and the value.
-// The timestamp goes unread, because the sidecar acts on a press
-// the moment it arrives and never orders or replays events.
+// inputEvent is the kernel's struct input_event on a 64-bit machine.
+// Nothing reads the timestamp, because the reader publishes each event
+// when it arrives.
 type inputEvent struct {
 	Sec   int64
 	Usec  int64
@@ -40,28 +35,27 @@ type inputEvent struct {
 	Value int32
 }
 
-// A record is 24 bytes on a 64-bit kernel: sixteen of timestamp,
-// two of type, two of code, four of value. The kernel returns whole
-// records from every read, never a fraction of one.
+// A record is 24 bytes on a 64-bit kernel: 16 for the timestamp, 2 for
+// the type, 2 for the code, and 4 for the value. The kernel returns
+// only whole records from a read.
 const inputEventSize = 24
 
-// The bitmap sizes, one bit per code: KEY_MAX is 0x2ff, so 96 bytes
-// cover every key code, and ABS_MAX is 0x3f, so 8 bytes cover every
+// The capability bitmaps have one bit per code. KEY_MAX is 0x2ff, so 96
+// bytes cover every key code. ABS_MAX is 0x3f, so 8 bytes cover every
 // axis.
 const (
 	keyBitmapBytes = 96
 	absBitmapBytes = 8
 )
 
-// The buffer the kernel writes a node's name into. A longer name is
-// cut at the buffer's end, which still tells one node from another.
+// nodeNameBytes is the size of the buffer that receives a node's name.
+// The kernel cuts a longer name at the end of the buffer.
 const nodeNameBytes = 128
 
-// parseInputEvents decodes one read's worth of records. The fields
-// are little endian, which is correct on the amd64 and arm64
-// machines liken targets and wrong on a big-endian kernel. A tail
-// shorter than one record is ignored; the kernel does not split
-// records, so there is never one to carry over.
+// parseInputEvents decodes the records in one read. It reads the fields
+// as little endian, which is right for the amd64 and arm64 machines
+// `liken` targets and wrong on a big-endian kernel. It ignores a tail
+// shorter than one record.
 func parseInputEvents(buffer []byte) []inputEvent {
 	events := make([]inputEvent, 0, len(buffer)/inputEventSize)
 	for offset := 0; offset+inputEventSize <= len(buffer); offset += inputEventSize {
@@ -77,19 +71,18 @@ func parseInputEvents(buffer []byte) []inputEvent {
 	return events
 }
 
-// bitmapRequest builds the EVIOCGBIT ioctl number by hand, the way
-// the C macro _IOC does: two bits of direction (read), fourteen bits
-// of size, the event family's letter 'E', and 0x20 plus the event
-// type as the command. The size is part of the number, so it must
-// state the buffer's real length or the kernel copies the wrong
-// amount.
+// bitmapRequest builds the EVIOCGBIT ioctl number the way the C macro
+// _IOC does: 2 bits of direction (read), 14 bits of size, the evdev
+// type 'E', and 0x20 plus the event type as the command. The size is
+// part of the number, so it must equal the length of the buffer or the
+// kernel copies the wrong number of bytes.
 func bitmapRequest(evType uint16, length int) uintptr {
 	return uintptr(2)<<30 | uintptr(length)<<16 | uintptr(0x45)<<8 | uintptr(0x20+evType)
 }
 
-// bitmapHasCode reads one code's bit: byte code/8, bit code%8,
-// least significant first. A code past the bitmap's end is a code
-// the node does not report.
+// bitmapHasCode reports whether the bitmap has the bit for code, which
+// is bit code%8 of byte code/8, counting from the least significant
+// bit. A code past the end of the bitmap is not set.
 func bitmapHasCode(bitmap []byte, code uint16) bool {
 	index := int(code / 8)
 	if index >= len(bitmap) {
@@ -98,9 +91,8 @@ func bitmapHasCode(bitmap []byte, code uint16) bool {
 	return bitmap[index]&(1<<(code%8)) != 0
 }
 
-// declaredKeyCodes lists every key code the node declares, in code
-// order. The bitmap is read with no button pressed, so the set is
-// complete the moment the node opens.
+// declaredKeyCodes lists the key codes set in the bitmap, in code
+// order.
 func declaredKeyCodes(bitmap []byte) []uint16 {
 	var codes []uint16
 	for code := range uint16(len(bitmap) * 8) {
@@ -111,8 +103,9 @@ func declaredKeyCodes(bitmap []byte) []uint16 {
 	return codes
 }
 
-// declaredHatAxes lists the hat axes the node declares, in code order.
-// The hats are the only axes a Keymap binds.
+// declaredHatAxes lists the axes of axisCodes that are set in the
+// bitmap, which are the only axes a Keymap can bind. It sorts them
+// because axisCodes is a map.
 func declaredHatAxes(bitmap []byte) []uint16 {
 	var codes []uint16
 	for _, code := range axisCodes {
@@ -124,26 +117,21 @@ func declaredHatAxes(bitmap []byte) []uint16 {
 	return codes
 }
 
-// controllerBitmaps is the selection rule: any key code at all, or
-// either hat axis. The reader has no keymap, so it keeps every node
-// that could carry a bound code, and one standing pod then feeds two
-// players that map the controller differently.
-func controllerBitmaps(keys, axes []byte) bool {
+// declaresKeyOrHat reports whether a node declares at least one key
+// code or one hat axis.
+func declaresKeyOrHat(keys, axes []byte) bool {
 	return len(declaredKeyCodes(keys)) > 0 || len(declaredHatAxes(axes)) > 0
 }
 
-// The reader asks the kernel to deliver only the events it publishes.
-// A pad's motion node reports thousands of events a second while the
-// pad rests on a table, and a reader that reads them all and drops
-// them after publishable spends most of a small machine's CPU on
-// nothing. The mask below is publishable stated to the kernel, one
-// bit per code, so the two never disagree: the test in evdev_test.go
-// checks them code for code.
+// The reader sets an event mask on each node, so that the kernel
+// delivers only the events that publishable in remote.go accepts. The
+// motion node of a gamepad reports events continuously, even when the
+// pad lies still, and reading them only to drop them wastes CPU on a
+// small machine. The masks below apply the same rule as publishable,
+// and a test checks that the two agree for every code.
 
 // inputMask is the kernel's struct input_mask, the argument of
-// EVIOCSMASK. One call sets the mask for one event type. The call for
-// type EV_SYN is special: its bitmap is the mask of event types, not
-// of SYN codes.
+// EVIOCSMASK. One call sets the mask for one event type.
 type inputMask struct {
 	Type      uint32
 	CodesSize uint32
@@ -151,39 +139,41 @@ type inputMask struct {
 }
 
 const (
-	// EV_SYN's slot holds the mask of event types.
-	maskTypeSlot uint16 = 0x00
+	// maskEventTypes is EV_SYN. EVIOCSMASK with this type sets the mask
+	// of event types, not a mask of SYN codes.
+	maskEventTypes uint16 = 0x00
 
-	// EV_CNT and ABS_CNT, the sizes of the two bitmaps the reader sets.
+	// eventTypeCount and absCodeCount are the kernel's EV_CNT and
+	// ABS_CNT.
 	eventTypeCount = 0x20
 	absCodeCount   = 0x40
 
-	// The kernel reads a mask in whole longs, and a length that is not
-	// a multiple of one is EINVAL, so every bitmap is padded to this.
+	// The kernel returns EINVAL for a mask whose length is not a
+	// multiple of sizeof(long), so every mask is padded to it.
 	maskWordBytes = 8
 )
 
-// maskRequest builds the EVIOCSMASK ioctl number by hand, the way
-// bitmapRequest builds EVIOCGBIT. The direction is write, the size is
-// the structure's, and the command is 0x93.
+// maskRequest builds the EVIOCSMASK ioctl number the way bitmapRequest
+// builds EVIOCGBIT. The direction is write, the size is that of
+// inputMask, and the command is 0x93.
 func maskRequest() uintptr {
 	return uintptr(1)<<30 | uintptr(unsafe.Sizeof(inputMask{}))<<16 | uintptr(0x45)<<8 | uintptr(0x93)
 }
 
-// maskBytes is how many bytes hold one bit per code, rounded up to the
-// whole machine words the kernel takes.
+// maskBytes returns the size of a bitmap with one bit for each of
+// codes, rounded up to whole machine words.
 func maskBytes(codes int) int {
 	words := (codes + maskWordBytes*8 - 1) / (maskWordBytes * 8)
 	return words * maskWordBytes
 }
 
-// setBitmapCode sets one code's bit, the write bitmapHasCode reads.
+// setBitmapCode sets the bit that bitmapHasCode reads for code.
 func setBitmapCode(bitmap []byte, code uint16) {
 	bitmap[code/8] |= 1 << (code % 8)
 }
 
-// publishableTypes is the event-type mask: the two types publishable
-// keeps.
+// publishableTypes is the event type mask: EV_KEY and EV_ABS, the
+// types that publishable accepts.
 func publishableTypes() []byte {
 	bitmap := make([]byte, maskBytes(eventTypeCount))
 	setBitmapCode(bitmap, evKey)
@@ -191,8 +181,7 @@ func publishableTypes() []byte {
 	return bitmap
 }
 
-// publishableAxes is the EV_ABS mask: the hat axes a Keymap binds, and
-// no other axis.
+// publishableAxes is the EV_ABS mask: the hat axes and no other axis.
 func publishableAxes() []byte {
 	bitmap := make([]byte, maskBytes(absCodeCount))
 	for _, code := range axisCodes {
@@ -201,8 +190,9 @@ func publishableAxes() []byte {
 	return bitmap
 }
 
-// setEventMask narrows what one open descriptor delivers for one event
-// type. An empty bitmap silences the type.
+// setEventMask limits the events that the descriptor delivers for one
+// event type to the codes in the bitmap. An empty bitmap blocks the
+// whole type.
 func setEventMask(descriptor int, evType uint16, codes []byte) error {
 	mask := inputMask{Type: uint32(evType), CodesSize: uint32(len(codes))}
 	if len(codes) > 0 {
@@ -214,6 +204,8 @@ func setEventMask(descriptor int, evType uint16, codes []byte) error {
 		maskRequest(),
 		uintptr(unsafe.Pointer(&mask)),
 	)
+	// CodesPtr is a plain integer, so the garbage collector does not
+	// see that the kernel reads codes during the call.
 	runtime.KeepAlive(codes)
 	if errno != 0 {
 		return errno
@@ -221,21 +213,20 @@ func setEventMask(descriptor int, evType uint16, codes []byte) error {
 	return nil
 }
 
-// restrictToPublishable narrows one open node to EV_KEY and the two
-// hat axes. EV_SYN frames still arrive; the kernel never filters them.
-// A kernel that refuses the call delivers everything, and the reader
-// stays correct, because publishable still drops what it never
-// publishes; the node only costs more to read.
+// restrictToPublishable limits a node to EV_KEY and the hat axes. The
+// kernel never filters EV_SYN, so those events still arrive. When the
+// kernel refuses a mask, the node delivers every event and publishable
+// still drops the ones a Keymap cannot bind.
 func restrictToPublishable(descriptor int) error {
-	if err := setEventMask(descriptor, maskTypeSlot, publishableTypes()); err != nil {
+	if err := setEventMask(descriptor, maskEventTypes, publishableTypes()); err != nil {
 		return err
 	}
 	return setEventMask(descriptor, evAbs, publishableAxes())
 }
 
-// nodeVerdict is what the reader decided about one node, with the
-// counts behind the decision. The verdicts log in both modes, so a
-// node the rule rejects is legible in the pod log.
+// nodeVerdict records whether the reader keeps one node, with the
+// number of key codes and hat axes the node declares. The reader logs
+// one line for each node, so the pod log shows why a node was rejected.
 type nodeVerdict struct {
 	Path string
 	Name string
@@ -244,7 +235,6 @@ type nodeVerdict struct {
 	Keep bool
 }
 
-// line renders one verdict the way the pod logs it.
 func (v nodeVerdict) line() string {
 	verdict := "reject"
 	if v.Keep {
@@ -256,8 +246,8 @@ func (v nodeVerdict) line() string {
 		countOf(v.Hats, "hat axis", "hat axes"))
 }
 
-// countOf writes one count in words, so a node that declares nothing
-// states that plainly.
+// countOf formats a count with its noun, and writes "no" and the plural
+// for zero.
 func countOf(count int, singular, plural string) string {
 	switch count {
 	case 0:
@@ -269,9 +259,8 @@ func countOf(count int, singular, plural string) string {
 	}
 }
 
-// openNode is one node the reader inspected: the file it reads, the
-// path and name a person knows it by, and the two capability bitmaps,
-// read once at open because no press changes them.
+// openNode is an event node the reader has opened. The capability
+// bitmaps are read once, when the node opens.
 type openNode struct {
 	file *os.File
 	path string
@@ -280,12 +269,11 @@ type openNode struct {
 	axes []byte
 }
 
-// label is the node as every logged line names it.
+// label names the node in log lines.
 func (n openNode) label() string {
 	return fmt.Sprintf("%s %q", filepath.Base(n.path), n.name)
 }
 
-// verdict is this node's decision, with the counts behind it.
 func (n openNode) verdict(keep bool) nodeVerdict {
 	return nodeVerdict{
 		Path: n.path,
@@ -296,9 +284,10 @@ func (n openNode) verdict(keep bool) nodeVerdict {
 	}
 }
 
-// inspectNode reads one node's name and both capability bitmaps. A
-// node that refuses either ioctl is not an event device, and the
-// reader skips it in either mode.
+// inspectNode reads the name and both capability bitmaps of a node. It
+// returns false when either bitmap ioctl fails, because then the node
+// is not an event device. The reader skips such a node even in
+// discovery mode.
 func inspectNode(descriptor int, path string) (openNode, bool) {
 	keys, err := deviceBitmap(descriptor, evKey, keyBitmapBytes)
 	if err != nil {
@@ -308,15 +297,14 @@ func inspectNode(descriptor int, path string) (openNode, bool) {
 	if err != nil {
 		return openNode{}, false
 	}
-	// A node with no name is still readable, so a missing name is no
-	// reason to skip it.
+	// A node whose name cannot be read still delivers events.
 	name, _ := deviceName(descriptor)
 	return openNode{path: path, name: name, keys: keys, axes: axes}, true
 }
 
-// deviceBitmap fetches one event type's capability bitmap. The
-// kernel fills the buffer up to the length the request number
-// states and reports how much it wrote; only the bits matter here.
+// deviceBitmap reads the capability bitmap of one event type. When the
+// kernel writes fewer than length bytes, the rest of the buffer stays
+// zero, which reads as codes the node does not declare.
 func deviceBitmap(descriptor int, evType uint16, length int) ([]byte, error) {
 	bitmap := make([]byte, length)
 	_, _, errno := syscall.Syscall(
@@ -331,15 +319,15 @@ func deviceBitmap(descriptor int, evType uint16, length int) ([]byte, error) {
 	return bitmap, nil
 }
 
-// nameRequest builds the EVIOCGNAME ioctl number by hand, the way
-// bitmapRequest builds EVIOCGBIT. The command is 0x06, and the size in
-// the number states how much name the kernel may write.
+// nameRequest builds the EVIOCGNAME ioctl number the way bitmapRequest
+// builds EVIOCGBIT. The command is 0x06, and the size in the number is
+// the most the kernel writes.
 func nameRequest(length int) uintptr {
 	return uintptr(2)<<30 | uintptr(length)<<16 | uintptr(0x45)<<8 | uintptr(0x06)
 }
 
-// deviceName reads one node's name from the kernel, which is the
-// model's own string, such as a controller's product name.
+// deviceName reads the name of a node from the kernel, such as the
+// product name of a controller.
 func deviceName(descriptor int) (string, error) {
 	buffer := make([]byte, nodeNameBytes)
 	written, _, errno := syscall.Syscall(
@@ -354,8 +342,8 @@ func deviceName(descriptor int) (string, error) {
 	return nodeName(buffer, int(written)), nil
 }
 
-// nodeName decodes what the kernel wrote: the bytes it reported,
-// ending at the first NUL.
+// nodeName returns the bytes the kernel wrote, up to the first NUL. A
+// name that the kernel cut at the end of the buffer has no NUL.
 func nodeName(buffer []byte, written int) string {
 	if written > len(buffer) {
 		written = len(buffer)

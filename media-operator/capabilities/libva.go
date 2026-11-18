@@ -1,18 +1,14 @@
 package main
 
-// The query of one render node through libva.
+// This file queries one render node through libva. It calls libva
+// through purego, which loads a shared library without cgo, so the
+// build keeps CGO_ENABLED=0 and needs no C toolchain or libva headers.
+// The binary still uses the system's dynamic loader, and the query
+// opens libva.so.2 and libva-drm.so.2 when it runs, so the agent runs
+// only in an image that has both, such as the vaapi base.
 //
-// The program calls libva without cgo, through purego, which opens a
-// shared library and calls its functions from Go. Every other program
-// in this repository builds with CGO_ENABLED=0, and purego keeps that
-// build: the same Go stage, with no C toolchain and no libva headers.
-// The result is not a static binary. It names the system's dynamic
-// loader, and it opens libva.so.2 and libva-drm.so.2 when the query
-// runs, so it runs only in an image that holds both, such as the vaapi
-// base. The agent's other work never opens libva.
-//
-// The query runs in a child process of the agent (query.go), so a
-// driver that hangs or crashes ends the child and not the agent.
+// The query runs in a child process of the agent (query.go), so a driver
+// that hangs or crashes ends the child and not the agent.
 
 import (
 	"encoding/binary"
@@ -22,15 +18,16 @@ import (
 	"github.com/ebitengine/purego"
 )
 
-// The two libraries, by soname. libva-drm opens a display on a DRM
-// render node, and libva holds every query.
+// libva-drm opens a display on a DRM render node, and libva has every
+// other function.
 const (
 	libvaName    = "libva.so.2"
 	libvaDRMName = "libva-drm.so.2"
 )
 
-// VAConfigAttribRTFormat names the render-target formats of a config,
-// and VASurfaceAttribPixelFormat names one surface format.
+// Values from libva's va.h: VAConfigAttribRTFormat,
+// VASurfaceAttribPixelFormat, VAGenericValueTypeInteger,
+// VA_STATUS_SUCCESS, and VA_ATTRIB_NOT_SUPPORTED.
 const (
 	configAttribRTFormat     int32  = 0
 	surfaceAttribPixelFormat int32  = 1
@@ -39,16 +36,16 @@ const (
 	vaAttribNotSupported     uint32 = 0x80000000
 )
 
-// configAttrib is libva's VAConfigAttrib: a type and a value, 8 bytes.
+// configAttrib is libva's VAConfigAttrib.
 type configAttrib struct {
 	Type  int32
 	Value uint32
 }
 
-// surfaceAttrib is libva's VASurfaceAttrib. The value is a
-// VAGenericValue: a type, then a union of an int, a float, and two
-// pointers, aligned to 8 bytes. The struct is 24 bytes on a 64-bit
-// machine.
+// surfaceAttrib is libva's VASurfaceAttrib. Its value is a
+// VAGenericValue, which is a type followed by a union of an int, a
+// float, and two pointers, aligned to 8 bytes. The struct is 24 bytes
+// on a 64-bit machine.
 type surfaceAttrib struct {
 	Type      int32
 	Flags     uint32
@@ -57,7 +54,6 @@ type surfaceAttrib struct {
 	Value     uint64
 }
 
-// libva holds the functions the query calls.
 type libva struct {
 	getDisplayDRM          func(fd int32) uintptr
 	initialize             func(display uintptr, major, minor *int32) int32
@@ -74,16 +70,16 @@ type libva struct {
 	querySurfaceAttributes func(display uintptr, id uint32, attribs *surfaceAttrib, count *uint32) int32
 }
 
-// openLibva opens the two libraries and binds each function. A library
-// that is missing fails here, with the loader's own message.
+// openLibva opens the two libraries and binds each function. A missing
+// library fails here with the loader's message.
 func openLibva() (*libva, error) {
 	va, err := purego.Dlopen(libvaName, purego.RTLD_NOW|purego.RTLD_GLOBAL)
 	if err != nil {
-		return nil, fmt.Errorf("opening %s: %w", libvaName, err)
+		return nil, err
 	}
 	drm, err := purego.Dlopen(libvaDRMName, purego.RTLD_NOW|purego.RTLD_GLOBAL)
 	if err != nil {
-		return nil, fmt.Errorf("opening %s: %w", libvaDRMName, err)
+		return nil, err
 	}
 	l := &libva{}
 	purego.RegisterLibFunc(&l.getDisplayDRM, drm, "vaGetDisplayDRM")
@@ -106,9 +102,9 @@ func openLibva() (*libva, error) {
 	return l, nil
 }
 
-// queryRenderNode reads the report of the driver behind one render
-// node. libva chooses the driver from the kernel driver of the node, as
-// every VA-API program does.
+// queryRenderNode returns what the VA-API driver of one render node
+// reports. libva picks the driver from the node's kernel driver, so the
+// caller does not name one.
 func queryRenderNode(path string) (report, error) {
 	l, err := openLibva()
 	if err != nil {
@@ -131,7 +127,6 @@ func queryRenderNode(path string) (report, error) {
 	return l.report(display)
 }
 
-// report reads the driver's statements from an initialized display.
 func (l *libva) report(display uintptr) (report, error) {
 	facts := report{Vendor: l.queryVendorString(display)}
 	configs, err := l.configs(display)
@@ -147,8 +142,9 @@ func (l *libva) report(display uintptr) (report, error) {
 	return facts, nil
 }
 
-// configs lists every profile and entrypoint pair the driver states,
-// with the render-target formats of each.
+// configs returns every profile and entrypoint pair that the driver
+// supports, with its render-target formats, or 0 when the driver does
+// not report them.
 func (l *libva) configs(display uintptr) ([]config, error) {
 	profiles := make([]int32, max(l.maxNumProfiles(display), 1))
 	var profileCount int32
@@ -178,9 +174,9 @@ func (l *libva) configs(display uintptr) ([]config, error) {
 	return out, nil
 }
 
-// videoProcFormats lists the surface formats of the video processor's
-// config. A driver with no video processor lists no VideoProc
-// entrypoint, and has no formats.
+// videoProcFormats returns the FourCC codes of the pixel formats that
+// the video processor accepts, or none when configs has no VideoProc
+// entrypoint.
 func (l *libva) videoProcFormats(display uintptr, configs []config) ([]string, error) {
 	listed := false
 	for _, c := range configs {
@@ -194,8 +190,7 @@ func (l *libva) videoProcFormats(display uintptr, configs []config) ([]string, e
 		return nil, fmt.Errorf("vaCreateConfig for the video processor: %s", l.errorStr(status))
 	}
 	defer l.destroyConfig(display, id)
-	// The first call with no array returns the count, and the second
-	// fills an array of that length.
+	// With a nil array, libva returns only the count.
 	var count uint32
 	if status := l.querySurfaceAttributes(display, id, nil, &count); status != vaStatusSuccess {
 		return nil, fmt.Errorf("vaQuerySurfaceAttributes: %s", l.errorStr(status))
@@ -210,8 +205,8 @@ func (l *libva) videoProcFormats(display uintptr, configs []config) ([]string, e
 	return pixelFormats(attribs[:count]), nil
 }
 
-// pixelFormats reads the FourCC codes out of a list of surface
-// attributes, once each, in the order the driver gave them.
+// pixelFormats returns the FourCC code of each pixel format attribute,
+// without duplicates, in the order that the driver returned them.
 func pixelFormats(attribs []surfaceAttrib) []string {
 	var out []string
 	seen := map[string]bool{}
@@ -228,8 +223,8 @@ func pixelFormats(attribs []surfaceAttrib) []string {
 	return out
 }
 
-// fourcc spells a FourCC code, which libva stores as four characters
-// in little-endian order: NV12 is 0x3231564e.
+// fourcc returns a FourCC code as a string. libva stores the four
+// characters in little-endian order, so NV12 is 0x3231564e.
 func fourcc(code uint32) string {
 	var b [4]byte
 	binary.LittleEndian.PutUint32(b[:], code)

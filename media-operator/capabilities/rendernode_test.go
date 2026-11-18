@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// fakeSysfs makes a sysfs tree with one PCI device whose drm directory
-// lists the given nodes, and points the lookup at it.
+// fakeSysfs creates a sysfs tree with one PCI device whose drm
+// directory contains the given nodes, and points sysRoot at it.
 func fakeSysfs(t *testing.T, address string, nodes ...string) {
 	t.Helper()
 	root := t.TempDir()
@@ -27,14 +27,14 @@ func TestTheRenderNodeOfAGPUComesFromItsAddress(t *testing.T) {
 	fakeSysfs(t, "0000:00:02.0", "card1", "renderD128")
 	got, err := renderNodePath("0000:00:02.0")
 	if err != nil || got != "/dev/dri/renderD128" {
-		t.Errorf("path = %q, err = %v", got, err)
+		t.Errorf("renderNodePath = (%q, %v), want (/dev/dri/renderD128, nil)", got, err)
 	}
 }
 
 func TestAGPUWithNoRenderNodeFails(t *testing.T) {
 	fakeSysfs(t, "0000:00:02.0", "card1")
 	_, err := renderNodePath("0000:00:02.0")
-	if err == nil || !strings.Contains(err.Error(), "lists no render node") {
-		t.Errorf("err = %v", err)
+	if err == nil || !strings.Contains(err.Error(), "no entry named renderD") {
+		t.Errorf("err = %v, want one that says the drm directory has no render node", err)
 	}
 }

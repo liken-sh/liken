@@ -1,9 +1,5 @@
 package main
 
-// These tests cover what a pattern:// URI resolves to: a file the player
-// image carries, at the frame the URI names, or at the frame of the
-// Player's screen when it names none. A pattern costs the pod no mount.
-
 import (
 	"strings"
 	"testing"
@@ -27,7 +23,7 @@ func TestResolveAPatternToTheFileInTheImage(t *testing.T) {
 		t.Run(c.uri, func(t *testing.T) {
 			resolved, err := resolvePlay("house", mediaItems(c.uri), nil, c.screen)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("resolving the Play: %v", err)
 			}
 			if resolved.Items[0] != c.want {
 				t.Errorf("item = %q, want %q", resolved.Items[0], c.want)
@@ -39,9 +35,9 @@ func TestResolveAPatternToTheFileInTheImage(t *testing.T) {
 	}
 }
 
-// A URI with no frame takes the largest frame of the screen's shape that
-// fits on the screen, and 1920x1080 when no frame has the screen's shape
-// or the screen is not known.
+// A URI with no frame gets the largest frame of the screen's shape that
+// fits within the screen, or 1920x1080 when no frame has the screen's
+// shape or the screen size is unknown.
 func TestAPatternWithNoFrameFitsTheScreen(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -68,8 +64,8 @@ func TestAPatternWithNoFrameFitsTheScreen(t *testing.T) {
 	}
 }
 
-// A pattern or a frame the image does not carry fails the Play, and the
-// message lists what the image carries.
+// A pattern or a frame that the image does not have fails the Play, and
+// the error lists the ones it has.
 func TestResolveRefusesAPatternTheImageDoesNotCarry(t *testing.T) {
 	cases := []struct {
 		uri  string
@@ -85,14 +81,14 @@ func TestResolveRefusesAPatternTheImageDoesNotCarry(t *testing.T) {
 		t.Run(c.uri, func(t *testing.T) {
 			_, err := resolvePlay("house", mediaItems(c.uri), nil, frame{})
 			if err == nil || !strings.Contains(err.Error(), c.want) {
-				t.Errorf("err = %v, want one that says %q", err, c.want)
+				t.Errorf("err = %v, want one that contains %q", err, c.want)
 			}
 		})
 	}
 }
 
-// A pattern is something to play, not a picture to draw, so a logo or
-// cover art that names one fails the Play.
+// A pattern is video to play, not a picture to draw, so a logo or cover
+// art that is a pattern URI fails the Play.
 func TestResolveRefusesAPatternAsArt(t *testing.T) {
 	items := []PlayItem{{
 		URI:          "pattern://white",
@@ -104,8 +100,8 @@ func TestResolveRefusesAPatternAsArt(t *testing.T) {
 	}
 }
 
-// The frame of a screen comes from the compositor's mode on its Display,
-// because the compositor's canvas is what mpv draws on.
+// The frame of a screen comes from the compositor's mode on its
+// Display, because mpv draws on the compositor's canvas.
 func TestTheScreenFrameIsTheCompositorsMode(t *testing.T) {
 	cases := []struct {
 		name string

@@ -1,56 +1,48 @@
 package main
 
-// The playback pod's table from key names to what they do during a
-// film, and the documentation of that pod's controls. This is the
-// consumer's half of the two layers: the pod binds the kernel's names
-// the way Kodi and mpv bind them, and the amounts here are this
-// consumer's defaults, stated in no Keymap. Three kinds of key act on a
-// repeat as well as a press, because they are the ones a person holds:
-// a seek, a chapter step, and an arrow.
+// This file maps the kernel key names that controllers publish to the
+// commands that the playback pod runs during a film.
 //
-// The volume keys have no row. The operator reads them off the
-// controllers' events topics and sets the level of the room
-// (volumeengine.go), so a press means the same during a film and
-// between films.
+// The volume and power keys have no row. The operator reads them from
+// each controller's events topic, so a press does the same thing during
+// a film and between films. volumeengine.go handles the volume keys, and
+// powerkeys.go writes the Player's spec.power for the power keys.
 
-// The amounts. They are this pod's own defaults. A cluster that wants
-// other numbers gets them from a later preferences tier, and no
-// per-controller table states them.
+// No Keymap changes these steps.
 const (
 	seekSeconds = 10
 	chapterStep = 1
 )
 
-// A keyBinding is one row: the command the key means, and whether a
-// held key repeats it. A key that does not repeat acts on the press
-// alone, so a held pause toggles once.
+// A keyBinding is the command a key runs, and whether holding the key
+// repeats it. A key that does not repeat acts on the press alone, so a
+// held pause toggles once.
 type keyBinding struct {
 	command mediaCommand
 	repeats bool
 }
 
-// The table. Each group of names is one command: the three transport
-// names a keyboard and a media remote report for play and pause, which
-// toggle, the four names a shell sends for OK, and the three it sends
-// for back. The kernel's rc-cec keymap names a TV remote's
-// deterministic functions (HDMI-CEC 1.3a, CEC 13.13.3) with names of
-// their own, and each sets the state it names, so a second press
-// changes nothing: KEY_PLAYCD, from Play and Play Function, plays;
-// KEY_PAUSECD pauses; and KEY_STOPCD ends the run. KEY_PLAYPAUSE stays
-// a toggle, because a Bluetooth remote's play button sends it too, and
-// rc-cec names a TV remote's Pause-Play Function with it; a Keymap row
-// on the Remote of the CEC adapter's input device can name that button
-// KEY_PAUSECD instead.
-// The power keys have no row: this operator reads them off the
-// controller's events topic and turns the Player off, which stops the
-// run (powerkeys.go).
-// KEY_CYCLEWINDOWS asks the operator to move the focus mark and
-// reaches no player program. BTN_MODE is absent on purpose: it is
-// reserved for a home surface this operator does not own.
+// playbackKeys maps a key name to its binding. Seeks, chapter steps,
+// and the arrows repeat, because a person holds those keys.
 //
-// The two home names, KEY_HOMEPAGE and KEY_WWW, end the film and ask the
-// client under it for its home page. They are homeKeys, the names
-// ensureInput asks the receiver to show the unit for.
+// KEY_PLAYPAUSE, KEY_PLAY, and KEY_PAUSE toggle pause. KEY_PLAYCD plays,
+// KEY_PAUSECD pauses, and KEY_STOPCD ends the run, so a second press of
+// one of them changes nothing. The kernel's rc-cec keymap reports the
+// CEC Play and Play Function as KEY_PLAYCD, Pause as KEY_PAUSECD, and
+// Stop as KEY_STOPCD, and HDMI-CEC 1.3a, section CEC 13.13.3, defines
+// each of those functions to set a state. rc-cec reports the
+// Pause-Play Function as KEY_PLAYPAUSE, which toggles. A
+// Keymap row on the Remote of the CEC adapter can map that button to
+// KEY_PAUSECD instead.
+//
+// KEY_CYCLEWINDOWS does not reach mpv. The command sidecar publishes a
+// cycle request on the controller's focus topic, and the operator moves
+// the focus mark to the next Player. BTN_MODE has no row because it is
+// reserved for a home surface that this operator does not own.
+//
+// KEY_HOMEPAGE and KEY_WWW end the run and publish a home command on
+// the Player's commands topic (home.go). ensure.go lists the same names
+// as homeKeys.
 var playbackKeys = map[string]keyBinding{
 	"KEY_PLAYPAUSE": {command: mediaCommand{Action: actionPause}},
 	"KEY_PLAY":      {command: mediaCommand{Action: actionPause}},
@@ -90,10 +82,10 @@ var playbackKeys = map[string]keyBinding{
 	"KEY_CYCLEWINDOWS": {command: mediaCommand{Action: actionCycleFocus}},
 }
 
-// commandForKey reads one key event as this pod's command. Value 0
-// does nothing, because the release of a key this pod acted on has no
-// meaning here. Value 2 acts only for the keys that repeat. A key with
-// no row, which is most of a keyboard, does nothing.
+// commandForKey returns the command for a key event, and false when the
+// event runs none. The kernel reports value 1 for a press, 2 for a
+// repeat, and 0 for a release. A repeat runs only for a key that
+// repeats, and a release runs nothing.
 func commandForKey(event keyEvent) (mediaCommand, bool) {
 	binding, bound := playbackKeys[event.Key]
 	if !bound {

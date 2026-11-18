@@ -1,9 +1,7 @@
 package main
 
-// These tests run whole passes over a Play's ending: the finalizer going
-// on, the release waiting for the pod, the two clears, and the sweep
-// behind them. Each one reads the fake API server and the fake broker
-// together, because the act this file proves is one write to each.
+// These tests check the fake API server and the fake broker together,
+// because the end of a Play writes to both.
 
 import (
 	"net/http"
@@ -14,9 +12,9 @@ import (
 	"time"
 )
 
-// mustClearPlayTopics reads the two empty retained publishes one run's clear
-// makes. A whole pass publishes each unit's presentable state as well, so
-// this reads past every topic that is not one of the run's two.
+// mustClearPlayTopics waits for the empty retained publishes that clear
+// a run's status and availability topics, and skips the other topics
+// that a pass publishes.
 func mustClearPlayTopics(t *testing.T, broker *fakeBroker, namespace, name string) {
 	t.Helper()
 	status := playStatusTopic(defaultTopicBase, namespace, name)
@@ -35,10 +33,7 @@ func mustClearPlayTopics(t *testing.T, broker *fakeBroker, namespace, name strin
 	}
 }
 
-// The sweep behind the finalizer clears the retained topics of a run whose
-// Play the API server no longer holds, and passes over a run whose Play is
-// still there.
-func TestTheSweepClearsTheTopicsOfARunWhosePlayIsGone(t *testing.T) {
+func TestSweepClearsTheTopicsOfARunWhosePlayIsGone(t *testing.T) {
 	cases := []struct {
 		name         string
 		play         string
@@ -62,8 +57,8 @@ func TestTheSweepClearsTheTopicsOfARunWhosePlayIsGone(t *testing.T) {
 					reports:   newReports(wake),
 				}
 
-				// The desk has seen the run, the way the broker's retained
-				// availability marks it seen the moment the operator subscribes.
+				// The operator records a run when it receives the run's
+				// retained availability message after it subscribes.
 				media.reports.availability("den", test.play, false, "")
 				if test.disconnected {
 					waitForDisconnect(t, media.bus, broker)
@@ -74,26 +69,24 @@ func TestTheSweepClearsTheTopicsOfARunWhosePlayIsGone(t *testing.T) {
 				if !test.wantCleared {
 					select {
 					case got := <-broker.pubs:
-						t.Fatalf("the sweep published %+v for a run it must leave alone: %s", got, test.name)
+						t.Fatalf("%s: the sweep published %+v, want no publish", test.name, got)
 					case <-time.After(50 * time.Millisecond):
 					}
 					if test.disconnected && len(media.reports.stale(map[string]bool{})) != 1 {
-						t.Error("the sweep forgot a run whose clear it never published")
+						t.Error("after a sweep with no bus session, the run is no longer listed as stale, want it still listed because its topics were not cleared")
 					}
 					return
 				}
 				mustClearPlayTopics(t, broker, "den", test.play)
 				if got := media.reports.stale(map[string]bool{}); len(got) != 0 {
-					t.Errorf("the desk still offers %v after the sweep cleared it", got)
+					t.Errorf("after the sweep cleared the topics, the stale runs are %v, want none", got)
 				}
 			})
 		})
 	}
 }
 
-// The operator's own finalizer goes on every Play the first pass reads.
-// It is what keeps the Play until the run's retained topics are cleared.
-func TestAPassHoldsEveryPlayWithTheFinalizer(t *testing.T) {
+func TestPassAddsTheFinalizerToEveryPlay(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
 	cluster.players["theater"] = housePlayer()
@@ -106,8 +99,7 @@ func TestAPassHoldsEveryPlayWithTheFinalizer(t *testing.T) {
 		t.Errorf("finalizers = %v, want %v", held, []string{playFinalizer})
 	}
 
-	// A second pass reads a Play that already carries it and writes
-	// nothing, so the operator does not patch the same Play every pass.
+	// A second pass finds the finalizer and sends no patch.
 	before := len(cluster.requests)
 	media.pass()
 	for _, request := range cluster.requests[before:] {
@@ -117,8 +109,8 @@ func TestAPassHoldsEveryPlayWithTheFinalizer(t *testing.T) {
 	}
 }
 
-// busOperator wires a pass's operator to a fake broker, so a test reads the
-// whole pass and what it published in one place.
+// busOperator returns an operator connected to a fake broker, so a test
+// can read both a pass's API requests and what it published.
 func busOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker) {
 	t.Helper()
 	bus, brokers, connected := startBus(t, 1, nil, nil)
@@ -128,10 +120,7 @@ func busOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker) {
 	return media, brokers[0]
 }
 
-// A deleting Play keeps the finalizer while its pod is still there. The
-// pod's sidecar publishes its own closing messages as it exits, so a clear
-// the operator published first would be overwritten.
-func TestADeletingPlayIsReleasedOnlyOnceItsPodIsGone(t *testing.T) {
+func TestDeletingPlayIsReleasedOnlyOnceItsPodIsGone(t *testing.T) {
 	cases := []struct {
 		name         string
 		lingers      bool
@@ -171,8 +160,8 @@ func TestADeletingPlayIsReleasedOnlyOnceItsPodIsGone(t *testing.T) {
 
 				media.pass()
 
-				if _, standing := cluster.plays["movie"]; standing != test.wantPlay {
-					t.Fatalf("the Play is still in the collection = %v, want %v", standing, test.wantPlay)
+				if _, exists := cluster.plays["movie"]; exists != test.wantPlay {
+					t.Fatalf("the Play exists = %v, want %v", exists, test.wantPlay)
 				}
 				if !test.wantCleared {
 					if held := cluster.plays["movie"].Metadata.Finalizers; !reflect.DeepEqual(held, []string{playFinalizer}) {
@@ -180,7 +169,7 @@ func TestADeletingPlayIsReleasedOnlyOnceItsPodIsGone(t *testing.T) {
 					}
 					select {
 					case got := <-broker.pubs:
-						t.Fatalf("the pass published %+v while the pod was still there", got)
+						t.Fatalf("the pass published %+v while the playback pod still exists, want no publish", got)
 					case <-time.After(50 * time.Millisecond):
 					}
 					return
@@ -191,10 +180,9 @@ func TestADeletingPlayIsReleasedOnlyOnceItsPodIsGone(t *testing.T) {
 	}
 }
 
-// A Play created under the name of one the operator just released reports
-// a run of its own, so nothing the earlier run left on the desk reads as
-// this run's state.
-func TestAPlayRecreatedUnderTheSameNameStartsClean(t *testing.T) {
+// A Play created under the name of a released Play starts with none of
+// the earlier run's cached report or ended state.
+func TestPlayRecreatedUnderTheSameNameStartsWithNoEarlierReport(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cluster := newFakeCluster()
 		leaving := playOnPlayer("movie", "theater", "2026-09-08T10:00:00Z")
@@ -212,10 +200,10 @@ func TestAPlayRecreatedUnderTheSameNameStartsClean(t *testing.T) {
 		media.pass()
 
 		if media.reports.latestFor("house", "movie") != nil {
-			t.Error("the recreated Play reads the released run's report")
+			t.Error("the recreated Play has the released run's cached report, want none")
 		}
 		if media.reports.endedFor("house", "movie") {
-			t.Error("the recreated Play starts ended")
+			t.Error("the recreated Play is marked ended, want not ended")
 		}
 		held := cluster.plays["movie"].Metadata.Finalizers
 		if !reflect.DeepEqual(held, []string{playFinalizer}) {
@@ -224,10 +212,9 @@ func TestAPlayRecreatedUnderTheSameNameStartsClean(t *testing.T) {
 	})
 }
 
-// This operator removes only its own finalizer, so the library operator's
-// finalizer on the same Play keeps the Play until that operator's own work
-// is done.
-func TestAReleaseLeavesAnotherOperatorsFinalizerAlone(t *testing.T) {
+// A release removes only playFinalizer, so another operator's finalizer
+// still keeps the Play.
+func TestReleaseLeavesAnotherOperatorsFinalizerAlone(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		const otherFinalizer = "library.liken.sh/progress"
 		cluster := newFakeCluster()
@@ -240,9 +227,9 @@ func TestAReleaseLeavesAnotherOperatorsFinalizerAlone(t *testing.T) {
 		media.pass()
 
 		mustClearPlayTopics(t, broker, "house", "movie")
-		held, standing := cluster.plays["movie"]
-		if !standing {
-			t.Fatal("the release took the other operator's finalizer with its own")
+		held, exists := cluster.plays["movie"]
+		if !exists {
+			t.Fatal("the release removed the other operator's finalizer, want the Play to remain")
 		}
 		if !reflect.DeepEqual(held.Metadata.Finalizers, []string{otherFinalizer}) {
 			t.Errorf("finalizers = %v, want %v", held.Metadata.Finalizers, []string{otherFinalizer})
@@ -250,25 +237,25 @@ func TestAReleaseLeavesAnotherOperatorsFinalizerAlone(t *testing.T) {
 	})
 }
 
-// A failed write anywhere on the two paths leaves the finalizer where it
-// is, so the next pass reads the Play again and finishes the work then.
-func TestAFailedWriteLeavesAPlayHeld(t *testing.T) {
+// When a write fails while the finalizer is added or removed, the
+// finalizer stays as it was, so the next pass can finish the work.
+func TestFailedWriteLeavesTheFinalizerAsItWas(t *testing.T) {
 	cases := []struct {
 		name     string
 		deleting bool
 		fails    string
 	}{
 		{
-			name:  "the hold cannot patch the Play",
+			name:  "adding the finalizer fails to patch the Play",
 			fails: playPath("house", "movie"),
 		},
 		{
-			name:     "the release cannot delete the pod",
+			name:     "the release fails to delete the pod",
 			deleting: true,
 			fails:    podsPath("house") + "/movie-playback",
 		},
 		{
-			name:     "the release cannot patch the Play",
+			name:     "the release fails to patch the Play",
 			deleting: true,
 			fails:    playPath("house", "movie"),
 		},
@@ -288,11 +275,11 @@ func TestAFailedWriteLeavesAPlayHeld(t *testing.T) {
 
 				media.pass()
 
-				held, standing := cluster.plays["movie"]
-				if !standing {
-					t.Fatal("a failed write released the Play")
+				held, exists := cluster.plays["movie"]
+				if !exists {
+					t.Fatal("the Play was removed after a failed write, want it to remain")
 				}
-				if test.deleting && !held.Metadata.holds(playFinalizer) {
+				if test.deleting && !held.Metadata.hasFinalizer(playFinalizer) {
 					t.Errorf("finalizers = %v, want the operator to keep %q",
 						held.Metadata.Finalizers, playFinalizer)
 				}

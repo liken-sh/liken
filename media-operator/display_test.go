@@ -1,6 +1,7 @@
 package main
 
-// The tests for the display sidecar's liveness on a Play.
+// These tests cover the DisplayAlive condition of a Play and the
+// restart counter of the display sidecar.
 
 import (
 	"strings"
@@ -10,9 +11,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
-// displayPod builds a running playback pod whose display sidecar
-// reports the given restart count, whether it runs now, and its last
-// termination.
+// displayPod builds a playback pod whose display sidecar has the given
+// restart count, running state, and last termination.
 func displayPod(restarts int, running bool, last *ContainerStateTerminated) *Pod {
 	pod := playbackPod(podRunning)
 	state := ContainerState{}
@@ -28,9 +28,9 @@ func displayPod(restarts int, running bool, last *ContainerStateTerminated) *Pod
 	return pod
 }
 
-// playCondition reads the one condition off a status, with its stamp
-// cleared so a case compares the rest. The second value reports whether
-// the status holds any condition at all.
+// playCondition returns the only condition of the status with its
+// transition time cleared, so a test can compare the other fields. The
+// second value is false when the status has no condition.
 func playCondition(t *testing.T, status PlayStatus) (PlayCondition, bool) {
 	t.Helper()
 	if len(status.Conditions) == 0 {
@@ -49,11 +49,11 @@ func TestTheDisplayAliveCondition(t *testing.T) {
 	crash := &ContainerStateTerminated{ExitCode: 1, Reason: "Error"}
 
 	cases := []struct {
-		name  string
-		pod   *Pod
-		held  bool
-		want  PlayCondition
-		phase string
+		name     string
+		pod      *Pod
+		reported bool
+		want     PlayCondition
+		phase    string
 	}{{
 		name:  "a pod with no display container reports nothing",
 		pod:   playbackPod(podRunning),
@@ -63,9 +63,9 @@ func TestTheDisplayAliveCondition(t *testing.T) {
 		pod:   displayPod(0, false, nil),
 		phase: phaseRunning,
 	}, {
-		name: "a display that never restarted is alive",
-		pod:  displayPod(0, true, nil),
-		held: true,
+		name:     "a display that never restarted is alive",
+		pod:      displayPod(0, true, nil),
+		reported: true,
 		want: PlayCondition{
 			Type:   displayAliveCondition,
 			Status: conditionTrue,
@@ -73,9 +73,9 @@ func TestTheDisplayAliveCondition(t *testing.T) {
 		},
 		phase: phaseRunning,
 	}, {
-		name: "a display running again after one restart is alive, and says so",
-		pod:  displayPod(1, true, crash),
-		held: true,
+		name:     "a display running again after one restart is alive, and says so",
+		pod:      displayPod(1, true, crash),
+		reported: true,
 		want: PlayCondition{
 			Type:    displayAliveCondition,
 			Status:  conditionTrue,
@@ -84,9 +84,9 @@ func TestTheDisplayAliveCondition(t *testing.T) {
 		},
 		phase: phaseRunning,
 	}, {
-		name: "a display running again after two restarts is alive",
-		pod:  displayPod(2, true, crash),
-		held: true,
+		name:     "a display running again after two restarts is alive",
+		pod:      displayPod(2, true, crash),
+		reported: true,
 		want: PlayCondition{
 			Type:    displayAliveCondition,
 			Status:  conditionTrue,
@@ -95,9 +95,9 @@ func TestTheDisplayAliveCondition(t *testing.T) {
 		},
 		phase: phaseRunning,
 	}, {
-		name: "a display waiting between restarts reads as restarting",
-		pod:  displayPod(2, false, crash),
-		held: true,
+		name:     "a display waiting between restarts reads as restarting",
+		pod:      displayPod(2, false, crash),
+		reported: true,
 		want: PlayCondition{
 			Type:    displayAliveCondition,
 			Status:  conditionFalse,
@@ -106,9 +106,9 @@ func TestTheDisplayAliveCondition(t *testing.T) {
 		},
 		phase: phaseRunning,
 	}, {
-		name: "a restart with no reason names the exit alone",
-		pod:  displayPod(2, false, &ContainerStateTerminated{ExitCode: 137}),
-		held: true,
+		name:     "a restart with no reason names the exit alone",
+		pod:      displayPod(2, false, &ContainerStateTerminated{ExitCode: 137}),
+		reported: true,
 		want: PlayCondition{
 			Type:    displayAliveCondition,
 			Status:  conditionFalse,
@@ -117,9 +117,9 @@ func TestTheDisplayAliveCondition(t *testing.T) {
 		},
 		phase: phaseRunning,
 	}, {
-		name: "a restart the kubelet recorded no exit for names the count alone",
-		pod:  displayPod(2, true, nil),
-		held: true,
+		name:     "a restart the kubelet recorded no exit for names the count alone",
+		pod:      displayPod(2, true, nil),
+		reported: true,
 		want: PlayCondition{
 			Type:    displayAliveCondition,
 			Status:  conditionTrue,
@@ -128,9 +128,9 @@ func TestTheDisplayAliveCondition(t *testing.T) {
 		},
 		phase: phaseRunning,
 	}, {
-		name: "a third restart ends the run, and the display that runs again says so",
-		pod:  displayPod(3, true, crash),
-		held: true,
+		name:     "a third restart ends the run, and the display that runs again says so",
+		pod:      displayPod(3, true, crash),
+		reported: true,
 		want: PlayCondition{
 			Type:    displayAliveCondition,
 			Status:  conditionTrue,
@@ -139,9 +139,9 @@ func TestTheDisplayAliveCondition(t *testing.T) {
 		},
 		phase: phaseFinished,
 	}, {
-		name: "a third restart ends the run while the display is down",
-		pod:  displayPod(3, false, crash),
-		held: true,
+		name:     "a third restart ends the run while the display is down",
+		pod:      displayPod(3, false, crash),
+		reported: true,
 		want: PlayCondition{
 			Type:    displayAliveCondition,
 			Status:  conditionFalse,
@@ -154,16 +154,16 @@ func TestTheDisplayAliveCondition(t *testing.T) {
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			status := derivePlayStatus(statusTestPlay(), player, nil, one.pod, nil, resolvedPreferences{})
-			condition, held := playCondition(t, status)
-			mustMatch(t, held, one.held)
+			condition, reported := playCondition(t, status)
+			mustMatch(t, reported, one.reported)
 			mustMatch(t, condition, one.want)
 			mustMatch(t, status.Phase, one.phase)
 		})
 	}
 }
 
-// A run that ends on its display reports the display's message as its
-// own.
+// A run that ends because of its display reports the display's message
+// as its own.
 func TestARunThatEndsOnTheDisplayCarriesTheReason(t *testing.T) {
 	player := &Player{Metadata: ObjectMeta{Name: "theater", Namespace: "house"}}
 	pod := displayPod(3, true, &ContainerStateTerminated{ExitCode: 1, Reason: "Error"})
@@ -174,8 +174,7 @@ func TestARunThatEndsOnTheDisplayCarriesTheReason(t *testing.T) {
 	mustMatch(t, status.Message, "the display restarted 3 times: Error (exit code 1)")
 }
 
-// The condition names the spec revision it was derived from, so a
-// reader can tell a condition on the current spec from a stale one.
+// The condition records the generation of the spec it was derived from.
 func TestTheDisplayAliveConditionReportsTheGeneration(t *testing.T) {
 	player := &Player{Metadata: ObjectMeta{Name: "theater", Namespace: "house"}}
 	play := statusTestPlay()
@@ -186,7 +185,8 @@ func TestTheDisplayAliveConditionReportsTheGeneration(t *testing.T) {
 	mustMatch(t, status.Conditions[0].ObservedGeneration, int64(4))
 }
 
-// The stamp moves only when the status changes.
+// The condition's transition time changes only when its status
+// changes.
 func TestTheDisplayAliveStampMovesOnlyOnAChange(t *testing.T) {
 	player := &Player{Metadata: ObjectMeta{Name: "theater", Namespace: "house"}}
 	stamped := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -201,24 +201,24 @@ func TestTheDisplayAliveStampMovesOnlyOnAChange(t *testing.T) {
 	other := PlayCondition{Type: "Scheduled", Status: conditionTrue, LastTransitionTime: stamped}
 
 	cases := []struct {
-		name string
-		held []PlayCondition
-		pod  *Pod
-		kept bool
+		name     string
+		existing []PlayCondition
+		pod      *Pod
+		kept     bool
 	}{
-		{name: "the display is alive as it was", held: []PlayCondition{alive},
+		{name: "the display is alive as it was", existing: []PlayCondition{alive},
 			pod: displayPod(1, true, crash), kept: true},
-		{name: "the display went from alive to restarting", held: []PlayCondition{alive},
+		{name: "the display went from alive to restarting", existing: []PlayCondition{alive},
 			pod: displayPod(2, false, crash)},
-		{name: "the run holds another condition first", held: []PlayCondition{other, alive},
+		{name: "the run has another condition first", existing: []PlayCondition{other, alive},
 			pod: displayPod(1, true, crash), kept: true},
-		{name: "the run holds no condition of this type", held: []PlayCondition{other},
+		{name: "the run has no condition of this type", existing: []PlayCondition{other},
 			pod: displayPod(1, true, crash)},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			play := statusTestPlay()
-			play.Status.Conditions = one.held
+			play.Status.Conditions = one.existing
 
 			status := derivePlayStatus(play, player, nil, one.pod, nil, resolvedPreferences{})
 
@@ -227,7 +227,8 @@ func TestTheDisplayAliveStampMovesOnlyOnAChange(t *testing.T) {
 	}
 }
 
-// The counter follows the kubelet's count and never falls.
+// The counter follows the container's restart count and never
+// decreases.
 func TestDisplayRestartsCountUpAcrossPasses(t *testing.T) {
 	cluster := runningCluster(housePlayer())
 	media := testOperator(t, cluster, make(chan struct{}, 1))
@@ -243,7 +244,7 @@ func TestDisplayRestartsCountUpAcrossPasses(t *testing.T) {
 	media.pass()
 	mustMatch(t, counted(), 1)
 
-	// The same count read twice counts once.
+	// Reading the same count twice adds it once.
 	media.pass()
 	mustMatch(t, counted(), 1)
 
@@ -252,7 +253,7 @@ func TestDisplayRestartsCountUpAcrossPasses(t *testing.T) {
 	media.pass()
 	mustMatch(t, counted(), 2)
 
-	// A pod recreated at zero leaves the total where it stands.
+	// A recreated pod starts at 0 and leaves the total unchanged.
 	cluster.pods["movie-playback"].Status.InitContainerStatuses =
 		displayPod(0, true, nil).Status.InitContainerStatuses
 	media.pass()
@@ -264,7 +265,7 @@ func TestDisplayRestartsCountUpAcrossPasses(t *testing.T) {
 	}
 }
 
-// The count a run reports, read from the pod the pass holds.
+// The restart count is read from the pod of the run.
 func TestTheDisplayRestartCount(t *testing.T) {
 	cases := []struct {
 		name string
@@ -282,9 +283,9 @@ func TestTheDisplayRestartCount(t *testing.T) {
 	}
 }
 
-// A run whose display never crashed reports a count of 0 from the pass
-// that first reads its pod, so a scrape tells a healthy run from a unit
-// with no run.
+// A run whose display never crashed exports 0 from the first pass that
+// reads its pod, so a scrape can tell a healthy run from a Player with no
+// run.
 func TestAHealthyRunReportsZeroDisplayRestarts(t *testing.T) {
 	cluster := runningCluster(housePlayer())
 	media := testOperator(t, cluster, make(chan struct{}, 1))
@@ -298,8 +299,8 @@ func TestAHealthyRunReportsZeroDisplayRestarts(t *testing.T) {
 	}
 }
 
-// The series is deleted when the run leaves, so a unit that plays
-// nothing has no display series at all.
+// The series is deleted when the run ends, so a Player that plays nothing
+// has no display series.
 func TestTheDisplayRestartsSeriesGoesWithTheRun(t *testing.T) {
 	cluster := runningCluster(housePlayer())
 	media := testOperator(t, cluster, make(chan struct{}, 1))
@@ -313,8 +314,8 @@ func TestTheDisplayRestartsSeriesGoesWithTheRun(t *testing.T) {
 	mustMatch(t, testutil.CollectAndCount(media.metrics.displayRestarts), 0)
 }
 
-// A display that keeps crashing ends the run the way a finished film
-// ends: the pod and the claim go with it.
+// A display that keeps crashing ends the run, and the next pass deletes
+// the run's pod and claim as it does when playback finishes.
 func TestADisplayThatKeepsDyingEndsTheRun(t *testing.T) {
 	cluster := runningCluster(housePlayer())
 	cluster.pods["movie-playback"].Status.InitContainerStatuses =
@@ -325,10 +326,10 @@ func TestADisplayThatKeepsDyingEndsTheRun(t *testing.T) {
 	mustMatch(t, cluster.plays["movie"].Status.Phase, phaseFinished)
 
 	media.pass()
-	if _, held := cluster.pods["movie-playback"]; held {
+	if _, found := cluster.pods["movie-playback"]; found {
 		t.Error("the run ended and kept its pod")
 	}
-	if _, held := cluster.claims["movie-devices"]; held {
+	if _, found := cluster.claims["movie-devices"]; found {
 		t.Error("the run ended and kept its claim")
 	}
 	if cluster.plays["movie"].Status.FinishedAt == "" {
@@ -336,7 +337,8 @@ func TestADisplayThatKeepsDyingEndsTheRun(t *testing.T) {
 	}
 }
 
-// The first two restarts leave the running pod alone.
+// A display with no more than maxDisplayRestarts restarts does not
+// end the run.
 func TestTwoRestartsLeaveTheRunningPodAlone(t *testing.T) {
 	cluster := runningCluster(housePlayer())
 	cluster.pods["movie-playback"].Status.InitContainerStatuses =
@@ -347,13 +349,13 @@ func TestTwoRestartsLeaveTheRunningPodAlone(t *testing.T) {
 	media.pass()
 
 	mustMatch(t, cluster.plays["movie"].Status.Phase, phaseRunning)
-	if _, held := cluster.pods["movie-playback"]; !held {
+	if _, found := cluster.pods["movie-playback"]; !found {
 		t.Error("a restarting display took the pod with it")
 	}
 }
 
-// The unit's bus status includes the Play's condition, so a client
-// reads it off the bus.
+// The Player's bus status includes the Play's condition, so a client
+// can read it from the bus.
 func TestThePlayerBusStatusCarriesTheDisplayCondition(t *testing.T) {
 	play := housePlay("https://nas/film.mkv")
 	play.Status = PlayStatus{
@@ -371,7 +373,7 @@ func TestThePlayerBusStatusCarriesTheDisplayCondition(t *testing.T) {
 	plays := []Play{*play}
 
 	got := derivePlayerBusStatus(housePlayer(), PlayerStatus{Activity: playerPlaying, Play: "movie"},
-		plays, newPeripheralDesk(), newFocusDesk(nil))
+		plays, newPeripheralCache(), newFocusCache(nil))
 
 	if got.Play == nil || got.Play.DisplayAlive == nil {
 		t.Fatalf("the unit's status carries no display mark: %+v", got)
@@ -383,7 +385,7 @@ func TestThePlayerBusStatusCarriesTheDisplayCondition(t *testing.T) {
 	})
 }
 
-// A run whose display is alive reports no fault on the bus.
+// A run whose display is alive reports no display fault on the bus.
 func TestThePlayerBusStatusMarksAnAliveDisplay(t *testing.T) {
 	play := housePlay("https://nas/film.mkv")
 	play.Status = PlayStatus{
@@ -396,7 +398,7 @@ func TestThePlayerBusStatusMarksAnAliveDisplay(t *testing.T) {
 	}
 
 	got := derivePlayerBusStatus(housePlayer(), PlayerStatus{Activity: playerPlaying, Play: "movie"},
-		[]Play{*play}, newPeripheralDesk(), newFocusDesk(nil))
+		[]Play{*play}, newPeripheralCache(), newFocusCache(nil))
 
 	if got.Play == nil || got.Play.DisplayAlive == nil {
 		t.Fatalf("the unit's status carries no display mark: %+v", got)

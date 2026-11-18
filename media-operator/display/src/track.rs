@@ -1,17 +1,17 @@
-//! The track controls. Each one's cell shows the current track, and its
-//! chooser lists the tracks `track-list` carries. A select switches the
-//! property mpv reads that stream from.
+//! The audio, subtitle, and video track controls. Each control's cell shows
+//! the selected track, and its chooser lists the tracks in mpv's
+//! `track-list` property. Selecting an entry sets the mpv property that
+//! picks the track of that kind.
 //!
-//! The audio control, the subtitle control, and the video control differ in
-//! the list they filter, the word their cell reads, and the property a select
-//! writes. Everything else they share, so they are one type here.
+//! The three controls differ only in the `track-list` type they filter, the
+//! text in their cell, and the property they set, so they share one type.
 
 use serde_json::json;
 
 use crate::film::Film;
 use crate::ipc::Command;
 
-/// Which stream a control picks.
+/// The kind of track a control picks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Track {
     Audio,
@@ -19,16 +19,16 @@ pub enum Track {
     Video,
 }
 
-/// The word a cell reads when no track of that kind plays.
+/// The cell text when no track of that kind is selected.
 const OFF: &str = "off";
 
-/// Off is the first entry of a subtitle list, ahead of the tracks, so a viewer
-/// can always turn subtitles off. Entry 1 maps to `sid no`, and every later
-/// entry maps to the track one place before it.
+/// The first entry of a subtitle list, so a viewer can always turn subtitles
+/// off. Entry 0 sets `sid` to `no`, and entry `n` selects the subtitle track
+/// at index `n - 1`.
 const OFF_ENTRY: &str = "Off";
 
 impl Track {
-    /// The `track-list` type this control filters on.
+    /// The `track-list` `type` value this control lists.
     pub fn kind(self) -> &'static str {
         match self {
             Track::Audio => "audio",
@@ -37,7 +37,7 @@ impl Track {
         }
     }
 
-    /// The property a select writes.
+    /// The mpv property that a select sets.
     pub fn property(self) -> &'static str {
         match self {
             Track::Audio => "aid",
@@ -46,9 +46,9 @@ impl Track {
         }
     }
 
-    /// The video control shows only when the file carries more than one video
-    /// track, like an alternate angle. Most files carry one, so it stays
-    /// hidden.
+    /// Whether the control shows. The video control shows only when the file
+    /// has more than one video track, such as an alternate angle. The other
+    /// controls show when the file has at least one track of their kind.
     pub fn available(self, film: &Film) -> bool {
         let count = film.tracks_of(self.kind()).count();
         match self {
@@ -57,8 +57,8 @@ impl Track {
         }
     }
 
-    /// The cell's word. A subtitle cell reads the language alone, because the
-    /// strip holds one line for it.
+    /// The cell text. A subtitle cell shows only the language when the track
+    /// has one, because the strip has room for one short line.
     pub fn value(self, film: &Film) -> String {
         let Some(track) = film.tracks_of(self.kind()).find(|track| track.selected) else {
             return OFF.to_string();
@@ -69,7 +69,8 @@ impl Track {
         }
     }
 
-    /// The chooser's entries, in the order the list carries them.
+    /// The chooser entries, in `track-list` order. A subtitle list starts
+    /// with an Off entry.
     pub fn entries(self, film: &Film) -> Vec<String> {
         let labels = film.tracks_of(self.kind()).map(|track| track.label());
         match self {
@@ -80,14 +81,15 @@ impl Track {
         }
     }
 
-    /// The entry a chooser opens on, which is the track that plays now.
+    /// The entry the chooser opens on, which is the playing track, or the
+    /// first entry when none plays.
     pub fn opens_on(self, film: &Film) -> usize {
         self.playing(film).unwrap_or(0)
     }
 
-    /// The entry of the track that plays now, which the chooser dots. A
-    /// subtitle list with no track playing has its Off entry playing. Any
-    /// other list with no track playing has no entry to dot.
+    /// The entry of the playing track, which the chooser marks with a dot.
+    /// A subtitle list with no selected track marks its Off entry. Any other
+    /// list with no selected track marks nothing.
     pub fn playing(self, film: &Film) -> Option<usize> {
         let at = film.tracks_of(self.kind()).position(|track| track.selected);
         match (self, at) {
@@ -97,8 +99,8 @@ impl Track {
         }
     }
 
-    /// Switch to the entry the chooser stands on. A subtitle list's first
-    /// entry turns subtitles off.
+    /// The mpv commands that switch to the entry at `selected`. Returns no
+    /// commands when the entry is no longer in the list.
     pub fn apply(self, film: &Film, selected: usize) -> Vec<Command> {
         let write = |value: String| {
             vec![vec![
@@ -143,7 +145,7 @@ mod tests {
     }
 
     #[test]
-    fn a_control_shows_for_the_file_that_carries_its_tracks() {
+    fn a_control_shows_when_the_file_has_its_tracks() {
         assert!(Track::Audio.available(&film()));
         assert!(Track::Subtitles.available(&film()));
         assert!(!Track::Video.available(&film()));
@@ -161,17 +163,17 @@ mod tests {
     }
 
     #[test]
-    fn a_cell_reads_the_track_that_plays() {
+    fn a_cell_shows_the_playing_track() {
         assert_eq!(Track::Audio.value(&film()), "ENG");
         assert_eq!(Track::Video.value(&film()), "Main");
         assert_eq!(Track::Subtitles.value(&film()), OFF);
         assert_eq!(Track::Audio.value(&Film::default()), OFF);
     }
 
-    /// A subtitle cell reads the language alone, and falls back to the whole
-    /// label when the track carries no language.
+    /// A subtitle cell shows the language, or the whole label when the
+    /// track has no language.
     #[test]
-    fn a_subtitle_cell_reads_its_language() {
+    fn a_subtitle_cell_shows_its_language() {
         let mut film = film();
         film.apply(
             "track-list",
@@ -187,7 +189,7 @@ mod tests {
     }
 
     #[test]
-    fn a_subtitle_list_carries_off_ahead_of_every_track() {
+    fn a_subtitle_list_starts_with_off() {
         assert_eq!(
             Track::Subtitles.entries(&film()),
             vec![
@@ -203,8 +205,8 @@ mod tests {
         assert_eq!(Track::Video.entries(&film()), vec!["Main".to_string()]);
     }
 
-    /// A chooser opens on the track that plays, and on the first entry when
-    /// none does.
+    /// A chooser opens on the playing track, or the first entry when none
+    /// plays.
     #[test]
     fn a_chooser_opens_on_the_track_that_plays() {
         let mut film = film();
@@ -224,8 +226,8 @@ mod tests {
         assert_eq!(Track::Subtitles.opens_on(&film), 2);
     }
 
-    /// The playing entry is the track mpv plays, Off for a subtitle list with
-    /// none, and no entry for an audio list with none.
+    /// The playing entry is the selected track, Off for a subtitle list with
+    /// none selected, and no entry for an audio list with none selected.
     #[test]
     fn the_playing_entry_is_the_track_mpv_plays() {
         let mut film = film();
@@ -245,7 +247,7 @@ mod tests {
     }
 
     #[test]
-    fn a_select_writes_the_property_mpv_reads_the_stream_from() {
+    fn a_select_sets_the_track_property() {
         assert_eq!(
             Track::Audio.apply(&film(), 1),
             vec![vec![json!("set_property"), json!("aid"), json!("2")]]
@@ -268,10 +270,10 @@ mod tests {
         );
     }
 
-    /// An entry the list no longer carries writes nothing, so a track that
-    /// went away between the open and the select changes none.
+    /// A track that left the list between opening the chooser and the select
+    /// changes nothing.
     #[test]
-    fn an_entry_the_list_lost_writes_nothing() {
+    fn a_missing_entry_writes_nothing() {
         assert!(Track::Audio.apply(&film(), 9).is_empty());
         assert!(Track::Subtitles.apply(&film(), 9).is_empty());
     }

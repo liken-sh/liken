@@ -1,14 +1,13 @@
-# The idle screen's standing pod. media.liken.sh/component: idle is the
-# label buildIdlePod already writes for display-operator's Layout to
-# select the surface by. This PodMonitor selects the same pod by the
-# same label.
+# Scrapes the idle screen pods. buildIdlePod labels each one
+# media.liken.sh/component: idle, the same label that display-operator's
+# Layout uses to select the surface.
 #
-# A Player lives in whatever namespace a household chose, and its idle
-# pod follows it there. So this PodMonitor cannot sit beside its
-# targets the way podmonitor-operator.yaml sits beside the Deployment,
-# and namespaceSelector reaches across every namespace instead. The
-# PodMonitor object itself still lives in liken-system, the namespace
-# the prometheus-operator is watching.
+# A Player can be in any namespace, and its idle pod runs in the same
+# namespace. So this PodMonitor cannot sit beside its targets the way
+# podmonitor-operator.yaml sits beside the Deployment, and
+# namespaceSelector selects pods in every namespace. The PodMonitor
+# itself is in liken-system, the namespace that prometheus-operator
+# watches.
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
@@ -22,21 +21,18 @@ spec:
       media.liken.sh/component: idle
   podMetricsEndpoints:
     - port: metrics
-      # The fleet dashboard selects by node, and a Pod's own labels
-      # never carry the node it landed on, so the scrape relabels it
-      # in from Prometheus's own discovery metadata.
+      # The fleet dashboard selects by node. A pod's labels do not
+      # include its node, so the scrape copies the node name from
+      # Prometheus's discovery metadata.
       relabelings:
         - sourceLabels: [__meta_kubernetes_pod_node_name]
           targetLabel: node
 ---
-# The playback pod. media.liken.sh/component: playback is the label
-# buildPod writes on every one, and the pod's command sidecar is what
-# serves plan 26's three mpv-derived series: it is the one process
-# that holds mpv's own IPC socket, so those facts are its to report. A
-# Play, like a Player, lives in whatever namespace a household chose,
-# so this PodMonitor reaches across every namespace the same way the
-# idle one does. The PodMonitor object itself still lives in
-# liken-system, the namespace the prometheus-operator is watching.
+# Scrapes the playback pods. buildPod labels each one
+# media.liken.sh/component: playback. The pod's command sidecar serves
+# the series that come from mpv, because it is the only process that
+# has mpv's IPC socket. A Play can also be in any namespace, so this
+# PodMonitor also selects every namespace from liken-system.
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:

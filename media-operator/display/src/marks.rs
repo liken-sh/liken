@@ -1,23 +1,21 @@
-//! The marks: the spans in the file where the intro, the recap, the credits,
-//! the scene after the credits, and the preview are. A Play can state
-//! several candidate spans for one kind, because a community database can
-//! return several, from different submissions or release versions of the
-//! file. This module merges the candidates of a kind into the spans the skip
-//! control and the up-next card act on. `library-operator` chooses one
-//! credits span and one intro span for a file before it writes a Play, so
-//! the merge of those two kinds has one candidate to read there.
+//! Marks are the time spans of a file that hold the intro, the recap, the
+//! credits, the scene after the credits, or the preview. A Play can list
+//! several candidate spans of one kind, because a community database can
+//! return several submissions or release versions of the same file. This
+//! module merges the candidates of each kind into the spans that the skip
+//! control and the up-next card use.
 
 use serde_json::Value;
 
-/// What one span holds. A kind the block names that is not one of these is
-/// ignored, so a library can send a new kind before the display acts on it.
+/// What a span contains. The display ignores any other kind in the block,
+/// so a library can send a new kind before the display supports it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     Intro,
     Recap,
     Credits,
-    /// The scene after the credits. IntroDB states it as a span of its own.
-    /// TheIntroDB states no such kind, and gives two credits spans with the
+    /// The scene after the credits. IntroDB sends it as its own span.
+    /// TheIntroDB has no such kind, so it sends two credits spans with the
     /// scene in the gap between them.
     PostCredits,
     Preview,
@@ -36,9 +34,9 @@ impl Kind {
     }
 }
 
-/// One candidate as the block states it. An absent start is the start of the
-/// file, and an absent end is the end of the file, which is known only once
-/// mpv reports the duration.
+/// One candidate span from the block. An absent start is the start of the
+/// file. An absent end is the end of the file, which the display knows only
+/// after mpv reports the duration.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Candidate {
     kind: Kind,
@@ -46,7 +44,7 @@ struct Candidate {
     end: Option<f64>,
 }
 
-/// One merged span, in seconds from the start of the file.
+/// A merged span, in seconds from the start of the file.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Span {
     pub kind: Kind,
@@ -55,30 +53,31 @@ pub struct Span {
 }
 
 impl Span {
-    /// The end is outside the span, so a seek to the end leaves it.
+    /// The span includes its start and excludes its end, so seeking to the
+    /// end leaves the span.
     pub fn contains(&self, at: f64) -> bool {
         self.start <= at && at < self.end
     }
 }
 
-/// What the skip control offers: the span the playhead is inside, and the
-/// second in the file a select seeks to.
+/// What the skip control offers: the span that contains the playhead, and
+/// the position in seconds that selecting the control seeks to.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Jump {
     pub span: Span,
     pub to: f64,
 }
 
-/// Every candidate the item's block carries, in the order it states them.
+/// The candidates of an item's block, in block order.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Marks {
     candidates: Vec<Candidate>,
 }
 
 impl Marks {
-    /// Read the block's `marks` array. An entry with a kind this module does
-    /// not know, or with a start or an end that is not a number of seconds, is
-    /// dropped, and the other entries still count.
+    /// Parse the block's `marks` array. An entry with an unknown kind, or
+    /// with a start or end that is not a number of seconds, is dropped. The
+    /// other entries are kept.
     pub fn parse(value: Option<&Value>) -> Self {
         let candidates = value
             .and_then(Value::as_array)
@@ -89,15 +88,15 @@ impl Marks {
         Self { candidates }
     }
 
-    /// The merged spans of one kind, in order. The candidates that overlap
-    /// form one group, and the group becomes one span from the median start
-    /// and the median end of its members, so one submission that is off by a
-    /// few seconds moves the span less than an average would. Groups that do
-    /// not overlap stay apart, because a film can carry two credits spans: the
-    /// main credits, then a scene after them and more credits.
+    /// The merged spans of one kind, in time order. Candidates that overlap
+    /// form a group, and each group becomes one span from the median start
+    /// and median end of its members. A median moves less than a mean when
+    /// one submission is off by a few seconds. Groups that do not overlap
+    /// stay separate spans, because a film can have two credits spans: the
+    /// main credits, then a scene and more credits.
     ///
-    /// A candidate with no end waits for the duration, and a candidate that
-    /// ends where it starts, or before, marks nothing.
+    /// A candidate with no end is dropped while `duration` is `None`. A
+    /// candidate that ends at or before its start is always dropped.
     pub fn spans(&self, kind: Kind, duration: Option<f64>) -> Vec<Span> {
         let mut ranges: Vec<(f64, f64)> = self
             .candidates
@@ -132,8 +131,9 @@ impl Marks {
     }
 
     /// What the skip control offers at the playhead. Inside an intro or a
-    /// recap it offers the end of that span. Inside the end credits it offers
-    /// the scene after them, when the marks place one ahead of the playhead.
+    /// recap it offers the end of that span. Inside the end credits it
+    /// offers the scene after them, if the marks place one ahead of the
+    /// playhead.
     pub fn skippable(&self, at: Option<f64>, duration: Option<f64>) -> Option<Jump> {
         let at = at?;
         let opening = [Kind::Intro, Kind::Recap]
@@ -144,13 +144,12 @@ impl Marks {
         opening.or_else(|| self.to_the_scene(at, duration))
     }
 
-    /// The jump from the end credits to the scene after them. The target is
-    /// the start of the first `post-credits` span ahead of the playhead. With
-    /// no such span, two or more credits spans in the second half place the
-    /// scene in the gap after the first one, which is how TheIntroDB states
-    /// it, so the target is the end of the first. A film with credits and no
-    /// scene offers no jump, because the only thing past its credits is the
-    /// end of the file, and the up-next card covers that.
+    /// The jump from the end credits to the scene after them: the start of
+    /// the first `post-credits` span ahead of the playhead. When there is
+    /// none and the second half has two or more credits spans, the scene is
+    /// the gap after the first of them, as TheIntroDB sends it, and the jump
+    /// goes to the end of that span. Credits with no scene after them offer
+    /// no jump, because the up-next card handles the end of the file.
     fn to_the_scene(&self, at: f64, duration: Option<f64>) -> Option<Jump> {
         let duration = duration.filter(|duration| *duration > 0.0)?;
         let credits: Vec<Span> = self
@@ -169,27 +168,23 @@ impl Marks {
         Some(Jump { span, to })
     }
 
-    /// Where the up-next card rises. Only the credits in the second half of
-    /// the item count: a credits span in the first half is an opening title
-    /// sequence, not the end of the story.
+    /// The time in seconds when the up-next card appears. Only credits in
+    /// the second half of the item count, because a credits span in the
+    /// first half is an opening title sequence.
     ///
-    /// With no scene after the credits, the card rises at the start of the
-    /// first credits span. With a scene, it rises after the scene, at the
-    /// later of the start of the last credits span and the end of the last
-    /// scene, so taking the offer does not drop a viewer out before the
-    /// scene. The skip control covers the credits before the scene. A scene
-    /// is a `post-credits` span that starts after the first credits span
-    /// starts, or a second credits span, which is how TheIntroDB states a
-    /// scene in the gap.
+    /// With no scene after the credits, the card appears at the start of the
+    /// first credits span. With a scene, it appears at the start of the last
+    /// credits span or the end of the last scene, whichever is later, so
+    /// accepting the card does not skip the scene. A scene is a
+    /// `post-credits` span that starts after the first credits span starts,
+    /// or the gap before a second credits span, as TheIntroDB sends it.
     ///
-    /// The rise after a scene is capped at `latest`, the time rule's point for
-    /// the item, so the card never rises later than it does for an item with
-    /// no marks. The offer is
-    /// how a person moves on, and a scene with no end, which IntroDB often
-    /// sends, would otherwise put the rise at the end of the file, where the
-    /// card never shows.
+    /// The time after a scene is capped at `latest(duration)`, the time the
+    /// card appears for an item with no marks. A scene with no end ends at
+    /// the end of the file, and without the cap the card would never show.
     ///
-    /// Nothing here means the card rises by the time that remains.
+    /// Returns `None` when the marks give no time, and the caller then uses
+    /// `latest(duration)`.
     pub fn credits(&self, duration: Option<f64>, latest: fn(f64) -> f64) -> Option<f64> {
         let duration = duration.filter(|duration| *duration > 0.0)?;
         let credits: Vec<Span> = self
@@ -214,8 +209,8 @@ impl Marks {
     }
 }
 
-/// One entry of the array, or nothing for an entry this module does not read.
-/// An absent or null start or end is the edge of the file.
+/// Parse one array entry, or return `None` for an entry this module does
+/// not read. An absent or null start or end means the edge of the file.
 fn candidate(entry: &Value) -> Option<Candidate> {
     let kind = Kind::from_word(entry.get("kind")?.as_str()?)?;
     let seconds = |name: &str| -> Option<Option<f64>> {
@@ -234,8 +229,8 @@ fn candidate(entry: &Value) -> Option<Candidate> {
     })
 }
 
-/// The middle value, or the mean of the two middle values when the count is
-/// even. The caller never passes an empty list.
+/// The median of the values: the middle one, or the mean of the two middle
+/// ones for an even count. `values` must not be empty.
 fn median(mut values: Vec<f64>) -> f64 {
     values.sort_by(f64::total_cmp);
     let middle = values.len() / 2;
@@ -259,8 +254,7 @@ mod tests {
         Span { kind, start, end }
     }
 
-    /// The jump out of one span to its own end, which an intro or a recap
-    /// offers.
+    /// The jump an intro or a recap offers: to the end of its own span.
     fn out(kind: Kind, start: f64, end: f64) -> Option<Jump> {
         Some(Jump {
             span: span(kind, start, end),
@@ -268,8 +262,8 @@ mod tests {
         })
     }
 
-    /// The candidates one database returned for one episode: three intro
-    /// submissions that agree within a few seconds, and one credits span.
+    /// The candidates of one episode: three intro submissions within a few
+    /// seconds of each other, and one credits span.
     fn episode() -> Marks {
         marks(json!([
             {"kind":"intro","end":107.0,"source":"theintrodb"},
@@ -338,7 +332,7 @@ mod tests {
         }
     }
 
-    /// An absent end is the end of the file, so it waits for the duration.
+    /// An absent end is the end of the file, so it needs the duration.
     #[test]
     fn an_absent_end_is_the_end_of_the_file() {
         let marks = marks(json!([{"kind":"credits","start":5000.0}]));
@@ -349,7 +343,7 @@ mod tests {
         );
     }
 
-    /// An entry the display cannot read is dropped, and the rest still count.
+    /// An entry the display cannot parse is dropped and the rest are kept.
     #[test]
     fn an_entry_the_display_cannot_read_is_dropped() {
         let cases = [
@@ -387,7 +381,8 @@ mod tests {
         }
     }
 
-    /// A null edge is an absent edge, the way every presentation field reads.
+    /// A null start or end is the same as an absent one, like every other
+    /// field of the presentation.
     #[test]
     fn a_null_edge_is_the_edge_of_the_file() {
         let marks = marks(json!([{"kind":"intro","start":null,"end":90.0}]));
@@ -429,11 +424,11 @@ mod tests {
         }
     }
 
-    /// The end credits offer the scene after them, in either encoding, and
-    /// only while the scene is still ahead of the playhead.
+    /// The end credits offer the scene after them, in either database's
+    /// format, and only while the scene is ahead of the playhead.
     #[test]
     fn the_end_credits_offer_the_scene_after_them() {
-        // IntroDB: one credits span and a post-credits span of its own.
+        // IntroDB: one credits span and a separate post-credits span.
         let introdb = marks(json!([
             {"kind":"credits","start":5801.777,"end":6371.111},
             {"kind":"post-credits","start":6371.111,"end":6408.0},
@@ -477,8 +472,8 @@ mod tests {
         assert_eq!(theintrodb.spans(Kind::Credits, Some(6500.0))[1], tail);
     }
 
-    /// Credits with no scene after them offer nothing, and so do credits in
-    /// the first half or a film whose length mpv has not reported.
+    /// Nothing is offered for credits with no scene after them, for credits
+    /// in the first half, or before mpv reports the duration.
     #[test]
     fn credits_with_no_scene_offer_no_jump() {
         let cases = [

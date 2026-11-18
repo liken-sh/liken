@@ -1,103 +1,102 @@
 package main
 
-// A controller declares every code it can report in its nodes'
-// capability bitmaps, readable the moment a node opens and complete
-// with no button pressed. The standing pod publishes that declared set
-// retained, this desk folds it in, and the reconcile pass reports the
-// gap, the declared controls the compiled table maps to nothing, on the
-// Remote's status. The gap is derived on every pass and never
-// accumulated, so erasing the status loses nothing.
+// A controller's input devices list in their capability bitmaps every
+// key code and hat axis they can send, so the operator can report the
+// codes that no row maps to a key before anyone presses a button. The
+// Remote's pod publishes those codes as a retained message, this file
+// caches them, and the reconcile pass compares them with the compiled
+// key table to fill status.unbound on the Remote. The pass computes
+// status.unbound again each time, so a lost status loses nothing.
 
 import (
 	"slices"
 	"sync"
 )
 
-// remoteCodes is the document the standing pod publishes retained at
-// every node open: the key codes and the hat axes its nodes declare.
-// It carries numbers alone, because the names are the API and the
-// numbers are the wire.
+// remoteCodes is the retained message that the Remote's pod publishes
+// each time it opens an input device. The names of the codes are in
+// keyCodeNames and axisCodeNames.
 type remoteCodes struct {
 	Keys []uint16 `json:"keys,omitempty"`
 	Axes []uint16 `json:"axes,omitempty"`
 }
 
-// codesDesk is the boundary between the codes topic and the reconcile
-// loop, shaped like the report desk beside it: the bus thread folds
-// messages in, and the pass reads one answer out.
-type codesDesk struct {
+// codesCache caches what each controller's pod has published on the
+// codes and availability topics. The message handler writes it, and the
+// reconcile pass reads it. A change wakes the pass through wake.
+type codesCache struct {
 	mutex    sync.Mutex
 	declared map[string]remoteCodes
 	online   map[string]bool
 	wake     chan<- struct{}
 }
 
-func newCodesDesk(wake chan<- struct{}) *codesDesk {
-	return &codesDesk{
+func newCodesCache(wake chan<- struct{}) *codesCache {
+	return &codesCache{
 		declared: map[string]remoteCodes{},
 		online:   map[string]bool{},
 		wake:     wake,
 	}
 }
 
-// setCodes folds one controller's document in. A document that differs
-// from the one held wakes the loop; a repeat, which every reconnect
-// delivers, wakes nothing.
-func (c *codesDesk) setCodes(key string, codes remoteCodes) {
+// setCodes stores one controller's codes. It wakes the pass only when
+// the codes differ from the stored ones, because the broker redelivers
+// the same retained message on every reconnect.
+func (c *codesCache) setCodes(key string, codes remoteCodes) {
 	c.mutex.Lock()
 	previous, had := c.declared[key]
 	c.declared[key] = codes
 	c.mutex.Unlock()
 	if !had || !sameCodes(previous, codes) {
-		poke(c.wake)
+		signalWake(c.wake)
 	}
 }
 
-// clear drops one controller's document. The pod publishes the empty
-// retained payload when its controller's nodes vanish, so the desk
-// holds nothing for a controller that slept.
-func (c *codesDesk) clear(key string) {
+// clear deletes one controller's codes. The pod publishes an empty
+// retained payload when the controller's input devices disappear.
+func (c *codesCache) clear(key string) {
 	c.mutex.Lock()
 	_, had := c.declared[key]
 	delete(c.declared, key)
 	c.mutex.Unlock()
 	if had {
-		poke(c.wake)
+		signalWake(c.wake)
 	}
 }
 
-// setAvailability records whether the standing pod that reports one
-// controller is up, from the availability topic the pod names as its
-// Last Will.
-func (c *codesDesk) setAvailability(key string, online bool) {
+// setAvailability records whether the pod that reports one controller
+// is online, from its availability topic. The pod's MQTT Last Will is
+// the offline payload, so the broker publishes it when the pod dies.
+func (c *codesCache) setAvailability(key string, online bool) {
 	c.mutex.Lock()
 	previous, had := c.online[key]
 	c.online[key] = online
 	c.mutex.Unlock()
 	if !had || previous != online {
-		poke(c.wake)
+		signalWake(c.wake)
 	}
 }
 
-// codesFor returns what one controller declares, and whether the desk
-// holds an answer. A controller whose pod is offline declares nothing,
-// because a retained document outlives the pod that wrote it.
-func (c *codesDesk) codesFor(key string) (remoteCodes, bool) {
+// codesFor returns the codes of one controller, and false when there
+// are none to use. The broker keeps a retained message after the pod
+// that published it dies, so codesFor ignores the codes while the pod's
+// availability is offline.
+func (c *codesCache) codesFor(key string) (remoteCodes, bool) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	codes, held := c.declared[key]
-	if !held {
+	codes, found := c.declared[key]
+	if !found {
 		return remoteCodes{}, false
 	}
-	if online, heard := c.online[key]; heard && !online {
+	if online, reported := c.online[key]; reported && !online {
 		return remoteCodes{}, false
 	}
 	return codes, true
 }
 
-// retain shrinks the desk to the Remotes the cluster still holds, so a
-// long-running operator keeps no entry for a deleted Remote.
-func (c *codesDesk) retain(live map[string]bool) {
+// retain deletes the entries of Remotes that are not in live, so a
+// deleted Remote does not stay cached for the life of the operator.
+func (c *codesCache) retain(live map[string]bool) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	for key := range c.declared {
@@ -117,19 +116,18 @@ func sameCodes(current, arriving remoteCodes) bool {
 		slices.Equal(current.Axes, arriving.Axes)
 }
 
-// The two words status.unbound uses for an entry's event type.
+// The values of the type field of an entry in status.unbound.
 const (
 	unboundKey  = "key"
 	unboundAxis = "abs"
 )
 
-// unboundCodes is the gap the status reports: every declared control
-// the table maps to nothing. A key code passes as itself, so it is
-// unbound only where a row drops it with none or the kernel gives it
-// no name at all. A hat axis is unbound where no row of it names a
-// key, which the base makes rare. The gap is by code, so a row on one
-// direction of a hat binds the whole axis. It is derived on every
-// pass, so it empties as the table grows.
+// unboundCodes returns the declared codes that the table does not map
+// to a key, for status.unbound. A key code with no row is sent as
+// itself, so it is unbound only when a row maps it to keyNone or when
+// keyCodeNames has no name for it. An axis is unbound when no row maps
+// its code to a key. A row for one direction binds the whole axis,
+// because the check compares codes and not values.
 func unboundCodes(declared remoteCodes, table []compiledBinding) []UnboundCode {
 	dropped := map[uint16]bool{}
 	named := map[uint16]bool{}

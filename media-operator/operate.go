@@ -1,17 +1,12 @@
 package main
 
-// The operator's loop has the shape liken's own operators use:
-// level-triggered, woken by a watch, with a ticker as a clock, and a
-// reconcile before the first event ever arrives.
-//
-// A pass reads the whole collection instead of acting on the object
-// an event carried. The event is only a wake. Every pass derives
-// every status from what the cluster holds right now, so a lost
-// event costs at most one tick, a reordered burst collapses
-// into one pass, and a restarted operator starts correct with no
-// replay. The pass reads the cluster from the watches' memory
-// (clusterview.go), so a pass that has nothing to change sends the
-// API server no request.
+// The operator is level-triggered. A watch event, a bus message, or the
+// tick only wakes the loop, and each pass then derives every status from
+// the cluster as it is now, not from the object that an event carried.
+// So a lost event delays the work by at most one tick, a burst of events
+// costs one pass, and a restarted operator needs no replay of what it
+// missed. A pass reads the watches' caches (clusterview.go), so a pass
+// with nothing to change sends the API server no request.
 
 import (
 	"context"
@@ -31,322 +26,260 @@ import (
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
-// The operator's own environment: four image overrides, the broker,
-// and the topic base. Only MEDIA_TOPIC_BASE has a default. An image
-// variable that is set wins over the image images.go derives from
-// the operator's own pod, and one that is unset derives.
+// Environment variables of the operator. An image variable that is set
+// overrides the image that images.go derives from the operator's own
+// pod.
 const (
 	playerImageVariable = "PLAYER_IMAGE"
 
-	// IDLE_IMAGE names the client that draws the idle screen. It is
-	// what an idle container runs where no tier states
-	// spec.idle.image, so a household that states nothing gets the
-	// client this release ships.
+	// IDLE_IMAGE is the image of the client that draws the idle screen.
+	// An idle container runs it unless the Player or the default
+	// MediaPreferences sets spec.idle.image.
 	idleImageVariable = "IDLE_IMAGE"
 
-	// SIDECAR_IMAGE names the image that carries this program alone,
-	// whose pod build every sidecar container runs. It holds none of the player
+	// SIDECAR_IMAGE is the image that holds only this program, and
+	// every sidecar container runs it. It has none of the player
 	// image's mpv, drivers, or fonts, because a sidecar decodes
 	// nothing.
 	sidecarImageVariable = "SIDECAR_IMAGE"
 
-	// DISPLAY_IMAGE names the image the display container runs. Like the
-	// other companions it derives from the operator's own image at the
-	// same tag, and this variable overrides that derivation.
+	// DISPLAY_IMAGE is the image that the display container runs.
 	displayImageVariable = "DISPLAY_IMAGE"
 
-	// IDLE_DISPLAY_CLASS names the cluster's display-draw DeviceClass, the
-	// shareable draw companion a Player's idle pod claims. The class is
-	// cluster policy, so the Deployment sets it and the operator reads it
-	// here. An unset value turns the idle screen off, so reconcileIdle
-	// creates no idle claim and no idle pod.
+	// IDLE_DISPLAY_CLASS names the shareable DeviceClass that a Player's
+	// idle pod claims a display through. The class is cluster policy, so
+	// the Deployment sets it. When it is unset, reconcileIdle creates no
+	// idle claim and no idle pod.
 	idleDisplayClassVariable = "IDLE_DISPLAY_CLASS"
 
-	// MEDIA_METRICS_ADDRESS is the listener address for /metrics, in the
-	// shape milestone 65 fixes for every process in the organization: an
-	// empty value turns the listener off. deploy/operator.yaml sets it to
-	// the operator's own port on the contract's table, so a cluster with
-	// no Prometheus still runs the operator, and one that wants metrics
-	// needs no code change to get them. The operator sets the same
-	// variable, at each client's own port, on the pods it creates for
-	// media-screen and the idle screen; wire.go's mediaVersionVariable
-	// travels beside it.
+	// MEDIA_METRICS_ADDRESS is the address of the /metrics listener, and
+	// an empty value turns the listener off. The operator also sets it on
+	// the media-screen and idle pods that it creates, each at that
+	// client's own port.
 	metricsAddressVariable = "MEDIA_METRICS_ADDRESS"
 )
 
-// tickInterval is how often the loop reconciles with nothing to prompt
-// it. The tick is a clock. It ends two waits that no event ends: a
-// playing position that only advanced reaches the Play's status, and a
-// Finished Play goes when its window passes. Each of them is a moment,
-// and nothing in the cluster announces a moment. The end of catchUpGrace
-// is a moment too, and reestablishRetained schedules its own wake for it.
-//
-// Every change the pass reads wakes it at once: the watches wake it
-// (clusterwatch.go), and so do the bus desks. The tick covers no
-// change the pass would otherwise miss.
-//
-// A pass reads every collection from memory, so a tick on a settled
-// cluster sends the API server no request. It writes only what
-// changed, and it reads an object from the API server only for a run
-// or a standing pod it is about to act on.
+// tickInterval is how often the loop runs a pass when nothing woke it.
+// Two changes wake nothing: a playing position that advanced, which the
+// pass writes to the Play's status, and a Finished Play whose time to
+// live ran out, which the pass deletes. Every other change wakes the
+// pass through a watch (clusterwatch.go) or the bus handler.
 const tickInterval = 10 * time.Second
 
-// positionWriteInterval bounds how often a bare position advance reaches
-// a Play's status. The command sidecar publishes a live position to the
-// bus every second, but a status write wakes the operator's own plays
-// watch, so writing the position every second would spin the loop and
-// the API server. A pause, an item change, or a phase change writes at
-// once; a
-// position that advanced alone waits this interval, and the bus carries
-// the live value in between.
+// positionWriteInterval limits how often a Play's status is written when
+// only its position advanced. The command sidecar publishes the position
+// on the bus every second, and each status write wakes the operator's
+// own Plays watch, so a write every second would keep the loop and the
+// API server busy. A pause, an item change, or a phase change is written
+// at once.
 //
-// The tick is what drives a bare position write, because a position
-// advance wakes nothing on its own. So this interval sits below
-// tickInterval on purpose: a write stamps a moment after the tick
-// that made it, so an interval equal to the tick would miss the next tick
-// by that moment and write every second tick, at twice the period. Two
-// seconds of headroom absorbs that skew, so a steadily playing film
-// writes on every tick.
+// Only the tick writes a bare position advance. Each write is stamped a
+// little after its tick, so with an interval equal to tickInterval the
+// next tick would come too early and the position would be written on
+// every second tick. The interval is 2 seconds shorter than the tick, so
+// a steady film writes its position on every tick.
 const positionWriteInterval = 8 * time.Second
 
-// catchUpGrace is how long the pass waits after a broker session
-// begins before it writes a retained value it did not read: a unit's
-// level, or a controller's first focus mark. The broker delivers the
-// retained values within milliseconds of the subscribe, and the wait
-// covers that delivery, so the pass reads desks that already hold what
-// the broker holds. A level written inside the window would draw the
-// indicator on every screen for a level the broker already held, and a
-// mark written inside it would move a controller to another room.
+// catchUpGrace is how long the operator waits after a broker session
+// starts before it publishes a Player's volume level or a controller's
+// focus mark that it did not receive from the broker. The broker sends
+// its retained values right after the subscribe, and the wait lets them
+// arrive first. Without it, a restarted operator would publish a level
+// again and draw the volume indicator on every screen, or publish a
+// focus mark that moves a controller to a different Player.
 const catchUpGrace = 2 * time.Second
 
-// defaultTTLSecondsAfterFinished is how long a Finished Play stands when
-// its spec sets no ttlSecondsAfterFinished. Five minutes is the default
-// continue-watching window: while the Play stands, kubectl get plays still
-// answers what just played and where it stopped, and the record goes when
-// the Play does. A library app sets the field on each Play it creates when
-// its continue-watching feature reads a different window.
+// defaultTTLSecondsAfterFinished is how long a Finished Play remains
+// when its spec does not set ttlSecondsAfterFinished. While the Play
+// remains, `kubectl get plays` shows what just played and where it
+// stopped.
 const defaultTTLSecondsAfterFinished = 300
 
-// operator holds what every pass needs. The report desk and the bus
-// are fields rather than globals so a test builds an operator around a
-// desk it can inspect.
+// operator holds what every pass needs. The bus and the caches are
+// fields and not globals, so a test can build an operator around ones
+// it can inspect.
 type operator struct {
 	// client sends every write, and every read that must include this
-	// operator's own last write. view answers every other read, from
-	// the watches. clusterview.go says which read goes where.
-	client *apiclient.Client
-	view   *clusterView
-	image  string
-	// idleImage is the client an idle container runs where no tier
-	// states spec.idle.image. It is a release decision, so it arrives
-	// in the environment beside the player image.
-	idleImage string
-	// sidecarImage is the image every sidecar container runs, the
-	// program's two builds alone. It is a release decision, so it arrives in the
-	// environment beside the player image.
+	// operator's own last write. view serves every other read from the
+	// watches' caches (clusterview.go).
+	client       *apiclient.Client
+	view         *clusterView
+	image        string
+	idleImage    string
 	sidecarImage string
-	// displayImage is the image the display container runs. It arrives the
-	// way the other companion images do, derived from the operator's
-	// image at the same tag, so one release names every container.
 	displayImage string
 	busAddress   string
 	topicBase    string
-	// idleDisplayClass is the display-draw DeviceClass a Player's idle pod
-	// claims. An empty value turns the idle screen off, so reconcileIdle
-	// builds nothing.
+	// idleDisplayClass is empty when the idle screen is off.
 	idleDisplayClass string
-	// playerVerbose is MEDIA_PLAYER_VERBOSE from the operator's own
-	// environment. Empty leaves mpv quiet. The operator copies it onto
-	// every playback pod it creates, so `kubectl set env` on the
-	// Deployment turns mpv's full output on for the pods that follow.
+	// playerVerbose is MEDIA_PLAYER_VERBOSE, which the operator copies
+	// onto each playback pod that it creates. So `kubectl set env` on
+	// the Deployment turns on mpv's full output for the pods created
+	// after the restart.
 	playerVerbose string
-	// resources holds the cpu and memory settings of each container the
-	// operator builds, read once at start. containerresources.go gives
-	// the defaults and the file they come from.
+	// resources holds the cpu and memory settings of each container that
+	// the operator builds, read once at start (containerresources.go).
 	resources resourceSettings
 	bus       *Bus
 	reports   *reports
-	// focus is the desk for the retained focus mark, built on the same
-	// wake as the report desk: a cycle request on the bus wakes the pass
-	// that arbitrates it.
-	focus *focusDesk
+	// focus holds the retained focus mark of each controller. It shares
+	// the wake channel of reports, so a cycle request on the bus wakes
+	// the pass that settles it.
+	focus *focusCache
 
-	// ensure is the desk for each unit's Receiver. The pass fills it from
-	// the Receivers, and the bus reader reads it when a controller press
-	// asks the unit's receiver for the unit's input.
-	ensure *ensureDesk
+	// playerReceivers maps each Player to the Receiver that it is connected to.
+	// The pass fills it, and the bus reader reads it when a press must
+	// select the Player's input on that Receiver.
+	playerReceivers *playerReceivers
 
-	// sessions composes and sends every write of a Receiver's
-	// status.session, from the pass and from the bus reader alike
-	// (receiverasks.go).
+	// sessions writes each change to a Receiver's status.session, for
+	// the pass and the bus reader (receiverasks.go).
 	sessions sessionWriter
 
-	// levels is the volume engine: each unit's devices, each device's
-	// pending target, and the relay onto each unit's volume topic. The
-	// pass hands it the devices' reports, and the bus reader hands it
-	// the presses (volumeengine.go).
+	// levels is the volume engine (volumeengine.go). The pass gives it
+	// each Player's volume devices and their reports, and the bus reader
+	// gives it the presses.
 	levels *volumeEngine
 
-	// screenAsks is the record of the Televisions' asks the pass relayed
-	// (screenask.go). Only the pass goroutine touches it.
-	screenAsks screenAsks
+	// seenScreenRequests records the screenAsk requests of the Televisions that
+	// the pass relayed (screenask.go). Only the pass goroutine uses it.
+	seenScreenRequests screenRequestLog
 
-	// peripherals is the desk for the bluetooth-operator's Peripherals and
-	// for the Peripheral each Remote's claim allocated. The pass fills it
-	// from the API, and both the pass and the bus reader read it when they
-	// build a Player's bus status. The peripherals watch is the wake, so a
-	// controller that connects, disconnects, or reports a new charge
-	// reaches the pass that republishes that status.
-	peripherals *peripheralDesk
+	// peripherals holds the bluetooth-operator's Peripherals and the
+	// Peripheral that each Remote's claim allocated. The pass fills it,
+	// and the pass and the bus reader both read it to build a Player's
+	// bus status, which has each controller's link and charge.
+	peripherals *peripheralCache
 
-	// codes is the desk for each controller's declared code set, built
-	// on the same wake: a code set that changed wakes the pass that
-	// rewrites the Remote status the gap appears on.
-	codes *codesDesk
+	// codes holds the key codes that each controller declared. A change
+	// wakes the pass, which writes the unbound codes to the Remote's
+	// status.
+	codes *codesCache
 
-	// panels is the desk for each unit's panel desire, built on
-	// the same wake: a desire that changed wakes the pass that writes
-	// the override onto the screen's Display.
-	panels *panelDesk
+	// panels holds the newest panel desire that each Player's idle
+	// client published. A change wakes the pass, which writes the
+	// override onto the screen's Display.
+	panels *panelCache
 
-	// panelOverrides holds the override this operator last
-	// applied per unit, so a pass writes the Display only when the
-	// desire changed, and a deleted Player's dark panel still has a
-	// screen to lift. Only the pass goroutine touches it.
+	// panelOverrides holds the override that this operator last applied
+	// for each Player, so a pass writes the Display only on a change,
+	// and the override of a deleted Player can still be removed. Only
+	// the pass goroutine uses it.
 	panelOverrides map[string]panelOverride
 
-	// absenceChecked names each standing pod, as namespace/name, that
+	// absenceChecked holds each persistent pod, as namespace/name, that
 	// the pass wants gone and has read from the API server since this
-	// process started. standing.go says why one read is enough. Only the
-	// pass goroutine touches it.
+	// process started (persistent.go). Only the pass goroutine uses it.
 	absenceChecked map[string]bool
 
-	// panelFaults holds the last panel fault reported per unit,
-	// so a screen with no Display logs once and not once a pass. Only
-	// the pass goroutine touches it.
+	// panelFaults holds the last panel fault logged for each Player, so a
+	// screen with no Display is logged once. Only the pass goroutine
+	// uses it.
 	panelFaults map[string]string
 
-	// The two lookups a pass shares, dropped at the start of every pass so
-	// each pass reads the cluster again. Only the pass goroutine touches
-	// them.
+	// The screen and Receiver lookups of one pass. The pass resets them
+	// at its start. Only the pass goroutine uses them.
 	screenCache   *screens
 	receiverCache *receivers
 
-	// receiverFaults names each unit, by its key, whose last session
-	// write on its Receiver failed. A pass writes the session again until
-	// it lands, so the first failure and the write that lands after it
-	// each post one Event, and the writes between them post none. Only
-	// the pass goroutine touches it.
+	// receiverFaults holds each Player whose last session write to its
+	// Receiver failed. The pass retries the write on every pass, and
+	// this set makes the first failure and the later success post one
+	// Event each. Only the pass goroutine uses it.
 	receiverFaults map[string]bool
 
-	// receiverSessions holds the session this operator last applied per
-	// unit, so a pass writes a Receiver only when the session changed, and
-	// a unit whose Play is gone still names a Receiver to lift the session
-	// from. Only the pass goroutine touches it.
+	// receiverSessions holds the session that this operator last applied
+	// for each Player, so a pass writes a Receiver only on a change, and
+	// the session of a deleted Player can still be removed. Only the
+	// pass goroutine uses it.
 	receiverSessions map[string]receiverSession
 
-	// heldScreens holds the last screen each unit resolved, and when it
-	// stopped resolving. screengap.go says why. Only the pass goroutine
-	// touches it.
-	heldScreens map[string]heldScreen
+	// lastScreens records the last screen that each Player resolved, and
+	// when it stopped resolving (screengap.go). Only the pass goroutine
+	// uses it.
+	lastScreens map[string]lastScreen
 
-	// specReleased names each Receiver whose spec holds no
-	// session of this operator's: one it read with no spec.session, or
-	// one whose spec.session it released this run. Only the pass
-	// goroutine touches it.
+	// specReleased holds each Receiver whose spec has no session from
+	// this operator: one that the pass read with no spec.session, or one
+	// whose spec.session the pass removed since this process started.
+	// Only the pass goroutine uses it.
 	specReleased map[string]bool
 
-	// catchUpEnds is when the current broker session's retained values
-	// have had time to arrive. Each connect pushes it out by catchUpGrace.
-	// It is zero before the first session, and caughtUp reads zero as a
-	// catch-up that has not started. Only the pass goroutine touches it.
+	// catchUpEnds is when the retained values of the current broker
+	// session have had time to arrive (catchUpGrace). It is zero before
+	// the first session. Only the pass goroutine uses it.
 	catchUpEnds time.Time
 
-	// endingLabeled holds, per run, the UID of the pod whose ending the
-	// pass labeled, so each pod is patched once and not once a pass, and
-	// a new pod of the same run is labeled on its own ending. The pass
-	// drops a run the collection no longer holds, so a Play created later
-	// under the same name is labeled on its own ending too. Only the pass
-	// goroutine touches it.
+	// endingLabeled holds, for each run, the UID of the pod that the
+	// pass labeled as ending, so each pod is patched once and a new pod
+	// of the same run is labeled again. Only the pass goroutine uses it.
 	endingLabeled map[string]string
 
-	// positionWrites stamps when each run last wrote its position, so a
-	// bare position advance writes no more than once per
-	// positionWriteInterval. Only the pass goroutine touches it.
+	// positionWrites holds when the pass last wrote each run's status, or
+	// found it current, for positionWriteInterval. Only the pass
+	// goroutine uses it.
 	positionWrites map[string]time.Time
 
-	// displayRestarts maps each run to the display restart count the last
-	// pass read, so the counter adds the growth alone. Only the pass
-	// goroutine touches it.
-	//
-	// The memo also names the Player the run's series is labeled with,
-	// so the run's end deletes that series.
+	// displayRestarts holds, for each run, the restart count of the
+	// display container that the last pass read, so the counter adds
+	// only the growth. It also holds the Player label of the run's
+	// metric series, so the end of the run deletes that series. Only the
+	// pass goroutine uses it.
 	displayRestarts map[string]displayRestartMemo
 
-	// keysPublished maps each Remote's keys topic to the table the
-	// operator last published there. The topic is retained, so the
-	// broker serves the current table to any new subscriber, and the
-	// operator republishes only when the table changes. The map also
-	// lets a later pass find a topic whose Remote is gone and clear its
-	// retained value. Only the pass goroutine touches it.
+	// keysPublished maps each Remote's keys topic to the table that the
+	// operator last published there, so an unchanged table is not
+	// published again, and the topic of a deleted Remote can be found
+	// and cleared. Only the pass goroutine uses it.
 	keysPublished map[string]string
 
-	// The units under media.liken.sh/none whose clear of the retained
-	// panel desire the bus has not queued. The pass is its only reader
-	// and writer.
+	// panelClears holds each Player under media.liken.sh/none whose
+	// clear of the retained panel desire the bus did not queue, so the
+	// next pass publishes the clear again. Only the pass goroutine uses
+	// it.
 	panelClears map[string]bool
 
-	// The table last logged for each keys topic. keysPublished resets on a
-	// fresh broker session and this does not, so a republish writes no
-	// line and a person's edit does.
+	// keyTables holds the table last logged for each keys topic. A new
+	// broker session resets keysPublished and not keyTables, so the
+	// publish after a reconnect writes no log line, and a person's edit
+	// does.
 	keyTables map[string]string
 
-	// playerStatuses records the payload the operator last published on
-	// each Player's status topic. It is the keymap pattern applied to the
-	// unit's presentable state: the topic is retained, so the operator
-	// republishes only when the payload changes, and a topic whose Player no
-	// longer exists has its retained value cleared. Unlike the memos above,
-	// two goroutines write it, so it carries a mutex of its own.
+	// playerStatuses holds the payload that the operator last published
+	// on each Player's status topic. The pass and the bus reader both
+	// write it, so it has its own mutex.
 	playerStatuses publishedStatuses
 
-	// snapshot holds the Plays and the Players the last pass listed, which
-	// is what an ending answers from. ending.go says why the answer comes
-	// from memory rather than from a read.
+	// snapshot holds the Plays and Players that the last pass listed.
+	// The bus reader answers an ending from it (ending.go).
 	snapshot passSnapshot
 
-	// recreateBackoff holds one run's recreate count and the earliest time it
-	// may recreate again, so a pod that keeps failing recreates slower up to a
-	// cap. Only the pass goroutine touches it.
+	// recreateBackoff holds each run's recreate backoff. Only the pass
+	// goroutine uses it.
 	recreateBackoff map[string]backoffState
 
-	// replacements holds, per run, the reason for a recreate whose delete
-	// went out and whose new pod is not created yet. replace.go says why
-	// the create waits. Only the pass goroutine touches it.
+	// replacements holds, for each run, the reason for a recreate whose
+	// delete was sent and whose new pod is not created yet
+	// (replace.go). Only the pass goroutine uses it.
 	replacements map[string]recreate
 
-	// wake is the loop's own wake channel. The operator schedules one wake at
-	// a backoff deadline, so a run waiting out its backoff resumes when the
-	// wait ends rather than on the next tick.
+	// wake is the loop's wake channel. requeueAfter sends on it at a
+	// deadline, so the loop does not wait for the next tick.
 	wake chan<- struct{}
 
-	// now is the clock the screen gap reads. It is a field so a test
-	// moves the clock past the bound without a wait.
+	// now is the clock for the screen gap and for status.poweredOnAt. A
+	// test replaces it to move time without waiting.
 	now func() time.Time
 
-	// busReconnected is set on the bus goroutine when a session reaches a
-	// CONNACK, and read on the pass goroutine. A fresh broker session
-	// holds none of the retained state the operator owns, so the next pass
-	// re-establishes it. It is atomic because the two goroutines share it
-	// with no other lock between them.
+	// busReconnected is set on the bus goroutine when a session receives
+	// its CONNACK, and read on the pass goroutine, which then publishes
+	// the retained state again (reestablishRetained).
 	busReconnected atomic.Bool
 
-	// metrics is nil in a test that has no use for it, so every write
-	// through it is guarded. operate builds one always: production
-	// metrics are never optional, only a test's need for them is.
+	// metrics is nil in a test that does not need it.
 	metrics *mediaMetrics
 
-	// Where the operator writes one line per operation a person caused.
-	// It is a field so a test reads what the operator would print.
+	// log receives one line for each operation that a person caused.
 	log io.Writer
 
 	// recorder posts the Events on Plays, Players, and Remotes
@@ -355,31 +288,25 @@ type operator struct {
 }
 
 func operate() {
-	// Setup failures end the process on purpose. The kubelet restarts
-	// the pod with backoff, and the failure shows in kubectl instead of
-	// hiding in a retry loop.
+	// A failure in setup ends the process. The kubelet restarts the pod
+	// with a backoff, and the failure shows in kubectl instead of being
+	// retried silently.
 	busAddress := os.Getenv(busAddressVariable)
 	if busAddress == "" {
-		fmt.Fprintf(os.Stderr, "%s is unset; the Deployment must name the broker\n", busAddressVariable)
+		fmt.Fprintf(os.Stderr, "%s is unset, so the operator has no message bus address. Set it in the Deployment\n", busAddressVariable)
 		os.Exit(1)
 	}
 	topicBase := os.Getenv(topicBaseVariable)
 	if topicBase == "" {
 		topicBase = defaultTopicBase
 	}
-	// The idle display class is optional. An unset value turns the idle
-	// screen off, so the operator runs with no idle pods rather than
-	// exiting the way a missing image or broker does.
 	idleDisplayClass := os.Getenv(idleDisplayClassVariable)
-	// The verbose switch is optional and read once: unset, every
-	// playback pod's mpv is quiet; set, it reaches the pods this operator
-	// creates from now on.
 	playerVerbose := os.Getenv(playerVerboseVariable)
 	metricsAddress := os.Getenv(metricsAddressVariable)
 
 	client, err := inClusterClient(requestTimeout)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "in-cluster config: %v\n", err)
+		fmt.Fprintf(os.Stderr, "reading the in-cluster configuration: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -389,34 +316,30 @@ func operate() {
 		os.Exit(1)
 	}
 
-	// The registry and the listener come up before anything else the
-	// operator does, so a scrape answers from the moment the process is
-	// up, the same promise the runtime collectors already keep for
-	// go_* and process_*.
+	// The metrics listener starts before the Lease wait, so a copy that
+	// waits for the Lease can be scraped too.
 	metrics := newMediaMetrics(operatorVersion(client))
 	metrics.serve(metricsAddress)
 
 	// Only the process that holds the Lease goes past this line, so a
-	// second copy opens no bus session and reconciles nothing. leader.go
-	// says why. The signal ends the wait here, or ends the loop below
-	// after its pass, and the release follows the last pass.
+	// second copy opens no bus session and reconciles nothing
+	// (leader.go). A signal ends the wait here, or ends the loop below
+	// after its pass.
 	stop, cancelSignals := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancelSignals()
 	leader := lead(stop)
-	// Every write from here on goes through the write guard: the passes,
-	// the bus handler, the volume engine, and the Event recorder. The
-	// reads before the lead go through the client without it, and the
-	// guard allows reads anyway.
+	// Every write from here on, from the passes, the bus handler, the
+	// volume engine, and the Event recorder, goes through the leader's
+	// write guard.
 	client = leader.guard(client)
 
-	// One wake channel serves the two watches and the bus handler,
-	// because a wake carries no information beyond "read the collection
-	// again".
+	// The watches and the bus handler share one wake channel, because a
+	// wake only means "run a pass".
 	wake := make(chan struct{}, 1)
-	desk := newReports(wake)
-	focusDesk := newFocusDesk(wake)
-	codesDesk := newCodesDesk(wake)
-	panels := newPanelDesk(wake)
+	playReports := newReports(wake)
+	focusCache := newFocusCache(wake)
+	codesCache := newCodesCache(wake)
+	panels := newPanelCache(wake)
 	media := &operator{
 		client:           client,
 		image:            images.player,
@@ -428,16 +351,16 @@ func operate() {
 		idleDisplayClass: idleDisplayClass,
 		playerVerbose:    playerVerbose,
 		resources:        loadResourceSettings(containerResourcesPath, func(line string) { fmt.Println(line) }),
-		reports:          desk,
-		focus:            focusDesk,
-		ensure:           newEnsureDesk(),
-		peripherals:      newPeripheralDesk(),
-		codes:            codesDesk,
+		reports:          playReports,
+		focus:            focusCache,
+		playerReceivers:  newPlayerReceivers(),
+		peripherals:      newPeripheralCache(),
+		codes:            codesCache,
 		panels:           panels,
 		panelOverrides:   map[string]panelOverride{},
 		panelFaults:      map[string]string{},
 		receiverSessions: map[string]receiverSession{},
-		heldScreens:      map[string]heldScreen{},
+		lastScreens:      map[string]lastScreen{},
 		specReleased:     map[string]bool{},
 		endingLabeled:    map[string]string{},
 		positionWrites:   map[string]time.Time{},
@@ -453,39 +376,35 @@ func operate() {
 	}
 	media.levels = media.newVolumeEngine()
 
-	// onConnect marks that a fresh broker session began, so the next pass
-	// re-establishes the retained state the operator owns. A broker that
-	// restarted holds none of it, so without this the keymaps and focus
-	// marks would stay missing until a person edited one. The focus desk
-	// and the volume engine forget what the last session delivered, so
-	// the pass can tell a value the broker still holds from one it lost.
+	// A restarted broker has none of the retained state that the
+	// operator owns, so each new session makes the next pass publish it
+	// again. newSession makes the focus cache and the volume engine drop
+	// what the last session sent, so after catchUpGrace an empty entry
+	// means that the broker lost the value.
 	onConnect := func(bus *Bus) {
-		// The mark goes first, so a pass that runs between these lines
-		// reads the catch-up as not over and publishes no mark from the
-		// record the two desks are about to clear.
+		// The flag is set first, so a pass that runs between these lines
+		// treats the catch-up as not over and publishes no mark from the
+		// records that newSession is about to clear.
 		media.busReconnected.Store(true)
 		media.levels.newSession()
 		media.focus.newSession()
-		poke(wake)
+		signalWake(wake)
 	}
-	// The bus handler is the only path the control plane takes a report or
-	// a focus signal.
 	media.bus = newBus(busAddress, "media-operator", nil, onConnect, media.handleBusMessage)
 	for _, filter := range busFilters(topicBase) {
 		media.bus.Subscribe(filter)
 	}
-	// The bus session ends before the Lease is released, because a
-	// press or a report that arrives on it can write to the API. Run
-	// returns only after its reader, which runs the handler, returns.
+	// The bus session must end before the Lease is released, because a
+	// press or a report on the bus can write to the API. Run returns only
+	// after the handler returns.
 	busContext, stopBus := context.WithCancel(context.Background())
 	busDone := make(chan struct{})
 	go func() {
 		media.bus.Run(busContext)
 		close(busDone)
 	}()
-	// quiet ends the bus session and answers whether it ended in time.
-	// stepDown runs it, and then shuts the recorder down, before it
-	// releases the Lease.
+	// quiet ends the bus session and reports whether it ended within 5
+	// seconds. stepDown calls it before it releases the Lease.
 	quiet := func() bool {
 		stopBus()
 		select {
@@ -496,23 +415,22 @@ func operate() {
 		}
 	}
 
-	// The watches start here, after the Lease, so a copy that waits
-	// watches nothing. The first pass waits until every watch has read
-	// its collection, because a pass that read an empty view would
-	// release every run and every standing pod it did not read. The wait
-	// also proves the operator can read each collection: one it cannot
-	// read in time ends the process. A cluster whose bluetooth-operator
-	// serves no Peripheral is one of those, so the operator ends rather
-	// than run with no record of any controller's link. The Displays and
-	// the Receivers are optional (clusterwatch.go).
+	// The watches start after the Lease is held, so a copy that waits
+	// for the Lease watches nothing. The first pass waits until every
+	// watch has listed its collection, because a pass over an empty view
+	// would release every run and every persistent pod. When a required
+	// collection cannot be listed within clusterSyncWait, the process
+	// ends. So a cluster where bluetooth-operator serves no Peripherals
+	// stops the operator, and the operator does not run without the
+	// controllers' links. The Displays and the Receivers are optional
+	// (clusterwatch.go).
 	//
-	// A signal during the wait ends it, and the operator steps down
-	// with no pass. Either way out of a failed wait releases the Lease
-	// first, so a waiting copy takes it on its next read instead of
-	// after the Lease's duration.
+	// When the wait fails or a signal ends it, the operator releases the
+	// Lease before it exits, so a waiting copy takes the Lease on its
+	// next read and does not wait for it to expire.
 	watcher, err := informer.InCluster()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "in-cluster config for the watches: %v\n", err)
+		fmt.Fprintf(os.Stderr, "reading the in-cluster configuration for the watches: %v\n", err)
 		leader.stepDown(quiet, media.recorder)
 		os.Exit(1)
 	}
@@ -549,12 +467,12 @@ func operate() {
 	}
 }
 
-// pass runs one reconcile over every Play and every Remote in the
+// pass runs one reconcile over every Play, Player, and Remote in the
 // cluster. A failure on one object is reported and the pass continues,
-// because one broken run must not freeze every other unit's status.
+// because one broken run must not freeze the status of every other
+// Player.
 func (o *operator) pass() {
-	// The pass reads the screens and the Receivers again, so a cable moved
-	// between passes is seen on the next one.
+	// Reset the lookups, so a cable that moved between passes is seen.
 	o.screenCache, o.receiverCache = nil, nil
 	if o.metrics != nil {
 		o.metrics.busConnected.Set(boolToFloat(o.bus.Connected()))
@@ -564,13 +482,13 @@ func (o *operator) pass() {
 	}
 	plays, err := o.view.Plays(o.client)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "reading plays: %v\n", err)
+		fmt.Fprintf(os.Stderr, "reading Plays: %v\n", err)
 		return
 	}
 	o.snapshot.recordPlays(plays)
-	// The desk learns each run's pod from the store before the endings
-	// below read their marks, so the mark of a pod that is gone no longer
-	// counts. runpod.go says why.
+	// Tell reports which pod each run has before the endings below are
+	// read, so the ending report of a pod that is gone stops counting
+	// (runpod.go).
 	for index := range plays {
 		namespace, name := plays[index].Metadata.Namespace, plays[index].Metadata.Name
 		pod, err := o.view.Pod(namespace, podName(name))
@@ -581,74 +499,67 @@ func (o *operator) pass() {
 			o.reports.observe(namespace, name, pod)
 		}
 	}
-	// The endings are marked before anything else the pass does. The
-	// sidecar holds mpv alive for a short grace after its ending report,
-	// and the label is what the compositor fades the surface on, so the
-	// label has that grace to reach display-operator and no longer. The
-	// loop is its own, ahead of the read below, so the read does not
-	// delay the label. ending.go says what reads it.
+	// Label the ending pods first. After its ending report, the sidecar
+	// keeps mpv running only for a short grace period, and the label
+	// must reach display-operator within it, because the label makes the
+	// compositor fade the surface (ending.go).
 	for index := range plays {
 		o.labelEnding(&plays[index])
 	}
-	// Each unit's presentable state comes from the plays list and the
-	// report desk, and the pass holds both by now, so it publishes here.
-	// A person is waiting: the browser's return and the room's lights key
-	// on the unit reading Idle. Everything the pass does below is work
-	// the answer does not come from, and each write it sends costs a few
-	// milliseconds on a quiet API server and hundreds on a busy one.
-	// reconcilePlayers publishes the same state again at the end of the
-	// pass, once the focus mark and the controllers' links are settled,
-	// and an unchanged payload is not published twice.
+	// Publish each Player's bus status now, before the slow writes of
+	// the rest of the pass, because a person is waiting: the browser and
+	// other readers of the status topic act when a Player turns Idle.
+	// reconcilePlayers publishes again at the end of the pass, with the
+	// settled focus mark and the controllers' links, and an unchanged
+	// payload is not sent twice.
 	//
-	// An ending has usually reached the bus before this publish, because
-	// answerEnding derives the same state from the last pass's lists the
-	// moment the report arrives. This publish is the confirmation, and it
-	// writes nothing where the two agree. It is also the whole answer for
-	// a run the last pass had not listed yet.
+	// publishEndingStatus usually publishes an ending first, from the last
+	// pass's lists, as soon as the report arrives. This publish then
+	// sends nothing. It is the only publish for a run that the last pass
+	// had not listed.
 	players, playersErr := o.view.Players(o.client)
 	if playersErr != nil {
-		fmt.Fprintf(os.Stderr, "reading players: %v\n", playersErr)
+		fmt.Fprintf(os.Stderr, "reading Players: %v\n", playersErr)
 	} else {
 		o.snapshot.recordPlayers(players)
 		o.publishPlayerStatuses(players, plays)
 	}
-	// Read the household default once per pass. A missing default is not an error,
-	// and a read that fails skips the tier this pass.
+	// A missing default MediaPreferences is not an error, and a failed
+	// read leaves this pass without the default.
 	defaults, err := o.view.MediaPreferences(mediaPreferencesName)
 	if err != nil {
 		if !errors.Is(err, apiclient.ErrNotFound) {
-			fmt.Fprintf(os.Stderr, "reading media preferences: %v\n", err)
+			fmt.Fprintf(os.Stderr, "reading MediaPreferences: %v\n", err)
 		}
 		defaults = nil
 	}
 	live := make(map[string]bool, len(plays))
-	// One unit runs one Play, and the newest Play is the one that runs. So
-	// the pass reads the whole list before it reconciles any Play, and it
-	// names the Plays a newer one replaces.
+	// A Player runs only its newest Play, so the pass finds the
+	// superseded Plays from the whole list before it reconciles any.
 	superseded := supersededPlays(plays)
 	for index := range plays {
 		play := &plays[index]
 		namespace, name := play.Metadata.Namespace, play.Metadata.Name
 		live[runKey(namespace, name)] = true
-		// A deleting Play keeps its pod until its finalizers clear, because
-		// garbage collection waits for them, and the pod keeps the unit's claim
-		// while it waits. So releasePlay deletes the pod itself, the claim frees
-		// at once, and the next run starts. A deleting Play is reconciled no
-		// further, so nothing recreates the pod of a run that is over.
+		// Garbage collection keeps a deleting Play's pod until the Play's
+		// finalizers clear, and the pod keeps the Player's claim until
+		// then. So removePlayFinalizer deletes the pod itself, and the next run
+		// can start at once. A deleting Play is reconciled no further, so
+		// nothing recreates its pod.
 		if play.Metadata.deleting() {
-			o.releasePlay(play)
+			o.removePlayFinalizer(play)
 			continue
 		}
-		// The finalizer goes on before the run does, so a Play deleted moments
-		// after it was created is still one the operator clears the topics of.
-		o.holdPlay(play)
-		// An older Play on a unit that a newer Play also names ends here.
-		// The delete is the whole ending: the sidecar quits mpv on the pod's
-		// termination signal, and the library's store records the last
-		// position before the finalizer clears.
+		// Add the finalizer before the run starts, so the operator clears
+		// the retained topics of a Play that is deleted right after its
+		// creation.
+		o.addPlayFinalizer(play)
+		// Deleting a superseded Play is the whole ending: the sidecar
+		// quits mpv when the pod receives SIGTERM, and the library's store
+		// records the last position before the finalizer clears.
 		if superseded[runKey(namespace, name)] {
 			if err := o.deletePlay(namespace, name); err != nil {
-				fmt.Fprintf(os.Stderr, "deleting superseded play %s/%s: %v\n", namespace, name, err)
+				fmt.Fprintf(os.Stderr, "deleting superseded Play %s/%s: %v\n", namespace, name, err)
 			} else {
 				logLine(o.log, "play %s/%s: deleted, because a newer play on player %s replaces it",
 					namespace, name, playerName(play))
@@ -656,12 +567,11 @@ func (o *operator) pass() {
 			}
 			continue
 		}
-		// A Finished Play is over, so the pass retires it in place of
-		// reconciling it. A Failed Play is not over here, because the
-		// reconcile below resumes it, so only a Finished Play is retired.
+		// A Failed Play is not retired, because the reconcile below
+		// resumes it.
 		if finishedPhase(play.Status.Phase) {
 			if err := o.retire(play); err != nil {
-				fmt.Fprintf(os.Stderr, "retiring play %s/%s: %v\n",
+				fmt.Fprintf(os.Stderr, "retiring Play %s/%s: %v\n",
 					play.Metadata.Namespace, play.Metadata.Name, err)
 			}
 			continue
@@ -672,7 +582,7 @@ func (o *operator) pass() {
 			o.metrics.observeReconcile(kindPlay, time.Since(start), err)
 		}
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "reconciling play %s/%s: %v\n",
+			fmt.Fprintf(os.Stderr, "reconciling Play %s/%s: %v\n",
 				play.Metadata.Namespace, play.Metadata.Name, err)
 		}
 	}
@@ -703,38 +613,30 @@ func (o *operator) pass() {
 		}
 	}
 	o.reclaimPlays(live)
-	// The Remotes are read once for the whole pass. The Peripherals are
-	// folded in here, before any Player status is written, because a
-	// unit's bus status carries each controller's link and charge. The same
-	// read reconciles the standing pods at the end of the pass. A read that
-	// fails skips both, so no desk shrinks to a collection the operator
-	// could not read.
+	// observePeripherals runs before any Player status is written,
+	// because a Player's bus status has each controller's link and
+	// charge. When the Remotes cannot be read, the pass skips it and
+	// reconcileRemotes, so no cache shrinks to a collection that the
+	// operator could not read.
 	remotes, remotesErr := o.view.Remotes()
 	var remoteClaims map[string]claimRead
 	if remotesErr != nil {
-		fmt.Fprintf(os.Stderr, "reading remotes: %v\n", remotesErr)
+		fmt.Fprintf(os.Stderr, "reading Remotes: %v\n", remotesErr)
 	} else {
 		remoteClaims = o.observePeripherals(remotes)
 	}
-	// The reconcile reads the Players this pass listed before it published
-	// each unit's presentable state, so one pass lists the collection
-	// once.
 	if playersErr == nil {
-		// The idle clock reads the household zone, one setting per cluster from
-		// the default MediaPreferences alone, so the pass resolves it once and
-		// hands it to every Player's idle pod.
+		// The idle clock's time zone is one setting for the cluster, from
+		// the default MediaPreferences only. Each Player's own idle block
+		// overrides the default idle policy field by field.
 		var zone string
-		// The idle default is read once from the same MediaPreferences,
-		// and each Player's own block overrides it field by field.
 		var defaultIdle *IdlePolicy
 		if defaults != nil {
 			zone = defaults.Spec.TimeZone
 			defaultIdle = defaults.Spec.Idle
 		}
-		// Focus settles before the Player statuses, because a remote part
-		// of a unit's bus status carries whether the mark names that unit.
-		// Arbitrating after would publish the previous pass's mark and
-		// leave the indicator one pass behind.
+		// Settle focus first, because a Player's bus status says whether
+		// each controller's focus mark names that Player.
 		o.reconcileFocus(players)
 		start := time.Now()
 		o.reconcilePlayers(players, plays, zone, defaultIdle)
@@ -744,9 +646,6 @@ func (o *operator) pass() {
 		}
 	}
 	if remotesErr == nil {
-		// The Keymaps are read first, because each Remote's table is its
-		// Keymap folded over the base, and the pass compiles one table per
-		// Remote.
 		start := time.Now()
 		o.reconcileRemotes(remotes, remoteClaims, o.loadKeymaps())
 		if o.metrics != nil {
@@ -755,12 +654,12 @@ func (o *operator) pass() {
 	}
 }
 
-// handleBusMessage folds one bus message into the report desk or the
-// focus desk by its topic. An empty payload on a status or availability
-// topic is a cleared retained value, not a live signal, so it is ignored:
-// the operator publishes that empty value itself when it reclaims a
-// deleted Play, and reading its own clear back as an offline signal would
-// mark the run seen again and reclaim it forever.
+// handleBusMessage stores one bus message in the cache for its topic,
+// or acts on it. An empty payload is the clear of a retained value. The
+// operator ignores it on a Play's topics, because it publishes that
+// clear itself when it reclaims a deleted Play, and reading the clear
+// back as an offline signal would mark the run as seen and reclaim it
+// again forever.
 func (o *operator) handleBusMessage(topic string, payload []byte) {
 	if namespace, name, kind, ok := parsePlayTopic(o.topicBase, topic); ok {
 		if len(payload) == 0 {
@@ -772,10 +671,10 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 			if err := json.Unmarshal(payload, &report); err != nil {
 				return
 			}
-			// An ending is the one report a person is waiting on, so it
-			// is answered here and not left to the pass the fold wakes.
+			// A person is waiting on an ending, so it is published here
+			// and not left to the pass that the fold wakes.
 			if o.reports.fold(namespace, name, report) {
-				o.answerEnding(namespace, name)
+				o.publishEndingStatus(namespace, name)
 			}
 		case playAvailabilityKind:
 			online, pod := parsePlayAvailability(payload)
@@ -791,12 +690,11 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 		o.focus.requestCycle(controllerKey(namespace, name))
 		return
 	}
-	// A press on a controller can move the unit's spec.power first, and
-	// a press that turns the unit on does nothing else. Every other press
-	// asks the unit's receiver for the unit's input, in the receiver's
-	// own generic vocabulary. A repeat or a release is dropped inside, so
-	// one held control asks once. A volume key moves the unit's level on
-	// a press and on each repeat.
+	// A press that turns the Player on does nothing else. Every other
+	// press asks the Player's Receiver to select the Player's input, and
+	// ensureInput drops a repeat or a release, so a held button sends one
+	// request. A volume key changes the level on the press and on each
+	// repeat.
 	if namespace, name, ok := parseRemoteEventsTopic(o.topicBase, topic); ok {
 		if o.pressPower(namespace, name, payload) {
 			return
@@ -805,10 +703,8 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 		o.pressVolume(namespace, name, payload)
 		return
 	}
-	// An availability with an empty payload is a cleared retained value and
-	// not a live signal, so it is ignored the way an empty plays message
-	// is. The signal gates the declared codes, because a retained document
-	// outlives the pod that wrote it.
+	// Availability decides whether the declared codes count, because a
+	// retained codes document outlives the pod that wrote it.
 	if namespace, name, ok := parseRemoteAvailabilityTopic(o.topicBase, topic); ok {
 		if len(payload) == 0 {
 			return
@@ -817,9 +713,8 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 			string(payload) == availabilityOnline)
 		return
 	}
-	// An empty payload on the codes topic is the pod's own clear,
-	// published when the controller's nodes vanish, so the desk drops
-	// the document rather than keep a stale one.
+	// A Remote's reader pod clears its codes topic when the controller's
+	// input devices close, so the codes cache drops the document.
 	if namespace, name, ok := parseRemoteCodesTopic(o.topicBase, topic); ok {
 		key := controllerKey(namespace, name)
 		if len(payload) == 0 {
@@ -833,14 +728,14 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 		o.codes.setCodes(key, codes)
 		return
 	}
-	// A home ask on a unit's commands topic asks the unit's receiver to
-	// show the unit, the way a Remote's home press does.
+	// A home request on a Player's commands topic asks the Player's
+	// Receiver to show the Player, as a Remote's home press does.
 	if namespace, name, ok := parsePlayerCommandsTopic(o.topicBase, topic); ok {
 		o.showForHomeAsk(namespace, name, payload)
 		return
 	}
-	// An empty payload is a cleared retained value and not a live
-	// signal, so the desk holds what it had.
+	// The panel cache keeps its desire on a clear. reconcilePlayers
+	// drops the desire of a Player that nothing draws.
 	if namespace, name, ok := parsePlayerPanelTopic(o.topicBase, topic); ok {
 		if len(payload) == 0 {
 			return
@@ -852,13 +747,11 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 		o.panels.setState(playerKey(namespace, name), panel.Desire)
 		return
 	}
-	// The level the broker holds is this operator's own write, read back
-	// so a restarted operator publishes no level the broker already
-	// holds. An empty payload is a cleared retained value and holds no
-	// level.
+	// The retained level is this operator's own earlier publish. Reading
+	// it back keeps a restarted operator from publishing it again.
 	if namespace, name, ok := parsePlayerVolumeTopic(o.topicBase, topic); ok {
 		if len(payload) > 0 {
-			o.levels.heardLevel(playerKey(namespace, name), payload)
+			o.levels.recordBrokerPayload(playerKey(namespace, name), payload)
 		}
 		return
 	}
@@ -867,36 +760,29 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 	}
 }
 
-// reestablishRetained rewrites what the operator publishes retained after
-// a fresh broker session, because a restarted broker holds none of it. It
-// clears the record of published keymaps and Player statuses, so
-// reconcileKeymaps and reconcilePlayers write every one of them again this
-// pass. The focus marks are not written here. A reader acts on a live
-// mark, so reconcileFocus publishes after the catch-up only the marks the
-// broker did not deliver back, and a controller keeps the Player it drives
-// across a broker restart with no mark sent again after an operator
-// restart. The command sidecar and the standing remote pod re-establish
-// their own retained topics from their own connect, so those need no help
-// here.
+// reestablishRetained runs on the first pass of a new broker session,
+// because a restarted broker has none of the operator's retained
+// values. It forgets which key tables and Player statuses were
+// published, so reconcileRemotes and reconcilePlayers publish all of
+// them again in this pass. The volume levels and the focus marks wait
+// for catchUpGrace, and then only the values that the broker did not
+// send back are published. So a controller keeps its Player across a
+// broker restart, and an operator restart publishes no value that the
+// broker already has. The command sidecar and the Remote reader pods
+// publish their own retained topics when they reconnect.
 func (o *operator) reestablishRetained() {
 	o.keysPublished = map[string]string{}
 	o.playerStatuses.reset()
-	// The levels wait out catchUpGrace, and the volume engine then
-	// publishes each unit's level the broker did not deliver back.
 	o.catchUpEnds = time.Now().Add(catchUpGrace)
-	// The focus marks wait out the same grace, and reconcileFocus then
-	// publishes only the marks the broker did not deliver back. This wake
-	// runs that pass when the grace ends, not on the next tick, so a
-	// controller whose mark a restarted broker lost drives its unit again
-	// within the grace.
+	// Run a pass when the grace ends, not at the next tick.
 	o.requeueAfter(catchUpGrace)
 }
 
-// caughtUp answers whether the current broker session's retained
-// values have had time to arrive, so a desk that holds nothing for a
-// key means the broker holds nothing for it too. It is false before
-// the first session, while no session is live, and from the connect
-// until the pass that starts the grace.
+// caughtUp reports whether the retained values of the current broker
+// session have had time to arrive, so that a cache with no value for a
+// key means that the broker has none. It is false before the first
+// session, while the bus is disconnected, and from a connect until
+// catchUpGrace after the pass that runs reestablishRetained.
 func (o *operator) caughtUp() bool {
 	if o.catchUpEnds.IsZero() || o.busReconnected.Load() || !o.bus.Connected() {
 		return false
@@ -904,24 +790,17 @@ func (o *operator) caughtUp() bool {
 	return !time.Now().Before(o.catchUpEnds)
 }
 
-// retire gives a Finished Play its two endings: the playback objects go at
-// once, and the Play itself goes when the window on its spec has passed.
+// retire ends a Finished Play. The first pass that reads the Finished
+// phase deletes the playback pod and its claim, because the final
+// position is in the Play's status and the ending was already published.
+// A Failed Play is not retired, because its pod's log is what a person
+// debugs from.
 //
-// The pod holds nothing worth keeping after the film ends. The final
-// position is on the Play's status and the ending already traveled the bus,
-// so the pod and its claim go on the first pass that reads the Finished
-// phase. Only a Finished Play is retired. A Failed pod stands, because its
-// log is the evidence a person debugs from and the reconcile resumes the
-// run.
-//
-// The finishedAt stamp is what tells a Play this pass just retired from one
-// retired earlier, so the two deletes run once per Play and the passes that
-// follow only read the clock. Both deletes read an absent object as success,
-// so a retry after a failed status write deletes nothing twice.
-//
-// The deletion follows the pass cadence, so a Play goes at most one
-// tickInterval, ten seconds, after its window ends. Nothing else wakes
-// the pass when the window ends.
+// The same pass writes status.finishedAt, so later passes skip the
+// deletes and only compare the time with playTTL. Both deletes treat an
+// absent object as success, so a retry after a failed status write is
+// safe. Nothing wakes the pass when the time to live ends, so the Play
+// is deleted up to one tickInterval later.
 func (o *operator) retire(play *Play) error {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
 	now := time.Now()
@@ -936,10 +815,9 @@ func (o *operator) retire(play *Play) error {
 		logLine(o.log, "play %s/%s: finished at item %d, %s, deleted its playback pod and its claim",
 			namespace, name, play.Status.Item, play.Status.Position)
 	}
-	// Deleting the Play is the whole teardown, and the ownerReferences
-	// collect anything the two deletes above did not. The retained topics go
-	// on the same terms as a Play a person deleted: the operator's finalizer
-	// holds the Play until the pod is gone and the topics are cleared.
+	// Garbage collection removes anything that the deletes above missed,
+	// and the finalizer keeps the Play until the operator has cleared its
+	// retained topics, as for a Play that a person deleted.
 	if now.Sub(finished) >= playTTL(play) {
 		if err := o.deletePlay(namespace, name); err != nil {
 			return err
@@ -956,15 +834,12 @@ func (o *operator) retire(play *Play) error {
 	return writePlayStatus(o.client, o.view.plays.Versions, play, status)
 }
 
-// supersededPlays names every unfinished Play that a newer Play on the
-// same unit replaces. The newest Play runs, so a play request from any
-// program on the bus ends the film that runs now. Without this rule, a
-// second Play's pod pends on the unit's claim, and nothing ends the
-// first.
-//
-// A Play that is finished, failed, or deleting names no run, and a Play
-// that names no Player names no unit, so none of them replaces anything
-// or is replaced.
+// supersededPlays returns the key of each unfinished Play that a newer
+// Play on the same Player replaces. So a play request from any program
+// ends the film that is playing. Without this, the pod of the second
+// Play would stay Pending on the Player's claim, and nothing would end
+// the first. A Play that is finished, failed, being deleted, or names
+// no Player takes no part.
 func supersededPlays(plays []Play) map[string]bool {
 	newest := map[string]*Play{}
 	superseded := map[string]bool{}
@@ -990,7 +865,6 @@ func supersededPlays(plays []Play) map[string]bool {
 	return superseded
 }
 
-// unfinishedPlay says whether this Play still names a run on a unit.
 func unfinishedPlay(play *Play) bool {
 	return play.Metadata.DeletionTimestamp == "" &&
 		!finishedPhase(play.Status.Phase) &&
@@ -998,9 +872,9 @@ func unfinishedPlay(play *Play) bool {
 		playerName(play) != ""
 }
 
-// newerPlay orders two Plays on one unit. The later creation time wins,
-// and the later name breaks a tie, so every pass picks the same run. A
-// Play with no creation time is the older one.
+// newerPlay reports whether play is newer than than. The later name
+// breaks a tie, so every pass picks the same run. A Play with no
+// creation time is the older one.
 func newerPlay(play, than *Play) bool {
 	created, other := playCreated(play), playCreated(than)
 	if !created.Equal(other) {
@@ -1009,8 +883,6 @@ func newerPlay(play, than *Play) bool {
 	return play.Metadata.Name > than.Metadata.Name
 }
 
-// playCreated reads the API server's creation time. A value that does
-// not parse counts as no time, and the name alone orders that Play.
 func playCreated(play *Play) time.Time {
 	created, err := time.Parse(time.RFC3339, play.Metadata.CreationTimestamp)
 	if err != nil {
@@ -1019,10 +891,9 @@ func playCreated(play *Play) time.Time {
 	return created
 }
 
-// playTTL is how long this Play stands after it finishes: the seconds its
-// spec states, or defaultTTLSecondsAfterFinished when it states none. The
-// pointer is what tells a spec that asked for zero from a spec that asked
-// for nothing, and zero deletes the Play on the pass that sees it finished.
+// playTTL is how long a Play remains after it finishes. A spec that
+// sets zero deletes the Play on the pass that reads it Finished, and a
+// spec that sets nothing gets defaultTTLSecondsAfterFinished.
 func playTTL(play *Play) time.Duration {
 	if play.Spec.TTLSecondsAfterFinished == nil {
 		return defaultTTLSecondsAfterFinished * time.Second
@@ -1030,12 +901,9 @@ func playTTL(play *Play) time.Duration {
 	return time.Duration(*play.Spec.TTLSecondsAfterFinished) * time.Second
 }
 
-// finishedTime reads the moment this run finished from the status, and
-// reports whether the status carried a stamp at all. A Play with no stamp
-// finished as far as this operator can tell right now, so its window starts
-// at the time the caller passes in. A stamp this operator cannot parse
-// counts as no stamp, so a garbled value starts the window over rather than
-// holding a Finished Play forever.
+// finishedTime returns status.finishedAt, and whether it parsed. When
+// it is missing or does not parse, it returns now, so a garbled value
+// restarts the time to live and does not keep a Finished Play forever.
 func finishedTime(play *Play, now time.Time) (time.Time, bool) {
 	stamped, err := time.Parse(time.RFC3339, play.Status.FinishedAt)
 	if err != nil {
@@ -1044,15 +912,14 @@ func finishedTime(play *Play, now time.Time) (time.Time, bool) {
 	return stamped, true
 }
 
-// loadKeymaps reads every Keymap once per pass and indexes it by
-// name. The pass holds them rather than compiling here, because a
-// table belongs to a Remote: it is the base folded with that Remote's
-// Keymap, and a Remote with no Keymap still needs the base.
+// loadKeymaps indexes the Keymaps by name. publishKeys compiles them,
+// because each Remote's table is the base table with that Remote's
+// Keymap applied, and a Remote with no Keymap still gets the base.
 func (o *operator) loadKeymaps() map[string]*Keymap {
 	keymaps := map[string]*Keymap{}
 	list, err := o.view.Keymaps()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "reading keymaps: %v\n", err)
+		fmt.Fprintf(os.Stderr, "reading Keymaps: %v\n", err)
 		return keymaps
 	}
 	for index := range list {
@@ -1062,20 +929,19 @@ func (o *operator) loadKeymaps() map[string]*Keymap {
 	return keymaps
 }
 
-// publishKeys compiles one Remote's table and publishes it retained
-// on that Remote's keys topic. The topic is retained, so an unchanged
-// table is not republished and a new subscriber reads the current one
-// from the broker. A Keymap that does not compile publishes nothing
-// and leaves the last good table in place, so a broken edit does not
-// stop a controller. The table this returns is what the status
-// reports the gap against.
+// publishKeys compiles one Remote's table and publishes it retained on
+// the Remote's keys topic when it changed. A Keymap that does not
+// compile publishes nothing and leaves the last good table on the
+// broker, so a broken edit does not stop a controller. It returns the
+// compiled table, for the unbound codes in the Remote's status, or nil
+// when the Keymap does not compile.
 func (o *operator) publishKeys(remote *Remote, keymaps map[string]*Keymap, present map[string]bool) []compiledBinding {
 	topic := remoteKeysTopic(o.topicBase, remote.Metadata.Namespace, remote.Metadata.Name)
 	present[topic] = true
 	table, err := compileTable(keymaps[remote.Spec.Keymap])
 	if err != nil {
-		// A pass runs every few seconds, and the broken edit stands until a
-		// person fixes it, so the refusal is logged once per error.
+		// Log the refusal once for each distinct error, not on every
+		// pass until a person fixes the Keymap.
 		refusal := "refused: " + err.Error()
 		if o.keyTables[topic] != refusal {
 			if o.keyTables == nil {
@@ -1091,16 +957,14 @@ func (o *operator) publishKeys(remote *Remote, keymaps map[string]*Keymap, prese
 	}
 	payload, err := json.Marshal(table)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "marshaling the key table for remote %s/%s: %v\n",
+		fmt.Fprintf(os.Stderr, "encoding the key table of Remote %s/%s: %v\n",
 			remote.Metadata.Namespace, remote.Metadata.Name, err)
 		return nil
 	}
-	// The record holds a table only when the bus queued it, so a frame the
-	// bus dropped on a full queue goes out again on the next pass.
+	// Record a table only when the bus queued it, so a table that the
+	// bus dropped is sent again on the next pass.
 	if o.keysPublished[topic] != string(payload) && o.bus.Publish(topic, payload, true) {
 		o.keysPublished[topic] = string(payload)
-		// A fresh broker session republishes every table, and that is no
-		// edit, so the line compares against the last table logged.
 		if o.keyTables[topic] != string(payload) {
 			if o.keyTables == nil {
 				o.keyTables = map[string]string{}
@@ -1114,7 +978,6 @@ func (o *operator) publishKeys(remote *Remote, keymaps map[string]*Keymap, prese
 	return table
 }
 
-// keymapSource names where a Remote's table came from, for a line.
 func keymapSource(remote *Remote) string {
 	if remote.Spec.Keymap == "" {
 		return "the base with no Keymap"
@@ -1122,84 +985,57 @@ func keymapSource(remote *Remote) string {
 	return "the base with Keymap " + remote.Spec.Keymap
 }
 
-// reconcilePlayers writes every Player's status, publishes the same state
-// to the bus, and ensures every Player's standing idle pod, from the
-// Players and Plays the pass already read. A Player's status is
-// relational, derived from the Plays that name it, so the pass lists the
-// Players once and hands the slice here and to reconcileFocus rather than
-// listing twice. The idle pod stands whether or not a Play runs, so its
-// reconcile is per Player and not derived from the Plays.
-//
-// The Kubernetes status and the bus status carry the same activity from
-// the same derivation. The API server holds what exists and what is
-// desired, and the bus carries the presentable now, which is why the idle
-// screen reads a topic and holds no API credentials.
-//
-// The pass published that presentable state before it read any of the
-// collections this reconcile reads. So the publish here is the corrected
-// one: it carries the focus mark this pass arbitrated and the links the
-// Peripherals reported, and it writes nothing where those changed
-// nothing.
+// reconcilePlayers writes every Player's status, publishes its bus
+// status, and reconciles its idle pod. Both statuses are derived from
+// the same activity, and the idle screen reads the bus status, so it
+// needs no API credentials. The publish here repeats the early publish
+// of the pass with this pass's focus marks and controller links, and
+// sends nothing when those changed nothing.
 func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone string, defaultIdle *IdlePolicy) {
 	published := make(map[string]bool, len(players))
 	live := make(map[string]bool, len(players))
-	// The units whose idle screen something draws. A unit under
-	// media.liken.sh/none leaves this set, and the panel desks treat
-	// it the way they treat a deleted unit: its desire is dropped and
-	// a dark panel it left behind takes a lift.
+	// drawn holds the Players whose idle screen something draws. The
+	// panel caches treat a Player under media.liken.sh/none like a
+	// deleted Player: its desire is dropped, and a panel that it left
+	// off has its override removed.
 	drawn := make(map[string]bool, len(players))
-	// One screens for the pass, so the driver's ResourceSlices
-	// are read at most once however many units the cluster holds.
 	lookup := o.screenLookup()
-	// The units whose screen matches a Receiver input, which is what keeps
-	// the session on their equipment. The session stands idle or playing,
-	// so this set is the match and not the standing run.
+	// matched holds the Players whose screen matches a Receiver input.
+	// The session on that Receiver lasts while the match does, whether
+	// the Player is idle or playing.
 	matched := make(map[string]bool, len(players))
-	// media_players counts units by zone and state, not by identity, so
-	// the pass tallies here and sets the gauge once below rather than
-	// exporting one series per Player, which zone already bounds to the
-	// cluster's own inventory.
+	// The media_players gauge counts Players by zone and state, not one
+	// series per Player.
 	playerCounts := map[[2]string]int{}
 	for index := range players {
 		player := &players[index]
 		key := playerKey(player.Metadata.Namespace, player.Metadata.Name)
 		live[key] = true
 		desired := derivePlayerStatus(player, plays, o.reports)
-		// The screen memory and the Screen condition are the one
-		// place outside this operator that says why an idle pod
-		// waits. The derivation builds a fresh status, so the memory
-		// is carried forward here from the status the pass read.
+		// derivePlayerStatus builds a new status, so reconcileScreen and
+		// reconcileSinks carry forward the fields that only the status
+		// records: the Screen field and condition, which say why an idle
+		// pod waits, and which Sink the scheduler picked for each of the
+		// spec's selections. media-api reads the Sinks from here, because
+		// the run's claim is gone between runs.
 		if player.Spec.Display != nil {
 			desired.Screen, desired.Conditions = o.reconcileScreen(player, key, lookup)
 		}
-		// The sink memory is the same kind of fact as the screen memory
-		// and is carried forward the same way. The spec holds only
-		// selections; the running Play's claim is the one place that
-		// says which Sink the scheduler picked for each one, and
-		// media-api reads the answer off the Player rather than the
-		// claim, which is gone between runs.
 		if len(player.Spec.Sinks) > 0 {
 			desired.Sinks = o.reconcileSinks(player, desired.Play)
 		}
 		idle := resolveIdle(player.Spec.Idle, defaultIdle, o.idleImage)
-		// The Player's power decides the panel and the session below, and
-		// a pass that changes it asks the hardware once (playerpower.go).
+		// A pass that changes spec.power requests the change on the
+		// hardware once (playerpower.go).
 		power := powerStepFor(player)
 		var outcome powerOutcome
-		// The panel state is what the screen's Display last
-		// observed, so the status reports the hardware and not what
-		// the media layer asked for.
 		if idle.Controller == idleControllerNone {
-			// Nothing draws, so no desire is settled and the panel
-			// reports nothing. The retained desire is cleared while
-			// the desk still holds it, so a restarted operator
-			// does not read the idle client pod's last word back off
-			// the broker after that pod is gone.
-			//
-			// The bus drops a clear while it holds no session and when its
-			// write queue is full, and the desk drops the desire below, so
-			// panelClears holds each unit whose clear was not queued and the
-			// next pass publishes it again.
+			// Nothing draws, so the status reports no panel. Clear the
+			// retained desire, so a restarted operator does not read the
+			// last desire of the idle pod back from the broker after the
+			// pod is gone. The bus drops a clear while it has no session
+			// or its queue is full, so panelClears keeps the Player until
+			// a clear is queued.
 			if o.panels.stateFor(key) != "" || o.panelClears[key] {
 				o.clearPanel(key, player.Metadata.Namespace, player.Metadata.Name)
 			}
@@ -1207,42 +1043,38 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 			drawn[key] = true
 			desired.Panel = o.reconcilePanel(player, key, lookup, idle.OffMode, power, &outcome)
 		}
-		// The equipment the unit's cable lands on, and the session it holds
-		// there. The session stands for as long as the unit matches an input,
-		// and its active flag follows the standing run.
-		standing := playerHasStandingPlay(player, plays)
-		desired.Receiver = o.reconcileReceiver(player, standing, power, &outcome)
+		// The session's active flag follows whether a run exists.
+		unfinished := playerHasUnfinishedPlay(player, plays)
+		desired.Receiver = o.reconcileReceiver(player, unfinished, power, &outcome)
 		matched[key] = desired.Receiver != nil
 		o.settlePower(player, plays, power, &outcome, &desired)
-		// The idle block is what a delegate reads to draw this
-		// unit's screen, so it goes on the status before the write.
+		// The idle block tells a delegate operator what it needs to
+		// draw this Player's screen.
 		desired.Idle = deriveIdleStatus(player, idle.Controller, o.busAddress, o.topicBase,
 			o.idleClaimFor(player), idle, gatherIdleRemotes(player, o.topicBase))
-		// The devices that set the unit's level, and their reports, reach
-		// the volume engine on every pass, because a report is what the
-		// relay publishes and what a pending target waits for.
+		// The volume engine publishes the devices' reports and holds a
+		// pending target until a report reaches it, so it receives them
+		// on every pass.
 		o.levels.observe(key, o.volumeDevices(player, desired.Sinks), o.caughtUp())
-		// The retained status is what says the film is over, and the idle
-		// screen client draws its return from it. The client subscribes to
-		// that topic itself, so the status reaches it in bus time, seconds
-		// before the playback pod terminates.
-		// The activity and the Play come from the derivation the publish
-		// made, so the Player's status and the gauge say what the bus says,
-		// even when an ending arrived during the unit's work above.
+		// Take the activity and the Play from the derivation that the
+		// publish made, so the Player's status and the gauge match the
+		// bus, even when an ending arrived during this Player's work
+		// above.
 		topic, derived := o.publishPlayerStatus(player, plays)
 		published[topic] = true
 		desired.Activity, desired.Play = derived.Activity, derived.Play
 		playerCounts[[2]string{player.Spec.Zone, playerMetricState(player.Metadata.Namespace, desired, plays)}]++
 		moved, err := writePlayerStatusFrom(o.client, o.view.players.Versions, player, desired)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "writing player %s/%s status: %v\n",
+			fmt.Fprintf(os.Stderr, "writing the status of Player %s/%s: %v\n",
 				player.Metadata.Namespace, player.Metadata.Name, err)
 		}
-		// For Screen, Unknown means no Display reports the remembered
-		// monitor, which a person fixes, so it is a Warning. False is a
-		// panel on another input or asleep, the park the CRD describes as
-		// by design, so it is Normal. For PowerApplied, False is a write
-		// that failed, which a person may need to look at.
+		// A Screen of Unknown means that no Display reports the saved
+		// monitor, which a person must fix, so it posts a Warning. A
+		// Screen of False repeats the Display, and with PanelAway the
+		// CRD documents it as expected, so it posts a Normal Event. A
+		// PowerApplied of False means that a write to the hardware failed,
+		// so it posts a Warning.
 		for _, condition := range moved {
 			bad := conditions.Unknown
 			if condition.Type == powerAppliedCondition {
@@ -1254,37 +1086,32 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 			o.postPowerChange(player, desired, power, moved)
 		}
 		if err := o.reconcileIdle(player, timeZone, defaultIdle); err != nil {
-			fmt.Fprintf(os.Stderr, "reconciling idle for player %s/%s: %v\n",
+			fmt.Fprintf(os.Stderr, "reconciling the idle pod of Player %s/%s: %v\n",
 				player.Metadata.Namespace, player.Metadata.Name, err)
 		}
 	}
-	// The panel desk shrinks to the units something draws, the way
-	// the codes desk shrinks to its Remotes.
 	o.panels.retain(drawn)
-	// A pending clear goes with its unit, and with a unit that something
-	// draws again, whose idle pod publishes a desire of its own.
+	// A pending clear is dropped when its Player is deleted, or when
+	// something draws its idle screen again, because that idle pod
+	// publishes a desire of its own.
 	for key := range o.panelClears {
 		if !live[key] || drawn[key] {
 			delete(o.panelClears, key)
 		}
 	}
-	// The overrides shrink the same way, and a unit dropped
-	// while its panel was dark takes a lift on the way out.
-	o.retainPanels(drawn)
-	// A unit that is gone, or whose screen no longer matches an input,
-	// releases the equipment it held.
+	o.removeGonePanelOverrides(drawn)
+	// A Player that is gone, or whose screen no longer matches an
+	// input, gives up its Receiver session.
 	o.retainSessions(matched)
 	o.retainHeldScreens(live)
-	o.ensure.retain(live)
-	// The volume engine shrinks the same way.
+	o.playerReceivers.retain(live)
 	o.levels.retain(live)
-	// A topic whose Player no longer exists has its retained value cleared
-	// with an empty publish, so a deleted Player leaves no unit on the bus
-	// for a subscriber to draw.
+	// Clear the status topic of each deleted Player, so a subscriber
+	// draws nothing for it.
 	o.playerStatuses.clear(o.bus, published)
 	if o.metrics != nil {
-		// Reset before Set, so a zone or state this pass found nobody in
-		// reads zero instead of the last pass's stale count.
+		// Reset first, so a zone or state with no Player in this pass
+		// is removed and does not keep an earlier pass's count.
 		o.metrics.players.Reset()
 		for bucket, count := range playerCounts {
 			o.metrics.players.WithLabelValues(bucket[0], bucket[1]).Set(float64(count))
@@ -1292,19 +1119,11 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 	}
 }
 
-// publishPlayerStatus derives one unit's presentable state from the
-// Plays the caller read and the report desk, and writes it to the unit's
-// retained status topic. It answers the topic it wrote, so the caller
-// records which topics this pass still owns, and the state it derived, so
-// the caller writes the same state into the Player's status. The memo
-// decides whether the payload reaches the broker at all: a payload the
-// broker already holds is churn a new subscriber does not need, because
-// it reads the current value off the retained topic. That skip is what
-// keeps the tick off the bus while a unit sits idle, and it is also what
-// makes the pass silent behind an ending the bus reader already answered.
-//
-// The pass and the bus reader both call this, and the state is derived
-// inside the memo's mutex (publishedStatuses says why).
+// publishPlayerStatus derives one Player's bus status and publishes it
+// on the Player's retained status topic, unless the broker already has
+// that payload. It returns the topic and the derived PlayerStatus. The
+// pass and the bus reader both call it, so the status is derived while
+// the mutex of playerStatuses is held (publishedStatuses).
 func (o *operator) publishPlayerStatus(player *Player, plays []Play) (string, PlayerStatus) {
 	topic := playerStatusTopic(o.topicBase, player.Metadata.Namespace, player.Metadata.Name)
 	var desired PlayerStatus
@@ -1315,12 +1134,10 @@ func (o *operator) publishPlayerStatus(player *Player, plays []Play) (string, Pl
 		return payload, status.Activity, err
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "marshaling player %s/%s bus status: %v\n",
+		fmt.Fprintf(os.Stderr, "encoding the bus status of Player %s/%s: %v\n",
 			player.Metadata.Namespace, player.Metadata.Name, err)
 		return topic, desired
 	}
-	// A unit that starts or ends a run is the moment the idle screen gives
-	// the screen to a film or takes it back, so the move gets a line.
 	if moved {
 		logLine(o.log, "player %s/%s: activity %s, was %s%s, published to %s",
 			player.Metadata.Namespace, player.Metadata.Name, desired.Activity, was, playOf(desired), topic)
@@ -1328,7 +1145,6 @@ func (o *operator) publishPlayerStatus(player *Player, plays []Play) (string, Pl
 	return topic, desired
 }
 
-// playOf names the Play a status carries, for a line.
 func playOf(status PlayerStatus) string {
 	if status.Play == "" {
 		return ""
@@ -1336,11 +1152,9 @@ func playOf(status PlayerStatus) string {
 	return ", play " + status.Play
 }
 
-// reconcileRemotes reconciles a standing pod for every Remote in the
-// cluster and writes each Remote's status. A Remote's pod runs whether or
-// not anything plays, so the pass reads the whole collection and hands it
-// here rather than deriving it from the Plays. It runs after reconcileFocus
-// on the same pass, so the status reports the mark this pass settled.
+// reconcileRemotes reconciles each Remote's reader pod, publishes its
+// key table, and writes its status. It runs after reconcileFocus, so the
+// status has the focus mark that this pass settled.
 func (o *operator) reconcileRemotes(remotes []Remote, claims map[string]claimRead, keymaps map[string]*Keymap) {
 	live := make(map[string]bool, len(remotes))
 	present := make(map[string]bool, len(remotes))
@@ -1349,39 +1163,34 @@ func (o *operator) reconcileRemotes(remotes []Remote, claims map[string]claimRea
 		key := controllerKey(remote.Metadata.Namespace, remote.Metadata.Name)
 		live[key] = true
 		if err := o.reconcileRemote(remote, claims[key]); err != nil {
-			fmt.Fprintf(os.Stderr, "reconciling remote %s/%s: %v\n",
+			fmt.Fprintf(os.Stderr, "reconciling Remote %s/%s: %v\n",
 				remote.Metadata.Namespace, remote.Metadata.Name, err)
 		}
 		table := o.publishKeys(remote, keymaps, present)
-		// The one status this pass builds carries the mark and the gap
-		// together, because two writers of one status would alternate
-		// and each write wakes the watch.
+		// One write sets the mark and the unbound codes together,
+		// because two writers of one status would undo each other, and
+		// each write wakes the watch.
 		desired := RemoteStatus{
 			Player:     o.focus.markFor(key),
 			Peripheral: o.peripherals.peripheralFor(key),
 		}
-		// A table that did not compile reports no gap, because the gap is
-		// what the live table leaves unbound, and this pass has no live
-		// table to subtract.
+		// A Keymap that did not compile reports no unbound codes, because
+		// this pass has no compiled table to compare the codes with.
 		if declared, held := o.codes.codesFor(key); held && table != nil {
 			desired.Unbound = unboundCodes(declared, table)
 		}
 		if err := writeRemoteStatus(o.client, remote, desired); err != nil {
-			fmt.Fprintf(os.Stderr, "writing remote %s/%s status: %v\n",
+			fmt.Fprintf(os.Stderr, "writing the status of Remote %s/%s: %v\n",
 				remote.Metadata.Namespace, remote.Metadata.Name, err)
 		}
 	}
-	// The codes desk holds a key per controller it has heard from, so it
-	// shrinks to the Remotes the cluster still holds.
 	o.codes.retain(live)
 	o.clearGoneKeys(present)
 }
 
-// clearGoneKeys clears the retained table of each Remote that is gone
-// with an empty payload. The map is the record of what this operator
-// wrote, so it is the one place that knows which topics to clear, and a
-// topic leaves it only once the bus queued the clear. A clear dropped on
-// a full queue goes out on the next pass.
+// clearGoneKeys clears the retained table of each Remote that is gone.
+// A topic leaves keysPublished only after the bus queued the clear, so
+// a dropped clear is sent again on the next pass.
 func (o *operator) clearGoneKeys(present map[string]bool) {
 	for topic := range o.keysPublished {
 		if !present[topic] && o.bus.Publish(topic, nil, true) {
@@ -1390,10 +1199,10 @@ func (o *operator) clearGoneKeys(present map[string]bool) {
 	}
 }
 
-// writeRemoteStatus follows the same two rules as the Play's and the
-// Player's status writers: an unchanged status is not written, and a
-// conflict earns one retry. The operator watches Remotes, so a needless
-// write would wake the loop that just wrote it, a pass per pass forever.
+// writeRemoteStatus skips an unchanged status and retries a conflict
+// once, as the Play and Player writers do. The operator watches
+// Remotes, so an unneeded write would wake another pass, which would
+// write again.
 func writeRemoteStatus(c *apiclient.Client, remote *Remote, desired RemoteStatus) error {
 	same, err := sameRemoteStatus(remote.Status, desired)
 	if err != nil {
@@ -1409,10 +1218,8 @@ func writeRemoteStatus(c *apiclient.Client, remote *Remote, desired RemoteStatus
 		return err
 	}
 
-	// A conflict means the Remote changed between the read and the write.
-	// The fresh copy carries the resourceVersion the API server accepts,
-	// and the desired status still reports the mark this pass settled, so
-	// it goes on unchanged.
+	// The desired status does not depend on what changed, so it is
+	// written unchanged onto the fresh copy.
 	fresh, err := GetRemote(c, remote.Metadata.Namespace, remote.Metadata.Name)
 	if err != nil {
 		return err
@@ -1426,9 +1233,8 @@ func writeRemoteStatus(c *apiclient.Client, remote *Remote, desired RemoteStatus
 	return err
 }
 
-// sameRemoteStatus compares the marshaled forms, the way the Play's
-// and the Player's writers compare, because the marshaled form is what
-// the API server stores and what omitempty decides.
+// sameRemoteStatus compares the marshaled forms, because the API server
+// stores the marshaled form, and omitempty decides which fields it has.
 func sameRemoteStatus(current, desired RemoteStatus) (bool, error) {
 	was, err := json.Marshal(current)
 	if err != nil {
@@ -1441,10 +1247,8 @@ func sameRemoteStatus(current, desired RemoteStatus) (bool, error) {
 	return string(was) == string(wants), nil
 }
 
-// reconcile takes one Play from the Player it names to the status it
-// earns. The order matters: nothing is created until the Player is read
-// and every URI resolves, so a Play that can never run leaves no
-// half-built objects behind.
+// reconcile reconciles one Play from the view, and again from the API
+// server when the run needs the pass to act (viewReads).
 func (o *operator) reconcile(play *Play, defaults *MediaPreferences) error {
 	err := o.reconcileFrom(play, defaults, o.viewReads(), false)
 	if errors.Is(err, errReadLive) {
@@ -1453,28 +1257,23 @@ func (o *operator) reconcile(play *Play, defaults *MediaPreferences) error {
 	return err
 }
 
-// errReadLive is how a reconcile from the view says that the run must
-// be read again from the API server before the pass acts on it.
 var errReadLive = errors.New("the run needs a read from the API server")
 
-// runReads is where one run reads its Player and the Player's Remotes.
 type runReads struct {
 	player func(namespace, name string) (*Player, error)
 	remote func(namespace, name string) (*Remote, error)
 }
 
-// A run reads its Player and Remotes from the view first. A run the
-// view shows as settled needs nothing more, and costs no request. A run
-// the pass would act on reads them again from the API server: a Player
-// or a Remote the view does not hold, which would fail the Play, and a
-// pod the pass would create or replace, which is built from them. Each
-// collection has a watch of its own, and nothing orders one watch's
-// events against another's, so a Play applied in one file with its
-// Player and its Remote can reach the view before them, and a Player
-// edit can reach it after the pod the edit reshaped. The second read
-// answers what the API server holds, so the pass never fails a Play for
-// an object that exists, and never builds or compares a pod against a
-// Player spec that an edit already replaced.
+// viewReads reads a run's Player and Remotes from the view, so a
+// settled run costs no request. A run that the pass would act on reads
+// them again from the API server (liveReads): one whose Player or Remote
+// the view lacks, which would fail the Play, and one whose pod the pass
+// would create or replace. Each collection has its own watch, and
+// nothing orders one watch's events against another's. So a Play
+// applied in one file with its Player can reach the view before the
+// Player, and a Player edit can reach it after the pod that the edit
+// changed. The second read keeps the pass from failing a Play for an
+// object that exists, and from building a pod from an old Player spec.
 func (o *operator) viewReads() runReads {
 	return runReads{
 		player: func(namespace, name string) (*Player, error) { return o.view.Player(o.client, namespace, name) },
@@ -1489,12 +1288,13 @@ func (o *operator) liveReads() runReads {
 	}
 }
 
-// reconcileFrom is one reconcile with one source of reads. live says
-// the reads come from the API server. A reconcile from the view answers
-// errReadLive where the run needs the pass to act.
+// reconcileFrom reconciles one Play with the given reads. Nothing is
+// created until the Player is read and every URI resolves, so a Play
+// that can never run leaves no objects behind. live is true when the
+// reads come from the API server. A reconcile from the view returns
+// errReadLive when the run needs the pass to act.
 func (o *operator) reconcileFrom(play *Play, defaults *MediaPreferences, reads runReads, live bool) error {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
-	// The default tier's spec, or nil when the cluster has no default.
 	var defaultSpec *MediaPreferencesSpec
 	if defaults != nil {
 		defaultSpec = &defaults.Spec
@@ -1524,19 +1324,15 @@ func (o *operator) reconcileFrom(play *Play, defaults *MediaPreferences, reads r
 		return o.refusePlay(play, derivePlayStatus(play, player, resolveErr, nil, nil, prefs))
 	}
 
-	// A missing Remote fails the Play only while there is still no pod.
-	// Once the pod exists, its container set is fixed and no edit to the
-	// Player's remotes can reach this run, so a Remote deleted mid-film
-	// must not fail the film. A Keymap never reaches this gather: it is
-	// compiled and published on the bus per Remote by reconcileRemotes,
-	// and a broken Keymap edit leaves the last good table in place
-	// instead.
+	// A missing Remote fails the Play only while the run has no pod, so
+	// a Remote that is deleted during a film does not fail the film. The
+	// Keymaps do not reach the pod, so a broken Keymap never fails a
+	// Play (publishKeys).
 	remotes, remoteErr := gatherRemotes(reads.remote, player)
 	if remoteErr != nil {
-		// The pod decides whether the Play fails. A pod the view holds
-		// keeps the run. A pod the view does not hold is read from the API
-		// server, because a pod this operator created on the last pass can
-		// still be on its way to the view.
+		// A pod that the operator created in the last pass may not be in
+		// the view yet, so a pod that the view lacks is read from the API
+		// server.
 		if !live {
 			if _, err := o.view.Pod(namespace, podName(name)); err != nil {
 				return errReadLive
@@ -1552,9 +1348,8 @@ func (o *operator) reconcileFrom(play *Play, defaults *MediaPreferences, reads r
 		}
 		remotes = nil
 	}
-	// The operator fills each remote's two topics here, because the
-	// topic base lives with the operator and not the gather. Both carry
-	// the Remote's namespace and name.
+	// The topic base belongs to the operator, so the topics are filled in
+	// here and not in the gather.
 	for index := range remotes {
 		remotes[index].EventsTopic = remoteEventsTopic(o.topicBase, namespace, remotes[index].Name)
 		remotes[index].FocusTopic = remoteFocusTopic(o.topicBase, namespace, remotes[index].Name)
@@ -1577,17 +1372,16 @@ func (o *operator) reconcileFrom(play *Play, defaults *MediaPreferences, reads r
 			delete(o.replacements, runKey(namespace, name))
 		}
 	}
-	// A genuinely new Play steals its controllers, the most-recent-steals
-	// default. A graceful recreate resumes the same Play, so it steals
-	// nothing and the mark stays where a person left it.
+	// A new run takes over its controllers' focus. A recreated pod
+	// resumes the same run, so the focus stays where a person left it.
 	if fresh && len(remotes) > 0 {
-		o.stealFocus(play, remotes)
+		o.takeFocus(play, remotes)
 	}
 	o.countDisplayRestarts(play, pod)
 	status := derivePlayStatus(play, player, nil, pod, o.reports.latestFor(namespace, name), prefs)
-	// A run that keeps failing reads the backoff note in place of the pod's
-	// own failure message, but only once the recreates repeat and only while
-	// the pod is Failed, so a run that recovers reads a clean status.
+	// After backoffNoteThreshold recreates, the backoff note replaces the
+	// pod's failure message, but only while the Play is Failed, so a run
+	// that recovers has a clean status.
 	if status.Phase == phaseFailed {
 		if note, backing := o.backoffNote(runKey(namespace, name)); backing {
 			status.Message = note
@@ -1596,31 +1390,25 @@ func (o *operator) reconcileFrom(play *Play, defaults *MediaPreferences, reads r
 	return o.writePlay(play, status)
 }
 
-// writePlay writes a Play's status through the position throttle. A
-// change in phase, pause, item, or message writes at once. A change that
-// is only a position advance waits positionWriteInterval, so the resource
-// keeps a coarse clock while the bus carries the live one, and a position
-// write does not wake the operator's own watch a second later.
-//
-// A phase that moves is the answer to a person's play request, so the
-// write that moves it gets a line, an Event, and a count on the playback
-// counters, with the message a failed phase carries. Each condition
-// that transitioned posts its Event too. The status it moved from is
-// the one the API server held, which writePlayStatusFrom answers, so a
-// pass that read the Play one write behind neither logs, posts, nor
-// counts the move twice, and a write the API server refused posts
-// nothing.
+// writePlay writes a Play's status. A change that is only a position
+// advance waits positionWriteInterval. A phase change gets a log line,
+// an Event, and a count on the playback counters, and each changed
+// condition posts its Event. The change is compared with the status that
+// the API server had, which writePlayStatusFrom returns, so a pass that
+// read a stale Play does not log, post, or count the change twice, and a
+// refused write posts nothing.
 func (o *operator) writePlay(play *Play, desired PlayStatus) error {
 	return o.writePlayAs(play, desired, reasonPlaybackFailed)
 }
 
-// refusePlay writes the Failed status of a Play whose own spec can
-// never run, so its Event reads InvalidSpec and not PlaybackFailed.
+// refusePlay writes the Failed status of a Play whose spec can never
+// run, with the Event reason InvalidSpec.
 func (o *operator) refusePlay(play *Play, desired PlayStatus) error {
 	return o.writePlayAs(play, desired, reasonInvalidSpec)
 }
 
-// writePlayAs is writePlay with the reason a move to Failed posts.
+// writePlayAs is writePlay with failReason as the Event reason of a
+// change to Failed.
 func (o *operator) writePlayAs(play *Play, desired PlayStatus, failReason string) error {
 	key := runKey(play.Metadata.Namespace, play.Metadata.Name)
 	if onlyPositionChanged(play.Status, desired) &&
@@ -1648,8 +1436,7 @@ func (o *operator) writePlayAs(play *Play, desired PlayStatus, failReason string
 	return nil
 }
 
-// phaseName names a phase for a line, and the phase a new Play carries
-// before its first write.
+// phaseName returns "none" for the empty phase of a new Play.
 func phaseName(phase string) string {
 	if phase == "" {
 		return "none"
@@ -1657,7 +1444,6 @@ func phaseName(phase string) string {
 	return phase
 }
 
-// messageOf adds a status message to a line when the status carries one.
 func messageOf(status PlayStatus) string {
 	if status.Message == "" {
 		return ""
@@ -1665,34 +1451,30 @@ func messageOf(status PlayStatus) string {
 	return ": " + status.Message
 }
 
-// ensurePlayback brings the running pod into line with the pod the
-// current Player would produce. A Play with no pod yet gets its claim
-// and its pod. A gather that failed keeps an existing pod as it is,
-// because the container set is fixed once it runs and a Keymap broken
-// mid-film must not fail the film. A running pod its Player reshaped is
-// recreated at the film's place, and a running pod its Player left
-// alone is kept. A pod on its way out is left to finish, and the pass
-// that finds it gone creates the pod its recreate owes.
+// ensurePlayback makes the run's pod match the pod that the current
+// Player produces. A run with no pod gets its claim and its pod. A
+// Failed pod, and a pod whose claim or Remotes the Player changed, is
+// recreated at the film's position. When keepExisting is set, because
+// the Remotes could not be gathered, an existing pod stays as it is,
+// even a Failed one. A pod that is being deleted is left to finish,
+// and the pass that finds it gone creates the replacement.
 //
-// The bool reports a genuinely new pod, true only when the run has no pod
-// and owes no recreate. A fresh Play uses it to steal its controllers,
-// and a recreate, which returns false, leaves the focus mark alone.
+// The bool is true only for a new run: no pod, no replacement owed, and
+// no saved position. The caller then takes over the run's controllers.
 func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote, keepExisting bool) (*Pod, bool, error) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
 	key := runKey(namespace, name)
-	// ensurePlayback runs only for a run the view shows something to act
-	// on, so it reads the pod from the API server and acts on that read.
-	// clusterview.go says why.
+	// The pass is about to act, so it reads the pod from the API server
+	// and not from the view (clusterview.go).
 	running, err := GetPod(o.client, namespace, podName(name))
 	if errors.Is(err, apiclient.ErrNotFound) {
 		if reason, owed := o.replacements[key]; owed {
 			pod, err := o.finishReplacement(play, player, claim, resolved, prefs, remotes, reason)
 			return pod, false, err
 		}
-		// Nothing answers for the pod: a taint evicted it, its node was lost,
-		// or the Play never had one. A run with a saved place resumes without
-		// stealing its controllers back, and a run with no saved place starts
-		// at spec.start and steals them. Both wait out the recreate backoff.
+		// The run has no pod because the Play is new, or because an
+		// eviction or a lost node removed it. Both cases wait for the
+		// recreate backoff.
 		_, resuming := o.resumePoint(play)
 		if !o.mayResume(key) {
 			return nil, false, nil
@@ -1700,22 +1482,22 @@ func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceCla
 		if err := ensureClaim(o.client, claim); err != nil {
 			return nil, false, err
 		}
-		// The session goes on the unit's Receiver before the pod exists, so
-		// the equipment is awake and on the right input by the time mpv draws
-		// its first frame. A Player that is off turns on first.
+		// Turn the Player on and apply its Receiver session before the
+		// pod exists, so the equipment is on the right input when mpv
+		// draws its first frame.
 		o.turnOnForPlay(play, player)
 		o.applyReceiverSession(player)
-		pod, err := o.createPodAtStash(play, player, claim, resolved, prefs, remotes)
+		pod, err := o.createPodAtSavedPosition(play, player, claim, resolved, prefs, remotes)
 		switch {
 		case err != nil:
 		case resuming:
-			// A run with a saved place had a pod that is gone, which a
-			// person may need to look at, so the create is an Event too.
+			// A run with a saved position lost its pod, which a person
+			// may need to look at, so this create also posts an Event.
 			o.notePodRecreated(play, fmt.Sprintf("created playback pod %s on player %s at %s, because the run had no pod",
-				pod.Metadata.Name, player.Metadata.Name, startName(o.stashedPosition(play))), true)
+				pod.Metadata.Name, player.Metadata.Name, startName(o.savedPosition(play))), true)
 		default:
 			logLine(o.log, "play %s: created playback pod %s on player %s at %s, because the play is new",
-				key, pod.Metadata.Name, player.Metadata.Name, startName(o.stashedPosition(play)))
+				key, pod.Metadata.Name, player.Metadata.Name, startName(o.savedPosition(play)))
 		}
 		return pod, !resuming, err
 	}
@@ -1723,24 +1505,23 @@ func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceCla
 		return nil, false, err
 	}
 	if running.Metadata.deleting() {
-		// The pod is on its way out, and its replacement reuses its name,
-		// so nothing can be created until it is gone. What the terminating
-		// pod says is not the run's state either: its remote set is the old
-		// one, and its mpv exits 4 on the delete's SIGTERM, which fails the
-		// pod. The pod watch reports the delete, and that pass creates the
-		// replacement.
+		// The replacement uses the same name, so nothing can be created
+		// until this pod is gone. Its status does not describe the run
+		// either, because mpv exits with 4 on the SIGTERM of the delete,
+		// which makes the pod Failed. The pod watch wakes the pass that
+		// creates the replacement.
 		return nil, false, nil
 	}
-	// A live pod under the name is the run's pod, whoever created it, so no
-	// replacement is owed any more.
+	// A live pod with this name is the run's pod, whoever created it, so
+	// no replacement is owed.
 	delete(o.replacements, key)
 	if keepExisting {
 		return running, false, nil
 	}
 	if running.Status.Phase == podFailed {
-		// mpv exited non-zero. Recreate the pod at the film's place the way a
-		// Job restarts a failed pod, bounded by the recreate backoff so a
-		// file that crashes at the same place does not recreate without end.
+		// mpv exited with a non-zero status. The recreate backoff keeps
+		// a file that crashes at the same position from being recreated
+		// without end.
 		if !o.mayResume(key) {
 			return running, false, nil
 		}
@@ -1765,13 +1546,11 @@ func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceCla
 	return pod, false, err
 }
 
-// viewedPlayback answers from the view when the run needs nothing done:
-// its pod stands, runs or waits to run, and holds the claim and the
-// Remotes the current Player produces, or the pod is on its way out and
-// the pass waits for it to go. The bool is false for every other case,
-// and the reconcile then reads the API server and runs ensurePlayback.
-// The branches match ensurePlayback's own, so a settled run costs no
-// request.
+// viewedPlayback reports, from the view, whether ensurePlayback would do
+// nothing: the pod is being deleted, or it has not failed and has the
+// claim and the Remotes that the current Player produces. When the bool
+// is false, the reconcile reads the API server and runs ensurePlayback.
+// The branches must match those of ensurePlayback.
 func (o *operator) viewedPlayback(play *Play, claim *ResourceClaim, remotes []boundRemote, keepExisting bool) (*Pod, bool) {
 	pod, err := o.view.Pod(play.Metadata.Namespace, podName(play.Metadata.Name))
 	if err != nil {
@@ -1797,7 +1576,6 @@ func (o *operator) viewedPlayback(play *Play, claim *ResourceClaim, remotes []bo
 	return pod, true
 }
 
-// startName names the place a pod starts at, for a line.
 func startName(position string) string {
 	if position == "" {
 		return "the start"
@@ -1805,8 +1583,6 @@ func startName(position string) string {
 	return position
 }
 
-// podMessage adds the kubelet's message for a failed pod to a line, word
-// for word, when the pod carries one.
 func podMessage(pod *Pod) string {
 	if pod.Status.Message == "" {
 		return ""
@@ -1814,19 +1590,18 @@ func podMessage(pod *Pod) string {
 	return ": " + pod.Status.Message
 }
 
-// createPodAtStash creates the playback pod with mpv's start set to the
-// film's saved place. A genuinely new run has no saved place, so the start
-// falls back to spec.start.
-func (o *operator) createPodAtStash(play *Play, player *Player, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote) (*Pod, error) {
+// createPodAtSavedPosition creates the playback pod with mpv starting at the
+// position that savedPosition returns.
+func (o *operator) createPodAtSavedPosition(play *Play, player *Player, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote) (*Pod, error) {
 	resume := *play
-	resume.Spec.Start = o.stashedPosition(play)
+	resume.Spec.Start = o.savedPosition(play)
 	return o.createPod(&resume, player, claim, resolved, prefs, remotes)
 }
 
-// createPod creates one playback pod and reads it back on a 409,
-// because another pass, or another copy of this operator, created the
-// pod first. Each create starts mpv, so each one decides what mpv passes
-// through and writes that decision's line.
+// createPod creates one playback pod and logs which audio formats mpv
+// passes through. When the create returns 409, because another pass or
+// another copy of the operator created the pod first, it reads that pod
+// back.
 func (o *operator) createPod(play *Play, player *Player, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote) (*Pod, error) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
 	passthrough := o.passthroughFor(player)
@@ -1844,21 +1619,18 @@ func (o *operator) createPod(play *Play, player *Player, claim *ResourceClaim, r
 	return created, nil
 }
 
-// stashedPosition reads the film's place for a recreate. It prefers the
-// run's own resume point, and falls back to the Play's spec.start for a
-// run that never reported a position, which a startup edit reshaped or a
-// brand-new Play that just started.
-func (o *operator) stashedPosition(play *Play) string {
+// savedPosition returns the position that a new pod starts at: the
+// run's resume point, or spec.start for a run that never reported a
+// position.
+func (o *operator) savedPosition(play *Play) string {
 	if position, ok := o.resumePoint(play); ok {
 		return position
 	}
 	return play.Spec.Start
 }
 
-// resumePoint reads the place a run reached, from the retained bus status
-// first and the Play's status second, and reports whether it found one. A
-// spec.start is not a resume point, so a run that never reported a position
-// starts fresh rather than resumes.
+// resumePoint returns the position that a run reached, from the bus
+// report first and the Play's status second, and whether it found one.
 func (o *operator) resumePoint(play *Play) (string, bool) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
 	if report := o.reports.latestFor(namespace, name); report != nil && report.Position != "" {
@@ -1870,34 +1642,31 @@ func (o *operator) resumePoint(play *Play) (string, bool) {
 	return "", false
 }
 
-// backoffState holds one run's recreate count and the two times that bound
-// its rate: last is when it last recreated, and next is the earliest it may
-// recreate again.
+// backoffState holds one run's recreate count, when it last recreated,
+// and the earliest time it may recreate again.
 type backoffState struct {
 	count int
 	last  time.Time
 	next  time.Time
 }
 
-// The recreate backoff follows the kubelet's CrashLoopBackOff: the first
-// recreate is immediate, and each recreate after it doubles the wait from
-// the base to the cap. A run that stays up for the reset window starts the
-// count over.
+// The recreate backoff follows the kubelet's CrashLoopBackOff: the
+// first recreate is immediate, and the wait doubles after each one from
+// the base up to the cap. A run with no recreate for the reset window
+// starts the count again.
 const (
 	recreateBackoffBase  = 10 * time.Second
 	recreateBackoffCap   = 5 * time.Minute
 	recreateBackoffReset = 10 * time.Minute
 )
 
-// backoffNoteThreshold is how many recreates a run reaches before its status
-// reads the repeated-failure note in place of the pod's own message.
+// backoffNoteThreshold is the recreate count from which a Failed run's
+// status shows the backoff note in place of the pod's message.
 const backoffNoteThreshold = 2
 
-// mayResume reports whether a run may recreate its dead pod now, and
-// advances the backoff when it may. On a yes it schedules one wake at the
-// deadline, so the loop resumes when the wait ends rather than on a
-// tick. On a no a wake from the last yes is already pending, so the caller
-// waits for it.
+// mayResume reports whether a run may create its pod now. When it may,
+// it advances the backoff and schedules a wake at the next deadline, so
+// a refused run is retried by that wake and not at the next tick.
 func (o *operator) mayResume(key string) bool {
 	now := time.Now()
 	state := o.recreateBackoff[key]
@@ -1915,9 +1684,9 @@ func (o *operator) mayResume(key string) bool {
 	return true
 }
 
-// backoffDelay returns the wait after the count-th recreate: the base
-// doubled once per recreate, up to the cap. The doubling runs in a loop and
-// stops at the cap, so a long run of failures never overflows the duration.
+// backoffDelay returns the wait after the count-th recreate. The loop
+// stops at the cap, so a long run of failures cannot overflow the
+// duration.
 func backoffDelay(count int) time.Duration {
 	delay := recreateBackoffBase
 	for range count - 1 {
@@ -1929,30 +1698,26 @@ func backoffDelay(count int) time.Duration {
 	return delay
 }
 
-// backoffNote returns the status message for a run that keeps failing, and
-// reports whether the count reached the threshold. The caller shows it only
-// while the pod is Failed.
+// backoffNote returns the status message for a run that keeps failing,
+// and whether the count reached backoffNoteThreshold.
 func (o *operator) backoffNote(key string) (string, bool) {
 	if o.recreateBackoff[key].count < backoffNoteThreshold {
 		return "", false
 	}
-	return "the playback pod keeps failing; the operator is retrying with a growing delay", true
+	return "the playback pod keeps failing, so the operator recreates it after a growing delay", true
 }
 
-// requeueAfter schedules one wake at delay from now, the requeue-after
-// idiom: the timer fires once and pokes the shared wake, which coalesces
-// with any queued wake, so a run waiting out its backoff wakes when the wait
-// ends.
+// requeueAfter schedules one wake after delay. The wake channel has a
+// buffer of one, so it merges with a wake that is already queued.
 func (o *operator) requeueAfter(delay time.Duration) {
 	if o.wake == nil {
 		return
 	}
-	time.AfterFunc(delay, func() { poke(o.wake) })
+	time.AfterFunc(delay, func() { signalWake(o.wake) })
 }
 
-// clearPanel publishes the empty retained desire on one unit's panel
-// topic, and records the unit in panelClears while the bus has not queued
-// the clear.
+// clearPanel clears one Player's retained panel desire, and records the
+// Player in panelClears when the bus did not queue the clear.
 func (o *operator) clearPanel(key, namespace, name string) {
 	if o.bus.Publish(playerPanelTopic(o.topicBase, namespace, name), nil, true) {
 		delete(o.panelClears, key)

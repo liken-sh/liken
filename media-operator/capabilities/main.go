@@ -1,28 +1,27 @@
-// media-capabilities is media-operator's capabilities agent: one pod on
-// each node with a GPU, which states what each GPU's media driver can
-// decode, encode, and scale, so a claim can ask for a GPU by what it
-// does.
+// media-capabilities is the agent that lets a claim ask for a GPU by
+// what its media driver can decode, encode, and scale. One pod runs on
+// each node with a GPU.
 //
 // `liken` publishes each render node as a `liken.sh` device with the
-// facts it reads from the kernel, and no fact that needs a media
-// driver to read. This agent holds a shareable claim on every render
-// node of its node, asks each node's VA-API driver what it supports,
-// and publishes one media.liken.sh device for each render node. A
-// workload's claim pairs that device with the render node of the same
-// GPU through the standard attribute resource.kubernetes.io/pciBusID,
-// so the scheduler allocates a render node only on a GPU whose driver
-// states what the claim asks for.
+// facts it reads from the kernel. It cannot publish what a media driver
+// supports, because that takes a VA-API query. This agent holds a
+// shareable claim on every render node of its node, queries the VA-API
+// driver of each one, and publishes one `media.liken.sh` device per
+// render node. A workload's claim pairs that device with the `liken.sh`
+// device of the same GPU through the standard attribute
+// `resource.kubernetes.io/pciBusID`, so the scheduler allocates a
+// render node only on a GPU whose driver supports what the claim asks
+// for.
 //
-// The agent is its own program, apart from the operator's, for two
-// reasons. Its query loads libva, so its image builds on the vaapi
-// base, and the operator's static image has no libva. And it serves
-// the kubelet's DRA plugin API over gRPC, which no other role of the
-// operator's program needs, so the pod build that every playback pod
-// runs stays without it.
+// The agent is a separate program from the operator because the query
+// loads libva, so its image builds on the `vaapi` base, and the
+// operator's static image has no libva. The agent also links a gRPC
+// server for the kubelet's DRA plugin API, which the operator's program,
+// run by every playback pod, does not need.
 //
-// With the argument `query <render node>`, the program is the child
-// that runs one query and writes the report as JSON (query.go). With
-// no argument, it is the agent.
+// With the argument `query <render node>`, the program runs one query
+// and writes the report as JSON (query.go). With no argument, it runs
+// the agent.
 package main
 
 import (
@@ -50,8 +49,8 @@ func main() {
 }
 
 // runAgent builds the agent from the pod's environment and runs it
-// until the pod is told to stop. A failure before the first pass ends
-// the process, and the kubelet starts the container again.
+// until the pod receives SIGTERM or an interrupt. A failure before the
+// first pass ends the process, and the kubelet restarts the container.
 func runAgent() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
@@ -87,13 +86,13 @@ func runAgent() error {
 	return operate(ctx, a, watch, serveDRAPlugin)
 }
 
-// newAgent reads the two facts the agent holds for the life of its pod:
-// the Node that owns its slice, and the render nodes its claim holds.
+// newAgent reads what stays fixed for the life of the pod: the Node
+// that owns the slice, and the render nodes that the pod's claim holds.
 func newAgent(client *apiclient.Client, env map[string]string,
 	query func(context.Context, string) (report, error)) (*agent, error) {
 	owner, err := nodeOwner(client, env["NODE_NAME"])
 	if err != nil {
-		return nil, fmt.Errorf("reading node %s: %w", env["NODE_NAME"], err)
+		return nil, fmt.Errorf("reading Node %s: %w", env["NODE_NAME"], err)
 	}
 	held, err := heldDevices(client, env["POD_NAMESPACE"], env["POD_NAME"])
 	if err != nil {
@@ -109,8 +108,9 @@ func newAgent(client *apiclient.Client, env map[string]string,
 
 // operate serves the kubelet plugin and runs a pass for each version of
 // the node's `liken.sh` slice, until the context ends or the plugin
-// fails. watch hands over each version, and nil while the slice does
-// not exist, and its channel closes after its last call.
+// fails. watch calls its callback with each version of the slice, and
+// with nil while the slice does not exist. The channel it returns
+// closes after its last call.
 func operate(ctx context.Context, a *agent,
 	watch func(context.Context, func(*ResourceSlice)) <-chan struct{},
 	serve func(context.Context) error) error {
@@ -119,7 +119,8 @@ func operate(ctx context.Context, a *agent,
 	plugin := make(chan error, 1)
 	go func() { plugin <- serve(ctx) }()
 
-	// Each version wakes the pass, which reads the newest.
+	// The pass always reads the newest version, so a burst of versions
+	// needs only one pass.
 	var mu sync.Mutex
 	var latest *ResourceSlice
 	wakes := make(chan struct{}, 1)
@@ -145,7 +146,7 @@ func operate(ctx context.Context, a *agent,
 	select {
 	case <-ctx.Done():
 	case err := <-plugin:
-		failed = fmt.Errorf("the kubelet plugin stopped: %w", err)
+		failed = fmt.Errorf("serving the DRA plugin: %w", err)
 		stop()
 	}
 	<-passes
@@ -153,13 +154,14 @@ func operate(ctx context.Context, a *agent,
 	return failed
 }
 
-// downwardEnv reads the three values the DaemonSet sets from the
-// downward API, and fails on the first one that is not set.
+// downwardEnv reads the node name, pod name, and pod namespace that the
+// DaemonSet sets from the downward API. It fails on the first one that
+// is empty.
 func downwardEnv(getenv func(string) string) (map[string]string, error) {
 	env := map[string]string{}
 	for _, name := range []string{"NODE_NAME", "POD_NAME", "POD_NAMESPACE"} {
 		if env[name] = getenv(name); env[name] == "" {
-			return nil, fmt.Errorf("%s is not set; the DaemonSet sets it from the downward API", name)
+			return nil, fmt.Errorf("environment variable %s is empty, but the DaemonSet sets it from the downward API", name)
 		}
 	}
 	return env, nil

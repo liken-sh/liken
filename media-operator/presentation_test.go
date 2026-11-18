@@ -1,21 +1,18 @@
 package main
 
-// These tests cover the presentation blocks: the operator bakes one per
-// item into the pod, and the command sidecar reads them back and forwards each
-// one to the display as the playlist reaches its item.
-
 import "testing"
 
-// The presentation blocks arrive as one baked variable. A value the
-// sidecar cannot read leaves no blocks, so every item forwards the empty object
-// and the display falls back to the file name.
+// parsePresentations reads the JSON array of presentation blocks, one
+// per playlist item, that the operator writes into the pod's
+// environment. A missing value or one that is not a JSON array gives no
+// blocks.
 func TestParsePresentations(t *testing.T) {
 	cases := []struct {
 		name   string
 		value  string
 		blocks []string
 	}{
-		{name: "two baked blocks", value: `[{"title":"One"},{"title":"Two"}]`, blocks: []string{`{"title":"One"}`, `{"title":"Two"}`}},
+		{name: "two blocks", value: `[{"title":"One"},{"title":"Two"}]`, blocks: []string{`{"title":"One"}`, `{"title":"Two"}`}},
 		{name: "an empty array", value: `[]`, blocks: []string{}},
 		{name: "the variable is unset"},
 		{name: "the value is not JSON", value: `{`},

@@ -1,15 +1,12 @@
-# The message bus: one Mosquitto broker as its own Deployment, Service,
-# and ConfigMap, all named bus, beside the operator's own Deployment and
-# never inside it. The two are separate so the operator restarts without
-# dropping a message. The broker and the pods that use it stay up, and a
-# button press reaches mpv while the operator is down.
+# The message bus is a Mosquitto broker, which the operator and every pod
+# that it creates connect to over MQTT. A Remote's pod publishes button
+# presses, and the playback pod acts on them itself, so a press still
+# reaches mpv while the operator restarts. The playback pods publish
+# reports, and the operator writes them to the Play's status.
 #
-# Every pod and the operator speak MQTT to this broker. The standing
-# remote pods publish button events, the playback pods publish their
-# reports, and the operator subscribes to both. MQTT is the choice over
-# NATS because it is the native protocol of home automation, so a Remote,
-# a Player, and a Play that already speak MQTT are one wiring step from a
-# home's Home Assistant.
+# The bus uses MQTT instead of NATS because home automation systems such
+# as Home Assistant use MQTT, so they can read and send the same messages
+# with no gateway.
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -20,9 +17,8 @@ spec:
   selector:
     matchLabels:
       app: bus
-  # Recreate, so two brokers never bind the same Service at once. The
-  # broker holds no volume, so a restart loses only the retained set,
-  # which the next report from each running Play refills within seconds.
+  # Recreate stops the old broker before it starts the new one, so two
+  # brokers never serve the Service at once.
   strategy:
     type: Recreate
   template:
@@ -30,12 +26,11 @@ spec:
       labels:
         app: bus
     spec:
-      # The mosquitto user the image builds, uid 1883. The pod runs as
-      # that user from the start, so the broker never runs as root and
-      # never drops privileges. The image's own entrypoint would chown
-      # its directories and setuid away from root, and both fail once the
-      # pod drops every capability, so the container runs mosquitto
-      # directly instead of through that entrypoint.
+      # uid 1883 is the image's mosquitto user. The image's entrypoint
+      # starts as root, changes the owner of its directories, and then
+      # drops to that user. Both steps fail when the container drops
+      # every capability, so the pod starts as the mosquitto user and
+      # runs mosquitto directly.
       securityContext:
         runAsUser: 1883
         runAsGroup: 1883
@@ -43,20 +38,14 @@ spec:
       containers:
         - name: bus
           # The `eclipse-mosquitto` entry of toolchains/images.toml.
-          # Mosquitto 2.1 publishes only the Alpine variant, so the tag
-          # names it. Pinned to a version rather than latest so a broker
-          # restart runs the same broker the manifest was read with.
+          # Mosquitto 2.1 publishes only the Alpine variant.
           image: eclipse-mosquitto:2.1.2-alpine
-          # Run the broker directly, not through the image's entrypoint,
-          # which chowns and drops privileges the locked-down pod cannot.
           command: ["/usr/sbin/mosquitto", "-c", "/mosquitto/config/mosquitto.conf"]
           ports:
             - name: mqtt
               containerPort: 1883
-          # The ConfigMap below, mounted where the image reads its
-          # configuration, so it replaces the image's default config. The
-          # default config also opens Mosquitto's HTTP API on port 9883,
-          # and the ConfigMap opens only the MQTT port.
+          # The ConfigMap replaces the image's default configuration,
+          # which also opens Mosquitto's HTTP API on port 9883.
           volumeMounts:
             - name: config
               mountPath: /mosquitto/config/mosquitto.conf
@@ -66,12 +55,8 @@ spec:
               drop: ["ALL"]
             privileged: false
             allowPrivilegeEscalation: false
-          # The broker's runtime memory is a few megabytes, so its cost
-          # on a one-gigabyte machine is noise beside k3s. Measured on a
-          # home cluster over eight days, its working set was 4.9Mi at
-          # the 99th percentile and 5.5Mi at most, and its cpu less than
-          # 1m. The limit is about six times that maximum. No cpu limit,
-          # because a throttled broker delays every press.
+          # There is no cpu limit, because a throttled broker delays every
+          # button press.
           resources:
             requests:
               cpu: 10m
@@ -83,33 +68,26 @@ spec:
           configMap:
             name: bus
 ---
-# The broker's configuration.
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: bus
 data:
-  # listener 1883 opens the MQTT port on every interface. A config with
-  # no listener line makes Mosquitto listen on localhost only, and then
-  # no other pod reaches the broker.
+  # Without a `listener` line, Mosquitto listens on localhost only.
   #
-  # allow_anonymous true accepts a client that presents no credentials.
-  # The in-cluster network is the trust boundary, and the broker accepts
-  # the cluster's own pods, so anonymous is correct here. A bring-your-own
-  # broker outside the cluster states its own credentials instead.
+  # `allow_anonymous true` accepts clients that send no credentials,
+  # because only pods in the cluster can reach the broker. A broker
+  # outside the cluster that you run yourself can require credentials.
   #
-  # persistence false keeps no volume. Input events are momentary and
-  # want no persistence, and reports are published retained, so the
-  # broker holds the last report per Play in memory and refills that set
-  # from each running Play within seconds of a restart.
+  # `persistence false` keeps retained messages only in memory. A button
+  # press is useless after a restart, and each playback pod publishes its
+  # last report again when it reconnects.
   mosquitto.conf: |
     listener 1883
     allow_anonymous true
     persistence false
 ---
-# Where every pod and the operator reach the broker. The operator cannot
-# derive this name, so it reads bus.liken-system.svc:1883 from its own
-# environment and passes the address into every pod it creates.
+# operator.yaml sets this Service's address in MEDIA_BUS_ADDRESS.
 apiVersion: v1
 kind: Service
 metadata:

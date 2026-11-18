@@ -1,13 +1,11 @@
 package main
 
-// This file writes the OpenAPI 3.1 document. It is generated from the
-// router and committed, so the document and the routes come from one
-// list and a test fails when they differ; `go generate` rewrites it.
-// Each extension route is its own path item with no {.ext}, because
-// OpenAPI has no form for a partial path segment and a client
-// generator reads one fixed path per representation. The served copy
-// changes one thing about the committed one: its servers entry names
-// the origin the request reached.
+// This file builds the OpenAPI 3.1 document of media-api, which is
+// committed as openapi.json. A test fails when the committed copy
+// differs from the router, and `go generate` rewrites it. Each
+// extension route, such as media.mp4, is its own path item, because
+// OpenAPI cannot express a partial path segment like {.ext} and client
+// generators expect one fixed path for each representation.
 
 //go:generate go test -run TestTheOpenAPIDocumentMatchesTheRouter -update-openapi
 
@@ -18,18 +16,18 @@ import (
 	"strings"
 )
 
-// openAPIServerPlaceholder is the server the committed copy names. The
-// served copy replaces it with the configured public base, or else
-// the origin the request reached.
+// openAPIServerPlaceholder is the server URL in the committed copy. The
+// served copy replaces it with the configured public base URL, or with
+// the origin of the request when none is configured.
 const openAPIServerPlaceholder = "https://media-api.liken-system.svc"
 
 //go:embed openapi.json
 var committedOpenAPI []byte
 
-// openAPISpecification is the document's shape, narrow on purpose: the
-// paths, the three methods, the parameters, and the statuses each
-// route answers. No schemas, because every body is a live capture, a
-// problem document, or one of the three documents the manual shows.
+// openAPISpecification has only the parts of OpenAPI that this
+// document uses. It has no schemas, because each response body is a
+// live capture, a problem document, or a document that the manual
+// describes.
 type openAPISpecification struct {
 	OpenAPI    string                    `json:"openapi"`
 	Info       openAPIInfo               `json:"info"`
@@ -39,7 +37,6 @@ type openAPISpecification struct {
 	Components openAPIComponents         `json:"components"`
 }
 
-// The two ways a caller names itself, as OpenAPI spells them.
 type openAPIComponents struct {
 	SecuritySchemes map[string]openAPISecurityScheme `json:"securitySchemes"`
 }
@@ -89,9 +86,9 @@ type openAPIResponse struct {
 	Description string `json:"description"`
 }
 
-// routeTemplates lists every template the router serves, built from
-// the same aspects and forms the router is built from, so the document
-// and the router can never name different routes.
+// routeTemplates returns every route template that the router serves.
+// It reads the same captureAspects as the router, so a new aspect or
+// form reaches the document without an edit here.
 func routeTemplates() []string {
 	templates := []string{
 		apiBasePath,
@@ -107,9 +104,6 @@ func routeTemplates() []string {
 	return templates
 }
 
-// openAPIDocument builds the document: one path item per template,
-// with GET, HEAD, and OPTIONS, the aspect's own query keys as
-// parameters, and the statuses the route table states.
 func openAPIDocument() []byte {
 	specification := openAPISpecification{
 		OpenAPI: "3.1.0",
@@ -121,9 +115,9 @@ func openAPIDocument() []byte {
 				"compose the two into one muxed stream.",
 		},
 		Servers: []openAPIServer{{URL: openAPIServerPlaceholder}},
-		// A list of two requirement objects is OpenAPI's OR, so a
-		// route takes the client certificate or the token, in the
-		// order this API reads them.
+		// Separate requirement objects in the list are alternatives, so
+		// a request authenticates with either a client certificate or
+		// a token.
 		Security: []map[string][]string{
 			{"mutualTLS": {}},
 			{"bearer": {}},
@@ -176,9 +170,9 @@ func openAPIDocument() []byte {
 	return append(body, '\n')
 }
 
-// operationID derives the id from the template, playerMediaMp4 for
-// the media.mp4 route, so a new form gets an id without a table to
-// keep in step and no two routes share one.
+// operationID derives the operation id from the template, such as
+// playerMediaMp4 for the media.mp4 route, so a new form needs no entry
+// in a lookup table.
 func operationID(template string) string {
 	switch template {
 	case apiBasePath:
@@ -208,8 +202,8 @@ func capitalized(text string) string {
 	return string(cleaned)
 }
 
-// openAPIParameters lists the two path variables of a Player route,
-// then the query keys the route's aspect takes.
+// openAPIParameters returns the namespace and name path parameters of a
+// Player route, then the query keys of the route's aspect.
 func openAPIParameters(template string) []openAPIParameter {
 	var parameters []openAPIParameter
 	if strings.HasPrefix(template, apiPlayerTemplate) {
@@ -224,9 +218,9 @@ func openAPIParameters(template string) []openAPIParameter {
 	return parameters
 }
 
-// aspectOf finds the aspect a template names and the form where the
-// template names one. An empty form means the extensionless route,
-// which negotiates.
+// aspectOf returns the aspect of a template and, when the template has
+// an extension, its form. The form is empty for the route without an
+// extension, which chooses the format from the Accept header.
 func aspectOf(template string) (captureAspect, mediaForm, bool) {
 	for _, aspect := range captureAspects() {
 		prefix := apiPlayerTemplate + "/" + aspect.name
@@ -242,18 +236,16 @@ func aspectOf(template string) (captureAspect, mediaForm, bool) {
 	return captureAspect{}, mediaForm{}, false
 }
 
-// templateKeys is the query keys the template's aspect takes, and
-// none for a document route.
+// templateKeys returns the query keys of the template's aspect, or nil
+// for a document route.
 func templateKeys(template string) []string {
-	aspect, _, held := aspectOf(template)
-	if !held {
+	aspect, _, ok := aspectOf(template)
+	if !ok {
 		return nil
 	}
 	return aspect.keys
 }
 
-// openAPISummary is one line on what each route answers, as the route
-// table states it.
 func openAPISummary(template string) string {
 	switch template {
 	case apiBasePath:
@@ -263,8 +255,8 @@ func openAPISummary(template string) string {
 	case apiPlayerTemplate:
 		return "The Player's Display, its Sinks, whether a Play runs, and the stream count."
 	}
-	aspect, form, held := aspectOf(template)
-	if !held {
+	aspect, form, ok := aspectOf(template)
+	if !ok {
 		return ""
 	}
 	subject := map[string]string{
@@ -278,19 +270,15 @@ func openAPISummary(template string) string {
 	return subject + ", as " + form.Type + "."
 }
 
-// openAPIResponses lists the statuses a route answers. Every route
-// answers 401, 403, and 405. A document route adds 200 and 304, and
-// the info route 404. A capture route adds its own 200, 307, or 409,
-// then the statuses an upstream or the grammar can produce.
 func openAPIResponses(template string) map[string]openAPIResponse {
 	responses := map[string]openAPIResponse{
 		"401": {Description: "No client certificate and no token, or a token the TokenReview refused."},
 		"403": {Description: "The SubjectAccessReview denied the subject."},
 		"405": {Description: "A method other than GET, HEAD, or OPTIONS."},
 	}
-	aspect, _, held := aspectOf(template)
-	if !held {
-		responses["200"] = openAPIResponse{Description: documentAnswer(template)}
+	aspect, _, ok := aspectOf(template)
+	if !ok {
+		responses["200"] = openAPIResponse{Description: documentResponse(template)}
 		responses["304"] = openAPIResponse{Description: "The document matches the If-None-Match field."}
 		if template == apiPlayerTemplate {
 			responses["404"] = openAPIResponse{Description: "No Player of that name."}
@@ -316,30 +304,28 @@ func openAPIResponses(template string) map[string]openAPIResponse {
 	responses["400"] = openAPIResponse{Description: "A query the grammar refuses, or an upstream 400."}
 	responses["404"] = openAPIResponse{Description: "No Player of that name, or an upstream 404."}
 	responses["406"] = openAPIResponse{Description: "Nothing this route serves is acceptable."}
-	responses["502"] = openAPIResponse{Description: "An upstream answer this API cannot relay."}
+	responses["502"] = openAPIResponse{Description: "An upstream response that this API cannot relay."}
 	responses["503"] = openAPIResponse{Description: "An upstream is busy, or this API is at its composition limit."}
 	responses["504"] = openAPIResponse{Description: "An upstream sent no headers within ten seconds plus the t= begin."}
 	return responses
 }
 
-// documentAnswer is the 200 description of each of the three document
-// routes.
-func documentAnswer(template string) string {
+// documentResponse returns the description of a document route's 200
+// response.
+func documentResponse(template string) string {
 	switch template {
 	case apiBasePath:
 		return "The discovery document, keyed by plural, with one entry per aspect."
 	case apiBasePath + "/openapi.json":
-		return "This document, with the servers entry naming the origin the request reached."
+		return "This document. Its servers entry is the configured public base URL, or else the origin that the request used."
 	default:
 		return "The Player's capture facts, with a related link to every capture route."
 	}
 }
 
-// servedOpenAPI sets the one field the served copy owns, servers,
-// to the origin given. The committed copy cannot carry it, because
-// the origin is known only at request time and differs between a
-// port-forward and a public name. Any failure serves the committed
-// copy unchanged.
+// servedOpenAPI returns the committed document with its servers entry
+// set to origin, which differs between a port-forward and a public
+// name. On any error it returns the committed copy unchanged.
 func servedOpenAPI(origin string) []byte {
 	var document map[string]json.RawMessage
 	if err := json.Unmarshal(committedOpenAPI, &document); err != nil {
@@ -357,8 +343,8 @@ func servedOpenAPI(origin string) []byte {
 	return append(body, '\n')
 }
 
-// openAPIPaths lists the paths the committed document names, sorted,
-// for the test that asks whether the router and the document agree.
+// openAPIPaths returns the sorted paths of the committed document, for
+// the test that compares it with the router.
 func openAPIPaths(document []byte) []string {
 	var specification struct {
 		Paths map[string]json.RawMessage `json:"paths"`

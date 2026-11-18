@@ -1,14 +1,9 @@
-//! The idle screen's harness: the flags, the frame loop, and the
-//! measurements.
+//! Runs a [`Screen`] in a Wayland window: the command-line flags, the frame
+//! loop, and the optional frame capture and statistics.
 //!
-//! A screen here is a piece of state with a clock and a view. The harness owns
-//! everything around it: the winit window, the wgpu surface, the iced renderer,
-//! the scripted key timeline, the frame capture, and the statistics file. The
-//! last two are the `measure` feature, and the image builds without it.
-//!
-//! The harness drives its own winit loop instead of calling `iced::application`
-//! because it must reach the renderer directly. A frame capture and a frame
-//! clock are not part of the high-level entry point.
+//! The harness runs its own winit event loop instead of calling
+//! `iced::application`, because frame capture and the timing of each frame
+//! need the renderer, and `iced::application` does not expose it.
 
 pub mod frame;
 pub mod graphics;
@@ -17,10 +12,9 @@ pub mod respawn;
 pub mod timeline;
 pub mod watchdog;
 
-// The capture and the measurements are the `measure` feature. Nothing a pod
-// runs reaches either one, because the operator sets no command on the idle
-// container and the image's entrypoint takes no flag, so the image builds
-// without them.
+// Capture and statistics are turned on only by command-line flags. The
+// operator passes no flags to the idle container, so `Dockerfile.screen`
+// builds the image without the `measure` feature.
 #[cfg(feature = "measure")]
 pub mod capture;
 #[cfg(feature = "measure")]
@@ -49,95 +43,94 @@ use watchdog::Watchdog;
 /// The key that ends a run, from the keyboard or from a script.
 pub const QUIT: &str = "q";
 
-/// What the harness needs from a screen. The harness advances the clock, hands
-/// over each key the script or the keyboard produced, and asks for a view.
+/// A screen the harness can run. The harness advances the screen's clock,
+/// passes it each key from the script or the keyboard, and asks it for a view
+/// to draw.
 pub trait Screen {
     /// The messages the screen's own widgets emit.
     type Message: std::fmt::Debug + Send + 'static;
 
-    /// The color behind everything. It is the clear color of the frame, so it
-    /// also fills a capture.
+    /// The clear color of each frame, which also fills a captured frame.
     fn background(&self) -> Color {
         Color::BLACK
     }
 
-    /// One key press, named the way the script names it: a single letter or
-    /// digit, or `up`, `down`, `left`, `right`.
+    /// Handles one key press. `name` is a script key, or the name that
+    /// [`key_name`] gives a key of the keyboard.
     fn key(&mut self, name: &str);
 
-    /// Fold in what the screen's own sources delivered since the last call,
-    /// at `at` seconds on the clock. The answer is whether anything folded,
-    /// so the harness drops a stale schedule and asks the screen again.
+    /// Applies the messages that the screen's own sources, such as the bus,
+    /// received since the last call. Returns true when the view changed, so
+    /// the harness redraws and asks [`Screen::next_frame`] again.
     ///
-    /// The harness calls this on every wake of the loop, not only on a frame.
-    /// A covered Wayland surface receives no frame callbacks, so a screen
-    /// that read its sources only when it drew would go deaf for exactly as
-    /// long as something covers it.
+    /// The harness calls this on every wake of the loop, not only when it
+    /// draws, because a compositor can stop sending frame callbacks to a
+    /// covered Wayland surface. A screen that read its sources only while
+    /// drawing would miss each message, such as the end of a film, that
+    /// arrives while a Play covers the idle screen.
     fn pump(&mut self, _at: f64) -> bool {
         false
     }
 
-    /// Take a handle that wakes the loop from any thread. A screen with a
-    /// source of its own hands it to that source, so a delivery wakes the
-    /// loop the moment it lands and [`Screen::pump`] folds it in
-    /// milliseconds. Without the wake, a message waits for the next
-    /// scheduled second, and a person's press shows up to a second late.
+    /// Receives a waker that wakes the event loop from any thread. A screen
+    /// gives it to each of its sources, so [`Screen::pump`] applies a message
+    /// as soon as it arrives. Without it, a message, such as a remote's key
+    /// press, waits up to [`timeline::BACKSTOP`] seconds for the next wake.
     fn wake_by(&mut self, _wake: media_screen::Waker) {}
 
-    /// Move the screen's clock to `at` seconds since the first frame. Every
-    /// animation reads that clock, so a frame is a pure function of it.
+    /// Sets the screen's clock to `at` seconds since the first frame. The
+    /// screen's animations read this clock and not the system time, so the
+    /// view depends only on the clock and the screen's state.
     fn tick(&mut self, at: f64);
 
-    /// The view for the clock's current position.
+    /// The view for the clock's current time.
     fn view(&self) -> Element<'_, Self::Message, Theme, Renderer>;
 
-    /// The second at which the screen next changes, on the same clock
-    /// [`Screen::tick`] reads. `at` is the second of the last frame, the
-    /// one on the glass, and not the clock now: a motion that ended while
-    /// that frame was drawn is still in motion at `at`, so the answer asks
-    /// for the frame that shows its end. The harness sleeps until the
-    /// second this answer names, so a screen whose clock draws no seconds
-    /// redraws once a minute rather than sixty times a second.
+    /// Returns the next second on the screen's clock at which the view
+    /// changes, and the harness sleeps until then. A screen that shows a
+    /// clock with no seconds returns the next minute.
     ///
-    /// `None` says nothing on this screen is scheduled, and the loop then
-    /// draws on an event alone. A screen that folds in a source of its own,
-    /// such as a bus, must not answer `None`.
+    /// `at` is the second of the last frame drawn, not the current clock.
+    /// [`frame::screen_due`] gives the reason.
     ///
-    /// The default answers `at`, which is a change on the frame already drawn,
-    /// so a screen that states nothing draws every pass the loop takes.
+    /// `None` means the loop draws only when an event arrives, and it also
+    /// stops the [`timeline::BACKSTOP`] wake. So a screen with sources of
+    /// its own must not return `None`.
+    ///
+    /// The default returns `at`, so a screen that does not override it is
+    /// drawn on every pass of the loop, at most once each [`frame::STEP`].
     fn next_frame(&self, at: f64) -> Option<f64> {
         Some(at)
     }
 
-    /// Handle a message from a widget.
+    /// Handles a message that one of the screen's widgets emitted.
     fn update(&mut self, _message: Self::Message) {}
 }
 
-/// Run a screen until the run ends, and write what it measured.
+/// Runs a screen until the quit key, the `--quit-after` deadline, the last
+/// capture, or a close request from the compositor ends the run. Returns an
+/// error when the compositor goes away first.
 pub fn run<S: Screen + 'static>(mut screen: S, options: Options) -> Result<(), String> {
-    // The brand's two faces go into the toolkit's shared font system before
-    // anything shapes a run of text, so every line the screen draws is
-    // shaped against the face the binary carries and not against a fallback.
+    // The fonts must be loaded into iced's font system before any text is
+    // shaped. Otherwise the first text is shaped with a fallback font.
     liken_iced::font::load();
 
-    // Two spans start here. The watchdog's grace runs from this moment, and so
-    // does the time to the first frame, which covers the whole life of the
-    // process: the wgpu setup, the first window, and the first draw.
+    // The watchdog's grace period and the time-to-first-frame statistic both
+    // count from here, so the statistic includes the wgpu setup, the window,
+    // and the first draw.
     let launched = std::time::Instant::now();
     let watchdog = Watchdog::new(options.window_grace, launched);
 
     let event_loop = match EventLoop::new() {
         Ok(event_loop) => event_loop,
-        // A client with no connection to a compositor has no window.
         Err(error) => {
             watchdog.expire(&format!("no connection to the compositor: {error}"));
             return Err(error.to_string());
         }
     };
 
-    // The screen's own sources wake the loop through this proxy, so a bus
-    // delivery folds the moment it lands. The event it sends carries
-    // nothing: the wake is the message, and `about_to_wait` pumps on it.
+    // The user event is empty, because waking the loop is enough:
+    // `about_to_wait` then calls `Screen::pump`.
     let proxy = event_loop.create_proxy();
     screen.wake_by(std::sync::Arc::new(move || {
         let _ = proxy.send_event(());
@@ -159,10 +152,11 @@ pub fn run<S: Screen + 'static>(mut screen: S, options: Options) -> Result<(), S
         return outcome.map_err(|error| error.to_string());
     }
 
-    // The loop ended before the run did. The Wayland connection is the
-    // window's one path to the screen, so a loop that ends any other way is a
-    // window that went away, whether winit reported an error or not. Nothing
-    // inside this process opens the connection again.
+    // The event loop ended without a call to `Ready::stop`. The window
+    // cannot exist without its Wayland connection, so the compositor went
+    // away, whether or not winit returned an error. The process cannot
+    // reconnect, so the watchdog exits it when a grace period is set, and
+    // the supervisor in `respawn.rs` starts it again.
     let reason = match outcome {
         Ok(()) => "the compositor stopped answering".to_string(),
         Err(error) => format!("the compositor stopped answering: {error}"),
@@ -171,13 +165,10 @@ pub fn run<S: Screen + 'static>(mut screen: S, options: Options) -> Result<(), S
     Err(reason)
 }
 
-/// The run, once the compositor has given the process a window.
+/// The state of a run after the compositor has created the window.
 pub struct Ready<S: Screen> {
     pub(crate) screen: S,
     pub(crate) timeline: Timeline,
-    /// The window and everything the frame loop draws through. They arrive
-    /// together and they go together, so the run holds the whole of what the
-    /// compositor gave it.
     pub(crate) graphics: Graphics,
     pub(crate) viewport: Viewport,
     pub(crate) cache: user_interface::Cache,
@@ -185,47 +176,42 @@ pub struct Ready<S: Screen> {
     pub(crate) modifiers: ModifiersState,
     pub(crate) events: Vec<Event>,
     pub(crate) resized: bool,
-    /// The second the screen named for its next change, while the loop sleeps
-    /// toward it. The harness holds that second until the frame it names is
-    /// drawn, and a press or a fold that changed the screen drops it.
-    pub(crate) scheduled: Option<f64>,
-    /// The timeline's zero: the first frame, not the launch. A compositor
-    /// can take seconds to give a window, and a script or a capture that
-    /// counted from the launch would fire on the first frame, before a
-    /// resize arrived and before anything was drawn.
+    /// The second that `Screen::next_frame` last returned, kept while the
+    /// loop sleeps toward it. A key press or a change from `Screen::pump`
+    /// clears it, because the screen's schedule can have changed.
+    pub(crate) next_frame_at: Option<f64>,
+    /// When the first frame was drawn. The screen's clock, the script, and
+    /// the captures count from here and not from the launch, because a
+    /// compositor can take seconds to create the window. Counted from the
+    /// launch, the early keys and captures would all fire on the first frame.
     pub(crate) start: Option<std::time::Instant>,
-    /// The second of the last frame. The pace holds the next one at least
-    /// [`frame::STEP`] after it, because nothing else caps the rate: the
-    /// surface presents without vsync, so an animation that asked for a
-    /// frame on every pass would draw as fast as the loop can spin.
-    pub(crate) drawn: f64,
-    /// Whether the frame on the glass shows old state. A fold and a key both
-    /// set it, because the elements schedule their own motion and not the
-    /// content: a level that changes while its row stands still would
-    /// otherwise wait for the next scheduled second, and a press must show
-    /// on the next frame.
-    pub(crate) stale: bool,
-    /// The frames this run writes to disk, from `--capture`. A run that named
-    /// no directory captures nothing.
+    /// The second of the last frame drawn. The next frame is at least
+    /// [`frame::STEP`] later.
+    pub(crate) last_frame_at: f64,
+    /// Set by a key press or a change from `Screen::pump`, because
+    /// `Screen::next_frame` schedules animations and not changes of content.
+    /// Without it, a bar that changes length while nothing animates is not
+    /// redrawn until the next scheduled second.
+    pub(crate) needs_redraw: bool,
+    /// The frames this run writes to disk, from `--capture`. `None` when the
+    /// flag is absent.
     #[cfg(feature = "measure")]
     pub(crate) captures: Option<Captures>,
-    /// What this run measures, from `--stats`. A run that named no file
-    /// measures nothing, and every call on the frame path is then one branch
-    /// and no allocation.
+    /// The measurements of this run, from `--stats`. `None` when the flag is
+    /// absent, so a run without it records nothing.
     #[cfg(feature = "measure")]
     pub(crate) stats: Option<Stats>,
     pub(crate) finished: bool,
-    /// Whether this run asked to leave the loop. The run reads it after the
-    /// loop returns, so it tells its own end from a lost window.
+    /// Set by [`Ready::stop`]. `exiting` copies it to `App::stopped`.
     pub(crate) stopped: bool,
 }
 
-/// The run and the one thing that outlives its window: the watchdog, which
-/// runs before the first window and after the last one.
+/// The watchdog is outside [`State`] because it must run before the window
+/// exists and after it is destroyed.
 struct App<S: Screen> {
     watchdog: Watchdog,
-    /// Whether the run ended on its own terms: the quit key, the deadline, the
-    /// last capture, or a close the compositor asked for.
+    /// True when the run ended through [`Ready::stop`]. `run` reads it to
+    /// tell a requested exit from a lost compositor.
     stopped: bool,
     state: State<S>,
 }
@@ -238,7 +224,7 @@ enum State<S: Screen> {
         launched: std::time::Instant,
     },
     Ready(Box<Ready<S>>),
-    /// The run is over and the graphics are already gone.
+    /// The run is over and the graphics are already dropped.
     Done,
 }
 
@@ -259,8 +245,8 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
         #[cfg(feature = "measure")]
         let launched = *launched;
 
-        // The window comes first, so a compositor that gives none leaves the
-        // screen and the flags where they are and the watchdog running.
+        // With no window the state stays `Loading`, and the watchdog keeps
+        // counting its grace period.
         let Some(graphics) = graphics::open(event_loop, options.size) else {
             return;
         };
@@ -299,10 +285,10 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
             modifiers: ModifiersState::default(),
             events: Vec::new(),
             resized: false,
-            scheduled: None,
+            next_frame_at: None,
             start: None,
-            drawn: 0.0,
-            stale: false,
+            last_frame_at: 0.0,
+            needs_redraw: false,
             #[cfg(feature = "measure")]
             captures,
             #[cfg(feature = "measure")]
@@ -330,8 +316,8 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
                 ready.frame(event_loop);
                 return;
             }
-            // The run maps one window and holds it for its whole life, so
-            // the watchdog counts again only for that window going away.
+            // The run never creates a second window, so when this one is
+            // destroyed the watchdog starts its grace period again.
             WindowEvent::Destroyed if id == ready.graphics.window.id() => {
                 watchdog.missing(std::time::Instant::now());
                 return;
@@ -364,14 +350,13 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
     }
 
     fn about_to_wait(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
-        // The grace is checked here rather than in the frame, because a client
-        // with no window draws no frame.
+        // The grace period is checked here and not in a frame, because a
+        // process with no window draws no frames.
         self.watchdog.expire_if_late(std::time::Instant::now());
 
-        // A client waiting for a window has nothing to draw and a grace to
-        // check. A compositor that gives no window sends no event, so the
-        // loop sleeps until the grace runs out, and the check above runs on
-        // that wake. An event before then wakes the loop sooner.
+        // While the grace period runs there is no window to draw. A
+        // compositor that never creates the window sends no event, so the
+        // loop sleeps until the grace period ends and the check above runs.
         if let Some(deadline) = self.watchdog.deadline() {
             event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
             return;
@@ -381,9 +366,8 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
             return;
         };
 
-        // The deadline is checked here as well as in the frame, so a run ends
-        // even if the compositor stops asking for frames. Before the first
-        // frame there is no timeline yet, so there is no deadline.
+        // The deadline is checked here as well as in the frame, so the run
+        // ends even when the compositor stops sending frame callbacks.
         if let Some(start) = ready.start
             && ready.timeline.past_deadline(start.elapsed().as_secs_f64())
         {
@@ -391,19 +375,12 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
             return;
         }
 
-        // The sources are pumped here, on every wake of the loop, because a
-        // covered client draws no frame: the compositor sends a hidden
-        // surface no frame callbacks. The status that says a film ended
-        // arrives while the client is covered, so the bus must be read on a
-        // path the compositor cannot starve.
+        // On every wake, not only in a frame. `Screen::pump` gives the reason.
         if let Some(start) = ready.start {
             let at = start.elapsed().as_secs_f64();
             if ready.screen.pump(at) {
-                // What arrived changed the unit, so the frame on the glass is
-                // stale whatever the animations schedule, and the second
-                // scheduled before it no longer holds.
-                ready.scheduled = None;
-                ready.stale = true;
+                ready.next_frame_at = None;
+                ready.needs_redraw = true;
             }
         }
 
@@ -416,18 +393,19 @@ impl<S: Screen> winit::application::ApplicationHandler for App<S> {
             ready.finish();
             *stopped = ready.stopped;
         }
-        // wgpu reaches every backend it can, and the GL one holds an EGL
-        // display on the compositor's connection. That display's destructor
-        // speaks Wayland, so it has to run while the connection is open, and
-        // the device and the surface hold the last references to it. winit
-        // closes the connection after this call and never before it, so the
-        // graphics are dropped here rather than where the loop returns.
+        // wgpu probes every backend, and its GL backend creates an EGL
+        // display on the compositor's Wayland connection. Dropping that
+        // display sends Wayland requests, so it must happen before winit
+        // closes the connection after `exiting` returns. The device and the
+        // surface hold the last references to it, so the graphics are
+        // dropped here and not after the loop.
         self.state = State::Done;
     }
 }
 
-/// The script's name for a key. A letter or a digit is itself, and the arrows
-/// carry the names a scripted timeline uses.
+/// The name a script uses for a key: the key's text in lower case for a
+/// character key, or `up`, `down`, `left`, `right` for the arrow keys. Other
+/// keys return `None`.
 pub fn key_name(key: &Key) -> Option<String> {
     match key {
         Key::Character(text) => Some(text.to_lowercase()),
@@ -445,7 +423,7 @@ mod tests {
     use iced_winit::winit::keyboard::SmolStr;
 
     #[test]
-    fn a_letter_names_itself() {
+    fn a_letter_key_is_named_by_its_lowercase_letter() {
         assert_eq!(
             key_name(&Key::Character(SmolStr::new("Q"))),
             Some("q".to_string())
@@ -453,7 +431,7 @@ mod tests {
     }
 
     #[test]
-    fn an_arrow_carries_the_script_name() {
+    fn an_arrow_key_has_its_script_name() {
         assert_eq!(
             key_name(&Key::Named(NamedKey::ArrowLeft)),
             Some("left".to_string())
@@ -461,7 +439,7 @@ mod tests {
     }
 
     #[test]
-    fn a_key_with_no_script_name_is_ignored() {
+    fn a_key_with_no_script_name_returns_none() {
         assert_eq!(key_name(&Key::Named(NamedKey::F1)), None);
     }
 }

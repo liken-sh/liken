@@ -1,21 +1,18 @@
 package main
 
-// Discovery is the reader's teaching mode. This file renders what one
-// event reports: the node it came from, the event type, the code by
-// its evdev name, the value as a press, a release, or a repeat, and
-// the Keymap entry that would bind it, ready to paste. Where no entry
-// can bind it, the line states why instead.
+// Discovery mode prints each input event with the Keymap entry that
+// would bind it, ready to paste, so a person can write a Keymap. When no
+// entry can bind the event, the line says why.
 
 import "fmt"
 
-// The placeholder the pasted fragment carries on its right side. A
-// Keymap row names the kernel key the control should report, or none
-// to drop it, and most controls need no row at all.
+// keymapKeyHint is the placeholder that the person replaces with the
+// KEY_* name the control should report, or with none to drop the control.
 const keymapKeyHint = "<a KEY_* name, or none>"
 
-// discoveryLines renders one event: the fields on the first line, and
-// under them the Keymap entry that binds it, indented to paste under
-// spec.buttons or spec.axes.
+// discoveryLines returns the event's fields, then its Keymap entry
+// indented to paste under spec.buttons or spec.axes. It returns nil for
+// an event that is not EV_KEY or EV_ABS.
 func discoveryLines(node string, event inputEvent) []string {
 	switch event.Type {
 	case evKey:
@@ -26,10 +23,9 @@ func discoveryLines(node string, event inputEvent) []string {
 	return nil
 }
 
-// keyLines names a key event's code and value. Only the press earns a
-// fragment, because a Keymap binds the press alone; the release and
-// the repeat lines state that instead, so a stream of value 2 does not
-// read as a bug.
+// Only a press gets a Keymap entry, because a Keymap binds presses.
+// Release and repeat lines say so, so that a stream of repeat events
+// does not look like a fault.
 func keyLines(node string, event inputEvent) []string {
 	name := keyCodeNames[event.Code]
 	line := fmt.Sprintf("%s %s %s %s", node, eventTypeField(event.Type),
@@ -47,9 +43,8 @@ func keyLines(node string, event inputEvent) []string {
 	}
 }
 
-// axisLines names a hat event's code and direction. The two directions
-// earn a fragment; the return to the middle does not, because a Keymap
-// binds -1 and 1 and treats 0 as the release.
+// A Keymap binds only the hat axes, at the values -1 and 1, and treats 0
+// as the release.
 func axisLines(node string, event inputEvent) []string {
 	name := axisCodeNames[event.Code]
 	line := fmt.Sprintf("%s %s %s %d", node, eventTypeField(event.Type),
@@ -68,8 +63,6 @@ func axisLines(node string, event inputEvent) []string {
 	}
 }
 
-// eventTypeField gives the type by the kernel's own name, with the
-// number beside it.
 func eventTypeField(eventType uint16) string {
 	name := "EV_KEY"
 	if eventType == evAbs {
@@ -78,8 +71,6 @@ func eventTypeField(eventType uint16) string {
 	return fmt.Sprintf("%s (%d)", name, eventType)
 }
 
-// codeField gives the code by name and number, or the number alone
-// when the kernel gives the code no name.
 func codeField(name string, code uint16) string {
 	if name == "" {
 		return fmt.Sprintf("%d", code)
@@ -87,7 +78,6 @@ func codeField(name string, code uint16) string {
 	return fmt.Sprintf("%s (%d)", name, code)
 }
 
-// keyValueField names a key's three values for what a person did.
 func keyValueField(value int32) string {
 	switch value {
 	case 0:

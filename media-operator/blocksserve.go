@@ -1,12 +1,10 @@
 package main
 
-// serve-blocks forwards the presentation blocks to the display on its own,
-// against a plain mpv IPC socket. The pod runs the whole command sidecar,
-// which also reports to the bus. A person iterating on the display locally
-// wants the blocks with no cluster and no bus. So this mode dials a socket,
-// reads the same presentation blocks the pod passes, and runs the same
-// forwarding code the sidecar runs. The local screens then show the item's own
-// words and its own art.
+// serve-blocks runs the command sidecar's code that sends each item's
+// presentation block, the titles and art that the
+// display draws. It reads a
+// local mpv's IPC socket, so you can work on the display without a
+// cluster or a bus.
 
 import (
 	"context"
@@ -16,14 +14,12 @@ import (
 	"syscall"
 )
 
-// serve-blocks reads a socket path on top of the presentation blocks, because
-// a local mpv serves its socket somewhere other than the pod's fixed path. It
-// takes a default, so the mode runs with nothing set.
+// A local mpv can put its socket anywhere, so this variable overrides
+// the pod's fixed path.
 const mpvSocketVariable = "MEDIA_MPV_SOCKET"
 
-// runBlocksServe dials the socket and forwards the blocks with a report sender
-// that publishes nothing. The item tracking then runs as it does in the pod,
-// with no bus.
+// runBlocksServe runs the sidecar's loop with a report sender that
+// discards each report, because there is no bus.
 func runBlocksServe() {
 	socket := os.Getenv(mpvSocketVariable)
 	if socket == "" {

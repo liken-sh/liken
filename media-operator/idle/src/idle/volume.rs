@@ -1,11 +1,10 @@
-//! The volume row: a speaker glyph, a short bar, and the number.
+//! The volume row: a speaker icon, a short bar, and the level as a number.
 //!
-//! The row comes and goes on a clock of its own, and it draws alone: a level
-//! change brings up the row and nothing else on the screen. The bus holds the
-//! level and the muted flag, and the client only reads them. `media-operator`
-//! is the only writer: it turns each volume key into an ask on the unit's
-//! `Receiver` or `Sink`, and relays the level the device reports, from 0.0 to
-//! 1.0 of the device's `spec.volume.max`.
+//! The row fades in on a volume change and out after a delay, and no other
+//! element moves when it appears. This client only reads the level and the
+//! muted flag from the bus. `media-operator` turns each volume key into a
+//! request to the unit's `Receiver` or `Sink`, and publishes the level that
+//! the device reports, as a fraction from 0.0 to 1.0 of the device's maximum.
 
 use iced_widget::canvas::{LineJoin, Path, Stroke, Style};
 use iced_winit::core::{Color, Point, Rectangle};
@@ -14,43 +13,37 @@ use super::{Frame, Layout};
 use crate::look;
 use crate::unit::Unit;
 
-/// A fade takes this long to reach full and this long to reach clear. The out
-/// is longer than the in, so the row leaves more slowly than it arrives.
+/// The seconds that the fade in and the fade out take.
 const FADE_IN: f64 = 0.35;
 const FADE_OUT: f64 = 0.6;
-/// The row leaves this many seconds after the last change. Each change
-/// restarts the wait, so a run of presses holds the row on screen.
+/// The seconds from the last volume change until the fade out starts. Each
+/// change restarts the wait, so repeated presses keep the row on screen.
 const HOLD: f64 = 4.0;
 
-/// The number reserves this much width at the right margin, so the bar and the
-/// glyph hold their place as the number moves between one and three digits.
+/// The width reserved for the number at the right margin, so the bar and the
+/// icon stay in place when the number changes between one and three digits.
 const NUMBER_WIDTH: f32 = 84.0;
-/// The bar is short because the number beside it carries the reading, and the
-/// bar shows the level at a glance.
+/// The bar is short because the number beside it gives the exact level.
 const BAR_WIDTH: f32 = 220.0;
 const BAR_HEIGHT: f32 = 12.0;
 const BAR_RADIUS: f32 = 3.0;
-/// The glyph's box, and the gap between the glyph and the bar.
-const GLYPH_WIDTH: f32 = 26.0;
-const GLYPH_HEIGHT: f32 = 30.0;
-const GLYPH_GAP: f32 = 16.0;
-/// The number's line box, in canvas pixels. The bar and the glyph centre on
-/// the middle of it and the dark surface covers it, so the three parts read as
-/// one row whatever the number's own type size.
-///
-/// The number here draws at `look::SMALL`, which is the `\fs` through the face
-/// metric, and the measure is that size's line box, which is the `\fs` again.
-/// The two readings meet at 34 canvas pixels.
+/// The size of the icon, and the gap between the icon and the bar.
+const ICON_WIDTH: f32 = 26.0;
+const ICON_HEIGHT: f32 = 30.0;
+const ICON_GAP: f32 = 16.0;
+/// The height of the number's line box, in canvas pixels. The bar and the
+/// icon are centred on its middle and the background is sized from it, so
+/// the parts stay aligned at any type size.
 const NUMBER_BOX: f32 = look::line_box(look::SMALL);
-/// The row appears over whatever frame is on screen, with nothing under it, and
-/// on a bright frame the glyph and the number would vanish. So the row carries
-/// a dark surface of its own, and this is the padding around the three parts.
+/// The row draws over whatever is on the screen, so it has its own dark
+/// background to keep the icon and the number readable on a bright frame.
+/// These are the background's padding and corner radius.
 const PAD_X: f32 = 24.0;
 const PAD_Y: f32 = 12.0;
 const SURFACE_RADIUS: f32 = 14.0;
 
-/// The speaker, one closed polygon of the driver box and the cone, in the
-/// glyph's own box. The image carries no icon font, so the mark is a path.
+/// The speaker icon as one closed polygon, in the icon's own coordinates.
+/// The image has no icon font, so the icon is a path.
 const SPEAKER: [(f32, f32); 6] = [
     (0.0, 10.0),
     (10.0, 10.0),
@@ -59,21 +52,17 @@ const SPEAKER: [(f32, f32); 6] = [
     (10.0, 20.0),
     (0.0, 20.0),
 ];
-/// The muted state draws this slash across the speaker, so one element carries
-/// both the level and the mute.
+/// The slash drawn across the speaker icon when the volume is muted.
 const SLASH: [(f32, f32); 4] = [(2.0, 24.0), (24.0, 2.0), (24.0, 8.0), (2.0, 30.0)];
-/// The slash draws in the speaker's own colour, and the two would read as one
-/// shape without an outline between them. This is the width of that outline
-/// outside the slash.
+/// The width of the dark outline around the slash. The slash has the
+/// speaker's color, so without the outline the two read as one shape.
 const SLASH_BORDER: f32 = 2.0;
 
-/// The row's own fade, from 0 off screen to 1 full.
+/// The opacity of the row at second `at`, from 0 for hidden to 1 for full.
 ///
-/// A live message on the volume topic is a change: a press that
-/// `media-operator` turned into a level, or a turn of a receiver's knob. The
-/// retained message a client reads when it first connects is no change. So
-/// the row answers a change, and it stays off screen while a pod restores the
-/// level it starts with.
+/// Only a volume change shows the row, and only when the receiver does not
+/// draw its own overlay. The retained level that a client reads when it
+/// connects is not a change, so the row stays hidden when the pod starts.
 pub fn fade(unit: &Unit, at: f64) -> f64 {
     let Some(pressed) = unit.pressed else {
         return 0.0;
@@ -86,22 +75,19 @@ pub fn fade(unit: &Unit, at: f64) -> f64 {
     arriving.min(leaving).clamp(0.0, 1.0)
 }
 
-/// The second the row next changes, for [`super::Idle::next_frame`].
+/// The second at which the row next changes, for [`super::Idle::next_frame`].
 ///
-/// The row is the one element with a still phase of its own, so it is the one
-/// element that names a second ahead of `at` rather than a draw now. It has
-/// three phases. The two fades change the row on every frame they cover, and
-/// they answer with `at`. Between them the row is up and steady, so it names
-/// the second the row starts to leave and the loop sleeps through the four
-/// seconds a person reads it. A row that has left states nothing.
+/// During a fade it returns `at`. While the row is fully shown it returns
+/// the second the fade out starts, so the loop sleeps while a person reads
+/// the row. Before the first volume change and after the fade out it returns
+/// `None`.
 ///
-/// A press moves `pressed` and lifts `pressed_from` from where the row stands,
-/// and the harness drops the second it holds on a key, so a press that lands
-/// during the hold is drawn at once and schedules its own leaving.
+/// A new press during the hold still draws at once, because the harness
+/// discards its scheduled second whenever `pump` applies a message.
 pub fn next_frame(unit: &Unit, at: f64) -> Option<f64> {
     let pressed = unit.pressed?;
-    // A row lifted from part way up reaches full sooner, by exactly the part
-    // of the fade it started above.
+    // A fade in that starts above zero, from `pressed_from`, reaches full
+    // sooner by the part of the fade it skips.
     let full = pressed + (1.0 - unit.pressed_from) * FADE_IN;
     let leaving = pressed + HOLD;
 
@@ -116,44 +102,38 @@ pub fn next_frame(unit: &Unit, at: f64) -> Option<f64> {
     }
 }
 
-/// How much of the bar the level fills, in canvas pixels. The level runs
-/// from 0.0 to 1.0, and a level outside that range fills no further.
+/// The width of the filled part of the bar, in canvas pixels.
 fn filled(level: f64) -> f32 {
     BAR_WIDTH * level.clamp(0.0, 1.0) as f32
 }
 
-/// Where the parts of the row stand.
-///
-/// The three parts hang off the right margin, so the row measures itself when
-/// it draws. The canvas width follows the screen, and a row measured once at
-/// startup holds the margin of another screen.
+/// The positions of the parts of the row. They are measured from the right
+/// margin, which moves with the canvas width, so `draw` computes them each
+/// time.
 struct Row {
     surface: Rectangle,
     bar: Rectangle,
-    glyph: Point,
+    icon: Point,
     number: Point,
 }
 
 fn row(layout: &Layout) -> Row {
     // The row is the third line of the top-right column, under the clock and
-    // the activity line, because the low middle of the screen holds the mark.
+    // the activity line.
     let top = look::MARGIN_Y + 2.0 * look::LINE_PITCH;
     let right = layout.right();
-    // The bar and the glyph centre on the middle of the number's line, so the
-    // three parts read as one row.
     let middle = top + NUMBER_BOX / 2.0;
 
     let bar_x = right - NUMBER_WIDTH - BAR_WIDTH;
-    let glyph_x = bar_x - GLYPH_GAP - GLYPH_WIDTH;
-    let surface_x = glyph_x - PAD_X;
+    let icon_x = bar_x - ICON_GAP - ICON_WIDTH;
+    let surface_x = icon_x - PAD_X;
 
     Row {
         surface: Rectangle {
             x: surface_x,
             y: top - PAD_Y,
             width: right + PAD_X - surface_x,
-            // The number's line is the tallest of the three parts, so the
-            // surface covers it and the padding.
+            // The number's line box is the tallest part of the row.
             height: NUMBER_BOX + 2.0 * PAD_Y,
         },
         bar: Rectangle {
@@ -162,12 +142,12 @@ fn row(layout: &Layout) -> Row {
             width: BAR_WIDTH,
             height: BAR_HEIGHT,
         },
-        glyph: Point::new(glyph_x, middle - GLYPH_HEIGHT / 2.0),
+        icon: Point::new(icon_x, middle - ICON_HEIGHT / 2.0),
         number: Point::new(right, top),
     }
 }
 
-/// One closed polygon in the glyph's own box, placed at `at`.
+/// A closed polygon from `points`, in icon coordinates, moved to `at`.
 fn polygon(points: &[(f32, f32)], at: Point) -> Path {
     Path::new(|path| {
         for (index, (x, y)) in points.iter().enumerate() {
@@ -181,12 +161,11 @@ fn polygon(points: &[(f32, f32)], at: Point) -> Path {
     })
 }
 
-/// Draw the element into the frame, in canvas units.
+/// Draws the row into `frame`, in canvas units.
 ///
-/// The glyph alone carries the muted state, so the bar reads the level in both
-/// states. Every part draws at the row's own fade, because the row arrives and
-/// leaves on a clock no other element reads, and then at the shade's factor
-/// with the rest of the screen.
+/// The bar shows the level even when the volume is muted, and only the icon
+/// shows the mute. Every part takes the row's fade and then `light`, the
+/// dimming factor that every element of the screen uses.
 pub fn draw(frame: &mut Frame, layout: &Layout, unit: &Unit, at: f64, light: f32) {
     let fade = fade(unit, at) as f32;
     if fade <= 0.0 {
@@ -223,14 +202,13 @@ pub fn draw(frame: &mut Frame, layout: &Layout, unit: &Unit, at: f64, light: f32
         );
     }
 
-    frame.fill(&polygon(&SPEAKER, row.glyph), shaded(ink, fade));
+    frame.fill(&polygon(&SPEAKER, row.icon), shaded(ink, fade));
     if unit.volume.muted {
-        let slash = polygon(&SLASH, row.glyph);
-        // The toolkit centres a stroke on the path it follows, and the outline
-        // this glyph needs stands outside the slash, so the stroke is twice the
-        // border and the fill covers the half that fell inside. The width is
-        // in surface pixels, for the reason the canvas scale is documented on
-        // Layout.
+        let slash = polygon(&SLASH, row.icon);
+        // iced centres a stroke on the path, so the stroke is twice the
+        // border width and the slash's fill then covers the inner half. The
+        // width is in surface pixels, as `Layout` explains for the canvas
+        // scale.
         frame.stroke(
             &slash,
             Stroke {
@@ -259,10 +237,11 @@ mod tests {
     use media_screen::Moment;
     use media_screen::volume::{Indicator, Volume};
 
-    // The x every flush-right part of the row ends on, on a 1920 canvas.
+    // The right edge of the row, on a 1920 canvas.
     const RIGHT: f32 = 1920.0 - look::MARGIN_X;
 
-    /// A unit that read a level and then a press of it.
+    /// A unit that applied a retained level and then a live volume change at
+    /// `at`.
     fn pressed(at: f64) -> Unit {
         let mut unit = Unit::default();
         let volume = Volume {
@@ -288,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    fn the_catch_up_shows_no_row() {
+    fn a_retained_level_shows_no_row() {
         let mut unit = Unit::default();
         unit.fold(
             Moment::Level {
@@ -301,7 +280,7 @@ mod tests {
         assert_eq!(fade(&unit, 2.0), 0.0);
     }
 
-    /// One level moment off the bus.
+    /// A level message from the bus.
     fn level(level: f64, indicator: Indicator, pressed: bool) -> Moment {
         Moment::Level {
             volume: Volume {
@@ -313,9 +292,9 @@ mod tests {
         }
     }
 
-    /// A receiver that shows its own overlay on the TV draws the level, so
-    /// the row stays down while the unit tracks the level. A message that
-    /// changes the indicator alone brings up no row either.
+    /// When a receiver draws its own overlay on the TV, the row stays hidden
+    /// while the unit still tracks the level. A message that changes only the
+    /// indicator does not show the row either.
     #[test]
     fn a_level_the_receiver_draws_shows_no_row() {
         let mut unit = Unit::default();
@@ -350,7 +329,7 @@ mod tests {
     }
 
     #[test]
-    fn the_bar_fills_at_the_top_of_the_range_and_no_further() {
+    fn the_bar_fill_is_clamped_to_the_bar_width() {
         assert_eq!(filled(0.0), 0.0);
         assert_eq!(filled(0.5), BAR_WIDTH / 2.0);
         assert_eq!(filled(1.0), BAR_WIDTH);
@@ -358,7 +337,7 @@ mod tests {
     }
 
     #[test]
-    fn the_two_fades_ask_for_a_frame_now() {
+    fn during_a_fade_the_next_frame_is_now() {
         let unit = pressed(10.0);
         assert_eq!(next_frame(&unit, 10.0), Some(10.0));
         assert_eq!(next_frame(&unit, 10.34), Some(10.34));
@@ -366,19 +345,17 @@ mod tests {
     }
 
     #[test]
-    fn the_row_sleeps_through_its_hold_and_wakes_to_leave() {
+    fn during_the_hold_the_next_frame_is_the_start_of_the_fade_out() {
         let unit = pressed(10.0);
-        // The row is up and steady from the end of the fade in, so every
-        // second of the hold names the one moment the row changes again.
         assert_eq!(next_frame(&unit, 10.35), Some(14.0));
         assert_eq!(next_frame(&unit, 13.9), Some(14.0));
     }
 
     #[test]
-    fn a_press_that_lifts_a_leaving_row_shortens_its_fade_in() {
+    fn a_press_during_the_fade_out_shortens_the_fade_in() {
         let mut unit = pressed(10.0);
-        // The row is halfway out at 14.3 seconds, and the press lifts it from
-        // there, so it reaches full in half of the 350 ms fade.
+        // The row is halfway faded out at 14.3 seconds, and the press fades it
+        // in from there, so it reaches full in half of the 350 ms.
         unit.fold(
             Moment::Level {
                 volume: unit.volume,
@@ -392,35 +369,34 @@ mod tests {
     }
 
     #[test]
-    fn a_row_that_has_left_asks_for_no_frame() {
+    fn a_row_that_has_faded_out_needs_no_frame() {
         assert_eq!(next_frame(&pressed(10.0), 14.61), None);
         assert_eq!(next_frame(&Unit::default(), 600.0), None);
     }
 
     #[test]
-    fn the_row_stands_two_line_pitches_under_the_top_margin() {
+    fn the_row_is_two_line_pitches_below_the_top_margin() {
         let row = row(&Layout::for_surface(Size::new(1920.0, 1080.0)));
         assert_eq!(row.number.x, RIGHT);
-        // The top margin is 90, and a pitch is a 34 pixel line box and 12
-        // pixels of air.
+        // The top margin is 90, and `look::LINE_PITCH` is 46.
         assert!((row.number.y - 182.0).abs() < 0.2, "{}", row.number.y);
         assert_eq!(row.bar.x, RIGHT - 84.0 - 220.0);
-        assert_eq!(row.glyph.x, row.bar.x - 16.0 - 26.0);
+        assert_eq!(row.icon.x, row.bar.x - 16.0 - 26.0);
     }
 
     #[test]
-    fn the_surface_covers_the_three_parts_and_the_padding() {
+    fn the_background_covers_the_three_parts_and_the_padding() {
         let row = row(&Layout::for_surface(Size::new(1920.0, 1080.0)));
-        assert_eq!(row.surface.x, row.glyph.x - PAD_X);
+        assert_eq!(row.surface.x, row.icon.x - PAD_X);
         assert_eq!(row.surface.x + row.surface.width, RIGHT + PAD_X);
         assert_eq!(row.surface.height, NUMBER_BOX + 2.0 * PAD_Y);
     }
 
     #[test]
-    fn the_bar_and_the_glyph_centre_on_the_number_s_line() {
+    fn the_bar_and_the_icon_are_centred_on_the_number_line() {
         let row = row(&Layout::for_surface(Size::new(1920.0, 1080.0)));
         let middle = |shape: Rectangle| shape.y + shape.height / 2.0;
         assert_eq!(middle(row.bar), row.number.y + NUMBER_BOX / 2.0);
-        assert_eq!(row.glyph.y + GLYPH_HEIGHT / 2.0, middle(row.bar));
+        assert_eq!(row.icon.y + ICON_HEIGHT / 2.0, middle(row.bar));
     }
 }

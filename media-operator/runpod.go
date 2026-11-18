@@ -1,30 +1,29 @@
 package main
 
-// A run's pod can stop while its Play goes on. A Player edit makes the
-// operator recreate it, mpv crashes and the operator resumes the run, or
-// something else deletes the pod, such as the taint manager on an
-// eviction. The new pod takes the old pod's name, and the old pod still
-// sends messages: its sidecar reports the ending on its SIGTERM, and the
-// broker publishes its Last Will when its keepalive runs out, which can
-// be long after the new pod plays. Each of those messages names the run
-// by its topic alone, so without the pod's UID the operator reads the
-// old pod's ending as the Play's, and the unit reads Idle while the Play
-// goes on.
+// A run's pod can be replaced while its Play continues. The operator
+// replaces it after a Player edit or after mpv crashes, and something
+// else can delete it, such as the taint manager on an eviction. The new
+// pod has the old pod's name, and the old pod can still send messages:
+// its sidecar reports an ending when it receives SIGTERM, and the broker
+// publishes its Last Will when its keepalive expires, which can be long
+// after the new pod starts playing. A message's topic names the run and
+// not the pod. Without a check, the operator would read the old pod's
+// ending as the Play's, and the Player would show Idle during the film.
 //
-// So each message carries the UID of the pod that sent it, and the desk
-// takes a message only from the run's pod. The pod store is what names
-// that pod. The store can be a moment behind the API server, so the desk
-// also remembers the pods it knows are gone: the pod the operator
-// deletes to replace it, a pod the store showed with a deletion mark,
-// and a pod the store held before that the store no longer holds.
+// So each message carries the UID of the pod that sent it, and
+// `reports` accepts a message only from the run's current pod. The pod
+// store can lag behind the API server, so runPods also records the pods
+// that are known to be gone: a pod the operator deleted to replace it,
+// a pod the store showed with a deletion timestamp, and a pod that left
+// the store.
 
-// runPods holds, per run, what tells the run's pod from an older one. The
-// report desk's mutex covers it.
+// runPods records, for each run, which pod is current and which pods are
+// gone. reports.mutex guards it.
 //
-// current is the UID of the run's pod as the pass last read it from the
-// store, standing and not deleting. gone holds the UIDs of the run's pods
-// known gone or replaced. lookup reads one pod by its namespace and name
-// from the pod store, and answers nil for a pod the store does not hold.
+// current maps a run to the UID of the pod that the pod store last
+// showed for it, when that pod was not being deleted. gone maps a run to
+// the UIDs of its pods that were deleted or replaced. lookup reads a pod
+// from the pod store, and returns nil when the store does not have it.
 type runPods struct {
 	current map[string]string
 	gone    map[string]map[string]bool
@@ -35,14 +34,20 @@ func newRunPods() runPods {
 	return runPods{current: map[string]string{}, gone: map[string]map[string]bool{}}
 }
 
-// fromRunPod answers whether a message that names this pod UID counts as
-// the run's. A message with no UID comes from a sidecar that sets none,
-// and the desk cannot tell its pod, so it counts. A pod known gone does
-// not. A pod the store holds counts while it stands, and once it is
-// deleting it does not. While the store holds a deleting pod, a pod with
-// another UID is the new pod the store has not delivered yet, so it
-// counts. With no pod in the store, a pod not known gone counts too,
-// because the new pod can report before the store holds it.
+// fromRunPod reports whether a message from the pod with this UID
+// belongs to the run.
+//
+//   - A message with no UID counts, because a sidecar that sets none
+//     cannot be told from the run's pod.
+//   - A pod recorded as gone does not count.
+//   - When the store has a pod for the run that is not being deleted,
+//     only a message from that pod counts.
+//   - When the store's pod is being deleted, a message from any other
+//     UID counts, because it comes from the replacement that the store
+//     does not have yet.
+//   - Before the pod store is read, or when it has no pod for the run,
+//     a message from a pod not recorded as gone counts, because a new
+//     pod can report before the store has it.
 func (p *runPods) fromRunPod(namespace, name, uid string) bool {
 	if uid == "" {
 		return true
@@ -64,9 +69,11 @@ func (p *runPods) fromRunPod(namespace, name, uid string) bool {
 	return pod.Metadata.deleting()
 }
 
-// observe records the run's pod as the store holds it. A standing pod is
-// the run's pod, and a pod it replaced is gone. A deleting pod is gone,
-// and so is the pod the store held before when the store holds none now.
+// observe records the run's pod as the store now shows it. A pod that
+// is not being deleted becomes the current pod, and the pod it replaces
+// is recorded as gone. A pod that is being deleted is recorded as gone.
+// When the store holds no pod, the previously current pod is recorded as
+// gone.
 func (p *runPods) observe(key string, pod *Pod) {
 	if pod != nil && !pod.Metadata.deleting() {
 		if held := p.current[key]; held != "" && held != pod.Metadata.UID {
@@ -84,12 +91,12 @@ func (p *runPods) observe(key string, pod *Pod) {
 	}
 }
 
-// back takes one pod off the gone list, for a delete that failed.
-func (p *runPods) back(key, uid string) {
+// unmarkGone removes a pod from the gone record, after its delete failed.
+func (p *runPods) unmarkGone(key, uid string) {
 	delete(p.gone[key], uid)
 }
 
-// markGone records one pod as gone.
+// markGone records a pod as gone.
 func (p *runPods) markGone(key, uid string) {
 	if uid == "" {
 		return
@@ -100,7 +107,7 @@ func (p *runPods) markGone(key, uid string) {
 	p.gone[key][uid] = true
 }
 
-// retain forgets the runs the pass no longer lists.
+// retain drops the records of runs that are not in live.
 func (p *runPods) retain(live map[string]bool) {
 	for key := range p.current {
 		if !live[key] {
@@ -114,7 +121,7 @@ func (p *runPods) retain(live map[string]bool) {
 	}
 }
 
-// forget drops one run.
+// forget drops the records of one run.
 func (p *runPods) forget(key string) {
 	delete(p.current, key)
 	delete(p.gone, key)

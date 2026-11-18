@@ -1,13 +1,8 @@
 package main
 
-// These tests cover the phase predicates the pass reads to decide
-// whether a Play still needs work.
-
 import "testing"
 
-// Both endings are terminal, and only Finished is done. A Failed Play
-// resumes, so the pass still reconciles it.
-func TestThePhasePredicates(t *testing.T) {
+func TestOnlyFinishedIsFinishedWhileFinishedAndFailedAreTerminal(t *testing.T) {
 	cases := []struct {
 		phase    string
 		terminal bool

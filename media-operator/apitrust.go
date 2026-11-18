@@ -1,12 +1,11 @@
 package main
 
-// This file holds the trust store: the CA certificates media-api
-// trusts when it calls a sibling. Each sibling publishes its CA in a
-// ConfigMap the way this API publishes its own, so trust is public
-// data read with list and watch on three named objects and no Secret.
-// The store watches the ConfigMaps because a rotation appends the
-// coming CA to ca.crt in place, and the next connection must trust it
-// with no restart.
+// The trust store holds the CA certificates that media-api trusts when
+// it calls the display API or the audio API. Each of those siblings
+// publishes its CA in a ConfigMap, so media-api needs no access to their
+// Secrets. The store watches the ConfigMaps because a CA rotation
+// appends the new CA to ca.crt, and the next connection must trust it
+// without a restart.
 
 import (
 	"context"
@@ -22,7 +21,6 @@ import (
 	"k8s.io/client-go/dynamic"
 )
 
-// ConfigMap is the core ConfigMap as this program reads and writes it.
 type ConfigMap struct {
 	APIVersion string            `json:"apiVersion,omitempty"`
 	Kind       string            `json:"kind,omitempty"`
@@ -53,20 +51,19 @@ func CreateConfigMap(c *apiclient.Client, configMap *ConfigMap) (*ConfigMap, err
 	return created, nil
 }
 
-// trustAnchor is one sibling's published file: every certificate in
-// it.
+// trustAnchor is the contents of one sibling's ca.crt, which can hold
+// several PEM certificates.
 type trustAnchor struct {
 	certificates []byte
 }
 
-// trustStore holds the anchors, one per named ConfigMap, and the pool
-// built from them that every request goroutine reads at dial time.
+// trustStore holds the certificates of each named ConfigMap and the
+// pool built from them, which each request reads when it dials.
 type trustStore struct {
 	namespace string
 	names     []string
 
-	// report is where a change of state goes. It is a field so a test
-	// reads what the store said.
+	// report receives a line when a ConfigMap disappears or comes back.
 	report func(line string)
 
 	mu      sync.RWMutex
@@ -92,48 +89,45 @@ func (t *trustStore) pool() *x509.CertPool {
 	return t.roots
 }
 
-// follow watches each ConfigMap in a goroutine of its own until the
-// context ends, because the Role scopes the list and the watch by
-// resourceNames, and a field selector names one object, so one watch
-// cannot cover three. It answers one channel per ConfigMap, which
-// closes when the store has taken that ConfigMap's first read. A
-// cluster may run one sibling and not the other, so an absent
-// ConfigMap is a read like any other.
+// follow starts one watch for each ConfigMap, because the Role grants
+// list and watch only by resourceNames and a field selector matches only
+// one name. Each returned channel closes after the first read of its
+// ConfigMap, whether or not the ConfigMap exists, because a cluster can
+// run one sibling and not the other.
 func (t *trustStore) follow(ctx context.Context, watcher dynamic.Interface) []<-chan struct{} {
 	read := make([]<-chan struct{}, 0, len(t.names))
 	for _, name := range t.names {
 		synced := make(chan struct{})
 		read = append(read, synced)
 		anchor := informer.One{Resource: configMapResource, Namespace: t.namespace, Name: name,
-			What: "configmap " + t.namespace + "/" + name}
+			What: "ConfigMap " + t.namespace + "/" + name}
 		informer.WatchOne(ctx, watcher, anchor, func(configMap *ConfigMap) {
 			if configMap == nil {
-				t.forget(name)
+				t.removeAnchors(name)
 				return
 			}
-			t.remember(name, configMap)
+			t.setAnchors(name, configMap)
 		}, func() { close(synced) })
 	}
 	return read
 }
 
-// remember takes up a ConfigMap's anchors. A ConfigMap that returns
-// after it was absent reports one line, because a person who read the
-// absence line reads when it ended.
-func (t *trustStore) remember(name string, configMap *ConfigMap) {
+// setAnchors stores the CA certificates of a ConfigMap and rebuilds the
+// pool. It reports a ConfigMap that comes back after it was absent.
+func (t *trustStore) setAnchors(name string, configMap *ConfigMap) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.anchors[name] = trustAnchor{certificates: []byte(configMap.Data[apiCACertKey])}
 	t.rebuild()
 	if t.absent[name] {
 		delete(t.absent, name)
-		t.report(fmt.Sprintf("configmap %s/%s is present and media-api trusts it", t.namespace, name))
+		t.report(fmt.Sprintf("ConfigMap %s/%s is present again, and media-api trusts its CA certificates", t.namespace, name))
 	}
 }
 
-// forget drops a ConfigMap's anchors. The first absence reports one
-// line, and a repeated one reports nothing.
-func (t *trustStore) forget(name string) {
+// removeAnchors removes the CA certificates of a ConfigMap and rebuilds
+// the pool. It reports the first absence and nothing for a repeat.
+func (t *trustStore) removeAnchors(name string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	delete(t.anchors, name)
@@ -141,20 +135,18 @@ func (t *trustStore) forget(name string) {
 	if !t.absent[name] {
 		t.absent[name] = true
 		t.report(fmt.Sprintf(
-			"configmap %s/%s is absent; media-api composes no stream through that API until it exists",
+			"ConfigMap %s/%s does not exist, so media-api does not trust its CA, and requests to the API whose certificate that CA signs fail the TLS check until the ConfigMap exists",
 			t.namespace, name))
 	}
 }
 
-// rebuild builds a new pool whole on every change and swaps it in, so
-// a reader never sees a half-built one. The caller holds the write
-// lock.
+// rebuild builds a new pool and swaps it in, so a reader never sees a
+// half-built pool. The caller holds the write lock.
 func (t *trustStore) rebuild() {
 	roots := x509.NewCertPool()
 	for _, name := range t.names {
-		// A rotation appends the coming CA to the file, so every
-		// certificate in it is an anchor and a leaf under either CA
-		// verifies.
+		// During a rotation ca.crt holds the old and the new CA, and
+		// both must verify.
 		roots.AppendCertsFromPEM(t.anchors[name].certificates)
 	}
 	t.roots = roots

@@ -1,18 +1,14 @@
 package main
 
-// The input asks: a press on a controller whose mark names a unit
-// writes an inputAsk into the session on the unit's Receiver. The fake
-// API server these read is in operate_test.go.
-
 import (
 	"strconv"
 	"testing"
 )
 
-// askOperator is an operator over a fake cluster whose den Receiver
-// holds the house theater's session, with the sofa remote's mark on the
-// theater. The session apply of the pass that set it up is dropped from
-// the record, so a test reads the applies its own press made.
+// askOperator returns an operator over a fake cluster where the den
+// Receiver has the session of the Player house/theater, and the sofa
+// remote has focus on the theater. It clears the session applies of the
+// setup, so a test sees only the applies of its own press.
 func askOperator(t *testing.T) (*operator, *fakeCluster) {
 	t.Helper()
 	cluster := receiverCluster()
@@ -23,14 +19,13 @@ func askOperator(t *testing.T) (*operator, *fakeCluster) {
 	return media, cluster
 }
 
-// press hands the operator one event from the sofa remote.
 func press(media *operator, key string, value int) {
 	media.handleBusMessage(remoteEventsTopic(defaultTopicBase, "house", "sofa"),
 		[]byte(`{"key":"`+key+`","value":`+strconv.Itoa(value)+`}`))
 }
 
 // selectInput sets the den Receiver's InputSelected condition and runs
-// the pass that reads it.
+// the reconcile pass that records it.
 func selectInput(media *operator, cluster *fakeCluster, status string) {
 	receiver := cluster.receivers["den-receiver"]
 	receiver.Status.Conditions = append(receiver.Status.Conditions,
@@ -39,8 +34,8 @@ func selectInput(media *operator, cluster *fakeCluster, status string) {
 	cluster.sessions = nil
 }
 
-// lastInputAsk reads the action of the input ask the last apply carried,
-// or none.
+// lastInputAsk returns the inputAsk action of the last session apply,
+// or "none" when there was no apply or it had no inputAsk.
 func lastInputAsk(cluster *fakeCluster) string {
 	if len(cluster.sessions) == 0 || cluster.sessions[len(cluster.sessions)-1].session.InputAsk == nil {
 		return "none"
@@ -48,10 +43,8 @@ func lastInputAsk(cluster *fakeCluster) string {
 	return cluster.sessions[len(cluster.sessions)-1].session.InputAsk.Action
 }
 
-// A press on the controller that drives a unit asks the unit's receiver
-// for the unit's input, in the receiver's vocabulary and never in input
-// names. The apply states the whole session beside the ask, under this
-// operator's field manager, so the apply removes none of the session.
+// The apply includes the whole session under this operator's field
+// manager, so writing the request removes no other session field.
 func TestAPressWritesAnEnsureIntoTheSession(t *testing.T) {
 	media, cluster := askOperator(t)
 
@@ -66,10 +59,9 @@ func TestAPressWritesAnEnsureIntoTheSession(t *testing.T) {
 	mustMatch(t, applied.session.InputAsk.Action, inputEnsure)
 }
 
-// While the receiver reports the session's input, an ensure would ask
-// for nothing, so a press writes nothing. A home press asks for the TV
-// too, which the condition says nothing about, so it is written.
-func TestAnEnsureWaitsForTheInputToBeLost(t *testing.T) {
+// A home press writes a show even while InputSelected is True, because
+// the condition says nothing about the TV.
+func TestAnEnsureIsWrittenOnlyWhileTheInputIsNotSelected(t *testing.T) {
 	cases := []struct {
 		name     string
 		selected string
@@ -94,9 +86,8 @@ func TestAnEnsureWaitsForTheInputToBeLost(t *testing.T) {
 	}
 }
 
-// Each ask carries a new time, so the equipment operator reads two
-// presses as two asks.
-func TestEachInputAskCarriesANewTime(t *testing.T) {
+// equipment-operator reads two requests with the same time as one.
+func TestEachInputAskHasANewTime(t *testing.T) {
 	media, cluster := askOperator(t)
 
 	press(media, "KEY_HOMEPAGE", 1)
@@ -104,16 +95,11 @@ func TestEachInputAskCarriesANewTime(t *testing.T) {
 
 	mustMatch(t, len(cluster.sessions), 2)
 	if cluster.sessions[0].session.InputAsk.At == cluster.sessions[1].session.InputAsk.At {
-		t.Errorf("two asks carry one time, %s", cluster.sessions[0].session.InputAsk.At)
+		t.Errorf("the second inputAsk has the time %s of the first, want a later time", cluster.sessions[0].session.InputAsk.At)
 	}
 }
 
-// A press asks nothing when it is a power key, a repeat or a release, a
-// press on a controller pointed at another unit, or a press on a unit
-// wired to no receiver. The power key is the room's toggle, and an
-// input ask beside it would make the receiver select the input, and
-// power it on, while the toggle puts the room to standby.
-func TestAPressThatAsksNothing(t *testing.T) {
+func TestAPressThatWritesNoAsk(t *testing.T) {
 	cases := []struct {
 		name  string
 		shape func(*operator)
@@ -130,7 +116,7 @@ func TestAPressThatAsksNothing(t *testing.T) {
 			media.focus.setMark(controllerKey("house", "sofa"), "studio")
 		}},
 		{name: "no receiver", key: "KEY_UP", value: 1, shape: func(media *operator) {
-			media.ensure.set(playerKey("house", "theater"), unitReceiver{})
+			media.playerReceivers.set(playerKey("house", "theater"), receiverWiring{})
 		}},
 	}
 	for _, each := range cases {
@@ -147,34 +133,29 @@ func TestAPressThatAsksNothing(t *testing.T) {
 	}
 }
 
-// The pass records the unit's Receiver and its InputSelected condition,
-// so a press later finds where to ask without a read of its own. A unit
-// that stops matching drops the entry.
-func TestThePassRecordsTheUnitsReceiver(t *testing.T) {
+// A press reads the Receiver from what the pass recorded, not from the
+// API server.
+func TestThePassRecordsThePlayersReceiver(t *testing.T) {
 	cluster := receiverCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	selectInput(media, cluster, "True")
 
-	held, found := media.ensure.receiverFor(playerKey("house", "theater"))
+	recorded, found := media.playerReceivers.receiverFor(playerKey("house", "theater"))
 	mustMatch(t, found, true)
-	mustMatch(t, held, unitReceiver{name: "den-receiver", inputSelected: true})
+	mustMatch(t, recorded, receiverWiring{name: "den-receiver", inputSelected: true})
 
 	cluster.receiversAbsent = true
 	runPlayers(media, []Player{*housePlayer()}, nil)
 
-	_, stillHeld := media.ensure.receiverFor(playerKey("house", "theater"))
-	mustMatch(t, stillHeld, false)
+	_, stillRecorded := media.playerReceivers.receiverFor(playerKey("house", "theater"))
+	mustMatch(t, stillRecorded, false)
 }
 
-// command hands the operator one message on the theater's commands topic.
 func command(media *operator, payload string) {
 	media.handleBusMessage(playerCommandsTopic(defaultTopicBase, "house", "theater"), []byte(payload))
 }
 
-// A program that asks a unit for home asks for what a remote's home key
-// asks for: the unit on the room's screen. So the ask on the unit's
-// commands topic writes the same show on the unit's Receiver, with no
-// controller's mark between them, because the topic names the unit.
+// No controller focus is needed, because the topic names the Player.
 func TestAHomeAskOnTheCommandsTopicWritesAShow(t *testing.T) {
 	media, cluster := askOperator(t)
 	selectInput(media, cluster, "True")
@@ -184,22 +165,19 @@ func TestAHomeAskOnTheCommandsTopicWritesAShow(t *testing.T) {
 	mustMatch(t, lastInputAsk(cluster), inputShow)
 }
 
-// A message on the commands topic that asks the Receiver for nothing: an
-// ask the playback pod made for a Remote's home press, which the operator
-// answered from the Remote's events topic, an ask for another action, a
-// payload that does not decode, and an ask for a unit wired to no
-// Receiver.
-func TestAMessageOnTheCommandsTopicThatAsksNothing(t *testing.T) {
+// A home action with remote set needs no show, because ensureInput
+// already wrote one for that Remote's press.
+func TestAMessageOnTheCommandsTopicThatWritesNoAsk(t *testing.T) {
 	cases := []struct {
 		name    string
 		shape   func(*operator)
 		payload string
 	}{
-		{name: "a home ask a Remote's press made", payload: `{"action":"home","remote":"house/sofa"}`},
-		{name: "the ask for the next work", payload: `{"action":"play-next"}`},
+		{name: "a home action from a Remote's press", payload: `{"action":"home","remote":"house/sofa"}`},
+		{name: "an action other than home", payload: `{"action":"play-next"}`},
 		{name: "a payload that does not decode", payload: `home`},
 		{name: "no receiver", payload: `{"action":"home"}`, shape: func(media *operator) {
-			media.ensure.set(playerKey("house", "theater"), unitReceiver{})
+			media.playerReceivers.set(playerKey("house", "theater"), receiverWiring{})
 		}},
 	}
 	for _, each := range cases {

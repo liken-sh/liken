@@ -1,14 +1,8 @@
-# This is the coverage gate, enforced in CI (see
-# .github/workflows/ci.yaml).
+# The Go coverage gate, which `make test-go` checks locally and in CI.
 #
-# The thresholds only rise over time. Each one is set just under what
-# the tests measure today. So a change that loses coverage fails the
-# check, and a change that gains coverage should raise the number
-# here to keep the gain.
-#
-# The numbers are measured with Go 1.27.2 and later, which count each basic
-# block once. Go 1.27.1 and earlier count a block once for each row
-# that comments split it into (golang/go#80974), and measure higher.
+# Each threshold is set just under the coverage that the tests measure,
+# so a change that loses coverage fails the gate. When a change gains
+# coverage, raise the threshold to keep the gain. Do not lower one.
 
 profile: coverage.out
 
@@ -16,11 +10,11 @@ threshold:
   total: 88
 
 override:
-  # The EDL: pure parsing and timeline arithmetic.
+  # mpv's EDL format: parsing and timeline arithmetic, with no I/O.
   - path: ^edl$
     threshold: 93
-  # The local harness: a developer tool for driving a player on a
-  # workstation, not something the operator ships.
+  # A developer tool that prints a timeline on a workstation. No image
+  # ships it.
   - path: ^local/edl$
     threshold: 8
   - path: ^local/present$

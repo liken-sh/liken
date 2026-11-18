@@ -1,14 +1,19 @@
-//! The header, the passive top-left region. It draws the current item's name
-//! from the resolved presentation fields, and takes no focus. A movie shows
-//! its title over its facts line, the year and the length. A series shows the
-//! series name over a season and episode line.
-//! When the item carries a logo, the header shows the logo in place of that
-//! name.
-//! A music item shows the track title over the artist, then the album with
-//! its year.
-//! An album plays as one mpv item whose chapters are its tracks, so the track
-//! name is the chapter mpv plays now, and the artist, the album, and the year
-//! come from the item's own block.
+//! The header in the top-left corner of the screen. It shows what is playing
+//! and takes no input focus. `lines` builds its text from the item's
+//! `Presentation`:
+//!
+//! - A movie shows its title over a line with the year and the length.
+//! - A series shows the series name over a line with the season, the
+//!   episode, the episode title, and the date.
+//! - A music item shows the track title over the artist, and under that the
+//!   album and the year. An album plays as one mpv item whose chapters are
+//!   its tracks, so the track title is the title of the chapter that mpv is
+//!   playing. The artist, album, and year come from the item's block, or
+//!   else from the file's tags.
+//!
+//! For a movie or a series with a logo, the logo is drawn in place of the
+//! title and `lines` draws only the line under it. A music item never has a
+//! logo, because `art` requests none for it.
 
 use iced::Point;
 use serde_json::Value;
@@ -21,20 +26,16 @@ use crate::theme;
 
 const LEFT: f32 = theme::MARGIN_X;
 const TOP_Y: f32 = theme::MARGIN_Y;
-/// The second line sits below the title, far enough to clear the title glyphs.
+/// Y of the line under the title when there is no logo.
 const SECOND_Y: f32 = TOP_Y + 82.0;
-/// With a logo, the second line sits this far below the logo's own bottom.
+/// The gap between the bottom of a logo and the line under it.
 const SECOND_GAP: f32 = 26.0;
-/// A music item runs to a third line, so the header keeps one drop from each
-/// of those lines to the next.
+/// The distance from one line under a music title to the next.
 const MUSIC_LINE_GAP: f32 = 46.0;
 
-/// The separator between two fields of one line: two spaces, a middle dot, and
-/// two spaces.
+/// Separates two fields on one line: two spaces, a middle dot, two spaces.
 pub const BETWEEN: &str = "  \u{00B7}  ";
 
-/// The month names, indexed one to twelve, so a date reads with its month
-/// spelled out.
 const MONTHS: [&str; 12] = [
     "January",
     "February",
@@ -50,8 +51,8 @@ const MONTHS: [&str; 12] = [
     "December",
 ];
 
-/// A season or an episode arrives as a JSON number. Render it as a whole
-/// number, so the line reads "Season 2", not "Season 2.0".
+/// Formats a JSON value for a line of text. A number prints as a whole
+/// number, so a season that arrives as `2.0` reads "Season 2".
 fn num(value: &Value) -> String {
     match value {
         Value::Number(number) => match number.as_f64() {
@@ -63,9 +64,9 @@ fn num(value: &Value) -> String {
     }
 }
 
-/// Turn an ISO date, YYYY-MM-DD, into a readable form like "March 5, 2017". A
-/// string that is not an ISO date returns unchanged, so a library that hands a
-/// ready-made date shows it as it is.
+/// Turns a `YYYY-MM-DD` date into a form like "March 5, 2017". Any other
+/// string, including one with a month outside 1 to 12, is returned
+/// unchanged, so a date that the library already formatted shows as it is.
 fn format_date(date: &str) -> String {
     let parts: Vec<&str> = date.split('-').collect();
     let iso = parts.len() == 3
@@ -89,10 +90,10 @@ fn format_date(date: &str) -> String {
     )
 }
 
-/// The second line joins the season, the episode number, and the episode
-/// title, and shows only the parts the item declared. The presentation
-/// resolves it when the block arrives, because none of its parts changes
-/// while the item plays.
+/// The line under a series name: the season, the episode number, the episode
+/// title, and the date, joined with `BETWEEN`. It leaves out each part that
+/// the item does not declare. `Presentation` calls this once when the block
+/// arrives, because none of these fields changes while the item plays.
 pub fn second_line(presentation: &Presentation) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
     if let Some(season) = presentation.season() {
@@ -110,9 +111,9 @@ pub fn second_line(presentation: &Presentation) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join(BETWEEN))
 }
 
-/// A film's facts line: the year, then the whole length to the nearest
-/// minute, as "2008  ·  2h 6m". The length is here and not on the scrubber's
-/// time line, because it does not change while the film plays.
+/// The line under a film's title: the year, then the length rounded to the
+/// nearest minute, as "2008  ·  2h 6m". The length is on this line and not
+/// beside the scrubber's time because it does not change during playback.
 fn facts(presentation: &Presentation, film: &Film) -> Option<String> {
     let parts: Vec<String> = presentation
         .year()
@@ -123,13 +124,11 @@ fn facts(presentation: &Presentation, film: &Film) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join(BETWEEN))
 }
 
-/// The word the line under a trailer's title carries.
 const TRAILER: &str = "Trailer";
 
-/// A trailer's mark joins the line under the title with the separator.
-/// Where the item declared none of that line's parts, the mark is the whole
-/// line. An item with no role, or a role other than `trailer`, keeps its
-/// line as it is.
+/// For an item whose `role` is `trailer`, appends the trailer mark to the
+/// line under the title, or makes the mark the whole line when there is
+/// none. Any other item keeps its line unchanged.
 fn marked(line: Option<String>, presentation: &Presentation) -> Option<String> {
     if presentation.role() != Some("trailer") {
         return line;
@@ -140,9 +139,8 @@ fn marked(line: Option<String>, presentation: &Presentation) -> Option<String> {
     })
 }
 
-/// The lines under a music title: the artist on one, then the album and the
-/// year together on the next. A field the block and the tags both leave empty
-/// draws nothing.
+/// The lines under a music title: the artist, then the album and the year.
+/// A field that neither the block nor mpv's tags supply is left out.
 fn music_lines(presentation: &Presentation, film: &Film) -> Vec<String> {
     let mut lines = Vec::new();
     if let Some(artist) = presentation.artist(film) {
@@ -161,9 +159,9 @@ fn music_lines(presentation: &Presentation, film: &Film) -> Vec<String> {
     lines
 }
 
-/// With a logo, the second line clears the logo's actual height, because a logo
-/// scales to its own size within the box. Without a logo it falls to the fixed
-/// line under the title.
+/// Y of the line under the title. With a logo, the line goes `SECOND_GAP`
+/// below the logo's drawn height, which varies because the logo is scaled
+/// to fit its box.
 fn second_y(logo: Option<f32>) -> f32 {
     match logo {
         Some(rows) => TOP_Y + rows + SECOND_GAP,
@@ -171,11 +169,9 @@ fn second_y(logo: Option<f32>) -> f32 {
     }
 }
 
-/// A series shows the series name over the season line. Everything else with a
-/// title shows the title. A field that resolved to nothing draws nothing. A
-/// logo takes the place of that name, and the second line stays as text. The
-/// logo is given as the rows it covers in canvas units, so the lines under it
-/// clear it.
+/// Builds the header's text lines for the current item. `logo` is the height
+/// in canvas units that the drawn logo covers, when there is one. A line
+/// whose fields are all missing is left out.
 pub fn lines(presentation: &Presentation, film: &Film, logo: Option<f32>) -> Vec<Line> {
     let title = |content: String, y: f32| {
         Line::new(
@@ -265,8 +261,8 @@ mod tests {
         );
     }
 
-    /// A film's line under its title holds its facts: the year, then the
-    /// whole length to the nearest minute, as the browser spells a runtime.
+    /// The line under a film's title has the year and the length rounded to
+    /// the nearest minute.
     #[test]
     fn a_film_reads_its_year_and_length_on_one_line() {
         let mut film = Film::default();
@@ -296,8 +292,8 @@ mod tests {
         );
     }
 
-    /// The title falls back to mpv's own `media-title`, and an item that
-    /// declares nothing at all draws nothing.
+    /// With no title in the block, the title is mpv's `media-title`. With
+    /// neither, nothing is drawn.
     #[test]
     fn a_film_with_no_block_reads_the_files_own_name() {
         let mut film = Film::default();
@@ -349,10 +345,10 @@ mod tests {
         );
     }
 
-    /// A trailer marks the line under the title in the movie layout and in
-    /// the series layout, beside whatever else that line holds.
+    /// A trailer's mark goes on the line under the title, in the movie
+    /// layout and the series layout, after any other fields of that line.
     #[test]
-    fn a_trailer_says_so_under_the_title() {
+    fn a_trailer_adds_its_mark_to_the_line_under_the_title() {
         let cases = [
             (
                 r#"{"title":"A Film","year":2014,"role":"trailer"}"#,
@@ -377,8 +373,6 @@ mod tests {
         }
     }
 
-    /// A logo carries the trailer mark under it, where the title's own line
-    /// would be.
     #[test]
     fn a_trailer_with_a_logo_marks_the_line_under_the_logo() {
         assert_eq!(
@@ -412,8 +406,7 @@ mod tests {
         );
     }
 
-    /// With no chapter title the track name falls back to the item's own
-    /// title, and a field neither the block nor the tags carry draws nothing.
+    /// With no chapter title, the track title is the item's title.
     #[test]
     fn a_music_item_falls_back_to_the_items_title() {
         assert_eq!(
@@ -422,8 +415,6 @@ mod tests {
         );
     }
 
-    /// A logo takes the place of the title, and the year under it clears the
-    /// logo's own rows.
     #[test]
     fn a_logo_takes_the_place_of_the_title() {
         assert_eq!(
@@ -436,7 +427,6 @@ mod tests {
         );
     }
 
-    /// A series with a logo shows the season line alone, under the logo.
     #[test]
     fn a_series_with_a_logo_shows_the_season_line_alone() {
         assert_eq!(
@@ -449,10 +439,10 @@ mod tests {
         );
     }
 
-    /// An item with a logo and no title of its own still shows its year, and
-    /// one with neither a logo nor a title shows nothing at all.
+    /// An item with a logo and no title still draws its year. An item with
+    /// neither a logo nor a title draws nothing.
     #[test]
-    fn a_logo_carries_the_year_under_it() {
+    fn a_logo_with_no_title_still_shows_the_year() {
         assert_eq!(
             with_logo(r#"{"year":2014}"#, &Film::default(), Some(110.0)).len(),
             1

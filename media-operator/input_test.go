@@ -1,8 +1,5 @@
 package main
 
-// These tests cover the translation from the playback pod's own command
-// words to mpv's, and the two evdev name tables the whole operator reads.
-
 import (
 	"strings"
 	"testing"
@@ -15,8 +12,6 @@ func TestCommandFor(t *testing.T) {
 		want    []any
 	}{
 		{name: "pause", command: mediaCommand{Action: actionPause}, want: []any{"no-osd", "cycle", "pause"}},
-		// play and hold set the state they name, so a second press leaves
-		// the film where the first put it (HDMI-CEC 1.3a, CEC 13.13.3).
 		{name: "play", command: mediaCommand{Action: actionPlay}, want: []any{"no-osd", "set", "pause", "no"}},
 		{name: "hold", command: mediaCommand{Action: actionHold}, want: []any{"no-osd", "set", "pause", "yes"}},
 		{name: "seek forward", command: mediaCommand{Action: actionSeek, Amount: 30}, want: []any{"no-osd", "seek", 30}},
@@ -53,8 +48,6 @@ func TestCommandFor(t *testing.T) {
 	}
 }
 
-// sendCommand writes one newline-delimited JSON command, the shape
-// mpv's IPC socket reads.
 func TestFeedbackFor(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -86,14 +79,11 @@ func TestSendCommandWritesOneJSONLine(t *testing.T) {
 	var written strings.Builder
 	mustSucceed(t, sendCommand(&written, []any{"osd-auto", "cycle", "pause"}))
 	if got := written.String(); got != "{\"command\":[\"osd-auto\",\"cycle\",\"pause\"]}\n" {
-		t.Errorf("command = %q", got)
+		t.Errorf("sendCommand wrote %q, want one JSON line holding the command", got)
 	}
 }
 
-// The button vocabulary is the whole EV_KEY name space, so a Keymap
-// may name a face button, a transport key, or a d-pad button, at the
-// codes the kernel gives them.
-func TestTheButtonCodesCarryTheWholeKeyNameSpace(t *testing.T) {
+func TestButtonCodesContainEveryKeyName(t *testing.T) {
 	cases := []struct {
 		name string
 		code uint16
@@ -123,19 +113,16 @@ func TestTheButtonCodesCarryTheWholeKeyNameSpace(t *testing.T) {
 	}
 }
 
-// A code names back, so a report reads in the names a Keymap uses.
-// The first name the header states wins where the kernel gives one
-// code several.
-func TestACodeNamesItselfBack(t *testing.T) {
+func TestCodeNamesMapBackToTheFirstName(t *testing.T) {
 	cases := []struct {
 		name string
 		code uint16
 		want string
 	}{
-		{name: "the name a gamepad's face button reports", code: 0x130, want: "BTN_SOUTH"},
+		{name: "a gamepad face button", code: 0x130, want: "BTN_SOUTH"},
 		{name: "a transport key", code: 0x0a4, want: "KEY_PLAYPAUSE"},
 		{name: "a hat axis", code: 0x10, want: "ABS_HAT0X"},
-		{name: "a code the kernel names nothing", code: 0x2ff, want: ""},
+		{name: "a code the kernel has no name for", code: 0x2ff, want: ""},
 	}
 
 	for _, each := range cases {

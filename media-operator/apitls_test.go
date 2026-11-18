@@ -1,10 +1,8 @@
 package main
 
-// These tests cover the serving pair: the first mint, the published
-// CA, the lost create race, the renewal near the end of a leaf's
-// life, and an owner's pair the keeper cannot re-sign. They run
-// against a real HTTP server in place of the API server, so the
-// keeper's requests are the bytes a cluster would receive.
+// These tests run the certificate keeper against an HTTP fake of the
+// API server, so the keeper sends the same requests it sends to a
+// cluster.
 
 import (
 	"crypto/tls"
@@ -21,11 +19,10 @@ import (
 	"time"
 )
 
-// coreAPI stands in for the core API: the Secrets and ConfigMaps the
-// namespace holds, and every write it took, so a test reads what the
-// keeper wrote. It answers client-go's watches too: a streaming list of
-// one named object, and every later change to that object, so a test
-// runs the api role's watches through client-go's own reflector.
+// coreAPI is a fake of the core API that stores Secrets and ConfigMaps
+// and records every write. It also serves watches of one named object,
+// with a streaming list, so tests can run media-api's watches through
+// client-go's reflector.
 type coreAPI struct {
 	mu      sync.Mutex
 	objects map[string]json.RawMessage
@@ -34,23 +31,21 @@ type coreAPI struct {
 	version int
 	streams []*coreStream
 	watches int
-	// collections records each list and each watch, as the path and
-	// the field selector it asked for.
+	// collections records each list and watch request as its path and
+	// field selector.
 	collections []string
 
-	// revision is the collection's resourceVersion that a list
-	// answers. It is apart from each object's own version, as on a
-	// cluster, where an object that has not changed in a while carries
-	// a version far older than the collection's.
+	// revision is the resourceVersion of the collection. It differs
+	// from each object's own version, as on a cluster, where an object
+	// that has not changed for a while is older than its collection.
 	revision string
 
-	// refusal, when it is not zero, is the status every list and every
-	// watch answers.
+	// refusal, when not zero, is the HTTP status that every list and
+	// watch request returns.
 	refusal int
 }
 
-// coreStream is one open watch: the object it names, and the event
-// lines still to send.
+// coreStream is one open watch and the event lines it has not sent.
 type coreStream struct {
 	key    string
 	events chan string
@@ -60,9 +55,8 @@ func newCoreAPI() *coreAPI {
 	return &coreAPI{objects: map[string]json.RawMessage{}, hidden: map[string]bool{}, revision: "900"}
 }
 
-// handler answers the secrets and configmaps paths, told apart by the
-// kind segment, with a get, a list by name, a watch by name, a create,
-// and an update on each.
+// handler serves get, create, and update of secrets and configmaps,
+// and list and watch by metadata.name.
 func (a *coreAPI) handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		kind, name := coreTarget(r.URL.Path)
@@ -82,11 +76,11 @@ func (a *coreAPI) handler() http.Handler {
 		case r.Method == http.MethodGet && name == "":
 			a.list(w, kind, query.Get("fieldSelector"))
 		case r.Method == http.MethodGet:
-			a.answer(w, kind+"/"+name)
+			a.get(w, kind+"/"+name)
 		case r.Method == http.MethodPost:
-			a.take(w, r, kind, true)
+			a.write(w, r, kind, true)
 		case r.Method == http.MethodPut:
-			a.take(w, r, kind, false)
+			a.write(w, r, kind, false)
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
@@ -104,11 +98,9 @@ func coreTarget(path string) (kind, name string) {
 	return "", ""
 }
 
-// coreKinds names each collection's kind, which client-go's decoder
-// needs on every object it reads.
+// client-go's decoder needs a kind on every object.
 var coreKinds = map[string]string{"configmaps": "ConfigMap", "secrets": "Secret"}
 
-// asCoreObject answers the stored object with its apiVersion and kind.
 func asCoreObject(kind string, body json.RawMessage) json.RawMessage {
 	object := map[string]any{}
 	_ = json.Unmarshal(body, &object)
@@ -118,18 +110,17 @@ func asCoreObject(kind string, body json.RawMessage) json.RawMessage {
 	return stamped
 }
 
-func (a *coreAPI) answer(w http.ResponseWriter, key string) {
-	body, held := a.objects[key]
-	if !held || a.hidden[key] {
+func (a *coreAPI) get(w http.ResponseWriter, key string) {
+	body, found := a.objects[key]
+	if !found || a.hidden[key] {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 	_, _ = w.Write(body)
 }
 
-// list answers a list under the field selector metadata.name, the only
-// list the program sends: the one object if the server holds it, and
-// the collection's revision.
+// list accepts only a metadata.name field selector, because the
+// program sends no other list.
 func (a *coreAPI) list(w http.ResponseWriter, kind, selector string) {
 	if a.refusal != 0 {
 		w.WriteHeader(a.refusal)
@@ -142,7 +133,7 @@ func (a *coreAPI) list(w http.ResponseWriter, kind, selector string) {
 	}
 	items := []json.RawMessage{}
 	key := kind + "/" + name
-	if body, held := a.objects[key]; held && !a.hidden[key] {
+	if body, found := a.objects[key]; found && !a.hidden[key] {
 		items = append(items, asCoreObject(kind, body))
 	}
 	body, _ := json.Marshal(map[string]any{
@@ -154,10 +145,10 @@ func (a *coreAPI) list(w http.ResponseWriter, kind, selector string) {
 	_, _ = w.Write(body)
 }
 
-// watch answers one watch under the field selector metadata.name. A
-// streaming list first sends the object as it is, if the server holds
-// it, and the bookmark that ends the initial events. Every watch then
-// sends each change to the object until the client hangs up.
+// watch serves a watch of one object. With sendInitialEvents it first
+// sends the object, if it exists, and the bookmark that ends the
+// initial events. Then it sends each change until the client
+// disconnects.
 func (a *coreAPI) watch(w http.ResponseWriter, r *http.Request, kind, selector string) {
 	name, _ := strings.CutPrefix(selector, "metadata.name=")
 	key := kind + "/" + name
@@ -172,7 +163,7 @@ func (a *coreAPI) watch(w http.ResponseWriter, r *http.Request, kind, selector s
 	a.streams = append(a.streams, stream)
 	var initial []string
 	if r.URL.Query().Get("sendInitialEvents") == "true" {
-		if body, held := a.objects[key]; held && !a.hidden[key] {
+		if body, found := a.objects[key]; found && !a.hidden[key] {
 			initial = append(initial, watchLine("ADDED", asCoreObject(kind, body)))
 		}
 		initial = append(initial, initialEventsEnd("v1", coreKinds[kind], a.revision))
@@ -208,7 +199,7 @@ func (a *coreAPI) close(stream *coreStream) {
 }
 
 // publish sends one change to every watch of the object. The caller
-// holds the lock.
+// must hold a.mu.
 func (a *coreAPI) publish(key, eventType string, body json.RawMessage) {
 	kind, _, _ := strings.Cut(key, "/")
 	line := watchLine(eventType, asCoreObject(kind, body))
@@ -219,25 +210,22 @@ func (a *coreAPI) publish(key, eventType string, body json.RawMessage) {
 	}
 }
 
-// requested answers each list and watch the server took, as the path
-// and the field selector.
 func (a *coreAPI) requested() []string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return append([]string{}, a.collections...)
 }
 
-// opened answers how many watches the server has taken.
 func (a *coreAPI) opened() int {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.watches
 }
 
-// take handles a create or an update. A create against a hidden
-// object is the lost race: it answers 409, and the hidden object
-// appears for the read that follows.
-func (a *coreAPI) take(w http.ResponseWriter, r *http.Request, kind string, create bool) {
+// write handles a create or an update. A create of a hidden object
+// returns 409 and makes the object visible, as when another pod wins
+// the create.
+func (a *coreAPI) write(w http.ResponseWriter, r *http.Request, kind string, create bool) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -277,18 +265,18 @@ func changeType(existed bool) string {
 	return "ADDED"
 }
 
-func (a *coreAPI) holds(t *testing.T, key string, out any) {
+func (a *coreAPI) mustRead(t *testing.T, key string, out any) {
 	t.Helper()
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	body, held := a.objects[key]
-	if !held {
-		t.Fatalf("the server holds no %s", key)
+	body, found := a.objects[key]
+	if !found {
+		t.Fatalf("the server has no %s", key)
 	}
 	mustSucceed(t, json.Unmarshal(body, out))
 }
 
-// seed places an object, and sends the change to every watch of it.
+// seed stores an object and sends the change to every watch of it.
 func (a *coreAPI) seed(t *testing.T, key string, object any) {
 	t.Helper()
 	body, err := json.Marshal(object)
@@ -300,21 +288,20 @@ func (a *coreAPI) seed(t *testing.T, key string, object any) {
 	a.publish(key, changeType(existed), body)
 }
 
-// remove deletes an object, and sends the deletion to every watch of
-// it.
+// remove deletes an object and sends the deletion to every watch of it.
 func (a *coreAPI) remove(key string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	body, held := a.objects[key]
-	if !held {
+	body, found := a.objects[key]
+	if !found {
 		return
 	}
 	delete(a.objects, key)
 	a.publish(key, "DELETED", body)
 }
 
-// hide takes an object out of every read until a create meets it,
-// which is how a test stages the race the keeper loses.
+// hide makes an object invisible to reads until a create of it
+// arrives, so a test can make the keeper lose a create race.
 func (a *coreAPI) hide(key string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -327,12 +314,10 @@ func (a *coreAPI) wrote() []string {
 	return append([]string{}, a.writes...)
 }
 
-// verifies is the chain check every test makes: the leaf verifies for
-// the Service name against the published CA at the given instant.
 func verifies(pair *tls.Certificate, caPEM string, at time.Time) error {
 	roots := x509.NewCertPool()
 	if !roots.AppendCertsFromPEM([]byte(caPEM)) {
-		return errors.New("ca.crt carries no certificates")
+		return errors.New("ca.crt has no certificates")
 	}
 	leaf, err := x509.ParseCertificate(pair.Certificate[0])
 	if err != nil {
@@ -345,7 +330,7 @@ func verifies(pair *tls.Certificate, caPEM string, at time.Time) error {
 func publishedCA(t *testing.T, api *coreAPI) string {
 	t.Helper()
 	published := &ConfigMap{}
-	api.holds(t, "configmaps/"+apiCAConfigMapName, published)
+	api.mustRead(t, "configmaps/"+apiCAConfigMapName, published)
 	return published.Data[apiCACertKey]
 }
 
@@ -357,7 +342,7 @@ func TestCertificateKeeperMintsAndPublishesTheFirstPair(t *testing.T) {
 	mustSucceed(t, err)
 
 	secret := &Secret{}
-	api.holds(t, "secrets/"+apiTLSSecretName, secret)
+	api.mustRead(t, "secrets/"+apiTLSSecretName, secret)
 	mustMatch(t, secret.Type, apiTLSSecretType)
 	mustMatch(t, string(derOf(t, secret.Data[apiTLSCertKey])), string(pair.Certificate[0]))
 	mustMatch(t, string(secret.Data[apiCACertKey]), publishedCA(t, api))
@@ -379,7 +364,7 @@ func TestCertificateKeeperReadsThePublishedPair(t *testing.T) {
 	mustMatchAll(t, api.wrote(), minted)
 }
 
-func TestCertificateKeeperReadsTheWinnerOfACreate(t *testing.T) {
+func TestCertificateKeeperReadsTheSecretAfterLosingACreateRace(t *testing.T) {
 	api := newCoreAPI()
 	client := testAPIClient(t, api.handler())
 
@@ -393,14 +378,14 @@ func TestCertificateKeeperReadsTheWinnerOfACreate(t *testing.T) {
 	mustMatch(t, string(loser.Certificate[0]), string(winner.Certificate[0]))
 }
 
-func TestCertificateKeeperRemintsALeafNearItsEnd(t *testing.T) {
+func TestCertificateKeeperRenewsALeafNearExpiry(t *testing.T) {
 	cases := []struct {
-		name     string
-		age      time.Duration
-		reminted bool
+		name    string
+		age     time.Duration
+		renewed bool
 	}{
-		{name: "over a third of its life left", age: 100 * 24 * time.Hour, reminted: false},
-		{name: "under a third of its life left", age: 300 * 24 * time.Hour, reminted: true},
+		{name: "over a third of its life left", age: 100 * 24 * time.Hour, renewed: false},
+		{name: "under a third of its life left", age: 300 * 24 * time.Hour, renewed: true},
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
@@ -419,14 +404,14 @@ func TestCertificateKeeperRemintsALeafNearItsEnd(t *testing.T) {
 			mustSucceed(t, err)
 
 			changed := string(after.Certificate[0]) != string(before.Certificate[0])
-			mustMatch(t, changed, each.reminted)
-			mustMatch(t, after.Leaf.NotAfter.After(before.Leaf.NotAfter), each.reminted)
+			mustMatch(t, changed, each.renewed)
+			mustMatch(t, after.Leaf.NotAfter.After(before.Leaf.NotAfter), each.renewed)
 			mustSucceed(t, verifies(after, publishedCA(t, api), minted.Add(each.age)))
 		})
 	}
 }
 
-func TestExpirySecondsAnswersTheLeafsRemainingLife(t *testing.T) {
+func TestExpirySecondsReturnsTheLeafsRemainingLife(t *testing.T) {
 	api := newCoreAPI()
 	keeper := newCertificateKeeper(testAPIClient(t, api.handler()), "liken-system")
 	minted := time.Now()
@@ -439,13 +424,13 @@ func TestExpirySecondsAnswersTheLeafsRemainingLife(t *testing.T) {
 
 	want := (apiLeafLife - gone).Seconds()
 	if got := keeper.expirySeconds(); math.Abs(got-want) > 1 {
-		t.Errorf("got %v seconds, want %v", got, want)
+		t.Errorf("expirySeconds is %v, want %v", got, want)
 	}
 }
 
-// An owner's own pair has no CA key, so the keeper serves it as it
-// stands and mints nothing, even when the leaf is near its end.
-func TestCertificateKeeperKeepsAPairItCannotResign(t *testing.T) {
+// An owner's Secret has no CA key, so the keeper serves its pair
+// unchanged even when the leaf is near expiry.
+func TestCertificateKeeperServesAnOwnersPairUnchanged(t *testing.T) {
 	minted := time.Now().Add(-300 * 24 * time.Hour)
 	api := newCoreAPI()
 	certPEM, keyPEM, caPEM := ownersPair(t, minted)
@@ -465,9 +450,8 @@ func TestCertificateKeeperKeepsAPairItCannotResign(t *testing.T) {
 	mustMatchAll(t, api.wrote(), []string{"POST configmaps/" + apiCAConfigMapName})
 }
 
-// ownersPair mints a pair at a chosen instant, the way an owner's
-// installer would leave one: a leaf, its key, and the CA certificate
-// with no CA key.
+// ownersPair returns a leaf, its key, and the CA certificate, without
+// the CA key, as an owner's own tooling would write them.
 func ownersPair(t *testing.T, at time.Time) (certPEM, keyPEM, caPEM []byte) {
 	t.Helper()
 	ca, err := mintAuthority(at)
@@ -484,7 +468,7 @@ func derOf(t *testing.T, certPEM []byte) []byte {
 	return certificate.Raw
 }
 
-func TestCertificateKeeperCarriesTheServersFailure(t *testing.T) {
+func TestCertificateKeeperErrorIncludesTheServersMessage(t *testing.T) {
 	cases := []string{
 		"GET secrets",
 		"POST secrets",
@@ -498,16 +482,16 @@ func TestCertificateKeeperCarriesTheServersFailure(t *testing.T) {
 			_, err := keeper.ensure()
 			mustFail(t, err)
 			if !strings.Contains(err.Error(), "the server said no") {
-				t.Errorf("the error lost the server's words: %v", err)
+				t.Errorf("the error is %q, want it to contain the server message", err)
 			}
 		})
 	}
 }
 
-// failsOn wraps the core API so one method on one kind is refused in
-// the server's own words and every other request is answered.
+// failsOn returns a 500 with a message for one method on one kind, and
+// passes every other request to the fake.
 func failsOn(api *coreAPI, failing string) http.Handler {
-	answer := api.handler()
+	served := api.handler()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		kind, _ := coreTarget(r.URL.Path)
 		if r.Method+" "+kind == failing {
@@ -515,11 +499,11 @@ func failsOn(api *coreAPI, failing string) http.Handler {
 			_, _ = io.WriteString(w, "the server said no")
 			return
 		}
-		answer.ServeHTTP(w, r)
+		served.ServeHTTP(w, r)
 	})
 }
 
-func TestCertificateKeeperCarriesAFailedUpdate(t *testing.T) {
+func TestCertificateKeeperErrorIncludesAFailedUpdatesMessage(t *testing.T) {
 	api := newCoreAPI()
 	minted := time.Now()
 	first := newCertificateKeeper(testAPIClient(t, api.handler()), "liken-system")
@@ -532,7 +516,7 @@ func TestCertificateKeeperCarriesAFailedUpdate(t *testing.T) {
 	_, err = later.ensure()
 	mustFail(t, err)
 	if !strings.Contains(err.Error(), "the server said no") {
-		t.Errorf("the error lost the server's words: %v", err)
+		t.Errorf("the error is %q, want it to contain the server message", err)
 	}
 }
 
@@ -570,7 +554,7 @@ func TestCertificateKeeperRefusesAPairItCannotRead(t *testing.T) {
 	}
 }
 
-func TestExpirySecondsAnswersZeroBeforeThePairIsLoaded(t *testing.T) {
+func TestExpirySecondsReturnsZeroBeforeThePairIsLoaded(t *testing.T) {
 	keeper := newCertificateKeeper(testAPIClient(t, newCoreAPI().handler()), "liken-system")
 	mustMatch(t, keeper.expirySeconds(), float64(0))
 }

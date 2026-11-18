@@ -1,8 +1,8 @@
-# The Go build reads the module files, the Go sources of the root package,
-# the embedded OpenAPI document, and the `edl/` package. The runtime
-# copies the committed test pattern files. An allowlist keeps
-# the Rust crates, the docs, and the deploy manifests out of this build
-# context, so a change to them does not rebuild this image.
+# The build context holds only what Dockerfile.player copies, so a
+# change to any other file does not rebuild this image. The Go build
+# reads the module files, the root package's Go sources,
+# `openapi.json`, which the package embeds, and `edl/`. The final stage
+# copies the test pattern files in `patterns/`.
 *
 !go.mod
 !go.sum
@@ -10,6 +10,6 @@
 !openapi.json
 !edl/
 !patterns/*.mkv
-# go build never reads a test file or testdata, so a test-only edit does not rebuild this image.
+# go build reads no test file or testdata.
 **/*_test.go
 **/testdata/

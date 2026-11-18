@@ -1,26 +1,23 @@
-# This Makefile names the checks a change must pass, and delegates each
-# one to the domain that owns it. `make test` runs every check CI runs,
-# in the same commands, so a change that passes here passes there. The
-# Go module and the Rust workspace are both in this directory, so their
-# checks are here; the docs are their own domain with their own
-# Makefile.
+# `make test` runs every check that CI runs, with the same commands, so
+# a change that passes here passes in CI. The Go module and the Rust
+# workspace are in this directory, so their checks are here. The docs
+# have their own Makefile, which `test-docs` calls.
 #
-# The coverage floors are the one number each gate enforces: the Go
-# floor is in .testcoverage.yml, and the three Rust floors are below.
-# CI reads the same files, so a floor moves in one place.
+# Each coverage gate has one floor, stored in one place that CI also
+# reads. The Go floor is in .testcoverage.yml, and the floors of the
+# two Rust crates are below.
 
-# A recipe that fails, or a build that is killed during one, leaves its
-# target partly written and newer than its inputs. make deletes that
-# target, so the next build makes it again and does not take it as
-# current.
+# A recipe that fails or is killed can leave a partial target that is
+# newer than its inputs. make deletes it, so the next run builds it
+# again.
 .DELETE_ON_ERROR:
 
 .PHONY: test
 test: test-go test-rust test-docs
 
-# keycodes.go is generated from the kernel header named here, and it is
-# committed, so a build needs the header only when the table is
-# regenerated against a newer kernel.
+# keycodes.go is generated from this kernel header and is committed, so
+# you need the header only to regenerate the table against a newer
+# kernel.
 INPUT_EVENT_CODES ?= /usr/include/linux/input-event-codes.h
 
 .PHONY: codes
@@ -29,24 +26,25 @@ codes:
 	gofmt -w keycodes.go
 
 # The test patterns that a pattern:// URI plays are committed in
-# patterns/, one file for each pattern and frame, and the player image
-# copies them, so neither the image build nor CI runs an encoder. The
-# names and the frames match patterns.go. `make patterns` writes a file
-# that is missing, and `make -B -j2 patterns` writes them all again
-# after an edit here. Each encode holds up to 400 MB, so -j2 is a safe
-# speedup and a high -j is not.
+# patterns/, one file for each pattern and frame size, and the player
+# image copies them, so neither the image build nor CI runs an encoder.
+# The names and frame sizes must match patterns.go. `make patterns` writes
+# the files that are missing, and `make -B -j2 patterns` writes all of
+# them again after an edit here. Each encode uses a lot of memory, so
+# keep -j low.
 #
-# Each file is ten minutes of one still frame at one frame a second.
+# Each file is ten minutes of one still frame at one frame per second.
 # mpv reads the position and the duration from the timestamps, so the
 # scrubber advances as it does for a film. A chapter every minute gives
-# the scrubber its marks, and the title gives the header a name.
+# the scrubber its marks, and the title is the name that the header
+# shows.
 #
-# The recipe encodes one minute and copies it ten times over, because
-# every minute is the same. The copy costs no encode, and each copy
-# starts on a keyframe, so a seek decodes at most one minute of frames.
-# The encode runs on one thread with no lookahead, because x264's
-# defaults held 4 GB of memory for one 3840x2160 encode, and one thread
-# holds under 400 MB.
+# Every minute is the same, so the recipe encodes one minute and
+# repeats it ten times with a stream copy. The copy needs no encode,
+# and each repeat starts on a keyframe, so a seek decodes at most one
+# minute of frames. The encode uses one thread and no lookahead,
+# because x264's defaults use several gigabytes of memory for one
+# 3840x2160 encode.
 PATTERN_NAMES := white bars
 PATTERN_FRAMES := 1280x720 1920x1080 3840x2160 2560x1080 3840x1600 1920x804
 PATTERN_FILES := $(foreach name,$(PATTERN_NAMES),$(foreach frame,$(PATTERN_FRAMES),patterns/$(name)-$(frame).mkv)) \
@@ -80,17 +78,20 @@ patterns/%.mkv:
 	  -metadata title='$(PATTERN_TITLE_$(name)), $(subst x,×,$(frame))' \
 	  $@
 
-# The speaker walk plays pink noise from one speaker of a 7.1 layout at a
-# time, 5 seconds each, around the room from the front left and then the
-# subwoofer, and names each speaker on the screen and in a chapter. Pink
-# noise is what a receiver's own speaker setup plays, and the subwoofer's
-# noise stops at 120 Hz. The picture is 1280x720, because the file is
-# for the ears. The audio is AAC at 80 kb/s with the cutoff forced to
-# 20 kHz: with the default, the encoder spreads the rate over all eight
-# channels, although seven are silent at a time, and cuts every band
-# above 8 kHz, so a tweeter would play nothing. 80 kb/s keeps the file
-# under the 500 KB that the large-file check allows. Each speaker is a
-# channel, the ffmpeg name of its channel, and its name on the screen.
+# The speaker walk plays pink noise from one speaker of a 7.1 layout at
+# a time, 5 seconds each, in order around the room from the front left
+# and ending with the subwoofer. The screen and a chapter show the name
+# of the current speaker. Pink noise is what a receiver's own speaker
+# setup plays. The subwoofer's noise is filtered to below 120 Hz. The
+# picture is 1280x720 because the file is meant for listening.
+#
+# The audio is AAC at 80 kb/s with the cutoff set to 20 kHz. With the
+# default cutoff, the encoder divides the bit rate among all eight
+# channels even though seven are silent at any moment, and it cuts
+# every band above 8 kHz, so a tweeter would play nothing. 80 kb/s
+# keeps the file under the 500 KB that the large-file check allows.
+# Each SPEAKERS entry is the ffmpeg channel name, a colon, and the name
+# shown on the screen.
 SPEAKERS := FL:Front_left FC:Center FR:Front_right SR:Side_right \
 	BR:Back_right BL:Back_left SL:Side_left LFE:Subwoofer
 SPEAKER_FONT := ../brand/fonts/SourceSans3-Regular.otf
@@ -122,25 +123,25 @@ patterns/speakers-1280x720.mkv: $(SPEAKER_FONT)
 	  -metadata title='Speaker walk, 7.1' \
 	  $@
 
-# One run of the tests gives both the race check and the coverage
-# profile, because -race with -covermode=atomic does both.
+# One run of the tests does both the race check and the coverage
+# profile, because -race works with -covermode=atomic.
 #
-# go-test-coverage is a pinned tool dependency (the `tool` directive
-# in go.mod), so the gate needs nothing installed beyond the Go
+# go-test-coverage is a tool dependency pinned by the `tool` directive
+# in go.mod, so the gate needs nothing installed beyond the Go
 # toolchain.
 
-# A package with no test file writes no rows to the profile, so the
-# gate never counts it: its number is not low, it is missing. This
-# lists such packages, and test-go fails on the first one.
+# A package with no test file writes no rows to the coverage profile,
+# so the gate ignores it and it cannot lower the total. test-go fails
+# when this command lists any package.
 UNTESTED_PACKAGES := go list -f '{{if not (or .TestGoFiles .XTestGoFiles)}}{{.ImportPath}}{{end}}' ./...
 
-# The pod build is the program the sidecar containers, the player shim,
-# and the api run, built with the tag pod (leader_pod.go says why). The
-# api's watches link client-go's reflector, its dynamic client, and rest,
-# with the packages they need. The check vets the build and fails when
-# it links the typed clientset, the informer factories, or leader
-# election, which would more than double the program that every
-# playback pod and every Remote's pod runs.
+# The sidecar containers, the player shim, and the api run the pod
+# build, the program built with the build tag pod. leader_pod.go gives
+# the reason for the tag. The api's watches need client-go's reflector,
+# dynamic client, and rest packages. This check fails when the pod build
+# also links the typed clientset, the informer factories, or leader
+# election, because they make the binary much larger in every playback
+# pod and every Remote's pod.
 POD_BUILD_CLIENT_GO := go list -tags pod -deps . | grep -E '^k8s.io/client-go/(kubernetes|informers|dynamic/dynamicinformer|tools/leaderelection)(/|$$)'
 
 .PHONY: test-go
@@ -156,25 +157,19 @@ test-go:
 
 # The Rust half is a cargo workspace with two members: the idle screen,
 # which draws with the media-screen library at the top of the
-# repository, and the display a playback pod draws over the film.
+# repository, and the display that a playback pod draws over the film.
 #
-# The Rust checks: the format, the lints, and the tests under a coverage
-# gate. cargo-llvm-cov runs the tests itself and measures every line they
-# reach, and `cargo llvm-cov report` applies each floor to that one
-# measurement. The unit tests cover the parsers, the rules, the
-# measurements, and the timeline; the integration test runs the binary
-# under cage on the headless backend, so the frame loop and the graphics
-# setup count too. That test needs cage, wlr-randr, and a Vulkan device,
-# and Mesa's lavapipe is enough of one.
-#
-# The two crates share a lock file and a target tree. Each crate keeps a
-# floor of its own, because they earn different numbers: the idle screen
-# carries a window, and the display's own window half needs a compositor
-# no unit test has. media-screen's own gate runs in its own directory.
+# The Rust checks are the format, the lints, and the tests under a
+# coverage gate. The idle screen's integration test runs its binary
+# under cage on the headless backend, so it also covers the frame loop
+# and the graphics setup. That test needs cage, wlr-randr, and a Vulkan
+# device, and Mesa's lavapipe is enough. The display has no test that
+# runs it under a compositor, so its window code is not covered and its
+# floor is lower. media-screen's gate runs in its own directory.
 
-# The floor on line coverage, as a percentage, one per crate. CI enforces the
-# same numbers through this file. Raise one when the tests earn it; never
-# lower it.
+# The floor on line coverage, as a percentage, for each crate. CI
+# enforces the same numbers through this file. Raise a floor when
+# coverage rises, and do not lower it.
 IDLE_COVERAGE_FLOOR := 95
 DISPLAY_COVERAGE_FLOOR := 90
 
@@ -182,27 +177,20 @@ DISPLAY_COVERAGE_FLOOR := 90
 test-rust:
 	cargo fmt --check
 	cargo clippy --workspace --all-targets -- -D warnings
-# The image builds with `measure` off, so the lints run over that build
-# too. The pass is the library and the binary alone, because the test
-# targets reach the flags and the measurements the feature carries.
+# The image builds with the `measure` feature off, so this lint run
+# covers that build too. It lints only the library and the binaries,
+# because the test targets need the code that the feature enables.
 	cargo clippy -p idle-screen --no-default-features --lib --bins -- -D warnings
-# One instrumented build of the workspace runs the tests of both
-# crates, and one report per crate applies that crate's floor. The
-# build uses the features of the whole workspace, the same set the
-# first clippy pass lints, so each dependency compiles once. A separate
-# run for each crate resolves a different feature set for each one,
-# and so compiles the iced crates twice.
+# One instrumented build runs the tests of both crates, and a report
+# for each crate applies its floor. The build uses the whole
+# workspace's features, the same set that the first clippy run lints,
+# so each dependency compiles once. A separate run for each crate would
+# resolve a different feature set and compile the iced crates twice. A
+# report with `-p` counts only that crate's files, and neither crate
+# links the other, so each crate's coverage comes from its own tests.
 #
-# A report with `-p` counts the lines of that crate's files alone.
-# Neither crate links the other, so a line of the idle screen runs
-# only under the idle screen's tests, and a line of the display only
-# under the display's. So each crate's number comes from its own tests
-# alone.
-#
-# The run starts from no objects and no profiles, so no test binary of
-# an earlier run counts. The Cobertura files at the workspace root are
-# inputs to `make coverage-report`, which draws the page the site
-# publishes.
+# `clean` runs first, so no object or profile of an earlier run counts.
+# The Cobertura files are the inputs of `make coverage-report`.
 	cargo llvm-cov clean --workspace
 	cargo llvm-cov --workspace --all-targets --no-report
 	cargo llvm-cov report -p idle-screen \
@@ -216,45 +204,41 @@ test-rust:
 
 .PHONY: test-docs
 test-docs:
-# The reference pages are generated and committed, so a checkout
-# carries them. make decides that a page is current by comparing file
-# times, and a fresh checkout gives each file the time that git wrote
-# it. So in CI, make cannot be trusted to rebuild a page, and a change
-# to a generator in brand/ can leave a stale page that the site
-# publishes. The check runs the generate target with -B, which
-# regenerates every page whatever the times say. It fails when the
-# result differs from what git has staged, or adds an untracked file,
-# as the skills check below does.
+# The reference pages are generated and committed. A fresh checkout
+# gives every file the time at which git wrote it, so in CI make cannot
+# tell from file times whether a page is stale, and a change to a
+# generator in brand/ would leave a stale page that the site publishes.
+# So this check regenerates every page with -B, and fails when the
+# result differs from what git has staged or adds an untracked file.
 	$(MAKE) -C docs -B generate
 	git diff --quiet -- docs/content/docs/reference \
 		&& test -z "$$(git ls-files --others --exclude-standard -- docs/content/docs/reference)" \
 		|| { git status --short -- docs/content/docs/reference; exit 1; }
 	$(MAKE) -C docs test
-# skills/ is generated from the guides and committed, so a checkout
-# carries it. The check regenerates it and fails when the result differs
-# from what git has staged, or adds an untracked file, which means a
-# guide changed and nobody ran `make -C docs skills`. The comparison is
-# with the index, not with the last commit, so a commit that stages a
-# guide and its regenerated skill together passes.
+# skills/ is generated from the guides and committed. This check
+# regenerates it and fails when the result differs from what git has
+# staged or adds an untracked file, which means that a guide changed
+# and nobody ran `make -C docs skills`. The comparison is with the
+# index, not with the last commit, so a commit that stages a guide and
+# its regenerated skill together passes.
 	$(MAKE) -C docs skills
 	git diff --quiet -- skills && test -z "$$(git ls-files --others --exclude-standard -- skills)" \
 		|| { git status --short -- skills; exit 1; }
 	$(MAKE) -C docs build
 
-# The report is the coverage data as one page the site publishes at
-# /coverage.html. It reads what the gates already wrote: the Go
-# profile from test-go, and one Cobertura file per crate from
-# test-rust. Run `make test` first, or the inputs are stale or
+# The report puts the coverage data on one page, which the site
+# publishes at /coverage.html. It reads what the gates already wrote:
+# the Go profile from test-go, and one Cobertura file for each crate
+# from test-rust. Run `make test` first, or the inputs are stale or
 # missing.
 #
-# `test` does not depend on this, because a gate and a report are
-# separate acts: the gate says pass or fail, and the report says
-# where the lines are.
+# `test` does not depend on this target, because the gate decides pass
+# or fail and the report shows which lines are uncovered.
 #
-# The tool is the brand component's, pinned as a tool dependency of
-# the docs module the way Hugo and crdref are, so it runs from docs/
-# and needs nothing installed. -root names the tree the inputs
-# describe, which is this directory.
+# The tool belongs to the brand component and is pinned as a tool
+# dependency of the docs module, so it runs from docs/ and needs
+# nothing installed. -root is this directory, the source tree that the
+# inputs describe.
 COVERAGE_INPUTS := coverage.out coverage-idle-screen.xml coverage-display.xml
 
 .PHONY: coverage-report

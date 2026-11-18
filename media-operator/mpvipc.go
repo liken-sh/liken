@@ -1,15 +1,13 @@
 package main
 
 // mpv's JSON IPC socket carries newline-delimited JSON objects in
-// both directions: commands in, replies and events out. It is the
-// one interface mpv offers a program, and the supervisor drives it
-// instead of parsing mpv's terminal output, which is written for a
-// person and changes shape freely.
+// both directions: commands to mpv, and replies and events from it.
+// The command sidecar uses it instead of parsing mpv's terminal
+// output, which is written for a person and can change format.
 //
-// The supervisor observes properties instead of polling them. mpv
-// sends the current value once at observe time and then one event
-// per change, so the socket carries the whole story with no timer of
-// the supervisor's own.
+// The sidecar observes properties instead of polling them. After an
+// observe_property command, mpv sends the current value once and then
+// one event for each change, so the sidecar needs no timer.
 
 import (
 	"bufio"
@@ -22,37 +20,32 @@ import (
 	"time"
 )
 
-// mpvSocketPath is a variable rather than a constant because the
-// same string appears in mpv's --input-ipc-server argument: one
-// value is what makes the two ends meet, and a test moves both at
-// once.
+// mpvSocketPath is a variable so a test can move the socket. It is also
+// the value of mpv's --input-ipc-server argument, so the sidecar and mpv
+// always use the same path.
 var mpvSocketPath = ipcSocketPath
 
-// mpv creates the socket a moment after it starts, so a dial retries.
-// mpvDialDelay is the pause between tries.
+// mpvDialDelay is the wait between dial attempts. mpv creates its socket
+// shortly after it starts, so the first attempt often fails.
 const mpvDialDelay = time.Second
 
-// The properties the Play's status is made of. The supervisor asks for no
-// others, because every event mpv sends costs a decode. The two current-tracks
-// entries are the languages mpv selected.
+// The properties that the Play's status comes from. The current-tracks
+// entries are the languages of the audio and subtitle tracks that mpv
+// selected.
 const (
 	audioLanguageProperty    = "current-tracks/audio/lang"
 	subtitleLanguageProperty = "current-tracks/sub/lang"
 
-	// The four properties plan 26's decode metrics read. None of them
-	// join a report: the command sidecar is the one process that holds
-	// mpv's socket, so these are its own Prometheus series and never
-	// travel to the operator. codecProperty and hardwareProperty
-	// together decide media_decode_info; droppedFramesProperty feeds
-	// media_dropped_frames_total; delayProperty is media_av_delay_seconds.
+	// The properties of the decode metrics. The command sidecar exports
+	// them as its own Prometheus series and does not send them to the
+	// operator in a play report. codecProperty and hardwareProperty set
+	// the labels of media_decode_info, droppedFramesProperty sets
+	// media_dropped_frames_total, and delayProperty sets
+	// media_av_delay_seconds.
 	//
-	// codecProperty reads current-tracks/video/codec rather than a
-	// plain video-codec, which mpv's manual does not define: the
-	// current-tracks tree is an alias onto the selected entry of
-	// track-list, and track-list/N/codec is documented as "the codec
-	// name used by this track, for example h264", the short, bounded
-	// name the label needs. current-tracks/audio/lang and
-	// current-tracks/sub/lang above read the same tree for the report.
+	// mpv's manual defines no video-codec property. current-tracks/video
+	// is the selected entry of track-list, and its codec is a short name
+	// such as h264, which suits a metric label.
 	codecProperty         = "current-tracks/video/codec"
 	hardwareProperty      = "hwdec-current"
 	droppedFramesProperty = "frame-drop-count"
@@ -65,30 +58,27 @@ var observedProperties = []string{
 	codecProperty, hardwareProperty, droppedFramesProperty, delayProperty,
 }
 
-// propertyChangeEvent carries an observed property's new value.
-// clientMessageEvent carries a script-message any client broadcast, which is
-// how the display reaches the command sidecar. fileLoadedEvent says that mpv
-// has opened a file and selected its tracks, which is when the sidecar
-// chooses the subtitle track. mpv sends many other events through the same
-// socket, and readEvents drops them.
+// The events that readEvents passes on. A client-message event carries a
+// script-message that a client broadcast, which is how the display sends a
+// request to the command sidecar. mpv sends file-loaded after it opens a
+// file and selects its tracks, and the sidecar chooses the subtitle track
+// then.
 const (
 	propertyChangeEvent = "property-change"
 	clientMessageEvent  = "client-message"
 	fileLoadedEvent     = "file-loaded"
 )
 
-// mpvCommand is the shape mpv accepts: an array of the command name
-// followed by its arguments.
-// A command that carries a request id comes back with that id on
-// mpv's answer; mpvrequests.go says which commands carry one.
+// mpvCommand is one command for mpv: the command name followed by its
+// arguments. When RequestID is set, mpv copies it into the reply.
+// mpvrequests.go sets it for the commands that need a reply.
 type mpvCommand struct {
 	Command   []any `json:"command"`
 	RequestID int   `json:"request_id,omitempty"`
 }
 
-// mpvMessage is the shape of one line mpv writes. Command replies
-// and events share the socket, so every field here is absent from
-// some of the lines that arrive.
+// mpvMessage is one line that mpv writes. Replies and events share the
+// socket, so each line leaves some of these fields empty.
 type mpvMessage struct {
 	Event string          `json:"event"`
 	ID    int             `json:"id"`
@@ -96,41 +86,39 @@ type mpvMessage struct {
 	Data  json.RawMessage `json:"data"`
 	Args  []string        `json:"args"`
 
-	// An answer to a command carries no event, the command's request
-	// id, and mpv's error word.
+	// A reply has no event. It has the request_id of the command and an
+	// error string, which is "success" when the command worked.
 	RequestID int    `json:"request_id"`
 	Error     string `json:"error"`
 }
 
-// clientMessage is one script-message the display broadcast, as its arguments
-// reach the sidecar over the socket. The first argument names the request, so
-// the sidecar tells its own requests from any other script's traffic.
+// clientMessage is a script-message that a client broadcast. The first
+// argument is the message name, which tells the display's requests from
+// the messages of other scripts.
 type clientMessage struct {
 	Args []string
 }
 
-// propertyChange is one observed property's new value. The data
-// stays raw because each property has its own type, and only the
-// fold that applies the change knows which one to decode.
+// propertyChange is the new value of one observed property. Data stays
+// raw JSON because each property has its own type, and the code that
+// handles the property decodes it.
 type propertyChange struct {
 	Name string
 	Data json.RawMessage
 }
 
-// known drops a null datum before anything decodes it. mpv writes
-// null for a property it has no value for yet, such as time-pos
-// before the first frame, and a null decoded into a number would
-// report a position of zero that the player never held.
+// known reports whether the change has a value. mpv sends null for a
+// property that has no value yet, such as time-pos before the first
+// frame. Decoding null into a number gives zero, which would report a
+// position that the player never had.
 func (c propertyChange) known() bool {
 	return string(c.Data) != "null" && len(c.Data) > 0
 }
 
 // dialMPV retries until it connects or the context ends. The command
-// sidecar is a native sidecar the kubelet starts before mpv, so the
-// socket can be minutes away, and the wait has no deadline of its own:
-// nothing but mpv appearing or the kubelet's SIGTERM ends it. Waiting is
-// the whole job when mpv is not up yet, so a wall-clock limit would only
-// quit early on a slow image pull or a display claim that is not ready.
+// sidecar is a native sidecar, which the kubelet starts before mpv. A slow
+// image pull or a display claim that is not ready can delay mpv for a long
+// time, so dialMPV has no deadline of its own.
 func dialMPV(ctx context.Context, path string) (net.Conn, error) {
 	for ctx.Err() == nil {
 		connection, err := net.Dial("unix", path)
@@ -145,32 +133,29 @@ func dialMPV(ctx context.Context, path string) (net.Conn, error) {
 	return nil, ctx.Err()
 }
 
-// observeProperties gives each property its own observe id because
-// mpv requires one, but the supervisor keys off the name in each
-// event rather than the id, so the ids only have to be distinct.
+// observeProperties sends an observe_property command for each name. mpv
+// requires an id for each observation. The ids only need to be distinct,
+// because readEvents matches events by property name.
 func observeProperties(writer io.Writer, names []string) error {
 	encoder := json.NewEncoder(writer)
 	for index, name := range names {
 		command := mpvCommand{Command: []any{"observe_property", index + 1, name}}
 		if err := encoder.Encode(command); err != nil {
-			return fmt.Errorf("observe %s: %w", name, err)
+			return fmt.Errorf("observing the mpv property %s: %w", name, err)
 		}
 	}
 	return nil
 }
 
-// maxEventLine bounds one line of mpv's output, far above anything
-// the four observed properties produce.
+// maxEventLine is the longest line of mpv output that readEvents accepts.
 const maxEventLine = 1 << 20
 
-// readEvents delivers the observed property changes, the client messages, the
-// file-loaded events, and the answers to commands that carried a request id,
-// and drops everything else: the answers with no id, other events, and any
-// line that does not decode. mpv's protocol grows new events, and one the
-// supervisor cannot read is no reason to stop reporting the ones it can. It
-// ends when the socket closes, which is how mpv says the run is over. A nil
-// replies channel drops the answers too, and a nil loads channel drops the
-// file-loaded events.
+// readEvents reads mpv's output and sends each observed property change,
+// client message, file-loaded event, and reply with a request id to its
+// channel. It skips every other line, including lines that are not valid
+// JSON, so an event that a new mpv version adds does no harm. A nil replies
+// or loads channel skips those messages. readEvents returns when the
+// socket closes, which means that mpv exited.
 func readEvents(
 	ctx context.Context, reader io.Reader, changes chan<- propertyChange,
 	messages chan<- clientMessage, replies chan<- mpvReply, loads chan<- struct{},
@@ -221,9 +206,9 @@ func readEvents(
 	return scanner.Err()
 }
 
-// replyData keeps an answer's data as JSON text, so a reply stays a value
-// that compares. A null or absent datum is empty, because mpv writes null
-// for an answer that carries no value.
+// replyData returns a reply's data as JSON text, so an mpvReply can be
+// compared with ==. mpv writes null when a command returns no value, and
+// replyData returns the empty string for it.
 func replyData(data json.RawMessage) string {
 	if string(data) == "null" {
 		return ""

@@ -1,8 +1,7 @@
 package main
 
-// These tests cover the command sidecar's lines: one line per press or
-// published command, with what it sent and what mpv answered, and no
-// line for a repeat, a catch-up, or a message that changes nothing.
+// The command sidecar logs one line for each key press or published
+// command, with what it sent to mpv and mpv's reply.
 
 import (
 	"encoding/json"
@@ -10,8 +9,8 @@ import (
 	"testing/synctest"
 )
 
-// loggingCommander is keyTestCommander with its lines collected and the
-// controller's mark on this Play's Player.
+// loggingCommander is keyTestCommander with its log collected and the
+// remote's focus on this Play's Player.
 func loggingCommander(t *testing.T) (*commander, *fakeBroker, <-chan string, *logBuffer) {
 	t.Helper()
 	c, broker, lines := keyTestCommander(t)
@@ -21,13 +20,11 @@ func loggingCommander(t *testing.T) (*commander, *fakeBroker, <-chan string, *lo
 	return c, broker, lines, &log
 }
 
-// answerLast reads the command the sidecar wrote and answers it the way
-// mpv does, under the request id it carried.
-func answerLast(t *testing.T, c *commander, lines <-chan string, answer string) {
+func replyToLast(t *testing.T, c *commander, lines <-chan string, answer string) {
 	t.Helper()
 	var sent mpvCommand
 	mustSucceed(t, json.Unmarshal([]byte(nextLine(t, lines)), &sent))
-	c.answer(mpvReply{ID: sent.RequestID, Error: answer})
+	c.deliverReply(mpvReply{ID: sent.RequestID, Error: answer})
 }
 
 func TestAPressLogsWhatItSentAndWhatMpvAnswered(t *testing.T) {
@@ -50,7 +47,7 @@ func TestAPressLogsWhatItSentAndWhatMpvAnswered(t *testing.T) {
 				events, _ := keyTestTopics()
 
 				c.handle(events, mustEncode(t, keyEvent{Key: each.key, Value: 1}))
-				answerLast(t, c, lines, mpvAnswerSuccess)
+				replyToLast(t, c, lines, mpvReplySuccess)
 
 				mustLogOnce(t, log, "command: "+each.want)
 			})
@@ -58,21 +55,18 @@ func TestAPressLogsWhatItSentAndWhatMpvAnswered(t *testing.T) {
 	}
 }
 
-// mpv's refusal reaches the line in mpv's own words.
 func TestAPressLogsMpvsRefusalWordForWord(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, _, lines, log := loggingCommander(t)
 		events, _ := keyTestTopics()
 
 		c.handle(events, mustEncode(t, keyEvent{Key: "KEY_NEXTSONG", Value: 1}))
-		answerLast(t, c, lines, "property unavailable")
+		replyToLast(t, c, lines, "property unavailable")
 
 		mustLogOnce(t, log, "chapter +1", "mpv answered property unavailable")
 	})
 }
 
-// A press the pod does not act on says why once, and its repeat and its
-// release say nothing more.
 func TestAnIgnoredPressSaysWhyOnce(t *testing.T) {
 	cases := []struct {
 		name string
@@ -117,15 +111,13 @@ func TestAnIgnoredPressSaysWhyOnce(t *testing.T) {
 	}
 }
 
-// A held key acts on every repeat and writes two lines for the whole
-// hold: the press, and the release with the count.
 func TestAHeldKeyLogsThePressAndTheReleaseAlone(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, _, lines, log := loggingCommander(t)
 		events, _ := keyTestTopics()
 
 		c.handle(events, mustEncode(t, keyEvent{Key: "KEY_FASTFORWARD", Value: 1}))
-		answerLast(t, c, lines, mpvAnswerSuccess)
+		replyToLast(t, c, lines, mpvReplySuccess)
 		nextLine(t, lines)
 		for range 3 {
 			c.handle(events, mustEncode(t, keyEvent{Key: "KEY_FASTFORWARD", Value: 2}))
@@ -146,7 +138,7 @@ func TestAPublishedCommandLogsWhatItSentAndWhatMpvAnswered(t *testing.T) {
 		c, _, lines, log := loggingCommander(t)
 
 		c.handle(c.commandsTopic, mustEncode(t, mediaCommand{Action: actionSeek, Amount: 30}))
-		answerLast(t, c, lines, mpvAnswerSuccess)
+		replyToLast(t, c, lines, mpvReplySuccess)
 
 		mustLogOnce(t, log, `command: a message on `+c.commandsTopic+`: seek +30 s, sent ["no-osd","seek",30] to mpv, mpv answered success`)
 	})
@@ -204,7 +196,7 @@ func TestTheCycleKeyWithNoFocusTopicSaysWhy(t *testing.T) {
 	})
 }
 
-func TestTheHomeKeyLogsTheAskAndTheEnding(t *testing.T) {
+func TestTheHomeKeyLogsTheRequestAndTheEnding(t *testing.T) {
 	cases := []struct {
 		name   string
 		key    string
@@ -215,13 +207,13 @@ func TestTheHomeKeyLogsTheAskAndTheEnding(t *testing.T) {
 			name:   "home on a pod that read its player",
 			key:    "KEY_HOMEPAGE",
 			player: keyTestPlayer,
-			want: "command: KEY_HOMEPAGE from remote house/sofa: home, published the home ask to " +
+			want: "command: KEY_HOMEPAGE from remote house/sofa: home, published the home command to " +
 				playerCommandsTopic(defaultTopicBase, keyTestPlayNS, keyTestPlayer) + ", so the run ends",
 		},
 		{
 			name: "home on a pod that read no player",
 			key:  "KEY_HOMEPAGE",
-			want: "command: KEY_HOMEPAGE from remote house/sofa: home, with no player commands topic to ask on, so the run ends",
+			want: "command: KEY_HOMEPAGE from remote house/sofa: home, with no Player commands topic to publish on, so the run ends",
 		},
 	}
 	for _, each := range cases {
@@ -242,7 +234,7 @@ func TestTheHomeKeyLogsTheAskAndTheEnding(t *testing.T) {
 	}
 }
 
-func TestTheUpNextSelectLogsTheAsk(t *testing.T) {
+func TestTheUpNextSelectLogsTheRequest(t *testing.T) {
 	cases := []struct {
 		name   string
 		next   string
@@ -253,18 +245,18 @@ func TestTheUpNextSelectLogsTheAsk(t *testing.T) {
 			name:   "a Play with a next block",
 			next:   `{"title":"Next","request":{"id":"b"}}`,
 			player: keyTestPlayer,
-			want: "command: the display took the up-next offer, published play-next to " +
+			want: "command: the display accepted the up-next offer, published play-next to " +
 				playerCommandsTopic(defaultTopicBase, keyTestPlayNS, keyTestPlayer),
 		},
 		{
 			name:   "a Play with no next block",
 			player: keyTestPlayer,
-			want:   "command: the display took the up-next offer, ignored, because the Play has no next block",
+			want:   "command: the display accepted the up-next offer, ignored, because the Play has no next block",
 		},
 		{
 			name: "a pod that read no player",
 			next: `{"title":"Next"}`,
-			want: "command: the display took the up-next offer, ignored, because the pod has no player commands topic to ask on",
+			want: "command: the display accepted the up-next offer, ignored, because the pod has no Player commands topic to publish on",
 		},
 	}
 	for _, each := range cases {
@@ -284,8 +276,6 @@ func TestTheUpNextSelectLogsTheAsk(t *testing.T) {
 	}
 }
 
-// A command with no socket under it logs at once, because no answer
-// will come.
 func TestACommandWithNoSocketSaysSo(t *testing.T) {
 	var log logBuffer
 	c := &commander{log: &log}
@@ -295,7 +285,6 @@ func TestACommandWithNoSocketSaysSo(t *testing.T) {
 	mustLogOnce(t, &log, `sent ["no-osd","cycle","pause"] to mpv, not delivered, because mpv's socket is not open`)
 }
 
-// A command whose write fails logs the write's own error.
 func TestACommandWhoseWriteFailsSaysWhy(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, _, _, log := loggingCommander(t)
@@ -307,8 +296,6 @@ func TestACommandWhoseWriteFailsSaysWhy(t *testing.T) {
 	})
 }
 
-// A line still waiting when the socket closes is logged then, because
-// mpv's answer will not come.
 func TestALineWaitingOnAClosedSocketIsLoggedOnce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, _, lines, log := loggingCommander(t)
@@ -317,18 +304,16 @@ func TestALineWaitingOnAClosedSocketIsLoggedOnce(t *testing.T) {
 		nextLine(t, lines)
 
 		c.detach()
-		c.answer(mpvReply{ID: 1, Error: mpvAnswerSuccess})
+		c.deliverReply(mpvReply{ID: 1, Error: mpvReplySuccess})
 
 		mustLogOnce(t, log, "pause or resume", "mpv closed its socket before it answered")
 	})
 }
 
-// The display's exit press ends the run with two lines: why it ended,
-// and the ending the sidecar published.
 func TestTheExitPressLogsWhyAndTheEnding(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, _, lines, log := loggingCommander(t)
-		c.statusTopic = playStatusTopic(defaultTopicBase, keyTestPlayNS, keyTestPlayrun)
+		c.statusTopic = playStatusTopic(defaultTopicBase, keyTestPlayNS, keyTestPlay)
 		c.lastReport, c.haveReport = playReport{Item: 2, Position: "0:41:07"}, true
 
 		c.serveMessage([]string{exitMessage})
@@ -343,8 +328,8 @@ func TestTheExitPressLogsWhyAndTheEnding(t *testing.T) {
 	})
 }
 
-// The reporter logs what a person sees change and nothing for a
-// position, a decode property, or a value that repeats.
+// The reporter logs nothing for position updates, decode properties, or
+// a value that did not change.
 func TestTheReporterLogsWhatAPersonSeesChange(t *testing.T) {
 	var log logBuffer
 	changes := make(chan propertyChange, 16)

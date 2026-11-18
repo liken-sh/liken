@@ -1,13 +1,11 @@
 package main
 
-// The media layer's half of the audio operator's Sink: the volume scale
-// a press steps in, the level the sink reports, and the session this
-// operator applies to ask for a level. A Sink is cluster-scoped, because
-// an endpoint is hardware on a machine and belongs to no namespace.
-//
-// The audio operator writes the status, and this operator writes only
-// status.session, by server-side apply under its own field manager, so
-// neither writer removes the other's fields.
+// media-operator reads audio-operator's cluster-scoped Sink for its
+// volume scale and the level the sink reports, and writes the Sink's
+// status.session to request a level. audio-operator writes the rest of
+// the status. This operator writes status.session by server-side apply
+// under its own field manager, so neither writer removes the other's
+// fields.
 
 import (
 	"encoding/json"
@@ -21,14 +19,13 @@ const (
 	sinksPath      = "/apis/audio.liken.sh/v1alpha1/sinks"
 )
 
-// The scale a Sink states when its spec states none, in percent: the
-// values a press used before a Sink stated a scale.
+// The volume scale in percent when the Sink's spec does not set one.
 const (
 	defaultSinkMax  = 100
 	defaultSinkStep = 5
 )
 
-// A Sink carries only what this operator reads or writes.
+// Sink declares only the fields this operator reads or writes.
 type Sink struct {
 	APIVersion string     `json:"apiVersion,omitempty"`
 	Kind       string     `json:"kind,omitempty"`
@@ -41,18 +38,17 @@ type SinkSpec struct {
 	Volume *SinkVolume `json:"volume,omitempty"`
 }
 
-// SinkVolume is the sink's volume scale, in percent: the resting level,
-// the loudest level an ask may set, and the distance one press moves the
-// level.
+// SinkVolume is in percent: the default level, the highest level a
+// request may set, and how far one key press moves the level.
 type SinkVolume struct {
 	Level *int `json:"level,omitempty"`
 	Max   *int `json:"max,omitempty"`
 	Step  *int `json:"step,omitempty"`
 }
 
-// UnmarshalJSON reads the volume as an object, and a bare number as the
-// resting level. A Sink that an audio operator with the integer schema
-// still serves then converts, and the view lists every Sink.
+// UnmarshalJSON also accepts a bare number as the default level, so that
+// a Sink from an older audio-operator, whose spec.volume is an integer,
+// does not fail the list of Sinks.
 func (v *SinkVolume) UnmarshalJSON(data []byte) error {
 	var level int
 	if err := json.Unmarshal(data, &level); err == nil {
@@ -63,23 +59,22 @@ func (v *SinkVolume) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, (*plain)(v))
 }
 
-// Passthrough is the encoded formats the running sink accepts, in
-// PipeWire's IEC958 codec names, such as AC3 and TrueHD. It is empty for
-// a sink that accepts none (passthrough.go).
+// Passthrough lists the encoded formats that the sink accepts, by
+// PipeWire's IEC958 codec names, such as AC3 and TrueHD (passthrough.go).
 type SinkStatus struct {
 	Observed    SinkObserved `json:"observed"`
 	Session     *SinkSession `json:"session,omitempty"`
 	Passthrough []string     `json:"passthrough,omitempty"`
 }
 
-// SinkObserved is the level and the mute the sink last reported.
+// SinkObserved is the volume and mute state the sink last reported.
 type SinkObserved struct {
 	Volume *int  `json:"volume,omitempty"`
 	Mute   *bool `json:"mute,omitempty"`
 }
 
-// SinkSession names the Player whose asks the block carries, and the
-// newest level ask, in percent.
+// SinkSession is the Player that controls the sink's volume, and its
+// latest request in percent.
 type SinkSession struct {
 	Player    string         `json:"player"`
 	VolumeAsk *SinkVolumeAsk `json:"volumeAsk,omitempty"`
@@ -91,8 +86,8 @@ type SinkVolumeAsk struct {
 	At    string `json:"at"`
 }
 
-// sinkScale reads the sink's scale, with the defaults for what the spec
-// leaves out.
+// sinkScale returns the sink's maximum and step, with the defaults for
+// values the spec leaves out.
 func sinkScale(sink *Sink) (max, step float64) {
 	max, step = defaultSinkMax, defaultSinkStep
 	if sink.Spec.Volume == nil {
@@ -107,8 +102,8 @@ func sinkScale(sink *Sink) (max, step float64) {
 	return max, step
 }
 
-// The body of a session apply carries the status alone, and the
-// session alone inside it.
+// sinkStatusApply is the body of the server-side apply that writes
+// status.session.
 type sinkStatusApply struct {
 	APIVersion string            `json:"apiVersion"`
 	Kind       string            `json:"kind"`
@@ -120,9 +115,8 @@ type sinkSessionStatus struct {
 	Session *SinkSession `json:"session,omitempty"`
 }
 
-// ApplySinkSession writes status.session and nothing else, under this
-// operator's field manager. Each apply states the whole block, so the
-// newest ask replaces the one before it.
+// ApplySinkSession replaces status.session, under this operator's field
+// manager.
 func ApplySinkSession(c *apiclient.Client, name string, session *SinkSession) error {
 	body, err := json.Marshal(&sinkStatusApply{
 		APIVersion: sinkAPIVersion,

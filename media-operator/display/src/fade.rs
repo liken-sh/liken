@@ -1,18 +1,19 @@
-//! The fade the whole display shares. One factor runs from 0 clear to 1
-//! full, and every colour the display draws scales its alpha by it, so the
-//! display fades as one.
+//! A fade is a factor from 0 (clear) to 1 (full). An element multiplies
+//! the alpha of every color it draws by its factor, so the whole element
+//! fades together.
 //!
-//! Three things on the display come and go on clocks of their own: the OSD,
-//! the up-next card, and the volume row. Each one carries a [`Clock`], and
-//! the frame loop steps the fades and arms the windows, because the loop owns
-//! the timer.
+//! Each element that fades on its own, such as the OSD, the up-next
+//! card, the volume row, and the skip control, has a [`Clock`]: its
+//! [`Fade`] and a request for its hide timer. The element only records
+//! the request, because the frame loop owns the timers.
 
 use std::time::Duration;
 
 use crate::theme;
 
-/// What the hide window does after a change. A summon arms one, a dismiss
-/// cancels it, and a press while paused leaves the display standing.
+/// What the frame loop does with an element's hide timer: `Arm` starts
+/// it, `Cancel` stops it, and `Keep` leaves it as it is. The OSD cancels
+/// its timer while the film is paused, so the OSD stays up.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Hide {
     #[default]
@@ -21,8 +22,8 @@ pub enum Hide {
     Cancel,
 }
 
-/// One element's own clock: how far its fade has moved, and what its hide
-/// window is asked to do next.
+/// The fade of one element, and the hide timer request that the frame
+/// loop has not read yet.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Clock {
     fade: Fade,
@@ -30,7 +31,6 @@ pub struct Clock {
 }
 
 impl Clock {
-    /// The fade, which the frame loop steps while it is moving.
     pub fn fade(&self) -> &Fade {
         &self.fade
     }
@@ -39,32 +39,30 @@ impl Clock {
         &mut self.fade
     }
 
-    /// The hide window this state asks for, which the frame loop arms and
-    /// cancels because it owns the timer.
+    /// Return the pending hide request and reset it to `Keep`.
     pub fn take_hide(&mut self) -> Hide {
         std::mem::take(&mut self.hide)
     }
 
-    /// Ask for a window without moving the fade, which a change that leaves
-    /// the element standing does.
-    pub fn ask(&mut self, hide: Hide) {
+    /// Request a hide timer action and leave the fade as it is.
+    pub fn request_hide(&mut self, hide: Hide) {
         self.hide = hide;
     }
 
-    /// Rise, and ask for the window that takes this element down again.
+    /// Fade in, and request a hide timer action.
     pub fn show(&mut self, hide: Hide) {
         self.fade.to(1.0);
         self.hide = hide;
     }
 
-    /// The window ran out, so the element leaves on its own fade.
+    /// Fade out. The frame loop calls this when the hide timer expires.
     pub fn hide(&mut self) {
         self.fade.to(0.0);
     }
 }
 
-/// The factor and where it is going. It starts clear, so the display draws
-/// nothing until something summons it.
+/// The current factor and the target it moves toward. It starts at 0, so
+/// nothing draws until a `show`.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Fade {
     value: f32,
@@ -72,8 +70,8 @@ pub struct Fade {
     exit: Option<Exit>,
 }
 
-/// An exit in progress: the factor it left from, and how many of its ticks
-/// have run.
+/// A fade out along the exit curve: the factor it started from, the ticks
+/// that have run, and the total ticks.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Exit {
     from: f32,
@@ -82,35 +80,37 @@ struct Exit {
 }
 
 impl Fade {
-    /// The factor, from 0 clear to 1 full.
+    /// The factor, from 0 (clear) to 1 (full).
     pub fn value(self) -> f32 {
         self.value
     }
 
-    /// Whether the factor is still moving. The display runs its tick only
-    /// while this holds, so a factor standing at either end costs nothing.
+    /// Whether the factor has not reached its target. The display runs
+    /// its tick only while a fade is running, so a fade at rest redraws
+    /// nothing.
     pub fn running(self) -> bool {
         self.value != self.target
     }
 
-    /// Whether any of the element is on the screen: the factor is above
-    /// clear, or it is on its way up from clear, which the next tick shows.
+    /// Whether the element draws: its factor or its target is above 0.
     pub fn shown(self) -> bool {
         self.value > 0.0 || self.target > 0.0
     }
 
-    /// Set the target. One factor serves both directions, so a dismiss
-    /// during a fade in reverses it from where it stands rather than
-    /// dropping the display and raising it again.
+    /// Set the target and cancel any exit. The factor moves from its
+    /// current value, so a dismiss during a fade in reverses the fade
+    /// from where it is.
     pub fn to(&mut self, target: f32) {
         self.target = target;
         self.exit = None;
     }
 
-    /// Fall to clear over `over` on the ease-in curve, t³, from where the
-    /// factor stands. The hand-off of a taken offer leaves this way, at the
-    /// same length and on the same curve as the compositor's fade of the
-    /// film, so the two reach black together.
+    /// Fall from the current value to 0 over `over`, along the ease-in
+    /// curve t³. When the viewer takes the up-next offer, the card fades
+    /// out this way over `theme::HAND_OFF`, which is the length of the
+    /// hand-off that the arranger asks the compositor to run on the film
+    /// with the `ease_in` curve. So the card and the film fade out
+    /// together. A fade already at 0 runs no exit.
     pub fn exit(&mut self, over: Duration) {
         self.target = 0.0;
         let ticks = (over.as_secs_f32() / theme::FADE_TICK.as_secs_f32()).round() as u32;
@@ -121,15 +121,16 @@ impl Fade {
         });
     }
 
-    /// Put the factor at its target at once. An element that will not draw
-    /// while it moves takes this, so no tick redraws the frame for it.
+    /// Move the factor to its target at once. An element that is not
+    /// drawn calls this, so no tick redraws the frame for it.
     pub fn finish(&mut self) {
         self.value = self.target;
         self.exit = None;
     }
 
-    /// Step the factor toward its target on one tick, at the in rate on the
-    /// way up and the out rate on the way down, or along the exit's curve.
+    /// Advance one tick: along the exit curve during an exit, and
+    /// otherwise toward the target, at the `FADE_IN` rate when rising and
+    /// the `FADE_OUT` rate when falling.
     pub fn step(&mut self) {
         if let Some(exit) = self.exit.as_mut() {
             exit.tick += 1;
@@ -158,15 +159,19 @@ impl Fade {
 mod tests {
     use super::*;
 
-    /// A fade in takes ceil(350 / 16.667) ticks, and a fade out takes
-    /// ceil(600 / 16.667).
+    /// Set the target and step until the fade stops. Returns the number
+    /// of ticks: `FADE_IN / FADE_TICK` for a full rise and
+    /// `FADE_OUT / FADE_TICK` for a full fall, rounded up.
     fn ticks_to(fade: &mut Fade, target: f32) -> usize {
         fade.to(target);
         let mut ticks = 0;
         while fade.running() {
             fade.step();
             ticks += 1;
-            assert!(ticks < 1000, "the fade never reached {target}");
+            assert!(
+                ticks < 1000,
+                "the fade did not reach {target} in 1000 ticks"
+            );
         }
         ticks
     }
@@ -175,7 +180,7 @@ mod tests {
     fn the_display_starts_clear_and_runs_no_tick() {
         let fade = Fade::default();
         assert_eq!(fade.value(), 0.0);
-        assert!(!fade.running());
+        assert!(!fade.running(), "a tick is scheduled, want none");
     }
 
     #[test]
@@ -187,45 +192,48 @@ mod tests {
         assert_eq!(fade.value(), 0.0);
     }
 
-    /// A summon while the display is already up moves nothing, so a repeat
-    /// press never drops it back to nothing and raises it again.
+    /// A repeat press on an element that is already up does not fade it
+    /// out and in again.
     #[test]
-    fn a_target_the_factor_already_holds_runs_no_tick() {
+    fn a_target_equal_to_the_value_runs_no_tick() {
         let mut fade = Fade::default();
         ticks_to(&mut fade, 1.0);
         fade.to(1.0);
-        assert!(!fade.running());
+        assert!(!fade.running(), "a tick is scheduled, want none");
         assert_eq!(fade.value(), 1.0);
     }
 
-    /// A summon during a fade out resumes from where the factor stands, so
-    /// the rest of the rise is shorter than a whole one.
+    /// A new target during a fade out moves from the current value, so
+    /// the rise takes fewer ticks than a full one.
     #[test]
-    fn a_summon_during_a_fall_resumes_from_where_the_factor_stands() {
+    fn a_target_during_a_fall_continues_from_the_current_value() {
         let mut fade = Fade::default();
         ticks_to(&mut fade, 1.0);
         fade.to(0.0);
         for _ in 0..18 {
             fade.step();
         }
-        let standing = fade.value();
-        assert!(standing > 0.0 && standing < 1.0);
+        let midway = fade.value();
+        assert!(
+            midway > 0.0 && midway < 1.0,
+            "the value after 18 ticks is {midway}, want between 0 and 1"
+        );
 
         assert_eq!(ticks_to(&mut fade, 1.0), 11);
         assert_eq!(fade.value(), 1.0);
     }
 
     #[test]
-    fn a_finish_puts_the_factor_at_its_target_and_runs_no_tick() {
+    fn a_finish_moves_the_factor_to_its_target_and_runs_no_tick() {
         let mut fade = Fade::default();
         fade.to(1.0);
         fade.finish();
         assert_eq!(fade.value(), 1.0);
-        assert!(!fade.running());
+        assert!(!fade.running(), "a tick is scheduled, want none");
     }
 
-    /// An exit over 300 ms takes 18 ticks, and it falls slowly at first and
-    /// fast at the end, as the compositor's `ease_in` curve does.
+    /// An exit over 300 ms takes 18 ticks, and each tick falls further
+    /// than the one before it.
     #[test]
     fn an_exit_eases_in_and_takes_eighteen_ticks() {
         let mut fade = Fade::default();
@@ -245,36 +253,45 @@ mod tests {
             .windows(2)
             .map(|pair| pair[0] - pair[1])
             .collect();
-        assert!(drops.windows(2).all(|pair| pair[1] > pair[0]));
+        assert!(
+            drops.windows(2).all(|pair| pair[1] > pair[0]),
+            "the drops per tick are {drops:?}, want each larger than the one before"
+        );
         assert!((values[8] - (1.0 - 0.125)).abs() < 1e-6, "{values:?}");
     }
 
-    /// An exit starts from where the factor stands, so an element half
-    /// faded leaves from half.
     #[test]
-    fn an_exit_falls_from_where_the_factor_stands() {
+    fn an_exit_starts_from_the_current_value() {
         let mut fade = Fade::default();
         fade.to(1.0);
         for _ in 0..10 {
             fade.step();
         }
-        let standing = fade.value();
+        let midway = fade.value();
         fade.exit(Duration::from_millis(300));
         fade.step();
-        assert!(fade.value() < standing);
-        assert!(fade.value() > standing * 0.99);
+        assert!(
+            fade.value() < midway,
+            "the value is {}, want below {midway}",
+            fade.value()
+        );
+        assert!(
+            fade.value() > midway * 0.99,
+            "the value is {}, want above {}",
+            fade.value(),
+            midway * 0.99
+        );
     }
 
-    /// An element already clear has nothing to exit, so no tick runs.
     #[test]
     fn an_exit_from_clear_runs_no_tick() {
         let mut fade = Fade::default();
         fade.exit(Duration::from_millis(300));
-        assert!(!fade.running());
+        assert!(!fade.running(), "a tick is scheduled, want none");
     }
 
-    /// A new target during an exit takes the ordinary rates from where the
-    /// factor stands.
+    /// A new target during an exit ends the exit, and the fade moves
+    /// from the current value at the `FADE_IN` rate.
     #[test]
     fn a_target_during_an_exit_ends_the_exit() {
         let mut fade = Fade::default();
@@ -292,14 +309,22 @@ mod tests {
         fade.to(1.0);
         for _ in 0..100 {
             fade.step();
-            assert!(fade.value() <= 1.0);
+            assert!(
+                fade.value() <= 1.0,
+                "the value is {}, want at most 1.0",
+                fade.value()
+            );
         }
         assert_eq!(fade.value(), 1.0);
 
         fade.to(0.0);
         for _ in 0..100 {
             fade.step();
-            assert!(fade.value() >= 0.0);
+            assert!(
+                fade.value() >= 0.0,
+                "the value is {}, want at least 0.0",
+                fade.value()
+            );
         }
         assert_eq!(fade.value(), 0.0);
     }

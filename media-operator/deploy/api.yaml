@@ -1,11 +1,12 @@
-# The media API: one Deployment per cluster, beside the operator, that
-# answers HTTPS for a Player. Like the operator it holds no hardware,
-# and unlike the operator it runs no informer: it reads one Player per
-# request and nothing else. Its screen routes redirect to the display
-# operator's display-api and its audio routes redirect to the audio
-# operator's audio-api, because each sibling owns its hardware and its
-# capture rule. Its media routes compose the two into one muxed
-# stream, the one thing no sibling can answer alone.
+# The media API is one Deployment per cluster, beside the operator,
+# that serves HTTPS for Players. Like the operator it controls no
+# hardware. Unlike the operator it keeps no informer of Players: it
+# reads one Player per request. Its screen routes redirect to
+# display-operator's display-api, and its audio routes redirect to
+# audio-operator's audio-api, because each of those owns its hardware
+# and its capture rules. Its media routes call both and combine the
+# screen and the sound into one muxed stream, which neither sibling can
+# serve alone.
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -16,10 +17,10 @@ spec:
   selector:
     matchLabels:
       app: media-api
-  # Recreate, so two pods never run at once. Two pods would each mint
-  # a CA and a serving leaf at first start and race to write them,
-  # and a composition is bound to the one process that started its
-  # ffmpeg, so a second replica could not take it over.
+  # Recreate keeps an update from running two pods at once. Two pods
+  # would each create a CA and a serving certificate at first start and
+  # race to write them. Each composed stream is an ffmpeg child of the
+  # pod that serves it, so a second replica could not take one over.
   strategy:
     type: Recreate
   template:
@@ -30,41 +31,41 @@ spec:
       serviceAccountName: media-api
       containers:
         - name: api
-          # Its own image, not the operator's. The composed stream is
-          # one ffmpeg mux, and the operator's image is a static
-          # binary on scratch with no ffmpeg in it.
+          # This is a separate image from the operator's, because the
+          # composed stream is an ffmpeg mux and the operator's image is
+          # a static binary on scratch with no ffmpeg in it.
           image: ghcr.io/liken-sh/media-operator-api:latest
-          # api is one more role of the program the operator runs, from
-          # its pod build.
+          # api is another role of the operator's program, built with
+          # the pod build tag.
           args: [api]
           env:
-            # The HTTPS listener. The API serves TLS because a Bearer
-            # token travels in every request and the cluster network
-            # carries no encryption of its own.
+            # The HTTPS listener. The API serves TLS because every
+            # request carries a Bearer token and the cluster network
+            # does not encrypt traffic.
             - name: MEDIA_API_ADDRESS
               value: ":8443"
-            # The metrics listener, on the port milestone 65 assigns
-            # every process in the organization. It answers whether or
-            # not a Prometheus runs.
+            # The metrics listener, on the metrics port that every
+            # liken process uses.
             - name: MEDIA_METRICS_ADDRESS
               value: ":9200"
-            # The sibling base URLs. Every Location and every upstream
-            # request is built from them, so an owner who exposes the
-            # APIs under public names sets these two variables and
-            # nothing else.
+            # The base URLs of the sibling APIs. Every Location header
+            # and every upstream request is built from them, so an owner
+            # who exposes the APIs under public names changes only these
+            # two variables.
             - name: MEDIA_API_DISPLAY_URL
               value: https://display-api.liken-system.svc
             - name: MEDIA_API_AUDIO_URL
               value: https://audio-api.liken-system.svc
-            # The composition limit, one ffmpeg process each. Past it
-            # the API answers 503 capture-busy with Retry-After.
+            # The most composed streams that run at once, one ffmpeg
+            # process each. Past that, the API responds 503 with the
+            # capture-busy problem and a Retry-After header.
             - name: MEDIA_API_MAX_COMPOSITIONS
               value: "4"
-            # The API reads its own pod for the tag of the container
-            # named api, which is the release it runs. liken_build_info
-            # reports that release, and every compiled document
-            # carries it as its ETag. The namespace is also where the
-            # TLS Secret and the CA ConfigMaps live.
+            # The API reads its own pod for the image tag of the
+            # container named api, which is the release it runs.
+            # liken_build_info reports that release, and the discovery
+            # and OpenAPI documents use it as their ETag. The namespace
+            # is also where the TLS Secret and the CA ConfigMaps are.
             - name: POD_NAME
               valueFrom:
                 fieldRef:
@@ -73,10 +74,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-          # One projected token per sibling. Each public API reviews
-          # the audience it is named for and refuses a token minted
-          # for another, so one token cannot open both. Ten minutes is
-          # the token's life; the kubelet rewrites the file before it
+          # One projected token for each sibling. Each sibling API
+          # reviews the audience that it is named for and refuses a
+          # token minted for another, so one token cannot call both. The
+          # kubelet rewrites each file before its 10-minute lifetime
           # ends, and the API reads the file on every call.
           volumeMounts:
             - name: sibling-tokens
@@ -87,11 +88,13 @@ spec:
               containerPort: 8443
             - name: metrics
               containerPort: 9200
-          # /readyz is a latching startup check. It answers 200 once
-          # the TLS pair is loaded and one TokenReview has reached the
-          # API server and come back, and it never calls the API
-          # server per probe. A later failure is a metric and a log
-          # line, not a pod taken out of the Service.
+          # /readyz returns 503 until startup has loaded the TLS pair and
+          # sent one TokenReview that the API server answered, and then
+          # 200 for the life of the process. A probe does not call the
+          # API server, so a later TokenReview failure shows in a metric
+          # and a log line and does not remove the pod from the Service.
+          # When the startup TokenReview fails, the pod stays unready
+          # until it restarts.
           readinessProbe:
             httpGet:
               path: /readyz
@@ -102,14 +105,13 @@ spec:
               drop: ["ALL"]
             privileged: false
             allowPrivilegeEscalation: false
-          # The limit is sized for four muxes at once. On cgroup v2,
-          # which every liken machine runs, one ffmpeg over the
-          # container limit kills the whole container cgroup, so one
-          # oversized composition would restart the API and end every
-          # composition with it. Measured on a home cluster over eight
-          # days, the API's working set was 14Mi at the 99th percentile
-          # and 16Mi at most, and its cpu 7m at the 99th percentile. No
-          # cpu limit, because a throttled mux delays the stream.
+          # The memory limit is sized for the four composed streams that
+          # MEDIA_API_MAX_COMPOSITIONS allows. On cgroup v2, which every
+          # liken machine runs, an ffmpeg that exceeds the container
+          # limit kills the whole container cgroup, so one oversized
+          # stream would restart the API and end every composed stream.
+          # There is no cpu limit, because throttling a mux delays the
+          # stream.
           resources:
             requests:
               cpu: 10m
@@ -129,8 +131,9 @@ spec:
                   expirationSeconds: 600
                   path: audio-api/token
 ---
-# Where a client reaches the API. 443 is the port a caller names in a
-# port-forward, and the port a sibling's Location implies.
+# The Service that clients use to reach the API. Port 443 is the port
+# that a caller gives to a port-forward, and the port that a sibling's
+# Location header implies.
 apiVersion: v1
 kind: Service
 metadata:
@@ -145,15 +148,15 @@ spec:
 ---
 # The API's own identity. It calls the siblings under this
 # ServiceAccount for a composed stream. A redirect carries no
-# credentials: the client follows it with its own token.
+# credentials, so the client follows it with its own token.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: media-api
 ---
-# system:auth-delegator is the grant Kubernetes already names for a
-# server that sends a TokenReview and a SubjectAccessReview, which
-# this API does for every request.
+# system:auth-delegator is the built-in ClusterRole for a server that
+# creates a TokenReview and a SubjectAccessReview, which this API does
+# for every request.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -172,22 +175,22 @@ kind: ClusterRole
 metadata:
   name: media-api
 rules:
-  # get alone, with no list or watch. The API reads one Player per
-  # request, so a moved status.screen moves the next redirect and
-  # there is no cache to invalidate.
+  # Only get, with no list or watch. The API reads one Player per
+  # request, so a change to status.screen changes the next redirect and
+  # no cache needs invalidating.
   - apiGroups: [media.liken.sh]
     resources: [players]
     verbs: [get]
   # Every request that produces bytes writes a Captured Event on the
-  # Player, so kubectl describe player answers who looked and when. The
-  # API patches the count and lastTimestamp of the same Event when the
-  # same caller takes the same capture again within ten minutes.
+  # Player, so kubectl describe player shows who captured and when. When
+  # the same caller requests the same capture again within ten minutes,
+  # the API patches the count and lastTimestamp of the existing Event.
   - apiGroups: [""]
     resources: [events]
     verbs: [create, patch]
-  # The subresources the siblings check when this API calls them for
-  # a composed stream. This is what lets a caller hold players/media
-  # alone: the API holds the grants on the Display and the Sink.
+  # The subresources that the siblings check when this API calls them
+  # for a composed stream. Because the API holds these grants on the
+  # Display and the Sink, a caller needs only players/media.
   - apiGroups: [display.liken.sh]
     resources: [displays/screen]
     verbs: [get]
@@ -208,52 +211,53 @@ subjects:
     name: media-api
     namespace: liken-system
 ---
-# The namespaced half of the grant. One CA per domain: this API's
-# serving pair lives in the Secret media-api-tls and its CA
-# certificate in the ConfigMap media-api-ca, and the siblings publish
-# theirs the same way. The API never overwrites a pair that exists,
-# so an owner with a CA replaces both objects and the API serves what
-# it finds.
+# The grants in liken-system. Each of the three APIs has its own CA. This
+# API's serving key and certificate are in the Secret media-api-tls and
+# its CA certificate is in the ConfigMap media-api-ca, and the siblings
+# publish theirs the same way. The API never overwrites a pair that
+# exists, so an owner with a CA replaces both objects and the API
+# serves what it finds.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: media-api
 rules:
-  # The three CA ConfigMaps: this API's own and the two siblings'
-  # anchors, watched so a rotation reaches the next connection with
-  # no restart. Both verbs keep their resourceNames. The list and the
-  # watch name their ConfigMap with the field selector metadata.name,
-  # and RBAC reads the name from that selector. client-go's reflector
-  # reads each ConfigMap with a streaming list, which is a watch, and
-  # falls back to a list when the API server refuses one.
+  # The CA ConfigMaps of this API and of the two siblings, watched so
+  # that a CA rotation reaches the next connection without a restart.
+  # resourceNames works for list and watch here, because each request
+  # selects one ConfigMap with the field selector metadata.name, and
+  # RBAC reads the name from that selector. client-go's reflector reads
+  # each ConfigMap with a streaming list, which is a watch, and falls
+  # back to a list when the API server refuses one.
   - apiGroups: [""]
     resources: [configmaps]
     resourceNames: [display-api-ca, audio-api-ca, media-api-ca]
     verbs: [list, watch]
-  # create carries no resourceNames, because RBAC cannot read a name
-  # off a create. A create that loses the race reads the winner.
+  # create has no resourceNames, because RBAC cannot read a name from
+  # a create request. When another pod created the object first, the
+  # API reads that object.
   - apiGroups: [""]
     resources: [configmaps, secrets]
     verbs: [create]
-  # The update is the rotation's first step: the new CA appended to
-  # ca.crt, and the leaf switched only after every client has read it.
-  # The get finds whether the ConfigMap exists before the API creates
-  # it.
+  # The update is the first step of a rotation: it appends the new CA
+  # to ca.crt, and the API switches the serving certificate only after
+  # every client has read it. The get checks whether the ConfigMap
+  # exists before the API creates it.
   - apiGroups: [""]
     resources: [configmaps]
     resourceNames: [media-api-ca]
     verbs: [get, update]
-  # The serving key and certificate, re-minted under a third of the
-  # leaf's life. The watch serves a pair that an owner or another pod
-  # wrote with no restart, and it lists the Secret again after a 410
-  # Gone.
+  # The serving key and certificate, which the API replaces when less
+  # than a third of the certificate's lifetime remains. The watch lets
+  # the API serve a pair that an owner or another pod wrote without a
+  # restart, and the API lists the Secret again after a 410 Gone.
   - apiGroups: [""]
     resources: [secrets]
     resourceNames: [media-api-tls]
     verbs: [get, list, update, watch]
-  # No resourceNames here, because a Deployment's pod name is
-  # generated and not known when this file is written. The API reads
-  # one pod, its own, for the tag of its own image.
+  # No resourceNames, because a Deployment generates its pod names, so
+  # they are unknown when this file is written. The API reads only its
+  # own pod, for the tag of its own image.
   - apiGroups: [""]
     resources: [pods]
     verbs: [get]
@@ -271,13 +275,15 @@ subjects:
     name: media-api
     namespace: liken-system
 ---
-# The grant a cluster owner binds. RBAC does not check that a
-# subresource exists, so these three names authorize the three
-# capture aspects although no API server serves them. An owner binds
-# this ClusterRole per namespace to give a subject capture, or writes
-# one rule with resourceNames. players/media on a Player is a grant on
-# that Player's Display and Sinks, because the API calls the siblings
-# under its own ServiceAccount for a composed stream.
+# The role that a cluster owner binds to grant capture. RBAC does not
+# check that a subresource exists, so a rule can name players/screen,
+# players/audio, and players/media although the Kubernetes API server
+# serves none of them. media-api checks them with a SubjectAccessReview
+# for each request. An owner binds this ClusterRole in a namespace to give a
+# subject capture, or writes one rule with resourceNames. A grant of
+# players/media on a Player covers that Player's Display and Sinks,
+# because the API calls the siblings under its own ServiceAccount for a
+# composed stream.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -287,8 +293,8 @@ rules:
     resources: [players/screen, players/audio, players/media]
     verbs: [get]
   # The info route reads the Player itself, so a subject bound to this
-  # role alone can ask what a Player resolves before it asks for a
-  # capture. Without it the manual's recipe needs a second role.
+  # role alone can ask what a Player resolves before it requests a
+  # capture. Without this rule, the manual's recipe needs a second role.
   - apiGroups: [media.liken.sh]
     resources: [players]
     verbs: [get]

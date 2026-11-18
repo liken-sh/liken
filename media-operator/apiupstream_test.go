@@ -1,9 +1,5 @@
 package main
 
-// These tests cover what the two bounds on an upstream leg each cover:
-// the header deadline waits for headers and nothing more, and the body
-// that follows runs until the idle watchdog or the caller ends it.
-
 import (
 	"net/http"
 	"os"
@@ -14,9 +10,7 @@ import (
 	"time"
 )
 
-// testClock is a clock a test moves by hand, so a composition can run
-// for thirty seconds of the server's time in a fraction of a second of
-// the machine's.
+// testClock is a clock that a test advances by hand.
 type testClock struct {
 	mutex sync.Mutex
 	now   time.Time
@@ -34,9 +28,8 @@ func (c *testClock) advance(by time.Duration) {
 	c.now = c.now.Add(by)
 }
 
-// copyingFFmpeg stands in for the mux and copies the video body
-// through to the response, so the test reads what the display sibling
-// sent and can tell a stream that was cut from one that ran.
+// copyingFFmpeg writes a stand-in ffmpeg that copies the display
+// upstream's input to its output and discards the audio input.
 func copyingFFmpeg(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "ffmpeg")
@@ -45,18 +38,16 @@ func copyingFFmpeg(t *testing.T) string {
 	return path
 }
 
-// The header deadline covers the wait for headers alone. A sibling
-// that answers at once and then streams for far longer than the bound
-// is not cut, and a sibling that answers late is a 504.
+// An upstream that sends headers at once and then streams for longer
+// than the header deadline is not cut off, and an upstream that sends
+// headers late gets a 504.
 func TestTheHeaderDeadlineBoundsOnlyTheWaitForHeaders(t *testing.T) {
-	// The stream goes through the stand-in ffmpeg, a subprocess, which a
-	// synctest bubble cannot wait on. So this case runs on the machine's
-	// clock, with a bound short enough that a stream of a quarter second
-	// outlives it.
+	// A synctest bubble cannot wait on the ffmpeg subprocess, so this
+	// case runs on the real clock with a short deadline.
 	t.Run("a stream that outlives the bound", func(t *testing.T) {
-		held := upstreamHeaderTimeout
+		original := upstreamHeaderTimeout
 		upstreamHeaderTimeout = 50 * time.Millisecond
-		t.Cleanup(func() { upstreamHeaderTimeout = held })
+		t.Cleanup(func() { upstreamHeaderTimeout = original })
 		fixture := newAPIFixture(t)
 		clock := &testClock{now: testAPIClock}
 		fixture.server.now = clock.read
@@ -64,9 +55,9 @@ func TestTheHeaderDeadlineBoundsOnlyTheWaitForHeaders(t *testing.T) {
 		fixture.display.body = []byte("frame")
 		fixture.display.chunks = 6
 		fixture.display.chunkGap = 40 * time.Millisecond
-		// The server's clock moves five seconds per chunk, so the
-		// composition runs thirty seconds and every idle mark stays
-		// current. Real time is under half a second.
+		// Each chunk advances the server's clock by five seconds, so the
+		// stream spans thirty seconds of server time, and each gap stays
+		// under upstreamIdleTimeout.
 		fixture.display.onChunk = func() { clock.advance(5 * time.Second) }
 
 		recorder := fixture.get(playerPathFor("media.mp4"))
@@ -91,9 +82,8 @@ func TestTheHeaderDeadlineBoundsOnlyTheWaitForHeaders(t *testing.T) {
 	})
 }
 
-// The caller's own response carries no write deadline, so a capture
-// runs for as long as the caller reads it. Only the request headers
-// are bounded.
+// The listener sets a deadline for reading request headers and none for
+// the response, so a capture streams for as long as the caller reads.
 func TestThisApiBoundsTheRequestHeadersAndNotTheResponse(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)

@@ -1,9 +1,8 @@
-//! The chooser panel. A control opens one to pick a track. It draws a
-//! vertical list on a dark plate, bottom-anchored above the control strip.
-//! The focused row reads bright and has the accent underline under its text,
-//! the same mark the control strip's focused stop takes, and the row of the
-//! track that plays now has a dot before it. It is the one element that
-//! captures input, so it draws on top of every region.
+//! The panel that a track control opens so the viewer can pick a track: a
+//! list on a dark plate above the control strip. The focused row is bright
+//! and underlined in the accent color, as the focused stop of the strip is,
+//! and the row of the playing track has a dot before it. The panel takes
+//! all input while it is open, so it draws on top of everything else.
 
 use iced::widget::canvas::Path;
 use iced::{Point, Rectangle, Size};
@@ -15,35 +14,32 @@ const X: f32 = theme::MARGIN_X;
 const W: f32 = 1180.0;
 const ROW_H: f32 = 58.0;
 const PAD: f32 = 24.0;
-/// The panel grows upward from this baseline, so it floats over the regions
-/// above the strip.
+/// The panel grows upward from this edge, over the regions above the
+/// control strip.
 const BOTTOM: f32 = theme::PANEL_BOTTOM;
-/// A subtitle list can run to dozens of tracks, more than fit on screen. The
-/// panel shows a window of rows around the selection, so the current entry
-/// stays in view however long the list.
+/// A subtitle list can have more tracks than fit on screen, so the panel
+/// shows at most this many rows and scrolls them with the focus.
 const MAX_ROWS: usize = 8;
 
-// The widest a row draws before it is clipped: the panel inside its
-// padding. The toolkit measures the run.
+/// The widest a label can draw before `clip` shortens it.
 const MAX_WIDTH: f32 = W - 2.0 * PAD;
 
-/// The dot before the row of the track that plays now. It is centred in the
-/// panel's left padding and on the label's line box, so it marks the row
-/// without moving the label. The focus can move off the playing track, so
-/// the dot and the underline are separate marks.
+/// The dot before the playing row, centred in the panel's left padding so
+/// it does not move the label. The focus can move off the playing track, so
+/// the dot is a separate mark from the underline.
 const DOT_R: f32 = 4.0;
 const DOT_X: f32 = X + PAD / 2.0;
 
-/// One panel of rows, and where each row draws.
+/// The panel's plate and its visible rows.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Panel {
     pub shape: Rectangle,
     pub rows: Vec<Row>,
 }
 
-/// One row of the list: the label as it draws, the row it draws on, whether
-/// it is the entry the chooser stands on, and whether it is the track that
-/// plays now.
+/// One visible row. `label` is clipped to fit, `y` is the top edge,
+/// `selected` means it has the focus, and `playing` means it is the playing
+/// track.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Row {
     pub label: String,
@@ -53,9 +49,8 @@ pub struct Row {
 }
 
 impl Row {
-    /// The underline under the focused row's label, as wide as the label
-    /// draws. A row the focus is not on has none. The bar ends inside the
-    /// row's own height, above the next row.
+    /// The underline under the focused row's label, as wide as the label,
+    /// or `None` for a row without the focus.
     pub fn underline(&self) -> Option<Rectangle> {
         self.selected.then(|| {
             theme::underline(
@@ -66,16 +61,16 @@ impl Row {
         })
     }
 
-    /// The centre of the dot before the row, when the row is the track that
-    /// plays now.
+    /// The centre of the dot before the row, or `None` when the row is not
+    /// the playing track.
     pub fn dot(&self) -> Option<Point> {
         self.playing
             .then(|| Point::new(DOT_X, self.y + theme::type_scale::LABEL / 2.0))
     }
 }
 
-/// The panel one list draws as, at the entry it stands on, above the
-/// control strip, with the entry that plays now dotted.
+/// The panel for a list of entries, with the focus on `selected` and a dot
+/// on the entry `playing`.
 pub fn panel(entries: &[String], selected: usize, playing: Option<usize>) -> Panel {
     let visible = entries.len().min(MAX_ROWS);
     let first = first(entries.len(), selected);
@@ -97,7 +92,8 @@ pub fn panel(entries: &[String], selected: usize, playing: Option<usize>) -> Pan
     }
 }
 
-/// The first entry of the window of rows a list of `len` entries shows.
+/// The index of the first visible entry. It keeps `selected` near the
+/// middle of the visible rows, and stops at the end of the list.
 fn first(len: usize, selected: usize) -> usize {
     if len > MAX_ROWS {
         selected.saturating_sub(MAX_ROWS / 2).min(len - MAX_ROWS)
@@ -106,16 +102,13 @@ fn first(len: usize, selected: usize) -> usize {
     }
 }
 
-/// The top edge of the panel a list of `len` entries draws as above the
-/// control strip.
+/// The top edge of the panel for a list of `len` entries.
 pub fn top(len: usize) -> f32 {
     BOTTOM - (len.min(MAX_ROWS) as f32 * ROW_H + PAD * 2.0)
 }
 
-/// Draw one list: the plate, the underline under the focused row, the dot
-/// before the playing row, and every row's label. The focused row's label
-/// reads bright and the others muted. The plate has no border, because a
-/// border in the accent would draw a second focus mark around the underline.
+/// Draw the panel. The plate has no border, because an accent border would
+/// be a second focus mark besides the underline.
 pub fn draw(brush: &mut Brush<'_>, entries: &[String], selected: usize, playing: Option<usize>) {
     let panel = panel(entries, selected, playing);
     brush.plate(panel.shape);
@@ -149,8 +142,8 @@ mod tests {
         (1..=count).map(|at| format!("Track {at}")).collect()
     }
 
-    /// A list that fits draws every entry, and the panel grows upward from the
-    /// baseline it hangs on.
+    /// A list that fits draws every entry, and the panel grows upward from
+    /// its bottom edge.
     #[test]
     fn a_list_that_fits_draws_every_entry() {
         let panel = panel(&entries(3), 1, None);
@@ -166,7 +159,6 @@ mod tests {
         assert!(!panel.rows[0].selected);
     }
 
-    /// One entry draws one row, and the panel is one row plus its padding.
     #[test]
     fn one_entry_draws_one_row() {
         let panel = panel(&entries(1), 0, None);
@@ -176,8 +168,8 @@ mod tests {
         assert_eq!(panel.rows[0].y, 794.0);
     }
 
-    /// A longer list shows a window of eight rows, and the window follows the
-    /// selection to the end of the list and no further.
+    /// A list longer than `MAX_ROWS` shows eight rows that follow the focus
+    /// and stop at the end of the list.
     #[test]
     fn a_longer_list_shows_a_window_around_the_selection() {
         let list = entries(20);
@@ -192,8 +184,8 @@ mod tests {
         assert_eq!(panel(&list, 19, None).shape.y, 364.0);
     }
 
-    /// A row too wide for the panel ends in an ellipsis, and what is left plus
-    /// the mark fits inside the panel's own padding.
+    /// A label too wide for the panel ends in an ellipsis, and the clipped
+    /// label fits inside the panel's padding.
     #[test]
     fn a_row_too_wide_for_the_panel_ends_in_an_ellipsis() {
         let long = "Director's commentary with the cast, the crew, every last one of their friends, and the caterers who fed them (ENG)";
@@ -204,7 +196,6 @@ mod tests {
         assert!(crate::canvas::measure(long, theme::type_scale::LABEL) > MAX_WIDTH);
     }
 
-    /// A row that fits draws as it is, marks and all.
     #[test]
     fn a_row_that_fits_draws_as_it_is() {
         let row = |label: &str| panel(&[label.to_string()], 0, None).rows[0].label.clone();
@@ -213,9 +204,8 @@ mod tests {
         assert_eq!(row("\u{6771}\u{4EAC} (JPN)"), "\u{6771}\u{4EAC} (JPN)");
     }
 
-    /// The focused row has the shared underline under its label: as wide as
-    /// the label, one gap under the label's line box, and inside the row, so
-    /// it ends above the next row's label. No other row has one.
+    /// Only the focused row is underlined, and the underline ends above the
+    /// next row's label.
     #[test]
     fn the_focused_row_is_underlined() {
         let panel = panel(&entries(3), 1, None);
@@ -233,9 +223,8 @@ mod tests {
         assert_eq!(panel.rows[2].underline(), None);
     }
 
-    /// The row of the entry that plays now has a dot in the panel's left
-    /// padding, on the label's middle, wherever the focus is. A list with no
-    /// entry playing has no dot.
+    /// The playing row has a dot wherever the focus is, and a list with no
+    /// playing entry has none.
     #[test]
     fn the_playing_row_is_dotted() {
         let panel = panel(&entries(3), 1, Some(2));
@@ -250,8 +239,7 @@ mod tests {
         );
     }
 
-    /// In a list longer than the window, the dot follows its entry and not
-    /// its place on screen.
+    /// The dot stays with its entry as the rows scroll.
     #[test]
     fn the_dot_follows_its_entry_through_the_window() {
         let list = entries(20);

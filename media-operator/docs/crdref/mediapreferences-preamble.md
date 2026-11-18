@@ -1,15 +1,15 @@
-A `MediaPreferences` holds the cluster's defaults: the preferred
-audio and subtitle languages, the time zone its displays show, and
-when an idle display fades and goes dark. It is the lowest of the three tiers a
-[`Play`](/docs/reference/plays/) resolves: the `Play`'s own spec
-first, then the [`Player`](/docs/reference/players/)'s, then this
-default.
+A `MediaPreferences` sets the cluster's defaults: the preferred audio
+and subtitle languages, the time zone of the idle clock, and when an
+idle display fades and turns off. For each setting, the operator uses
+the value from the [`Play`](/docs/reference/plays/)'s spec, then from
+the [`Player`](/docs/reference/players/)'s spec, then from this
+object. A `Play` has no idle settings, and the time zone is set only
+here.
 
-There is exactly one, and its name is `default`. The CRD pins the
-name with a CEL rule, so a `MediaPreferences` under any other name
-is rejected at apply, and the mistake shows at once instead of
-adding a silent second object. A cluster without one is fine: a
-missing default is not an error, and resolution skips the tier.
+A cluster has at most one `MediaPreferences`, named `default`. The CRD
+rejects any other name, so a misnamed object fails when you apply it.
+A cluster with no `MediaPreferences` works, and the operator uses only
+the `Play` and the `Player`.
 
     apiVersion: media.liken.sh/v1alpha1
     kind: MediaPreferences

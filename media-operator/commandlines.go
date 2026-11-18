@@ -1,14 +1,10 @@
 package main
 
-// The words the command sidecar's lines use for what a person asked
-// for and what mpv reports back. They name the operation the way a
-// person reads it on the screen, and the exact mpv words go beside them
-// in each line.
+// The command sidecar's log lines describe each command and playback
+// change in plain words, beside mpv's own command and property names.
 
 import "fmt"
 
-// describeCommand names what a command asks for in a person's words,
-// for the line it earns.
 func describeCommand(command mediaCommand) string {
 	switch command.Action {
 	case actionPause:
@@ -29,10 +25,8 @@ func describeCommand(command mediaCommand) string {
 	return command.Action
 }
 
-// describeChange names what one property change moved, in the words a
-// person reads on the screen, or nothing for a change a person does not
-// see. The first item is the start of the run, which the line names as
-// such.
+// describeChange returns an empty string for a change a viewer cannot
+// see.
 func describeChange(before, after playbackState) string {
 	at := after.position
 	if at == "" {
@@ -55,8 +49,6 @@ func describeChange(before, after playbackState) string {
 	return ""
 }
 
-// languageName quotes a track's language, and names a track that states
-// none.
 func languageName(language string) string {
 	if language == "" {
 		return "not stated"
@@ -64,7 +56,6 @@ func languageName(language string) string {
 	return fmt.Sprintf("%q", language)
 }
 
-// signed writes a step with its sign, so a line reads +10 and -10 alike.
 func signed(amount int) string {
 	return fmt.Sprintf("%+d", amount)
 }

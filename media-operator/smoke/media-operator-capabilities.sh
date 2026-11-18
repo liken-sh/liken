@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Proves the media-operator-capabilities image before it ships.
+# Checks the media-operator-capabilities image before it is published.
 #
 # Usage: media-operator-capabilities.sh <image>
 #
@@ -7,17 +7,18 @@
 #            ghcr.io/liken-sh/media-operator-capabilities:2026.10.02-001.
 #            The image must be in the local Docker daemon.
 #
-# The check runs the query against /dev/null, which is not a render
-# node. The query calls libva-drm's vaGetDisplayDRM only after the
-# dynamic loader, libva.so.2, and libva-drm.so.2 all load, so libva-drm's
-# refusal of /dev/null proves the image holds what the query needs. A
-# build machine has no GPU to query.
+# The CI runner has no GPU, so the check runs the query against
+# /dev/null, which is not a render node. The query calls vaGetDisplayDRM
+# only after the dynamic loader has started the program and libva.so.2
+# and libva-drm.so.2 have loaded. So when vaGetDisplayDRM refuses
+# /dev/null, those libraries are in the image. The check does not load
+# the media driver, which libva opens later, in vaInitialize.
 set -euo pipefail
 
 image=$1
 
-# The image must hold the notices of the third-party software in it,
-# as notices/check.sh describes.
+# Checks the license notices of the third-party software in the image
+# (notices/check.sh).
 "$(dirname "$0")/../../notices/check.sh" "$image" \
   usr/share/doc/go/LICENSE
 

@@ -229,7 +229,7 @@
             "description": "No Play runs on this Player, or it resolves no Sink."
           },
           "502": {
-            "description": "An upstream answer this API cannot relay."
+            "description": "An upstream response that this API cannot relay."
           },
           "503": {
             "description": "An upstream is busy, or this API is at its composition limit."
@@ -300,7 +300,7 @@
             "description": "No Play runs on this Player, or it resolves no Sink."
           },
           "502": {
-            "description": "An upstream answer this API cannot relay."
+            "description": "An upstream response that this API cannot relay."
           },
           "503": {
             "description": "An upstream is busy, or this API is at its composition limit."
@@ -382,7 +382,7 @@
             "description": "No Play runs on this Player, or it resolves no Sink."
           },
           "502": {
-            "description": "An upstream answer this API cannot relay."
+            "description": "An upstream response that this API cannot relay."
           },
           "503": {
             "description": "An upstream is busy, or this API is at its composition limit."
@@ -453,7 +453,7 @@
             "description": "No Play runs on this Player, or it resolves no Sink."
           },
           "502": {
-            "description": "An upstream answer this API cannot relay."
+            "description": "An upstream response that this API cannot relay."
           },
           "503": {
             "description": "An upstream is busy, or this API is at its composition limit."
@@ -535,7 +535,7 @@
             "description": "No Play runs on this Player, or it resolves no Sink."
           },
           "502": {
-            "description": "An upstream answer this API cannot relay."
+            "description": "An upstream response that this API cannot relay."
           },
           "503": {
             "description": "An upstream is busy, or this API is at its composition limit."
@@ -606,7 +606,7 @@
             "description": "No Play runs on this Player, or it resolves no Sink."
           },
           "502": {
-            "description": "An upstream answer this API cannot relay."
+            "description": "An upstream response that this API cannot relay."
           },
           "503": {
             "description": "An upstream is busy, or this API is at its composition limit."
@@ -688,7 +688,7 @@
             "description": "No Play runs on this Player, or it resolves no Sink."
           },
           "502": {
-            "description": "An upstream answer this API cannot relay."
+            "description": "An upstream response that this API cannot relay."
           },
           "503": {
             "description": "An upstream is busy, or this API is at its composition limit."
@@ -759,7 +759,7 @@
             "description": "No Play runs on this Player, or it resolves no Sink."
           },
           "502": {
-            "description": "An upstream answer this API cannot relay."
+            "description": "An upstream response that this API cannot relay."
           },
           "503": {
             "description": "An upstream is busy, or this API is at its composition limit."
@@ -879,7 +879,7 @@
             "description": "The Player resolves no stream at all, or an upstream reports its Display, Sink, or Source away."
           },
           "502": {
-            "description": "An upstream answer this API cannot relay."
+            "description": "An upstream response that this API cannot relay."
           },
           "503": {
             "description": "An upstream is busy, or this API is at its composition limit."
@@ -988,7 +988,7 @@
             "description": "The Player resolves no stream at all, or an upstream reports its Display, Sink, or Source away."
           },
           "502": {
-            "description": "An upstream answer this API cannot relay."
+            "description": "An upstream response that this API cannot relay."
           },
           "503": {
             "description": "An upstream is busy, or this API is at its composition limit."
@@ -1108,7 +1108,7 @@
             "description": "The Player resolves no stream at all, or an upstream reports its Display, Sink, or Source away."
           },
           "502": {
-            "description": "An upstream answer this API cannot relay."
+            "description": "An upstream response that this API cannot relay."
           },
           "503": {
             "description": "An upstream is busy, or this API is at its composition limit."
@@ -1217,7 +1217,7 @@
             "description": "The Player resolves no stream at all, or an upstream reports its Display, Sink, or Source away."
           },
           "502": {
-            "description": "An upstream answer this API cannot relay."
+            "description": "An upstream response that this API cannot relay."
           },
           "503": {
             "description": "An upstream is busy, or this API is at its composition limit."
@@ -1337,7 +1337,7 @@
             "description": "The Player resolves no stream at all, or an upstream reports its Display, Sink, or Source away."
           },
           "502": {
-            "description": "An upstream answer this API cannot relay."
+            "description": "An upstream response that this API cannot relay."
           },
           "503": {
             "description": "An upstream is busy, or this API is at its composition limit."
@@ -1446,7 +1446,7 @@
             "description": "The Player resolves no stream at all, or an upstream reports its Display, Sink, or Source away."
           },
           "502": {
-            "description": "An upstream answer this API cannot relay."
+            "description": "An upstream response that this API cannot relay."
           },
           "503": {
             "description": "An upstream is busy, or this API is at its composition limit."
@@ -1556,7 +1556,7 @@
             "description": "The Player has no status.screen."
           },
           "502": {
-            "description": "An upstream answer this API cannot relay."
+            "description": "An upstream response that this API cannot relay."
           },
           "503": {
             "description": "An upstream is busy, or this API is at its composition limit."
@@ -1655,7 +1655,7 @@
             "description": "The Player has no status.screen."
           },
           "502": {
-            "description": "An upstream answer this API cannot relay."
+            "description": "An upstream response that this API cannot relay."
           },
           "503": {
             "description": "An upstream is busy, or this API is at its composition limit."
@@ -1765,7 +1765,7 @@
             "description": "The Player has no status.screen."
           },
           "502": {
-            "description": "An upstream answer this API cannot relay."
+            "description": "An upstream response that this API cannot relay."
           },
           "503": {
             "description": "An upstream is busy, or this API is at its composition limit."
@@ -1864,7 +1864,7 @@
             "description": "The Player has no status.screen."
           },
           "502": {
-            "description": "An upstream answer this API cannot relay."
+            "description": "An upstream response that this API cannot relay."
           },
           "503": {
             "description": "An upstream is busy, or this API is at its composition limit."
@@ -1974,7 +1974,7 @@
             "description": "The Player has no status.screen."
           },
           "502": {
-            "description": "An upstream answer this API cannot relay."
+            "description": "An upstream response that this API cannot relay."
           },
           "503": {
             "description": "An upstream is busy, or this API is at its composition limit."
@@ -2073,7 +2073,7 @@
             "description": "The Player has no status.screen."
           },
           "502": {
-            "description": "An upstream answer this API cannot relay."
+            "description": "An upstream response that this API cannot relay."
           },
           "503": {
             "description": "An upstream is busy, or this API is at its composition limit."
@@ -2183,7 +2183,7 @@
             "description": "The Player has no status.screen."
           },
           "502": {
-            "description": "An upstream answer this API cannot relay."
+            "description": "An upstream response that this API cannot relay."
           },
           "503": {
             "description": "An upstream is busy, or this API is at its composition limit."
@@ -2282,7 +2282,7 @@
             "description": "The Player has no status.screen."
           },
           "502": {
-            "description": "An upstream answer this API cannot relay."
+            "description": "An upstream response that this API cannot relay."
           },
           "503": {
             "description": "An upstream is busy, or this API is at its composition limit."
@@ -2392,7 +2392,7 @@
             "description": "The Player has no status.screen."
           },
           "502": {
-            "description": "An upstream answer this API cannot relay."
+            "description": "An upstream response that this API cannot relay."
           },
           "503": {
             "description": "An upstream is busy, or this API is at its composition limit."
@@ -2491,7 +2491,7 @@
             "description": "The Player has no status.screen."
           },
           "502": {
-            "description": "An upstream answer this API cannot relay."
+            "description": "An upstream response that this API cannot relay."
           },
           "503": {
             "description": "An upstream is busy, or this API is at its composition limit."
@@ -2517,7 +2517,7 @@
         "summary": "This OpenAPI document.",
         "responses": {
           "200": {
-            "description": "This document, with the servers entry naming the origin the request reached."
+            "description": "This document. Its servers entry is the configured public base URL, or else the origin that the request used."
           },
           "304": {
             "description": "The document matches the If-None-Match field."
@@ -2538,7 +2538,7 @@
         "summary": "This OpenAPI document. The headers alone, with no body, no capture, and no upstream call.",
         "responses": {
           "200": {
-            "description": "This document, with the servers entry naming the origin the request reached."
+            "description": "This document. Its servers entry is the configured public base URL, or else the origin that the request used."
           },
           "304": {
             "description": "The document matches the If-None-Match field."

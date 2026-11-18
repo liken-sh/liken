@@ -1,16 +1,12 @@
 package main
 
-// These tests run the operator's watches through client-go's real
-// reflector, against a scripted API server. The reflector's own loop is
-// upstream's to test; what these prove is which changes wake the pass,
-// that every collection reaches the view before the first pass, and
-// that a settled pass reads nothing from the API server.
-// optionalwatch_test.go covers a collection a cluster lacks.
-//
-// Each test that runs a reflector runs in a synctest bubble, so
-// synctest.Wait returns when the reflector has taken every event the
-// server sent and waits for the next one. A test then reads what the
-// watch did, with no wait on the machine's clock.
+// These tests run the operator's watches on client-go's reflector
+// against a scripted API server, inside a synctest bubble.
+// synctest.Wait returns once the reflector has processed every event
+// the server sent, so a test reads the result without waiting on the
+// real clock. The reflector's own retries are upstream's to test.
+// optionalwatch_test.go covers a collection that the cluster does not
+// have.
 
 import (
 	"context"
@@ -31,44 +27,46 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// closeStream, sent as a line, ends the watch the way the API server
-// ends one at its timeout.
+// closeStream, sent as a line, ends the open watch the way the API
+// server does when the watch times out.
 const closeStream = "close"
 
-// servedCollection is one collection the scripted server holds: the
-// objects its reads answer, the status it answers instead when status
-// is not zero, and the lines the test sends to the open watch.
+// servedCollection is one collection on the scripted server: the
+// objects that list requests return, a status code that replaces the
+// response when status is not zero, and the lines the test sends to the
+// open watch.
 type servedCollection struct {
 	apiVersion string
 	kind       string
 	items      []json.RawMessage
 	status     int
 	live       chan string
-	// missed holds the lines of changes made while no watch was open.
-	// The next watch from a version sends them first, and a watch with
-	// no version drops them, the way the API server does.
+	// missed holds the lines of changes made while no watch was open. A
+	// watch that resumes from a resourceVersion receives them first. A
+	// watch with no resourceVersion does not, as on the API server.
 	missed []string
-	// forbidWatch answers every watch with 403 and still answers a list
-	// and a read of one object, the way the API server answers under
-	// RBAC that grants list and get and not watch.
+	// forbidWatch returns 403 for every watch and still serves list and
+	// get, as the API server does under RBAC that grants list and get but
+	// not watch.
 	forbidWatch bool
 }
 
-// collectionServer answers client-go's reads and watches of each
-// collection it holds, the way the API server does: a streaming list
-// with one ADDED event for each object and the bookmark that ends the
-// initial events, a plain list when the reflector falls back to one,
-// and the test's lines on the open watch after that.
+// collectionServer serves list and watch requests for each of its
+// collections as the API server does. A streaming list sends one ADDED
+// event per object and then the bookmark that ends the initial events.
+// A plain list serves the reflector when it falls back to one. Then the
+// test's lines go out on the open watch.
 type collectionServer struct {
 	mu          sync.Mutex
 	collections map[string]*servedCollection
 	requests    []string
-	// objectReadCount counts the requests for one object, which no
-	// collection path takes.
+	// objectReadCount counts get requests for a single object, whose
+	// paths match no collection.
 	objectReadCount int
 }
 
-// objectReads answers how many requests for one object the server took.
+// objectReads returns how many get requests for a single object the
+// server received.
 func (s *collectionServer) objectReads() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -96,8 +94,8 @@ func (s *collectionServer) serve(t *testing.T, resource schema.GroupVersionResou
 	return collection
 }
 
-// stamped encodes an object with its collection's apiVersion and kind,
-// which client-go's decoder needs.
+// stamped encodes an object with the collection's apiVersion and kind,
+// because client-go's decoder requires them.
 func stamped(t *testing.T, collection *servedCollection, object any) json.RawMessage {
 	t.Helper()
 	encoded, err := json.Marshal(object)
@@ -111,7 +109,7 @@ func stamped(t *testing.T, collection *servedCollection, object any) json.RawMes
 	return encoded
 }
 
-// send puts one event on the collection's open watch.
+// send writes one event to the collection's open watch.
 func (c *servedCollection) send(t *testing.T, eventType string, object any) {
 	t.Helper()
 	c.live <- watchLine(eventType, stamped(t, c, object))
@@ -148,8 +146,8 @@ func (s *collectionServer) handler() http.Handler {
 			return
 		}
 		// A streaming list sends every object and then the bookmark. A
-		// watch with no version sends every object too, the way the API
-		// server starts one at the most recent version.
+		// watch with no resourceVersion also sends every object first,
+		// because the API server starts it at the most recent version.
 		if query.Get("sendInitialEvents") == "true" || query.Get("resourceVersion") == "" {
 			for _, item := range collection.items {
 				_, _ = w.Write([]byte(watchLine("ADDED", item) + "\n"))
@@ -158,9 +156,9 @@ func (s *collectionServer) handler() http.Handler {
 		if query.Get("sendInitialEvents") == "true" {
 			_, _ = w.Write([]byte(initialEventsEnd(collection.apiVersion, collection.kind, "100") + "\n"))
 		}
-		// A watch from a version sends every change made after that
-		// version. A watch with no version, and a streaming list, start at
-		// the present, so they send none of the missed changes.
+		// A watch from a resourceVersion sends every change after that
+		// version. A watch with no resourceVersion, and a streaming list,
+		// start at the present and send none of the missed changes.
 		s.mu.Lock()
 		missed := collection.missed
 		collection.missed = nil
@@ -186,8 +184,8 @@ func (s *collectionServer) handler() http.Handler {
 	})
 }
 
-// serveObject answers a read of one object, at its namespaced path or
-// at its cluster-scoped path, from the collection that holds it.
+// serveObject serves a get of one object at its namespaced or
+// cluster-scoped path, from the collection that holds it.
 func (s *collectionServer) serveObject(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -216,7 +214,8 @@ func (s *collectionServer) serveObject(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
-// requested answers each request the server took for one collection.
+// requested returns every request the server received for one
+// collection.
 func (s *collectionServer) requested(resource schema.GroupVersionResource) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -230,8 +229,8 @@ func (s *collectionServer) requested(resource schema.GroupVersionResource) []str
 }
 
 // runWatch runs one collection watch until the test ends. The watch
-// stops before the server closes, because a reflector that meets a
-// closed server waits out a backoff that ignores its context.
+// must stop before the server closes, because a reflector that finds
+// the server closed sleeps in a backoff that ignores its context.
 func runWatch(t *testing.T, server *collectionServer, watch collectionWatch) {
 	t.Helper()
 	client := testWatcher(t, server.handler())
@@ -247,9 +246,9 @@ func runWatch(t *testing.T, server *collectionServer, watch collectionWatch) {
 	}()
 }
 
-// received reports whether the channel holds a value or is closed, and
-// takes the value. A test calls it after synctest.Wait, when every
-// goroutine that could send has sent or waits for something else.
+// received reports whether the channel has a value or is closed, and
+// consumes the value. Call it after synctest.Wait, when every goroutine
+// that could send has either sent or is blocked on something else.
 func received(channel <-chan struct{}) bool {
 	select {
 	case <-channel:
@@ -259,7 +258,8 @@ func received(channel <-chan struct{}) bool {
 	}
 }
 
-// asObject is an object the way the informer hands it to a handler.
+// asObject returns an object in the form the informer passes to a
+// handler.
 func asObject(t *testing.T, object any) *unstructured.Unstructured {
 	t.Helper()
 	encoded, err := json.Marshal(object)
@@ -276,10 +276,9 @@ func labeledPod(name, component, phase string) *Pod {
 	}
 }
 
-// Every change to a Play wakes the pass through the real reflector,
-// this operator's own status write included, and so does the first
-// read: the pass after a status write is how a Finished Play retires at
-// once.
+// The first list and every change to a Play wake the pass, including
+// the operator's own status writes. So the pass acts on a Play that
+// has just Finished without waiting for another change.
 func TestAChangeToAPlayWakesThePass(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := newCollectionServer()
@@ -306,9 +305,8 @@ func TestAChangeToAPlayWakesThePass(t *testing.T) {
 	})
 }
 
-// Any of this operator's pods wakes the pass when it goes away, and a
-// playback pod also when its status changes. Nothing else about a pod
-// wakes it.
+// Deleting any of the operator's pods wakes the pass. A change to a
+// playback pod's status wakes it too. No other pod change does.
 func TestAPodWakesThePassWhenItEndsOrAPlaybackPodMoves(t *testing.T) {
 	restarted := labeledPod("movie-playback", playbackLabelValue, podRunning)
 	restarted.Status.ContainerStatuses = []ContainerStatus{{Name: displayContainer, RestartCount: 3}}
@@ -353,8 +351,8 @@ func TestAPodWakesThePassWhenItEndsOrAPlaybackPodMoves(t *testing.T) {
 	}
 }
 
-// Every pod the watch selects is this operator's, so the removal of
-// any of them wakes the pass.
+// The pods watch selects only this operator's pods, so deleting any of
+// them wakes the pass.
 func TestAPodRemovalWakesThePass(t *testing.T) {
 	for _, component := range []string{playbackLabelValue, idleLabelValue, remoteLabelValue} {
 		t.Run(component, func(t *testing.T) {
@@ -367,8 +365,8 @@ func TestAPodRemovalWakesThePass(t *testing.T) {
 	}
 }
 
-// A removal whose tombstone holds no copy of the pod wakes the pass,
-// because every pod the watch selects is this operator's.
+// A delete event whose tombstone has no copy of the pod wakes the pass,
+// because every pod the watch selects belongs to this operator.
 func TestAPodRemovedWithNoCopyWakesThePass(t *testing.T) {
 	wake := make(chan struct{}, 1)
 
@@ -377,9 +375,8 @@ func TestAPodRemovedWithNoCopyWakesThePass(t *testing.T) {
 	mustMatch(t, len(wake), 1)
 }
 
-// Through the reflector: the pods watch selects the operator's own pods
-// by their component label, and a playback pod that fails wakes the
-// pass.
+// Through the reflector, the pods watch selects the operator's pods by
+// their component label, and a playback pod that fails wakes the pass.
 func TestThePodsWatchSelectsTheOperatorsOwnPods(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := newCollectionServer()
@@ -391,8 +388,7 @@ func TestThePodsWatchSelectsTheOperatorsOwnPods(t *testing.T) {
 			handler: podRule.handler(wake), synced: func(informer.View) { close(synced) }})
 		synctest.Wait()
 		mustMatch(t, received(synced), true)
-		// The first read holds a running playback pod, which wakes the
-		// pass once.
+		// The running playback pod in the first list wakes the pass once.
 		mustMatch(t, received(wake), true)
 		pods.send(t, "MODIFIED", labeledPod("movie-playback", playbackLabelValue, podFailed))
 		synctest.Wait()
@@ -404,9 +400,9 @@ func TestThePodsWatchSelectsTheOperatorsOwnPods(t *testing.T) {
 	})
 }
 
-// Each watch the API server accepts after the first counts as one
-// restart, and the refusals while the API server is away do not.
-func TestAWatchCountsEachReopen(t *testing.T) {
+// Each watch the API server accepts after the first calls reopened
+// once.
+func TestReopenedRunsOnceForEachLaterWatch(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := newCollectionServer()
 		plays := server.serve(t, playResource, "Play")
@@ -419,8 +415,7 @@ func TestAWatchCountsEachReopen(t *testing.T) {
 		mustMatch(t, received(synced), true)
 		plays.send(t, "ADDED", housePlay("https://nas/film.mkv"))
 		plays.live <- closeStream
-		// The reflector opens the next watch after its backoff, which is
-		// under a minute.
+		// The reflector's backoff before the next watch is under a minute.
 		time.Sleep(time.Minute)
 		synctest.Wait()
 
@@ -428,8 +423,8 @@ func TestAWatchCountsEachReopen(t *testing.T) {
 	})
 }
 
-// servedCluster serves every collection the view reads, from what the
-// fake cluster holds.
+// servedCluster serves every collection the view reads, with the
+// objects of the fake cluster.
 func servedCluster(t *testing.T, cluster *fakeCluster) *collectionServer {
 	t.Helper()
 	server := newCollectionServer()
@@ -462,11 +457,9 @@ func servedCluster(t *testing.T, cluster *fakeCluster) *collectionServer {
 	return server
 }
 
-// watchedView runs watchCluster against a server until the test ends,
-// and answers its view. The caller runs in a synctest bubble. When the
-// test ends, the watches stop, and the bubble waits for them to end,
-// before the server closes, because a reflector that meets a closed
-// server waits out a backoff that ignores its context.
+// watchedView runs watchCluster against the server until the test ends
+// and returns its view. The caller must run in a synctest bubble. The
+// watches stop before the server closes, for the reason runWatch gives.
 func watchedView(t *testing.T, server *collectionServer, wake chan struct{}) *clusterView {
 	t.Helper()
 	watcher, reader := testWatcher(t, server.handler()), viewClient(t, server)
@@ -480,19 +473,18 @@ func watchedView(t *testing.T, server *collectionServer, wake chan struct{}) *cl
 	return view
 }
 
-// viewClient is the operator's own client, pointed at the server the
-// watches read, for the reads the view sends the API server.
+// viewClient returns the operator's own client, pointed at the scripted
+// server, for the reads that the view sends directly.
 func viewClient(t *testing.T, server *collectionServer) *apiclient.Client {
 	t.Helper()
 	return apiclient.New(apiservertest.Host, apiservertest.Start(t, server.handler()).Client(), "")
 }
 
-// settledHouse is a cluster the operator has already settled: a Player
-// with a screen wired through a Receiver, a Remote with its controller
-// bonded, and a Play running on the Player, each with the claims and
-// the pods the passes built, and the claims allocated. The operator it
-// answers has run a pass over that cluster, so it holds what a running
-// operator holds.
+// settledHouse returns a cluster that the operator has already
+// reconciled, and that operator. The cluster has a Player with a screen
+// wired through a Receiver, a Remote with its controller bonded, and a
+// Play running on the Player. Each has the claims and pods that the
+// passes created, with the claims allocated.
 func settledHouse(t *testing.T, wake chan struct{}) (*fakeCluster, *operator) {
 	t.Helper()
 	cluster := receiverCluster()
@@ -524,8 +516,8 @@ func settledHouse(t *testing.T, wake chan struct{}) (*fakeCluster, *operator) {
 	for range 4 {
 		media.pass()
 	}
-	// The scheduler allocates the claims the passes created, which the
-	// fake cluster does not do on its own.
+	// The fake cluster has no scheduler, so the test allocates the
+	// claims that the passes created.
 	cluster.claims[idleClaimName("theater")].Status = allocatedIdleClaim().Status
 	cluster.claims[remoteClaimName("sofa")].Status = bonded.claims[remoteClaimName("sofa")].Status
 	for range 2 {
@@ -549,9 +541,9 @@ func TestASettledPassSendsTheAPIServerNothing(t *testing.T) {
 	})
 }
 
-// A collection the operator cannot read ends the wait with an error
-// that names it, so the process ends and says which grant or which
-// resource is missing.
+// When the operator cannot read a collection, the first read fails with
+// an error that names the collection, so the log shows which RBAC grant
+// or resource is missing.
 func TestTheFirstReadNamesACollectionItCannotRead(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := servedCluster(t, newFakeCluster())
@@ -572,8 +564,9 @@ func TestTheFirstReadNamesACollectionItCannotRead(t *testing.T) {
 	})
 }
 
-// An object that does not convert is an error that names it, so a log
-// line says which object the operator could not read.
+// An object that cannot be converted to its type is an error that names
+// the object, so the log shows which object the operator could not
+// read.
 func TestAnObjectThatDoesNotConvertIsAnErrorThatNamesIt(t *testing.T) {
 	object := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": mediaAPIVersion, "kind": "Play",

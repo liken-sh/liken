@@ -1,8 +1,6 @@
 package main
 
-// These tests cover the command sidecar's half of plan 90 over mpv's
-// socket: when mpv loads a file, the sidecar reads the playlist position
-// and the track list, and sets sid to the track the rule chooses.
+// In these tests, the test acts as mpv on the other end of a net.Pipe.
 
 import (
 	"encoding/json"
@@ -13,16 +11,14 @@ import (
 	"time"
 )
 
-// subtitleMPV is a commander that chooses subtitles, driven against a pipe
-// the test answers as mpv. It returns mpv's end of the pipe and the lines
-// the sidecar writes to it, after the observe requests.
+// subtitleMPV starts a commander with prefs and returns mpv's end of the
+// pipe and the lines that the commander writes after its observe
+// requests.
 func subtitleMPV(t *testing.T, prefs subtitlePreferences, presentations ...string) (net.Conn, <-chan string) {
 	t.Helper()
 	return subtitleMPVLogging(t, &logBuffer{}, prefs, presentations...)
 }
 
-// subtitleMPVLogging is subtitleMPV with the sidecar's log in the test's
-// hands.
 func subtitleMPVLogging(t *testing.T, log *logBuffer, prefs subtitlePreferences, presentations ...string) (net.Conn, <-chan string) {
 	t.Helper()
 	server, client := net.Pipe()
@@ -37,8 +33,7 @@ func subtitleMPVLogging(t *testing.T, log *logBuffer, prefs subtitlePreferences,
 	return server, lines
 }
 
-// answerQuery reads one get_property request and answers it with data.
-func answerQuery(t *testing.T, mpv net.Conn, lines <-chan string, property string, data any) {
+func replyToQuery(t *testing.T, mpv net.Conn, lines <-chan string, property string, data any) {
 	t.Helper()
 	var sent mpvCommand
 	mustSucceed(t, json.Unmarshal([]byte(waitForLine(t, lines)), &sent))
@@ -46,15 +41,14 @@ func answerQuery(t *testing.T, mpv net.Conn, lines <-chan string, property strin
 	writeEvent(t, mpv, fmt.Sprintf(`{"request_id":%d,"error":"success","data":%s}`, sent.RequestID, mustEncode(t, data)))
 }
 
-// loadedFile answers the two reads of one choice: the playlist position and
-// the track list mpv holds for the file at that position.
+// loadedFile answers the playlist-pos and track-list reads of one
+// choice.
 func loadedFile(t *testing.T, mpv net.Conn, lines <-chan string, position int, file surveyFile) {
 	t.Helper()
-	answerQuery(t, mpv, lines, "playlist-pos", position)
-	answerQuery(t, mpv, lines, "track-list", append([]mpvTrack{audio("eng")}, file.tracks...))
+	replyToQuery(t, mpv, lines, "playlist-pos", position)
+	replyToQuery(t, mpv, lines, "track-list", append([]mpvTrack{audio("eng")}, file.tracks...))
 }
 
-// mustSetSid reads the sidecar's set_property sid and answers it.
 func mustSetSid(t *testing.T, mpv net.Conn, lines <-chan string, want any) {
 	t.Helper()
 	var sent mpvCommand
@@ -63,23 +57,21 @@ func mustSetSid(t *testing.T, mpv net.Conn, lines <-chan string, want any) {
 	writeEvent(t, mpv, fmt.Sprintf(`{"request_id":%d,"error":"success"}`, sent.RequestID))
 }
 
-// presentationWith is an item's block that carries the counts of a file.
+// presentationWith returns an item's Presentation with the subtitle
+// event counts of file.
 func presentationWith(t *testing.T, file surveyFile) string {
 	t.Helper()
 	return string(mustEncode(t, Presentation{Subtitles: file.counts}))
 }
 
-// mpv sends file-loaded after it has opened each file and chosen its audio,
-// so the sidecar chooses the subtitle track for each item from that item's
-// own counts. The first item carries no counts, so the short default track
-// keeps the full role and wins on its flag. The second carries them, and
-// the long track wins.
+// The first item has no event counts, so the short default track keeps
+// the full role and wins because it is the default. The second item has counts,
+// and the long track wins.
 func TestEachLoadedFileGetsTheSubtitleTrackOfItsOwnCounts(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		mpv, lines := subtitleMPV(t, english(subtitlesOn, ""), emptyPresentation, presentationWith(t, survey(t, "hawkeye")))
-		// The sidecar reads mpv's position when it connects, and mpv has no
-		// file open yet.
-		answerQuery(t, mpv, lines, "playlist-pos", -1)
+		// The choice on connect finds no file open.
+		replyToQuery(t, mpv, lines, "playlist-pos", -1)
 		mustNoLine(t, lines)
 
 		writeEvent(t, mpv, `{"event":"file-loaded"}`)
@@ -92,9 +84,6 @@ func TestEachLoadedFileGetsTheSubtitleTrackOfItsOwnCounts(t *testing.T) {
 	})
 }
 
-// The sidecar dials mpv's socket once a second, so mpv can load the first
-// file before the sidecar connects, and that file-loaded event reaches
-// nobody. So the sidecar chooses for the file mpv has open when it connects.
 func TestAFileOpenWhenTheSidecarConnectsGetsItsSubtitleTrack(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		log := &logBuffer{}
@@ -112,8 +101,8 @@ func TestAFileOpenWhenTheSidecarConnectsGetsItsSubtitleTrack(t *testing.T) {
 	})
 }
 
-// In auto, audio in the first language with no forced track shows no
-// subtitles, so the sidecar sets sid to no.
+// In auto mode, audio in the first language with no forced track shows
+// no subtitles.
 func TestAFileWithNoTrackToShowGetsNoSubtitles(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		mpv, lines := subtitleMPV(t, english(subtitlesAuto, ""), presentationWith(t, survey(t, "horrorStory")))
@@ -123,9 +112,7 @@ func TestAFileWithNoTrackToShowGetsNoSubtitles(t *testing.T) {
 	})
 }
 
-// The sidecar chooses at load and at no other time, so a track a person
-// selects by hand stays until the next file.
-func TestATrackAPersonSelectsStays(t *testing.T) {
+func TestATrackSelectedByHandStaysUntilTheNextFile(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		mpv, lines := subtitleMPV(t, english(subtitlesOn, ""), presentationWith(t, survey(t, "pluribus")))
 		loadedFile(t, mpv, lines, 0, survey(t, "pluribus"))
@@ -136,9 +123,7 @@ func TestATrackAPersonSelectsStays(t *testing.T) {
 	})
 }
 
-// A household that names no language gives the rule nothing to choose by, so
-// the sidecar sets nothing and logs why.
-func TestNoLanguageKeepsMpvsChoice(t *testing.T) {
+func TestNoLanguageInPreferencesLeavesMpvsChoice(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		log := &logBuffer{}
 		mpv, lines := subtitleMPVLogging(t, log, subtitlePreferences{Subtitles: subtitlesOn}, presentationWith(t, survey(t, "pluribus")))
@@ -154,8 +139,6 @@ func TestNoLanguageKeepsMpvsChoice(t *testing.T) {
 	})
 }
 
-// A file with no subtitle track gives the rule nothing to choose among, so
-// the sidecar sends nothing.
 func TestAFileWithNoSubtitleTrackGetsNoCommand(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		mpv, lines := subtitleMPV(t, english(subtitlesOn, ""))
@@ -165,9 +148,7 @@ func TestAFileWithNoSubtitleTrackGetsNoCommand(t *testing.T) {
 	})
 }
 
-// A read that mpv refuses ends the choice with a line that holds mpv's own
-// words, and mpv keeps the track it chose itself.
-func TestARefusedReadLogsMpvsWords(t *testing.T) {
+func TestARefusedReadLogsMpvsError(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server, client := net.Pipe()
 		t.Cleanup(func() { server.Close() })
@@ -185,14 +166,12 @@ func TestARefusedReadLogsMpvsWords(t *testing.T) {
 
 		mustMatchAll(t, log.lines(), []string{
 			"command: connected to mpv's socket",
-			"command: the sidecar connected to mpv's socket, but the subtitle track stays mpv's own choice, because the read of playlist-pos failed: mpv answered property unavailable",
+			"command: the sidecar connected to mpv's socket, but the subtitle track stays mpv's own choice, because reading playlist-pos from mpv returned: mpv answered property unavailable",
 		})
 	})
 }
 
-// A read that mpv never answers, and a read whose socket closes first, each
-// end the choice with a line that says why, and mpv keeps its own choice.
-func TestAReadWithNoAnswerGivesUp(t *testing.T) {
+func TestAReadWithNoAnswerEndsTheChoice(t *testing.T) {
 	cases := []struct {
 		name   string
 		answer func(mpv net.Conn)
@@ -221,14 +200,15 @@ func TestAReadWithNoAnswerGivesUp(t *testing.T) {
 
 				mustMatch(t, log.lines()[1],
 					"command: the sidecar connected to mpv's socket, but the subtitle track stays mpv's own choice, "+
-						"because the read of playlist-pos failed: "+one.want)
+						"because reading playlist-pos from mpv returned: "+one.want)
 			})
 		})
 	}
 }
 
-// The operator writes the preferences only for a mode that chooses a track,
-// so an unset or malformed value is a sidecar that chooses nothing.
+// The operator writes the preferences only for a mode that chooses a
+// track, so an empty or malformed value means the sidecar chooses
+// nothing.
 func TestParseSubtitlePreferences(t *testing.T) {
 	cases := []struct {
 		name  string

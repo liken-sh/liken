@@ -1,8 +1,5 @@
 package main
 
-// These tests cover the command sidecar's controller half: the focus
-// gate, the key that asks for a cycle, and the press that reaches mpv.
-
 import (
 	"bufio"
 	"net"
@@ -11,13 +8,13 @@ import (
 	"time"
 )
 
-// The one controller these tests press, and the Player its mark must
-// name for a press to act.
+// A press has an effect only when the focus mark of keyTestRemote is
+// keyTestPlayer.
 const (
-	keyTestPlayer  = "theater"
-	keyTestRemote  = "sofa"
-	keyTestPlayNS  = "house"
-	keyTestPlayrun = "movie"
+	keyTestPlayer = "theater"
+	keyTestRemote = "sofa"
+	keyTestPlayNS = "house"
+	keyTestPlay   = "movie"
 )
 
 func keyTestTopics() (events, focus string) {
@@ -25,9 +22,8 @@ func keyTestTopics() (events, focus string) {
 		remoteFocusTopic(defaultTopicBase, keyTestPlayNS, keyTestRemote)
 }
 
-// A command sidecar wired to a fake broker and to a pipe that stands
-// in for mpv's IPC socket, so a test reads both what the pod publishes
-// and what it writes to the player.
+// keyTestCommander returns a command sidecar connected to a fake broker,
+// and the lines that it writes to a pipe in place of mpv's IPC socket.
 func keyTestCommander(t *testing.T) (*commander, *fakeBroker, <-chan string) {
 	t.Helper()
 	bus, brokers, connected := startBus(t, 1, nil, nil)
@@ -47,7 +43,7 @@ func keyTestCommander(t *testing.T) (*commander, *fakeBroker, <-chan string) {
 	return &commander{
 		bus:           bus,
 		mpv:           client,
-		commandsTopic: playCommandsTopic(defaultTopicBase, keyTestPlayNS, keyTestPlayrun),
+		commandsTopic: playCommandsTopic(defaultTopicBase, keyTestPlayNS, keyTestPlay),
 		volumeTopic:   playerVolumeTopic(defaultTopicBase, keyTestPlayNS, keyTestPlayer),
 		playerName:    keyTestPlayer,
 		remotes:       map[string]playRemote{events: {focus: focus}},
@@ -55,8 +51,8 @@ func keyTestCommander(t *testing.T) (*commander, *fakeBroker, <-chan string) {
 	}, brokers[0], lines
 }
 
-// focusHere marks the controller on this Play's own Player, the state
-// a running pod holds once the retained mark arrives.
+// focusHere delivers a focus mark of keyTestPlayer, as the broker
+// delivers the retained mark after the sidecar subscribes.
 func focusHere(c *commander) {
 	_, focus := keyTestTopics()
 	c.handle(focus, []byte(keyTestPlayer))
@@ -68,13 +64,11 @@ func nextLine(t *testing.T, lines <-chan string) string {
 	case line := <-lines:
 		return line
 	case <-time.After(time.Second):
-		t.Fatal("no command reached mpv")
+		t.Fatal("no command reached mpv within one second")
 		return ""
 	}
 }
 
-// A key press on the focused controller reaches mpv as the command
-// this pod binds it to.
 func TestAFocusedKeyPressReachesMpv(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, _, lines := keyTestCommander(t)
@@ -87,10 +81,7 @@ func TestAFocusedKeyPressReachesMpv(t *testing.T) {
 	})
 }
 
-// A held arrow reaches the display on every repeat, because an arrow
-// is one of the four kinds a person holds. The repeat carries a third
-// word, so the display logs the press alone.
-func TestAHeldArrowReachesTheDisplayOnTheRepeat(t *testing.T) {
+func TestARepeatOfAHeldArrowKeyReachesMpv(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, _, lines := keyTestCommander(t)
 		events, _ := keyTestTopics()
@@ -102,9 +93,9 @@ func TestAHeldArrowReachesTheDisplayOnTheRepeat(t *testing.T) {
 	})
 }
 
-// A press whose mark names another Player reaches mpv not at all, so a
-// controller pointed at another room does not drive this film.
-func TestAPressFromAnUnfocusedControllerReachesMpvNotAtAll(t *testing.T) {
+// The subtitles command is the first line that reaches mpv, so the press
+// before it wrote nothing.
+func TestAPressFromAControllerFocusedElsewhereDoesNotReachMpv(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, _, lines := keyTestCommander(t)
 		events, focus := keyTestTopics()
@@ -117,9 +108,9 @@ func TestAPressFromAnUnfocusedControllerReachesMpvNotAtAll(t *testing.T) {
 	})
 }
 
-// A press that arrives before any mark reaches mpv not at all, because
-// the gate is closed until the operator marks the controller.
-func TestAPressBeforeAnyMarkReachesMpvNotAtAll(t *testing.T) {
+// As in the test above, the first line that reaches mpv is the
+// subtitles command, so the press wrote nothing.
+func TestAPressBeforeAnyFocusMarkDoesNotReachMpv(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, _, lines := keyTestCommander(t)
 		events, _ := keyTestTopics()
@@ -131,8 +122,6 @@ func TestAPressBeforeAnyMarkReachesMpvNotAtAll(t *testing.T) {
 	})
 }
 
-// The cycle key asks the operator to move the mark, on the remote's own
-// cycle topic, and reaches mpv not at all.
 func TestTheCycleKeyPublishesTheCycleRequest(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, broker, _ := keyTestCommander(t)
@@ -147,10 +136,9 @@ func TestTheCycleKeyPublishesTheCycleRequest(t *testing.T) {
 	})
 }
 
-// A volume key is the operator's: it sets the room's level from the
-// same events topic. The sidecar publishes nothing for it, writes
-// nothing to mpv, and writes no line.
-func TestAVolumeKeyIsLeftToTheOperator(t *testing.T) {
+// The operator handles volume keys from the same events topic, so the
+// sidecar publishes nothing, writes nothing to mpv, and logs nothing.
+func TestTheSidecarIgnoresVolumeKeys(t *testing.T) {
 	for _, key := range []string{"KEY_VOLUMEUP", "KEY_VOLUMEDOWN", "KEY_MUTE", "KEY_UNMUTE"} {
 		t.Run(key, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -172,9 +160,7 @@ func TestAVolumeKeyIsLeftToTheOperator(t *testing.T) {
 	}
 }
 
-// The two topic lists the operator sets pair by position, so each
-// controller's presses are gated on that controller's own mark.
-func TestThePlayRemoteListsPairByPosition(t *testing.T) {
+func TestPlayRemoteMapPairsTopicsByPosition(t *testing.T) {
 	remotes := playRemoteMap("events/sofa\nevents/armchair", "focus/sofa\nfocus/armchair")
 
 	mustMatch(t, len(remotes), 2)
@@ -182,7 +168,6 @@ func TestThePlayRemoteListsPairByPosition(t *testing.T) {
 	mustMatch(t, remotes["events/armchair"], playRemote{focus: "focus/armchair"})
 }
 
-// A Play on a Player that names no controller subscribes to none.
-func TestAPlayWithNoRemotesReadsNoController(t *testing.T) {
+func TestPlayRemoteMapIsEmptyWithNoRemotes(t *testing.T) {
 	mustMatch(t, len(playRemoteMap("", "")), 0)
 }

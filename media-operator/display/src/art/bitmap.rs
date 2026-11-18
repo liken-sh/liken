@@ -5,15 +5,16 @@ use iced::{Point, Rectangle, Size};
 
 use crate::canvas::{Brush, Canvas};
 
-/// What the toolkit may hand a bitmap in one go. A toolkit image at or over
-/// this size uploads on a thread of its own and draws no earlier than the next
-/// frame, so a picture that large is read as bands under the limit. Of the
-/// four pictures the display draws, the album cover is the one that crosses
-/// it.
+/// iced_wgpu uploads an image of this many bytes or more on a worker
+/// thread, and draws nothing for it until a later frame. A smaller image
+/// uploads during the frame that draws it. So `from_rgba` splits a larger
+/// picture into bands under this size, and the picture appears in the
+/// first frame that draws it. The value is `MAX_SYNC_SIZE` in iced_wgpu's
+/// `src/image/cache.rs`.
 const MAX_SYNC: usize = 2 * 1024 * 1024;
 
-/// One band of a bitmap: the row it starts at, the rows it covers, and the
-/// toolkit image it was read into.
+/// A horizontal slice of a bitmap: its first row, its row count, and the
+/// iced image that holds its pixels.
 #[derive(Debug, Clone)]
 struct Band {
     top: u32,
@@ -21,9 +22,8 @@ struct Band {
     handle: Handle,
 }
 
-/// One decoded picture: its size in real pixels, and the toolkit images the
-/// display read it into. A clone shares the pixels, because a toolkit image
-/// holds its own.
+/// A decoded picture, with its size in output pixels, stored as one or more
+/// bands. Cloning is cheap because an iced `Handle` shares its pixels.
 #[derive(Debug, Clone)]
 pub struct Bitmap {
     pub width: u32,
@@ -32,8 +32,9 @@ pub struct Bitmap {
 }
 
 impl Bitmap {
-    /// Read straight-alpha RGBA, row major, as the decoder hands it back. A
-    /// buffer shorter than the size it states is no picture at all.
+    /// Builds a bitmap from straight-alpha RGBA pixels in row-major order.
+    /// Returns `None` when a dimension is zero or `pixels` is shorter than
+    /// `width * height * 4`.
     pub fn from_rgba(width: u32, height: u32, pixels: Vec<u8>) -> Option<Self> {
         let (rows, row) = (height as usize, width as usize * 4);
         if width == 0 || height == 0 || pixels.len() < row * rows {
@@ -41,8 +42,8 @@ impl Bitmap {
         }
 
         let per_band = ((MAX_SYNC - 1) / row).max(1);
-        // A picture under the cap is one band, and the decoder already owns
-        // its pixels, so they go into the toolkit image as they are.
+        // A picture under the limit is one band, which takes `pixels`
+        // without a copy.
         if per_band >= rows {
             return Some(Self {
                 width,
@@ -76,9 +77,9 @@ impl Bitmap {
         })
     }
 
-    /// Draw the picture at the place the formulas give it, in canvas units
-    /// like every other drawing call. The display decodes every picture to the
-    /// pixel size the screen takes, so one pixel of it covers one output pixel.
+    /// Draws the picture with its top left corner at `at`, in canvas units.
+    /// Every picture is decoded at the output's pixel size, so one picture
+    /// pixel covers one output pixel.
     pub fn draw(&self, brush: &mut Brush<'_>, at: Point) {
         let canvas = brush.canvas();
         for band in &self.bands {
@@ -95,9 +96,9 @@ impl Bitmap {
         }
     }
 
-    /// The pixels the bands carry, row major, as the decoder handed them
-    /// over. A test reads a drawn picture through this and not through the
-    /// handles, because a handle takes an id of its own on every call.
+    /// All the bands' pixels in row-major order. Tests compare pixels
+    /// instead of handles, because every `Handle` has a unique id and two
+    /// handles never compare equal.
     #[cfg(test)]
     pub fn pixels(&self) -> Vec<u8> {
         self.bands
@@ -109,8 +110,8 @@ impl Bitmap {
             .collect()
     }
 
-    /// The rows the picture covers in canvas units, which the header measures
-    /// its second line down from.
+    /// The picture's height in canvas units, rounded to a whole unit. The
+    /// header places its text below a logo of this height.
     pub fn canvas_height(&self, canvas: &Canvas) -> f32 {
         (canvas.to_canvas(self.height as f32) + 0.5).floor()
     }
@@ -124,9 +125,7 @@ mod tests {
         Canvas::for_output(Size::new(1920.0, 1080.0))
     }
 
-    /// The pixels one toolkit image carries. A handle takes an id of its own
-    /// on every call, so two handles never compare equal and the pixels are
-    /// what a test reads.
+    /// The pixels of one band's handle.
     fn read_back(handle: &Handle) -> Vec<u8> {
         match handle {
             Handle::Rgba { pixels, .. } => pixels.to_vec(),
@@ -134,34 +133,30 @@ mod tests {
         }
     }
 
-    /// The decoder hands back straight alpha, which is what the toolkit
-    /// blends on, so the pixels arrive as they are.
     #[test]
     fn straight_rgba_reads_back_as_it_arrived() {
         let pixels = [255, 0, 0, 255, 255, 255, 255, 128, 0, 0, 0, 0];
-        let bitmap =
-            Bitmap::from_rgba(3, 1, pixels.to_vec()).expect("a picture the display can draw");
+        let bitmap = Bitmap::from_rgba(3, 1, pixels.to_vec())
+            .expect("from_rgba accepts a 3x1 buffer of 12 bytes");
         assert_eq!(bitmap.width, 3);
         assert_eq!(bitmap.height, 1);
         assert_eq!(read_back(&bitmap.bands[0].handle), pixels.to_vec());
     }
 
-    /// A buffer shorter than the size it states is no picture at all, and
-    /// neither is a size of nothing.
     #[test]
-    fn a_buffer_that_does_not_match_its_size_is_no_picture() {
+    fn a_buffer_too_short_for_its_size_is_no_picture() {
         assert!(Bitmap::from_rgba(2, 1, vec![0, 0, 0, 255]).is_none());
         assert!(Bitmap::from_rgba(0, 1, vec![0, 0, 0, 255]).is_none());
         assert!(Bitmap::from_rgba(1, 0, vec![0, 0, 0, 255]).is_none());
     }
 
-    /// A picture too large to upload inside one frame reads as bands under the
-    /// limit, and the bands cover every row once.
+    /// Every band is under the limit, and together the bands cover each
+    /// row once.
     #[test]
     fn a_large_picture_reads_as_bands() {
         let (width, height) = (1024u32, 700u32);
         let bitmap = Bitmap::from_rgba(width, height, vec![255; (width * height * 4) as usize])
-            .expect("a picture in bands");
+            .expect("from_rgba accepts a 1024x700 buffer of 4 bytes per pixel");
         assert!(bitmap.bands.len() > 1);
         assert_eq!(bitmap.bands[0].top, 0);
         assert_eq!(
@@ -174,11 +169,11 @@ mod tests {
         }
     }
 
-    /// A small picture is one band, and its rows measure in canvas units at the
-    /// surface's own scale.
+    /// A small picture is one band, and its height scales with the canvas.
     #[test]
     fn a_small_picture_is_one_band() {
-        let bitmap = Bitmap::from_rgba(4, 8, vec![0; 4 * 8 * 4]).expect("one band");
+        let bitmap = Bitmap::from_rgba(4, 8, vec![0; 4 * 8 * 4])
+            .expect("from_rgba accepts a 4x8 buffer of 4 bytes per pixel");
         assert_eq!(bitmap.bands.len(), 1);
         assert_eq!(bitmap.canvas_height(&canvas()), 8.0);
         assert_eq!(

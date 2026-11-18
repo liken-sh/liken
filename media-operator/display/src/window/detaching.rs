@@ -1,21 +1,19 @@
-//! What the display does when mpv's socket closes.
+//! What the display does when mpv's IPC socket closes.
 //!
-//! mpv runs in the playback pod's ordinary container, and the pod's restart
-//! policy is `Never`, so mpv never starts again inside the same pod. Its
-//! socket closes when mpv exits, and the pod ends with it. The display is a
-//! native sidecar, which the kubelet stops after mpv's container ends, so the
-//! display runs for a few seconds after mpv quits. The next screen, such as
-//! the media browser's loading curtain, can show under the display then, so
-//! anything the display still draws stands over it. So the detach is final: the
-//! display stops drawing and ticking at once, and no later event of the
-//! socket brings it back.
+//! mpv runs in the playback pod's regular container with restart policy
+//! `Never`, so when mpv exits it does not start again, and its socket
+//! closes. The display runs in a native sidecar, which the kubelet stops only
+//! after the regular container has exited, so the display can keep running
+//! after mpv is gone. By then the next screen, such as the media browser's
+//! loading overlay, can already show, and anything the display draws would
+//! cover it. So once the socket closes, the display draws nothing until its
+//! process exits, whatever events arrive later.
 
 use super::Display;
 
 impl Display {
-    /// mpv's socket closed. Both layers draw nothing from here on, the fades
-    /// stop ticking, and the hide windows are cancelled, so no timer wakes
-    /// the frame loop for a screen that is gone.
+    /// Cancels the hide timers as well, so no timer wakes the frame loop after
+    /// mpv is gone.
     pub(super) fn on_detached(&mut self) {
         if self.detached {
             return;
@@ -43,8 +41,7 @@ mod tests {
         Message::Mpv(ipc::Event::Detached)
     }
 
-    /// The OSD and the risen card both stand when mpv quits, and both
-    /// layers stop drawing at once, with no fade out.
+    /// Both layers stop drawing at once, with no fade out.
     #[tokio::test]
     async fn a_detach_draws_nothing_at_once() {
         let (mut display, _) = display();
@@ -52,52 +49,74 @@ mod tests {
         let _ = display.update(property("time-pos", json!(5940.0)));
         let _ = display.update(message("summon"));
         settle(&mut display);
-        assert!(display.draws(Part::Below));
-        assert!(display.draws(Part::Above));
+        assert!(
+            display.draws(Part::Below),
+            "the below layer draws before the detach"
+        );
+        assert!(
+            display.draws(Part::Above),
+            "the above layer draws before the detach"
+        );
 
         let _ = display.update(detach());
-        assert!(!display.draws(Part::Below));
-        assert!(!display.draws(Part::Above));
+        assert!(
+            !display.draws(Part::Below),
+            "the below layer still draws after the detach"
+        );
+        assert!(
+            !display.draws(Part::Above),
+            "the above layer still draws after the detach"
+        );
         assert_eq!(
-            display.said.last().map(String::as_str),
+            display.logged.last().map(String::as_str),
             Some(
                 "media-display: mpv detached, because its socket closed, so the display draws nothing"
             )
         );
     }
 
-    /// A fade in flight stops ticking, and every hide window is cancelled.
     #[tokio::test]
-    async fn a_detach_stops_the_ticks_and_the_windows() {
+    async fn a_detach_stops_the_fades_and_the_hide_timers() {
         let (mut display, _) = display();
         let _ = display.update(block("next", OFFER));
         let _ = display.update(property("time-pos", json!(5940.0)));
         let _ = display.update(message("summon"));
-        assert!(display.fading());
-        assert!(display.idle.armed.is_some());
-        assert!(display.card.armed.is_some());
+        assert!(display.fading(), "a fade runs before the detach");
+        assert!(
+            display.idle.armed.is_some(),
+            "the idle timer is armed before the detach"
+        );
+        assert!(
+            display.card.armed.is_some(),
+            "the card timer is armed before the detach"
+        );
 
         let _ = display.update(detach());
-        assert!(!display.fading());
+        assert!(!display.fading(), "a fade still runs after the detach");
         assert_eq!(display.idle.armed, None);
         assert_eq!(display.card.armed, None);
         assert_eq!(display.row.armed, None);
     }
 
-    /// The detach is final: a press or a position that still arrives draws
-    /// nothing, and a second detach writes no second line.
+    /// A second detach writes no second log line.
     #[tokio::test]
     async fn nothing_draws_after_a_detach() {
         let (mut display, _) = display();
         let _ = display.update(detach());
-        let lines = display.said.len();
+        let lines = display.logged.len();
 
         let _ = display.update(message("summon"));
         let _ = display.update(property("time-pos", json!(1201.0)));
         let _ = display.update(detach());
-        assert!(!display.draws(Part::Below));
-        assert!(!display.draws(Part::Above));
-        assert!(!display.fading());
-        assert_eq!(display.said.len(), lines);
+        assert!(
+            !display.draws(Part::Below),
+            "the below layer draws after a second detach"
+        );
+        assert!(
+            !display.draws(Part::Above),
+            "the above layer draws after a second detach"
+        );
+        assert!(!display.fading(), "a fade runs after a second detach");
+        assert_eq!(display.logged.len(), lines);
     }
 }

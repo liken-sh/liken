@@ -1,11 +1,6 @@
-//! The activity line: the one line the screen draws while a `Play` starts or
-//! runs.
-//!
-//! The line draws under the clock and names the title, so the seconds a
-//! playback pod pulls and starts read as work in progress and not as a screen
-//! that ignored the button. The unit holds the last title after the `Play`
-//! ends, because the line leaves with the mark's motion rather than vanishing
-//! on the frame the activity changes.
+//! The activity line under the clock, which shows the title of the `Play`
+//! while it starts or plays. While the playback pod pulls its image and
+//! starts, the line tells a person that the press started something.
 
 use iced_winit::core::Point;
 
@@ -15,17 +10,14 @@ use crate::look;
 use crate::unit::Unit;
 use media_screen::status::Activity;
 
-/// How opaque the line draws, from 0 clear to 1 full.
+/// The opacity of the line: 1 while the activity is `Starting` or
+/// `Playing`. After a move to `Idle` it fades to 0 over
+/// [`energy::RAMP_DOWN`], on the same curve as the mark's ramp down, so the
+/// line and the mark leave together.
 ///
-/// While a `Play` starts or runs the line is opaque, whatever the energy is.
-/// The move to `Idle` starts its fade, over the same ramp down the mark
-/// returns on, so the line leaves with the motion and a settled screen draws
-/// no line at all.
-///
-/// The fade leaves from full and not from the energy the mark holds. The line
-/// was full for the whole of the `Play`, and the mark may not be: a `Play`
-/// that ends before it played leaves the mark part way up its ramp, and a line
-/// that took that level would step down in the frame the `Play` ended.
+/// The fade starts from 1 and not from the mark's energy, because a `Play`
+/// that ends while `Starting` leaves the energy partway up, and the line
+/// would drop in that frame.
 pub fn opacity(unit: &Unit, at: f64) -> f32 {
     match unit.activity {
         Activity::Starting | Activity::Playing => 1.0,
@@ -33,18 +25,14 @@ pub fn opacity(unit: &Unit, at: f64) -> f32 {
     }
 }
 
-/// The line the screen draws for one title.
-///
-/// The title takes real quotation marks and one ellipsis character, because the
-/// line is read from across a room.
+/// The text of the line, with typographic quotation marks and an ellipsis
+/// character.
 fn line(title: &str) -> String {
     format!("Playing \u{201c}{title}\u{201d}\u{2026}")
 }
 
-/// Draw the element into the frame, in canvas units.
-///
-/// The line shares the clock's right edge and hangs one line pitch under it, so
-/// the two read as one column and neither touches the other.
+/// Draws the line one `look::LINE_PITCH` below the clock, aligned to its
+/// right edge.
 pub fn draw(frame: &mut Frame, layout: &Layout, unit: &Unit, at: f64, light: f32) {
     let Some(title) = &unit.title else {
         return;
@@ -69,14 +57,14 @@ mod tests {
     use media_screen::Moment;
     use media_screen::status::{Play, Status};
 
-    /// A unit that read one status naming a `Play`.
-    fn playing(activity: Activity, at: f64) -> Unit {
+    /// A unit that read one status with a `Play` and `activity`.
+    fn unit_with_play(activity: Activity, at: f64) -> Unit {
         let mut unit = Unit::default();
         unit.fold(
             Moment::Status(Status {
                 activity,
                 play: Some(Play {
-                    name: "den-tv-1".into(),
+                    name: "play-1".into(),
                     title: "A Film".into(),
                 }),
                 ..Status::default()
@@ -87,19 +75,19 @@ mod tests {
     }
 
     #[test]
-    fn the_line_names_the_title_in_quotation_marks() {
+    fn the_line_shows_the_title_in_quotation_marks() {
         assert_eq!(line("A Film"), "Playing \u{201c}A Film\u{201d}\u{2026}");
     }
 
     #[test]
     fn the_line_is_opaque_while_a_play_starts_or_runs() {
-        assert_eq!(opacity(&playing(Activity::Starting, 0.0), 0.1), 1.0);
-        assert_eq!(opacity(&playing(Activity::Playing, 0.0), 9.0), 1.0);
+        assert_eq!(opacity(&unit_with_play(Activity::Starting, 0.0), 0.1), 1.0);
+        assert_eq!(opacity(&unit_with_play(Activity::Playing, 0.0), 9.0), 1.0);
     }
 
     #[test]
-    fn the_line_leaves_with_the_marks_motion() {
-        let mut unit = playing(Activity::Starting, 0.0);
+    fn the_line_fades_over_the_ramp_down() {
+        let mut unit = unit_with_play(Activity::Starting, 0.0);
         unit.fold(Moment::Status(Status::default()), 1.2);
 
         assert_eq!(opacity(&unit, 1.2), 1.0);
@@ -107,13 +95,11 @@ mod tests {
         assert_eq!(opacity(&unit, 3.7), 0.0);
     }
 
-    /// A `Play` that ends before it played leaves the mark part way up its
-    /// ramp, and the line was full through the whole of it. So the line
-    /// leaves from full here too, and the frame the `Play` ended on reads
-    /// the same alpha as the frame before it.
+    /// The frame where the `Play` ends has the same opacity as the frame
+    /// before it.
     #[test]
-    fn a_play_that_ends_before_it_played_carries_the_line_out_from_full() {
-        let mut unit = playing(Activity::Starting, 0.0);
+    fn a_play_that_ends_while_starting_fades_the_line_from_full_opacity() {
+        let mut unit = unit_with_play(Activity::Starting, 0.0);
         assert_eq!(opacity(&unit, 0.6), 1.0);
 
         unit.fold(Moment::Status(Status::default()), 0.6);
@@ -125,7 +111,7 @@ mod tests {
 
     #[test]
     fn a_settled_screen_draws_no_line() {
-        let unit = playing(Activity::Idle, 0.0);
+        let unit = unit_with_play(Activity::Idle, 0.0);
         assert_eq!(unit.title.as_deref(), Some("A Film"));
         assert_eq!(opacity(&unit, 5.0), 0.0);
     }

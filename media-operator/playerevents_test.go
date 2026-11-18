@@ -1,20 +1,16 @@
 package main
 
-// These tests cover the Events on a Player and a Remote, and the
-// Events of a run's DisplayAlive condition: each condition transition
-// posts one Event with the condition's reason and message, and a fault
-// that a pass retries posts its first failure and its recovery. Each
-// runs in a synctest bubble and reads the Events with postedOn.
+// A fault that each pass retries posts one Event for the first failure
+// and one for the recovery, not one for each retry.
 
 import (
 	"testing"
 	"testing/synctest"
 )
 
-// The Screen condition's transitions post its reason and the
-// Display's message. A screen with no Display is a Warning, because a
-// person fixes it. A panel on another input is Normal, because the
-// CRD describes that park as by design.
+// A screen with no Display is a Warning, because a person must fix it.
+// A panel on another input is Normal, because the Player CRD documents
+// it as expected.
 func TestAScreenTransitionPostsTheConditionsReason(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -34,7 +30,7 @@ func TestAScreenTransitionPostsTheConditionsReason(t *testing.T) {
 					cluster.displays[testMonitor] = each.display
 				}
 				player := housePlayer()
-				player.Status.Screen = rememberedScreen()
+				player.Status.Screen = earlierScreen()
 				cluster.players["theater"] = player
 				media := testOperator(t, cluster, make(chan struct{}, 1))
 
@@ -46,13 +42,11 @@ func TestAScreenTransitionPostsTheConditionsReason(t *testing.T) {
 	}
 }
 
-// A screen that stays as it was posts nothing more, and one that
-// flips posts the new reason.
-func TestAScreenPostsOnlyWhenItFlips(t *testing.T) {
+func TestAScreenPostsOnlyWhenItChanges(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cluster := screenCluster()
 		player := housePlayer()
-		player.Status.Screen = rememberedScreen()
+		player.Status.Screen = earlierScreen()
 		cluster.players["theater"] = player
 		media := testOperator(t, cluster, make(chan struct{}, 1))
 
@@ -68,8 +62,6 @@ func TestAScreenPostsOnlyWhenItFlips(t *testing.T) {
 	})
 }
 
-// A display sidecar that went down posts its DisplayAlive transition
-// as a Warning, with the restart count and the last exit.
 func TestADisplayThatRestartsPostsAWarning(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cluster := runningCluster(housePlayer())
@@ -87,8 +79,8 @@ func TestADisplayThatRestartsPostsAWarning(t *testing.T) {
 	})
 }
 
-// reasonsOn is postedOn with the type and the reason of each Event
-// alone, for an Event whose message holds an error's own words.
+// reasonsOn is postedOn without the messages, for Events whose message
+// holds an error's text.
 func reasonsOn(cluster *fakeCluster, kind, name string) []string {
 	synctest.Wait()
 	var posted []string
@@ -98,8 +90,6 @@ func reasonsOn(cluster *fakeCluster, kind, name string) []string {
 	return posted
 }
 
-// A Keymap that does not compile posts one Warning on the Remote, for
-// as long as the same refusal stands.
 func TestARefusedKeymapPostsOnceOnTheRemote(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cluster := newFakeCluster()
@@ -115,19 +105,16 @@ func TestARefusedKeymapPostsOnceOnTheRemote(t *testing.T) {
 	})
 }
 
-// A session write on the Receiver that fails posts a Warning once, the
-// passes that write it again post nothing, and the write that lands
-// posts the recovery.
 func TestAReceiverWritePostsItsFirstFailureAndItsRecovery(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cluster := receiverCluster()
 		cluster.sessionsFail = true
 		media := testOperator(t, cluster, make(chan struct{}, 1))
 
-		runPlayers(media, []Player{*housePlayer()}, standingPlays())
-		runPlayers(media, []Player{*housePlayer()}, standingPlays())
+		runPlayers(media, []Player{*housePlayer()}, runningPlays())
+		runPlayers(media, []Player{*housePlayer()}, runningPlays())
 		cluster.sessionsFail = false
-		runPlayers(media, []Player{*housePlayer()}, standingPlays())
+		runPlayers(media, []Player{*housePlayer()}, runningPlays())
 
 		mustMatchAll(t, reasonsOn(cluster, "Player", "theater"), []string{
 			"Warning ReceiverWriteFailed",

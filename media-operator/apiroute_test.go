@@ -1,10 +1,5 @@
 package main
 
-// These tests cover the router against the plan: every row of the
-// route table, every row of the negotiation table, the stream count
-// rule from zero to three streams, and a redirect's Location and Link
-// read byte for byte.
-
 import (
 	"encoding/json"
 	"io"
@@ -15,7 +10,7 @@ import (
 	"testing/synctest"
 )
 
-func TestTheRouteTableAnswersEveryRow(t *testing.T) {
+func TestEveryRouteResponds(t *testing.T) {
 	rows := []struct {
 		name   string
 		method string
@@ -63,7 +58,7 @@ func TestEveryResponseCarriesTheServiceLinks(t *testing.T) {
 	})
 }
 
-func TestOptionsAnswersTheMethodsAndNoBody(t *testing.T) {
+func TestOptionsListsTheMethodsWithNoBody(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
 
@@ -99,11 +94,11 @@ func TestNoTokenIsRefusedWithTheRealmAlone(t *testing.T) {
 	})
 }
 
-func TestARefusedTokenCarriesTheReviewsOwnWords(t *testing.T) {
+func TestARejectedTokenReturnsTheTokenReviewMessage(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
 		fixture.plane.authenticated = false
-		fixture.plane.words = "token is expired"
+		fixture.plane.message = "token is expired"
 
 		recorder := fixture.get(playerPathFor("screen"))
 
@@ -129,9 +124,7 @@ func TestADenialNamesTheScopeItRefused(t *testing.T) {
 	})
 }
 
-// The SubjectAccessReview names the path's namespace and the aspect's
-// subresource, with the subject the TokenReview answered.
-func TestTheReviewNamesThePathsNamespaceAndTheAspect(t *testing.T) {
+func TestTheAccessReviewHasTheNamespaceSubresourceAndUser(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
 
@@ -146,8 +139,8 @@ func TestTheReviewNamesThePathsNamespaceAndTheAspect(t *testing.T) {
 	})
 }
 
-// A 403 answers before the Player is read, so a denied caller is
-// told nothing about whether the name exists.
+// A denied caller gets a 403 before the Player is read, so the response
+// does not reveal whether the name exists.
 func TestADenialNeverReadsThePlayer(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
@@ -171,10 +164,7 @@ func TestAPlayerThatIsNotThereIsANotFound(t *testing.T) {
 	})
 }
 
-// The plan's negotiation table, row by row: the negotiated media route
-// and its Content-Location, a refused extension, and the redirects
-// each Accept produces.
-func TestNegotiationAnswersEveryRowOfThePlan(t *testing.T) {
+func TestContentNegotiation(t *testing.T) {
 	rows := []struct {
 		name            string
 		method          string
@@ -245,8 +235,8 @@ func TestNegotiationAnswersEveryRowOfThePlan(t *testing.T) {
 	}
 }
 
-// A 406 on an extension route lists the route's own type beside its
-// siblings, each with the route that serves it.
+// A 406 on an extension route lists every form of the aspect with the
+// route that serves it.
 func TestA406ListsEveryFormWithItsHref(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
@@ -261,10 +251,9 @@ func TestA406ListsEveryFormWithItsHref(t *testing.T) {
 	})
 }
 
-// The redirect a client reads, field by field: the Location with the
-// caller's query, no-store, the related link to the composed form at
-// the same span, and no upstream call.
-func TestARedirectReadsByteForByte(t *testing.T) {
+// A redirect keeps the caller's query, links the composed form for the
+// same time range, and makes no upstream request.
+func TestARedirectKeepsTheQueryAndLinksTheComposedForm(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
 		fixture.server.display = testDisplayBase
@@ -281,9 +270,7 @@ func TestARedirectReadsByteForByte(t *testing.T) {
 	})
 }
 
-// A query the grammar refuses is a 400 before any upstream is
-// reached, so it costs no capture.
-func TestAQueryTheGrammarRefusesCostsNoCapture(t *testing.T) {
+func TestAnInvalidQueryIs400WithNoCapture(t *testing.T) {
 	rows := []string{"?t=10,10", "?t=5,3", "?t=1&t=2", "?t=61,70", "?width=10&height=10", "?zoom=2"}
 	for _, row := range rows {
 		t.Run(row, func(t *testing.T) {
@@ -299,9 +286,7 @@ func TestAQueryTheGrammarRefusesCostsNoCapture(t *testing.T) {
 	}
 }
 
-// The three Media Fragments section 6.1.1 cases reach the upstream as
-// their literal forms do.
-func TestThePercentEncodedSpansReachTheUpstream(t *testing.T) {
+func TestPercentEncodedTimeRangesReachTheUpstreamDecoded(t *testing.T) {
 	rows := []struct {
 		query    string
 		location string
@@ -325,10 +310,9 @@ func TestThePercentEncodedSpansReachTheUpstream(t *testing.T) {
 	}
 }
 
-// PROSE: the stream count rule from zero to three streams: zero is a
-// 409, and one or more the composed route serves itself with no
-// redirect. Sinks with no running Play count for nothing.
-func TestTheStreamCountRuleAnswersZeroToThreeStreams(t *testing.T) {
+// The composed route serves a 200 with no redirect when the Player has
+// a screen or a sink, and a sink counts only while a Play runs.
+func TestTheComposedRouteNeedsAScreenOrAPlayingSink(t *testing.T) {
 	rows := []struct {
 		name     string
 		screen   bool
@@ -384,8 +368,6 @@ func shapedPlayer(screen bool, sinks int, playing bool) *Player {
 	return player
 }
 
-// The audio aspect of a unit with no running Play is a 409
-// not-playing whose detail names the action.
 func TestTheAudioAspectNeedsARunningPlay(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
@@ -400,8 +382,8 @@ func TestTheAudioAspectNeedsARunningPlay(t *testing.T) {
 	})
 }
 
-// A screen the Player never resolved is a 409 no-node, not a 404,
-// because the Player exists and the caller can act.
+// A Player whose screen has no node is a 409, not a 404, because the
+// Player exists.
 func TestTheScreenAspectNeedsAResolvedScreen(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
@@ -414,8 +396,8 @@ func TestTheScreenAspectNeedsAResolvedScreen(t *testing.T) {
 	})
 }
 
-// A HEAD takes no frame and asks no sibling for one, and its
-// Content-Type omits the codecs parameter, which only a GET carries.
+// A HEAD makes no upstream request, so its Content-Type has no codecs
+// parameter.
 func TestAHeadMakesNoUpstreamCallAndOmitsTheCodecs(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
@@ -431,10 +413,8 @@ func TestAHeadMakesNoUpstreamCallAndOmitsTheCodecs(t *testing.T) {
 	})
 }
 
-// A composed answer carries the capture fields whether it streams or
-// is a HEAD: no-store, no ranges, the file name, and one link per
-// upstream with the lead-in added to t=.
-func TestAComposedAnswerCarriesTheCaptureFields(t *testing.T) {
+// Each upstream link of a composed response adds the lead-in to t=.
+func TestAComposedResponseHasTheCaptureHeaders(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
 		fixture.server.display = testDisplayBase
@@ -457,8 +437,6 @@ func TestAComposedAnswerCarriesTheCaptureFields(t *testing.T) {
 	})
 }
 
-// The negotiated composed route alone names its alternates and its
-// Content-Location; an extension route sends neither.
 func TestTheNegotiatedComposedRouteLinksItsAlternates(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
@@ -472,15 +450,13 @@ func TestTheNegotiatedComposedRouteLinksItsAlternates(t *testing.T) {
 		mustMatch(t, fixed.Header().Get("Content-Location"), "")
 		for _, link := range fixed.Header().Values("Link") {
 			if strings.Contains(link, `rel="alternate"`) {
-				t.Errorf("an extension route sent %s", link)
+				t.Errorf("the route with a file extension sent the Link header %s, want no rel=\"alternate\" link", link)
 			}
 		}
 	})
 }
 
-// Every request writes one log line, with the route template and the
-// id the problem document's instance carries.
-func TestOneLogLineCarriesTheRequestId(t *testing.T) {
+func TestOneLogLineHasTheRequestID(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
 		fixture.plane.allowed = false
@@ -495,7 +471,7 @@ func TestOneLogLineCarriesTheRequestId(t *testing.T) {
 	})
 }
 
-func TestHealthAnswersAndReadinessLatches(t *testing.T) {
+func TestHealthIsOKAndReadinessFollowsTheReadyFlag(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
 		fixture.server.ready.Store(false)
@@ -509,7 +485,7 @@ func TestHealthAnswersAndReadinessLatches(t *testing.T) {
 	})
 }
 
-func TestTheRouterReadsEveryTemplateSegment(t *testing.T) {
+func TestMatchTemplate(t *testing.T) {
 	rows := []struct {
 		template  string
 		path      string
@@ -549,5 +525,5 @@ func mustContain(t *testing.T, values []string, wanted string) {
 			return
 		}
 	}
-	t.Errorf("got %q, want one of them to be %q", values, wanted)
+	t.Errorf("the header values are %q, want one to be %q", values, wanted)
 }

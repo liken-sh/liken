@@ -1,37 +1,42 @@
-//! A compositor that speaks the Wayland wire protocol on one end of a socket
-//! pair, for the link's tests. It answers the core requests the binding
-//! makes, offers `liken_arranger_manager_v1` when a test asks it to, and
-//! answers the arranger the way the compositor module does: it grants or
-//! refuses, reports the region and the surfaces, and reports `landed` for
-//! each commit. It records every arranger request it reads, so a test reads
-//! what the display sent.
+//! A fake Wayland compositor for the tests of `link`. On one end of a
+//! socket pair, it answers the core requests that the client binding
+//! makes, offers `liken_arranger_manager_v1` unless the `Offer` is
+//! `Nothing`, and grants or refuses `get_arranger` as the `Offer` says.
+//! It sends `landed` at once for each commit, where the real compositor
+//! sends it when the tween ends. It records each arranger request as a
+//! line of text, so a test can check what the display sent.
 //!
-//! A message is the object id, then the size and the opcode in one word,
-//! then the arguments in native byte order, each padded to four bytes.
+//! A wire message is the object id, then one word holding the size in
+//! the high 16 bits and the opcode in the low 16 bits, then the
+//! arguments in native byte order, each padded to four bytes.
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex};
 
-/// What the compositor offers and how it answers `get_arranger`.
+/// Whether the compositor offers the arranger global, and how it
+/// answers `get_arranger`.
 #[derive(Debug, Clone, Copy)]
 pub enum Offer {
-    /// No arranger global: a compositor without the module.
+    /// The compositor has no arranger global, like one without the
+    /// module.
     Nothing,
-    /// Grant the arranger, and report a region of this size and one surface
-    /// of mpv's.
+    /// Grant the arranger, then send a region of this size and a count
+    /// of one mpv surface.
     Grant(i32, i32),
-    /// Refuse with this reason.
+    /// Refuse `get_arranger` with this reason code.
     Refuse(u32),
-    /// Grant, then close the socket, the way a compositor that crashes does.
+    /// Grant, then close the socket, like a compositor that crashes.
     GrantThenClose,
 }
 
-/// The arranger requests the compositor read, in order, as text.
+/// The arranger requests that the compositor received, in order, as
+/// text.
 pub type Log = Arc<Mutex<Vec<String>>>;
 
-/// Serve one client on `stream` until it closes the socket.
+/// Serves one client on `stream` in a new thread, until the client
+/// closes the socket. The returned log is filled as requests arrive.
 pub fn serve(stream: UnixStream, offer: Offer) -> Log {
     let log = Log::default();
     let record = Arc::clone(&log);
@@ -43,7 +48,7 @@ struct Compositor {
     stream: UnixStream,
     offer: Offer,
     log: Log,
-    /// The interface of each object id the client created.
+    /// The interface of each object id that the client created.
     objects: HashMap<u32, &'static str>,
 }
 
@@ -64,13 +69,14 @@ impl Compositor {
         while let Some((object, opcode, body)) = self.read() {
             let mut args = Args(&body);
             match (self.objects.get(&object).copied(), opcode) {
-                // wl_display.sync: answer done at once, and free the id.
+                // wl_display.sync: send `done` at once and release the
+                // id.
                 (Some("wl_display"), 0) => {
                     let callback = args.uint();
                     self.send(callback, 0, &[Arg::Uint(0)]);
                     self.send(DISPLAY, 1, &[Arg::Uint(callback)]);
                 }
-                // wl_display.get_registry: list the globals.
+                // wl_display.get_registry: announce the globals.
                 (Some("wl_display"), 1) => {
                     let registry = args.uint();
                     self.objects.insert(registry, "wl_registry");
@@ -86,7 +92,9 @@ impl Compositor {
                         );
                     }
                 }
-                // wl_registry.bind with a new_id of no fixed interface.
+                // wl_registry.bind. Its new_id argument has no fixed
+                // interface, so the request carries the interface name
+                // and version.
                 (Some("wl_registry"), 0) => {
                     let _name = args.uint();
                     let _interface = args.string();
@@ -126,8 +134,8 @@ impl Compositor {
         }
     }
 
-    /// Answer `get_arranger` the way the offer says. It answers false when
-    /// the compositor goes away.
+    /// Answers `get_arranger` as the offer says. It returns false when
+    /// the offer closes the socket, so the caller stops reading.
     fn answer(&mut self, arranger: u32) -> bool {
         match self.offer {
             Offer::Nothing => true,

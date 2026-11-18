@@ -1,11 +1,11 @@
 package main
 
-// This file is the media layer's half of the display-operator's
-// Display resource. The media layer never writes a panel. It finds
-// the Display that names the screen a unit's idle pod draws on, and
-// it applies or lifts spec.override there. The types are hand-written
-// for the same reason the Kubernetes types in api.go are, and the
-// display-operator's Go module is not a dependency.
+// This file connects media-operator to the Display resources that
+// display-operator owns. media-operator never talks to a monitor. It
+// finds the Display for the screen a Player's idle pod draws on, then
+// applies or removes spec.override on it. The Display types are
+// written by hand here because this module does not import
+// display-operator's module.
 
 import (
 	"errors"
@@ -17,45 +17,39 @@ import (
 	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
-// The group the display-operator serves. A Display is
-// cluster-scoped, because a panel is physical and belongs to no
-// namespace.
 const displayAPIVersion = "display.liken.sh/v1alpha1"
 
-// The attribute both of a connector's devices carry. The
-// display-operator names each Display by this value, so the allocated
-// draw device names the Display through it.
+// monitorIDAttribute is the device attribute that holds the monitor
+// id. display-operator names each Display by its monitor id, so the
+// id on the allocated draw device is the name of the Display.
 const monitorIDAttribute = "monitor.liken.sh/id"
 
-// The one override value the media layer writes, and the one
-// observed power word that means a lit panel. The panel comes back
-// when the block is deleted, so nothing here writes an on value: the
-// display-operator answers the lift by restoring what it captured.
-// Both are PascalCase, the form of every enum value in a Kubernetes
-// resource.
+// displayPowerOff is the only value media-operator writes into an
+// override, for the power or for the backlight. displayPowerOn is the
+// observed power value of a lit panel.
+// To turn a panel back on, media-operator removes the override, and
+// display-operator then restores the settings it saved before the
+// override.
 const (
 	displayPowerOff = "Off"
 	displayPowerOn  = "On"
 )
 
-// samePower compares two Display power words without regard to case.
-// The display-operator reports a word in lowercase or in PascalCase,
-// "on" or "On", depending on its build, and a Display's override can
-// hold "off" or "Off" in the same way. Both spellings name one state.
-// An exact compare reads a lit panel as down, or a standing override as
-// one to write again, when the spelling differs.
+// samePower compares two power values without regard to case, because
+// display-operator can report "on" or "On", and an override can hold
+// "off" or "Off". A case-sensitive compare would read a lit panel as
+// off, and would apply an override that is already in place again.
 func samePower(a, b string) bool {
 	return strings.EqualFold(a, b)
 }
 
-// The field manager this operator applies under. Server-side
-// apply keeps it to the one block this operator states, so the cluster
-// owner's resting fields never conflict with it.
+// applyFieldManager is the server-side apply field manager for the
+// override. The apply sets only spec.override, so it does not conflict
+// with the fields of the Display that other managers set.
 const applyFieldManager = "media-operator"
 
-// A Display carries only what this operator reads or writes:
-// the override it applies, and the observed values it folds into the
-// Player's status.
+// Display has only the fields this operator uses: the override it
+// applies, and the observed values it copies into the Player's status.
 type Display struct {
 	APIVersion string        `json:"apiVersion,omitempty"`
 	Kind       string        `json:"kind,omitempty"`
@@ -64,23 +58,21 @@ type Display struct {
 	Status     DisplayStatus `json:"status"`
 }
 
-// The spec half this operator writes is the override alone. A
-// nil override is the apply that lifts one.
+// DisplaySpec is the part of a Display's spec that this operator
+// writes. An apply with a nil override removes the override.
 type DisplaySpec struct {
 	Override *DisplayOverride `json:"override,omitempty"`
 }
 
-// The temporary layer over the panel's resting settings. A backlight
-// at zero still answers DDC. Power off stops some panels from
-// answering DDC at all, so a Player states it only for a panel the
-// drill proved wakes.
+// DisplayOverride replaces the panel's settings until media-operator
+// removes it.
 type DisplayOverride struct {
 	Backlight string `json:"backlight,omitempty"`
 	Power     string `json:"power,omitempty"`
 }
 
-// The body of an apply. It carries the spec alone, because the
-// status is the display-operator's to write.
+// displayApply is the body of an apply. It has no status, because
+// display-operator writes the status.
 type displayApply struct {
 	APIVersion string      `json:"apiVersion"`
 	Kind       string      `json:"kind"`
@@ -94,17 +86,18 @@ type DisplayStatus struct {
 	Conditions []DisplayCondition `json:"conditions,omitempty"`
 }
 
-// The mode the display-operator set: the kernel's, and the compositor's
-// canvas, such as 1920x1080@60. A pattern:// URI with no frame reads the
-// canvas, because the canvas is what mpv draws on.
+// DisplayMode is the mode display-operator set, for the kernel and for
+// the compositor's canvas, such as 1920x1080@60. A pattern:// URI with
+// no frame reads the canvas mode, because mpv draws on the canvas.
 type DisplayMode struct {
 	Kernel string `json:"kernel,omitempty"`
 	Weston string `json:"weston,omitempty"`
 }
 
-// The one Display condition this operator reads. The display-operator
-// sets it False with the NoPanel reason when the connector carries no
-// panel, which is a monitor that shows another input.
+// displayConnectedCondition is the only Display condition this
+// operator reads. display-operator sets it to False with the reason
+// NoPanel when the connector has no panel, for example when the monitor
+// shows another input.
 const (
 	displayConnectedCondition = "Connected"
 	displayReasonNoPanel      = "NoPanel"
@@ -117,10 +110,11 @@ type DisplayCondition struct {
 	Message string `json:"message,omitempty"`
 }
 
-// The Screen condition a Player carries, and its reasons. Present and
-// PanelAway are this operator's words for the Display's True and
-// NoPanel; every other Display reason passes through. NoDisplay and
-// NotReported are the two ways the Display answers nothing.
+// The Screen condition of a Player and its reasons. Present and
+// PanelAway replace the Display's True status and NoPanel reason, and
+// the Player keeps every other Display reason unchanged. NoDisplay
+// means the Display does not exist. NotReported means the Display has
+// no Connected condition.
 const (
 	screenConditionType     = "Screen"
 	screenReasonPresent     = "Present"
@@ -132,29 +126,25 @@ const (
 	conditionUnknown = "Unknown"
 )
 
-// What the display-operator last read from the panel. It is
-// last-known and never live, because a DDC read is itself a wake
-// stimulus on some panels.
+// DisplayObserved is what display-operator last read from the panel.
+// It is not read live, because on some panels a DDC read wakes the
+// panel.
 type DisplayObserved struct {
 	Brightness *int   `json:"brightness,omitempty"`
 	Power      string `json:"power,omitempty"`
 }
 
-// The claim status the scheduler writes. The operator reads it
-// for two questions: which device the draw request took, and which pods
-// hold the claim now.
+// ResourceClaimStatus is the status the scheduler writes. The operator
+// reads which device the draw request got and which pods use the claim.
 type ResourceClaimStatus struct {
 	Allocation *DeviceAllocationResult `json:"allocation,omitempty"`
 
-	// ReservedFor names every object that holds an allocated
-	// claim. An allocated claim carries the delete-protection finalizer,
-	// so a delete stays in Terminating until every holder is gone.
 	ReservedFor []ClaimConsumer `json:"reservedFor,omitempty"`
 }
 
-// One holder of an allocated claim. The field names match DRA's
-// ResourceClaimConsumerReference. Resource is the plural resource name,
-// and the operator acts on pods alone.
+// ClaimConsumer is one object that uses an allocated claim. Its fields
+// match DRA's ResourceClaimConsumerReference. Resource is the plural
+// resource name, and this operator looks only at pods.
 type ClaimConsumer struct {
 	APIGroup string `json:"apiGroup,omitempty"`
 	Resource string `json:"resource,omitempty"`
@@ -170,9 +160,9 @@ type DeviceAllocationDevices struct {
 	Results []DeviceRequestAllocationResult `json:"results,omitempty"`
 }
 
-// One allocated device. The three coordinates name it in the
-// driver's ResourceSlices: the driver, the pool, and the device name
-// inside that pool.
+// DeviceRequestAllocationResult is one allocated device. The driver,
+// the pool, and the device name together identify it in the driver's
+// ResourceSlices.
 type DeviceRequestAllocationResult struct {
 	Request string `json:"request,omitempty"`
 	Driver  string `json:"driver,omitempty"`
@@ -180,8 +170,8 @@ type DeviceRequestAllocationResult struct {
 	Device  string `json:"device,omitempty"`
 }
 
-// A ResourceSlice is the driver's published inventory. This
-// operator reads it for the attributes on one allocated device.
+// ResourceSlice lists the devices a driver publishes. This operator
+// reads it for the attributes of one allocated device.
 type ResourceSlice struct {
 	Metadata ObjectMeta        `json:"metadata"`
 	Spec     ResourceSliceSpec `json:"spec"`
@@ -190,8 +180,8 @@ type ResourceSlice struct {
 type ResourceSliceSpec struct {
 	Driver string            `json:"driver,omitempty"`
 	Pool   ResourceSlicePool `json:"pool"`
-	// The machine whose devices this slice publishes, which is the machine
-	// a Receiver input names.
+	// NodeName is the machine whose devices this slice lists. It is the
+	// machine that a Receiver input refers to.
 	NodeName string              `json:"nodeName,omitempty"`
 	Devices  []ResourceSliceItem `json:"devices,omitempty"`
 }
@@ -205,28 +195,24 @@ type ResourceSliceItem struct {
 	Attributes map[string]DeviceAttribute `json:"attributes,omitempty"`
 }
 
-// An attribute is one of four types, and one field of the four
-// is set. This operator reads the string form alone.
+// DeviceAttribute has only the string value, because this operator
+// reads no attribute of another type.
 type DeviceAttribute struct {
 	String *string `json:"string,omitempty"`
 }
 
-// A resolved screen is the machine the unit draws on and the monitor id
-// that names its Display.
+// screen is the machine a Player draws on and the monitor id, which
+// is also the name of its Display.
 type screen struct {
 	node    string
 	monitor string
 }
 
-// screens resolves each unit's screen to the monitor id that
-// names its Display. It reads the driver's ResourceSlices from the view
-// at most once a pass, because one read answers every unit.
-//
-// Each unit's answer is held for the pass, because the panel and the
-// equipment both ask the same question of the same claim. Each
-// Display read is held the same way, because the Screen condition
-// and the panel both read the same one, and every caller in the pass
-// then reads the same answer.
+// screens finds each Player's screen and Display, and caches the
+// ResourceSlices, the screens, and the Displays it reads for one pass.
+// The cluster view's watch caches can change during a pass, so without
+// this cache the Screen condition, the panel, the pattern frame, and
+// the Receiver match could each act on a different screen.
 type screens struct {
 	view     *clusterView
 	slices   []ResourceSlice
@@ -235,8 +221,8 @@ type screens struct {
 	displays map[string]displayRead
 }
 
-// One Display read, kept with its error so every caller in the pass
-// sees the same answer.
+// displayRead is a cached Display read with its error, so a failed
+// read is also cached for the pass.
 type displayRead struct {
 	display *Display
 	err     error
@@ -250,9 +236,8 @@ func newScreens(view *clusterView) *screens {
 	}
 }
 
-// displayFor reads one Display at most once a pass.
 func (s *screens) displayFor(monitor string) (*Display, error) {
-	if read, held := s.displays[monitor]; held {
+	if read, cached := s.displays[monitor]; cached {
 		return read.display, read.err
 	}
 	display, err := s.view.Display(monitor)
@@ -260,8 +245,8 @@ func (s *screens) displayFor(monitor string) (*Display, error) {
 	return display, err
 }
 
-// screenLookup is the pass's one screens. It is built on first use and
-// dropped when the pass ends.
+// screenLookup returns the screens cache for the current pass. pass
+// clears it when it starts, and the first call in the pass creates it.
 func (o *operator) screenLookup() *screens {
 	if o.screenCache == nil {
 		o.screenCache = newScreens(o.view)
@@ -269,22 +254,20 @@ func (o *operator) screenLookup() *screens {
 	return o.screenCache
 }
 
-// screenFor is the whole lookup: the unit's standing idle
-// claim carries the allocation, the allocation names the draw device,
-// and the device's attributes carry the monitor id. A claim the
-// scheduler has not allocated yet names no screen, and the pass then
-// writes no override.
+// screenFor returns the screen of the device that the scheduler
+// allocated to the draw request of a Player's idle claim. It returns
+// false when the claim is not allocated or the device has no monitor id.
 func (s *screens) screenFor(player *Player) (screen, bool) {
 	key := playerKey(player.Metadata.Namespace, player.Metadata.Name)
-	if held, checked := s.resolved[key]; checked {
-		return held, held.monitor != ""
+	if cached, checked := s.resolved[key]; checked {
+		return cached, cached.monitor != ""
 	}
-	found, resolved := s.lookUp(player)
+	found, resolved := s.screenOfClaim(player)
 	s.resolved[key] = found
 	return found, resolved
 }
 
-func (s *screens) lookUp(player *Player) (screen, bool) {
+func (s *screens) screenOfClaim(player *Player) (screen, bool) {
 	claim, err := s.view.ResourceClaim(player.Metadata.Namespace, idleClaimName(player.Metadata.Name))
 	if err != nil || claim.Status == nil || claim.Status.Allocation == nil {
 		return screen{}, false
@@ -293,18 +276,15 @@ func (s *screens) lookUp(player *Player) (screen, bool) {
 		if result.Request != idleDrawRequest {
 			continue
 		}
-		return s.screenOf(result)
+		return s.screenOfDevice(result)
 	}
 	return screen{}, false
 }
 
-// screenOf reads the monitor id off the allocated device. The
-// driver, the pool, and the device name are what a ResourceSlice entry
-// is keyed by.
-//
-// The slice also names the machine that publishes the device, which is
-// the machine a Receiver input names.
-func (s *screens) screenOf(result DeviceRequestAllocationResult) (screen, bool) {
+// screenOfDevice finds an allocated device in the ResourceSlices by
+// driver, pool, and device name, and returns the slice's node and the
+// device's monitor id. It lists the slices at most once per pass.
+func (s *screens) screenOfDevice(result DeviceRequestAllocationResult) (screen, bool) {
 	if !s.listed {
 		s.listed = true
 		slices, err := s.view.ResourceSlices()
@@ -322,8 +302,8 @@ func (s *screens) screenOf(result DeviceRequestAllocationResult) (screen, bool) 
 			if device.Name != result.Device {
 				continue
 			}
-			attribute, held := device.Attributes[monitorIDAttribute]
-			if !held || attribute.String == nil {
+			attribute, ok := device.Attributes[monitorIDAttribute]
+			if !ok || attribute.String == nil {
 				return screen{}, false
 			}
 			return screen{node: slice.Spec.NodeName, monitor: *attribute.String}, true
@@ -332,32 +312,30 @@ func (s *screens) screenOf(result DeviceRequestAllocationResult) (screen, bool) 
 	return screen{}, false
 }
 
-// panelOverride is what this operator last wrote for one unit: the
-// desire it applied, the override block that desire became, and the
-// monitor it applied it to. The block is held beside the desire because
-// one desire becomes two blocks: the off desire of the idle timers
-// takes the off mode, and a Player that is off takes the power block.
-// The monitor is held because a deleted Player takes its idle claim
-// with it, and the claim was the only path from the unit to its screen.
-// The lift a dark panel is still owed goes to the remembered monitor.
+// panelOverride records what this operator last applied for one Player.
+// The override is stored beside the desire because the off desire
+// becomes a backlight or a power override, depending on the off mode
+// and spec.power. The monitor id is stored because deleting a Player
+// deletes its idle claim, and removeGonePanelOverrides then has no other way to
+// find the Display whose override it must remove.
 type panelOverride struct {
 	desire   string
 	override *DisplayOverride
 	monitor  string
 }
 
-// reconcilePanel settles one unit's panel and answers the
-// state its status carries. The desire is the idle screen client's, the
-// override is this operator's write, and the observed state is the
-// display-operator's. A unit whose screen carries no Display keeps
-// its panel lit: there is no second writer to fall back to.
+// reconcilePanel applies the override for the panel desire of one
+// Player, and returns the panel value for the Player's status from the
+// Display's observed state. When the screen has no Display, it writes
+// nothing, so the panel stays lit.
 //
-// spec.power decides before the client does. A Player that is off holds
-// its panel powered off whatever the client states, so a client that
-// stopped, or one that held the shade up under a film, leaves no panel
-// lit. The pass that turns a Player on lifts the override at once,
-// before the client answers the wake with the on desire. outcome
-// records what a change of spec.power asked of the Display.
+// spec.power takes priority over the desire that the idle screen client
+// sends. While a Player is off, its panel gets the power override, so a
+// client that has stopped, or still sends the on desire, cannot leave
+// the panel lit. In the pass that turns a Player on, the override is
+// removed at once, without waiting for the client to send the on
+// desire. outcome records what a change of spec.power did to the
+// Display.
 func (o *operator) reconcilePanel(player *Player, key string, lookup *screens, mode string, step powerStep, outcome *powerOutcome) string {
 	desire := o.panels.desireFor(key, player.Status.PoweredOnAt)
 	switch {
@@ -372,32 +350,32 @@ func (o *operator) reconcilePanel(player *Player, key string, lookup *screens, m
 	found, resolved := lookup.screenFor(player)
 	monitor := found.monitor
 	if !resolved {
-		// A screen the scheduler has not allocated is the one
-		// silent fault, and only for the on desire: the panel is lit,
-		// which is what the desire asks for.
+		// With no allocated screen there is no Display to write. Only
+		// the off desire reports a fault, because the on desire wants
+		// the panel lit.
 		if desire == panelDesireOff {
-			o.panelFault(key, fmt.Sprintf("player %s/%s: no allocated screen; the panel stays lit",
+			o.panelFault(key, fmt.Sprintf("Player %s/%s has no allocated screen, so the panel stays lit",
 				player.Metadata.Namespace, player.Metadata.Name))
 		}
 		return ""
 	}
 	display, err := lookup.displayFor(monitor)
 	if err != nil {
-		o.panelFault(key, fmt.Sprintf("reading display %s: %v", monitor, err))
+		o.panelFault(key, fmt.Sprintf("reading Display %s: %v", monitor, err))
 		if step.moving {
-			outcome.fail(powerReasonDisplayWriteFailed, fmt.Sprintf("reading display %s failed: %v", monitor, err))
+			outcome.fail(powerReasonDisplayWriteFailed, fmt.Sprintf("reading Display %s: %v", monitor, err))
 		}
 		return ""
 	}
 	want := overrideFor(desire, mode)
-	if held, tracked := o.panelOverrides[key]; !tracked || !sameOverride(held.override, want) {
-		cause := "the idle screen asked for panel " + desire
+	if applied, tracked := o.panelOverrides[key]; !tracked || !sameOverride(applied.override, want) {
+		cause := "the idle screen requested panel " + desire
 		if step.want == playerPowerOff || step.turningOn() {
 			cause = "spec.power is " + step.want
 		}
 		if err := o.writeOverride(key, cause, desire, monitor, want, display); err != nil {
 			if step.moving {
-				outcome.fail(powerReasonDisplayWriteFailed, fmt.Sprintf("applying %s to display %s failed: %v",
+				outcome.fail(powerReasonDisplayWriteFailed, fmt.Sprintf("applying %s to Display %s: %v",
 					describeOverride(want), monitor, err))
 			}
 			return panelFromDisplay(display.Status.Observed)
@@ -405,37 +383,35 @@ func (o *operator) reconcilePanel(player *Player, key string, lookup *screens, m
 	}
 	if step.moving {
 		if want == nil {
-			outcome.ask("lifted the override on display %s", monitor)
+			outcome.record("removed the override from Display %s", monitor)
 		} else {
-			outcome.ask("applied %s to display %s", describeOverride(want), monitor)
+			outcome.record("applied %s to Display %s", describeOverride(want), monitor)
 		}
 	}
 	delete(o.panelFaults, key)
 	return panelFromDisplay(display.Status.Observed)
 }
 
-// writeOverride brings the Display's override to the one a new desire
-// asks for, and records the desire. It reads the override the Display
-// carries first, and writes only when that override differs, so an
-// operator that restarts adopts the override its earlier run wrote and
-// the panel sees no second write. It answers the error of a write the
-// API server refused.
+// writeOverride applies want to the Display and records it in
+// panelOverrides. It applies only when the Display's override differs,
+// so after a restart the operator records the override that the earlier
+// run applied and makes no second write.
 func (o *operator) writeOverride(key, cause, desire, monitor string, want *DisplayOverride, display *Display) error {
 	if !sameOverride(display.Spec.Override, want) {
 		if err := ApplyDisplayOverride(o.client, monitor, want); err != nil {
-			o.panelFault(key, fmt.Sprintf("overriding display %s: %v", monitor, err))
+			o.panelFault(key, fmt.Sprintf("applying the override to Display %s: %v", monitor, err))
 			return err
 		}
-		logLine(o.log, "player %s: %s, applied %s to display %s",
+		logLine(o.log, "player %s: %s, applied %s to Display %s",
 			key, cause, describeOverride(want), monitor)
 	}
 	o.panelOverrides[key] = panelOverride{desire: desire, override: want, monitor: monitor}
 	return nil
 }
 
-// sameOverride compares two override blocks, each value without regard
-// to case, for the reason samePower gives. No block and an empty block
-// are the same: each leaves the panel at its resting settings.
+// sameOverride compares two overrides, ignoring case as samePower does.
+// A nil override and an empty one are equal, because neither changes the
+// panel's settings.
 func sameOverride(a, b *DisplayOverride) bool {
 	var left, right DisplayOverride
 	if a != nil {
@@ -447,35 +423,35 @@ func sameOverride(a, b *DisplayOverride) bool {
 	return samePower(left.Backlight, right.Backlight) && samePower(left.Power, right.Power)
 }
 
-// reconcileScreen answers one unit's screen memory and its Screen
-// condition. The memory is the screen the claim resolves to this
-// pass, or the one the Player already remembers when the claim has
-// deallocated: a monitor that shows another input drops the draw
-// device, and the claim was the only path from the unit to its
-// Display. The condition reads that Display, so a person can tell a
-// unit that waits for its panel from a unit at fault.
+// reconcileScreen returns the screen and the Screen condition for the
+// Player's status. When the idle claim is not allocated, it keeps the
+// screen already in the status. That happens when the monitor shows
+// another input, because display-operator then removes the draw
+// device, and the status is the only record of which Display to read. The condition lets a person tell a Player that waits for its
+// panel from a Player with a fault.
 func (o *operator) reconcileScreen(player *Player, key string, lookup *screens) (*PlayerScreenStatus, []PlayerCondition) {
-	remembered := player.Status.Screen
+	current := player.Status.Screen
 	if found, resolved := lookup.screenFor(player); resolved {
-		remembered = &PlayerScreenStatus{Node: found.node, Monitor: found.monitor}
+		current = &PlayerScreenStatus{Node: found.node, Monitor: found.monitor}
 	}
-	if remembered == nil {
+	if current == nil {
 		return nil, nil
 	}
-	condition, reported := o.screenCondition(player, key, lookup, remembered.Monitor)
+	condition, reported := o.screenCondition(player, key, lookup, current.Monitor)
 	if !reported {
-		return remembered, nil
+		return current, nil
 	}
-	return remembered, []PlayerCondition{condition}
+	return current, []PlayerCondition{condition}
 }
 
-// screenCondition folds the Display's Connected condition into the
-// unit's Screen condition. A Display that is gone or carries no
-// report answers Unknown. A read that fails any other way is not a
-// change on the panel, so the unit keeps the condition it holds and
-// the fault reports once.
+// screenCondition builds the Player's Screen condition from the
+// Display's Connected condition. The status is Unknown when the Display
+// does not exist or has no Connected condition. Any other read error
+// says nothing about the panel, so it returns the Player's current
+// Screen condition, if any, and reports the fault once. conditions.Set
+// keeps the transition time when the status has not changed.
 func (o *operator) screenCondition(player *Player, key string, lookup *screens, monitor string) (PlayerCondition, bool) {
-	held, holds := heldCondition(player.Status.Conditions, screenConditionType)
+	existing, exists := conditionOfType(player.Status.Conditions, screenConditionType)
 	display, err := lookup.displayFor(monitor)
 	var condition PlayerCondition
 	switch {
@@ -486,8 +462,8 @@ func (o *operator) screenCondition(player *Player, key string, lookup *screens, 
 			Message: "no Display named " + monitor,
 		}
 	case err != nil:
-		o.panelFault(key, fmt.Sprintf("reading display %s: %v", monitor, err))
-		return held, holds
+		o.panelFault(key, fmt.Sprintf("reading Display %s: %v", monitor, err))
+		return existing, exists
 	default:
 		condition = screenFromDisplay(display)
 	}
@@ -498,9 +474,10 @@ func (o *operator) screenCondition(player *Player, key string, lookup *screens, 
 	return condition, true
 }
 
-// screenFromDisplay reads the Display's Connected condition. True is
-// Present, and NoPanel is PanelAway; the Display's message comes
-// along either way, because it names the connector.
+// screenFromDisplay converts the Display's Connected condition into a
+// Screen condition. True becomes Present and the reason NoPanel becomes
+// PanelAway. The message is copied unchanged, because it names the
+// connector.
 func screenFromDisplay(display *Display) PlayerCondition {
 	for _, connected := range display.Status.Conditions {
 		if connected.Type != displayConnectedCondition {
@@ -518,8 +495,7 @@ func screenFromDisplay(display *Display) PlayerCondition {
 	return PlayerCondition{Status: conditionUnknown, Reason: screenReasonNotReported}
 }
 
-// heldCondition finds the condition of one type on a Player.
-func heldCondition(conditions []PlayerCondition, kind string) (PlayerCondition, bool) {
+func conditionOfType(conditions []PlayerCondition, kind string) (PlayerCondition, bool) {
 	for _, condition := range conditions {
 		if condition.Type == kind {
 			return condition, true
@@ -528,45 +504,44 @@ func heldCondition(conditions []PlayerCondition, kind string) (PlayerCondition, 
 	return PlayerCondition{}, false
 }
 
-// retainPanels shrinks the record to the units the cluster
-// still holds, and lifts the override of every unit it drops. A
-// Player deleted while its panel is dark has no idle claim any more,
-// so nothing would ever write that Display again and the panel would
-// stay dark. A lift that fails keeps the entry, so the next pass
-// writes it again.
-func (o *operator) retainPanels(live map[string]bool) {
+// removeGonePanelOverrides removes the override of each Player that is not in live,
+// and drops its entry. A deleted Player's idle claim is deleted with
+// it, so no later pass would find the Display, and a panel left off
+// would stay off. When the removal fails, the entry stays and the next
+// pass retries it.
+func (o *operator) removeGonePanelOverrides(live map[string]bool) {
 	for key, override := range o.panelOverrides {
 		if live[key] {
 			continue
 		}
 		if override.override != nil {
-			// A Display that is gone carries no override, so the
-			// lift it refuses has already landed. Every other failure
-			// keeps the entry, because the block still stands.
+			// A Display that no longer exists has no override, so a
+			// NotFound error means the override is already gone. Any
+			// other error keeps the entry, because the override may
+			// still be applied.
 			err := ApplyDisplayOverride(o.client, override.monitor, nil)
 			if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
-				o.panelFault(key, fmt.Sprintf("lifting the override on display %s: %v",
+				o.panelFault(key, fmt.Sprintf("lifting the override on Display %s: %v",
 					override.monitor, err))
 				continue
 			}
-			logLine(o.log, "player %s: lifted the override on display %s, because the player is gone", key, override.monitor)
+			logLine(o.log, "player %s: removed the override from Display %s, because the Player was deleted", key, override.monitor)
 		}
 		delete(o.panelOverrides, key)
 		delete(o.panelFaults, key)
 	}
-	// A fault outlives its unit only while that unit still owes
-	// a lift, because the retry reports the same message once and not
-	// once a pass.
+	// Keep the fault of a deleted Player until its override is removed,
+	// so the retry does not log the same message on every pass.
 	for key := range o.panelFaults {
-		if _, owed := o.panelOverrides[key]; !live[key] && !owed {
+		if _, pending := o.panelOverrides[key]; !live[key] && !pending {
 			delete(o.panelFaults, key)
 		}
 	}
 }
 
-// panelFault reports a panel this pass could not write. Each
-// distinct message reports once per unit, so a cluster with no
-// Display support does not log every pass.
+// panelFault logs a failure to read or write a Display, once per Player
+// and message, so a cluster without display-operator does not log the
+// same failure on every pass.
 func (o *operator) panelFault(key, message string) {
 	if o.panelFaults[key] == message {
 		return
@@ -575,7 +550,8 @@ func (o *operator) panelFault(key, message string) {
 	fmt.Fprintln(os.Stderr, message)
 }
 
-// describeOverride names an override block the way a line reads it.
+// describeOverride returns a short description of an override for log
+// lines and condition messages.
 func describeOverride(override *DisplayOverride) string {
 	switch {
 	case override == nil:
@@ -586,9 +562,8 @@ func describeOverride(override *DisplayOverride) string {
 	return "backlight " + override.Backlight
 }
 
-// overrideFor turns one desire and the resolved off mode into
-// the override block. The on desire carries no block, and that apply
-// is what deletes the one standing.
+// overrideFor returns the override for a desire and the off mode. The
+// on desire returns nil, and applying nil removes the current override.
 func overrideFor(desire, mode string) *DisplayOverride {
 	if desire != panelDesireOff {
 		return nil

@@ -1,38 +1,31 @@
 package main
 
-// The command sidecar applies the subtitle rule of subtitletracks.go to
-// each file mpv loads. mpv sends the file-loaded event after it has opened
-// the file, loaded the subtitle files beside it, and selected the audio
-// track, so the track list is complete and the audio language is known at
-// that moment. The sidecar then reads the playlist position and the track
-// list, and sets sid.
+// The command sidecar sets mpv's sid property with the rule of
+// subtitletracks.go each time mpv sends file-loaded. mpv sends that
+// event after it has loaded the external subtitle files and selected
+// the audio track, so the track list and the audio language are
+// complete. The sidecar does not act when the current tracks change,
+// because a person who selects a subtitle track by hand changes them
+// too, and that choice must stay until the next file.
 //
-// The sidecar acts on file-loaded and not on a change of the observed
-// current tracks, because a person who selects a subtitle track by hand
-// changes the current tracks too, and the choice is for the moment a file
-// starts. Each item of a Play is its own file load, so each item gets its
-// own choice from its own presentation.
-//
-// The sidecar dials mpv's socket once a second, so mpv can load the first
-// file before the sidecar connects, and that event reaches nobody. So the
-// sidecar also chooses once when it connects, for the file mpv has open. A
-// sidecar that restarts during an item chooses again for that item,
-// because it keeps no record of its earlier choice.
+// mpv can load the first file before dialMPV connects, and then the
+// sidecar never receives that file-loaded. So the sidecar also chooses
+// once when it connects. A sidecar that restarts during an item chooses
+// again for that item.
 
 import (
 	"encoding/json"
 	"fmt"
 )
 
-// The triggers of a choice, for its log line.
+// What triggered a choice, in the words of the log line.
 const (
 	triggerConnected = "the sidecar connected to mpv's socket"
 	triggerLoaded    = "mpv loaded a file"
 )
 
-// parseSubtitlePreferences reads the preferences the operator wrote into the
-// pod. An unset or malformed value is a pod whose sidecar chooses nothing,
-// so mpv keeps its own choice.
+// parseSubtitlePreferences returns nil for an empty or malformed value.
+// The sidecar then sets no sid, and mpv keeps its own choice.
 func parseSubtitlePreferences(value string) *subtitlePreferences {
 	if value == "" {
 		return nil
@@ -44,8 +37,6 @@ func parseSubtitlePreferences(value string) *subtitlePreferences {
 	return &prefs
 }
 
-// serveLoads chooses the subtitle track once for the file mpv has open, and
-// then once for each file mpv loads, until the socket closes.
 func (c *commander) serveLoads(loads <-chan struct{}) {
 	c.chooseSubtitles(triggerConnected)
 	for range loads {
@@ -53,9 +44,8 @@ func (c *commander) serveLoads(loads <-chan struct{}) {
 	}
 }
 
-// chooseSubtitles reads what mpv has open and sets sid to the track the rule
-// chooses. A read that fails leaves mpv's own choice, which the flags of
-// mpvPreferenceOptions keep sensible.
+// chooseSubtitles sets nothing when a read fails, and mpv keeps the
+// track that the flags of mpvPreferenceOptions made it choose.
 func (c *commander) chooseSubtitles(trigger string) {
 	if c.subtitles == nil {
 		return
@@ -90,23 +80,22 @@ func (c *commander) chooseSubtitles(trigger string) {
 		trigger, chosen, item, choice.reason), []any{"set_property", "sid", sid})
 }
 
-// readProperty reads one property into value, and logs why when the read
-// fails.
+// readProperty logs a failed read or decode and returns false.
 func (c *commander) readProperty(trigger, property string, value any) bool {
 	data, err := c.query(property)
 	if err == nil {
 		err = json.Unmarshal([]byte(data), value)
 	}
 	if err != nil {
-		logLine(c.log, "command: %s, but the subtitle track stays mpv's own choice, because the read of %s failed: %v",
+		logLine(c.log, "command: %s, but the subtitle track stays mpv's own choice, because reading %s from mpv returned: %v",
 			trigger, property, err)
 		return false
 	}
 	return true
 }
 
-// describeChosenTrack names a track the way a person checks it against
-// mpv's track list: its id, its language, its role, and its count.
+// describeChosenTrack describes a track for the log with the details a
+// person compares with mpv's track list.
 func describeChosenTrack(tracks []subtitleTrack, id int) string {
 	for _, one := range tracks {
 		if one.track.ID != id {

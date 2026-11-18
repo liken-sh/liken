@@ -1,12 +1,5 @@
 package main
 
-// What these tests prove: a Player status or a key table that the bus
-// dropped because its write queue was full goes out again on a later pass.
-// The fake broker stops reading while no one takes its publishes, so the
-// client's queue fills and Publish drops each frame past it. A record of
-// such a payload would skip it on every later pass, and the broker would
-// never hold it.
-
 import (
 	"fmt"
 	"io"
@@ -14,9 +7,10 @@ import (
 	"testing/synctest"
 )
 
-// statusTopics is half again as many status topics as the bus's write queue
-// holds, so one burst overflows the queue and the second burst holds what
-// the first left over.
+// statusTopics returns more topics than busQueueDepth, so one burst of
+// publishes fills the bus's write queue and Publish drops the rest. The
+// fake broker stops reading when its pubs channel is full, so the queue
+// stays full until the test starts to read pubs.
 func statusTopics() []string {
 	topics := make([]string, 0, busQueueDepth*3/2)
 	for index := range cap(topics) {
@@ -25,18 +19,21 @@ func statusTopics() []string {
 	return topics
 }
 
-// publishIdle publishes one idle status on each topic, as a pass does.
+// publishIdle publishes an idle status to each topic, as a reconcile pass does.
 func publishIdle(t *testing.T, statuses *publishedStatuses, bus *Bus, topics []string) {
 	t.Helper()
 	for _, topic := range topics {
 		if _, _, err := statuses.publishDerived(bus, topic, func() ([]byte, string, error) {
 			return []byte(`{"state":"idle"}`), "idle", nil
 		}); err != nil {
-			t.Fatal(err)
+			t.Fatalf("publishing the idle status to %s: %v", topic, err)
 		}
 	}
 }
 
+// A Player status that Publish dropped on a full queue is published by
+// the next pass. If publishedStatuses recorded the dropped status as
+// published, every later pass would skip it.
 func TestAStatusDroppedOnAFullQueueIsPublishedOnTheNextPass(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		bus, brokers, connected := startBus(t, 1, nil, nil)
@@ -65,8 +62,8 @@ func TestAStatusDroppedOnAFullQueueIsPublishedOnTheNextPass(t *testing.T) {
 	})
 }
 
-// publishTables publishes the base key table for each of count Remotes, as
-// a pass does, and answers each table's topic.
+// publishTables publishes the base key table of count Remotes, as a
+// reconcile pass does, and returns the topic of each table.
 func publishTables(media *operator, count int) []string {
 	topics := make([]string, 0, count)
 	for index := range count {
@@ -77,6 +74,8 @@ func publishTables(media *operator, count int) []string {
 	return topics
 }
 
+// A key table that Publish dropped on a full queue is published by the
+// next pass.
 func TestAKeyTableDroppedOnAFullQueueIsPublishedOnTheNextPass(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		bus, brokers, connected := startBus(t, 1, nil, nil)

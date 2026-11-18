@@ -1,8 +1,6 @@
 package main
 
-// These tests cover the compile from a Keymap's evdev names to the
-// numbers the standing pod matches, and the gather that finds the
-// Remotes one Player owns.
+// These tests cover compileRows and gatherRemotes.
 
 import (
 	"reflect"
@@ -10,9 +8,8 @@ import (
 	"testing"
 )
 
-// A Keymap for one controller model: the two face buttons a gamepad
-// reports the wrong way round for media, both bumpers, and one hat
-// direction the base already covers.
+// testKeymap is a gamepad's Keymap that rebinds two face buttons and
+// both bumpers, and silences one hat direction.
 func testKeymap() *Keymap {
 	return &Keymap{
 		Metadata: ObjectMeta{Name: "gamepad", Namespace: "house"},
@@ -30,12 +27,12 @@ func testKeymap() *Keymap {
 	}
 }
 
-// The buttons compile to EV_KEY presses and the axes to EV_ABS values,
-// in that order, so the standing pod carries numbers alone.
+// The buttons compile to EV_KEY presses and then the axes to EV_ABS
+// values.
 func TestCompileRowsTurnsEveryNameIntoItsCode(t *testing.T) {
 	rows, err := compileRows(testKeymap())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("compiling the rows of the Keymap: %v", err)
 	}
 
 	want := []compiledBinding{
@@ -66,7 +63,7 @@ func TestCompileRowsBindsTheKeysAMediaRemoteReports(t *testing.T) {
 
 	rows, err := compileRows(keymap)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("compiling the rows of the Keymap: %v", err)
 	}
 
 	want := []compiledBinding{
@@ -79,8 +76,9 @@ func TestCompileRowsBindsTheKeysAMediaRemoteReports(t *testing.T) {
 	}
 }
 
-// A compile error reaches a person through the operator's log, so
-// each one must name the Keymap, the entry, and the rule it broke.
+// A person reads a compile error in the operator's log and in an Event
+// on the Remote, so each error names the Keymap, the entry, and the
+// rule it broke.
 func TestCompileRowsRefusesWhatItCannotCompile(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -135,8 +133,8 @@ func TestCompileRowsRefusesWhatItCannotCompile(t *testing.T) {
 	}
 }
 
-// none is the one right side that is not a key name, and it is how a
-// Keymap silences a control the base would otherwise pass.
+// keyNone is the only output that is not a key name. A Keymap uses it
+// to silence a control that the base mapping would pass on.
 func TestCompileRowsAcceptsNoneOnEitherSide(t *testing.T) {
 	keymap := &Keymap{
 		Metadata: ObjectMeta{Name: "pad"},
@@ -148,7 +146,7 @@ func TestCompileRowsAcceptsNoneOnEitherSide(t *testing.T) {
 
 	rows, err := compileRows(keymap)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("compiling the rows of the Keymap: %v", err)
 	}
 
 	want := []compiledBinding{
@@ -160,7 +158,7 @@ func TestCompileRowsAcceptsNoneOnEitherSide(t *testing.T) {
 	}
 }
 
-// A remote with a device selector and a keymap, named by a Player.
+// testRemote is a Remote with a device selector and a Keymap.
 func testRemote(name, keymap string) Remote {
 	return Remote{
 		Metadata: ObjectMeta{Name: name, Namespace: "house"},
@@ -171,7 +169,8 @@ func testRemote(name, keymap string) Remote {
 	}
 }
 
-// A Player that names the given Remotes in its spec.remotes.
+// gatherPlayer is a Player that lists the given Remotes in
+// spec.remotes.
 func gatherPlayer(remotes ...string) *Player {
 	entries := make([]PlayerRemote, 0, len(remotes))
 	for _, name := range remotes {
@@ -183,8 +182,8 @@ func gatherPlayer(remotes ...string) *Player {
 	}
 }
 
-// remotesView is a view that holds the given Remotes in the house
-// namespace.
+// remotesView is a view that holds the given Remotes in the namespace
+// that gatherPlayer uses.
 func remotesView(remotes ...Remote) *clusterView {
 	cluster := newFakeCluster()
 	for index := range remotes {
@@ -193,15 +192,14 @@ func remotesView(remotes ...Remote) *clusterView {
 	return cluster.view()
 }
 
-// The Player's remotes gather in name order whatever order the spec lists
-// them in, because the pod spec they become must not change between
-// passes.
+// The Remotes return in name order, whatever order the Player lists
+// them in.
 func TestGatherRemotesReadsThePlayersRemotesInNameOrder(t *testing.T) {
 	view := remotesView(testRemote("sofa", "gamepad"), testRemote("armchair", "gamepad"))
 
 	remotes, err := gatherRemotes(view.Remote, gatherPlayer("sofa", "armchair"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("gathering the Remotes of the Player: %v", err)
 	}
 
 	names := []string{}
@@ -216,15 +214,15 @@ func TestGatherRemotesReadsThePlayersRemotesInNameOrder(t *testing.T) {
 func TestGatherRemotesFindsNoneWhenThePlayerNamesNoRemote(t *testing.T) {
 	remotes, err := gatherRemotes(remotesView().Remote, gatherPlayer())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("gathering the Remotes of the Player: %v", err)
 	}
 	if len(remotes) != 0 {
 		t.Errorf("remotes = %+v, want none", remotes)
 	}
 }
 
-// A Player that names a Remote nobody wrote is a failure the person
-// who wrote the Player can read.
+// A Player that lists a Remote that does not exist fails with an error
+// that names the Player and the Remote.
 func TestGatherRemotesFailsWhenTheRemoteIsAbsent(t *testing.T) {
 	_, err := gatherRemotes(remotesView().Remote, gatherPlayer("ghost"))
 	if err == nil {
@@ -238,7 +236,7 @@ func TestGatherRemotesFailsWhenTheRemoteIsAbsent(t *testing.T) {
 }
 
 // A repeat block compiles to milliseconds, an empty field takes the
-// default, and a row with no block carries no repeat.
+// default, and a row with no block has no repeat.
 func TestCompileRepeatSetsMillisecondsAndDefaults(t *testing.T) {
 	keymap := &Keymap{
 		Metadata: ObjectMeta{Name: "pad", Namespace: "house"},
@@ -253,7 +251,7 @@ func TestCompileRepeatSetsMillisecondsAndDefaults(t *testing.T) {
 
 	rows, err := compileRows(keymap)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("compiling the rows of the Keymap: %v", err)
 	}
 	if rows[0].RepeatDelay != 500 || rows[0].RepeatInterval != 200 {
 		t.Errorf("explicit repeat = %d/%d, want 500/200", rows[0].RepeatDelay, rows[0].RepeatInterval)
@@ -266,8 +264,7 @@ func TestCompileRepeatSetsMillisecondsAndDefaults(t *testing.T) {
 	}
 }
 
-// A duration that does not parse fails the compile, because the
-// standing pod reads milliseconds and parses nothing.
+// A repeat duration that does not parse fails the compile.
 func TestCompileRepeatRejectsADurationThatDoesNotParse(t *testing.T) {
 	bad := &Keymap{
 		Metadata: ObjectMeta{Name: "pad", Namespace: "house"},

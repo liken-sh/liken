@@ -1,12 +1,5 @@
 package main
 
-// These tests cover focus arbitration against Players. A fresh Play
-// marks its Player, a graceful recreate marks nothing, a cycle advances the
-// mark through the Players that name the Remote in name order and wraps, a
-// one-Player cycle republishes the same mark, an idle Player is in the cycle
-// set, a mark on a Player that no longer names the Remote recovers to the
-// first of the set, and a Remote no Player names has its mark cleared.
-
 import (
 	"encoding/json"
 	"io"
@@ -16,39 +9,39 @@ import (
 	"time"
 )
 
-// focusOperator builds an operator with a focus desk and a bus that is
-// never Run, so publishFocus drops on the wire and records on the desk.
+// focusOperator builds an operator whose bus never starts, so
+// publishFocus stores the mark in o.focus and sends nothing.
 func focusOperator(t *testing.T) *operator {
 	t.Helper()
 	media := &operator{
-		topicBase: defaultTopicBase,
-		bus:       newBus("bus.media.svc:1883", "focus-test", nil, nil, nil),
-		focus:     newFocusDesk(make(chan struct{}, 1)),
-		ensure:    newEnsureDesk(),
-		log:       io.Discard,
+		topicBase:       defaultTopicBase,
+		bus:             newBus("bus.media.svc:1883", "focus-test", nil, nil, nil),
+		focus:           newFocusCache(make(chan struct{}, 1)),
+		playerReceivers: newPlayerReceivers(),
+		log:             io.Discard,
 	}
 	media.levels = media.newVolumeEngine()
 	return media
 }
 
-// focusBrokerOperator wires the focus desk to a fake broker, so a test
-// reads the retained messages publishFocus writes and not only the desk.
+// focusBrokerOperator connects the operator's bus to a fake broker, so a
+// test can read the retained messages that publishFocus sends.
 func focusBrokerOperator(t *testing.T) (*operator, *fakeBroker) {
 	t.Helper()
 	bus, brokers, connected := startBus(t, 1, nil, nil)
 	waitForConnect(t, connected)
 	media := &operator{
-		topicBase: defaultTopicBase,
-		bus:       bus,
-		focus:     newFocusDesk(make(chan struct{}, 1)),
-		ensure:    newEnsureDesk(),
-		log:       io.Discard,
+		topicBase:       defaultTopicBase,
+		bus:             bus,
+		focus:           newFocusCache(make(chan struct{}, 1)),
+		playerReceivers: newPlayerReceivers(),
+		log:             io.Discard,
 	}
 	media.levels = media.newVolumeEngine()
 	return media, brokers[0]
 }
 
-// focusPlay is one Play on one Player in the house namespace.
+// focusPlay returns a Play on one Player in the house namespace.
 func focusPlay(name, player, phase string) Play {
 	return Play{
 		Metadata: ObjectMeta{Name: name, Namespace: "house"},
@@ -57,8 +50,8 @@ func focusPlay(name, player, phase string) Play {
 	}
 }
 
-// focusPlayer is one Player naming the given controllers in the house
-// namespace.
+// focusPlayer returns a Player in the house namespace whose
+// spec.remotes lists the given Remotes.
 func focusPlayer(name string, remotes ...string) Player {
 	entries := make([]PlayerRemote, 0, len(remotes))
 	for _, remote := range remotes {
@@ -67,7 +60,7 @@ func focusPlayer(name string, remotes ...string) Player {
 	return Player{Metadata: ObjectMeta{Name: name, Namespace: "house"}, Spec: PlayerSpec{Remotes: entries}}
 }
 
-// boundSofa is the house sofa controller as the pod builders carry it.
+// boundSofa returns the sofa Remote as the pod builders receive it.
 func boundSofa() []boundRemote {
 	return []boundRemote{{
 		Name:        "sofa",
@@ -76,7 +69,7 @@ func boundSofa() []boundRemote {
 	}}
 }
 
-// remotePlay is a Play on a named Player, with a resolvable URI.
+// remotePlay returns a Play with one item on the named Player.
 func remotePlay(name, player string) *Play {
 	return &Play{
 		Metadata: ObjectMeta{Name: name, Namespace: "house", UID: name + "-uid", ResourceVersion: "9"},
@@ -84,8 +77,8 @@ func remotePlay(name, player string) *Play {
 	}
 }
 
-// remotePlayer is the house player renamed and set to own the sofa
-// controller.
+// remotePlayer returns housePlayer with the given name and with the sofa
+// Remote in its spec.remotes.
 func remotePlayer(name string) *Player {
 	player := housePlayer()
 	player.Metadata.Name = name
@@ -93,9 +86,7 @@ func remotePlayer(name string) *Player {
 	return player
 }
 
-// A fresh Play marks its Player, so the controller drives the unit the
-// newest film runs on.
-func TestAFreshPlayStealsTheFocusMarkForItsPlayer(t *testing.T) {
+func TestANewPlaySetsTheFocusMarkToItsPlayer(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
 	cluster.players["theater"] = housePlayerWithRemote()
@@ -106,18 +97,18 @@ func TestAFreshPlayStealsTheFocusMarkForItsPlayer(t *testing.T) {
 	media.pass()
 
 	if got := media.focus.markFor(controllerKey("house", "sofa")); got != "theater" {
-		t.Errorf("focus mark = %q, want the fresh play's Player", got)
+		t.Errorf("focus mark = %q, want the new Play's Player", got)
 	}
 }
 
-// A graceful recreate resumes the same Play and steals nothing, so a mark
-// another live Play holds stays where it was.
-func TestAGracefulRecreateDoesNotStealTheFocusMark(t *testing.T) {
+// A Play whose pod the operator recreates is not a new Play, so it does
+// not take the mark from the Player that has it.
+func TestARecreatedPlayDoesNotTakeTheFocusMark(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.remotes["sofa"] = houseRemote("gamepad")
 	cluster.keymaps["gamepad"] = testKeymap()
 
-	// game holds the mark and keeps running unchanged.
+	// game is running and unchanged, on the Player that has the mark.
 	game := remotePlay("game", "console")
 	game.Status = PlayStatus{Phase: phaseRunning, Activity: activityPlaying, Pod: "game-playback"}
 	console := remotePlayer("console")
@@ -131,7 +122,8 @@ func TestAGracefulRecreateDoesNotStealTheFocusMark(t *testing.T) {
 	cluster.pods["game-playback"] = gamePod
 	cluster.claims["game-devices"] = buildClaim(game, console)
 
-	// movie is reshaped so its claim diverges and its pod recreates.
+	// movie changes its Player's display, so its claim differs from the
+	// one it was built with and the operator recreates its pod.
 	movie := remotePlay("movie", "theater")
 	movie.Status = PlayStatus{Phase: phaseRunning, Activity: activityPlaying, Pod: "movie-playback"}
 	theater := remotePlayer("theater")
@@ -155,18 +147,16 @@ func TestAGracefulRecreateDoesNotStealTheFocusMark(t *testing.T) {
 	media.pass()
 
 	if got := media.focus.markFor(controllerKey("house", "sofa")); got != "console" {
-		t.Errorf("focus mark = %q, want console; a graceful recreate must not steal", got)
+		t.Errorf("focus mark = %q, want console; a recreated Play must not take the mark", got)
 	}
 	if _, held := cluster.pods["movie-playback"]; !held {
-		t.Fatalf("the movie pod is gone: %v", cluster.requests)
+		t.Fatalf("the requests are %v, want the movie pod still present", cluster.requests)
 	}
 	if got := countMethod(cluster.requests, "DELETE"); got == 0 {
-		t.Errorf("the reshaped play did not recreate: no delete in %v", cluster.requests)
+		t.Errorf("the requests are %v, want a delete to recreate the reshaped Play", cluster.requests)
 	}
 }
 
-// A cycle advances the mark to the next Player that names the Remote,
-// in name order, and wraps from the last back to the first.
 func TestReconcileFocusCyclesThroughTheBoundPlayers(t *testing.T) {
 	o := focusOperator(t)
 	key := controllerKey("house", "sofa")
@@ -189,8 +179,8 @@ func TestReconcileFocusCyclesThroughTheBoundPlayers(t *testing.T) {
 	}
 }
 
-// An idle Player is in the cycle set, because the set reads the
-// Players that name the Remote and reads no Play at all.
+// The cycle set comes from the Players alone, so bbb is in it with no
+// Play.
 func TestReconcileFocusCyclesToAnIdlePlayer(t *testing.T) {
 	o := focusOperator(t)
 	key := controllerKey("house", "sofa")
@@ -208,9 +198,8 @@ func TestReconcileFocusCyclesToAnIdlePlayer(t *testing.T) {
 	}
 }
 
-// A cycle on a Remote one Player names republishes the same mark. The
-// retained message is the press's feedback, so it goes out whether or not the
-// value changed.
+// The repeated mark is the feedback for the press, so the operator
+// sends it although the value did not change.
 func TestACycleWithOneBoundPlayerRepublishesTheSameMark(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		o, broker := focusBrokerOperator(t)
@@ -228,8 +217,6 @@ func TestACycleWithOneBoundPlayerRepublishesTheSameMark(t *testing.T) {
 	})
 }
 
-// A mark on a Player that no longer names the Remote moves to the
-// first of the cycle set, so a controller always drives a unit that lists it.
 func TestReconcileFocusRecoversAMarkOffTheCycleSet(t *testing.T) {
 	o := focusOperator(t)
 	key := controllerKey("house", "sofa")
@@ -243,8 +230,8 @@ func TestReconcileFocusRecoversAMarkOffTheCycleSet(t *testing.T) {
 	}
 }
 
-// A Play that finished moves no mark, because the mark names a Player
-// and a unit whose film ended still holds its controllers.
+// The mark names a Player, so it stays on the Player when its Play
+// finishes.
 func TestReconcileFocusLeavesTheMarkWhenAPlayFinishes(t *testing.T) {
 	o := focusOperator(t)
 	key := controllerKey("house", "sofa")
@@ -261,8 +248,8 @@ func TestReconcileFocusLeavesTheMarkWhenAPlayFinishes(t *testing.T) {
 	}
 }
 
-// The mark is cleared, so no consumer gates open on a unit that
-// dropped the controller.
+// When no Player lists a Remote, its mark is cleared, so no reader
+// accepts presses for a Player that dropped the Remote.
 func TestReconcileFocusClearsAMarkWithNoBoundPlayer(t *testing.T) {
 	o := focusOperator(t)
 	key := controllerKey("house", "sofa")
@@ -275,8 +262,8 @@ func TestReconcileFocusClearsAMarkWithNoBoundPlayer(t *testing.T) {
 	}
 }
 
-// caughtUpFocusOperator is focusBrokerOperator with the broker's catch-up
-// over, so an empty desk means the broker holds no mark.
+// caughtUpFocusOperator is focusBrokerOperator with the catch-up time
+// over, so an empty focusCache means that the broker retains no mark.
 func caughtUpFocusOperator(t *testing.T) (*operator, *fakeBroker) {
 	t.Helper()
 	o, broker := focusBrokerOperator(t)
@@ -284,8 +271,6 @@ func caughtUpFocusOperator(t *testing.T) (*operator, *fakeBroker) {
 	return o, broker
 }
 
-// A controller with no mark after the catch-up is set on the first
-// Player of its set, so it always drives a unit that lists it.
 func TestReconcileFocusSetsAMarkTheBrokerDoesNotHold(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		o, broker := caughtUpFocusOperator(t)
@@ -298,10 +283,9 @@ func TestReconcileFocusSetsAMarkTheBrokerDoesNotHold(t *testing.T) {
 	})
 }
 
-// An operator that starts before the broker's catch-up holds no mark, and
-// that is not a mark the broker lacks. Recovery writes nothing before the
-// first connect's grace or inside it, so the retained mark that arrives
-// late still names the room a person chose, and nothing is written over it.
+// Before the catch-up time ends, the operator publishes no mark for an
+// empty focusCache, so a retained mark that arrives late is not replaced
+// with the first Player of the set.
 func TestReconcileFocusWritesNoMarkBeforeTheCatchUp(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		o, broker := focusBrokerOperator(t)
@@ -319,8 +303,7 @@ func TestReconcileFocusWritesNoMarkBeforeTheCatchUp(t *testing.T) {
 	})
 }
 
-// One pass settles the mark and publishes it on the unit's bus
-// status, so the focus indicator is never a pass behind the press.
+// The focus indicator does not wait for a second pass.
 func TestOnePassMarksTheFocusedRemoteOnTheBusStatus(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cluster := newFakeCluster()
@@ -336,31 +319,28 @@ func TestOnePassMarksTheFocusedRemoteOnTheBusStatus(t *testing.T) {
 	})
 }
 
-// A stored value that changes wakes the loop, because the Player bus
-// status and the Remote status both derive from the mark. A repeat of the
-// same value wakes nothing.
 func TestSetMarkWakesTheLoopOnAChange(t *testing.T) {
 	wake := make(chan struct{}, 1)
-	desk := newFocusDesk(wake)
+	cache := newFocusCache(wake)
 
-	desk.setMark(controllerKey("house", "sofa"), "theater")
+	cache.setMark(controllerKey("house", "sofa"), "theater")
 	select {
 	case <-wake:
 	default:
-		t.Fatal("a changed mark did not wake the loop")
+		t.Fatal("the loop did not wake after the mark changed, want it woken")
 	}
 
-	desk.setMark(controllerKey("house", "sofa"), "theater")
+	cache.setMark(controllerKey("house", "sofa"), "theater")
 	select {
 	case <-wake:
-		t.Error("an unchanged mark woke the loop")
+		t.Error("the loop woke after an unchanged mark, want it asleep")
 	default:
 	}
 }
 
-// A new broker session whose catch-up delivered no mark for a controller
-// is a broker that lost it, so the operator publishes the mark it holds
-// once the catch-up is over, and a controller keeps the Player it drives.
+// When a new broker session sends no mark for a controller, the broker
+// lost it. Once the catch-up time ends, the operator publishes the mark
+// it stored, once, so the controller keeps its Player.
 func TestANewSessionRestoresAMarkTheBrokerLost(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		o, broker := focusBrokerOperator(t)
@@ -383,10 +363,9 @@ func TestANewSessionRestoresAMarkTheBrokerLost(t *testing.T) {
 	})
 }
 
-// A mark the broker delivers back on the new session is still on the
-// broker, so the operator publishes nothing. A republish reaches every
-// screen as a live mark, and a screen reads a live mark as a person
-// pointing a controller at it, so a restart would light a dark room.
+// A mark that the broker sends on the new session is still retained, so
+// the operator publishes nothing. Each publish reaches every reader as a
+// live mark that no person caused.
 func TestANewSessionDoesNotRepublishAMarkTheBrokerHolds(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		o, broker := focusBrokerOperator(t)

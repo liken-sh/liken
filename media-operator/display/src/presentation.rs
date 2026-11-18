@@ -1,29 +1,29 @@
-//! The presentation module holds the current item's declared fields and
-//! resolves each one for the header. The command sidecar hands it a block over
-//! a script-message whenever the playlist reaches a new item.
+//! The fields that the library declares for the current item, such as
+//! its title, logo, and marks. The command sidecar sends them as one JSON
+//! object, the block, in a `script-message` when the playlist reaches a
+//! new item. The title, artist, album, and music year fall back to what
+//! mpv reads from the file when the block does not declare them.
 
 use serde_json::{Map, Value};
 
 use crate::film::Film;
 use crate::marks::Marks;
 
-/// What kind of item the block declares, which the scrubber, the strip, and
-/// the header each ask about on every rebuild.
+/// The kind of item that the block's `type` declares. The scrubber, the
+/// strip, and the header change their layout by it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Kind {
     #[default]
     Other,
-    /// A still photo, which has no timeline.
+    /// A still photo.
     Image,
-    /// An album, which is one audio stream with nothing to choose.
+    /// An album.
     Music,
 }
 
-/// The current item's declared fields, and the three readings that do not
-/// change between two blocks: what kind of item it is, the season line a
-/// series draws, and the marks. Each is resolved when the block arrives,
-/// because the display reads them many times for one item and the block is
-/// read once.
+/// The block for the current item. `receive` parses the kind, the line
+/// under a series title, and the marks once, because the display reads
+/// them on every redraw and they change only when a new block arrives.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Presentation {
     block: Map<String, Value>,
@@ -33,9 +33,8 @@ pub struct Presentation {
 }
 
 impl Presentation {
-    /// Take the block as one JSON string. An empty object, or text that does
-    /// not parse, means the item declared nothing, so every field falls
-    /// through to its next tier.
+    /// Replace the block with a JSON string. Text that is not a JSON
+    /// object, including an empty string, reads as an empty block.
     pub fn receive(&mut self, text: &str) {
         self.block = serde_json::from_str::<Value>(text)
             .ok()
@@ -53,42 +52,39 @@ impl Presentation {
         self.marks = Marks::parse(self.field("marks"));
     }
 
-    /// The spans the library found for the intro, the recap, the credits, and
-    /// the preview. An item with none plays with no skip control, and its card
-    /// rises by the time that remains.
+    /// The spans of the intro, the recap, the credits, and the preview.
+    /// An item with no marks has no skip control, and its up-next card
+    /// appears by the time remaining instead of at the credits.
     pub fn marks(&self) -> &Marks {
         &self.marks
     }
 
-    /// The title resolves in three tiers: the block's own title, then mpv's
-    /// `media-title` read from the file, then nothing. The other fields have no
-    /// file to fall back to, so they come from the block alone.
+    /// The block's title, or else mpv's `media-title` for the file.
     pub fn title(&self, film: &Film) -> Option<String> {
         self.word("title")
             .map(str::to_string)
             .or_else(|| film.media_title.clone())
     }
 
-    /// The item's type. The block names this field `type`, which Rust keeps
-    /// for itself.
+    /// The block's `type` field, named `kind` because `type` is a Rust
+    /// keyword.
     pub fn kind(&self) -> Kind {
         self.kind
     }
 
-    /// A still photo has no timeline, so it shows no scrubber and no strip.
+    /// A still photo has no timeline, so the display draws no scrubber.
     pub fn is_image(&self) -> bool {
         self.kind == Kind::Image
     }
 
-    /// An album is one audio stream with nothing to choose, so it shows no
-    /// strip.
+    /// An album is one audio stream with no track to choose, so the
+    /// display draws no strip.
     pub fn is_music(&self) -> bool {
         self.kind == Kind::Music
     }
 
-    /// The line under the title of a series: the season, the episode, and the
-    /// date the block names. Every part of it comes from the block, so it is
-    /// resolved once for the item.
+    /// The line under the title of a series: the season, the episode,
+    /// the episode title, and the date.
     pub fn second(&self) -> Option<&str> {
         self.second.as_deref()
     }
@@ -97,8 +93,7 @@ impl Presentation {
         self.word("hint")
     }
 
-    /// The item's part in the work: `trailer`, or nothing for the work
-    /// itself.
+    /// `trailer` for a trailer, and `None` for the work itself.
     pub fn role(&self) -> Option<&str> {
         self.word("role")
     }
@@ -131,10 +126,10 @@ impl Presentation {
             .map(str::to_string)
     }
 
-    /// The music year takes the block's own year first, then the leading four
-    /// digits of the file's date tag, which often carries a whole date. The
-    /// film year below keeps the block as its only tier, so a film file with a
-    /// date tag never shows a year its block did not declare.
+    /// The block's year, or else the first four digits of the file's
+    /// `date` tag, because that tag often holds a whole date. `year`
+    /// reads the block alone, so a film never shows a year from a file
+    /// tag that its block did not declare.
     pub fn music_year(&self, film: &Film) -> Option<Value> {
         if let Some(year) = self.year()
             && year != &Value::String(String::new())
@@ -154,34 +149,34 @@ impl Presentation {
         self.word("date")
     }
 
-    /// The logo is a resolved reference: an in-pod path on the media mount, or
-    /// an https URL. The header decodes it to the box it draws it in.
+    /// The logo reference: a path under the media mount in the pod, or
+    /// an https URL.
     pub fn logo(&self) -> Option<&str> {
         self.word("logo")
     }
 
-    /// The trickplay reference, the sprite-sheet directory the scan crops tiles
-    /// from. Nothing means the item shows no thumbnail.
+    /// The directory of Jellyfin's trickplay sprite sheets, which the
+    /// display crops scrub thumbnails from. `None` means the item shows no
+    /// thumbnail.
     pub fn trickplay(&self) -> Option<&str> {
         self.word("trickplay")
     }
 
-    /// The spans file the appearances fact wrote for the item, which names
-    /// the people on screen in each span. Nothing means the item shows no
-    /// cast row.
+    /// The path of the file that lists the people on screen in each span
+    /// of the item. `None` means the item shows no cast row.
     pub fn appearances(&self) -> Option<&str> {
         self.word("appearances")
     }
 
-    /// The library's .contributors directory, which the spans file names
-    /// each portrait under.
+    /// The library's `.contributors` directory, which holds the portrait
+    /// that the appearances file names for each person.
     pub fn contributors(&self) -> Option<&str> {
         self.word("contributors")
     }
 
-    /// The cover reference, resolved the way the logo is. It is the first tier
-    /// of the art the music layout draws, and the picture inside the file and a
-    /// cover beside it follow.
+    /// The cover, a path or URL like the logo. The music layout tries it
+    /// first, then the picture embedded in the file, then a cover file
+    /// beside the file.
     pub fn art(&self) -> Option<&str> {
         self.word("art")
     }
@@ -217,7 +212,7 @@ mod tests {
     }
 
     #[test]
-    fn a_block_that_declares_nothing_falls_through_every_tier() {
+    fn a_block_that_declares_nothing_falls_back_for_every_field() {
         for text in ["", "{}", "not json", "[1, 2]", "null"] {
             let presentation = block(text);
             assert_eq!(
@@ -240,7 +235,7 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_field_falls_through_to_the_tier_below() {
+    fn an_empty_field_reads_as_undeclared() {
         let presentation = block(
             r#"{"title":"","artist":"","album":"","logo":"","trickplay":"","art":"","role":""}"#,
         );
@@ -254,7 +249,7 @@ mod tests {
     }
 
     #[test]
-    fn a_title_resolves_to_nothing_when_the_file_carries_none() {
+    fn a_title_is_none_when_the_file_has_none() {
         assert_eq!(block("{}").title(&Film::default()), None);
     }
 
@@ -278,19 +273,32 @@ mod tests {
         assert_eq!(presentation.logo(), Some("/art/logo.png"));
         assert_eq!(presentation.trickplay(), Some("/art/tiles"));
         assert_eq!(presentation.art(), Some("/art/cover.jpg"));
-        assert!(!presentation.is_image());
-        assert!(!presentation.is_music());
+        assert!(
+            !presentation.is_image(),
+            "a block with no type is an image, want not"
+        );
+        assert!(
+            !presentation.is_music(),
+            "a block with no type is music, want not"
+        );
     }
 
     #[test]
-    fn the_image_and_music_types_read_off_the_block() {
-        assert!(block(r#"{"type":"image"}"#).is_image());
-        assert!(block(r#"{"type":"music"}"#).is_music());
-        assert!(!block(r#"{"type":"music"}"#).is_image());
+    fn the_image_and_music_types_set_the_kind() {
+        assert!(
+            block(r#"{"type":"image"}"#).is_image(),
+            "type image is not an image"
+        );
+        assert!(
+            block(r#"{"type":"music"}"#).is_music(),
+            "type music is not music"
+        );
+        assert!(
+            !block(r#"{"type":"music"}"#).is_image(),
+            "type music is an image, want not"
+        );
     }
 
-    /// The music year takes the block first and the date tag's leading four
-    /// digits next. The film year has the block as its only tier.
     #[test]
     fn the_music_year_falls_back_to_the_date_tag() {
         assert_eq!(
@@ -310,8 +318,6 @@ mod tests {
         assert_eq!(block("{}").music_year(&short), None);
     }
 
-    /// A second block replaces the first, so a new item carries none of the
-    /// last one's fields.
     #[test]
     fn a_second_block_replaces_the_first() {
         let mut presentation = block(r#"{"title":"A Film","year":2014}"#);
@@ -320,10 +326,8 @@ mod tests {
         assert_eq!(presentation.year(), None);
     }
 
-    /// The marks read off the block once, and the next item's block, which
-    /// may carry none, replaces them.
     #[test]
-    fn the_marks_read_off_the_block_and_a_new_item_replaces_them() {
+    fn the_marks_come_from_the_block_and_a_new_item_replaces_them() {
         let mut presentation =
             block(r#"{"title":"A Film","marks":[{"kind":"intro","start":5.0,"end":65.0}]}"#);
         assert_eq!(

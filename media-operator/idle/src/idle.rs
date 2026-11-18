@@ -1,18 +1,12 @@
 //! The idle screen: what the client draws while no `Play` runs.
 //!
-//! The whole screen is one `canvas`, and `draw` states the order the elements
-//! go into it.
+//! The whole screen is one `canvas` frame. Every element draws in a canvas
+//! 1080 rows tall, and the frame scales it to the surface, so one layout
+//! serves 720p, 1080p, and 4K.
 //!
-//! That order holds between shapes, and it does not hold between a shape and
-//! text. `iced_wgpu` renders a layer in four passes, quads then meshes then
-//! images then text, and a canvas frame is one layer, so a rectangle drawn
-//! last still lands under every line of text. An element that has to cover
-//! text cannot be drawn over it. So the shade is a factor every element
-//! applies to its own colours, and every `draw` below takes it.
-//!
-//! Every element draws in the display's own space, 1080 rows tall, and the
-//! frame scales that space onto the surface. One layout serves 720, 1080, and
-//! 4K with no branch.
+//! Each element's `draw` takes the shade's brightness factor `light` and
+//! applies it to its own colours. `look::under` explains why the shade is not
+//! a rectangle drawn over the screen.
 
 pub mod activity;
 pub mod clock;
@@ -30,27 +24,24 @@ use iced_winit::core::{Point, Rectangle, Size, Theme, mouse};
 use crate::look;
 use crate::unit::Unit;
 
-/// The canvas frame every element draws into.
 pub type Frame = canvas::Frame<Renderer>;
 
 /// The canvas the elements measure against.
 ///
-/// The height is always 1080, and the width follows the surface's own ratio.
-/// `look::canvas_width` states the rule and the reason.
+/// The height is always 1080, and the width follows the surface's aspect
+/// ratio. See `look::canvas_width`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Layout {
     pub width: f32,
     pub height: f32,
-    /// How many surface pixels one canvas pixel takes. The frame carries this
-    /// as a transform, so no element multiplies a position by it. A stroke is
-    /// the exception, because the toolkit tessellates a stroke at the width it
-    /// is given after it has transformed the path, so a stroke width is stated
-    /// in surface pixels and every element that strokes multiplies by this.
+    /// Surface pixels per canvas pixel. The frame applies it to positions.
+    /// It does not apply it to a stroke width, because the toolkit
+    /// transforms the path and then tessellates the stroke at the width it
+    /// was given. So an element that strokes multiplies the width by `scale`.
     pub scale: f32,
 }
 
 impl Layout {
-    /// The canvas for one surface size.
     pub fn for_surface(size: Size) -> Self {
         Self {
             width: look::canvas_width((size.width as u32, size.height as u32)),
@@ -59,73 +50,59 @@ impl Layout {
         }
     }
 
-    /// The x every flush-right element hangs from.
     pub fn right(&self) -> f32 {
         self.width - look::MARGIN_X
     }
 
-    /// The y every element standing on the bottom edge hangs from. It is the
-    /// top margin, so the identity block balances the clock across the screen.
+    /// The bottom margin is the same as the top margin, so the identity
+    /// block at the bottom balances the clock at the top.
     pub fn bottom(&self) -> f32 {
         self.height - look::MARGIN_Y
     }
 
-    /// The middle of the canvas, where the mark rests.
     pub fn center(&self) -> Point {
         Point::new(self.width / 2.0, self.height / 2.0)
     }
 
-    /// The width the mark fills: a third of the canvas height at 16:9, or a
-    /// third of the width on a screen narrower than that. The mark then keeps
-    /// one size against the height, and a wide screen shows the same mark with
-    /// more room beside it.
+    /// The width of the mark: a third of the canvas width, up to a third of
+    /// the width of a 16:9 canvas. So the mark keeps its size on a surface
+    /// wider than 16:9, and shrinks to fit on a narrower one.
     pub fn mark_span(&self) -> f32 {
         self.width.min(self.height * 16.0 / 9.0) / 3.0
     }
 
-    /// How one canvas row maps onto the surface.
     fn onto(&self, bounds: Rectangle) -> f32 {
         bounds.height / self.height
     }
 }
 
-/// The screen, as the canvas draws it at one moment.
+/// The screen at second `at` on the harness's clock.
 ///
-/// `at` is the second on the harness's clock, and every element is a function
-/// of it and of the moments in `unit`. Nothing here counts frames, so a
-/// captured frame is reproducible and a dropped frame is harmless.
+/// Every element is a function of `at` and of the moments folded into `unit`,
+/// and nothing counts frames. So a captured frame is reproducible, and a
+/// dropped frame changes nothing.
 #[derive(Debug)]
 pub struct Idle<'a> {
     pub unit: &'a Unit,
     pub at: f64,
-    /// Whether the preview keys are bound, which only a workstation does. The
-    /// legend draws under it, so a cluster's idle screen never carries one.
+    /// Whether the preview keys are bound. Only then does the screen draw
+    /// their legend.
     pub preview: bool,
-    /// How far the wall clock is into its minute, in seconds, at the second
-    /// of the frame, which tells the clock when its reading next turns.
+    /// Seconds the wall clock is into its current minute at second `at`.
     pub into_minute: f64,
 }
 
 impl Idle<'_> {
-    /// The second this screen next changes, which is the first second any one
-    /// element changes at. `at` is the second of the last frame, the one on
-    /// the glass, and not the clock now, so an ease that ended while that
-    /// frame was drawn still asks for the frame that shows its end. A second
-    /// at or before `at` asks the harness to draw now.
+    /// The next second at which the picture changes, the earliest that any
+    /// element returns. A result at or before `at` means draw now.
     ///
-    /// Each element answers for itself, beside the code that computes its own
-    /// drawing, so a change to an ease changes the schedule with it. Most of
-    /// them ease or they are still: an ease asks to draw now, and a settled
-    /// element states nothing. The clock and the volume row are the two that
-    /// name a second ahead, and the clock's is the turn of the minute.
-    ///
-    /// Two of the elements `draw` lists answer through another. The activity
-    /// line takes its opacity from the energy, and the preview legend draws
-    /// one fixed run of text.
-    ///
-    /// The clock always names one, so this is never `None`. The harness
-    /// sleeps toward it and wakes on its own backstop in between to read the
-    /// bus.
+    /// `at` is the second of the last frame drawn, not the current time, so
+    /// an ease that ended during that frame still gets a frame that shows its
+    /// end. Each element computes its next frame beside its `draw`, so a
+    /// change to an ease changes the schedule with it. The activity line has
+    /// no entry because it takes its opacity from the energy, and the legend
+    /// has none because it does not change. The clock always returns a
+    /// second, so the result is never `None`.
     pub fn next_frame(&self, at: f64) -> Option<f64> {
         [
             Some(clock::next_frame(at, self.into_minute)),
@@ -144,9 +121,8 @@ impl Idle<'_> {
 impl<Message> canvas::Program<Message, Theme, Renderer> for Idle<'_> {
     type State = ();
 
-    /// The elements. The mark draws first, so the corner text draws over it
-    /// if the two ever meet. The shade is read first and drawn by none of
-    /// them: each element scales its own colours by it.
+    /// The mark draws first, so the corner elements draw over it where they
+    /// overlap.
     fn draw(
         &self,
         _state: &Self::State,
@@ -182,7 +158,7 @@ mod tests {
     use media_screen::volume::Volume;
 
     #[test]
-    fn a_16_by_9_surface_gives_the_width_the_display_has_always_held() {
+    fn a_16_by_9_surface_gives_a_1920_by_1080_canvas() {
         let layout = Layout::for_surface(Size::new(1920.0, 1080.0));
         assert_eq!((layout.width, layout.height), (1920.0, 1080.0));
     }
@@ -201,8 +177,8 @@ mod tests {
         assert_eq!(tall.mark_span(), tall.width / 3.0);
     }
 
-    /// The screen one unit draws, with no preview keys bound, when the wall
-    /// clock is `into_minute` seconds into its minute.
+    /// The screen for `unit` with no preview keys bound, when the wall clock
+    /// is `into_minute` seconds into its minute.
     fn screen(unit: &Unit, into_minute: f64) -> Idle<'_> {
         Idle {
             unit,
@@ -213,26 +189,25 @@ mod tests {
     }
 
     #[test]
-    fn a_settled_screen_draws_when_the_minute_turns() {
+    fn a_settled_screen_next_changes_when_the_minute_turns() {
         let unit = Unit::default();
         assert_eq!(screen(&unit, 30.0).next_frame(0.0), Some(30.0));
         assert_eq!(screen(&unit, 59.5).next_frame(11.75), Some(12.25));
     }
 
     #[test]
-    fn an_element_in_motion_takes_the_screen_ahead_of_the_clock() {
+    fn an_easing_element_is_drawn_before_the_clocks_next_minute() {
         let mut unit = Unit::default();
         unit.fold(Moment::Sleep, 10.0);
 
-        // The shade eases for four seconds, and a second at or before `at`
-        // asks the harness to draw now. Once it settles, the clock's minute
-        // is the next change.
+        // The fade to black lasts four seconds. After it, the next change is
+        // the clock's minute.
         assert_eq!(screen(&unit, 0.0).next_frame(10.5), Some(10.5));
         assert_eq!(screen(&unit, 50.0).next_frame(14.5), Some(24.5));
     }
 
     #[test]
-    fn the_screen_takes_the_nearer_of_the_volume_row_and_the_clock() {
+    fn next_frame_is_the_earlier_of_the_volume_row_and_the_clock() {
         let mut unit = Unit::default();
         unit.fold(
             Moment::Level {
@@ -246,9 +221,7 @@ mod tests {
             10.0,
         );
 
-        // The row names 14.0, the second it starts to leave, and the clock
-        // names the turn of its minute. The screen takes the nearer of the
-        // two.
+        // The volume row starts to fade out at 14.0.
         assert_eq!(screen(&unit, 59.0).next_frame(11.5), Some(12.5));
         assert_eq!(screen(&unit, 10.0).next_frame(11.5), Some(14.0));
     }

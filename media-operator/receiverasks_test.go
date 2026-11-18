@@ -1,17 +1,11 @@
 package main
 
-// The session writer: every write of a Receiver's status.session
-// composes the session and the newest ask of each kind. The fake API
-// server is in operate_test.go.
-
 import (
 	"errors"
 	"testing"
 	"time"
 )
 
-// Two asks of one kind in the same millisecond carry two times, so the
-// equipment operator reads them as two asks.
 func TestTwoAsksInOneMillisecondCarryTwoTimes(t *testing.T) {
 	now := time.Date(2026, 10, 4, 12, 15, 25, 164_000_000, time.UTC)
 	first := nextAskTime("", now)
@@ -21,8 +15,6 @@ func TestTwoAsksInOneMillisecondCarryTwoTimes(t *testing.T) {
 	mustMatch(t, nextAskTime(first, now.Add(time.Second)), "2026-10-04T12:15:26.164Z")
 }
 
-// An ask for a Receiver that holds no session of this operator's writes
-// nothing, because the ask has no unit to belong to.
 func TestAnAskWithNoSessionWritesNothing(t *testing.T) {
 	cluster := receiverCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
@@ -35,9 +27,8 @@ func TestAnAskWithNoSessionWritesNothing(t *testing.T) {
 	mustMatch(t, len(cluster.sessions), 0)
 }
 
-// A new session carries the asks the Receiver already holds, so a
-// change of the active flag removes no ask. A lift removes the asks
-// with the session, and the next session starts with none.
+// A new session keeps the cached requests, so changing the active flag
+// removes none. A lift removes them with the session.
 func TestTheSessionCarriesTheAsksUntilItIsLifted(t *testing.T) {
 	cluster := receiverCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))

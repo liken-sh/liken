@@ -1,28 +1,25 @@
 package main
 
-// The ending label is how a finished run reaches the compositor. The
-// sidecar publishes the ending and then holds mpv alive for its exit
-// grace, so there is a live surface for that half second. The label is
-// what the compositor acts on: a Layout whose film region excludes
-// media.liken.sh/ending stops matching the pod the moment the label
-// lands, and the region's exit fade takes the film off the screen.
+// When a film ends, the command sidecar in the playback pod publishes
+// an ending report and keeps mpv running for exitGrace before it
+// exits. The operator acts on the report in two ways.
 //
-// The Play's status is not the signal. A Layout matches pods, and
-// display-operator reads none of this operator's kinds, so the mark
-// goes onto the pod itself.
+// labelEnding adds the label media.liken.sh/ending to the playback
+// pod. A Layout whose film region selects only pods without that label
+// stops matching the pod, and display-operator takes the film off the
+// screen with the region's transition. The label is on the pod and not
+// on the Play, because a Layout selects pods and display-operator does
+// not read this operator's kinds. The label must reach the pod before
+// mpv exits, so the pass labels pods as soon as it has read the Plays.
 //
-// The ending also has to reach the bus as the unit's Idle state, which
-// is what every screen client keys its return on, and that answer comes
-// from memory. The pass that the report wakes runs only after the pass
-// in flight ends, and a pass waits on the API server for each write it
-// sends, with nothing bounding the worst case. A person is looking at
-// the screen for the whole wait.
-// The operator read both collections on its last pass, and neither the
-// film's last frame nor the pass that follows it changes what those
-// lists say about this unit, so the fold derives the unit's state from
-// the lists it holds and publishes it at once. The pass runs behind it
-// and derives the same payload, which the broker already holds, so it
-// writes nothing.
+// publishEndingStatus publishes the Player's Idle status to the bus as soon as
+// the report arrives. The media browser and other readers of the
+// Player's status topic act when a Player reads Idle, and a person is
+// watching the screen. The pass that the report wakes starts only when
+// the running pass finishes, which can take a long time on a busy API
+// server. So the bus reader publishes the status itself, from the Plays
+// and Players that the last pass listed. The next pass computes the
+// same payload and does not publish it again.
 
 import (
 	"errors"
@@ -33,15 +30,11 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// passSnapshot holds the Plays and the Players the last pass listed. One
-// mutex covers both, because the pass writes them on its own goroutine
-// and the bus reader reads them on another.
-//
-// Each list is recorded where the pass reads it, so a list read that
-// failed leaves the previous list standing rather than emptying the
-// memory. The slices are copies: the pass writes a Play's finalizers and
-// a Player's status onto the elements of the lists it holds, and a
-// reader on the bus goroutine must not see those writes.
+// passSnapshot is the Plays and Players that the last pass listed, for
+// the bus reader's goroutine. The pass records each list when it reads
+// it, so a failed read keeps the previous list. The slices are copies,
+// because the pass then writes finalizers and status into the elements
+// of its own lists.
 type passSnapshot struct {
 	mutex   sync.Mutex
 	plays   []Play
@@ -62,25 +55,20 @@ func (s *passSnapshot) recordPlayers(players []Player) {
 	s.mutex.Unlock()
 }
 
-// lists answers both lists as the last pass read them. An operator that
-// has finished no pass answers two empty lists.
+// lists returns empty lists until the first pass has read them.
 func (s *passSnapshot) lists() ([]Play, []Player) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	return s.plays, s.players
 }
 
-// answerEnding publishes one unit's presentable state the moment the
-// run's sidecar reports the film is over, from the lists the last pass
-// read. The bus reader calls it on its own goroutine, so it makes no API
-// request and no blocking call: the publish enqueues one frame and
-// returns.
+// publishEndingStatus publishes the status of the Player of a Play whose film
+// is over, from the last pass's lists. The bus reader calls it, so it
+// makes no API request, and the publish only queues the message.
 //
-// A snapshot that holds neither the Play nor the Player it names is an
-// operator that has finished no pass, or a run created since the last
-// one. Such an ending is left to the pass, which reads both collections
-// and answers it a moment later.
-func (o *operator) answerEnding(namespace, name string) {
+// When the snapshot has no such Play or Player, no pass has listed them
+// yet, and the next pass publishes the status.
+func (o *operator) publishEndingStatus(namespace, name string) {
 	plays, players := o.snapshot.lists()
 	play := findPlay(plays, namespace, name)
 	if play == nil {
@@ -93,8 +81,6 @@ func (o *operator) answerEnding(namespace, name string) {
 	o.publishPlayerStatus(player, plays)
 }
 
-// findPlayer returns the Player of that name in that namespace, or nil
-// where the list holds none.
 func findPlayer(players []Player, namespace, name string) *Player {
 	for index := range players {
 		player := &players[index]
@@ -105,24 +91,24 @@ func findPlayer(players []Player, namespace, name string) *Player {
 	return nil
 }
 
-// labelEnding patches the ending label onto one Play's playback pod,
-// once. It runs first in the pass for that Play, ahead of the retire
-// that deletes the pod, because the fade needs the label while the pod
-// still draws. The ending report is what wakes that pass, so the label
-// lands within milliseconds of the film's last frame.
+// labelEnding adds the ending label to the playback pod of a Play whose
+// run has ended, once for each pod. The pass calls it before it deletes
+// the pod, because display-operator needs the label while the pod still
+// draws to the screen.
 //
-// The memo holds the UID of the pod that reported the ending it
-// labeled, so the ending of a new pod under the same name is labeled on
-// its own. A merge patch names the pod by its name alone, and a new pod
-// can hold the name before the pod store shows it, so for an ending that
-// names its pod the pass reads the pod from the API server first and
-// labels it only when the UID matches. Only the pass creates a playback
-// pod, and the pass is where this runs, so no new pod can take the name
-// between the read and the patch. A pod that has gone, or whose name
-// another pod holds, is nothing to label: that pod's fade is over or
-// never started, so the memo records it as done. A read or a patch that
-// fails for any other reason is reported and tried again on the next
-// pass.
+// endingLabeled records the UID of each labeled pod, so a later pod
+// with the same name gets its own label. The patch selects the pod by
+// name, so when the report gives the pod's UID, labelEnding reads the
+// pod from the API server and patches only when the UIDs match. It does
+// not read o.view, because the view can still hold a pod that an
+// earlier pass replaced, and a patch by that pod's name would label the
+// new pod and take a film that is still playing off the screen. Only
+// the pass creates playback pods, so no new pod can take the name
+// between the read and the patch.
+//
+// A pod that is gone or replaced is no longer on the screen, so it
+// needs no label and is recorded as done. Any other failure is logged,
+// and the next pass tries again.
 func (o *operator) labelEnding(play *Play) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
 	key := runKey(namespace, name)
@@ -135,18 +121,13 @@ func (o *operator) labelEnding(play *Play) {
 	}
 	pod := podName(name)
 	if uid != "" {
-		// A direct read, not the view: an earlier pass may have created
-		// the pod that holds the name now, and the view can still hold
-		// the pod it replaced, whose UID matches the ending. The patch
-		// names the pod by its name alone, so a patch on the view's copy
-		// would label the new pod and fade a film that plays.
-		held, err := GetPod(o.client, namespace, pod)
+		current, err := GetPod(o.client, namespace, pod)
 		switch {
-		case errors.Is(err, apiclient.ErrNotFound) || (err == nil && held.Metadata.UID != uid):
+		case errors.Is(err, apiclient.ErrNotFound) || (err == nil && current.Metadata.UID != uid):
 			o.endingLabeled[key] = uid
 			return
 		case err != nil:
-			fmt.Fprintf(os.Stderr, "reading pod %s/%s to label its ending: %v\n",
+			fmt.Fprintf(os.Stderr, "reading Pod %s/%s to label its ending: %v\n",
 				namespace, pod, err)
 			return
 		}
@@ -154,7 +135,7 @@ func (o *operator) labelEnding(play *Play) {
 	err := PatchPodLabels(o.client, namespace, pod,
 		map[string]string{endingLabelKey: endingLabelValue})
 	if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
-		fmt.Fprintf(os.Stderr, "labeling the ending on pod %s/%s: %v\n",
+		fmt.Fprintf(os.Stderr, "labeling the ending on Pod %s/%s: %v\n",
 			namespace, pod, err)
 		return
 	}

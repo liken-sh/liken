@@ -1,9 +1,9 @@
 package main
 
-// The ask a run makes of the client under it as the run ends. Home ends
-// the film and has a meaning the playback pod cannot act on: the
-// client's home page. So the pod asks on the Player's commands topic,
-// and the client that draws the screen between films answers.
+// Some commands end the film and need an action that the playback pod
+// cannot take, such as home, which shows the home page of the idle
+// screen's client. The pod publishes such a command on the Player's
+// commands topic, and that client acts on it.
 
 import (
 	"encoding/json"
@@ -11,30 +11,29 @@ import (
 	"os"
 )
 
-// askAndEnd publishes the ask and then runs the ending path, so the ask
-// reaches the broker before the ending does, and the client holds the ask
-// before the unit's status reads Idle.
-func (c *commander) askAndEnd(trigger string, ask mediaCommand) {
-	if topic, published := c.publishAsk(ask); published {
-		logLine(c.log, "command: %s: %s, published the %s ask to %s, so the run ends", trigger, ask.Action, ask.Action, topic)
+// publishCommandAndEnd publishes command and then ends the run. The bus sends the
+// command before the ending, so the client receives it before the Player
+// status changes to Idle.
+func (c *commander) publishCommandAndEnd(trigger string, command mediaCommand) {
+	if topic, published := c.publishCommand(command); published {
+		logLine(c.log, "command: %s: %s, published the %s command to %s, so the run ends", trigger, command.Action, command.Action, topic)
 	} else {
-		logLine(c.log, "command: %s: %s, with no player commands topic to ask on, so the run ends", trigger, ask.Action)
+		logLine(c.log, "command: %s: %s, with no Player commands topic to publish on, so the run ends", trigger, command.Action)
 	}
 	c.exit()
 }
 
-// publishAsk publishes one message on the Player's commands topic, not
-// retained, because the ask is an event and not a state. A pod that read
-// no Player has no topic to publish on, and a pod with no bus has no
-// broker, so each publishes nothing. The answer names the topic and
-// whether the ask went out.
-func (c *commander) publishAsk(ask mediaCommand) (string, bool) {
+// publishCommand publishes command on the Player's commands topic and returns
+// the topic. It does not retain the message, because a command is an
+// event and not a state. It returns false when the pod read no Player or
+// has no bus.
+func (c *commander) publishCommand(command mediaCommand) (string, bool) {
 	if c.playerCommandsTopic == "" || c.bus == nil {
 		return "", false
 	}
-	payload, err := json.Marshal(ask)
+	payload, err := json.Marshal(command)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "command: %s: %v\n", ask.Action, err)
+		fmt.Fprintf(os.Stderr, "command: encoding the %s command: %v\n", command.Action, err)
 		return "", false
 	}
 	c.bus.Publish(c.playerCommandsTopic, payload, false)

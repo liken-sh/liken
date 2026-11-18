@@ -1,25 +1,20 @@
 package main
 
-// The claims, the ResourceSlices, the Displays, the Receivers, the
-// Sinks, the Televisions, and the operator's own pods wake the pass when a change reaches a field the
-// pass reads, and a change to anything else wakes nothing. Each rule names those fields as a
-// mark, and the handler compares the mark of the copy the informer held
-// with the mark of the new copy. The informer hands an update both, so
-// the handler keeps no copy of its own.
+// An update to a watched object wakes the pass only when a field that the
+// pass reads has changed. Each kind has a changeRule whose mark function
+// encodes those fields as a string, and the update handler compares the
+// mark of the old copy with the mark of the new one.
 //
-// Each mark leaves out what this operator writes itself, so its own
-// write does not wake the pass that made it: a Display's spec.override,
-// a Receiver's session in its spec and its status, and a Sink's session
-// in its status. A claim's spec
-// is immutable, and the operator writes nothing else on a claim, so a
-// claim's mark is what the scheduler writes. Each mark holds the UID
-// and the deletion mark too. After a gap in the watch, an object
-// deleted and created again with the same name reaches the handler as
-// an update, and a deletion request changes what the pass does.
+// A mark leaves out the fields that this operator writes, so that its own
+// write does not wake the pass again: a Display's spec.override, and the
+// session of a Receiver or a Sink.
 //
-// After a gap, the informer reports each difference from what it held
-// as an addition, an update, or a deletion, so the same rules cover a
-// change made while the watch was down.
+// A mark that is not empty includes the UID and the deletion timestamp,
+// because the start of a delete changes what the pass does, and because
+// an object that was deleted and created again under the same name during
+// a gap in the watch reaches the handler as an update. After such a gap, the informer reports
+// each difference from its cache as an add, update, or delete event, so
+// the same rules cover the changes made while the watch was down.
 
 import (
 	"encoding/json"
@@ -30,17 +25,19 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// changeRule is the wake rule for one kind.
+// changeRule decides which events of one kind wake the pass.
 type changeRule[T any] struct {
+	// what names the kind in the error report of an object that fails
+	// to convert.
 	what string
 	// ours reports whether the pass reads the object at all. A nil ours
-	// is every object.
+	// accepts every object.
 	ours func(T) bool
-	// mark answers the fields of the object the pass reads and another
-	// writer changes.
+	// mark encodes the fields that the pass reads and that another
+	// writer can change.
 	mark func(T) string
 	// added reports whether a new object wakes the pass. A nil added
-	// wakes on every new object.
+	// wakes the pass for every new object.
 	added func(T) bool
 }
 
@@ -53,7 +50,7 @@ func (r changeRule[T]) handler(wake chan<- struct{}) cache.ResourceEventHandler 
 				return
 			}
 			if r.matters(item) && (r.added == nil || r.added(item)) {
-				poke(wake)
+				signalWake(wake)
 			}
 		},
 		UpdateFunc: func(before, after any) {
@@ -62,31 +59,32 @@ func (r changeRule[T]) handler(wake chan<- struct{}) cache.ResourceEventHandler 
 				informer.Report(r.what, err)
 				return
 			}
-			// A held copy that does not convert was reported when it
-			// arrived. Nothing says what it held, so the change counts.
+			// The old copy failed to convert, and that failure was
+			// already reported. Its fields are unknown, so treat the
+			// update as a change.
 			old, err := informer.Convert[T](before)
 			if err != nil {
 				if r.matters(item) {
-					poke(wake)
+					signalWake(wake)
 				}
 				return
 			}
 			if (r.matters(item) || r.matters(old)) && r.mark(item) != r.mark(old) {
-				poke(wake)
+				signalWake(wake)
 			}
 		},
-		// A removal whose tombstone holds no copy wakes the pass, because
-		// nothing says whose object it was, and one extra pass costs less
-		// than a change the pass never reads.
+		// A tombstone with no copy of the object does not show whether
+		// the pass reads it. An extra pass costs less than a missed
+		// deletion, so it wakes the pass.
 		DeleteFunc: func(object any) {
 			item, err := informer.Convert[T](object)
 			if err != nil {
 				informer.Report(r.what, err)
-				poke(wake)
+				signalWake(wake)
 				return
 			}
 			if r.matters(item) {
-				poke(wake)
+				signalWake(wake)
 			}
 		},
 	}
@@ -96,14 +94,11 @@ func (r changeRule[T]) matters(item T) bool {
 	return r.ours == nil || r.ours(item)
 }
 
-// identity is the part of every mark that names the object's life: its
-// UID and its deletion mark.
 func identity(meta ObjectMeta) string {
 	return meta.UID + "|" + meta.DeletionTimestamp
 }
 
-// markOf is a field's JSON, which compares the way the API server
-// stores the field.
+// markOf returns the JSON encoding of a field, for comparing two copies.
 func markOf(value any) string {
 	encoded, err := json.Marshal(value)
 	if err != nil {
@@ -112,11 +107,11 @@ func markOf(value any) string {
 	return string(encoded)
 }
 
-// claimRule wakes the pass when the scheduler allocates one of this
-// operator's claims or releases the allocation, and when one goes away.
-// The pass reads the allocation to resolve a unit's screen, its Sinks,
-// and a controller's Peripheral. A claim this operator just created
-// holds no allocation, so its creation wakes nothing.
+// claimRule wakes the pass when the scheduler allocates or deallocates one
+// of this operator's claims, and when one is deleted. A claim's spec is
+// immutable, and this operator writes nothing else on a claim, so the mark
+// covers only status.allocation. A claim that this operator has just
+// created has no allocation, so its add event wakes nothing.
 var claimRule = changeRule[ResourceClaim]{
 	what: "the claims",
 	ours: func(claim ResourceClaim) bool { return ownedByThisOperator(claim.Metadata) },
@@ -132,10 +127,10 @@ var claimRule = changeRule[ResourceClaim]{
 	},
 }
 
-// ownedByThisOperator reports whether a Play, a Player, or a Remote owns
-// the object, which is true of every claim this operator creates. The
-// claims watch covers the whole cluster, and the other claims wake
-// nothing.
+// ownedByThisOperator reports whether the object has an owner in this
+// operator's API group. Every claim that this operator creates has a Play,
+// a Player, or a Remote as its owner. The claims watch covers the whole
+// cluster, and the claims of other programs must not wake the pass.
 func ownedByThisOperator(meta ObjectMeta) bool {
 	for _, owner := range meta.OwnerReferences {
 		if strings.HasPrefix(owner.APIVersion, playResource.Group+"/") {
@@ -145,10 +140,9 @@ func ownedByThisOperator(meta ObjectMeta) bool {
 	return false
 }
 
-// sliceRule wakes the pass when a driver publishes, changes, or
-// withdraws a ResourceSlice. The pass reads a slice's devices to name a
-// unit's monitor and machine. A slice holds only a spec, so its
-// generation counts every change the pass could read.
+// sliceRule wakes the pass when a driver publishes, changes, or deletes a
+// ResourceSlice. A slice has a spec and no status, so its generation
+// changes when its devices change, and not when only its labels change.
 var sliceRule = changeRule[ResourceSlice]{
 	what: "the ResourceSlices",
 	mark: func(slice ResourceSlice) string {
@@ -156,10 +150,9 @@ var sliceRule = changeRule[ResourceSlice]{
 	},
 }
 
-// displayRule wakes the pass when the display-operator writes a
-// Display's status: whether a panel is connected, and what it shows.
-// The Screen condition and the panel both read it. The spec holds only
-// the override this operator applies, so the mark leaves it out.
+// displayRule wakes the pass when display-operator writes a Display's
+// status. The only field of the spec that the pass reads is the override
+// that this operator writes, so the mark leaves the spec out.
 var displayRule = changeRule[Display]{
 	what: "the Displays",
 	mark: func(display Display) string {
@@ -167,12 +160,12 @@ var displayRule = changeRule[Display]{
 	},
 }
 
-// receiverRule wakes the pass when a person rewires a Receiver's inputs
-// or its volume scale, or when the equipment-operator writes its power,
-// its input, its zones, or its conditions. The session, in the spec or
-// the status, is this operator's to write, and the pass decides it from
-// its own record, so the mark leaves it out. A zone's volume is in the
-// mark, because the pass hands each report to the volume engine.
+// receiverRule wakes the pass when a person changes a Receiver's inputs or
+// volume scale, or when equipment-operator changes any field of its status
+// other than the session. This operator writes the session in both the
+// spec and the status, so the mark leaves it out. The mark includes each
+// zone's volume, because the pass gives each level that the receiver
+// reports to the volume engine.
 var receiverRule = changeRule[Receiver]{
 	what: "the Receivers",
 	mark: func(receiver Receiver) string {
@@ -183,11 +176,10 @@ var receiverRule = changeRule[Receiver]{
 	},
 }
 
-// sinkRule wakes the pass when a person changes a Sink's volume scale,
-// or when the audio-operator reports a new level or mute. The pass
-// hands each report to the volume engine. The session is this
-// operator's own write, and the rest of the status changes nothing the
-// pass reads, so the mark leaves both out.
+// sinkRule wakes the pass when a person changes a Sink's volume scale, or
+// when audio-operator reports a new level or mute, which the pass gives to
+// the volume engine. The mark leaves out the session, which this operator
+// writes, and the rest of the status, which the pass does not read.
 var sinkRule = changeRule[Sink]{
 	what: "the Sinks",
 	mark: func(sink Sink) string {
@@ -195,8 +187,9 @@ var sinkRule = changeRule[Sink]{
 	},
 }
 
-// televisionRule wakes the pass when the CEC node workload writes a new
-// ask for a Player's screen, which the pass relays (screenask.go).
+// televisionRule wakes the pass when equipment-operator's CEC node pod
+// writes a new status.screenAsk, which the pass publishes to the Player
+// (screenask.go).
 var televisionRule = changeRule[Television]{
 	what: "the Televisions",
 	mark: func(television Television) string {
@@ -204,22 +197,20 @@ var televisionRule = changeRule[Television]{
 	},
 }
 
-// podRule wakes the pass when one of this operator's pods goes away,
-// and when a playback pod's status changes. The pass derives a Play's
-// phase from its pod's status: Pending with the scheduler's message,
-// Running, Succeeded, Failed, and a display container that keeps
-// restarting. The Pod struct holds only the status fields the pass
-// reads, so the mark changes only when one of them does, and not when
-// a probe time moves. The ending label is this operator's own write,
-// and the mark leaves the labels out.
+// podRule wakes the pass when one of this operator's pods is deleted, and
+// when a playback pod's status changes, because the pass sets a Play's
+// phase from its pod's status. PodStatus decodes only the fields that the
+// pass reads, so a change to another field, such as a probe time, leaves
+// the mark the same. The mark leaves out the labels, because this operator
+// writes the media.liken.sh/ending label.
 //
-// An idle pod and a reader pod restart their containers in place, and
-// the pass reads nothing of their status, so only their removal leaves
-// the pass something to do. A new pod wakes the pass only when it is a
-// playback pod that has already started: after a gap in the watch, the
-// informer reports a pod it did not hold as an addition, whatever
-// happened to it in the gap. The API server gives every pod it creates
-// the Pending phase, so this operator's own create wakes nothing.
+// The pass reads nothing in the status of any other pod, such as an idle
+// pod, so the mark of such a pod is empty and only its deletion wakes the
+// pass. A new pod wakes the pass only when it is a playback pod past the
+// Pending phase. That case comes from a gap in the watch, when the
+// informer reports a pod that it had not cached as an add event. The pod
+// that this operator creates starts Pending, so its add event wakes
+// nothing.
 var podRule = changeRule[Pod]{
 	what: "the pods",
 	mark: func(pod Pod) string {

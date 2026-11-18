@@ -1,9 +1,5 @@
 package main
 
-// These tests cover the wire codec with no socket: every packet is
-// built and read back as bytes, so the encoding is proved against the
-// protocol and not against a broker.
-
 import (
 	"bufio"
 	"bytes"
@@ -12,9 +8,8 @@ import (
 )
 
 func TestRemainingLengthRoundTrips(t *testing.T) {
-	// The boundaries the variable-byte encoding turns on: the last
-	// value each byte count can hold, and the first that needs one
-	// more byte.
+	// The largest value that fits in each number of bytes, and the
+	// smallest value that needs one more byte.
 	cases := []struct {
 		length int
 		bytes  int
@@ -43,8 +38,6 @@ func TestRemainingLengthRoundTrips(t *testing.T) {
 	}
 }
 
-// A stream that never ends its length is a lost frame, not a large
-// packet, so the decoder refuses it after four bytes.
 func TestRemainingLengthRefusesAFifthByte(t *testing.T) {
 	runaway := []byte{0x80, 0x80, 0x80, 0x80, 0x01}
 	if _, err := decodeRemainingLength(bufio.NewReader(bytes.NewReader(runaway))); err == nil {
@@ -52,9 +45,8 @@ func TestRemainingLengthRefusesAFifthByte(t *testing.T) {
 	}
 }
 
-// frameOf returns the frame an encoder built. Every frame a test or a
-// fake broker builds is far below the protocol's limit, so an error
-// here is a broken encoder, and the panic ends the test.
+// frameOf panics on an encoder's error, because the frames in these
+// tests are far below the protocol's limits.
 func frameOf(frame []byte, err error) []byte {
 	if err != nil {
 		panic(err)
@@ -62,10 +54,8 @@ func frameOf(frame []byte, err error) []byte {
 	return frame
 }
 
-// A body past the protocol's limit has no remaining length that a
-// broker accepts, so packet refuses it before it allocates the frame.
-// The body is never written, so its pages are never touched and the
-// test costs no real memory.
+// The test never writes to the body, so the operating system does not
+// allocate its pages.
 func TestPacketRefusesABodyPastTheProtocolLimit(t *testing.T) {
 	frame, err := packet(mqttPublish, make([]byte, mqttMaxRemainingLength+1))
 	if err == nil {
@@ -73,11 +63,6 @@ func TestPacketRefusesABodyPastTheProtocolLimit(t *testing.T) {
 	}
 }
 
-// MQTT 3.1.1 sections 1.5.3 and 3.1.3.3 give a string and a will
-// payload two bytes of length, so 65,535 bytes is the longest that
-// each field can carry. A longer field would write a length that
-// wraps, and the broker would read the rest of the field as the next
-// field. Every encoder refuses the field instead.
 func TestEncodersRefuseAFieldPastTwoBytesOfLength(t *testing.T) {
 	long := string(make([]byte, mqttMaxFieldLength+1))
 	cases := []struct {
@@ -104,15 +89,13 @@ func TestEncodersRefuseAFieldPastTwoBytesOfLength(t *testing.T) {
 	}
 }
 
-// A field of exactly 65,535 bytes is the longest that two bytes of
-// length express, so it encodes and reads back whole.
 func TestEncodePublishCarriesATopicAtTheFieldLimit(t *testing.T) {
 	topic := string(bytes.Repeat([]byte{'t'}, mqttMaxFieldLength))
 	frame := frameOf(encodePublish(topic, []byte("hi"), false))
 
 	_, body, err := readPacket(bufio.NewReader(bytes.NewReader(frame)))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the PUBLISH packet: %v", err)
 	}
 	gotTopic, payload, ok := parsePublish(body)
 	if !ok {
@@ -123,16 +106,13 @@ func TestEncodePublishCarriesATopicAtTheFieldLimit(t *testing.T) {
 	}
 }
 
-// MQTT 3.1.1 section 3.3.3 gives a PUBLISH payload no length of its
-// own: it is the rest of the body. So a payload longer than any
-// two-byte field still encodes and reads back whole.
 func TestEncodePublishCarriesAPayloadPastTwoBytesOfLength(t *testing.T) {
 	sent := bytes.Repeat([]byte{'p'}, mqttMaxFieldLength+1)
 	frame := frameOf(encodePublish("a/b", sent, true))
 
 	_, body, err := readPacket(bufio.NewReader(bytes.NewReader(frame)))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the PUBLISH packet: %v", err)
 	}
 	topic, payload, ok := parsePublish(body)
 	if !ok {
@@ -159,9 +139,7 @@ func TestEncodeConnectWithNoWill(t *testing.T) {
 	}
 }
 
-// A will sets three things: the will flag, the will retain bit when
-// the will is retained, and the topic and payload in the payload after
-// the client identifier.
+// A will's topic and payload follow the client identifier.
 func TestEncodeConnectCarriesARetainedWill(t *testing.T) {
 	packet := frameOf(encodeConnect("op", 30, &busWill{
 		Topic:    "a/b",
@@ -190,8 +168,8 @@ func TestEncodePublishSetsTheRetainBit(t *testing.T) {
 	if retained[0] != mqttPublish|0x01 {
 		t.Errorf("first byte = %#x, want the retain bit set", retained[0])
 	}
-	// The body is the length-prefixed topic and then the raw payload,
-	// with no packet identifier at QoS 0.
+	// At QoS 0 the body is the topic with its length prefix and then the
+	// payload, with no packet identifier.
 	want := []byte{mqttPublish, 0x07, 0x00, 0x03, 'a', '/', 'b', 'h', 'i'}
 	if !bytes.Equal(plain, want) {
 		t.Errorf("publish = %v, want %v", plain, want)
@@ -218,15 +196,13 @@ func TestEncodePingreqIsTwoBytes(t *testing.T) {
 	}
 }
 
-// A PUBLISH encoded by this codec reads back through readPacket and
-// parsePublish as the topic and payload it went in as.
 func TestReadPacketReadsBackAPublish(t *testing.T) {
 	frame := frameOf(encodePublish("plays/house/movie/status", []byte(`{"item":1}`), true))
 	reader := bufio.NewReader(bytes.NewReader(frame))
 
 	first, body, err := readPacket(reader)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the PUBLISH packet: %v", err)
 	}
 	if first&0xF0 != mqttPublish {
 		t.Errorf("type = %#x, want a publish", first)
@@ -236,10 +212,10 @@ func TestReadPacketReadsBackAPublish(t *testing.T) {
 		t.Fatal("the publish body did not parse")
 	}
 	if topic != "plays/house/movie/status" {
-		t.Errorf("topic = %q", topic)
+		t.Errorf("topic = %q, want plays/house/movie/status", topic)
 	}
 	if string(payload) != `{"item":1}` {
-		t.Errorf("payload = %q", payload)
+		t.Errorf("payload = %q, want {\"item\":1}", payload)
 	}
 }
 
@@ -264,8 +240,6 @@ func TestParseSubackReadsTheGrantedCodes(t *testing.T) {
 	}
 }
 
-// A topic longer than its body claims is a torn frame, and parsePublish
-// refuses it rather than reading past the body.
 func TestParsePublishRefusesAShortBody(t *testing.T) {
 	if _, _, ok := parsePublish([]byte{0x00, 0x05, 'a'}); ok {
 		t.Error("a short publish body parsed")
@@ -275,13 +249,11 @@ func TestParsePublishRefusesAShortBody(t *testing.T) {
 	}
 }
 
-// A CONNECT built here reads back with the fields it went in as, so
-// the encoder and reader agree on framing.
 func TestReadPacketReadsBackAConnect(t *testing.T) {
 	frame := frameOf(encodeConnect("media-operator", 30, nil))
 	first, body, err := readPacket(bufio.NewReader(bytes.NewReader(frame)))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the CONNECT packet: %v", err)
 	}
 	if first != mqttConnect {
 		t.Errorf("type = %#x, want a connect", first)

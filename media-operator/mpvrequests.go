@@ -1,17 +1,17 @@
 package main
 
-// The command sidecar's record of the commands a person caused. mpv
-// answers every command on its socket with the request id the command
-// carried and one error word, "success" for a command it ran. The
-// sidecar gives a request id to each command a press or a published
-// command sends, holds the line that describes it, and writes the line
-// when mpv's answer arrives. So one line says what triggered the
-// command, what the sidecar sent, and what mpv answered.
+// This file logs each mpv command that a person caused, together with
+// mpv's reply. mpv replies to a command that has a request id with the
+// same id and an error string, which is "success" when the command ran.
+// The command sidecar gives a request id to each command that a key
+// press or a published command sends, and keeps the log line until the
+// reply arrives. So one line shows what caused the command, the JSON
+// that the sidecar sent, and mpv's reply.
 //
-// The commands the sidecar sends for its own reasons, such as a
-// presentation block, the observe requests, or a repeat of a held key,
-// carry no request id. mpv answers those with id 0, and the sidecar
-// reads nothing from that answer.
+// Commands that the sidecar sends on its own, such as the observe
+// requests or the repeat of a held key, have no request id. mpv replies
+// to those with request id 0, and answer drops the reply because no
+// request uses id 0.
 
 import (
 	"encoding/json"
@@ -23,45 +23,47 @@ import (
 	"time"
 )
 
-// mpvAnswerSuccess is the error word mpv writes for a command it ran.
-const mpvAnswerSuccess = "success"
+// mpvReplySuccess is the error string of mpv's reply to a command that
+// ran.
+const mpvReplySuccess = "success"
 
-// mpvReply is one answer mpv wrote to a command that carried a request
-// id. Data is the JSON text of the value a get_property answer carries.
+// mpvReply is mpv's reply to a command that had a request id. Data is
+// the JSON text of the value that a get_property returns.
 type mpvReply struct {
 	ID    int
 	Error string
 	Data  string
 }
 
-// mpvRequest is one line that waits for mpv's answers. A line can cover
-// more than one command, such as the level and the mute of one volume
-// state, so it waits until every command it sent has an answer.
+// mpvRequest is a log line that waits for mpv's replies. One line can
+// cover several commands, such as the level and the mute of one volume
+// change, so left counts the replies that have not arrived, and the
+// line is logged when left reaches 0. results has each distinct error
+// string of the replies.
 type mpvRequest struct {
 	line    string
 	left    int
-	answers []string
+	results []string
 }
 
-// mpvWords writes a command the way mpv's socket carries it, so the line
-// shows the exact words the sidecar sent.
-func mpvWords(command []any) string {
-	// A command is strings and numbers, and those marshal
-	// unconditionally, so the error is dropped.
+// commandJSON returns a command as the JSON that goes over mpv's
+// socket, so the log line shows exactly what the sidecar sent.
+func commandJSON(command []any) string {
+	// Marshaling strings and numbers cannot fail.
 	words, _ := json.Marshal(command)
 	return string(words)
 }
 
 // request sends commands to mpv as one operation and logs line when
-// mpv has answered all of them. A socket that is not open, and a write
-// that fails, log the line at once with the reason, because no answer
-// will arrive.
+// mpv has replied to all of them. When the socket is not open or a
+// write fails, it logs the line at once with the reason, because no
+// reply will arrive.
 func (c *commander) request(line string, commands ...[]any) {
 	c.mpvMutex.Lock()
 	defer c.mpvMutex.Unlock()
 	sent := make([]string, len(commands))
 	for index, command := range commands {
-		sent[index] = mpvWords(command)
+		sent[index] = commandJSON(command)
 	}
 	line += ", sent " + strings.Join(sent, " and ") + " to mpv"
 	if c.mpv == nil {
@@ -84,13 +86,11 @@ func (c *commander) request(line string, commands ...[]any) {
 	}
 }
 
-// answer folds one of mpv's answers into the line that waits for it,
-// and logs the line when its last answer arrives. An id the sidecar did
-// not give, or one it already answered, is dropped.
-func (c *commander) answer(reply mpvReply) {
+// deliverReply matches a reply from mpv to the query or the log line that
+// waits for its id, and logs the line when its last reply arrives. It
+// drops a reply whose id nothing waits for.
+func (c *commander) deliverReply(reply mpvReply) {
 	c.mpvMutex.Lock()
-	// A read waits for its answer itself, so its answer is handed back and
-	// writes no line here.
 	if query, reading := c.queries[reply.ID]; reading {
 		delete(c.queries, reply.ID)
 		c.mpvMutex.Unlock()
@@ -104,24 +104,25 @@ func (c *commander) answer(reply mpvReply) {
 	}
 	delete(c.requests, reply.ID)
 	entry.left--
-	if !slices.Contains(entry.answers, reply.Error) {
-		entry.answers = append(entry.answers, reply.Error)
+	if !slices.Contains(entry.results, reply.Error) {
+		entry.results = append(entry.results, reply.Error)
 	}
 	c.mpvMutex.Unlock()
 	if entry.left == 0 {
-		logLine(c.log, "%s, mpv answered %s", entry.line, strings.Join(entry.answers, " and "))
+		logLine(c.log, "%s, mpv answered %s", entry.line, strings.Join(entry.results, " and "))
 	}
 }
 
-// serveReplies answers each of mpv's replies until the socket closes.
+// serveReplies passes each reply from mpv to answer until the replies
+// channel closes.
 func (c *commander) serveReplies(replies <-chan mpvReply) {
 	for reply := range replies {
-		c.answer(reply)
+		c.deliverReply(reply)
 	}
 }
 
 // abandonRequests logs every line still waiting when the socket closes,
-// because mpv will not answer it now. The caller holds mpvMutex.
+// because mpv can no longer reply. The caller holds mpvMutex.
 func (c *commander) abandonRequests() {
 	logged := map[*mpvRequest]bool{}
 	ids := make([]int, 0, len(c.requests))
@@ -139,8 +140,9 @@ func (c *commander) abandonRequests() {
 	c.requests = nil
 }
 
-// abandonQueries tells every read still waiting when the socket closes that
-// no answer will come. The caller holds mpvMutex.
+// abandonQueries closes the channel of every query still waiting when
+// the socket closes, so each query returns an error. The caller holds
+// mpvMutex.
 func (c *commander) abandonQueries() {
 	for id, query := range c.queries {
 		close(query)
@@ -148,14 +150,15 @@ func (c *commander) abandonQueries() {
 	}
 }
 
-// mpvQueryTimeout bounds the wait for mpv's answer to a read. mpv answers a
-// get_property from memory in well under a second, so a read that waits
-// longer is a socket that has stopped, and the read gives up.
+// mpvQueryTimeout bounds the wait for mpv's reply to a query. mpv
+// replies to get_property at once, so a query that waits this long
+// means that mpv has stopped reading its socket.
 const mpvQueryTimeout = 5 * time.Second
 
-// query reads one property from mpv and returns its value as JSON text. The
-// answer arrives on the reader goroutine, so the caller runs on a goroutine
-// of its own. An error holds mpv's own error word.
+// query reads one property from mpv and returns its value as JSON text.
+// serveReplies delivers the reply on its own goroutine, so the caller
+// must not be that goroutine. When mpv replies with an error,
+// the returned error includes mpv's error string.
 func (c *commander) query(property string) (string, error) {
 	c.mpvMutex.Lock()
 	if c.mpv == nil {
@@ -182,7 +185,7 @@ func (c *commander) query(property string) (string, error) {
 		switch {
 		case !answered:
 			return "", errors.New("mpv closed its socket before it answered")
-		case reply.Error != mpvAnswerSuccess:
+		case reply.Error != mpvReplySuccess:
 			return "", fmt.Errorf("mpv answered %s", reply.Error)
 		}
 		return reply.Data, nil
@@ -194,7 +197,8 @@ func (c *commander) query(property string) (string, error) {
 	}
 }
 
-// sendRequest writes one command with the request id mpv answers under.
+// sendRequest writes one command as JSON, with the request id that mpv
+// copies into its reply.
 func sendRequest(writer io.Writer, id int, command []any) error {
 	return json.NewEncoder(writer).Encode(mpvCommand{Command: command, RequestID: id})
 }

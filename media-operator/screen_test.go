@@ -1,9 +1,8 @@
 package main
 
-// These tests cover the media layer's half of the Display resource:
-// the lookup from an allocated draw device to the Display that names
-// the panel, the override each desire writes there, and what a
-// cluster with no Display does instead.
+// These tests cover how media-operator uses Display resources: finding
+// the Display from an allocated draw device, the override that each
+// desire applies to it, and what happens when there is no Display.
 
 import (
 	"testing"
@@ -12,16 +11,17 @@ import (
 	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
-// The monitor id the display-operator publishes for the
-// screen, which is also the name of its Display.
+// testMonitor is the monitor id that display-operator publishes for the
+// screen. It is also the name of the Display.
 const testMonitor = "DP-1"
 
-// The machine the display driver publishes that screen from, which is
-// the machine a Receiver input names.
+// testNode is the machine whose display driver publishes the screen. A
+// Receiver input refers to this machine.
 const testNode = "node-5"
 
-// The idle claim as the scheduler left it: the draw request
-// allocated against one device in the display driver's pool.
+// allocatedIdleClaim returns the idle claim after the scheduler
+// allocated its draw request to one device in the display driver's
+// pool.
 func allocatedIdleClaim() *ResourceClaim {
 	claim := buildIdleClaim(housePlayer(), "display-draw")
 	claim.Status = &ResourceClaimStatus{
@@ -39,8 +39,8 @@ func allocatedIdleClaim() *ResourceClaim {
 	return claim
 }
 
-// The slice entry that carries the allocated device's
-// attributes, the monitor id among them.
+// monitorSlice returns the ResourceSlice with the allocated device and
+// its attributes, including the monitor id.
 func monitorSlice() ResourceSlice {
 	return ResourceSlice{
 		Metadata: ObjectMeta{Name: "node-5-display"},
@@ -56,8 +56,7 @@ func monitorSlice() ResourceSlice {
 	}
 }
 
-// The panel as the display-operator reports it while it is
-// lit, with no override standing.
+// litDisplay returns a Display for a lit panel with no override.
 func litDisplay() *Display {
 	return &Display{
 		Metadata: ObjectMeta{Name: testMonitor},
@@ -68,9 +67,8 @@ func litDisplay() *Display {
 	}
 }
 
-// The panel as the display-operator reports it while the monitor
-// shows another input: the connector carries no panel, and the idle
-// claim has deallocated.
+// awayDisplay returns a Display whose connector has no panel, as when
+// the monitor shows another input.
 func awayDisplay() *Display {
 	display := litDisplay()
 	display.Status.Conditions = []DisplayCondition{connectedCondition("False", displayReasonNoPanel, "no panel on DP-1")}
@@ -81,39 +79,37 @@ func connectedCondition(status, reason, message string) DisplayCondition {
 	return DisplayCondition{Type: displayConnectedCondition, Status: status, Reason: reason, Message: message}
 }
 
-// The screen the theater unit remembers from an earlier pass, as the
-// operator wrote it onto the Player's status.
-func rememberedScreen() *PlayerScreenStatus {
+// earlierScreen is the screen that an earlier pass wrote to the
+// theater Player's status.
+func earlierScreen() *PlayerScreenStatus {
 	return &PlayerScreenStatus{Node: testNode, Monitor: testMonitor}
 }
 
-// The Screen condition the theater unit held from an earlier pass,
-// stamped at a time no pass under test writes.
-func heldScreenCondition(status conditions.Status, reason string) PlayerCondition {
+// earlierScreenCondition is a Screen condition that an earlier pass
+// wrote, with a transition time that no pass in the tests writes.
+func earlierScreenCondition(status conditions.Status, reason string) PlayerCondition {
 	return PlayerCondition{
 		Type:               screenConditionType,
 		Status:             status,
 		Reason:             reason,
-		LastTransitionTime: heldScreenStamp,
+		LastTransitionTime: earlierTransitionTime,
 	}
 }
 
-// heldScreenStamp is the time no pass under test writes.
-var heldScreenStamp = time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+var earlierTransitionTime = time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
 
-// screenCondition answers the one Screen condition the written
-// Player carries, and fails the test when it carries none or more.
+// screenCondition returns the Screen condition of the written Player.
+// It fails the test unless the Player has exactly one condition.
 func screenCondition(t *testing.T, player *Player) PlayerCondition {
 	t.Helper()
 	if len(player.Status.Conditions) != 1 {
-		t.Fatalf("the Player carries %+v, want one Screen condition", player.Status.Conditions)
+		t.Fatalf("the Player conditions are %+v, want one Screen condition", player.Status.Conditions)
 	}
 	condition := player.Status.Conditions[0]
 	mustMatch(t, condition.Type, screenConditionType)
 	return condition
 }
 
-// displayReads counts the passes' reads of the screen's Display.
 func displayReads(cluster *fakeCluster) int {
 	reads := 0
 	for _, request := range cluster.requests {
@@ -124,8 +120,8 @@ func displayReads(cluster *fakeCluster) int {
 	return reads
 }
 
-// screenCluster is a cluster whose theater unit has an
-// allocated screen and a Display for it.
+// screenCluster returns a cluster where the theater Player has an
+// allocated screen and a Display.
 func screenCluster() *fakeCluster {
 	cluster := newFakeCluster()
 	cluster.players["theater"] = housePlayer()
@@ -135,24 +131,23 @@ func screenCluster() *fakeCluster {
 	return cluster
 }
 
-// statePanel hands the operator one desire off the bus and
-// runs the pass that acts on it. The pass's lookups are dropped first,
-// the way a pass drops them, so the pass reads the Display as the last
-// one left it.
-func statePanel(media *operator, players []Player, desire string, defaults *IdlePolicy) {
+// sendPanelDesireAndReconcile sends one panel desire as a bus message and reconciles
+// the Players. It clears the cached lookups first, as pass does, so the
+// reconcile reads the Display as the previous one left it.
+func sendPanelDesireAndReconcile(media *operator, players []Player, desire string, defaults *IdlePolicy) {
 	media.screenCache, media.receiverCache = nil, nil
 	media.handleBusMessage(playerPanelTopic(defaultTopicBase, "house", "theater"),
 		[]byte(`{"desire":"`+desire+`"}`))
 	media.reconcilePlayers(players, nil, "", defaults)
 }
 
-// The off desire becomes a backlight override on the screen's
-// own Display, applied under this operator's field manager.
+// The off desire applies a backlight override to the screen's Display
+// under this operator's field manager.
 func TestTheOffDesireOverridesTheBacklight(t *testing.T) {
 	cluster := screenCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
-	statePanel(media, []Player{*housePlayer()}, panelDesireOff, nil)
+	sendPanelDesireAndReconcile(media, []Player{*housePlayer()}, panelDesireOff, nil)
 
 	mustMatch(t, len(cluster.applies), 1)
 	mustMatch(t, cluster.applies[0].name, testMonitor)
@@ -161,95 +156,82 @@ func TestTheOffDesireOverridesTheBacklight(t *testing.T) {
 	mustMatch(t, *cluster.displays[testMonitor].Spec.Override, DisplayOverride{Backlight: displayPowerOff})
 }
 
-// The resolved off mode picks the block. The power mode is
-// deeper than the backlight, and a Player states it only for a panel
-// a drill proved wakes.
-func TestTheOffDesireOverridesThePowerWhenTheModeStatesIt(t *testing.T) {
+func TestTheOffDesireOverridesThePowerWhenTheOffModeIsPower(t *testing.T) {
 	cluster := screenCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
-	statePanel(media, []Player{*housePlayer()}, panelDesireOff, &IdlePolicy{OffMode: offModePower})
+	sendPanelDesireAndReconcile(media, []Player{*housePlayer()}, panelDesireOff, &IdlePolicy{OffMode: offModePower})
 
 	mustMatch(t, *cluster.applies[0].override, DisplayOverride{Power: displayPowerOff})
 }
 
-// The on desire applies a spec with no override, and the API
-// server then removes the block this operator owns. The
-// display-operator restores the panel from there.
-func TestTheOnDesireLiftsTheOverride(t *testing.T) {
+// The on desire applies a spec with no override, so the API server
+// removes the override that this field manager owns. display-operator
+// then restores the panel's settings.
+func TestTheOnDesireRemovesTheOverride(t *testing.T) {
 	cluster := screenCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
-	statePanel(media, []Player{*housePlayer()}, panelDesireOff, nil)
-	statePanel(media, []Player{*cluster.players["theater"]}, panelDesireOn, nil)
+	sendPanelDesireAndReconcile(media, []Player{*housePlayer()}, panelDesireOff, nil)
+	sendPanelDesireAndReconcile(media, []Player{*cluster.players["theater"]}, panelDesireOn, nil)
 
 	mustMatch(t, len(cluster.applies), 2)
 	if cluster.applies[1].override != nil {
-		t.Errorf("the second apply carried %+v, want no override", cluster.applies[1].override)
+		t.Errorf("the second apply wrote override %+v, want none", cluster.applies[1].override)
 	}
 	if cluster.displays[testMonitor].Spec.Override != nil {
-		t.Errorf("the Display still holds %+v", cluster.displays[testMonitor].Spec.Override)
+		t.Errorf("the Display override is %+v, want none", cluster.displays[testMonitor].Spec.Override)
 	}
 }
 
-// The retained topic redelivers the same desire on every
-// broker session, so the pass writes the Display only when the desire
-// changed.
+// The broker redelivers the retained desire on every new session, so
+// the pass writes the Display only when the desire has changed.
 func TestThePassWritesTheDisplayOnlyWhenTheDesireChanges(t *testing.T) {
 	cluster := screenCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
-	statePanel(media, []Player{*housePlayer()}, panelDesireOff, nil)
-	statePanel(media, []Player{*cluster.players["theater"]}, panelDesireOff, nil)
+	sendPanelDesireAndReconcile(media, []Player{*housePlayer()}, panelDesireOff, nil)
+	sendPanelDesireAndReconcile(media, []Player{*cluster.players["theater"]}, panelDesireOff, nil)
 
 	mustMatch(t, len(cluster.applies), 1)
 }
 
-// A screen with no Display keeps its panel lit. There is no
-// second writer to fall back to, so the pass writes nothing and the
-// Player carries no panel word.
 func TestAScreenWithNoDisplayKeepsThePanelLit(t *testing.T) {
 	cluster := screenCluster()
 	delete(cluster.displays, testMonitor)
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
-	statePanel(media, []Player{*housePlayer()}, panelDesireOff, nil)
+	sendPanelDesireAndReconcile(media, []Player{*housePlayer()}, panelDesireOff, nil)
 
 	mustMatch(t, len(cluster.applies), 0)
 	mustMatch(t, cluster.players["theater"].Status.Panel, "")
 }
 
-// A claim the scheduler has not allocated names no screen, so
-// the pass writes no override for the unit.
-func TestAnUnallocatedClaimNamesNoScreen(t *testing.T) {
+func TestAnUnallocatedClaimWritesNoOverride(t *testing.T) {
 	cluster := screenCluster()
 	cluster.claims[idleClaimName("theater")].Status = nil
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
-	statePanel(media, []Player{*housePlayer()}, panelDesireOff, nil)
+	sendPanelDesireAndReconcile(media, []Player{*housePlayer()}, panelDesireOff, nil)
 
 	mustMatch(t, len(cluster.applies), 0)
 }
 
-// The Player's panel word is the Display's observation, so a
-// person reads what the hardware last showed and not what the media
-// layer asked for.
-func TestThePlayerStatusFoldsTheDisplayObservation(t *testing.T) {
+// The Player's panel status shows what the panel last reported, not
+// the override that media-operator applied.
+func TestThePlayerPanelStatusComesFromTheObservedState(t *testing.T) {
 	cluster := screenCluster()
 	cluster.displays[testMonitor].Status.Observed = DisplayObserved{Brightness: ptr(0), Power: "on"}
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
-	statePanel(media, []Player{*housePlayer()}, panelDesireOff, nil)
+	sendPanelDesireAndReconcile(media, []Player{*housePlayer()}, panelDesireOff, nil)
 
 	mustMatch(t, cluster.players["theater"].Status.Panel, panelBacklightOff)
 }
 
-// A unit with no screen memory reads no Display at all: its claim
-// has never resolved, so there is no Display to read a condition
-// from, and it carries no Screen condition. A unit with a screen
-// reads its Display once a pass whether or not a desire stands,
-// because the condition is what says why the idle pod waits.
-func TestAUnitWithNoScreenMemoryReadsNoDisplay(t *testing.T) {
+// A Player whose claim is not allocated and whose status has no screen
+// has no Display to read, so it gets no Screen condition.
+func TestAPlayerWithNoKnownScreenReadsNoDisplay(t *testing.T) {
 	cluster := screenCluster()
 	cluster.claims[idleClaimName("theater")].Status = nil
 	media := testOperator(t, cluster, make(chan struct{}, 1))
@@ -259,48 +241,40 @@ func TestAUnitWithNoScreenMemoryReadsNoDisplay(t *testing.T) {
 	mustMatch(t, cluster.players["theater"].Status.Panel, "")
 	mustMatch(t, len(cluster.players["theater"].Status.Conditions), 0)
 	if cluster.players["theater"].Status.Screen != nil {
-		t.Errorf("the Player remembers %+v, want no screen", cluster.players["theater"].Status.Screen)
+		t.Errorf("the Player status.screen is %+v, want none", cluster.players["theater"].Status.Screen)
 	}
 	mustMatch(t, displayReads(cluster), 0)
 }
 
-// The pass writes the screen the idle claim resolved to onto the
-// Player, so a person reads which machine and which Display the unit
-// draws on.
-func TestThePassRemembersTheScreenFromAnAllocatedClaim(t *testing.T) {
+func TestThePassWritesTheScreenFromAnAllocatedClaimToTheStatus(t *testing.T) {
 	cluster := screenCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
 	media.reconcilePlayers([]Player{*housePlayer()}, nil, "", nil)
 
-	mustMatch(t, *cluster.players["theater"].Status.Screen, *rememberedScreen())
+	mustMatch(t, *cluster.players["theater"].Status.Screen, *earlierScreen())
 }
 
-// A claim that deallocated names no screen, so the pass keeps the
-// screen the Player remembers and reads that Display for the
-// condition. The monitor showing another input is the PanelAway
-// reason, with the Display's own message.
-func TestThePassKeepsTheRememberedScreenWhenTheClaimIsUnallocated(t *testing.T) {
+// When the claim is no longer allocated, the pass keeps the screen in
+// the Player's status and reads that Display for the condition.
+func TestThePassKeepsTheStatusScreenWhenTheClaimIsUnallocated(t *testing.T) {
 	cluster := screenCluster()
 	cluster.claims[idleClaimName("theater")].Status = nil
 	cluster.displays[testMonitor] = awayDisplay()
 	player := housePlayer()
-	player.Status.Screen = rememberedScreen()
+	player.Status.Screen = earlierScreen()
 	cluster.players["theater"] = player
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
 	media.reconcilePlayers([]Player{*player}, nil, "", nil)
 
-	mustMatch(t, *cluster.players["theater"].Status.Screen, *rememberedScreen())
+	mustMatch(t, *cluster.players["theater"].Status.Screen, *earlierScreen())
 	condition := screenCondition(t, cluster.players["theater"])
 	mustMatch(t, condition.Status, "False")
 	mustMatch(t, condition.Reason, screenReasonPanelAway)
 	mustMatch(t, condition.Message, "no panel on DP-1")
 }
 
-// The Screen condition is the Display's Connected condition read
-// for the unit: present, away, or unknown when there is no Display
-// or no report to read.
 func TestTheScreenConditionFollowsTheDisplay(t *testing.T) {
 	unreported := litDisplay()
 	unreported.Status.Conditions = nil
@@ -353,16 +327,13 @@ func TestTheScreenConditionFollowsTheDisplay(t *testing.T) {
 			mustMatch(t, condition.Reason, each.want.Reason)
 			mustMatch(t, condition.Message, each.want.Message)
 			if condition.LastTransitionTime.IsZero() {
-				t.Error("the condition carries no transition time")
+				t.Error("the Screen condition has no lastTransitionTime, want one")
 			}
 		})
 	}
 }
 
-// The transition time is the moment the status last changed, so a
-// pass that reads the same status keeps the time the Player already
-// holds, and a pass that reads a different one stamps a new time.
-func TestTheTransitionTimeMovesOnlyWhenTheStatusFlips(t *testing.T) {
+func TestTheTransitionTimeChangesOnlyWhenTheStatusChanges(t *testing.T) {
 	cases := []struct {
 		name    string
 		display *Display
@@ -376,74 +347,69 @@ func TestTheTransitionTimeMovesOnlyWhenTheStatusFlips(t *testing.T) {
 			cluster := screenCluster()
 			cluster.displays[testMonitor] = each.display
 			player := housePlayer()
-			player.Status.Screen = rememberedScreen()
-			player.Status.Conditions = []PlayerCondition{heldScreenCondition(conditionTrue, screenReasonPresent)}
+			player.Status.Screen = earlierScreen()
+			player.Status.Conditions = []PlayerCondition{earlierScreenCondition(conditionTrue, screenReasonPresent)}
 			cluster.players["theater"] = player
 			media := testOperator(t, cluster, make(chan struct{}, 1))
 
 			media.reconcilePlayers([]Player{*player}, nil, "", nil)
 
 			condition := screenCondition(t, cluster.players["theater"])
-			mustMatch(t, !condition.LastTransitionTime.Equal(heldScreenStamp), each.moves)
+			mustMatch(t, !condition.LastTransitionTime.Equal(earlierTransitionTime), each.moves)
 		})
 	}
 }
 
-// A Display the pass cannot read is not a change on the panel, so
-// the unit keeps the condition it already holds rather than churning
-// on a transient error, and the fault reports once.
-func TestAnUnreadableDisplayKeepsTheHeldCondition(t *testing.T) {
+// A read error says nothing about the panel, so the Player keeps its
+// current condition, and the fault is reported once.
+func TestAnUnreadableDisplayKeepsTheCurrentCondition(t *testing.T) {
 	cluster := screenCluster()
 	cluster.fails[displaysPath+"/"+testMonitor] = true
 	player := housePlayer()
-	player.Status.Screen = rememberedScreen()
-	player.Status.Conditions = []PlayerCondition{heldScreenCondition("False", screenReasonPanelAway)}
+	player.Status.Screen = earlierScreen()
+	player.Status.Conditions = []PlayerCondition{earlierScreenCondition("False", screenReasonPanelAway)}
 	cluster.players["theater"] = player
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
 	media.reconcilePlayers([]Player{*player}, nil, "", nil)
 	media.reconcilePlayers([]Player{*cluster.players["theater"]}, nil, "", nil)
 
-	mustMatch(t, screenCondition(t, cluster.players["theater"]), heldScreenCondition("False", screenReasonPanelAway))
+	mustMatch(t, screenCondition(t, cluster.players["theater"]), earlierScreenCondition("False", screenReasonPanelAway))
 	if media.panelFaults[playerKey("house", "theater")] == "" {
-		t.Error("an unreadable Display reported no fault")
+		t.Error("after the Display could not be read, panelFaults has no entry, want one")
 	}
 }
 
-// The condition and the panel both read the unit's Display from the
-// view, so the pass asks the API server nothing about it.
-func TestAUnitReadsItsDisplayFromTheView(t *testing.T) {
+// The Screen condition and the panel read the Display from the cluster
+// view's watch cache, so the pass sends the API server no request.
+func TestAPlayerReadsItsDisplayFromTheView(t *testing.T) {
 	cluster := screenCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
-	statePanel(media, []Player{*housePlayer()}, panelDesireOff, nil)
+	sendPanelDesireAndReconcile(media, []Player{*housePlayer()}, panelDesireOff, nil)
 
 	mustMatch(t, displayReads(cluster), 0)
 	mustMatch(t, cluster.players["theater"].Status.Panel, panelOn)
 }
 
-// An apply the API server refuses leaves the panel dark, so
-// the fault reports whichever desire it was. Only a lit panel is
-// silent, and a lift that did not land is not one.
-func TestAFailedLiftReportsTheFault(t *testing.T) {
+// A rejected removal of the override leaves the panel off, so it
+// reports a fault, and the recorded off override stays for a retry.
+func TestARejectedOverrideRemovalReportsTheFault(t *testing.T) {
 	cluster := screenCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	key := playerKey("house", "theater")
 
-	statePanel(media, []Player{*housePlayer()}, panelDesireOff, nil)
+	sendPanelDesireAndReconcile(media, []Player{*housePlayer()}, panelDesireOff, nil)
 	cluster.applyFails = true
-	statePanel(media, []Player{*cluster.players["theater"]}, panelDesireOn, nil)
+	sendPanelDesireAndReconcile(media, []Player{*cluster.players["theater"]}, panelDesireOn, nil)
 
 	if media.panelFaults[key] == "" {
-		t.Error("a refused lift reported no fault")
+		t.Error("after the Display refused the lift, panelFaults has no entry, want one")
 	}
 	mustMatch(t, media.panelOverrides[key].desire, panelDesireOff)
 }
 
-// A screen the pass cannot read reports the fault for either
-// desire, because a Display that answers nothing leaves an override
-// standing as readily as it refuses a new one.
-func TestAnUnreadableDisplayReportsTheFaultOnEitherDesire(t *testing.T) {
+func TestAMissingDisplayReportsTheFaultOnEitherDesire(t *testing.T) {
 	cases := []string{panelDesireOff, panelDesireOn}
 	for _, desire := range cases {
 		t.Run(desire, func(t *testing.T) {
@@ -451,79 +417,74 @@ func TestAnUnreadableDisplayReportsTheFaultOnEitherDesire(t *testing.T) {
 			delete(cluster.displays, testMonitor)
 			media := testOperator(t, cluster, make(chan struct{}, 1))
 
-			statePanel(media, []Player{*housePlayer()}, desire, nil)
+			sendPanelDesireAndReconcile(media, []Player{*housePlayer()}, desire, nil)
 
 			if media.panelFaults[playerKey("house", "theater")] == "" {
-				t.Errorf("the %s desire reported no fault", desire)
+				t.Errorf("with the %s desire and no Display, panelFaults has no entry, want one", desire)
 			}
 		})
 	}
 }
 
-// A unit with no allocated screen and the on desire is the one
-// silent fault. The panel is lit, which is what the desire asks for.
 func TestAnUnallocatedScreenIsSilentOnTheOnDesire(t *testing.T) {
 	cluster := screenCluster()
 	cluster.claims[idleClaimName("theater")].Status = nil
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
-	statePanel(media, []Player{*housePlayer()}, panelDesireOn, nil)
+	sendPanelDesireAndReconcile(media, []Player{*housePlayer()}, panelDesireOn, nil)
 
 	mustMatch(t, media.panelFaults[playerKey("house", "theater")], "")
 }
 
-// A Player deleted while its panel is dark still owes the
-// screen a lift. The idle claim goes with the Player, so the pass
-// writes the Display from the monitor it remembered when it applied
+// The idle claim is deleted with the Player, so the pass removes the
+// override from the Display whose monitor id it stored when it applied
 // the override.
-func TestAPrunedUnitLiftsItsOverride(t *testing.T) {
+func TestADeletedPlayerHasItsOverrideRemoved(t *testing.T) {
 	cluster := screenCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
-	statePanel(media, []Player{*housePlayer()}, panelDesireOff, nil)
+	sendPanelDesireAndReconcile(media, []Player{*housePlayer()}, panelDesireOff, nil)
 	delete(cluster.players, "theater")
 	media.reconcilePlayers(nil, nil, "", nil)
 
 	mustMatch(t, len(cluster.applies), 2)
 	mustMatch(t, cluster.applies[1].name, testMonitor)
 	if cluster.applies[1].override != nil {
-		t.Errorf("the lift carried %+v, want no override", cluster.applies[1].override)
+		t.Errorf("the lift wrote override %+v, want none", cluster.applies[1].override)
 	}
 	if cluster.displays[testMonitor].Spec.Override != nil {
-		t.Errorf("the Display still holds %+v", cluster.displays[testMonitor].Spec.Override)
+		t.Errorf("the Display override is %+v, want none", cluster.displays[testMonitor].Spec.Override)
 	}
 	mustMatch(t, len(media.panelOverrides), 0)
 }
 
-// A unit switched to media.liken.sh/none draws nothing, so a dark
-// panel it left behind is lifted the way a deleted unit's is, and the
-// desk drops the desire so no later pass applies it again.
-func TestAUnitSwitchedToNoneLiftsItsOverride(t *testing.T) {
+// A Player switched to media.liken.sh/none draws nothing, so its
+// override is removed as for a deleted Player, and its stored desire is
+// dropped so no later pass applies it again.
+func TestAPlayerSwitchedToNoneHasItsOverrideRemoved(t *testing.T) {
 	cluster := screenCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	key := playerKey("house", "theater")
 
-	statePanel(media, []Player{*housePlayer()}, panelDesireOff, nil)
+	sendPanelDesireAndReconcile(media, []Player{*housePlayer()}, panelDesireOff, nil)
 	player := *cluster.players["theater"]
 	player.Spec.Idle = &IdlePolicy{Controller: idleControllerNone}
 	media.reconcilePlayers([]Player{player}, nil, "", nil)
 
 	mustMatch(t, len(cluster.applies), 2)
 	if cluster.applies[1].override != nil {
-		t.Errorf("the lift carried %+v, want no override", cluster.applies[1].override)
+		t.Errorf("the lift wrote override %+v, want none", cluster.applies[1].override)
 	}
 	mustMatch(t, len(media.panelOverrides), 0)
 	mustMatch(t, media.panels.stateFor(key), "")
 	mustMatch(t, cluster.players["theater"].Status.Panel, "")
 }
 
-// A unit whose panel was lit owes the screen nothing, so its
-// entry goes with no write at all.
-func TestAPrunedUnitWithTheOnDesireLiftsNothing(t *testing.T) {
+func TestADeletedPlayerWithALitPanelWritesNothing(t *testing.T) {
 	cluster := screenCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 
-	statePanel(media, []Player{*housePlayer()}, panelDesireOn, nil)
+	sendPanelDesireAndReconcile(media, []Player{*housePlayer()}, panelDesireOn, nil)
 	applied := len(cluster.applies)
 	delete(cluster.players, "theater")
 	media.reconcilePlayers(nil, nil, "", nil)
@@ -532,14 +493,12 @@ func TestAPrunedUnitWithTheOnDesireLiftsNothing(t *testing.T) {
 	mustMatch(t, len(media.panelOverrides), 0)
 }
 
-// A lift the API server refuses keeps the entry, so the next
-// pass writes the Display again. The panel is dark until one lands.
-func TestAFailedPruneLiftRetriesOnTheNextPass(t *testing.T) {
+func TestARejectedRemovalForADeletedPlayerRetriesOnTheNextPass(t *testing.T) {
 	cluster := screenCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	key := playerKey("house", "theater")
 
-	statePanel(media, []Player{*housePlayer()}, panelDesireOff, nil)
+	sendPanelDesireAndReconcile(media, []Player{*housePlayer()}, panelDesireOff, nil)
 	delete(cluster.players, "theater")
 	cluster.applyFails = true
 	media.reconcilePlayers(nil, nil, "", nil)
@@ -547,7 +506,7 @@ func TestAFailedPruneLiftRetriesOnTheNextPass(t *testing.T) {
 	mustMatch(t, media.panelOverrides[key].desire, panelDesireOff)
 	mustMatch(t, media.panelOverrides[key].monitor, testMonitor)
 	if media.panelFaults[key] == "" {
-		t.Error("a refused lift reported no fault")
+		t.Error("after the Display refused the lift, panelFaults has no entry, want one")
 	}
 
 	cluster.applyFails = false
@@ -556,19 +515,18 @@ func TestAFailedPruneLiftRetriesOnTheNextPass(t *testing.T) {
 	mustMatch(t, len(media.panelOverrides), 0)
 	mustMatch(t, media.panelFaults[key], "")
 	if cluster.displays[testMonitor].Spec.Override != nil {
-		t.Errorf("the Display still holds %+v", cluster.displays[testMonitor].Spec.Override)
+		t.Errorf("the Display override is %+v, want none", cluster.displays[testMonitor].Spec.Override)
 	}
 }
 
-// A Display that no longer exists carries no override, so the
-// lift it refuses is the lift landing. The entry goes, and nothing
-// new is reported.
-func TestAPrunedUnitWhoseDisplayIsGoneDropsItsEntry(t *testing.T) {
+// A Display that no longer exists has no override, so the NotFound
+// error drops the entry with no fault.
+func TestADeletedPlayerWhoseDisplayIsGoneDropsItsEntry(t *testing.T) {
 	cluster := screenCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	key := playerKey("house", "theater")
 
-	statePanel(media, []Player{*housePlayer()}, panelDesireOff, nil)
+	sendPanelDesireAndReconcile(media, []Player{*housePlayer()}, panelDesireOff, nil)
 	delete(cluster.displays, testMonitor)
 	delete(cluster.players, "theater")
 	media.reconcilePlayers(nil, nil, "", nil)
@@ -577,8 +535,6 @@ func TestAPrunedUnitWhoseDisplayIsGoneDropsItsEntry(t *testing.T) {
 	mustMatch(t, media.panelFaults[key], "")
 }
 
-// The lookup walks the allocation to the slice entry and
-// answers the monitor id the Display is named by.
 func TestTheScreenIsFoundThroughTheAllocation(t *testing.T) {
 	cluster := screenCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
@@ -590,8 +546,6 @@ func TestTheScreenIsFoundThroughTheAllocation(t *testing.T) {
 	mustMatch(t, found.node, testNode)
 }
 
-// A device that carries no monitor id names no Display, which
-// is a driver that publishes a screen this operator cannot place.
 func TestADeviceWithNoMonitorIDNamesNoScreen(t *testing.T) {
 	cluster := screenCluster()
 	cluster.slices[0].Spec.Devices[0].Attributes = nil
@@ -602,8 +556,6 @@ func TestADeviceWithNoMonitorIDNamesNoScreen(t *testing.T) {
 	mustMatch(t, found, false)
 }
 
-// The allocated draw device the lookup walks to, named the way a
-// ResourceSlice entry is keyed: by driver, by pool, and by device.
 func allocatedDrawDevice() DeviceRequestAllocationResult {
 	return DeviceRequestAllocationResult{
 		Request: idleDrawRequest,
@@ -613,9 +565,7 @@ func allocatedDrawDevice() DeviceRequestAllocationResult {
 	}
 }
 
-// The lookup answers no screen when no slice carries the allocated
-// device, which is a driver whose slices this operator cannot place.
-func TestTheMonitorLookupWalksPastSlicesThatDoNotHoldTheDevice(t *testing.T) {
+func TestTheMonitorLookupSkipsSlicesThatDoNotListTheDevice(t *testing.T) {
 	otherDriver := monitorSlice()
 	otherDriver.Spec.Driver = "gpu.liken.sh"
 	otherPool := monitorSlice()
@@ -634,24 +584,22 @@ func TestTheMonitorLookupWalksPastSlicesThatDoNotHoldTheDevice(t *testing.T) {
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
-			// The slices are already read, so the lookup needs no
-			// view and reads the list the case names.
+			// listed is true, so the lookup uses the slices of the case
+			// and does not read them from the view.
 			lookup := &screens{slices: each.slices, listed: true}
 
-			_, found := lookup.screenOf(allocatedDrawDevice())
+			_, found := lookup.screenOfDevice(allocatedDrawDevice())
 
 			mustMatch(t, found, false)
 		})
 	}
 }
 
-// A slice read that fails names no screen, so the pass writes no
-// override rather than one built on a guess.
-func TestTheMonitorLookupAnswersNothingWhenTheSliceReadFails(t *testing.T) {
+func TestTheMonitorLookupReturnsNoScreenWhenTheSliceReadFails(t *testing.T) {
 	cluster := screenCluster()
 	cluster.fails[slicesPath] = true
 
-	_, found := newScreens(cluster.view()).screenOf(allocatedDrawDevice())
+	_, found := newScreens(cluster.view()).screenOfDevice(allocatedDrawDevice())
 
 	mustMatch(t, found, false)
 }

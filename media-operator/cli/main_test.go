@@ -19,13 +19,13 @@ func TestRunPrintsTheVersion(t *testing.T) {
 func TestRunWithNoVerbPrintsUsage(t *testing.T) {
 	var stdout, stderr strings.Builder
 	if err := run(context.Background(), nil, &stdout, &stderr); err != nil {
-		t.Fatalf("run with no args: %v", err)
+		t.Fatalf("run with no arguments: %v", err)
 	}
 	if !strings.Contains(stderr.String(), usageText) {
 		t.Fatalf("stderr = %q, want the usage text", stderr.String())
 	}
 	if stdout.Len() != 0 {
-		t.Fatalf("stdout carried %q", stdout.String())
+		t.Fatalf("stdout = %q, want it empty", stdout.String())
 	}
 }
 
@@ -36,7 +36,7 @@ func TestRunRejectsAnUnknownVerb(t *testing.T) {
 		t.Fatal("run returned no error for an unknown verb")
 	}
 	if !strings.Contains(err.Error(), "frobnicate") {
-		t.Fatalf("error %q does not name the verb", err)
+		t.Fatalf("error is %q, want one that names the verb frobnicate", err)
 	}
 }
 
@@ -61,7 +61,7 @@ func TestRunDispatchesCapture(t *testing.T) {
 	var stdout, stderr strings.Builder
 	err := run(context.Background(), []string{"capture", "living-room", "-n", "house", "--format", "webm"}, &stdout, &stderr)
 	if err == nil {
-		t.Fatal("run dispatched capture without surfacing the bad format")
+		t.Fatal("run returned no error for capture with the format webm, want one")
 	}
 }
 

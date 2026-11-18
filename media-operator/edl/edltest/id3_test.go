@@ -13,14 +13,14 @@ func TestWriteTrackWritesAnID3Tag(t *testing.T) {
 
 	written, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("wanted no error, got %v", err)
+		t.Fatalf("reading the track back: %v", err)
 	}
 	if !bytes.HasPrefix(written, []byte("ID3")) {
 		t.Errorf("the file starts with %q, want ID3", written[:3])
 	}
 	for _, want := range []string{"TIT2", "Song", "TPE1", "Band"} {
 		if !bytes.Contains(written, []byte(want)) {
-			t.Errorf("the tag carries no %q", want)
+			t.Errorf("the tag has no %q, want it", want)
 		}
 	}
 }

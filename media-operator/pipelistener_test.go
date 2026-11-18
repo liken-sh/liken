@@ -1,10 +1,10 @@
 package main
 
-// A pipeListener serves a real http.Server, with its own TLS, over
-// in-memory connections. A test of a TLS handshake then runs in a
-// synctest bubble: a goroutine that reads a socket is not durably
-// blocked, so the bubble's clock does not advance while one is open,
-// and a pipe's reads block on channels instead.
+// A pipeListener lets a real http.Server with TLS serve over in-memory
+// pipes, so a test of a TLS handshake can run in a synctest bubble. A
+// goroutine that reads a real socket is not durably blocked, so the
+// bubble's clock stops while a socket is open. A pipe's reads block on
+// channels, which synctest counts as durably blocked.
 
 import (
 	"bytes"
@@ -41,10 +41,9 @@ func (l *pipeListener) Close() error {
 
 func (l *pipeListener) Addr() net.Addr { return &net.UnixAddr{Name: "pipe", Net: "pipe"} }
 
-// dial opens a pipe and hands the server the far end. It has the
-// signature of net.Dialer.DialContext, and it answers every address. A
-// listener that has closed refuses the connection, the way a port with
-// no server does.
+// dial has the signature of net.Dialer.DialContext and ignores the
+// address. When the listener is closed, it returns a connection refused
+// error, like a port with no server.
 func (l *pipeListener) dial(ctx context.Context, _, _ string) (net.Conn, error) {
 	client, server := net.Pipe()
 	select {
@@ -57,12 +56,11 @@ func (l *pipeListener) dial(ctx context.Context, _, _ string) (net.Conn, error) 
 	return nil, &net.OpError{Op: "dial", Net: "tcp", Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)}
 }
 
-// queuedConn is the client's end of a pipe. Its writes return at once,
-// and a goroutine of its own delivers them in order, the way a socket's
-// send buffer holds bytes the peer has not read yet. A bare pipe holds
-// no bytes, so a TLS client that refuses the server's certificate
-// blocks on the write of its alert while the server blocks on the rest
-// of its own handshake, and neither write ends.
+// queuedConn is the client's end of a pipe, with a send buffer like a
+// socket's. Write returns at once, and a goroutine writes the bytes to
+// the pipe in order. A bare net.Pipe has no buffer, so when a TLS client
+// rejects the server's certificate, the client blocks writing its alert
+// while the server blocks writing the rest of its handshake.
 type queuedConn struct {
 	net.Conn
 	writes chan []byte

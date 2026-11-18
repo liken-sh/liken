@@ -1,9 +1,5 @@
 package main
 
-// These tests cover the client-certificate half of authentication:
-// the anchors read from the ConfigMap, the caller read out of a
-// verified leaf, and the whole policy on a real TLS listener.
-
 import (
 	"context"
 	"crypto/ecdsa"
@@ -22,10 +18,8 @@ import (
 	"time"
 )
 
-// An authority in the shape the API server publishes in
-// extension-apiserver-authentication, with the client leaves it
-// signs. Every test below that offers a client certificate mints one
-// of these.
+// clientAuthority signs client certificates the way the cluster's
+// client certificate authority does.
 type clientAuthority struct {
 	certPEM     []byte
 	certificate *x509.Certificate
@@ -59,8 +53,8 @@ func newClientAuthority(t *testing.T) *clientAuthority {
 	}
 }
 
-// A leaf in the shape a kubeconfig carries: the user in the subject's
-// common name and the groups in its organization.
+// leaf returns a client certificate like one in a kubeconfig, with the
+// user as the subject common name and the groups as its organizations.
 func (a *clientAuthority) leaf(t *testing.T, user string, groups []string) tls.Certificate {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -83,8 +77,8 @@ func (a *clientAuthority) leaf(t *testing.T, user string, groups []string) tls.C
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: certificate}
 }
 
-// The state a TLS listener hands the handler once it verified the leaf
-// against the cluster's authority.
+// verified returns the connection state a TLS listener passes to the
+// handler after it verified a leaf against this authority.
 func (a *clientAuthority) verified(t *testing.T, user string, groups []string) *tls.ConnectionState {
 	t.Helper()
 	leaf := a.leaf(t, user, groups)
@@ -94,8 +88,8 @@ func (a *clientAuthority) verified(t *testing.T, user string, groups []string) *
 	}
 }
 
-// One request over a connection that carries the given TLS state, with
-// no Authorization field unless the header states one.
+// callOver sends one request with the given TLS connection state and
+// headers, without a real TLS listener.
 func (f *apiFixture) callOver(target string, state *tls.ConnectionState, header http.Header) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(http.MethodGet, target, nil)
 	for key, values := range header {
@@ -109,9 +103,8 @@ func (f *apiFixture) callOver(target string, state *tls.ConnectionState, header 
 	return recorder
 }
 
-// The user is the leaf's subject common name and the groups are its
-// subject organization values, which is what the SubjectAccessReview
-// has to carry for a rule written for that person to answer.
+// The SubjectAccessReview has the leaf's common name as the user and
+// its organizations as the groups.
 func TestAVerifiedClientCertificateIsTheCaller(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
@@ -127,8 +120,6 @@ func TestAVerifiedClientCertificateIsTheCaller(t *testing.T) {
 	})
 }
 
-// kubectl describe player answers with the Captured Event, so the
-// Event names the certificate's user.
 func TestTheCapturedEventNamesTheCertificateUser(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
@@ -146,8 +137,6 @@ func TestTheCapturedEventNamesTheCertificateUser(t *testing.T) {
 	})
 }
 
-// A certificate that named a caller is the caller, and the token beside
-// it is never reviewed.
 func TestTheCertificateComesBeforeTheToken(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
@@ -163,8 +152,8 @@ func TestTheCertificateComesBeforeTheToken(t *testing.T) {
 	})
 }
 
-// Only a chain the listener verified names a caller, so an offered
-// certificate falls to the token beside it.
+// A certificate that the listener did not verify identifies no caller,
+// so the request is authenticated by its bearer token.
 func TestAnUnverifiedCertificateNamesNobody(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
@@ -182,8 +171,6 @@ func TestAnUnverifiedCertificateNamesNobody(t *testing.T) {
 	})
 }
 
-// A leaf with no common name names no user, so the request falls to the
-// token and ends in the ordinary 401 when it carries none.
 func TestACertificateWithNoCommonNameNamesNobody(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
@@ -197,7 +184,8 @@ func TestACertificateWithNoCommonNameNamesNobody(t *testing.T) {
 	})
 }
 
-// Neither credential is the bare challenge, RFC 6750 section 3.
+// A request with neither credential gets the bare challenge of RFC 6750
+// section 3.
 func TestNoCertificateAndNoTokenIsRefused(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
@@ -209,9 +197,8 @@ func TestNoCertificateAndNoTokenIsRefused(t *testing.T) {
 	})
 }
 
-// The grant cache is keyed on the leaf, so one certificate costs one
-// access review and a second certificate never reuses the first one's
-// grant.
+// A second certificate for the same user does not reuse the first
+// certificate's cached grant.
 func TestTheGrantCacheKeysOnTheCertificate(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
@@ -227,8 +214,6 @@ func TestTheGrantCacheKeysOnTheCertificate(t *testing.T) {
 	})
 }
 
-// authenticationConfigMap is the API server's own ConfigMap, holding
-// one authority's certificate.
 func authenticationConfigMap(caPEM string, version string) *ConfigMap {
 	return &ConfigMap{
 		Metadata: ObjectMeta{Name: clientCAConfigMap, Namespace: clientCANamespace, ResourceVersion: version},
@@ -241,19 +226,18 @@ func publishAuthority(t *testing.T, api *coreAPI, caPEM string) {
 	api.seed(t, "configmaps/"+clientCAConfigMap, authenticationConfigMap(caPEM, "7"))
 }
 
-// Whether a leaf of this authority verifies against the anchors the
-// pool holds now.
+// verifiesAgainst reports whether a leaf that authority signed
+// verifies against the current pool.
 func verifiesAgainst(t *testing.T, anchors *clientAnchors, authority *clientAuthority) bool {
 	t.Helper()
 	leaf := authority.leaf(t, "admin", []string{"system:masters"})
 	_, err := leaf.Leaf.Verify(x509.VerifyOptions{
-		Roots:     anchors.held(),
+		Roots:     anchors.current(),
 		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 	})
 	return err == nil
 }
 
-// reportedLines collects what a watch reports.
 type reportedLines struct {
 	mu    sync.Mutex
 	lines []string
@@ -271,11 +255,9 @@ func (r *reportedLines) count() int {
 	return len(r.lines)
 }
 
-// keepAnchors runs the watch on the client authority until the test
-// ends, and answers the channel that closes on its first read. synced
-// is nil for a caller that waits for no first read. The caller runs in
-// a synctest bubble, and the watch has taken what the server sent when
-// keepAnchors returns.
+// keepAnchors runs keepClientAnchors until the test ends. It returns
+// after the watch has processed everything the server sent, because it
+// waits for the synctest bubble to settle.
 func keepAnchors(t *testing.T, handler http.Handler, anchors *clientAnchors, lines *reportedLines, synced chan struct{}) {
 	t.Helper()
 	watcher := testWatcher(t, handler)
@@ -292,9 +274,8 @@ func keepAnchors(t *testing.T, handler http.Handler, anchors *clientAnchors, lin
 	synctest.Wait()
 }
 
-// The pool comes from the ConfigMap, and the watch delivers the
-// ConfigMap the API server rewrote when it rotated its authority, so
-// the pool changes with no clock and no restart.
+// Every request that keepClientAnchors sends selects that ConfigMap by
+// its name.
 func TestTheClientAnchorsFollowTheConfigMap(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		first, second := newClientAuthority(t), newClientAuthority(t)
@@ -318,8 +299,6 @@ func TestTheClientAnchorsFollowTheConfigMap(t *testing.T) {
 	})
 }
 
-// A caller that waits for no first read passes no channel, and the
-// watch still follows the ConfigMap.
 func TestTheClientAnchorsFollowTheConfigMapWithNoSyncedChannel(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		first, second := newClientAuthority(t), newClientAuthority(t)
@@ -336,9 +315,9 @@ func TestTheClientAnchorsFollowTheConfigMapWithNoSyncedChannel(t *testing.T) {
 	})
 }
 
-// A ConfigMap the API cannot read leaves an empty pool behind, because
-// the API still answers every token caller.
-func TestAConfigMapThisAPICannotReadLeavesAnEmptyPool(t *testing.T) {
+// When the API server refuses the read, the pool stays empty and synced
+// stays open.
+func TestAnUnreadableConfigMapLeavesAnEmptyPool(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		authority := newClientAuthority(t)
 		api := newCoreAPI()
@@ -356,9 +335,7 @@ func TestAConfigMapThisAPICannotReadLeavesAnEmptyPool(t *testing.T) {
 	})
 }
 
-// A deleted ConfigMap leaves the pool as it is and says so, because
-// the certificates the pool holds are still the ones the cluster
-// issued.
+// A deleted ConfigMap reports one line and keeps the pool.
 func TestADeletedConfigMapKeepsThePool(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		authority := newClientAuthority(t)
@@ -378,8 +355,6 @@ func TestADeletedConfigMapKeepsThePool(t *testing.T) {
 	})
 }
 
-// A ConfigMap that carries no usable authority is reported, and the
-// pool stays empty until a valid authority arrives.
 func TestAConfigMapWithNoAuthorityIsReported(t *testing.T) {
 	rows := []struct {
 		name  string
@@ -410,10 +385,8 @@ func TestAConfigMapWithNoAuthorityIsReported(t *testing.T) {
 	}
 }
 
-// The API served over its own TLS configuration, with the anchors the
-// test set, so a caller meets the policy a cluster caller meets. The
-// listener is a pipeListener, so the handshake runs in the test's
-// bubble, and a caller dials it with the dial this answers.
+// listenOver serves the API with the server's real TLS configuration
+// on a pipeListener, so the handshake runs inside the synctest bubble.
 func listenOver(t *testing.T, fixture *apiFixture) (base string, serverAnchor *x509.CertPool, dial dialFunc) {
 	t.Helper()
 	authority, err := mintAuthority(time.Now())
@@ -422,11 +395,11 @@ func listenOver(t *testing.T, fixture *apiFixture) (base string, serverAnchor *x
 	mustSucceed(t, err)
 	pair, err := tls.X509KeyPair(certPEM, keyPEM)
 	mustSucceed(t, err)
-	fixture.server.holdCertificate(&pair)
+	fixture.server.setCertificate(&pair)
 
 	socket := newPipeListener()
-	// The log slice is the fixture's own and no lock guards it, so a
-	// listener that answers on goroutines of its own writes no lines.
+	// No lock guards the fixture's log slice, so disable logging while
+	// the listener's goroutines serve requests.
 	fixture.server.log = nil
 	serving := &http.Server{
 		Handler:           fixture.server.handler(),
@@ -441,11 +414,8 @@ func listenOver(t *testing.T, fixture *apiFixture) (base string, serverAnchor *x
 	return "https://localhost", serverAnchor, socket.dial
 }
 
-// A dialFunc opens a connection the way net.Dialer.DialContext does.
 type dialFunc func(ctx context.Context, network, address string) (net.Conn, error)
 
-// The client a caller dials the listener with, offering the leaves it
-// holds and naming the server leaf's own name.
 func callerWith(dial dialFunc, anchor *x509.CertPool, offered ...tls.Certificate) *http.Client {
 	return &http.Client{
 		Timeout: 10 * time.Second,
@@ -462,10 +432,9 @@ func callerWith(dial dialFunc, anchor *x509.CertPool, offered ...tls.Certificate
 	}
 }
 
-// The whole policy on a real connection: a leaf of the cluster's
-// authority is the caller, a leaf of any other authority never
-// reaches a route, and a token answers on the same listener.
-func TestTheListenerTakesTheClusterAuthorityAlone(t *testing.T) {
+// A certificate from another authority fails the TLS handshake, and a
+// bearer token with no certificate still works.
+func TestTheListenerAcceptsOnlyCertificatesFromTheClusterAuthority(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
 		authority, foreign := newClientAuthority(t), newClientAuthority(t)
@@ -480,10 +449,8 @@ func TestTheListenerTakesTheClusterAuthorityAlone(t *testing.T) {
 		mustSucceed(t, resp.Body.Close())
 		mustMatch(t, resp.StatusCode, http.StatusOK)
 		mustMatch(t, fixture.plane.reviews[0].Spec.User, "admin")
-		// The listener answers its own TLS configuration on every
-		// handshake, and that configuration names the protocols. A
-		// configuration that named none would drop every caller to
-		// HTTP/1.1 and nothing else would say so.
+		// Without NextProtos in the configuration that GetConfigForClient
+		// returns, every client uses HTTP/1.1.
 		mustMatch(t, resp.Proto, "HTTP/2.0")
 
 		_, err = callerWith(dial, anchor, foreign.leaf(t, "admin", nil)).Get(target)
@@ -492,9 +459,9 @@ func TestTheListenerTakesTheClusterAuthorityAlone(t *testing.T) {
 		request, err := http.NewRequest(http.MethodGet, target, nil)
 		mustSucceed(t, err)
 		request.Header.Set("Authorization", "Bearer "+testAPIToken)
-		answered, err := callerWith(dial, anchor).Do(request)
+		tokenResponse, err := callerWith(dial, anchor).Do(request)
 		mustSucceed(t, err)
-		mustSucceed(t, answered.Body.Close())
-		mustMatch(t, answered.StatusCode, http.StatusOK)
+		mustSucceed(t, tokenResponse.Body.Close())
+		mustMatch(t, tokenResponse.StatusCode, http.StatusOK)
 	})
 }

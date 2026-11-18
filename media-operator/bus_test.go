@@ -1,9 +1,8 @@
 package main
 
-// These tests run the client against a fake broker on the far end of a
-// net.Pipe, so the connect handshake, the subscription resend, the
-// publish path, and the inbound delivery are proved with no TCP and no
-// Mosquitto.
+// These tests run the client against a fake broker on a net.Pipe, so
+// they cover the CONNECT handshake, resubscribing, publishing, and
+// inbound delivery without TCP or Mosquitto.
 
 import (
 	"bufio"
@@ -15,23 +14,20 @@ import (
 	"time"
 )
 
-// busTestTimeout bounds every wait. Each test that waits runs in a
-// synctest bubble, so the bound passes on the bubble's clock, and a
-// client that never answers fails the test at once instead of hanging
-// it.
+// busTestTimeout bounds each wait. In a synctest bubble it passes on the
+// fake clock, so a client that never responds fails the test at once.
 const busTestTimeout = 2 * time.Second
 
-// A brokerPublish is one message the broker read from the client.
+// brokerPublish is a message that the broker read from the client.
 type brokerPublish struct {
 	topic    string
 	payload  []byte
 	retained bool
 }
 
-// fakeBroker is the far end of a pipe: it completes the CONNECT
-// handshake, answers each SUBSCRIBE with a SUBACK, records every
-// PUBLISH, and can push a PUBLISH back at the client the way Mosquitto
-// pushes a retained message to a new subscriber.
+// fakeBroker is the broker end of a pipe. It replies to CONNECT with a
+// CONNACK and to each SUBSCRIBE with a SUBACK, and records each filter
+// and PUBLISH that it receives.
 type fakeBroker struct {
 	conn   net.Conn
 	reader *bufio.Reader
@@ -82,19 +78,19 @@ func (b *fakeBroker) serve() {
 	}
 }
 
-// push sends the client a retained message, the way the broker
-// delivers a topic's last value to a fresh subscriber.
+// push sends the client a message with the retain flag, as the broker
+// does for the stored value of a topic when a client subscribes.
 func (b *fakeBroker) push(topic string, payload []byte) {
 	b.conn.Write(frameOf(encodePublish(topic, payload, true)))
 }
 
-// forward sends the client a live message, the way the broker forwards
-// a publish to a subscriber that is already connected.
+// forward sends the client a message without the retain flag, as the
+// broker does for a publish that arrives while the client is subscribed.
 func (b *fakeBroker) forward(topic string, payload []byte) {
 	b.conn.Write(frameOf(encodePublish(topic, payload, false)))
 }
 
-// readTopicFilter reads the length-prefixed filter a SUBSCRIBE carries.
+// readTopicFilter reads the length-prefixed topic filter of a SUBSCRIBE.
 func readTopicFilter(body []byte) (int, string, bool) {
 	if len(body) < 2 {
 		return 0, "", false
@@ -106,17 +102,15 @@ func readTopicFilter(body []byte) (int, string, bool) {
 	return 2 + length, string(body[2 : 2+length]), true
 }
 
-// startBus wires a client to a dialer that hands out the pipe ends in
-// order and blocks once they run out, so a client that reconnects past
-// the scripted connections waits instead of spinning. Run stops when
-// the test's context ends.
+// startBus starts a client whose dialer returns count pipe connections
+// in order and then blocks, so a client that reconnects more often than
+// the test expects waits instead of spinning.
 func startBus(t *testing.T, count int, will *busWill, handler busHandler) (*Bus, []*fakeBroker, <-chan *Bus) {
 	t.Helper()
 	return startBusWith(t, count, will, handler, nil)
 }
 
-// startBusWith is startBus with a handler for the retained messages, set
-// before the client runs.
+// startBusWith is startBus with a retainedHandler.
 func startBusWith(t *testing.T, count int, will *busWill, handler, retained busHandler) (*Bus, []*fakeBroker, <-chan *Bus) {
 	t.Helper()
 	conns := make(chan net.Conn, count)
@@ -143,9 +137,8 @@ func startBusWith(t *testing.T, count int, will *busWill, handler, retained busH
 		}
 	}
 
-	// The test waits for Run to end before it returns, so no client
-	// outlives its test, and a test in a synctest bubble ends with no
-	// goroutine left.
+	// A synctest bubble fails if a goroutine is still running when the
+	// test ends, so the cleanup waits for Run to return.
 	ctx, cancel := context.WithCancel(context.Background())
 	ended := make(chan struct{})
 	t.Cleanup(func() {
@@ -172,10 +165,8 @@ func waitForConnect(t *testing.T, connected <-chan *Bus) {
 	}
 }
 
-// The client reports a session between its CONNACK and the end of that
-// connection. A caller whose publish must not be lost reads it before it
-// publishes.
-func TestTheBusReportsWhetherItHoldsASession(t *testing.T) {
+// Connected is true from the CONNACK until the connection ends.
+func TestConnectedIsTrueWhileASessionIsOpen(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		bus, brokers, connected := startBus(t, 1, nil, nil)
 		waitForConnect(t, connected)
@@ -187,10 +178,9 @@ func TestTheBusReportsWhetherItHoldsASession(t *testing.T) {
 	})
 }
 
-// waitForDisconnect closes the broker's end of the connection and waits for
-// the client to settle, then fails the test if the client still reports a
-// session. The scripted dialer hands out no second connection, so the client
-// stays disconnected for the rest of the test. It runs in a synctest bubble.
+// waitForDisconnect closes the broker's end of the connection and fails
+// the test if Connected is still true once the client is idle. It must
+// run in a synctest bubble.
 func waitForDisconnect(t *testing.T, bus *Bus, broker *fakeBroker) {
 	t.Helper()
 	broker.conn.Close()
@@ -222,22 +212,21 @@ func waitForPublish(t *testing.T, values <-chan brokerPublish) brokerPublish {
 	}
 }
 
-// The client connects, calls onConnect, and re-sends every remembered
-// subscription on that connection.
-func TestBusConnectsAndSendsRememberedSubscriptions(t *testing.T) {
+// A client that connects calls onConnect and sends every stored
+// subscription.
+func TestBusConnectsAndSendsStoredSubscriptions(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		bus, brokers, connected := startBus(t, 1, nil, nil)
 		bus.Subscribe("liken/media/plays/+/+/status")
 
 		waitForConnect(t, connected)
 		if got := waitForString(t, brokers[0].subs); got != "liken/media/plays/+/+/status" {
-			t.Errorf("subscription = %q", got)
+			t.Errorf("the subscription is %q, want liken/media/plays/+/+/status", got)
 		}
 	})
 }
 
-// A publish from the caller reaches the broker with its topic, its
-// payload, and its retain flag.
+// A publish reaches the broker with its topic, payload, and retain flag.
 func TestBusPublishesToTheBroker(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		bus, brokers, connected := startBus(t, 1, nil, nil)
@@ -247,10 +236,10 @@ func TestBusPublishesToTheBroker(t *testing.T) {
 
 		got := waitForPublish(t, brokers[0].pubs)
 		if got.topic != "liken/media/plays/house/movie/status" {
-			t.Errorf("topic = %q", got.topic)
+			t.Errorf("the topic is %q, want liken/media/plays/house/movie/status", got.topic)
 		}
 		if string(got.payload) != `{"item":1}` {
-			t.Errorf("payload = %q", got.payload)
+			t.Errorf("the payload is %q, want {\"item\":1}", got.payload)
 		}
 		if !got.retained {
 			t.Error("the publish was not retained")
@@ -258,7 +247,7 @@ func TestBusPublishesToTheBroker(t *testing.T) {
 	})
 }
 
-// A message the broker pushes reaches the handler with its topic and
+// A message from the broker reaches the handler with its topic and
 // payload.
 func TestBusDeliversAnInboundPublishToTheHandler(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
@@ -274,10 +263,10 @@ func TestBusDeliversAnInboundPublishToTheHandler(t *testing.T) {
 		select {
 		case got := <-received:
 			if got.topic != "liken/media/plays/house/movie/status" {
-				t.Errorf("topic = %q", got.topic)
+				t.Errorf("the topic is %q, want liken/media/plays/house/movie/status", got.topic)
 			}
 			if string(got.payload) != `{"paused":true}` {
-				t.Errorf("payload = %q", got.payload)
+				t.Errorf("the payload is %q, want {\"paused\":true}", got.payload)
 			}
 		case <-time.After(busTestTimeout):
 			t.Fatal("the handler read nothing the broker pushed")
@@ -285,8 +274,8 @@ func TestBusDeliversAnInboundPublishToTheHandler(t *testing.T) {
 	})
 }
 
-// A dropped connection reconnects, and the remembered subscription
-// goes out again on the new connection with no second Subscribe call.
+// After a dropped connection, the client reconnects and sends the stored
+// subscription again without another Subscribe call.
 func TestBusResendsSubscriptionsAfterAReconnect(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		bus, brokers, connected := startBus(t, 2, nil, nil)
@@ -294,33 +283,27 @@ func TestBusResendsSubscriptionsAfterAReconnect(t *testing.T) {
 
 		waitForConnect(t, connected)
 		if got := waitForString(t, brokers[0].subs); got != "liken/media/plays/+/+/status" {
-			t.Fatalf("first subscription = %q", got)
+			t.Fatalf("the first subscription is %q, want liken/media/plays/+/+/status", got)
 		}
 
-		// Drop the first connection. The client reconnects onto the second
-		// broker and re-sends the filter it remembers.
+		// The client's next dial returns the second broker.
 		brokers[0].conn.Close()
 
 		waitForConnect(t, connected)
 		if got := waitForString(t, brokers[1].subs); got != "liken/media/plays/+/+/status" {
-			t.Errorf("resent subscription = %q", got)
+			t.Errorf("after the reconnect the subscription is %q, want liken/media/plays/+/+/status", got)
 		}
 	})
 }
 
-// A publish made while the client is disconnected is dropped at QoS 0,
-// and the caller re-publishes from onConnect once the connection
-// returns.
+// Publish on a client that never connected does not panic.
 func TestBusDropsAPublishWhileDisconnected(t *testing.T) {
 	bus := newBus("pipe", "media-operator", nil, nil, nil)
-	// No connection is ever dialed, so out stays nil and the publish
-	// has nowhere to go.
+	// The client never ran, so out is nil.
 	bus.Publish("liken/media/plays/house/movie/status", []byte("x"), true)
-	// The test proves only that the call returns and panics on nothing.
 }
 
-// The client newBus builds dials the address over TCP. Nothing answers
-// this port, so the dial fails rather than reaching some other broker.
+// Nothing listens on port 1, so a TCP dial there fails.
 func TestNewBusDialsTheAddressOverTCP(t *testing.T) {
 	bus := newBus("127.0.0.1:1", "media-operator", nil, nil, nil)
 
@@ -331,8 +314,8 @@ func TestNewBusDialsTheAddressOverTCP(t *testing.T) {
 	}
 }
 
-// A broker that never answers is retried ever more slowly, up to the
-// ceiling, so a broker that is down does not become a tight reconnect loop.
+// While the broker is down, the first dial is immediate and each later
+// wait doubles until it reaches busMaxBackoff.
 func TestTheBackoffGrowsToItsCeilingWhileTheBrokerIsDown(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		waits := make(chan time.Duration, 16)
@@ -353,8 +336,6 @@ func TestTheBackoffGrowsToItsCeilingWhileTheBrokerIsDown(t *testing.T) {
 			bus.Run(ctx)
 		}()
 
-		// The first dial is immediate. Each wait after it is twice the
-		// one before, up to the ceiling.
 		want := []time.Duration{0, time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second,
 			16 * time.Second, busMaxBackoff, busMaxBackoff}
 		for dial, wait := range want {
@@ -372,9 +353,8 @@ func TestTheBackoffGrowsToItsCeilingWhileTheBrokerIsDown(t *testing.T) {
 	})
 }
 
-// Run returns while it waits out a backoff, so a pod that is shutting
-// down does not sit through the whole wait.
-func TestRunReturnsWhileItWaitsOutABackoff(t *testing.T) {
+// Run returns as soon as its context ends, even during a backoff wait.
+func TestRunReturnsDuringABackoffWait(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		dialed := make(chan struct{}, 1)
 		bus := newBus("pipe", "media-operator", nil, nil, nil)
@@ -401,10 +381,8 @@ func TestRunReturnsWhileItWaitsOutABackoff(t *testing.T) {
 	})
 }
 
-// A message the broker marks retained, which it delivers because of a
-// new subscription, reaches the retained handler, and a live message
-// reaches the ordinary one. A reader tells the state it catches up on
-// from a change made now.
+// A message with the retain flag reaches the retained handler, and a
+// message without it reaches the ordinary handler.
 func TestARetainedMessageReachesTheRetainedHandler(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		live := make(chan string, 2)
@@ -422,8 +400,8 @@ func TestARetainedMessageReachesTheRetainedHandler(t *testing.T) {
 	})
 }
 
-// A client with no retained handler reads every message through its one
-// handler, the retained ones too.
+// Without a retained handler, the ordinary handler receives retained
+// messages too.
 func TestWithNoRetainedHandlerEveryMessageReachesTheHandler(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		live := make(chan string, 2)

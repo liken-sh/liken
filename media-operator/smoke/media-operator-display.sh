@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Proves the media-operator-display image before it ships.
+# Checks the media-operator-display image before it is published.
 #
 # Usage: media-operator-display.sh <image>
 #
@@ -7,16 +7,16 @@
 #            ghcr.io/liken-sh/media-operator-display:2026.10.02-001.
 #            The image must be in the local Docker daemon.
 #
-# The binary takes no flag that prints and exits, so the loader in
-# `--list` mode resolves the whole closure and exits non-zero when a
-# library is missing. A library the toolkit opens by name at run time
-# is not covered by this.
+# The binary has no flag that prints and exits. Instead the dynamic
+# loader runs with `--list`, which resolves every linked library and
+# exits non-zero when one is missing. This does not detect a library
+# that the program opens by name at run time.
 set -euo pipefail
 
 image=$1
 
-# The image must hold the notices of the third-party software in it,
-# as notices/check.sh describes.
+# Checks the license notices of the third-party software in the image
+# (notices/check.sh).
 "$(dirname "$0")/../../notices/check.sh" "$image" \
   usr/share/doc/rust/COPYRIGHT-library.html \
   usr/share/doc/fonts-droid-fallback/copyright

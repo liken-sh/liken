@@ -10,7 +10,7 @@ import (
 
 // The query passes surfaceAttrib to libva by address, so its layout
 // must be VASurfaceAttrib's on a 64-bit machine.
-func TestASurfaceAttributeHasLibvasLayout(t *testing.T) {
+func TestSurfaceAttribHasLibvaLayout(t *testing.T) {
 	if size := unsafe.Sizeof(surfaceAttrib{}); size != 24 {
 		t.Errorf("surfaceAttrib is %d bytes, want 24", size)
 	}
@@ -19,7 +19,7 @@ func TestASurfaceAttributeHasLibvasLayout(t *testing.T) {
 	}
 }
 
-func TestPixelFormatsReadsEachFourCCOnce(t *testing.T) {
+func TestPixelFormatsReturnsEachFourCCOnce(t *testing.T) {
 	got := pixelFormats([]surfaceAttrib{
 		{Type: surfaceAttribPixelFormat, ValueType: genericValueTypeInteger, Value: 0x3231564e},
 		{Type: surfaceAttribPixelFormat, ValueType: genericValueTypeInteger, Value: 0x30313050},
@@ -28,27 +28,25 @@ func TestPixelFormatsReadsEachFourCCOnce(t *testing.T) {
 		{Type: 3, ValueType: genericValueTypeInteger, Value: 16384},
 	})
 	if want := []string{"NV12", "P010"}; !slices.Equal(got, want) {
-		t.Errorf("formats = %v, want %v", got, want)
+		t.Errorf("pixelFormats returns %v, want %v", got, want)
 	}
 }
 
-// A file that is not a render node fails in libva-drm, and the error
-// names the file. The test needs libva.so.2 and libva-drm.so.2 on the
-// machine, which the CI job installs with ffmpeg.
-func TestTheQueryOfAFileThatIsNotARenderNodeFails(t *testing.T) {
+// The test needs libva.so.2 and libva-drm.so.2 on the machine, which
+// the CI job installs with ffmpeg.
+func TestQueryOfNonRenderNodeFails(t *testing.T) {
 	_, err := queryRenderNode("/dev/null")
 	if err == nil || !strings.Contains(err.Error(), "/dev/null") {
 		t.Errorf("err = %v, want libva-drm's refusal of /dev/null", err)
 	}
 }
 
-// fakeDriver stands in for a VA-API driver behind libva's functions, so
-// a test walks the same calls the query sends to a GPU.
+// fakeDriver returns the libva functions of a fake VA-API driver.
 type fakeDriver struct {
 	entrypoints map[int32][]int32
 	rtFormats   map[[2]int32]uint32
 	formats     []uint32
-	// failing names the one libva function that answers an error.
+	// failing names the libva function that returns an error status.
 	failing string
 }
 
@@ -119,10 +117,10 @@ func tenBitDriver() *fakeDriver {
 	}
 }
 
-func TestTheQueryReadsEachStatementOfTheDriver(t *testing.T) {
+func TestQueryReportsVendorConfigsAndVideoProcFormats(t *testing.T) {
 	got, err := tenBitDriver().libva().report(1)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("querying the fake driver: %v", err)
 	}
 	want := report{
 		Vendor: "Fake VA driver 1.0",
@@ -138,18 +136,16 @@ func TestTheQueryReadsEachStatementOfTheDriver(t *testing.T) {
 	}
 }
 
-// A driver with no VideoProc entrypoint has no video processor, so the
-// query creates no config for it and states no format.
-func TestADriverWithNoVideoProcessorStatesNoFormat(t *testing.T) {
+func TestDriverWithoutVideoProcessorReportsNoFormats(t *testing.T) {
 	driver := tenBitDriver()
 	delete(driver.entrypoints, profileNone)
 	got, err := driver.libva().report(1)
 	if err != nil || got.VideoProcFormats != nil {
-		t.Errorf("formats = %v, err = %v", got.VideoProcFormats, err)
+		t.Errorf("formats = %v, err = %v, want nil and no error", got.VideoProcFormats, err)
 	}
 }
 
-func TestAFailedLibvaCallFailsTheQueryWithLibvasText(t *testing.T) {
+func TestFailedLibvaCallFailsQueryWithLibvaErrorText(t *testing.T) {
 	for _, call := range []string{
 		"vaQueryConfigProfiles", "vaQueryConfigEntrypoints", "vaGetConfigAttributes",
 		"vaCreateConfig", "vaQuerySurfaceAttributes",

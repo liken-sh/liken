@@ -1,16 +1,12 @@
 package main
 
-// Every operation a person causes gets one line in the log of the role
-// that performs it: a press, a playback request, a volume step, a focus
-// move, a controller that connects, an edit the operator acts on. The
-// line says what triggered the operation, what the role sent, and what
-// came back. Loops a person does not see, such as a poll, a position
-// report, or a pass that changes nothing, write no line, so the lines
-// that remain read as a record of what people did.
-//
-// The lines go to standard output. Standard error keeps the failures of
-// the role's own machinery, such as a list that failed or a socket that
-// closed.
+// Each operation that a person causes, such as a key press, a playback
+// request, a volume step, or an edit to a resource, writes one line to
+// standard output. The line says what triggered the operation, what was
+// sent, and what came back. Background work, such as position reports
+// and passes that change nothing, writes no line, so the log is a record
+// of what people did. Failures of the program itself, such as a list
+// call that failed, go to standard error.
 
 import (
 	"fmt"
@@ -19,10 +15,8 @@ import (
 	"strings"
 )
 
-// logLine writes one line to out, or to standard output when out is
-// nil. Each role holds its writer as a field, so a test reads the lines
-// the role would print, and a role a test builds with no writer prints
-// where the pod would.
+// logLine writes one formatted line to out, or to standard output when
+// out is nil. A test passes its own writer to read the lines.
 func logLine(out io.Writer, format string, args ...any) {
 	if out == nil {
 		out = os.Stdout
@@ -30,12 +24,10 @@ func logLine(out io.Writer, format string, args ...any) {
 	fmt.Fprintf(out, format+"\n", args...)
 }
 
-// remoteOfTopic names the Remote a controller topic belongs to, as
-// namespace/name. Every controller topic is
-// <base>/remotes/<namespace>/<name>/<kind>, and the base can hold
-// slashes of its own, so the name is found from the remotes segment and
-// not from the start. A topic of another shape names itself, so a line
-// never loses its trigger.
+// remoteOfTopic returns namespace/name from a Remote's topic,
+// <base>/remotes/<namespace>/<name>/<kind>. The base can itself contain
+// a "remotes" segment, so the search starts at the end. A topic of any
+// other shape is returned unchanged, so the log line still shows it.
 func remoteOfTopic(topic string) string {
 	parts := strings.Split(topic, "/")
 	for index := len(parts) - 1; index >= 0; index-- {

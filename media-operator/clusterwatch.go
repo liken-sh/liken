@@ -1,29 +1,28 @@
 package main
 
-// The operator watches every collection its pass reads, so the pass
-// reads them from memory (clusterview.go) instead of from the API
-// server. Some watches also wake the pass, and the rest only keep the
-// view current:
+// The operator watches every collection that a pass reads, so the pass
+// reads from memory (clusterview.go) and not from the API server. Each
+// watch also decides which changes trigger a pass:
 //
-//   - A change to a Play, a Player, a Remote, a Keymap, a
-//     MediaPreferences, or a Peripheral wakes the pass. That includes
-//     this operator's own status writes on Plays, Players, and
-//     Remotes: the pass after a write is how a Finished Play retires
-//     at once and a new phase reaches the Player.
-//   - A pod of this operator's that goes away wakes the pass, so the
-//     pass that follows an eviction, a lost node, or its own delete
-//     creates what it owes. A playback pod also wakes it when its
-//     status changes, because the Play's status is derived from it.
+//   - Any change to a Play, a Player, a Remote, a Keymap, a
+//     MediaPreferences, or a Peripheral triggers a pass. That includes
+//     this operator's own status writes, so the pass after a write
+//     retires a Finished Play at once and reports the Player's new
+//     phase.
+//   - Deleting one of this operator's pods triggers a pass, which
+//     creates the pod again after an eviction, a lost node, or the
+//     operator's own delete. A change to a playback pod's status also
+//     triggers a pass, because the Play's status comes from it.
 //   - A claim, a ResourceSlice, a Display, a Receiver, a Sink, or a
-//     Television wakes the pass when a change reaches a field the pass
-//     reads, and not when this operator writes it. changewake.go holds
-//     each rule, the pods' rule too.
+//     Television triggers a pass only when a field that the pass reads
+//     changes, and not when this operator made the change. changewake.go
+//     has each of these rules, and the rule for pods.
 //
-// A watch is scoped the way the pass reads: the pods by the component
-// label this operator stamps on each pod it creates, and every other
-// collection in the whole cluster. A claim carries no label of this
-// operator's, and a claim created by an older release never will, so
-// the claims are watched in the whole cluster.
+// Pods are watched by the component label that this operator sets on
+// each pod it creates. Every other collection is watched across the
+// whole cluster. That includes the claims, because this operator sets
+// no label on them, and claimRule ignores a claim that this operator
+// does not own.
 
 import (
 	"context"
@@ -40,7 +39,6 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// resourceOf names one collection by its API version and resource.
 func resourceOf(apiVersion, resource string) schema.GroupVersionResource {
 	version, err := schema.ParseGroupVersion(apiVersion)
 	if err != nil {
@@ -49,7 +47,6 @@ func resourceOf(apiVersion, resource string) schema.GroupVersionResource {
 	return version.WithResource(resource)
 }
 
-// The collections the operator watches.
 var (
 	playResource        = resourceOf(mediaAPIVersion, "plays")
 	playerResource      = resourceOf(mediaAPIVersion, "players")
@@ -66,33 +63,33 @@ var (
 	televisionResource  = resourceOf(televisionAPIVersion, "televisions")
 )
 
-// ownPodsSelector selects every pod this operator creates, by the
-// component label each builder stamps.
+// ownPodsSelector matches every pod this operator creates, by the
+// component label that each pod builder sets.
 var ownPodsSelector = fmt.Sprintf("%s in (%s,%s,%s)",
 	playbackLabelKey, playbackLabelValue, idleLabelValue, remoteLabelValue)
 
-// clusterSyncWait bounds the wait for the first read of every
-// collection. The first read is one request per collection, so a
-// healthy API server answers well inside it. A collection that is not
-// read by then ends the process, and the kubelet restarts it with
-// backoff.
+// clusterSyncWait bounds the wait for the first list of every
+// collection. That is one request per collection, so a healthy API
+// server finishes well inside it. When a collection is not listed by
+// then, the process exits and the kubelet restarts it with backoff.
 const clusterSyncWait = time.Minute
 
-// watchedCollection is one collection of the view: the watch, and
-// where the view keeps its store.
+// watchedCollection is one collection of the view: its watch, and the
+// function that stores its source in the view.
 type watchedCollection struct {
 	kind  string
 	watch collectionWatch
 	into  func(watchedSource)
 }
 
-// keepIn keeps a collection in one field of the view.
 func keepIn(field *objectSource) func(watchedSource) {
 	return func(source watchedSource) { *field = source }
 }
 
-// keepWhole keeps a store that holds its whole kind in one field of the
-// view, with a memo of the copies this operator wrote or read.
+// keepWhole is keepIn for a collection whose watch has no selector and
+// that is read through the object cache. Whole tells the cache that the
+// store has the whole collection, so a list also returns an object that
+// this operator just created and the store does not have yet.
 func keepWhole(field *informer.Held) func(watchedSource) {
 	return func(source watchedSource) {
 		view := source.view
@@ -102,18 +99,16 @@ func keepWhole(field *informer.Held) func(watchedSource) {
 }
 
 // watchCluster starts one informer for each collection the pass reads,
-// and answers the view once every informer has read its collection.
-// The informers run until ctx ends. wait bounds the wait for the first
-// reads: when it ends first, watchCluster answers an error that names
-// each collection still unread. reader reads a collection from the API
+// and returns the view once every informer has listed its collection.
+// The informers run until ctx ends. When wait ends before every
+// collection is listed, watchCluster returns an error that names the
+// collections still unlisted. reader lists a collection from the API
 // server while the API server forbids its watch (watchedsource.go).
 func watchCluster(ctx, wait context.Context, client dynamic.Interface, reader *apiclient.Client,
 	wake chan<- struct{}, metrics *mediaMetrics) (*clusterView, error) {
 	view := &clusterView{}
 	wakes := wakeOnChange(wake)
 	collections := []watchedCollection{
-		// The Play and Player watches take every object of their kind,
-		// so each store holds the whole collection.
 		{kindPlay, collectionWatch{resource: playResource, handler: wakes}, keepWhole(&view.plays)},
 		{kindPlayer, collectionWatch{resource: playerResource, handler: wakes}, keepWhole(&view.players)},
 		{kindRemote, collectionWatch{resource: remoteResource, handler: wakes}, keepIn(&view.remotes)},
@@ -123,9 +118,9 @@ func watchCluster(ctx, wait context.Context, client dynamic.Interface, reader *a
 		{kindPod, collectionWatch{resource: podResource, labels: ownPodsSelector, handler: podRule.handler(wake)}, keepIn(&view.pods)},
 		{kindResourceClaim, collectionWatch{resource: claimResource, handler: claimRule.handler(wake)}, keepIn(&view.claims)},
 		{kindResourceSlice, collectionWatch{resource: sliceResource, handler: sliceRule.handler(wake)}, keepIn(&view.slices)},
-		// The display-operator, the equipment-operator, and the
-		// audio-operator define these four, and a cluster can run the
-		// media operator with none of them.
+		// These four kinds are defined by display-operator,
+		// equipment-operator, and audio-operator. A cluster can run
+		// media-operator without them, so their watches are optional.
 		{kindDisplay, collectionWatch{resource: displayResource, optional: true,
 			handler: displayRule.handler(wake)}, keepIn(&view.displays)},
 		{kindReceiver, collectionWatch{resource: receiverResource, optional: true,
@@ -178,12 +173,13 @@ func sortedKinds(kinds map[string]bool) string {
 	return strings.Join(names, ", ")
 }
 
-// wakeOnChange wakes the pass on every change the informer reports.
-// The pass reads the whole collection, so the handler converts nothing.
+// wakeOnChange returns a handler that triggers a pass on every add,
+// update, and delete. The pass reads the whole collection again, so the
+// handler does not look at the object.
 func wakeOnChange(wake chan<- struct{}) cache.ResourceEventHandler {
 	return cache.ResourceEventHandlerFuncs{
-		AddFunc:    func(any) { poke(wake) },
-		UpdateFunc: func(any, any) { poke(wake) },
-		DeleteFunc: func(any) { poke(wake) },
+		AddFunc:    func(any) { signalWake(wake) },
+		UpdateFunc: func(any, any) { signalWake(wake) },
+		DeleteFunc: func(any) { signalWake(wake) },
 	}
 }

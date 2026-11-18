@@ -1,11 +1,11 @@
 ## Test patterns
 
-A test pattern gives the display a known picture under it, so a check
-of the OSD, the scrims, or the color does not depend on a scene in a
-film. The player image carries each pattern as a ten-minute file with a
-chapter each minute, so the scrubber, the chapter marks, and the time
-left behave as they do for a film. A pattern needs no storage and no
-network.
+A test pattern is a video with a known picture. Use one to check the
+on-screen display or the screen's colors without hunting for a suitable
+scene in a film. The pattern files are in the player image, so a
+pattern needs no volume and no network. `white` and `bars` are
+ten-minute files with a chapter every minute, so the scrubber and the
+chapter marks look the same as for a film.
 
     apiVersion: media.liken.sh/v1alpha1
     kind: Play
@@ -18,21 +18,21 @@ network.
 
 | Pattern | What it shows |
 |---|---|
-| `white` | a white screen, the worst case for the dark scrims behind the OSD |
-| `bars` | the SMPTE HD color bars, which show a color or a range error |
-| `speakers` | a walk of a 7.1 layout: pink noise from one speaker at a time, named on the screen |
+| `white` | a white screen, which is the hardest background for the dark backing behind the on-screen display |
+| `bars` | the SMPTE HD color bars, which show a color error or a range error |
+| `speakers` | pink noise from each speaker of a 7.1 layout in turn, with the speaker's name on the screen |
 
-`speakers` plays pink noise for 5 seconds from each speaker in turn:
-front left, center, front right, side right, back right, back left, side
-left, and then the subwoofer, whose noise stops at 120 Hz. The screen
-names the speaker that should play, and each speaker is a chapter, so a
-chapter skip moves to the next one. The file is 7.1, so a system with
-fewer speakers plays a downmix, and the walk shows where each missing
-speaker's channel lands. The walk is 40 seconds long and carries the
-one frame `1280x720`.
+`speakers` is 40 seconds long, at one frame size, `1280x720`. It plays
+pink noise for 5 seconds from each speaker in this order: front left,
+center, front right, side right, back right, back left, side left, and
+the subwoofer, whose noise stops at 120 Hz. Each speaker is a chapter,
+so a chapter skip moves to the next speaker. On a system with fewer
+than eight speakers, the downmix shows which speaker each missing
+channel goes to.
 
-The URI can name a frame after the pattern, as in
-`pattern://bars/1920x1080`. `white` and `bars` carry every frame below:
+To choose a frame size, add it after the pattern, as in
+`pattern://bars/1920x1080`. `white` and `bars` come in every frame size
+in this table:
 
 | Frame | Shape | What it matches |
 |---|---|---|
@@ -43,152 +43,145 @@ The URI can name a frame after the pattern, as in
 | `3840x1600` | 2.4:1 | a wide 1600-row screen |
 | `1920x804` | 2.39:1 | a scope film, which letterboxes on a 16:9 screen |
 
-A URI with no frame takes the frame of the `Player`'s screen: the
-largest frame of the screen's shape that fits on the compositor's
-canvas, which the screen's `Display` reports. A screen whose shape
-matches no frame, or a `Player` whose screen is not known yet, plays
-`1920x1080`, and mpv scales it. The operator chooses the frame when it
-creates the playback pod, so a `Display` that changes mode later does
-not change the run.
+When the URI gives no frame size, the operator picks the largest one
+that has the same shape as the `Player`'s screen and fits the canvas
+size that the screen's `Display` reports. When no frame size has the
+screen's shape, or the operator does not know the screen yet, the
+pattern plays at `1920x1080` and `mpv` scales it. The operator picks
+the frame size when it creates the playback pod, so a later mode change
+on the `Display` does not affect a run that is already playing.
 
 ## Events
 
-The operator posts a Kubernetes `Event` on the `Play` for each phase
-it moves to, for each playback pod it creates again, and for the delete
-that ends the `Play`. `kubectl describe play` prints them. The API
-server deletes an `Event` one hour after its last write, so the phase,
-the conditions, and the operator's log hold the facts after that.
+The operator posts a Kubernetes `Event` on the `Play` each time its
+phase changes, each time it creates the playback pod again, and when it
+deletes the `Play`. `kubectl describe play` prints them. The API server
+deletes an `Event` one hour after its last write, so after that hour,
+read the phase, the conditions, and the operator's log.
 
 | Reason | Type | When |
 |---|---|---|
 | `PlaybackStarted` | Normal | The phase moved to `Running`. |
 | `PlaybackFinished` | Normal | The phase moved to `Finished`. The message gives the item and the position. |
-| `PlaybackFailed` | Warning | The phase moved to `Failed` because the playback pod failed. The message is the pod's own. |
-| `InvalidSpec` | Warning | The phase moved to `Failed` because the `Play` can never run as written: it names no `Player`, an item does not resolve, or a `Remote` the pod needs does not exist. |
-| `PodRecreated` | Warning or Normal | The operator created the playback pod again. A pod that failed or is gone is a Warning, and a spec edit that reshaped the pod is Normal. The message gives the position the new pod starts at. |
-| `ResumeBackoff` | Warning | The playback pod failed again soon after a recreate. The message gives the count and the wait before the next recreate. |
+| `PlaybackFailed` | Warning | The phase moved to `Failed` because the playback pod failed. The message is the pod's failure message. |
+| `InvalidSpec` | Warning | The phase moved to `Failed` because the `Play` can never run as written: it names no `Player`, an item does not resolve, or a `Remote` that the pod needs does not exist. |
+| `PodRecreated` | Warning or Normal | The operator created the playback pod again. The type is Warning when the old pod failed or is gone, and Normal when an edit to the spec changed the pod. The message gives the position where the new pod starts. |
+| `ResumeBackoff` | Warning | The playback pod failed again soon after the operator created it again. The message gives the number of failures and the wait before the next attempt. |
 | `Restarting`, `Running` | Warning, Normal | The `DisplayAlive` condition changed, with the condition's message. |
-| `Superseded` | Normal | The operator deleted the `Play`, because a newer `Play` on the same `Player` replaces it. |
-| `Retired` | Normal | The operator deleted the `Play`, because its `ttlSecondsAfterFinished` passed after it finished. |
+| `Superseded` | Normal | The operator deleted the `Play` because a newer `Play` on the same `Player` replaced it. |
+| `Retired` | Normal | The operator deleted the `Play` because `ttlSecondsAfterFinished` passed after it finished. |
 
-`Superseded` and `Retired` also go on the `Player`, because the
-`Play`'s own `Event`s leave `kubectl describe` with it.
+The operator posts `Superseded` and `Retired` on the `Player` as well,
+because `kubectl describe` stops showing the `Play`'s own `Event`s when
+the `Play` is deleted.
 
 ## On the bus
 
-The `plays` tree contains one run's commands, report, and availability.
-[The media bus](/docs/reference/bus/) gives the rules
-every topic follows and lists every writer and reader of each.
+Each run has a commands topic, a status topic, and an availability
+topic. [The media bus](/docs/reference/bus/) gives the rules that every
+topic follows and lists the writers and readers of each topic.
 
 | Topic | Writer | Retained | Carries |
 |---|---|---|---|
 | `plays/{namespace}/{name}/commands` | any program | no | one named command |
-| `plays/{namespace}/{name}/status` | the playback pod | yes | the run's report |
+| `plays/{namespace}/{name}/status` | the playback pod | yes | the run's status report |
 | `plays/{namespace}/{name}/availability` | the playback pod | yes | `online` or `offline` |
 
 ### `commands`
 
-The topic any program publishes to drive the run. A phone and a
-Home Assistant integration reach the run the same way: publish one
-JSON command, and the playback pod applies it. A controller does not
-reach this topic. The playback pod's command sidecar reads the
-`Remote`'s events topic itself and binds the key names there, so a
-press becomes one of these commands inside the pod.
+Any program, such as a phone app or a Home Assistant integration, can
+publish one JSON command here to control the run. A `Remote` does not
+publish here. The playback pod's command sidecar reads the `Remote`'s
+events topic itself and maps each key name to one of these commands.
 
     {"action": "seek", "amount": -30}
 
-`action` names a word from the vocabulary below. `amount` belongs
-only to the two actions that move by one, and its sign is the
-direction: seconds for `seek`, and chapters for `chapter`.
+`action` is one of the words in the table below. Only `seek` and
+`chapter` take `amount`. For `seek` it is in seconds, and for `chapter`
+it is in chapters. A negative `amount` moves backward.
 
 | Action | What it does |
 |---|---|
-| `pause` | toggles pause |
-| `play` | plays, and leaves a film that plays playing |
-| `hold` | pauses, and leaves a paused film paused |
-| `stop` | ends the run, the way the display's exit ends it |
-| `seek` | moves the playhead by `amount` seconds |
-| `chapter` | jumps by `amount` chapters |
-| `subtitles` | cycles the subtitle track |
-| `audio` | cycles the audio track |
-| `info` | shows the file name and position for a few seconds |
-| `up`, `down`, `left`, `right`, `select`, `back` | drive the on-screen display |
-| `home` | asks the unit's client for its home page, then ends the run |
+| `pause` | switches between paused and playing |
+| `play` | starts playing, and does nothing when the film is already playing |
+| `hold` | pauses, and does nothing when the film is already paused |
+| `stop` | ends the run, the same as exiting the display |
+| `seek` | moves the playback position by `amount` seconds |
+| `chapter` | moves by `amount` chapters |
+| `subtitles` | switches to the next subtitle track |
+| `audio` | switches to the next audio track |
+| `info` | shows the file name and the position for a few seconds |
+| `up`, `down`, `left`, `right`, `select`, `back` | navigate the on-screen display |
+| `home` | asks the `Player`'s client to show its home page, then ends the run |
 
-Two parts of the on-screen display answer these actions. When an item
-names an `appearances` file and the on-screen display is up, playing
-or paused, the display draws a row of cards above the skip control and
-the chip, one for each credited person in the scene. `up`, `left`,
-and `right` move the focus along it, and `select` on a card plays or
-pauses the film. When an item's `marks` place the playhead inside an
-intro or a recap, or inside the credits before a post-credits scene,
-the display offers a skip control, and `select` takes it. A skip to a
-post-credits scene takes `select` only while the on-screen display is
-up. The display never skips on its own.
+When an item sets an `appearances` file and the on-screen display is
+showing, whether the film is playing or paused, the display draws a row
+of cards above the skip control and the up-next chip. There is one card
+for each credited person in the scene. `up`, `left`, and `right` move
+the focus along the row, and `select` on a card pauses or resumes the
+film.
 
-In a track chooser, the row the focus is on reads bright and has an
-underline in the accent, the same mark the focused stop of the strip
-under the bar has. A track chooser also puts a dot before the track
-that plays now, so the dot stays where it is when the focus moves.
-While a chooser or an adjuster is open, the on-screen display stays
-up, and it hides on its own again only after the chooser or adjuster
-closes.
+When an item's `marks` put the playback position inside an intro, a
+recap, or the credits before a post-credits scene, the display shows a
+skip control, and `select` skips. Skipping to a post-credits scene
+works only while the on-screen display is showing. The display never
+skips by itself.
 
-The subtitles stay readable while the on-screen display is up. mpv
-draws them under the display, so the display moves them up until
-their lowest line ends a small gap above the highest thing it draws at
-the foot of the frame: the time over the scrubber, the up-next chip
-or the skip control, the row of cards, a scan's thumbnail, or an open
-chooser or adjuster. They move with the display's fade in and return
-to their place with its fade out. The
-display sets mpv's `sub-pos` for this, which moves text tracks, ASS
-tracks, and image tracks such as PGS. An ASS sign that the track
-places at a fixed point does not move, and neither does the part of an
-image track that draws in the upper half of the picture. mpv moves an
-image track's cue by a share of the picture's height, not the
-frame's, so on a letterboxed film the cue moves a shorter way, from a
-place inside the picture that is already higher than a text cue's. The display
-moves no subtitles while no subtitle track plays.
+In a track chooser, the focused row is bright and underlined in the
+accent color, and a dot marks the track that plays now. The on-screen
+display stays visible while a chooser or an adjuster is open.
 
-`back` has one meaning for each state, tried in order. It closes an
-open chooser, cancels a scan's preview, and hides the on-screen
-display. With the display hidden and the film stepped back beside the
-up-next column ([`next`](#spec--next)), it returns the film to the
-whole screen and the film plays on. At the bare video it ends the run,
-the way `stop` does. So over a stepped-back film, the first `back`
-keeps watching and the second one leaves.
+While the on-screen display is showing, it moves the subtitles up so
+that the lowest line stays just above whatever the display draws at the
+bottom of the frame. It does this with `mpv`'s `sub-pos`, which moves
+text tracks, ASS tracks, and image tracks such as PGS. An ASS sign that
+the track places at a fixed point does not move, and neither does an
+image cue in the upper half of the picture. On a letterboxed film, an
+image cue moves a shorter distance than a text cue, because `mpv` moves
+it by a share of the picture's height and not of the frame's.
 
-The display finds the film's window by its xdg app_id when it asks the
-compositor for the step back. mpv's window carries `liken-media-video`
-and the display's own window carries `liken-media-overlay`.
+`back` does the first of these that applies:
 
-`play`, `hold`, and `stop` set the state they name, so a second one
-changes nothing. The playback pod binds them to the names the kernel's
-`rc-cec` keymap gives a TV remote's deterministic functions (HDMI-CEC
-1.3a, CEC 13.13.3): `KEY_PLAYCD`, `KEY_PAUSECD`, and `KEY_STOPCD`. The
-playback pod binds no power key. The operator reads the power keys
-and turns the `Player` off, which publishes `stop` here
-([Turning a Player off and on](/docs/reference/players/#turning-a-player-off-and-on)). The keymap also gives the Pause-Play
-Function the name `KEY_PLAYPAUSE`, which a Bluetooth remote's play
-button sends too, so it stays a toggle. A `Keymap` row on the
-`Remote` that holds the CEC adapter's input device can name the
-Pause-Play Function `KEY_PAUSECD`.
+1. It closes an open chooser.
+2. It cancels a scan's preview.
+3. It hides the on-screen display.
+4. When the display is hidden and the film is stepped back beside the
+   up-next column ([`next`](#spec--next)), it returns the film to the
+   whole screen, and the film keeps playing.
+5. When only the video is showing, it ends the run, the same as `stop`.
 
-The level belongs to the unit and not to the run, so this topic
-carries no volume action. The operator reads the volume keys from the
-`Remote`'s events topic, and a program that is not a remote asks on
-the [Player's `volume/commands` topic](/docs/reference/players/#volumecommands).
-An action this build has no case for does nothing, so a command from a
-newer program has no effect rather than a crash. A focus cycle never
-travels here: the key that asks for one, `KEY_CYCLEWINDOWS`, becomes
-a request on the [Remote's tree](/docs/reference/remotes/) instead.
+The display steps the film back by asking the compositor to move the
+window whose xdg `app_id` is `liken-media-video`. The display's own
+window has the `app_id` `liken-media-overlay`.
+
+Sending `play`, `hold`, or `stop` twice changes nothing. The playback
+pod binds them to the key names that
+the kernel's `rc-cec` keymap gives the deterministic functions of a TV
+remote (HDMI-CEC 1.3a, CEC 13.13.3): `KEY_PLAYCD`, `KEY_PAUSECD`, and
+`KEY_STOPCD`. The playback pod binds no power key. The operator reads
+the power keys and turns the `Player` off, which publishes `stop` here
+([Turning a Player off and on](/docs/reference/players/#turning-a-player-off-and-on)).
+The keymap also gives the Pause-Play Function the name `KEY_PLAYPAUSE`,
+which the play button of a Bluetooth remote sends too, so that key
+switches between paused and playing. A `Keymap` row on the `Remote` of
+the CEC adapter's input device can map the Pause-Play Function to
+`KEY_PAUSECD` instead.
+
+This topic has no volume action, because the volume belongs to the
+`Player` and not to the run. The operator reads the volume keys from the
+`Remote`'s events topic, and any other program publishes to the
+[Player's `volume/commands` topic](/docs/reference/players/#volumecommands).
+The playback pod ignores an action that it does not know. The key that
+cycles the focus, `KEY_CYCLEWINDOWS`, becomes a request on the
+[Remote's topics](/docs/reference/remotes/), not a command here.
 
 ### `status`
 
-The run's report, as the playback pod reads it from the player. The
-pod publishes it on every change, and every few seconds while the
-position advances. It is retained, so a restarted operator reads a
-running `Play`'s place back from the broker.
+The playback pod publishes the run's status from `mpv`. It publishes a
+pause, a resume, a new item, or a new track language at once, and a
+change of position at most once a second. The message is retained, so a
+restarted operator reads the position of a running `Play` from the
+broker.
 
     {
       "paused": false,
@@ -200,66 +193,65 @@ running `Play`'s place back from the broker.
       "pod": "5f0c7a52-8e1d-4c3b-9a27-2d6b1e4f8c90"
     }
 
-`item` counts from 1 in spec order. `duration` is empty until the
-player has read the item's header, and the two language fields are
-absent while no track of that kind plays. The language values are
-the track's own tags as the file carries them, for Matroska the
-three-letter ISO 639-2 codes, whatever form the preference used. The
-`ended` field appears when the run is over and remains set in every later report of
-the same run. The pod takes seconds to terminate, so the operator
-reads this mark and returns the unit to idle at once instead of
-waiting out the pod.
+`item` counts from 1 in the order of `spec.items`. `duration` is empty
+until the player has read the item's header. `audioLanguage` and
+`subtitleLanguage` are absent while no track of that kind plays. Their
+values are the track's own language tags from the file, which for
+Matroska are the three-letter ISO 639-2 codes, whatever form the
+language preference used.
 
-`pod` is the UID of the playback pod that sent the report. A run's pod
-can stop while the `Play` goes on: the operator recreates it after an
-edit to the `Player`, resumes the run after the player crashes, or
-replaces a pod that something else deleted, such as an eviction. The
-new pod has the same name, and the old pod reports the `ended` field
-when it stops. The operator refuses a report from a pod that its pod
-watch shows deleting, from a pod other than the one the watch shows
-standing, and from a pod it knows is gone or replaced. So the old pod's
-ending does not move the unit to `Idle`, and the new pod's ending is
-marked and labeled on its own. While the watch shows no pod for the
-run, the operator takes a report from any pod it does not know is gone,
-because the new pod can report before the watch shows it.
+The `ended` field appears when the run is over, and it stays in every
+later report of the same run. The operator returns the `Player` to idle
+when it reads `ended`, without waiting for the pod to stop.
 
-The operator takes a report with no `pod` field as the run's, so a pod
-that runs an older sidecar image still reports. Two such pods of one
-run look the same to the operator, so the limits above do not apply to
-them.
+`pod` is the UID of the playback pod that sent the report. One `Play`
+can have several pods in turn: the operator creates the pod again after
+an edit to the `Player`, after `mpv` crashes, and after something else
+deletes the pod, such as an eviction. The new pod has the same name, and
+the old pod reports `ended` when it stops. So the operator ignores a
+report from a pod that is being deleted, from a pod that is not the
+run's current pod, and from a pod that it knows is gone or replaced,
+and the old pod's ending does not move the `Player` to `Idle`. While the
+operator's pod watch shows no pod for the run, it accepts a report from
+any pod that it does not know is gone, because the new pod can report
+before the watch shows it.
 
-The operator folds each report into the `Play`'s Kubernetes status,
-so a program that only needs the current position can read either
-one.
+The operator treats a report with no `pod` field as coming from the
+run's pod, so a pod that runs an older sidecar image still reports. The
+operator cannot tell two such pods of one run apart, so the rules above
+do not apply to them.
 
-Two writers clear the topic. The pod clears it with an empty retained
-payload when its run ends cleanly. The operator clears it as well, which
-is what a pod that died uncleanly needs, and it does so on its
-finalizer: it adds `media.liken.sh/bus-topics` to every `Play`, and
-when the `Play` is deleted it deletes the pod, waits for the pod to be
-gone, publishes an empty retained payload on `status` and on
-`availability`, and only then takes its finalizer off. So the `Play` is
-never gone while its topics remain, and a deleted `Play` leaves no
-report on the broker.
+The operator copies the reports into the `Play`'s status, but when only
+the position changed, it writes the status about every 10 seconds. A program that shows a
+position that advances every second reads this topic.
+
+The pod publishes an empty retained payload here when its run ends
+cleanly. The operator clears the topic too, in case a pod died without
+clearing it. It adds the finalizer `media.liken.sh/bus-topics` to every
+`Play`. When the `Play` is deleted, the operator deletes the pod, waits
+until the pod is gone, publishes an empty retained payload on `status`
+and on `availability`, and then removes the finalizer. So a deleted
+`Play` leaves no report on the broker.
 
 ### `availability`
 
-`online` or `offline`, a space, and the pod's UID, retained, the
-[availability](/docs/reference/bus/#availability) signal for the
-report above. For example, `offline 5f0c7a52-8e1d-4c3b-9a27-2d6b1e4f8c90`.
-The pod names this topic as its MQTT Last Will with `offline` and its
-UID as the payload, publishes `online` and its UID once it connects,
-and publishes `offline` and its UID itself when its run ends cleanly.
+The payload is `online` or `offline`, a space, and the pod's UID, for
+example `offline 5f0c7a52-8e1d-4c3b-9a27-2d6b1e4f8c90`. The message is
+retained, and it tells a reader whether the status report comes from a
+running pod ([availability](/docs/reference/bus/#availability)). The
+pod registers `offline` and its UID as its MQTT Last Will, publishes
+`online` and its UID after it connects, and publishes `offline` and its
+UID itself when its run ends cleanly.
 
-The broker publishes a dead pod's Last Will only when the pod's
-keepalive runs out, which can be after the run's new pod is online.
-The operator takes an availability on the same terms as a report, so
-a late `offline` from an old pod does not drop the new pod's report.
-It takes the word with no UID as the run's. An operator that has just
-started knows no pod as gone until its pod watch has read the cluster,
-so the retained `offline` of an old pod can drop the report it read.
-The new pod reports again within a second.
+The broker publishes the Last Will of a dead pod only when the pod's
+MQTT keepalive runs out, which can be after the run's new pod is online.
+So the operator applies the same rules to an availability message as to
+a status report, and a late `offline` from the old pod does not discard
+the new pod's report. It treats a message with no UID as coming from
+the run's pod. Until a newly started operator's pod watch has listed the
+cluster, the retained `offline` of an old pod can make it discard the
+report that it read. The new pod's next report restores it.
 
 The operator clears this topic with an empty retained payload on the
-same terms as `status`: on its finalizer, once the `Play` is deleted and
-its pod is gone.
+same terms as `status`: on its finalizer, after the `Play` is deleted
+and its pod is gone.

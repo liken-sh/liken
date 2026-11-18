@@ -1,8 +1,5 @@
 package main
 
-// These tests cover the discovery mode's output: what one line reports
-// about an event, and the Keymap entry a person pastes out of it.
-
 import "testing"
 
 func TestDiscoveryLinesTeachTheKeymapEntry(t *testing.T) {
@@ -12,7 +9,7 @@ func TestDiscoveryLinesTeachTheKeymapEntry(t *testing.T) {
 		want  []string
 	}{
 		{
-			name:  "a button press, which is the one value a Keymap binds",
+			name:  "a button press, the only value that a Keymap binds",
 			event: inputEvent{Type: evKey, Code: 0x130, Value: 1},
 			want: []string{
 				`event3 "pad" EV_KEY (1) BTN_SOUTH (304) press (1)`,
@@ -82,7 +79,7 @@ func TestDiscoveryLinesTeachTheKeymapEntry(t *testing.T) {
 		t.Run(each.name, func(t *testing.T) {
 			lines := discoveryLines(`event3 "pad"`, each.event)
 			if len(lines) < len(each.want) {
-				t.Fatalf("lines = %v, want at least %v", lines, each.want)
+				t.Fatalf("discoveryLines returned %v, want at least %v", lines, each.want)
 			}
 			for index, want := range each.want {
 				mustMatch(t, lines[index], want)
@@ -94,9 +91,7 @@ func TestDiscoveryLinesTeachTheKeymapEntry(t *testing.T) {
 	}
 }
 
-// The fragment's right side is a key name, so a person pastes the
-// entry and writes the kernel name the control should report.
-func TestTheFragmentAsksForAKeyName(t *testing.T) {
+func TestTheEntryEndsWithAKeyPlaceholder(t *testing.T) {
 	lines := discoveryLines(`event3 "pad"`, inputEvent{Type: evKey, Code: 0x130, Value: 1})
 
 	mustMatch(t, lines[len(lines)-1], "    key: "+keymapKeyHint)

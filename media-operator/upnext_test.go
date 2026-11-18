@@ -1,9 +1,5 @@
 package main
 
-// The sidecar's up-next half: the block it sends the display, the art it
-// decodes for the card, and the ask it publishes on the Player's commands
-// topic.
-
 import (
 	"context"
 	"encoding/json"
@@ -16,8 +12,7 @@ import (
 	"time"
 )
 
-// The block the operator writes into MEDIA_NEXT, with the art at its
-// in-pod path.
+// nextBlockValue returns the JSON that the operator sets in MEDIA_NEXT.
 func nextBlockValue(art string) string {
 	block, _ := json.Marshal(PlayNext{
 		Reason:  "Next in Harbor Lights",
@@ -28,8 +23,6 @@ func nextBlockValue(art string) string {
 	return string(block)
 }
 
-// A value that is not one JSON object gives the sidecar no block, so it
-// offers nothing and forwards nothing.
 func TestParseNextReadsOneObject(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -48,9 +41,6 @@ func TestParseNextReadsOneObject(t *testing.T) {
 	}
 }
 
-// The sidecar sends the display the block when the playlist reaches its
-// first item, after the presentation, and again on every replay the
-// display asks for.
 func TestTheSidecarSendsTheNextBlockAtTheStartAndOnAReplay(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, lines := bridgeToMPV(t)
@@ -71,8 +61,6 @@ func TestTheSidecarSendsTheNextBlockAtTheStartAndOnAReplay(t *testing.T) {
 	})
 }
 
-// A Play with no next block sends the display nothing after the
-// presentation, so the display offers nothing.
 func TestASidecarWithNoNextBlockSendsNone(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, lines := bridgeToMPV(t)
@@ -85,9 +73,7 @@ func TestASidecarWithNoNextBlockSendsNone(t *testing.T) {
 	})
 }
 
-// The display's ask becomes one message on the Player's commands topic,
-// not retained, with the block's own request.
-func TestTheAskPublishesOnThePlayersCommandsTopic(t *testing.T) {
+func TestSelectingTheOfferPublishesOnThePlayersCommandsTopic(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		bus, brokers, connected := startBus(t, 1, nil, nil)
 		waitForConnect(t, connected)
@@ -106,9 +92,7 @@ func TestTheAskPublishesOnThePlayersCommandsTopic(t *testing.T) {
 	})
 }
 
-// A sidecar with no next block, or one that read no Player, publishes
-// nothing for the ask.
-func TestTheAskPublishesNothingWithoutABlockOrAPlayer(t *testing.T) {
+func TestSelectingTheOfferPublishesNothingWithoutABlockOrAPlayer(t *testing.T) {
 	cases := []struct {
 		name  string
 		block json.RawMessage
@@ -132,9 +116,6 @@ func TestTheAskPublishesNothingWithoutABlockOrAPlayer(t *testing.T) {
 	}
 }
 
-// The pod's termination signal runs the same ending the exit press runs:
-// the report with the ended mark reaches the bus first, and only then
-// does quit reach mpv.
 func TestTheTerminationSignalPublishesTheEndingBeforeTheQuitReachesMpv(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		bus, brokers, connected := startBus(t, 1, nil, nil)
@@ -163,14 +144,14 @@ func TestTheTerminationSignalPublishesTheEndingBeforeTheQuitReachesMpv(t *testin
 		select {
 		case <-stopped:
 		case <-time.After(time.Second):
-			t.Fatal("the run never ended")
+			t.Fatal("the run did not end within one second of the signal")
 		}
 	})
 }
 
-// A run that ends on its own leaves the signal handler nothing to do, so
-// the ending publishes once and no second quit reaches mpv.
-func TestARunThatEndsFirstLeavesTheSignalHandlerNothing(t *testing.T) {
+// After the run ends, the signal handler publishes nothing and ends
+// nothing.
+func TestTheSignalHandlerDoesNothingAfterTheRunEnds(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		bus, brokers, connected := startBus(t, 1, nil, nil)
 		waitForConnect(t, connected)

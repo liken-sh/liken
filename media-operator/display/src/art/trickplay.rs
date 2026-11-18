@@ -1,8 +1,8 @@
-//! The display crops a trickplay tile from a Jellyfin sprite sheet, so a scrub
-//! shows the frame at the target time. The library precomputes the sheets, so
-//! the playback machine decodes no second video stream for a thumbnail. The
-//! scrub time maps to a tile, and the display reads the geometry off the sheet,
-//! crops the cell, and scales it to the box.
+//! Crops the thumbnail for a scrub position out of a Jellyfin trickplay
+//! sprite sheet. Jellyfin generates the sheets ahead of time, so the player
+//! decodes no second video stream to show the frame at the cursor time.
+//! The tile grid comes from the layout directory's name, and `tile` picks
+//! the cell for the time, crops it, and scales it to the requested box.
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -12,16 +12,17 @@ use image::DynamicImage;
 use super::bitmap::Bitmap;
 use super::decode;
 
-/// How long one tile covers. The operator writes the Play's own interval into
-/// the pod, and an unset, unreadable, or sub-millisecond value falls back to
-/// Jellyfin's own default, because the tile mapping divides by this value.
+/// The environment variable that holds the time one tile covers, as a Go
+/// duration. The operator sets it from the `Play`. `interval_ms` falls back
+/// to Jellyfin's default of ten seconds when it is unset, unparseable, or
+/// under one millisecond, because the tile index divides by it.
 pub const INTERVAL_VARIABLE: &str = "MEDIA_TRICKPLAY_INTERVAL";
 const DEFAULT_INTERVAL_MS: i64 = 10_000;
 
-/// The sheets on disk, one JPEG per grid of tiles.
+/// Each sheet is a JPEG named `<number>.jpg` inside the layout directory.
 const SHEET_SUFFIX: &str = ".jpg";
 
-/// The pod's interval as milliseconds.
+/// The time one tile covers, in milliseconds.
 pub fn interval_ms() -> i64 {
     std::env::var(INTERVAL_VARIABLE)
         .ok()
@@ -31,8 +32,8 @@ pub fn interval_ms() -> i64 {
         .unwrap_or(DEFAULT_INTERVAL_MS)
 }
 
-/// One duration as the operator writes it, which is Go's own spelling: a run
-/// of signed decimal numbers, each with a unit, such as `10s` or `1m30s`.
+/// Parses a Go `time.Duration` string such as `10s` or `1m30s`, which is the
+/// format the operator writes. Returns `None` for a number with no unit.
 fn duration_ms(text: &str) -> Option<i64> {
     let (text, sign) = match text.strip_prefix('-') {
         Some(rest) => (rest, -1.0),
@@ -61,8 +62,8 @@ fn duration_ms(text: &str) -> Option<i64> {
     Some((sign * milliseconds) as i64)
 }
 
-/// Every unit Go's own duration spells, longest name first so `ms` is read
-/// before `m`.
+/// The units of a Go duration, in milliseconds. `ms` comes before `m` and
+/// `s` so that the longer unit matches first.
 const UNITS: [(&str, f64); 7] = [
     ("ns", 1e-6),
     ("us", 1e-3),
@@ -73,18 +74,18 @@ const UNITS: [(&str, f64); 7] = [
     ("h", 3_600_000.0),
 ];
 
-/// The one decoded sheet the display holds. A scrub stays within one sheet for
-/// a long stretch, one hundred tiles at the interval, so holding one sheet is
-/// what keeps a scrub off the disk.
+/// A cache of the last decoded sheet, keyed by its layout path and number.
+/// Consecutive scrub positions usually fall on the same sheet, so the cache
+/// saves a file read and a JPEG decode on most steps.
 #[derive(Debug, Default)]
 pub struct Sheets {
     key: String,
     sheet: Option<DynamicImage>,
 }
 
-/// Map the cursor time to a tile, read the sheet geometry off disk, crop the
-/// cell, and scale it to the box. A directory with no layout inside it, or a
-/// sheet the display cannot read, crops nothing.
+/// Returns the thumbnail for `ms` from the sheets in `dir`, scaled to the
+/// box. Returns `None` when `dir` has no layout directory or the sheet
+/// cannot be read or cropped.
 pub fn tile(dir: &str, ms: i64, box_w: u32, box_h: u32, sheets: &Mutex<Sheets>) -> Option<Bitmap> {
     let index = ms / interval_ms();
     let (name, tile_w, cols, rows) = find_layout(dir)?;
@@ -94,28 +95,28 @@ pub fn tile(dir: &str, ms: i64, box_w: u32, box_h: u32, sheets: &Mutex<Sheets>) 
     let cell = index % per_sheet;
     let row = cell / cols;
     let col = cell % cols;
-    // A time past the end of the film maps past the last sheet. The highest
-    // sheet on disk is the last one, so clamp to it.
+    // A time past the end of the film indexes a sheet that does not exist,
+    // so use the highest numbered sheet on disk.
     let sheet = (index / per_sheet).min(highest_sheet(&layout));
 
-    let held = sheet_image(&layout, sheet, sheets)?;
-    // The tile height is the sheet height over the rows. It is the film's
-    // aspect, so a scope film gives a short wide tile, not a 16:9 one.
-    let tile_h = held.height() / rows as u32;
+    let image = sheet_image(&layout, sheet, sheets)?;
+    // The layout name gives the tile width but not the height. The height is
+    // the sheet height over the rows, which follows the film's aspect ratio.
+    let tile_h = image.height() / rows as u32;
     if tile_h == 0 {
         return None;
     }
-    let region = held.crop_imm(col as u32 * tile_w, row as u32 * tile_h, tile_w, tile_h);
+    let region = image.crop_imm(col as u32 * tile_w, row as u32 * tile_h, tile_w, tile_h);
     decode::scale(&region, box_w, box_h)
 }
 
-/// The held sheet when the crop names it, and a sheet decoded once and held
-/// otherwise.
+/// Returns the decoded sheet from the cache, or reads and decodes it and
+/// replaces the cached one.
 fn sheet_image(layout: &Path, sheet: i64, sheets: &Mutex<Sheets>) -> Option<DynamicImage> {
     let key = format!("{}:{sheet}", layout.to_string_lossy());
-    if let Ok(held) = sheets.lock()
-        && held.key == key
-        && let Some(sheet) = &held.sheet
+    if let Ok(cached) = sheets.lock()
+        && cached.key == key
+        && let Some(sheet) = &cached.sheet
     {
         return Some(sheet.clone());
     }
@@ -123,16 +124,17 @@ fn sheet_image(layout: &Path, sheet: i64, sheets: &Mutex<Sheets>) -> Option<Dyna
     let path = layout.join(format!("{sheet}{SHEET_SUFFIX}"));
     let decoded = decode::read(&std::fs::read(path).ok()?)?;
 
-    if let Ok(mut held) = sheets.lock() {
-        held.key = key;
-        held.sheet = Some(decoded.clone());
+    if let Ok(mut cached) = sheets.lock() {
+        cached.key = key;
+        cached.sheet = Some(decoded.clone());
     }
     Some(decoded)
 }
 
-/// The one layout directory inside a trickplay directory. Its name carries the
-/// tile width and the grid, like `320 - 10x10`, so the display reads the
-/// geometry from the name and opens no sheet to learn it.
+/// Finds the first subdirectory of `dir`, in name order, whose name parses
+/// as a layout. Jellyfin names it `<tile width> - <columns>x<rows>`, such as
+/// `320 - 10x10`, so the geometry is known without opening a sheet. Returns
+/// the name, tile width, columns, and rows.
 fn find_layout(dir: &str) -> Option<(String, u32, i64, i64)> {
     let mut names: Vec<String> = std::fs::read_dir(dir)
         .ok()?
@@ -147,7 +149,8 @@ fn find_layout(dir: &str) -> Option<(String, u32, i64, i64)> {
     })
 }
 
-/// One layout name, as the tile width, the columns, and the rows.
+/// Parses `<tile width> - <columns>x<rows>`. All three numbers must be
+/// positive.
 fn parse_layout(name: &str) -> Option<(u32, i64, i64)> {
     let (left, right) = name.split_once(" - ")?;
     let tile_w: u32 = left.trim().parse().ok()?;
@@ -157,8 +160,8 @@ fn parse_layout(name: &str) -> Option<(u32, i64, i64)> {
     (tile_w > 0 && cols > 0 && rows > 0).then_some((tile_w, cols, rows))
 }
 
-/// The highest N among the N.jpg sheets. A time past the end of the film
-/// clamps to it.
+/// The highest number N among the `N.jpg` files in `dir`, or 0 when there
+/// are none.
 fn highest_sheet(dir: &Path) -> i64 {
     std::fs::read_dir(dir)
         .into_iter()
@@ -185,9 +188,9 @@ mod tests {
     use image::{ImageFormat, Rgba, RgbaImage};
     use std::path::PathBuf;
 
-    /// The sheet every crop test reads: a 32 by 32 JPEG of four 16 by 16
-    /// cells, laid out the way a sprite sheet lays them out, cell 0 top left
-    /// and cell 3 bottom right.
+    /// The color of each cell of the test sheet: a 32 by 32 JPEG of four
+    /// 16 by 16 cells, numbered row by row, cell 0 top left and cell 3
+    /// bottom right.
     const CELLS: [[u8; 4]; 4] = [
         [200, 0, 0, 255],
         [0, 200, 0, 255],
@@ -208,8 +211,8 @@ mod tests {
         encoded_from(&picture, ImageFormat::Jpeg)
     }
 
-    /// One trickplay directory: a layout directory of the stated name, holding
-    /// the stated sheets in order.
+    /// Writes a trickplay directory with one layout directory named
+    /// `layout`, holding `sheets` as `0.jpg`, `1.jpg`, and so on.
     fn trickplay(name: &str, layout: &str, sheets: &[Vec<u8>]) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("media-display-{name}.trickplay"));
         let _ = std::fs::remove_dir_all(&dir);
@@ -222,14 +225,13 @@ mod tests {
         dir
     }
 
-    fn held() -> Mutex<Sheets> {
+    fn cache() -> Mutex<Sheets> {
         Mutex::new(Sheets::default())
     }
 
-    /// The lock on the interval variable. Cargo runs tests on parallel
-    /// threads, and several tests here set the one process-wide variable,
-    /// so a test holds this lock from its set to its last read. Without it,
-    /// another test's set lands between them.
+    /// Serializes the tests that set the interval variable. Cargo runs tests
+    /// on parallel threads and the variable is process-wide, so without the
+    /// lock one test can change it between another test's set and read.
     static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn env() -> std::sync::MutexGuard<'static, ()> {
@@ -237,23 +239,21 @@ mod tests {
     }
 
     fn set_interval(text: &str) {
-        // SAFETY: the tests in this module are the one reader of this
-        // variable, and each one holds ENV while it sets and reads it.
+        // SAFETY: only tests in this module use this variable, and each
+        // holds ENV while it sets and reads it.
         unsafe { std::env::set_var(INTERVAL_VARIABLE, text) };
     }
 
-    /// The interval as the pod states it, held until the guard drops. Every
-    /// test states one, because the tile mapping divides by this value.
+    /// Sets the interval variable and returns the lock, which the test keeps
+    /// until it ends.
     fn interval(text: &str) -> std::sync::MutexGuard<'static, ()> {
-        let held = env();
+        let guard = env();
         set_interval(text);
-        held
+        guard
     }
 
-    /// The interval falls back to ten seconds, which is Jellyfin's own
-    /// default, for an unset value and for one no reader can use.
     #[test]
-    fn the_interval_falls_back_to_ten_seconds() {
+    fn the_interval_reads_go_durations_and_falls_back_to_ten_seconds() {
         let _env = env();
         for (text, want) in [
             ("10s", 10_000),
@@ -276,10 +276,8 @@ mod tests {
         assert_eq!(interval_ms(), DEFAULT_INTERVAL_MS);
     }
 
-    /// A layout name carries the tile width and the grid, and a name that
-    /// spells neither is no layout.
     #[test]
-    fn a_layout_name_carries_the_tile_width_and_the_grid() {
+    fn a_layout_name_parses_into_the_tile_width_and_the_grid() {
         assert_eq!(parse_layout("320 - 10x10"), Some((320, 10, 10)));
         assert_eq!(parse_layout("240 - 8x12"), Some((240, 8, 12)));
         for name in [
@@ -297,10 +295,8 @@ mod tests {
         }
     }
 
-    /// The layout directory is the one subdirectory whose name spells a grid,
-    /// and the highest sheet is the top number among the N.jpg files.
     #[test]
-    fn the_layout_and_the_highest_sheet_read_off_the_directory() {
+    fn the_layout_and_the_highest_sheet_come_from_the_directory_listing() {
         let dir = trickplay("layout", "16 - 2x2", &[sheet(), sheet(), sheet()]);
         assert_eq!(
             find_layout(&dir.to_string_lossy()),
@@ -309,9 +305,9 @@ mod tests {
         assert_eq!(highest_sheet(&dir.join("16 - 2x2")), 2);
     }
 
-    /// A directory that is not a trickplay set has no layout, and one with no
-    /// numbered sheet reads as the first sheet. A directory that is not there
-    /// answers the same way, so the two cannot be told apart.
+    /// A directory with no layout subdirectory has no layout, and a layout
+    /// directory with no numbered sheet has highest sheet 0. A directory that
+    /// does not exist gives the same results.
     #[test]
     fn a_directory_that_is_not_a_trickplay_set_has_no_layout() {
         let loose = trickplay("loose", "extras", &[]);
@@ -327,87 +323,93 @@ mod tests {
         assert_eq!(highest_sheet(&mixed.join("absent")), 0);
     }
 
-    /// The scrub time maps to a cell: the time divides by the interval, the
-    /// index divides by the grid into a sheet and a cell, and the cell reads as
-    /// a row and a column.
+    /// The time divided by the interval is the tile index. The index divided
+    /// by `cols * rows` gives the sheet and the remainder gives the cell,
+    /// which is read row by row.
     #[test]
     fn the_scrub_time_maps_to_a_cell_of_a_sheet() {
         let dir = trickplay("mapping", "16 - 2x2", &[sheet()]);
         let _env = interval("10s");
         for (milliseconds, cell) in [(0, 0), (9_999, 0), (15_000, 1), (25_000, 2), (39_999, 3)] {
-            let tile = tile(&dir.to_string_lossy(), milliseconds, 32, 32, &held()).expect("a tile");
-            assert_eq!((tile.width, tile.height), (32, 32), "{milliseconds}");
+            let tile =
+                tile(&dir.to_string_lossy(), milliseconds, 32, 32, &cache()).expect("a tile");
+            assert_eq!(
+                (tile.width, tile.height),
+                (32, 32),
+                "the tile size at {milliseconds} ms is wrong, want 32x32"
+            );
             let [red, green, blue, _] = centre(&tile);
             let want = CELLS[cell];
             assert!(
                 red.abs_diff(want[0]) < 60
                     && green.abs_diff(want[1]) < 60
                     && blue.abs_diff(want[2]) < 60,
-                "{milliseconds} read {red} {green} {blue}"
+                "at {milliseconds} ms the tile centre is {red} {green} {blue}, want near {want:?}"
             );
         }
     }
 
-    /// A time past the end of the film clamps to the highest sheet on disk.
-    /// The cell is not read again after the clamp, so the tile is the cell the
-    /// index named.
+    /// A time past the end of the film uses the highest sheet on disk. The
+    /// cell within the sheet still comes from the unclamped index.
     #[test]
     fn a_time_past_the_end_clamps_to_the_highest_sheet() {
         let dir = trickplay("clamp", "16 - 2x2", &[sheet()]);
         let _env = interval("10s");
         // 9,000,000 ms is index 900, which is sheet 225 and cell 0.
-        let tile = tile(&dir.to_string_lossy(), 9_000_000, 24, 24, &held()).expect("a tile");
+        let tile = tile(&dir.to_string_lossy(), 9_000_000, 24, 24, &cache()).expect("a tile");
         assert_eq!((tile.width, tile.height), (24, 24));
         let [red, green, blue, _] = centre(&tile);
-        assert!(red > 150 && green < 60 && blue < 60, "{red} {green} {blue}");
+        assert!(
+            red > 150 && green < 60 && blue < 60,
+            "the tile centre is {red} {green} {blue}, want red"
+        );
     }
 
-    /// The tile width is the layout's own, and the tile height is the sheet
-    /// height over the rows. It is the film's aspect, so a scope film gives a
-    /// short wide tile and not a 16:9 one.
+    /// The tile width comes from the layout name and the tile height is the
+    /// sheet height over the rows, so a wide film gives a short, wide tile.
     #[test]
     fn the_tile_height_is_the_sheet_height_over_the_rows() {
         let scope = encoded(200, 84, ImageFormat::Jpeg, [0, 0, 0, 255]);
         let dir = trickplay("scope", "100 - 2x2", &[scope]);
         let _env = interval("10s");
-        let tile = tile(&dir.to_string_lossy(), 0, 360, 220, &held()).expect("a tile");
+        let tile = tile(&dir.to_string_lossy(), 0, 360, 220, &cache()).expect("a tile");
         assert_eq!((tile.width, tile.height), (360, 151));
     }
 
-    /// The sheet is decoded once and held, because a scrub stays within one
-    /// sheet for a long stretch. The held sheet answers after the file goes.
+    /// A second tile from the same sheet reads no file: it still succeeds
+    /// after the sheet is deleted.
     #[test]
-    fn the_sheet_is_decoded_once_and_held() {
-        let dir = trickplay("held", "16 - 2x2", &[sheet()]);
+    fn a_second_tile_from_the_same_sheet_comes_from_the_cache() {
+        let dir = trickplay("cached", "16 - 2x2", &[sheet()]);
         let _env = interval("10s");
-        let sheets = held();
+        let sheets = cache();
         assert!(tile(&dir.to_string_lossy(), 0, 16, 16, &sheets).is_some());
         std::fs::remove_file(dir.join("16 - 2x2").join("0.jpg")).expect("the sheet to go");
         assert!(tile(&dir.to_string_lossy(), 15_000, 16, 16, &sheets).is_some());
     }
 
-    /// Every failure along the crop path crops nothing: a directory that is
-    /// not there, one with no layout inside it, a layout with no sheet, a
-    /// sheet that is not a picture, and a sheet too short to hold its rows.
+    /// Each failure returns `None`: a missing directory, a directory with no
+    /// layout, a layout with no sheet, a sheet that is not an image, and a
+    /// sheet shorter than its row count.
     #[test]
-    fn a_directory_the_display_cannot_read_crops_nothing() {
+    fn an_unreadable_trickplay_directory_returns_no_tile() {
         let _env = interval("10s");
-        assert!(tile("/art/nothing", 5_000, 24, 24, &held()).is_none());
+        assert!(tile("/art/nothing", 5_000, 24, 24, &cache()).is_none());
 
         let empty = trickplay("empty", "not a layout", &[]);
-        assert!(tile(&empty.to_string_lossy(), 5_000, 24, 24, &held()).is_none());
+        assert!(tile(&empty.to_string_lossy(), 5_000, 24, 24, &cache()).is_none());
 
         let missing = trickplay("missing", "16 - 2x2", &[]);
-        assert!(tile(&missing.to_string_lossy(), 5_000, 24, 24, &held()).is_none());
+        assert!(tile(&missing.to_string_lossy(), 5_000, 24, 24, &cache()).is_none());
 
         let garbage = trickplay("garbage", "16 - 2x2", &[b"not an image".to_vec()]);
-        assert!(tile(&garbage.to_string_lossy(), 5_000, 24, 24, &held()).is_none());
+        assert!(tile(&garbage.to_string_lossy(), 5_000, 24, 24, &cache()).is_none());
 
         let short = trickplay(
             "short",
             "16 - 2x2",
             &[encoded(32, 1, ImageFormat::Jpeg, [0, 0, 0, 255])],
         );
-        assert!(tile(&short.to_string_lossy(), 5_000, 24, 24, &held()).is_none());
+        assert!(tile(&short.to_string_lossy(), 5_000, 24, 24, &cache()).is_none());
     }
 }

@@ -1,13 +1,11 @@
 package main
 
-// The agent's side of the query: it runs the query of one render node
-// as a child process and reads the report from its output.
-//
-// A VA-API driver is a shared library that runs inside the process
-// that opens it. A driver that hangs in vaInitialize would hang the
-// agent, and a driver that crashes would end it. The child holds the
-// driver instead: the agent kills a child that runs past
-// queryTimeout, and reads a crash as a failed query.
+// The agent queries each render node in a child process and reads the
+// report from the child's stdout. A VA-API driver is a shared library
+// that runs in the process that loads it, so a driver that hangs in
+// vaInitialize or crashes would hang or end the agent. The agent kills
+// a child that runs longer than queryTimeout and treats a crash as a
+// failed query.
 
 import (
 	"bytes"
@@ -22,23 +20,23 @@ import (
 	"time"
 )
 
-// queryMode is the argument that runs the program as the query of one
-// render node.
+// queryMode is the first argument that makes the program run as the
+// child.
 const queryMode = "query"
 
-// queryTimeout bounds one query. A healthy driver answers in well under
-// a second, because the query reads lists and creates one config.
+// queryTimeout limits one query. The query only lists profiles and
+// formats and creates one config, so a query that takes this long has a
+// hung driver.
 const queryTimeout = 20 * time.Second
 
-// querier runs the query of one render node.
 type querier struct {
-	// Command builds the child process. The agent runs its own
-	// executable in queryMode, and a test runs a stand-in.
+	// command builds the child process. A test replaces it.
 	command func(ctx context.Context, path string) *exec.Cmd
 	timeout time.Duration
 }
 
-// selfQuerier runs this program's own executable as the child.
+// selfQuerier returns a querier that runs this program's own executable
+// with queryMode.
 func selfQuerier() (*querier, error) {
 	self, err := os.Executable()
 	if err != nil {
@@ -52,35 +50,35 @@ func selfQuerier() (*querier, error) {
 	}, nil
 }
 
-// query runs the child and decodes its report. A child that fails
-// returns an error that holds its stderr word for word, and a child
-// that runs past the timeout returns an error that says so.
+// query runs the child and decodes its report. When the child fails or
+// is killed, the error includes the child's stderr.
 func (q *querier) query(ctx context.Context, path string) (report, error) {
 	ctx, cancel := context.WithTimeout(ctx, q.timeout)
 	defer cancel()
 	var stdout, stderr bytes.Buffer
 	cmd := q.command(ctx, path)
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	// A process that the child started can hold its output open after
-	// the kill. WaitDelay bounds the wait for that output to close.
+	// A process that the child started can keep the output pipes open
+	// after the child exits or is killed, and Run would wait for them.
 	cmd.WaitDelay = time.Second
 	err := cmd.Run()
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return report{}, fmt.Errorf("the query of %s ran past %s and was killed: %s",
+		return report{}, fmt.Errorf("the query of %s did not finish within %s and was killed, child stderr: %s",
 			path, q.timeout, strings.TrimSpace(stderr.String()))
 	}
 	if err != nil {
-		return report{}, fmt.Errorf("the query of %s failed (%v): %s", path, err, strings.TrimSpace(stderr.String()))
+		return report{}, fmt.Errorf("the query of %s exited with %v, child stderr: %s", path, err, strings.TrimSpace(stderr.String()))
 	}
 	var facts report
 	if err := json.Unmarshal(stdout.Bytes(), &facts); err != nil {
-		return report{}, fmt.Errorf("the query of %s wrote a report that does not decode: %w", path, err)
+		return report{}, fmt.Errorf("decoding the report that the query of %s wrote: %w", path, err)
 	}
 	return facts, nil
 }
 
-// runQuery is the child's side: it queries one render node and writes
-// the report to stdout as JSON. It returns the exit code.
+// runQuery runs in the child. It queries one render node and writes the
+// report to stdout as JSON. It returns the exit code: 2 for wrong
+// arguments and 1 for a failed query.
 func runQuery(args []string, stdout, stderr io.Writer) int {
 	if len(args) != 1 {
 		fmt.Fprintf(stderr, "usage: %s %s <render node>\n", os.Args[0], queryMode)

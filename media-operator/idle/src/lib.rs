@@ -1,5 +1,5 @@
-// The idle screen is a library with a binary over it, so its parsers and
-// its measurements have unit tests that open no window.
+// The idle screen is a library with a thin binary on top, so its parsing
+// and layout code can be unit tested without opening a window.
 
 pub mod client;
 pub mod clock;

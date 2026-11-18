@@ -1,45 +1,41 @@
 package main
 
-// This file owns content negotiation: the forms each aspect serves,
-// the Accept field, and the choice between them. An extension in the
-// path names one fixed form, and the only question is whether the
-// Accept field admits it. An extensionless route negotiates on Accept
-// with q-values, RFC 9110 section 12.5.1, and no Accept means the
-// aspect's default. The screen and audio forms are what the sibling
-// APIs serve, so a redirect carries the extension the negotiation
-// chose and the sibling negotiates nothing again.
+// This file chooses the representation of a capture response from the
+// request's Accept header. A route with an extension in the path
+// serves that one form, and the Accept header can only refuse it. A
+// route without an extension picks a form by the q-values of the
+// Accept header (RFC 9110 section 12.5.1), and a request with no
+// Accept header gets the aspect's first form. The screen and audio
+// aspects redirect to the display and audio APIs with the chosen
+// extension in the Location, so those APIs do not negotiate again.
 
 import (
 	"strconv"
 	"strings"
 )
 
-// mediaForm is one fixed representation of an aspect. It has both a
-// media type and an extension because a client reaches it two ways:
-// by naming the type in Accept on the extensionless route, or by
-// naming the extension in the path. Each way must land on the same
-// form, and a redirect's Location carries the extension.
+// mediaForm is one format a capture can be served in. A client
+// selects it either by media type in the Accept header or by
+// extension in the path, and both must select the same form.
 type mediaForm struct {
-	// Type is the media type the form is served as, and the one a
-	// Content-Type and a Link type parameter carry.
+	// Type is the media type sent in Content-Type and in the type
+	// parameter of a Link.
 	Type string
-	// Extension is the path extension that names this form, mp4 for
-	// video/mp4.
+	// Extension is the path extension that selects this form.
 	Extension string
-	// Aliases are the other media types that match this form. A
-	// client that names the deprecated video/x-matroska or one of the
-	// three unregistered WAVE names asks for the same bytes, so the
-	// alias matches, and the answer is served under Type.
+	// Aliases are other media types that an Accept header can use for
+	// this form, such as the deprecated video/x-matroska. A request
+	// that names an alias is served under Type.
 	Aliases []string
 }
 
-// The forms each aspect serves, in order of the server's preference.
-// The first form is the aspect's default, the one an absent Accept
-// gets, and the order breaks a tie between forms the client rates at
-// equal quality. The screen and audio lists are exactly what the
-// display API and the audio API serve, because a screen or audio
-// request redirects there and the extension in the Location must be
-// one the sibling answers. The composed list is this API's own.
+// The forms of each aspect, in the server's order of preference. The
+// first form is the default for a request with no Accept header, and
+// the order breaks a tie between forms that the client rates at the
+// same quality. The screen and audio lists must match the forms that
+// the display API and the audio API serve, because the redirect's
+// Location sends one of these extensions to those APIs. This API
+// serves the composed forms itself.
 var (
 	screenForms = []mediaForm{
 		{Type: "image/png", Extension: "png"},
@@ -58,11 +54,10 @@ var (
 	}
 )
 
-// negotiate picks the form an extensionless route serves from the
-// Accept field. An absent or empty field means the aspect's default,
-// the first form. Otherwise the highest-quality form the field admits
-// wins. A false answer means nothing offered is acceptable, which the
-// route answers as 406.
+// negotiate picks the form for a route with no extension. It returns
+// the first form when the Accept header is empty, and otherwise the
+// form with the highest quality in the header. It returns false when
+// the header admits no form, and the route then responds 406.
 func negotiate(accept string, forms []mediaForm) (mediaForm, bool) {
 	if len(forms) == 0 {
 		return mediaForm{}, false
@@ -75,17 +70,16 @@ func negotiate(accept string, forms []mediaForm) (mediaForm, bool) {
 	bestQuality, bestSpecificity := 0.0, 0
 	for _, form := range forms {
 		quality, specificity, ok := bestRange(ranges, form)
-		// A form at q=0 is one the client refused, not one it rates
-		// low: RFC 9110 section 12.4.2 says q=0 means "not
-		// acceptable". Serving it when nothing else matches would
-		// hand the client bytes it said it cannot use.
+		// q=0 means "not acceptable" (RFC 9110 section 12.4.2), so
+		// skip the form even when no other form matches. Serving it
+		// would send a representation the client refused.
 		if !ok || quality <= 0 {
 			continue
 		}
-		// Quality decides first. At equal quality, the form matched
-		// by the more specific range wins, so `video/*, video/matroska`
-		// picks matroska. At equal specificity the earlier form wins,
-		// which is the server's own preference.
+		// The higher quality wins. At equal quality, the form that
+		// matched a more specific range wins, so `video/*,
+		// video/matroska` picks matroska. At equal specificity the
+		// earlier form in the list wins.
 		if found && (quality < bestQuality || (quality == bestQuality && specificity <= bestSpecificity)) {
 			continue
 		}
@@ -94,10 +88,10 @@ func negotiate(accept string, forms []mediaForm) (mediaForm, bool) {
 	return chosen, found
 }
 
-// acceptable answers the one question an extension route asks: does
-// the Accept field admit the form the path named? An absent field
-// admits everything. A field that names other types, or this form at
-// q=0, does not, and the route answers 406.
+// acceptable reports whether the Accept header admits the form that
+// the path's extension selected. An empty header admits every form.
+// A header that lists only other types, or lists this form at q=0,
+// does not, and the route then responds 406.
 func acceptable(accept string, form mediaForm) bool {
 	if strings.TrimSpace(accept) == "" {
 		return true
@@ -106,8 +100,8 @@ func acceptable(accept string, form mediaForm) bool {
 	return ok && quality > 0
 }
 
-// formByExtension finds the one form an extension names. The extension
-// is not negotiated: mp4 is video/mp4 whatever the Accept field says.
+// formByExtension returns the form that an extension selects. The
+// Accept header does not change the result: mp4 is always video/mp4.
 func formByExtension(extension string, forms []mediaForm) (mediaForm, bool) {
 	for _, form := range forms {
 		if form.Extension == extension {
@@ -117,29 +111,26 @@ func formByExtension(extension string, forms []mediaForm) (mediaForm, bool) {
 	return mediaForm{}, false
 }
 
-// mediaRange is one entry of an Accept field: a type, a subtype, and
-// the quality the client gives the pair. Either part may be `*`. A
-// range with no q parameter is at full quality, 1.
+// mediaRange is one entry of an Accept header: a type, a subtype, and
+// a quality. Either part may be `*`. An entry with no q parameter has
+// quality 1.
 type mediaRange struct {
 	kind    string
 	subtype string
 	quality float64
 }
 
-// parseAccept reads an Accept field into its ranges. Only the q
-// parameter matters for matching. Every other parameter, such as
-// codecs, is ignored, because this API serves one representation per
-// form and a parameter that names a codec neither adds a form nor
-// removes one. A q value that does not parse is taken as full quality,
-// so a malformed parameter widens the match rather than refusing a
-// client.
+// parseAccept splits an Accept header into its ranges. It reads only
+// the q parameter and ignores the others, such as codecs, because
+// each form has one fixed encoding. A q value that does not parse
+// leaves the quality at 1, so a malformed value admits the form
+// instead of refusing it.
 func parseAccept(accept string) []mediaRange {
 	ranges := []mediaRange{}
 	for _, entry := range splitOutsideQuotes(accept, ',') {
 		fields := splitOutsideQuotes(entry, ';')
 		kind, subtype, named := strings.Cut(strings.TrimSpace(fields[0]), "/")
-		// An entry with no slash is not a media range, and matching
-		// it against a form has no defined answer, so it is dropped.
+		// An entry with no slash is not a media range, so skip it.
 		if !named {
 			continue
 		}
@@ -162,11 +153,11 @@ func parseAccept(accept string) []mediaRange {
 	return ranges
 }
 
-// bestRange finds the range that decides a form's quality when several
-// match. The most specific matching range wins, RFC 9110 section
-// 12.5.1, so `video/*;q=0.5, video/mp4` gives video/mp4 full quality.
-// The specificity is how many parts of the range are exact: 0 for
-// `*/*`, 1 for `video/*`, and 2 for a full type.
+// bestRange returns the quality of a form from the most specific range
+// that matches it (RFC 9110 section 12.5.1), so `video/*;q=0.5,
+// video/mp4` gives video/mp4 quality 1. Among ranges of equal
+// specificity, the higher quality is used. ok is false when no range
+// matches.
 func bestRange(ranges []mediaRange, form mediaForm) (quality float64, specificity int, ok bool) {
 	for _, candidate := range ranges {
 		candidateSpecificity, matched := matchRange(candidate, form)
@@ -181,10 +172,10 @@ func bestRange(ranges []mediaRange, form mediaForm) (quality float64, specificit
 	return quality, specificity, ok
 }
 
-// matchRange tells whether a range matches a form, by the form's type
-// or one of its aliases, and scores the match. The catch-all `*/*`
-// scores 0, a type wildcard such as `video/*` scores 1, and an exact
-// type scores 2.
+// matchRange reports whether a range matches the form's type or one
+// of its aliases, and returns the specificity of the match: 0 for
+// `*/*`, 1 for a type wildcard such as `video/*`, and 2 for an exact
+// type.
 func matchRange(candidate mediaRange, form mediaForm) (int, bool) {
 	if candidate.kind == "*" && candidate.subtype == "*" {
 		return 0, true
@@ -204,10 +195,10 @@ func matchRange(candidate mediaRange, form mediaForm) (int, bool) {
 	return 0, false
 }
 
-// splitOutsideQuotes splits a field on a separator that is not inside
-// a quoted string. A codecs parameter carries a comma inside its
-// quotes, `video/mp4;codecs="avc1.64001f,Opus"`, and a plain split on
-// the comma would cut that one entry into two.
+// splitOutsideQuotes splits a header value on a separator byte that is
+// not inside a quoted string. A codecs parameter can contain a comma,
+// as in `video/mp4;codecs="avc1.64001f,Opus"`, and splitting on every
+// comma would cut that entry in two.
 func splitOutsideQuotes(field string, separator byte) []string {
 	parts := []string{}
 	quoted, start := false, 0

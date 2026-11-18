@@ -1,22 +1,18 @@
 package main
 
-// A watch's store answers the view only while it is ready
-// (informer.View.Ready): it holds the whole first read, and the API
-// server has not forbidden the watch since. A store whose watch the API
-// server forbids with a 401 or a 403 holds no change made since its
-// last list. The case is a release skew: a new binary under the
-// previous release's RBAC, which grants list and not watch. While the
-// store is not ready, each read of the collection goes to the API
-// server. A watch that fails for another reason, such as a refused
-// connection while the API server restarts, leaves the store ready, so
-// the pass keeps its local work going from the store.
+// This file reads one collection from its watch's store while
+// informer.View.Ready is true, and from the API server otherwise. The
+// store stops being ready when the API server refuses the watch with a
+// 401 or a 403, because the store then misses every change after its
+// last list. That happens when a new binary runs under the previous
+// release's RBAC, which grants list but not watch. Any other watch
+// failure, such as a refused connection while the API server restarts,
+// leaves the store ready.
 //
-// The reads from the API server go through the shared memo package,
-// which notes the version of each object a read answers. The kinds here
-// have no memo, so each read passes a nil memo and notes nothing. The
-// pass reads no status it wrote back from them (objectcache.go), and it
-// reads an object again from the API server before it creates or
-// deletes one (clusterview.go).
+// The reads from the API server pass a nil memo, so they record no
+// resourceVersion. These kinds need none, because a pass does not read
+// back a status it wrote to them (objectcache.go), and it reads the API
+// server again before it creates or deletes an object (clusterview.go).
 
 import (
 	"errors"
@@ -31,19 +27,17 @@ import (
 	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
-// watchedSource is one collection of the view: the watch's store, and
-// the API server's copy of the same selection while the store is not
-// ready.
+// watchedSource reads one collection of the view.
 type watchedSource struct {
 	view     informer.View
 	client   *apiclient.Client
 	resource schema.GroupVersionResource
-	// labels is the watch's label selector, which a list from the API
-	// server states too, so both answer the same selection.
+	// labels is the label selector of the watch. The list from the API
+	// server uses it too, so both reads return the same objects.
 	labels string
 }
 
-// List answers every object of the collection.
+// List returns every object of the collection.
 func (s watchedSource) List() ([]any, error) {
 	if s.view.Ready() {
 		return s.view.Store.List(), nil
@@ -53,8 +47,9 @@ func (s watchedSource) List() ([]any, error) {
 		path += "?labelSelector=" + url.QueryEscape(s.labels)
 	}
 	list, err := memo.ReadList[objectFields](s.client, nil, path)
-	// A collection the API server does not serve holds no object, the
-	// way the watch of an optional collection reads it (watch.go).
+	// A 404 means the cluster does not serve the resource, which the
+	// watch of an optional resource also reads as an empty collection
+	// (watch.go).
 	if errors.Is(err, apiclient.ErrNotFound) {
 		return nil, nil
 	}
@@ -68,7 +63,7 @@ func (s watchedSource) List() ([]any, error) {
 	return items, nil
 }
 
-// GetByKey answers one object by its key, namespace/name or name.
+// GetByKey returns the object with this key, namespace/name or name.
 func (s watchedSource) GetByKey(key string) (any, bool, error) {
 	if s.view.Ready() {
 		return s.view.Store.GetByKey(key)
@@ -83,13 +78,13 @@ func (s watchedSource) GetByKey(key string) (any, bool, error) {
 	return &unstructured.Unstructured{Object: *fields}, true, nil
 }
 
-// objectFields is one object as the API server answers it, which the
-// view converts to the operator's own struct later (clusterview.go).
+// objectFields is one object as decoded from the API server's JSON.
 type objectFields map[string]any
 
 func (f *objectFields) GetObjectMeta() memo.Meta { return &unstructured.Unstructured{Object: *f} }
 
-// Stored answers one object from the watch's store alone.
+// Stored returns the object from the watch's store, and never reads
+// the API server, even while the store is not ready.
 func (s watchedSource) Stored(key string) (any, bool) {
 	if s.view.Store == nil {
 		return nil, false
@@ -98,14 +93,14 @@ func (s watchedSource) Stored(key string) (any, bool) {
 	return item, held && err == nil
 }
 
-// collectionPath is the path that lists a collection in every
-// namespace, or a cluster-scoped collection.
+// collectionPath is the API path that lists the collection in every
+// namespace.
 func collectionPath(resource schema.GroupVersionResource) string {
 	return groupPath(resource) + "/" + resource.Resource
 }
 
-// objectPath is the path of one object by its key, namespace/name for a
-// namespaced object and the name for a cluster-scoped one.
+// objectPath is the API path of the object with this key:
+// namespace/name, or the name alone for a cluster-scoped object.
 func objectPath(resource schema.GroupVersionResource, key string) string {
 	namespace, name, namespaced := strings.Cut(key, "/")
 	if !namespaced {
@@ -114,8 +109,7 @@ func objectPath(resource schema.GroupVersionResource, key string) string {
 	return groupPath(resource) + "/namespaces/" + namespace + "/" + resource.Resource + "/" + name
 }
 
-// groupPath is the path of a resource's group and version: /api/v1 for
-// the core group.
+// groupPath is the API path prefix of a resource's group and version.
 func groupPath(resource schema.GroupVersionResource) string {
 	if resource.Group == "" {
 		return "/api/" + resource.Version

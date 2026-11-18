@@ -1,16 +1,10 @@
 package main
 
-// These tests cover the capture query parser, the shifted t= value an
-// upstream request carries, and the NPT renderer. The refusal rows are
-// the plan's drill rows, so a 400 here is a 400 on the cluster.
-
 import (
 	"strings"
 	"testing"
 )
 
-// A capture with no query is a whole capture: the upstream's own
-// default span and frame, with no knob set.
 func TestCaptureQueryReadsAnEmptyQuery(t *testing.T) {
 	got, err := parseCaptureQuery("", mediaCaptureKeys)
 
@@ -18,10 +12,6 @@ func TestCaptureQueryReadsAnEmptyQuery(t *testing.T) {
 	mustMatch(t, got, captureQuery{})
 }
 
-// The temporal dimension takes a begin, an end, or both, with or
-// without the npt: prefix, in ss, mm:ss, or hh:mm:ss form. The
-// interval is half-open, so the begin and the end are two distinct
-// facts.
 func TestCaptureQueryReadsTheTemporalDimension(t *testing.T) {
 	cases := []struct {
 		name string
@@ -49,9 +39,8 @@ func TestCaptureQueryReadsTheTemporalDimension(t *testing.T) {
 	}
 }
 
-// The parser splits before it decodes, the three cases of Media
-// Fragments section 6.1.1: t=10%2C20 is the interval, and t=%6ept:10
-// and t=npt%3a10 both carry the prefix.
+// Media Fragments section 5.1.1 splits the query before it decodes
+// the names and values.
 func TestCaptureQuerySplitsBeforeItDecodes(t *testing.T) {
 	cases := []struct {
 		name string
@@ -74,9 +63,8 @@ func TestCaptureQuerySplitsBeforeItDecodes(t *testing.T) {
 	}
 }
 
-// The spatial dimension is kept as it was written, prefix and all,
-// including a region the frame does not hold, because the display
-// sidecar that owns the frame clips it.
+// A region that extends past the frame is kept, because the display
+// sidecar clips it.
 func TestCaptureQueryKeepsTheSpatialDimensionAsWritten(t *testing.T) {
 	cases := []struct {
 		name string
@@ -98,17 +86,14 @@ func TestCaptureQueryKeepsTheSpatialDimensionAsWritten(t *testing.T) {
 	}
 }
 
-// The knobs stay the strings the caller wrote, because they go to an
-// upstream unchanged.
-func TestCaptureQueryKeepsTheKnobsAsStrings(t *testing.T) {
+func TestCaptureQueryKeepsTheParametersAsStrings(t *testing.T) {
 	got, err := parseCaptureQuery("width=960&framerate=30&quality=80&bitrate=128000", mediaCaptureKeys)
 
 	mustSucceed(t, err)
 	mustMatch(t, got, captureQuery{Width: "960", Framerate: "30", Quality: "80", Bitrate: "128000"})
 }
 
-// height= alone is a capture, the way width= alone is; only the pair
-// is refused.
+// Only width= and height= together are refused.
 func TestCaptureQueryReadsHeightAlone(t *testing.T) {
 	got, err := parseCaptureQuery("height=540", mediaCaptureKeys)
 
@@ -116,8 +101,6 @@ func TestCaptureQueryReadsHeightAlone(t *testing.T) {
 	mustMatch(t, got, captureQuery{Height: "540"})
 }
 
-// Each route reads the keys its aspect has: the screen keys, the
-// audio keys, and the union for the composed route.
 func TestCaptureQueryReadsEachRoutesOwnKeys(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -137,10 +120,7 @@ func TestCaptureQueryReadsEachRoutesOwnKeys(t *testing.T) {
 	}
 }
 
-// A query the grammar refuses is an error and never an ignored
-// dimension, because the query names a new resource and a client that
-// asked for a region must not silently get the whole screen.
-func TestCaptureQueryRefusesAQueryTheGrammarRefuses(t *testing.T) {
+func TestCaptureQueryRefusesAnInvalidQuery(t *testing.T) {
 	cases := []struct {
 		name    string
 		raw     string
@@ -150,7 +130,7 @@ func TestCaptureQueryRefusesAQueryTheGrammarRefuses(t *testing.T) {
 		{"bitrate on a screen route", "bitrate=128000", screenCaptureKeys},
 		{"xywh on an audio route", "xywh=0,0,640,480", audioCaptureKeys},
 		{"width on an audio route", "width=960", audioCaptureKeys},
-		{"a key with no value mark", "t", mediaCaptureKeys},
+		{"a key with no equals sign", "t", mediaCaptureKeys},
 		{"a repeated key", "t=1&t=2", mediaCaptureKeys},
 		{"a key repeated under an encoding", "t=1&%74=2", mediaCaptureKeys},
 		{"an equal begin and end", "t=10,10", mediaCaptureKeys},
@@ -183,8 +163,8 @@ func TestCaptureQueryRefusesAQueryTheGrammarRefuses(t *testing.T) {
 		{"an empty bitrate", "bitrate=", mediaCaptureKeys},
 		{"a key that is not percent encoded", "%zz=10", mediaCaptureKeys},
 		{"a value that is not percent encoded", "t=%zz", mediaCaptureKeys},
-		{"a seconds value no number holds", "t=" + strings.Repeat("9", 400), mediaCaptureKeys},
-		{"an hours value no number holds", "t=" + strings.Repeat("9", 400) + ":00:30", mediaCaptureKeys},
+		{"a seconds value too large for a float64", "t=" + strings.Repeat("9", 400), mediaCaptureKeys},
+		{"an hours value too large for a float64", "t=" + strings.Repeat("9", 400) + ":00:30", mediaCaptureKeys},
 		{"an allowed key with no dimension", "zoom=2", []string{"zoom"}},
 	}
 	for _, c := range cases {
@@ -196,9 +176,10 @@ func TestCaptureQueryRefusesAQueryTheGrammarRefuses(t *testing.T) {
 	}
 }
 
-// Each error names what the query got wrong, because the message is
-// the problem document's detail and the only thing the client reads.
-func TestCaptureQueryErrorsNameWhatTheQueryGotWrong(t *testing.T) {
+// Each error message quotes the part of the query that is wrong,
+// because it becomes the detail of the problem document, and the
+// client sees nothing else.
+func TestCaptureQueryErrorsQuoteTheInvalidPart(t *testing.T) {
 	cases := []struct {
 		name   string
 		raw    string
@@ -222,10 +203,6 @@ func TestCaptureQueryErrorsNameWhatTheQueryGotWrong(t *testing.T) {
 	}
 }
 
-// An upstream request carries the caller's t= with the lead-in added
-// to each end, so both sidecars have a running pipeline before their
-// zero. An absent begin is zero, so t=,10 asks for the same interval
-// t=0,10 asks for.
 func TestCaptureShiftedTemporalAddsTheLead(t *testing.T) {
 	cases := []struct {
 		name string
@@ -248,8 +225,6 @@ func TestCaptureShiftedTemporalAddsTheLead(t *testing.T) {
 	}
 }
 
-// An NPT value carries no trailing zeros, so a Location reads as the
-// caller wrote it.
 func TestCaptureFormatNPTWritesTheShortestValue(t *testing.T) {
 	cases := []struct {
 		name    string

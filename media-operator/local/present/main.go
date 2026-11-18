@@ -1,24 +1,23 @@
 package main
 
-// present is a workstation testing utility. It builds and runs on its own,
-// with `go run ./local/present`, and no part of it ships in the media-operator
-// binary. The local screens run it to build the block they hand the display.
-
-// present reads the NFO that sits beside a media file and prints the
-// presentation block the liken display expects. The block is one JSON object
-// on stdout. A movie folder holds a sibling movie.nfo. An episode holds a
-// sibling <basename>.nfo with a <season> and an <episode>.
+// present is a command for a workstation, and not part of the
+// media-operator binary. The script local/video runs it with
+// `go run ./local/present <media-file>` to build the presentation block
+// that it passes to the display.
 //
-// When a logo art file or a trickplay directory sits beside the media, the
-// block carries its path, so the display decodes the art and crops the tiles.
-// When the appearances fact's spans file sits in .liken/appearances/ beside
-// the media, the block carries it and the library's .contributors directory,
-// so the display shows the people on screen when the film pauses.
+// present reads the NFO file beside a media file and prints the block
+// as one JSON object on stdout. A movie folder has a movie.nfo beside
+// the media file. An episode has a <basename>.nfo with a <season> and
+// an <episode>.
 //
-// The art does not need an NFO. With no NFO the block starts empty, and the
-// display falls back to mpv's own media-title for the name. The art fields are
-// added when the files are present, so a film with trickplay but no NFO still
-// shows the scrub thumbnail.
+// The block also holds the path of a logo file or a trickplay directory
+// beside the media, when one exists. When
+// .liken/appearances/<media file>.spans.json exists beside the media,
+// the block holds its path and the path of the library's .contributors
+// directory, so the display can show who is on screen when the film
+// pauses. present finds the logo, the trickplay directory, and the
+// appearances file without an NFO. Without one the block has no name,
+// and the display uses mpv's media-title.
 
 import (
 	"encoding/json"
@@ -30,9 +29,10 @@ import (
 	"strings"
 )
 
-// The field order here sets the JSON key order the block prints with. A
-// pointer field marks a number the NFO did not carry, so a real season zero
-// survives and an absent value is omitted.
+// block is the JSON object that present prints, with its keys in the
+// order of the fields. A number is a pointer, so that a zero such as
+// season 0 is printed and a value that the NFO does not have is
+// omitted.
 type block struct {
 	Type         string `json:"type,omitempty"`
 	Hint         string `json:"hint,omitempty"`
@@ -49,9 +49,9 @@ type block struct {
 	Contributors string `json:"contributors,omitempty"`
 }
 
-// An NFO is read as the direct children of its root, so the root tag itself
-// does not matter. A movie NFO roots at <movie> and an episode NFO at
-// <episodedetails>, and both read the same way.
+// document is the direct children of an NFO's root element. The root's
+// own name is ignored, because a movie NFO has <movie> as its root and
+// an episode NFO has <episodedetails>, and both are read the same way.
 type document struct {
 	Elements []element `xml:",any"`
 }
@@ -61,7 +61,8 @@ type element struct {
 	Text    string `xml:",chardata"`
 }
 
-// has reports whether the document holds a <tag>, whatever its text.
+// has reports whether the document has a <tag> element, even an empty
+// one.
 func (d document) has(tag string) bool {
 	_, found := d.find(tag)
 	return found
@@ -76,8 +77,8 @@ func (d document) find(tag string) (element, bool) {
 	return element{}, false
 }
 
-// text returns the stripped text of the first <tag>, and false when it is
-// absent or empty.
+// text returns the trimmed text of the first <tag>, and false when
+// there is none or it is empty.
 func (d document) text(tag string) (string, bool) {
 	el, found := d.find(tag)
 	if !found {
@@ -90,8 +91,8 @@ func (d document) text(tag string) (string, bool) {
 	return value, true
 }
 
-// yearOf returns the release year, from <year>, or the leading year of
-// <premiered>.
+// yearOf returns the year from <year>, or else the first four
+// characters of <premiered>. It returns nil when neither is present.
 func (d document) yearOf() (*int, error) {
 	raw, found := d.text("year")
 	if !found {
@@ -115,9 +116,9 @@ func number(raw string) (*int, error) {
 	return &value, nil
 }
 
-// findNFO returns the NFO for a media file: a sibling movie.nfo for a movie,
-// or a sibling <basename>.nfo for an episode. The episode NFO wins when both
-// exist, so a file named for its episode keeps its own metadata.
+// findNFO returns the NFO for a media file: <basename>.nfo beside it,
+// or else movie.nfo in its folder. The first wins when both exist, so
+// an episode keeps its own metadata.
 func findNFO(media string) (string, bool) {
 	episodeNFO := strings.TrimSuffix(media, filepath.Ext(media)) + ".nfo"
 	movieNFO := filepath.Join(filepath.Dir(media), "movie.nfo")
@@ -130,9 +131,9 @@ func findNFO(media string) (string, bool) {
 	return "", false
 }
 
-// findLogo returns the logo art beside the media, as an absolute path. A file
-// named for the media wins over a folder-wide one, so an item with its own
-// logo keeps it. The display opens this path and decodes it.
+// findLogo returns the absolute path of the logo file beside the media,
+// or an empty string. A logo named for the media wins over a logo for
+// the whole folder.
 func findLogo(media string) string {
 	parent := filepath.Dir(media)
 	stem := stemOf(media)
@@ -150,10 +151,10 @@ func findLogo(media string) string {
 	return ""
 }
 
-// findTrickplay returns the trickplay directory beside the media, as an
-// absolute path. Jellyfin names it for the media file, so `X.mkv` has a
-// sibling `X.trickplay` directory of sprite sheets. The display reads the
-// sheets and crops one tile per scrub position.
+// findTrickplay returns the absolute path of the trickplay directory
+// beside the media, or an empty string. Jellyfin names the directory
+// for the media file, so `X.mkv` has `X.trickplay`, which holds sprite
+// sheets. The display crops one tile from them for each scrub position.
 func findTrickplay(media string) string {
 	trickplay := filepath.Join(filepath.Dir(media), stemOf(media)+".trickplay")
 	info, err := os.Stat(trickplay)
@@ -163,12 +164,12 @@ func findTrickplay(media string) string {
 	return absolute(trickplay)
 }
 
-// findAppearances returns the spans file the appearances fact writes for the
-// media, as an absolute path, and the .contributors directory of the library
-// that holds the media, the nearest one at or above the media's folder. The
-// spans file names each portrait by its path under that directory. Both are
-// empty unless both exist, because the display can draw a card only with
-// its portrait.
+// findAppearances returns the absolute path of the media's spans file
+// in .liken/appearances/, and the path of the nearest .contributors
+// directory at or above the media's folder. The spans file names each
+// person's portrait by its path under that directory. It returns empty
+// strings unless both exist, because the display needs the portrait to
+// draw a person.
 func findAppearances(media string) (string, string) {
 	spans := filepath.Join(filepath.Dir(media), ".liken", "appearances", filepath.Base(media)+".spans.json")
 	if !exists(spans) {
@@ -250,8 +251,9 @@ func seriesBlock(doc document) (block, error) {
 	return made, nil
 }
 
-// blockFor returns a series block when the NFO declares a <season>, and a
-// movie block otherwise. A sibling movie.nfo is a movie regardless.
+// blockFor returns a series block when the NFO has a <season>, and a
+// movie block otherwise. A file named movie.nfo always gives a movie
+// block.
 func blockFor(nfo string) (block, error) {
 	raw, err := os.ReadFile(nfo)
 	if err != nil {
@@ -267,8 +269,6 @@ func blockFor(nfo string) (block, error) {
 	return movieBlock(doc)
 }
 
-// presentationBlock builds the block for one media file: the NFO metadata when
-// an NFO sits beside it, and the art fields when the art files are present.
 func presentationBlock(media string) (block, error) {
 	made := block{}
 	nfo, found := findNFO(media)
@@ -287,17 +287,17 @@ func presentationBlock(media string) (block, error) {
 
 func main() {
 	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: present <media-file>")
+		fmt.Fprintf(os.Stderr, "present: got %d arguments, want 1\nusage: present <media-file>\n", len(os.Args)-1)
 		os.Exit(2)
 	}
 	made, err := presentationBlock(os.Args[1])
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintf(os.Stderr, "present: %v\n", err)
 		os.Exit(1)
 	}
 	encoded, err := json.Marshal(made)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintf(os.Stderr, "present: encoding the presentation block: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Println(string(encoded))

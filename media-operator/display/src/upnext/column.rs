@@ -1,12 +1,9 @@
-//! The next work in the right half of the screen, which the display draws in
-//! place of the corner card while the film stands stepped back on the left.
-//!
-//! The column takes the card's lines and the card's picture at a larger
-//! size: the art over the reason, the title in the title type, the detail,
-//! and the time the next work would end, each line a step larger than on the
-//! card because the column is read from across the room. It draws in canvas
-//! pixels, so it scales with the canvas the way every other
-//! part of the display does, and it ends on the right margin.
+//! The up-next column. While the arranger has stepped the film back to the
+//! left half of the screen, the display draws the next work in this column
+//! on the right half, in place of the corner card. It shows the same art and
+//! lines as the card: the reason, the title, the detail, and the time the
+//! next work would end. Each line is one step larger on the type scale than
+//! on the card, because the column is read from across the room.
 
 use iced::{Color, Point, Rectangle, Size};
 use jiff::Zoned;
@@ -15,35 +12,35 @@ use super::{Art, Offer, ends_at};
 use crate::canvas::{Anchor, Brush, Canvas, Line, clip};
 use crate::theme;
 
-/// The art box, 704 by 396, a 16:9 picture as wide as the column.
+/// The art box, 16:9 and as wide as the column.
 pub(super) const ART: Size = Size::new(704.0, 396.0);
-/// The column is placed from its foot. Near the credits the scrubber's
-/// current time stands under the column's right end, from 846 down to the
-/// bar, so the focus panel ends above it, and a line added to the column
-/// moves the art and the lines above it up. The art starts below the line
-/// box of the corner clock's end time, which ends at 170.
+/// The top of the art, just below the clock's end time, whose line box ends
+/// at y 170. The positions are fixed from the bottom up: near the credits the
+/// scrubber draws the current time under the column's right end, from y 846
+/// down to the bar, and the focus panel has to end above it. So a new line
+/// in the column moves the lines above it and the art up.
 const ART_Y: f32 = 176.0;
 const _: () = assert!(ART_Y >= theme::MARGIN_Y + theme::LINE_PITCH + theme::type_scale::SMALL);
-/// The top of each line under the art. The reason clears the art by 32, the
-/// title and the detail take the room between them, and the end time drops
-/// one label line plus the same 12 that `theme::LINE_PITCH` adds, so the end
-/// time's line box ends at 832, 26 above the bottom of the focus panel.
+/// The top of each line under the art. The 12 in `ENDS_DROP` is the gap that
+/// `theme::LINE_PITCH` puts between lines.
 const REASON_Y: f32 = 604.0;
 const TITLE_Y: f32 = 652.0;
 const DETAIL_Y: f32 = 740.0;
 const ENDS_Y: f32 = DETAIL_Y + ENDS_DROP;
 const ENDS_DROP: f32 = theme::type_scale::LABEL + 12.0;
-/// How far the focus panel reaches past the column on every side.
+/// How far the focus panel extends past the column on the left, the right,
+/// and the top. `FOCUS_BOTTOM` sets its bottom edge.
 const FOCUS_PAD: f32 = 16.0;
-/// The bottom of the focus panel, under the end time.
 const FOCUS_BOTTOM: f32 = 858.0;
 const _: () = assert!(ENDS_Y + theme::type_scale::LABEL + FOCUS_PAD <= FOCUS_BOTTOM);
 
-/// The column's left edge. Its right edge is the right margin.
+/// The column's left edge. The column ends at the right margin.
 pub(super) fn left(canvas: &Canvas) -> f32 {
     canvas.right() - ART.width
 }
 
+/// Draws the focus panel when `focused`, then the plate, the art, and the
+/// lines.
 pub(super) fn draw(
     brush: &mut Brush<'_>,
     offer: &Offer,
@@ -72,9 +69,9 @@ pub(super) fn draw(
     }
 }
 
-/// The picture in the middle of its plate, on the output pixel grid. The
-/// decode fits it inside the plate and keeps its ratio, so a poster stands
-/// in the middle with the plate on both sides.
+/// Centers a picture of `size` on the plate, snapped to the output pixels.
+/// The decode keeps the picture's aspect ratio, so a poster is narrower than
+/// the plate and leaves plate showing on both sides.
 fn centred(canvas: &Canvas, plate: Rectangle, size: Size) -> Rectangle {
     Rectangle::new(
         Point::new(
@@ -85,8 +82,8 @@ fn centred(canvas: &Canvas, plate: Rectangle, size: Size) -> Rectangle {
     )
 }
 
-/// The lines under the art, each clipped to the column's width. The end time
-/// reads the wall clock `now`.
+/// The lines under the art, each clipped to the column's width. A field the
+/// offer does not have draws no line, and the other lines keep their rows.
 fn lines(canvas: &Canvas, offer: &Offer, now: &Zoned) -> Vec<Line> {
     let x = left(canvas);
     let room = ART.width;
@@ -154,17 +151,15 @@ mod tests {
         crate::clock::at(22 * 3600 + 30 * 60)
     }
 
-    /// The design's numbers on a 1920 by 1080 canvas: the column starts at
-    /// 1120 and ends on the right margin at 1824.
     #[test]
-    fn the_column_takes_the_right_half_of_the_canvas() {
+    fn the_column_ends_at_the_right_margin() {
         let canvas = Canvas::default();
         assert_eq!(left(&canvas), 1120.0);
         assert_eq!(left(&canvas) + ART.width, canvas.right());
     }
 
     #[test]
-    fn the_lines_stand_where_the_design_puts_them() {
+    fn the_lines_are_placed_at_their_fixed_positions() {
         let canvas = Canvas::default();
         let placed: Vec<(String, f32, f32)> = lines(&canvas, &offer(), &evening())
             .into_iter()
@@ -181,7 +176,6 @@ mod tests {
         );
     }
 
-    /// The end time takes the detail's type and colour.
     #[test]
     fn the_end_time_reads_like_the_detail() {
         let lines = lines(&Canvas::default(), &offer(), &evening());
@@ -190,8 +184,7 @@ mod tests {
         assert_eq!(lines[3].size, lines[2].size);
     }
 
-    /// The end time is the wall clock plus the seconds that remain, and it
-    /// rolls past midnight.
+    /// The end time rolls past midnight.
     #[test]
     fn the_end_time_reads_the_wall_clock_plus_the_seconds_that_remain() {
         let late = crate::clock::at(23 * 3600 + 50 * 60);
@@ -199,8 +192,6 @@ mod tests {
         assert_eq!(lines[3].content, "45m · ends at 12:35 am");
     }
 
-    /// A block with no seconds draws no end time, and every other line keeps
-    /// its row.
     #[test]
     fn an_offer_with_no_seconds_draws_no_end_time() {
         let offer = Offer {
@@ -214,10 +205,8 @@ mod tests {
         assert_eq!(rows, [604.0, 652.0, 740.0]);
     }
 
-    /// The column stays clear of the line box of the corner clock's end
-    /// time above it, and its focus panel ends above the scrubber.
     #[test]
-    fn the_column_keeps_its_bottom_and_its_art_clears_the_clock() {
+    fn the_art_top_and_the_focus_panel_bottom_keep_their_positions() {
         assert_eq!(ART_Y, 176.0);
         assert_eq!(FOCUS_BOTTOM, 858.0);
         assert_eq!(ENDS_Y, 792.0);
@@ -231,7 +220,7 @@ mod tests {
     }
 
     #[test]
-    fn a_poster_stands_in_the_middle_of_the_plate() {
+    fn a_narrow_poster_is_centered_on_the_plate() {
         let canvas = Canvas::default();
         let plate = Rectangle::new(Point::new(left(&canvas), ART_Y), ART);
         let bounds = centred(&canvas, plate, Size::new(264.0, 396.0));

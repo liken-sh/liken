@@ -1,17 +1,14 @@
-// The unit as the screen holds it: what the environment seeded, and what the
-// bus has said since.
+// The state of one player as the idle screen draws it. It starts from the
+// player name and part names that the operator passes in environment
+// variables, and each `Moment` from `media-screen` updates it.
 //
-// Every field is a fact or the second a moment landed. No animation keeps its
-// own state here, because each one is a function of the wall clock and the
-// moments before it. A view reads the seconds below against the clock it is
-// drawn at, so a captured frame is reproducible and a dropped frame is
-// harmless.
-//
-// A moment that turns an ease around records where that ease stood as well as
-// the second it landed. The ease that follows leaves from there, so a press
-// that lands in the middle of a fade never makes the screen jump. The reading
-// comes from the element that draws the curve, so one module states each ease
-// and this one states the moments.
+// The unit records when each change happened, and no animation state. The
+// `idle` modules compute every animation from the current time and those
+// times, so a captured frame is the same on every run and a skipped frame
+// costs nothing. When a change reverses an animation that is still running,
+// the unit also records the animation's value at that time in a `*_from`
+// field. The next animation starts from that value, so the screen does not
+// jump.
 
 use crate::idle::{energy, identity, shade, volume};
 use media_screen::Moment;
@@ -22,63 +19,62 @@ use media_screen::volume::Volume;
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Part {
     pub name: String,
-    /// `display`, `sink`, or `remote`. A part the environment seeded carries
-    /// none, because the seed names the parts and nothing else.
+    /// `display`, `sink`, or `remote`. Empty for a part created from the
+    /// environment, which supplies names only.
     pub kind: String,
-    /// The presence of a part that has any. `None` is a part with no live
-    /// state, which draws at full brightness always.
+    /// Whether the part is connected. `None` when the status does not report
+    /// it, as for a display or a sink, and then the name draws at full
+    /// brightness.
     pub connected: Option<bool>,
-    /// The charge the part reports, from 0 to 100. The identity block draws
-    /// it as a bar in the left margin. `None` is a part that reports none, and
-    /// its line carries the name alone.
+    /// The charge the part reports, from 0 to 100. `idle::identity` draws
+    /// it as a bar in the left margin. `None` when the part reports no
+    /// charge, and then its line shows the name alone.
     pub battery: Option<i64>,
-    /// Whether the focus mark names this part. The seed carries no focus, so no
-    /// marker draws before the first status.
+    /// Whether the status marks this part as focused, which draws the focus
+    /// marker.
     pub focused: bool,
-    /// The second this part last came back, from a status that carried it from
-    /// disconnected to connected. The identity block flashes the name white
-    /// from here.
+    /// The time of the status that reconnected this part. `idle::identity`
+    /// flashes the name white from this time.
     pub returned: Option<f64>,
-    /// The second this part last went away, from a status that carried it from
-    /// connected to disconnected. The identity block eases the name down to the
-    /// dim alpha from here, so a controller that disconnects leaves over the
-    /// same 400 ms it returns over.
+    /// The time of the status that reported this part disconnected after it
+    /// was connected or reported nothing. `idle::identity` fades the name
+    /// to its dim level from this time.
     pub left: Option<f64>,
-    /// The second a focus moment last named this part. The marker beats from
-    /// here. The status says whether the marker draws at all, and the moment
-    /// carries the timing, so a beat that lands before the status still shows.
+    /// The time of the last `Focus` moment for this part, which starts the
+    /// marker's beat. The beat shows even before a status marks the part
+    /// focused.
     pub marked: Option<f64>,
-    /// The name's brightness at `returned` or `left`, so a part that
-    /// flips presence mid-ease turns around from the level it stood at
-    /// rather than jumping to one end.
+    /// The name's brightness at `returned` or `left`. The next fade starts
+    /// from it, so a part that reconnects or disconnects during a fade does
+    /// not jump to full or dim.
     pub brightness_from: f32,
-    /// The name's white flash at `returned`, so a second return inside
-    /// one flash climbs from the level it holds.
+    /// The level of the name's white flash at `returned`, so a second
+    /// reconnect during a flash starts from the level the flash reached.
     pub flash_from: f32,
-    /// The marker's beat at `marked`, so a second focus moment inside
-    /// one beat climbs from the level it holds.
+    /// The level of the marker's beat at `marked`, so a second `Focus` during
+    /// a beat starts from the level the beat reached.
     pub focus_from: f32,
 }
 
-/// The shade over the whole screen: which way it moves, and the second it
-/// started. It eases down over 4000 ms and up over 400 ms.
+/// The fade of the whole screen to black and back. `down` is true while the
+/// screen fades to black and false while it clears. `since` is the time the
+/// fade started. `idle::shade` sets how long each direction takes.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Shade {
     pub down: bool,
     pub since: f64,
-    /// The cover at that second, from 0 clear to 1 opaque. A press that lands
-    /// while the screen still fades to black clears it from the grey it
-    /// reached, and not from black.
+    /// How dark the screen was at `since`, from 0 clear to 1 black, so a
+    /// `Wake` during the fade to black clears from the darkness it reached.
     pub from: f64,
 }
 
-/// The ramp the energy runs, from the moment the activity last changed.
+/// The energy ramp that started at the last change of activity.
 ///
-/// The target and the duration follow from the activity the unit holds now, so
-/// this is the other half: the second the ramp started, the energy it started
-/// from, and the animation clock the mark had reached by then. The clock is
-/// recorded rather than counted again, because it is an integral over every
-/// ramp before this one, and the unit holds none of those ramps.
+/// The unit's `activity` sets the ramp's target energy and duration. This
+/// records the time the ramp started, the energy at that time, and the mark's
+/// animation clock at that time in `phase`. The clock is the integral of the
+/// energy over every earlier ramp, and the unit keeps no earlier ramps, so it
+/// stores the clock.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Ramp {
     pub since: f64,
@@ -86,14 +82,12 @@ pub struct Ramp {
     pub phase: f64,
 }
 
-/// The moment the unit reached `Idle`: the second of the move, and the
-/// activity it left.
+/// The time the unit's activity changed to `Idle`, and the activity it left.
 ///
-/// Both halves matter, because only one of the two arrivals owes the mark a
-/// new ramp. An arrival from `Playing` finds the mark stopped and the screen
-/// covered, so the energy comes back at full swing. An arrival from any other
-/// activity finds the mark on the screen and moving, so the ramp the move
-/// already started stands and the motion turns around where it is.
+/// After `Playing`, the mark's energy starts again from full, because the
+/// mark was stopped and covered during playback. After any other activity
+/// the mark is still moving on screen, so the ramp that the change of
+/// activity started continues from the mark's current energy.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Arrival {
     pub at: f64,
@@ -103,41 +97,41 @@ pub struct Arrival {
 /// The unit the client draws.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Unit {
-    /// The unit's friendly name, seeded from `IDLE_PLAYER_NAME` and replaced by
-    /// the first status.
+    /// The unit's friendly name. It starts as `IDLE_PLAYER_NAME`, and the
+    /// first status with a display name replaces it.
     pub name: String,
     /// The parts, in the order the status lists them: the display, then each
     /// sink, then each remote.
     pub parts: Vec<Part>,
     pub activity: Activity,
-    /// The energy's ramp, which starts over on every change of activity.
     pub ramp: Ramp,
-    /// The title of the last `Play` the unit named. It stays after the `Play`
-    /// ends, because the activity line fades out with the mark's motion rather
-    /// than vanishing on the frame the activity changes.
+    /// The title of the last `Play` in a status. It is kept after the `Play`
+    /// ends, because the activity line fades out with the mark's motion and
+    /// still draws the text during the fade.
     pub title: Option<String>,
     pub volume: Volume,
-    /// The second of the last live volume message, which is a change a person
-    /// made. The volume row draws from here, and the broker's catch-up sets no
-    /// second, so a pod that starts draws no row.
+    /// The time of the last live volume message that showed the volume row.
+    /// A live message is a change that a person made. The retained message
+    /// that the broker sends on connect does not set it, so a pod that starts
+    /// draws no row.
     pub pressed: Option<f64>,
-    /// The row's own fade at that second, from 0 off screen to 1 full. A change
-    /// that lands while the row fades out lifts it from where it stands, so a
-    /// run of presses holds one row on screen instead of blinking it.
+    /// The row's fade level at `pressed`, from 0 off screen to 1 full. A
+    /// change during the fade out fades the row in from that level, so a run
+    /// of presses keeps the row on screen and it does not blink.
     pub pressed_from: f64,
-    /// The shade, once a shade moment has arrived. A client that has read none
-    /// draws no shade.
+    /// `None` until the first `Sleep`. While it is `None`, the screen draws
+    /// no shade.
     pub shade: Option<Shade>,
-    /// The last move to `Idle`, once one has arrived. A client that holds none
-    /// has read no `Play` on this unit to its end.
+    /// The last change of the activity to `Idle` from another activity.
+    /// `Client::receive` sets it. `None` until the first such change.
     pub arrived: Option<Arrival>,
 }
 
 impl Unit {
-    /// The unit before the broker answers, from the seeds the operator set. A
-    /// seeded part reports no presence, so the identity block draws every name
-    /// at full brightness until the first status.
-    pub fn seeded(name: String, components: Vec<String>) -> Self {
+    /// Creates the unit that the client draws before the first status. The
+    /// parts have only names and report no presence, so `idle::identity`
+    /// draws every name at full brightness until the first status.
+    pub fn before_first_status(name: String, components: Vec<String>) -> Self {
         Self {
             name,
             parts: components
@@ -151,14 +145,14 @@ impl Unit {
         }
     }
 
-    /// Fold one moment in, at `at` seconds on the screen's clock. Every moment
-    /// the unit holds arrives here, so one path carries what the broker says.
+    /// Applies one `Moment` to the unit. `at` is the time in seconds on the
+    /// screen's clock.
     pub fn fold(&mut self, moment: Moment, at: f64) {
         match moment {
             Moment::Status(status) => self.receive(status, at),
-            // A live level brings up the row unless the receiver draws its
-            // own overlay or only the indicator changed. The unit tracks
-            // the level either way.
+            // A live level shows the volume row, unless the receiver shows
+            // the level on the TV or only the indicator changed. See
+            // `Volume::draws_after`. The unit stores the level in every case.
             Moment::Level { volume, pressed } => {
                 if pressed && volume.draws_after(self.volume) {
                     self.pressed_from = volume::fade(self, at);
@@ -169,27 +163,24 @@ impl Unit {
             Moment::Sleep => self.cover(true, at),
             Moment::Wake => self.cover(false, at),
             Moment::Focus { remote } => self.mark(remote, at),
-            // A press is the client's own to answer, and
-            // `Client::receive` reads it before this fold. The stock
-            // idle screen draws no list, so the unit changes for none
-            // of them.
+            // `Client::receive` handles a press before this fold. The stock
+            // idle screen draws no list, so a press changes nothing here.
             Moment::Press(_) => {}
             // The up-next offer is for the client that wrote the `Play`. The
-            // stock idle screen writes none, so it acts on none.
+            // stock idle screen writes none, so it ignores the offer.
             Moment::PlayNext(_) => {}
-            // The stock idle screen names no topic of its own, so no message
-            // on one arrives, and it keeps no retained state to republish
-            // when a session starts.
+            // The stock idle screen owns no topic, so no message arrives for
+            // it, and it has no retained state to republish when a bus
+            // session starts.
             Moment::Message { .. } | Moment::Connected => {}
         }
     }
 
-    /// Ease the shade toward black or toward clear.
+    /// Starts the shade fading to black (`down`) or clearing.
     ///
-    /// An ease already running that way runs on, and a cover already at that
-    /// end stays there. The idle command pod sends a wake on every press, so
-    /// without that rule a run of presses would restart the ease and hold the
-    /// screen dim for as long as the presses keep arriving.
+    /// A shade that already fades in that direction continues, and a `Wake`
+    /// on a screen with no shade sets none, so a repeated `Sleep` or `Wake`
+    /// does not restart the fade.
     fn cover(&mut self, down: bool, at: f64) {
         let running = match self.shade {
             Some(shade) => shade.down == down,
@@ -206,17 +197,16 @@ impl Unit {
         });
     }
 
-    /// Replace the whole unit with one status. A part that keeps its name keeps
-    /// the seconds it drew from, so a status that changed one field does not
-    /// restart every fade.
+    /// Replaces the unit's state with one status. A part keeps the recorded
+    /// times of the part with the same name, so a status that changes one
+    /// field does not restart every fade.
     fn receive(&mut self, status: Status, at: f64) {
         if !status.display_name.is_empty() {
             self.name = status.display_name;
         }
-        // The operator publishes a status on every pass over the `Player`, and
-        // a repeated one carries the activity the unit already holds. A ramp
-        // that started over on each of those would stretch for as long as the
-        // statuses keep arriving and never reach its target.
+        // Most statuses repeat the current activity. If each one restarted
+        // the ramp, the ramp would not reach its target while statuses keep
+        // arriving.
         if status.activity != self.activity {
             self.ramp = energy::ramp(self, status.activity, at);
         }
@@ -242,10 +232,10 @@ impl Unit {
             .collect();
     }
 
-    /// Beat one controller's marker. `remote` counts the parts of kind
-    /// `remote` in the order the status lists them. An index that names no
-    /// controller changes nothing, because a moment can arrive for a controller
-    /// this unit's status has not listed yet.
+    /// Starts the marker beat on one controller. `remote` is an index among
+    /// the parts of kind `remote`, in the order the status lists them. An
+    /// index with no controller changes nothing, because a `Focus` can arrive
+    /// for a controller that no status has listed yet.
     fn mark(&mut self, remote: usize, at: f64) {
         if let Some(part) = self
             .parts
@@ -260,34 +250,28 @@ impl Unit {
     }
 }
 
-/// Whether a part draws at full brightness. A part that reports no presence
-/// draws lit, because a part that cannot be absent must not read as
-/// present-for-now. Only a part that reports it is away draws dim.
-fn lit(connected: Option<bool>) -> bool {
+/// Only `Some(false)` counts as absent, so a display or a sink, whose status
+/// reports no `connected`, never draws dim.
+fn is_present(connected: Option<bool>) -> bool {
     connected != Some(false)
 }
 
-/// One part of a status, against the part of that name the unit already held.
-/// A part that changed presence takes the second it changed, and the identity
-/// block eases its line from there.
+/// Builds one part from its entry in a status and the part of the same name
+/// in the previous status, if there was one.
 ///
-/// The two seconds answer two different questions. `left` is the moment a lit
-/// part went away, and a part that reported no presence at all is lit, so a
-/// controller the environment seeded eases down the first time a status says
-/// it is away. `returned` is the moment a part the status called away came
-/// back connected, which is the flash that tells a person the controller
-/// returned.
+/// `left` is set when a part that counted as present is now disconnected, so
+/// a remote that only the environment named fades the first time a status
+/// reports it disconnected. `returned` is set when a disconnected part is
+/// now connected. A part with no earlier entry gets neither time, so a remote
+/// that is already disconnected in the first status that lists it draws dim
+/// with no fade.
 ///
-/// A part this unit has not listed before takes neither second, so a
-/// controller that is already away when the first status lands draws dim
-/// without easing there.
-///
-/// A part that turns also records the level the identity block drew it
-/// at, read through that block's own curve, so the ease that follows
-/// leaves from there. A part that did not turn keeps the levels it
-/// already held.
+/// When a part disconnects or reconnects, this records the brightness that
+/// `idle::identity` drew at `at`, and on a reconnect the flash level, so
+/// the next fade starts from there.
 fn part(component: Component, was: Option<&Part>, at: f64) -> Part {
-    let went_away = was.is_some_and(|was| lit(was.connected)) && !lit(component.connected);
+    let went_away =
+        was.is_some_and(|was| is_present(was.connected)) && !is_present(component.connected);
     let came_back =
         was.is_some_and(|was| was.connected == Some(false)) && component.connected == Some(true);
     let brightness_from = match was {
@@ -325,9 +309,9 @@ mod tests {
     use super::*;
     use media_screen::status::Play;
 
-    fn seeded() -> Unit {
-        Unit::seeded(
-            "The Den".into(),
+    fn fresh_unit() -> Unit {
+        Unit::before_first_status(
+            "Player One".into(),
             vec!["The screen".into(), "The speakers".into()],
         )
     }
@@ -344,7 +328,7 @@ mod tests {
 
     fn status(components: Vec<Component>) -> Status {
         Status {
-            display_name: "The Den".into(),
+            display_name: "Player One".into(),
             activity: Activity::Idle,
             play: None,
             components,
@@ -352,21 +336,24 @@ mod tests {
     }
 
     #[test]
-    fn the_seeds_name_the_unit_and_its_parts() {
-        let unit = seeded();
-        assert_eq!(unit.name, "The Den");
+    fn a_seeded_unit_has_the_given_name_and_parts_that_report_nothing() {
+        let unit = fresh_unit();
+        assert_eq!(unit.name, "Player One");
         assert_eq!(unit.parts.len(), 2);
         assert_eq!(unit.parts[0].name, "The screen");
         assert_eq!(unit.parts[0].connected, None);
-        assert!(!unit.parts[0].focused);
+        assert!(
+            !unit.parts[0].focused,
+            "the first part is focused, want unfocused"
+        );
     }
 
     #[test]
-    fn the_first_status_replaces_the_whole_block() {
-        let mut unit = seeded();
+    fn a_status_replaces_the_name_activity_and_parts() {
+        let mut unit = fresh_unit();
         unit.fold(
             Moment::Status(Status {
-                display_name: "The Living Room".into(),
+                display_name: "Player Two".into(),
                 activity: Activity::Starting,
                 play: None,
                 components: vec![component("A remote", "remote", Some(true))],
@@ -374,7 +361,7 @@ mod tests {
             1.0,
         );
 
-        assert_eq!(unit.name, "The Living Room");
+        assert_eq!(unit.name, "Player Two");
         assert_eq!(unit.activity, Activity::Starting);
         assert_eq!(unit.parts.len(), 1);
         assert_eq!(unit.parts[0].kind, "remote");
@@ -382,7 +369,7 @@ mod tests {
 
     #[test]
     fn a_status_with_no_display_name_keeps_the_name_the_unit_has() {
-        let mut unit = seeded();
+        let mut unit = fresh_unit();
         unit.fold(
             Moment::Status(Status {
                 display_name: String::new(),
@@ -390,12 +377,12 @@ mod tests {
             }),
             1.0,
         );
-        assert_eq!(unit.name, "The Den");
+        assert_eq!(unit.name, "Player One");
     }
 
     #[test]
-    fn a_part_with_no_name_draws_no_line() {
-        let mut unit = seeded();
+    fn a_status_drops_a_part_with_no_name() {
+        let mut unit = fresh_unit();
         unit.fold(
             Moment::Status(status(vec![
                 component("", "sink", None),
@@ -408,8 +395,8 @@ mod tests {
     }
 
     #[test]
-    fn a_part_that_came_back_takes_the_second_it_returned() {
-        let mut unit = seeded();
+    fn a_status_that_reconnects_a_part_sets_its_returned_time() {
+        let mut unit = fresh_unit();
         unit.fold(
             Moment::Status(status(vec![component("A remote", "remote", Some(false))])),
             1.0,
@@ -431,8 +418,8 @@ mod tests {
     }
 
     #[test]
-    fn a_part_that_went_away_takes_the_second_it_left() {
-        let mut unit = seeded();
+    fn a_status_that_disconnects_a_part_sets_its_left_time() {
+        let mut unit = fresh_unit();
         unit.fold(
             Moment::Status(status(vec![component("A remote", "remote", Some(true))])),
             1.0,
@@ -454,8 +441,8 @@ mod tests {
     }
 
     #[test]
-    fn a_part_the_seed_named_takes_the_second_it_left() {
-        let mut unit = Unit::seeded("The Den".into(), vec!["A remote".into()]);
+    fn a_seeded_part_that_a_status_reports_away_sets_its_left_time() {
+        let mut unit = Unit::before_first_status("Player One".into(), vec!["A remote".into()]);
         assert_eq!(unit.parts[0].connected, None);
 
         unit.fold(
@@ -466,8 +453,8 @@ mod tests {
     }
 
     #[test]
-    fn a_part_that_came_back_mid_fade_records_the_level_it_stood_at() {
-        let mut unit = seeded();
+    fn a_reconnect_during_the_fade_down_records_the_brightness_reached() {
+        let mut unit = fresh_unit();
         unit.fold(
             Moment::Status(status(vec![component("A remote", "remote", Some(true))])),
             1.0,
@@ -478,8 +465,8 @@ mod tests {
         );
         assert_eq!(unit.parts[0].brightness_from, 1.0);
 
-        // The return lands 200 ms into the 400 ms fade, so the name
-        // stands at half and the ease up leaves from there.
+        // The reconnect arrives 200 ms into the 400 ms fade down, so the
+        // name is at half brightness and the fade up starts from there.
         unit.fold(
             Moment::Status(status(vec![component("A remote", "remote", Some(true))])),
             4.2,
@@ -489,8 +476,8 @@ mod tests {
     }
 
     #[test]
-    fn a_part_that_did_not_turn_keeps_the_level_it_already_recorded() {
-        let mut unit = seeded();
+    fn a_repeated_status_keeps_the_recorded_brightness() {
+        let mut unit = fresh_unit();
         unit.fold(
             Moment::Status(status(vec![component("A remote", "remote", Some(true))])),
             1.0,
@@ -507,8 +494,8 @@ mod tests {
     }
 
     #[test]
-    fn a_focus_moment_inside_a_beat_records_the_level_the_marker_held() {
-        let mut unit = seeded();
+    fn a_focus_during_a_beat_records_the_marker_level_reached() {
+        let mut unit = fresh_unit();
         unit.fold(
             Moment::Status(status(vec![component("A remote", "remote", Some(true))])),
             1.0,
@@ -517,16 +504,17 @@ mod tests {
         unit.fold(Moment::Focus { remote: 0 }, 3.0);
         assert_eq!(unit.parts[0].focus_from, 0.0);
 
-        // The second moment lands 250 ms into the beat's 500 ms fall, so
-        // the marker holds half and the next beat climbs from there.
+        // The second focus arrives 250 ms into the 500 ms fall of the first
+        // beat, so the marker is at half and the next beat rises from
+        // there.
         unit.fold(Moment::Focus { remote: 0 }, 3.37);
         assert_eq!(unit.parts[0].marked, Some(3.37));
         assert_eq!(unit.parts[0].focus_from, 0.5);
     }
 
     #[test]
-    fn a_part_that_arrives_away_takes_no_second_to_fade_from() {
-        let mut unit = seeded();
+    fn a_part_first_reported_away_has_no_left_time() {
+        let mut unit = fresh_unit();
         unit.fold(
             Moment::Status(status(vec![component("A remote", "remote", Some(false))])),
             1.0,
@@ -535,8 +523,8 @@ mod tests {
     }
 
     #[test]
-    fn a_part_that_arrives_connected_never_flashed() {
-        let mut unit = seeded();
+    fn a_part_first_reported_connected_has_no_returned_time() {
+        let mut unit = fresh_unit();
         unit.fold(
             Moment::Status(status(vec![component("A remote", "remote", Some(true))])),
             1.0,
@@ -546,12 +534,12 @@ mod tests {
 
     #[test]
     fn the_title_comes_from_the_play_and_stays_after_it_ends() {
-        let mut unit = seeded();
+        let mut unit = fresh_unit();
         unit.fold(
             Moment::Status(Status {
                 activity: Activity::Playing,
                 play: Some(Play {
-                    name: "den-tv-1".into(),
+                    name: "player-one-1".into(),
                     title: "A Film".into(),
                 }),
                 ..status(Vec::new())
@@ -566,24 +554,24 @@ mod tests {
     }
 
     #[test]
-    fn a_play_with_no_title_reads_its_object_name() {
-        let mut unit = seeded();
+    fn a_play_with_no_title_uses_its_object_name() {
+        let mut unit = fresh_unit();
         unit.fold(
             Moment::Status(Status {
                 play: Some(Play {
-                    name: "den-tv-1".into(),
+                    name: "player-one-1".into(),
                     title: String::new(),
                 }),
                 ..status(Vec::new())
             }),
             1.0,
         );
-        assert_eq!(unit.title.as_deref(), Some("den-tv-1"));
+        assert_eq!(unit.title.as_deref(), Some("player-one-1"));
     }
 
     #[test]
-    fn the_catch_up_sets_the_level_and_a_press_sets_the_second() {
-        let mut unit = seeded();
+    fn a_retained_level_sets_the_volume_and_a_live_level_sets_the_press_time() {
+        let mut unit = fresh_unit();
         let volume = Volume {
             level: 0.4,
             muted: false,
@@ -616,8 +604,8 @@ mod tests {
     }
 
     #[test]
-    fn an_ask_for_the_next_work_changes_nothing_this_screen_draws() {
-        let mut unit = seeded();
+    fn a_play_next_moment_changes_nothing_this_screen_draws() {
+        let mut unit = fresh_unit();
         let before = unit.clone();
 
         unit.fold(Moment::PlayNext(br#"{"library":"shows"}"#.to_vec()), 2.0);
@@ -626,13 +614,13 @@ mod tests {
     }
 
     #[test]
-    fn a_client_topic_and_a_bus_session_change_nothing_this_screen_draws() {
-        let mut unit = seeded();
+    fn a_client_topic_message_and_a_bus_session_change_nothing_this_screen_draws() {
+        let mut unit = fresh_unit();
         let before = unit.clone();
 
         unit.fold(
             Moment::Message {
-                topic: "liken/library/screens/house/theater/watching".into(),
+                topic: "liken/library/screens/default/player-one/watching".into(),
                 payload: b"person-a".to_vec(),
                 retained: true,
             },
@@ -644,8 +632,8 @@ mod tests {
     }
 
     #[test]
-    fn the_shade_holds_the_way_it_moves_and_the_second_it_started() {
-        let mut unit = seeded();
+    fn a_sleep_and_a_wake_record_the_shade_direction_and_start_time() {
+        let mut unit = fresh_unit();
         assert_eq!(unit.shade, None);
 
         unit.fold(Moment::Sleep, 30.0);
@@ -658,8 +646,8 @@ mod tests {
             })
         );
 
-        // The screen reached black at 34.0, four seconds after the sleep, so
-        // the wake clears from a full cover.
+        // The fade to black takes 4 s, so the screen is fully black at 34.0
+        // and the wake clears from full black.
         unit.fold(Moment::Wake, 41.5);
         assert_eq!(
             unit.shade,
@@ -672,12 +660,12 @@ mod tests {
     }
 
     #[test]
-    fn a_press_during_the_fade_to_black_clears_from_the_grey_it_reached() {
-        let mut unit = seeded();
+    fn a_wake_during_the_fade_to_black_clears_from_the_darkness_reached() {
+        let mut unit = fresh_unit();
         unit.fold(Moment::Sleep, 10.0);
         unit.fold(Moment::Wake, 12.0);
 
-        // Halfway through the four seconds the cover stands at half.
+        // Halfway through the 4 s fade the screen is half dark.
         assert_eq!(
             unit.shade,
             Some(Shade {
@@ -689,8 +677,8 @@ mod tests {
     }
 
     #[test]
-    fn a_run_of_presses_holds_one_ease_rather_than_restarting_it() {
-        let mut unit = seeded();
+    fn repeated_wakes_do_not_restart_the_clearing_fade() {
+        let mut unit = fresh_unit();
         unit.fold(Moment::Sleep, 10.0);
         unit.fold(Moment::Wake, 12.0);
         unit.fold(Moment::Wake, 12.2);
@@ -699,15 +687,15 @@ mod tests {
     }
 
     #[test]
-    fn a_wake_on_a_clear_screen_starts_no_ease() {
-        let mut unit = seeded();
+    fn a_wake_on_a_clear_screen_sets_no_shade() {
+        let mut unit = fresh_unit();
         unit.fold(Moment::Wake, 3.0);
         assert_eq!(unit.shade, None);
     }
 
     #[test]
     fn the_ramp_starts_over_on_a_change_of_activity_and_not_on_a_repeat() {
-        let mut unit = seeded();
+        let mut unit = fresh_unit();
         unit.fold(
             Moment::Status(Status {
                 activity: Activity::Starting,
@@ -732,8 +720,8 @@ mod tests {
     }
 
     #[test]
-    fn a_press_during_the_fade_out_lifts_the_row_from_where_it_stands() {
-        let mut unit = seeded();
+    fn a_level_change_during_the_row_fade_out_fades_in_from_the_current_level() {
+        let mut unit = fresh_unit();
         let volume = Volume {
             level: 0.4,
             muted: false,
@@ -756,8 +744,8 @@ mod tests {
         );
         assert_eq!(unit.pressed_from, 0.0);
 
-        // The row leaves four seconds after the press, over 600 ms, so at 5.3
-        // seconds it stands halfway out.
+        // The row starts to fade out 4 s after the press at 1.0 and takes
+        // 600 ms, so at 5.3 it is half visible.
         unit.fold(
             Moment::Level {
                 volume,
@@ -768,14 +756,14 @@ mod tests {
         assert_eq!(unit.pressed, Some(5.3));
         assert!(
             (unit.pressed_from - 0.5).abs() < 1e-9,
-            "{}",
+            "pressed_from is {}, want 0.5",
             unit.pressed_from
         );
     }
 
     #[test]
-    fn a_focus_moment_beats_the_controller_it_counted_to() {
-        let mut unit = seeded();
+    fn a_focus_moment_beats_the_remote_at_its_index_among_remotes() {
+        let mut unit = fresh_unit();
         unit.fold(
             Moment::Status(status(vec![
                 component("The screen", "display", None),
@@ -792,16 +780,16 @@ mod tests {
     }
 
     #[test]
-    fn a_focus_moment_that_names_no_controller_changes_nothing() {
-        let mut unit = seeded();
+    fn a_focus_moment_with_no_matching_controller_changes_nothing() {
+        let mut unit = fresh_unit();
         let before = unit.clone();
         unit.fold(Moment::Focus { remote: 4 }, 3.0);
         assert_eq!(unit, before);
     }
 
     #[test]
-    fn a_part_carries_the_charge_the_status_reports() {
-        let mut unit = seeded();
+    fn a_status_sets_and_clears_the_battery_of_a_part() {
+        let mut unit = fresh_unit();
         unit.fold(
             Moment::Status(status(vec![Component {
                 battery: Some(62),
@@ -811,7 +799,7 @@ mod tests {
         );
         assert_eq!(unit.parts[0].battery, Some(62));
 
-        // The device stops reporting a level, so the line drops it.
+        // The status no longer reports a level, so the part has none.
         unit.fold(
             Moment::Status(status(vec![component("A remote", "remote", Some(true))])),
             2.0,
@@ -820,8 +808,8 @@ mod tests {
     }
 
     #[test]
-    fn a_part_that_keeps_its_name_keeps_the_seconds_it_draws_from() {
-        let mut unit = seeded();
+    fn a_part_with_the_same_name_keeps_its_recorded_times() {
+        let mut unit = fresh_unit();
         unit.fold(
             Moment::Status(status(vec![component("A remote", "remote", Some(true))])),
             1.0,
@@ -837,6 +825,9 @@ mod tests {
         );
 
         assert_eq!(unit.parts[0].marked, Some(2.0));
-        assert!(unit.parts[0].focused);
+        assert!(
+            unit.parts[0].focused,
+            "the first part is unfocused, want focused"
+        );
     }
 }

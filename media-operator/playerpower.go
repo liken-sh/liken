@@ -1,30 +1,29 @@
 package main
 
-// A Player's power. spec.power is On or Off, and an absent field is On.
-// A remote's power keys write it (powerkeys.go), and so does a person
-// with kubectl. This operator turns the unit's hardware to follow it.
+// A Player's spec.power is On or Off, and an empty field means On. The
+// remote's power keys (powerkeys.go), kubectl, and the start of a Play
+// on a Player that is Off write it. This file makes the hardware follow
+// it.
 //
-// Two kinds of work follow spec.power. The states follow it on every
-// pass, so they need no record: while the Player is Off, the screen's
-// Display holds the override {power: Off} (screen.go), and the
-// Receiver session's awake flag is false (receiver.go). The asks are
-// events, so they go out once for each change: on Off, a powerAsk of
-// off on the Receiver, which the equipment operator answers by putting
-// the receiver and the TV in standby, a sleep on the power topic, which
-// lowers the screen client's shade, and a stop on each standing Play's
-// commands topic. On On, a wake on the power topic. The client then
-// states the on desire, the awake flag follows the desire, and the
-// equipment operator wakes the TV and the receiver.
+// Some effects are computed from spec.power on every pass: while the
+// Player is Off, its Display has the override {power: Off} (screen.go)
+// and its Receiver session has awake false (receiver.go). The other
+// effects are commands that a pass sends once for each change:
 //
-// The record of a change is status.power, the value the operator last
-// applied, because a change must survive a restart of the operator and
-// the operator holds no state of its own beyond caches. A pass acts
-// when spec.power differs from status.power. A Player whose status
-// records no value adopts its spec and acts on nothing, the same way
-// the operator adopts the Receiver sessions it finds at start.
+//   - To Off: a powerAsk of off on the Receiver, so that
+//     equipment-operator puts the receiver and the TV in standby, sleep
+//     on the Player's power topic for the screen client, and stop on the
+//     commands topic of each unfinished Play.
+//   - To On: wake on the power topic. The screen client then publishes
+//     an on panel desire, the session's awake flag follows it, and
+//     equipment-operator wakes the TV and the receiver.
 //
-// The idle timers stay a soft off. They darken the panel and let the
-// awake flag go false, and spec.power stays On through them.
+// status.power records the value that the last change applied, so a
+// restarted operator does not send the commands again. When status.power
+// is empty, the pass records spec.power and sends nothing.
+//
+// The screen client has no API credentials, so when it turns the panel
+// off on its own, spec.power stays On.
 
 import (
 	"encoding/json"
@@ -35,9 +34,9 @@ import (
 	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
-// The PowerApplied condition says what the last change of spec.power
-// asked of the unit's hardware. True means every write landed. False
-// names the write that failed, and the next pass asks again.
+// PowerApplied reports the result of the last change of spec.power. When
+// a write failed, the condition is False, its reason names the write,
+// and the next pass sends the commands again.
 const (
 	powerAppliedCondition         = "PowerApplied"
 	powerReasonApplied            = "Applied"
@@ -45,57 +44,51 @@ const (
 	powerReasonDisplayWriteFailed = "DisplayWriteFailed"
 )
 
-// The powerAsk actions this operator writes on a Receiver.
 const receiverPowerOff = "off"
 
-// powerStep is what one pass does about one Player's power: the value
-// spec.power asks for, and whether this pass asks the hardware for it.
+// powerStep is spec.power and whether this pass sends the commands for
+// a change to it.
 type powerStep struct {
 	want   string
 	moving bool
 }
 
-// powerStepFor reads the step from the Player the pass holds. A pass
-// asks when spec.power differs from the value the status records, and
-// also when the last change failed: some of its writes may have landed,
-// so a change that spec.power took back still asks the hardware for the
-// value it wants now.
+// powerStepFor also sends the commands while PowerApplied is False.
+// Some writes of a failed change can have succeeded, so when spec.power
+// returns to the value in status.power, the hardware may no longer match
+// it.
 func powerStepFor(player *Player) powerStep {
 	want := specPower(player)
 	applied := player.Status.Power
-	held, holds := heldCondition(player.Status.Conditions, powerAppliedCondition)
-	failed := holds && held.Status == conditionFalse
+	condition, found := conditionOfType(player.Status.Conditions, powerAppliedCondition)
+	failed := found && condition.Status == conditionFalse
 	return powerStep{want: want, moving: applied != "" && (applied != want || failed)}
 }
 
-// turningOff and turningOn answer whether this pass is the one that
-// asks the hardware for a change.
 func (p powerStep) turningOff() bool { return p.moving && p.want == playerPowerOff }
 func (p powerStep) turningOn() bool  { return p.moving && p.want == playerPowerOn }
 
-// powerOutcome collects what the pass asked of each piece of hardware
-// for a change of spec.power, and the first write that failed.
+// powerOutcome collects the writes of one change of spec.power, for the
+// message of PowerApplied, and the first write that failed.
 type powerOutcome struct {
-	asked   []string
+	writes  []string
 	reason  string
 	failure string
 }
 
-// ask records one thing the pass asked, in the words of the condition's
-// message.
-func (o *powerOutcome) ask(format string, values ...any) {
-	o.asked = append(o.asked, fmt.Sprintf(format, values...))
+// record records a write that succeeded.
+func (o *powerOutcome) record(format string, values ...any) {
+	o.writes = append(o.writes, fmt.Sprintf(format, values...))
 }
 
-// fail records a write that failed. The first failure names the
-// condition's reason, because the next pass asks for everything again.
+// fail records a failed write. Only the first failure sets the reason,
+// because the next pass sends every command again anyway.
 func (o *powerOutcome) fail(reason, message string) {
 	if o.reason == "" {
 		o.reason, o.failure = reason, message
 	}
 }
 
-// condition is the PowerApplied condition for one change.
 func (o *powerOutcome) condition(want string) PlayerCondition {
 	if o.reason != "" {
 		return PlayerCondition{
@@ -109,38 +102,33 @@ func (o *powerOutcome) condition(want string) PlayerCondition {
 		Type:    powerAppliedCondition,
 		Status:  conditionTrue,
 		Reason:  powerReasonApplied,
-		Message: want + ": " + strings.Join(o.asked, ", "),
+		Message: want + ": " + strings.Join(o.writes, ", "),
 	}
 }
 
-// settlePower publishes the asks of a change, and answers the power the
-// status records and the conditions it carries. The Display and the
-// Receiver were written earlier in the same pass, and outcome holds
-// what they were asked. A change whose writes all landed records the
-// new value. A change with a failed write keeps the value the status
-// held, so the next pass asks the hardware again; every ask names the
-// state it wants, so a second ask leaves hardware already in that
-// state as it is.
+// settlePower runs after the pass has written the Display and the
+// Receiver session into outcome. It publishes the bus commands and sets
+// the power, poweredOnAt, and PowerApplied in desired. When a write
+// failed, desired.Power keeps the old value, so the next pass sends
+// every command again. That is safe because each command names the
+// state it wants, not a toggle.
 //
-// A pass that changes nothing carries the condition the status holds.
-//
-// The pass that turns the Player on records the moment in
-// status.poweredOnAt, before it publishes the wake, so every desire the
-// client states in answer arrives after it. Every other pass carries the
-// moment forward.
+// The pass that turns the Player on records status.poweredOnAt before
+// it publishes the wake, so every panel desire that the screen client
+// publishes in response is later than that time.
 func (o *operator) settlePower(player *Player, plays []Play, step powerStep, outcome *powerOutcome, desired *PlayerStatus) {
 	desired.Power = step.want
 	desired.PoweredOnAt = player.Status.PoweredOnAt
 	if !step.moving {
-		if held, holds := heldCondition(player.Status.Conditions, powerAppliedCondition); holds {
-			desired.Conditions = append(desired.Conditions, held)
+		if condition, found := conditionOfType(player.Status.Conditions, powerAppliedCondition); found {
+			desired.Conditions = append(desired.Conditions, condition)
 		}
 		return
 	}
 	if step.turningOn() {
 		desired.PoweredOnAt = o.now().UTC().Format(askTimeLayout)
 	}
-	o.announcePower(player, plays, step, outcome)
+	o.publishPowerCommands(player, plays, step, outcome)
 	condition := composeCondition(player, outcome.condition(step.want))
 	desired.Conditions = append(desired.Conditions, condition)
 	key := playerKey(player.Metadata.Namespace, player.Metadata.Name)
@@ -150,8 +138,8 @@ func (o *operator) settlePower(player *Player, plays []Play, step powerStep, out
 	}
 }
 
-// composeCondition sets one condition over the ones the status holds,
-// so its lastTransitionTime moves only when its status does.
+// composeCondition sets next on a copy of the status conditions, so
+// lastTransitionTime changes only when the condition's status changes.
 func composeCondition(player *Player, next PlayerCondition) PlayerCondition {
 	composed := append([]PlayerCondition(nil), player.Status.Conditions...)
 	conditions.Set(&composed, next)
@@ -159,29 +147,28 @@ func composeCondition(player *Player, next PlayerCondition) PlayerCondition {
 	return condition
 }
 
-// announcePower publishes the asks of a change on the bus. The screen
-// client reads sleep and wake on the power topic. A standing Play stops
-// the way the remote's stop key stops it, through its commands topic,
-// so the playback pod ends the run by the path every ending takes.
-func (o *operator) announcePower(player *Player, plays []Play, step powerStep, outcome *powerOutcome) {
+// publishPowerCommands sends each unfinished Play the same stop that the
+// remote's stop key sends, so the playback pod ends the way every other
+// ending does.
+func (o *operator) publishPowerCommands(player *Player, plays []Play, step powerStep, outcome *powerOutcome) {
 	namespace, name := player.Metadata.Namespace, player.Metadata.Name
 	action := screenWake
 	if step.want == playerPowerOff {
 		action = screenSleep
 	}
 	o.publishCommand(playerPowerTopic(o.topicBase, namespace, name), powerMessage{Action: action})
-	outcome.ask("asked the screen to %s", action)
+	outcome.record("published %s to the screen", action)
 	if step.want != playerPowerOff {
 		return
 	}
-	for _, play := range standingPlaysOn(player, plays) {
+	for _, play := range unfinishedPlayNames(player, plays) {
 		o.publishCommand(playCommandsTopic(o.topicBase, namespace, play), mediaCommand{Action: actionStop})
-		outcome.ask("asked play %s to stop", play)
+		outcome.record("published stop to Play %s", play)
 	}
 }
 
-// publishCommand publishes one ask, not retained, because an ask is an
-// event and not a state.
+// publishCommand does not set the retain flag, so a client that
+// subscribes later does not receive an old command.
 func (o *operator) publishCommand(topic string, message any) {
 	payload, err := json.Marshal(message)
 	if err != nil {
@@ -190,9 +177,8 @@ func (o *operator) publishCommand(topic string, message any) {
 	o.bus.Publish(topic, payload, false)
 }
 
-// standingPlaysOn names each Play that stands on the unit, by the test
-// playerHasStandingPlay makes.
-func standingPlaysOn(player *Player, plays []Play) []string {
+// unfinishedPlayNames selects the same Plays as playerHasUnfinishedPlay.
+func unfinishedPlayNames(player *Player, plays []Play) []string {
 	var names []string
 	for index := range plays {
 		play := &plays[index]
@@ -206,10 +192,9 @@ func standingPlaysOn(player *Player, plays []Play) []string {
 	return names
 }
 
-// postPowerChange posts the Event of a change that landed and that no
-// condition transition posted: a change from Off to On, or back, leaves
-// PowerApplied True with the reason Applied, and only its message moves.
-// Each change is an action a person caused, so each one posts.
+// postPowerChange posts an Event for a change that succeeded. A change
+// from Off to On, or back, usually leaves PowerApplied True with the
+// reason Applied, so no condition transition posts an Event for it.
 func (o *operator) postPowerChange(player *Player, written PlayerStatus, step powerStep, moved []PlayerCondition) {
 	if !step.moving || written.Power != step.want {
 		return
@@ -219,19 +204,17 @@ func (o *operator) postPowerChange(player *Player, written PlayerStatus, step po
 			return
 		}
 	}
-	if condition, held := heldCondition(written.Conditions, powerAppliedCondition); held {
+	if condition, held := conditionOfType(written.Conditions, powerAppliedCondition); held {
 		o.recorder.Normal(playerRef(player), condition.Reason, condition.Message)
 	}
 }
 
-// turnOnForPlay turns a Player that is off on before a Play starts on
-// it, with the same apply a key press sends, so the pass after it runs
-// the change from Off to On the way a press does: the wake, the lifted
-// override, the condition, and the Event. A person who starts a film
-// wants to see it. The local copy takes the new value, so the session
-// the caller applies next is a Player that is on. A refused apply
-// leaves the Player off, and the run starts on equipment that stays
-// asleep until spec.power turns On.
+// turnOnForPlay sets spec.power to On, with the same apply as a power
+// key, before a Play starts on a Player that is Off. The next pass then
+// runs the change to On as it does for a key press. The caller's copy of
+// the Player is set to On too, so the session that the caller applies
+// next is awake. When the apply fails, the Play still starts, and the
+// equipment stays asleep until spec.power is On.
 func (o *operator) turnOnForPlay(play *Play, player *Player) {
 	if specPower(player) != playerPowerOff {
 		return

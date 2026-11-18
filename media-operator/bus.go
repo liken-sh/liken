@@ -1,15 +1,12 @@
 package main
 
-// The bus client is one live TCP connection to the broker, with a
-// reader, a single writer, and a keepalive timer, and it reconnects
-// with backoff whenever any of the three fails. Every mode of this
-// operator that speaks to the broker holds one Bus and lets it manage
-// the connection, so no caller writes the socket directly.
+// Bus is an MQTT 3.1.1 client for one broker. It keeps one TCP
+// connection open and reconnects with backoff when the connection fails.
 //
-// All writes go through one goroutine and one channel, because two
-// goroutines writing one TCP connection would interleave their bytes
-// and corrupt a packet. A publish or a subscribe from any goroutine
-// enqueues a finished frame, and the writer sends it.
+// Only the writer goroutine writes the connection, because two
+// goroutines writing one connection would interleave their bytes and
+// corrupt a packet. Publish and Subscribe encode a complete frame and
+// put it on a channel, and the writer sends it.
 
 import (
 	"bufio"
@@ -22,43 +19,38 @@ import (
 	"time"
 )
 
-// The keepalive the client asks the broker for, and the queue the
-// writer drains. The client sends a PINGREQ once the connection has
-// been idle longer than half the keepalive, so the broker never
-// reaches the keepalive without hearing from the client. The queue is
-// bounded, and a publish that would overflow it is dropped, which is
-// correct at QoS 0.
+// busKeepalive is the keepalive interval in seconds that the client
+// sends in CONNECT. The writer sends a PINGREQ when nothing has been
+// written for half of it, so the broker hears from the client within
+// the interval. When the write queue already holds busQueueDepth
+// frames, a new frame is dropped, which QoS 0 permits.
 const (
 	busKeepalive  = 30
 	busQueueDepth = 64
 )
 
-// The reconnect backoff bounds. The client waits busMinBackoff after
-// the first failure and doubles the wait up to busMaxBackoff, so a
-// broker that is down does not become a tight reconnect loop.
 const (
 	busMinBackoff = time.Second
 	busMaxBackoff = 30 * time.Second
 )
 
-// busHandler receives one inbound message's topic and payload. The Bus
-// calls it on the reader goroutine, so a handler that blocks holds up
+// busHandler receives the topic and payload of one inbound message. The
+// Bus calls it on the reader goroutine, so a handler that blocks delays
 // every later message on the connection.
 type busHandler func(topic string, payload []byte)
 
-// busWill is the MQTT Last Will the client names at connect time. The
-// broker publishes it on any disconnect the client does not make
-// cleanly, which is how a killed pod's status is marked offline.
+// busWill is the MQTT Last Will that the client sends in CONNECT. The
+// broker publishes it when the connection ends without a DISCONNECT, so
+// a killed pod's availability topic reads offline.
 type busWill struct {
 	Topic    string
 	Payload  []byte
 	Retained bool
 }
 
-// Bus holds the connection's parts and the state that outlives one
-// connection: the remembered subscriptions and the packet identifier
-// counter. out is the current connection's write queue, or nil while
-// disconnected, and the mutex guards both it and the fields around it.
+// Bus keeps filters and packetID across reconnects. out is the write
+// queue of the open session, and nil while the client is disconnected.
+// mutex guards filters, out, and packetID.
 type Bus struct {
 	clientID  string
 	will      *busWill
@@ -66,12 +58,12 @@ type Bus struct {
 	handler   busHandler
 	dial      func(context.Context) (net.Conn, error)
 
-	// retainedHandler, when it is set, receives each message the broker
-	// marks retained, in place of handler. The broker marks a retained
-	// message it delivers because of a new subscription, and marks none
-	// it forwards as it is published (MQTT 3.1.1, 3.3.1.3). So a reader
-	// tells the state it catches up on from a change made now. Set it
-	// before Run.
+	// retainedHandler, when set, receives the messages that have the
+	// retain flag, and handler receives the rest. The broker sets the
+	// flag only on a stored message that it sends because of a new
+	// subscription (MQTT 3.1.1, 3.3.1.3), so the flag separates the state
+	// before the subscription from the changes after it. Set it before
+	// Run.
 	retainedHandler busHandler
 
 	mutex    sync.Mutex
@@ -80,10 +72,9 @@ type Bus struct {
 	packetID uint16
 }
 
-// newBus builds a client that dials the address over TCP. The address,
-// the client identifier, the will, the connect callback, and the
-// inbound handler are fixed for the client's life; the connection they
-// drive is not.
+// newBus returns a client that dials address over TCP. Run starts it.
+// onConnect, when set, runs after each CONNACK and after the stored
+// subscriptions are sent.
 func newBus(address, clientID string, will *busWill, onConnect func(*Bus), handler busHandler) *Bus {
 	bus := &Bus{
 		clientID:  clientID,
@@ -99,11 +90,12 @@ func newBus(address, clientID string, will *busWill, onConnect func(*Bus), handl
 	return bus
 }
 
-// Run holds the connection open until ctx ends. It dials, connects,
-// and serves one session, then waits a backoff and dials again. A
-// session that reached a CONNACK resets the backoff to its floor, so a
-// connection that drops after an hour reconnects at once, while a
-// broker that never answers is retried ever more slowly.
+// Run keeps a session open until ctx ends. When a session ends, it
+// waits and dials again. After a session that got a CONNACK it waits
+// busMinBackoff, so a connection that drops after an hour reconnects
+// quickly. After each attempt that got no CONNACK the wait doubles, up
+// to busMaxBackoff, so a broker that is down does not get a tight
+// reconnect loop.
 func (b *Bus) Run(ctx context.Context) {
 	backoff := busMinBackoff
 	for ctx.Err() == nil {
@@ -128,10 +120,9 @@ func (b *Bus) Run(ctx context.Context) {
 	}
 }
 
-// runSession dials, completes the CONNECT handshake, and serves the
-// connection until its reader or writer fails. It returns whether the
-// handshake reached a CONNACK, which is what tells Run to reset the
-// backoff.
+// runSession dials, sends CONNECT, and serves the connection until the
+// reader or the writer fails or ctx ends. It returns true when the broker
+// sent a CONNACK.
 func (b *Bus) runSession(parent context.Context) (connected bool) {
 	conn, err := b.dial(parent)
 	if err != nil {
@@ -141,7 +132,7 @@ func (b *Bus) runSession(parent context.Context) (connected bool) {
 
 	connect, err := encodeConnect(b.clientID, busKeepalive, b.will)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "connecting to the broker: %v\n", err)
+		fmt.Fprintf(os.Stderr, "encoding the CONNECT packet: %v\n", err)
 		return false
 	}
 	if _, err := conn.Write(connect); err != nil {
@@ -158,9 +149,8 @@ func (b *Bus) runSession(parent context.Context) (connected bool) {
 
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
-	// The reader blocks in Read until the broker writes or the
-	// connection closes. Closing the connection when the session ends
-	// is what unblocks a reader waiting on a silent broker.
+	// Closing the connection makes the blocked Read in readLoop return,
+	// so a silent broker cannot keep the session open after ctx ends.
 	defer context.AfterFunc(ctx, func() { conn.Close() })()
 
 	out := make(chan []byte, busQueueDepth)
@@ -177,14 +167,14 @@ func (b *Bus) runSession(parent context.Context) (connected bool) {
 	writing.Add(1)
 	go func() {
 		defer writing.Done()
-		// A write failure ends the session, so the reader stops too.
+		// When the writer fails, cancel closes the connection, which
+		// ends readLoop.
 		defer cancel()
 		b.writeLoop(ctx, conn, out)
 	}()
 
-	// The remembered subscriptions go out first, so the broker is
-	// delivering again before onConnect re-publishes any retained
-	// state.
+	// The SUBSCRIBE frames go on the queue before anything that
+	// onConnect publishes, so the broker receives them first.
 	b.resubscribe(out)
 	if b.onConnect != nil {
 		b.onConnect(b)
@@ -196,10 +186,8 @@ func (b *Bus) runSession(parent context.Context) (connected bool) {
 	return true
 }
 
-// writeLoop is the one goroutine that writes the connection. It sends
-// each queued frame and, when no frame has gone out for half the
-// keepalive, sends a PINGREQ so the broker hears from the client
-// before the keepalive elapses.
+// writeLoop is the only writer of conn. It sends each queued frame and
+// the PINGREQ of the keepalive.
 func (b *Bus) writeLoop(ctx context.Context, conn net.Conn, out <-chan []byte) {
 	idle := time.Duration(busKeepalive) * time.Second / 2
 	ticker := time.NewTicker(idle)
@@ -225,11 +213,10 @@ func (b *Bus) writeLoop(ctx context.Context, conn net.Conn, out <-chan []byte) {
 	}
 }
 
-// readLoop reads whole packets and delivers each inbound PUBLISH to the
-// handler. A SUBACK and a PINGRESP are read and dropped: the client
-// asks for QoS 0, so a SUBACK carries nothing to act on, and a
-// PINGRESP only proves the broker is alive, which a successful read
-// already shows. Any read error ends the loop and the session.
+// readLoop passes each inbound PUBLISH to retainedHandler or handler
+// until a read fails. It ignores every other packet, because a client
+// that subscribes at QoS 0 has nothing to do with a SUBACK or a
+// PINGRESP.
 func (b *Bus) readLoop(reader *bufio.Reader) {
 	for {
 		first, body, err := readPacket(reader)
@@ -249,17 +236,16 @@ func (b *Bus) readLoop(reader *bufio.Reader) {
 	}
 }
 
-// Publish enqueues a QoS 0 PUBLISH from any goroutine. While the client
-// is disconnected the queue does not exist and the publish is dropped,
-// which is correct at QoS 0: a caller re-publishes its retained state
-// from onConnect, so the broker holds the current value again within
-// the reconnect. A message too long for one packet is refused with a
-// line in the pod log, because the broker would close the connection
-// on the malformed packet and drop every publish queued behind it.
+// Publish queues a QoS 0 PUBLISH and is safe to call from any
+// goroutine. It returns true when the frame reached the queue, and
+// false when the client is disconnected or the queue is full. A caller
+// that skips payloads it already published records a payload only
+// after true, so a dropped frame is sent on the next try, and it
+// publishes its retained state again from onConnect.
 //
-// The answer is whether the frame reached the queue. A caller that skips
-// a payload it already published records the payload only on true, so a
-// frame dropped on a full queue goes out again on its next try.
+// A message too long for one packet is refused with a line on stderr,
+// because the broker would close the connection on the malformed packet
+// and every frame queued behind it would be lost.
 func (b *Bus) Publish(topic string, payload []byte, retained bool) bool {
 	b.mutex.Lock()
 	out := b.out
@@ -280,22 +266,20 @@ func (b *Bus) Publish(topic string, payload []byte, retained bool) bool {
 	}
 }
 
-// Connected reports whether the client holds a live session right now,
-// which is the same test Publish makes before it enqueues. A caller whose
-// publish is the only record of an act, such as clearing a retained topic,
-// asks first and does the act on a later pass instead of losing it to a
-// dropped QoS 0 publish.
+// Connected reports whether a session is open. A caller whose publish
+// is the only record of an action, such as clearing a retained topic,
+// checks it first and retries on a later pass while it is false.
 func (b *Bus) Connected() bool {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 	return b.out != nil
 }
 
-// Subscribe remembers the filter and sends it if the client is
-// connected. The remembered set is what runSession re-sends on every
-// reconnect, so a subscription outlives the connection it was made on.
-// A filter too long for one packet is refused with a line in the pod
-// log and is not remembered, so every remembered filter encodes.
+// Subscribe stores the filter and queues a SUBSCRIBE when a session is
+// open. Each new session sends every stored filter, so a SUBSCRIBE
+// dropped on a full queue or a closed connection is sent at the next
+// reconnect. A filter too long for one packet is refused with a line on
+// stderr and is not stored.
 func (b *Bus) Subscribe(filter string) {
 	b.mutex.Lock()
 	frame, err := encodeSubscribe(b.nextPacketID(), filter)
@@ -316,9 +300,8 @@ func (b *Bus) Subscribe(filter string) {
 	}
 }
 
-// resubscribe sends every remembered filter on a fresh connection. The
-// filters go out in sorted order so the frames a reconnect writes are
-// the same every time, which keeps a test deterministic.
+// resubscribe queues a SUBSCRIBE for every stored filter, in sorted
+// order, so every reconnect sends the same frames.
 func (b *Bus) resubscribe(out chan<- []byte) {
 	b.mutex.Lock()
 	filters := make([]string, 0, len(b.filters))
@@ -328,8 +311,7 @@ func (b *Bus) resubscribe(out chan<- []byte) {
 	frames := make([][]byte, 0, len(filters))
 	sort.Strings(filters)
 	for _, filter := range filters {
-		// Subscribe remembers only a filter that encodes, so this
-		// refuses none in practice.
+		// Subscribe stores only filters that encode.
 		frame, err := encodeSubscribe(b.nextPacketID(), filter)
 		if err != nil {
 			continue
@@ -345,9 +327,8 @@ func (b *Bus) resubscribe(out chan<- []byte) {
 	}
 }
 
-// nextPacketID hands out the identifier a SUBSCRIBE carries and its
-// SUBACK echoes. It skips zero, which the protocol reserves. The caller
-// holds the mutex.
+// nextPacketID returns the packet identifier for a SUBSCRIBE. MQTT
+// reserves zero, so the counter wraps to 1. The caller holds the mutex.
 func (b *Bus) nextPacketID() uint16 {
 	b.packetID++
 	if b.packetID == 0 {

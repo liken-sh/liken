@@ -1,5 +1,5 @@
-//! The image stop. A still photo has no timeline, so it shows no scrubber, and
-//! left and right step across the photos in the playlist instead of seeking.
+//! The focus stop of a still photo. A photo has no timeline, so the display
+//! shows this stop in place of a film's scrubber. Left and right move to the previous and next item of the playlist.
 
 use iced::Point;
 use serde_json::json;
@@ -11,13 +11,14 @@ use crate::ipc::Command;
 use crate::presentation::Presentation;
 use crate::theme;
 
-/// An image item is one whose presentation block declares the image type.
+/// Whether the `type` of the current item's presentation block is `image`.
 pub fn available(presentation: &Presentation) -> bool {
     presentation.is_image()
 }
 
-/// The counter sits low and centered, on the row the scrubber bar holds for a
-/// film. playlist-pos counts from zero, so the item is one more.
+/// The counter line, such as "3 of 7", centered on the row where a film's
+/// scrubber bar draws. mpv's `playlist-pos` starts at zero, so the number
+/// shown is one more.
 pub fn lines(canvas: &Canvas, film: &Film) -> Vec<Line> {
     let at = film.playlist_pos.unwrap_or(0) + 1;
     let count = film.playlist_count.unwrap_or(1);
@@ -30,8 +31,8 @@ pub fn lines(canvas: &Canvas, film: &Film) -> Vec<Line> {
     )]
 }
 
-/// left and right walk the playlist across the photos. This is the first use
-/// of the multi-item list for navigation, not for seeking within one item.
+/// The mpv command for a left or right press. Any other action returns no
+/// command.
 pub fn press(action: Action) -> Vec<Command> {
     match action {
         Action::Left => vec![vec![json!("playlist-prev")]],
@@ -52,7 +53,7 @@ mod tests {
     }
 
     #[test]
-    fn the_counter_sits_centred_on_the_bar_row() {
+    fn the_counter_is_centred_on_the_bar_row() {
         let lines = lines(&Canvas::default(), &film(2, 7));
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].content, "3 of 7");

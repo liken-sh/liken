@@ -1,6 +1,6 @@
-//! The layout space and the one shape drawn in it so far. The canvas is
-//! 1080 rows tall and as wide as the surface's own ratio makes it, and every
-//! value that moves with the position snaps to a whole output pixel.
+//! The coordinate space that the display lays out in, and the drawing
+//! modules that use it. The canvas is [`theme::CANVAS_HEIGHT`] units tall,
+//! and its width follows the surface's aspect ratio.
 
 use iced::Size;
 
@@ -14,13 +14,12 @@ pub mod shape;
 pub use brush::{Anchor, Brush, ELLIPSIS, Line, clip, forget_measurements, measure};
 pub use scrim::{Picture, Scrims};
 
-/// How the layout space maps to the real surface. `scale` maps a canvas
-/// length to output pixels, and the two axes share it because the width
-/// follows the surface's own ratio.
+/// The mapping from canvas units to output pixels. Both axes use the same
+/// `scale`, because the canvas width follows the surface's aspect ratio.
 ///
-/// The fields are private and [`Canvas::for_output`] is the one constructor,
-/// because a scale of nothing divides through every conversion below and
-/// turns every position it touches into NaN.
+/// The fields are private, so a canvas comes only from
+/// [`Canvas::for_output`] or `Default`, and its scale is never 0. A scale
+/// of 0 would make `to_canvas` divide by 0.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Canvas {
     width: f32,
@@ -37,15 +36,13 @@ impl Default for Canvas {
 }
 
 impl Canvas {
-    /// The canvas the surface the compositor configured calls for. The width
-    /// follows the real surface's own ratio, so a canvas pixel is square. A
-    /// fixed 1920 canvas on a 21:9 screen stretched every vector drawing by a
-    /// third and pulled every margin inside where it belonged. A 16:9 surface
-    /// gives 1920, the width this space always held, so a 16:9 screen draws
-    /// every number it drew before.
+    /// The canvas for the surface size that the compositor configured.
+    /// The width follows the surface's aspect ratio, so a canvas unit is
+    /// square on the screen.
     ///
-    /// A surface with no size yet gives the default canvas, because a width
-    /// of nothing would place every flush-right element off the screen.
+    /// A surface with no size yet gives the default canvas, because a
+    /// canvas width of 0 would place every flush-right element off the
+    /// screen.
     pub fn for_output(output: Size) -> Self {
         if output.width <= 0.0 || output.height <= 0.0 {
             return Self::default();
@@ -56,8 +53,6 @@ impl Canvas {
         }
     }
 
-    /// The canvas the surface gives: as wide as its ratio makes it, and always
-    /// [`theme::CANVAS_HEIGHT`] rows tall.
     pub fn width(&self) -> f32 {
         self.width
     }
@@ -66,35 +61,34 @@ impl Canvas {
         theme::CANVAS_HEIGHT
     }
 
-    /// How many output pixels one canvas length covers.
+    /// Output pixels per canvas unit.
     pub fn scale(&self) -> f32 {
         self.scale
     }
 
-    /// One canvas length in whole output pixels. Every request, every
-    /// placement, and every snap rounds one this way, so the two halves of a
-    /// position never disagree by a pixel.
+    /// A canvas length in whole output pixels, rounded half up. `snap`
+    /// rounds through this too, so a snapped position and a length in
+    /// pixels round the same way.
     pub fn to_pixels(&self, value: f32) -> f32 {
         (value * self.scale + 0.5).floor()
     }
 
-    /// One length in output pixels as the canvas length it covers.
     pub fn to_canvas(&self, pixels: f32) -> f32 {
         pixels / self.scale
     }
 
-    /// One canvas value on the output pixel grid, so what the display draws
-    /// stands still between two frames that land on the same pixel.
+    /// A canvas value rounded to the output pixel grid, so an element at
+    /// almost the same position in two frames is drawn on the same pixel.
     pub fn snap(&self, value: f32) -> f32 {
         self.to_canvas(self.to_pixels(value))
     }
 
-    /// The column every flush-right element ends on.
+    /// The x position where a flush-right element ends, inside the right
+    /// margin.
     pub fn right(&self) -> f32 {
         self.width - theme::MARGIN_X
     }
 
-    /// The middle of the screen, which a centred element measures from.
     pub fn centre_x(&self) -> f32 {
         self.width / 2.0
     }
@@ -104,8 +98,6 @@ impl Canvas {
 mod tests {
     use super::*;
 
-    /// A 16:9 surface gives exactly 1920, and a 21:9 surface gives 2560 at
-    /// 1080 rows.
     #[test]
     fn the_canvas_width_follows_the_surface_ratio() {
         assert_eq!(
@@ -150,7 +142,7 @@ mod tests {
     }
 
     #[test]
-    fn a_snapped_value_lands_on_a_whole_output_pixel() {
+    fn a_snapped_value_is_a_whole_number_of_output_pixels() {
         let canvas = Canvas::for_output(Size::new(1920.0, 1080.0));
         assert_eq!(canvas.snap(270.6), 271.0);
         assert_eq!(canvas.snap(763.2), 763.0);

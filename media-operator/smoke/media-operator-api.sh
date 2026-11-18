@@ -7,15 +7,14 @@
 #            ghcr.io/liken-sh/media-operator-api:2026.10.02-001. The
 #            image must be in the local Docker daemon.
 #
-# The check proves ffmpeg is in the image and runs. The composed stream
-# is one ffmpeg mux, and the image has no shell, so the check runs
-# ffmpeg itself as the entrypoint.
+# The API muxes each capture stream with ffmpeg, so the check runs the
+# image's ffmpeg in place of the entrypoint to prove that it starts.
 set -euo pipefail
 
 image=$1
 
-# The image must hold the notices of the third-party software in it,
-# as notices/check.sh describes.
+# notices/check.sh fails unless the image contains these license files
+# and the copyright file of each Debian package that its closures list.
 "$(dirname "$0")/../../notices/check.sh" "$image" \
   usr/share/doc/go/LICENSE
 

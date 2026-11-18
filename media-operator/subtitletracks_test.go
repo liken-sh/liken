@@ -1,11 +1,9 @@
 package main
 
-// These tests cover the subtitle rule of plan 90: how the command sidecar
-// gives each subtitle track of a file a role, and which track it then
-// chooses. The cases are in testdata/subtitle-rule.json, because the media
-// browser in library-operator applies the same rule to mark the track a
-// play will show, and its tests read the same file. A change to the rule
-// in one program fails a test until the other program agrees.
+// The cases are in testdata/subtitle-rule.json. The media browser in
+// library-operator applies the same rule to show which track a play will
+// choose, and its tests read the same file, so a change to the rule in one
+// program fails a test until the other program matches.
 
 import (
 	"encoding/json"
@@ -15,10 +13,9 @@ import (
 	"testing"
 )
 
-// ruleTrack is one track of the shared cases. An embedded track gives its
-// tag, title, and flags. An external track gives its file name, and the
-// language and flags that mpv reads from that name. The flags are the
-// words default, forced, and hi.
+// ruleTrack is one track of the shared cases. An external track has a
+// file, and an embedded track has none. The flag values are default,
+// forced, and hi.
 type ruleTrack struct {
 	File   string   `json:"file"`
 	Lang   string   `json:"lang"`
@@ -27,7 +24,6 @@ type ruleTrack struct {
 	Events *int64   `json:"events"`
 }
 
-// ruleCases is the whole file of shared cases.
 type ruleCases struct {
 	Files    map[string][]ruleTrack `json:"files"`
 	Classify []struct {
@@ -57,32 +53,32 @@ type ruleCases struct {
 	} `json:"choose"`
 }
 
-// loadRuleCases reads the shared cases once for each test.
 func loadRuleCases(t *testing.T) ruleCases {
 	t.Helper()
 	data, err := os.ReadFile("testdata/subtitle-rule.json")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading testdata/subtitle-rule.json: %v", err)
 	}
 	var cases ruleCases
 	if err := json.Unmarshal(data, &cases); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding testdata/subtitle-rule.json: %v", err)
 	}
 	return cases
 }
 
-// The video every external file of the cases sits beside.
+// The external files of the cases are in this folder, beside a video of
+// this name.
 const (
 	ruleVideoFolder = "/media/1/Movie (2024)/"
 	ruleVideoName   = "Movie (2024)."
 )
 
-// mpvTracks builds the track-list that mpv gives for the tracks of one
-// case, and the counts that library-operator records for them. Each
-// track's mpv id is its position from 1. An embedded track's container
-// index is one more than its id, because the video stream holds index 0.
-// mpv titles an external file with no title of its own by the part of its
-// name after the video's name.
+// mpvTracks builds the track-list that mpv reports for the tracks of one
+// case, and the counts that library-operator records for them. A track's
+// mpv id is its position, starting at 1. An embedded track's container
+// index is its id plus one, after the video and audio streams at 0 and 1.
+// mpv titles an external file that has no title of its own with the part
+// of its name after the video's name.
 func mpvTracks(tracks []ruleTrack) ([]mpvTrack, []PlaySubtitle) {
 	var list []mpvTrack
 	var counts []PlaySubtitle
@@ -112,27 +108,26 @@ func mpvTracks(tracks []ruleTrack) ([]mpvTrack, []PlaySubtitle) {
 	return list, counts
 }
 
-// surveyFile is one file of the shared cases as mpv and the presentation
-// give it: its subtitle tracks and the counts that library-operator
-// records for them.
+// surveyFile is one file of the shared cases: the subtitle tracks as mpv
+// reports them, and the counts that library-operator records for them.
 type surveyFile struct {
 	tracks []mpvTrack
 	counts []PlaySubtitle
 }
 
-// survey builds the survey file of the shared cases under this name.
+// survey builds the file of the shared cases with this name.
 func survey(t *testing.T, name string) surveyFile {
 	t.Helper()
 	tracks, counts := mpvTracks(loadRuleCases(t).Files[name])
 	return surveyFile{tracks: tracks, counts: counts}
 }
 
-// audio builds the audio track mpv selected.
 func audio(lang string) mpvTrack {
 	return mpvTrack{ID: 1, Type: trackTypeAudio, Lang: lang, Selected: true}
 }
 
-// english is a household that reads and hears English.
+// english returns the preferences of a household that reads and hears
+// English.
 func english(mode, sdh string) subtitlePreferences {
 	return subtitlePreferences{
 		Subtitles:         mode,
@@ -142,7 +137,8 @@ func english(mode, sdh string) subtitlePreferences {
 	}
 }
 
-// caseTracks is a case's own tracks, or the survey file it names.
+// caseTracks returns a case's own tracks, or the tracks of the file it
+// names.
 func caseTracks(cases ruleCases, file string, tracks []ruleTrack) []ruleTrack {
 	if file != "" {
 		return cases.Files[file]
@@ -150,8 +146,8 @@ func caseTracks(cases ruleCases, file string, tracks []ruleTrack) []ruleTrack {
 	return tracks
 }
 
-// Each track takes one role from its flags, its title, its file name, and its
-// event count. A track with no count takes its role from the other three.
+// Each track gets one role from its flags, title, file name, and event
+// count. A track with no count gets its role from the other three.
 func TestClassifySubtitleTracks(t *testing.T) {
 	cases := loadRuleCases(t)
 	for _, one := range cases.Classify {
@@ -166,10 +162,8 @@ func TestClassifySubtitleTracks(t *testing.T) {
 	}
 }
 
-// mpv reads no language and no marker from a name that ends in a number, so
-// the sidecar reads the name's segments itself. The media's own name can hold
-// dots, so the walk starts from the end and stops at the first segment that is
-// not a number, a marker, or a language.
+// mpv reads no language and no marker from a name that ends in a number,
+// so the sidecar parses the name itself.
 func TestSubtitleFileName(t *testing.T) {
 	for _, one := range loadRuleCases(t).FileNames {
 		t.Run(one.Name, func(t *testing.T) {
@@ -179,8 +173,8 @@ func TestSubtitleFileName(t *testing.T) {
 	}
 }
 
-// The preferences name a language in any of the forms people and files use,
-// and the rule treats each form as the same language.
+// Preferences and file names write a language in several forms, such as en,
+// eng, and en-US, and the rule treats them as the same language.
 func TestSameLanguage(t *testing.T) {
 	for _, one := range loadRuleCases(t).SameLanguage {
 		t.Run(one.A+" and "+one.B, func(t *testing.T) {
@@ -189,13 +183,13 @@ func TestSameLanguage(t *testing.T) {
 	}
 }
 
-// keepsMpvsChoice marks a case in which the rule sets nothing, so mpv's own
-// choice stands. No mpv id is negative.
+// keepsMpvsChoice is the value of chosen when the rule changes nothing and
+// mpv's own choice stays. No mpv id is negative.
 const keepsMpvsChoice = -1
 
-// chosen is the mpv id of the track the rule chooses, 0 for none, or
-// keepsMpvsChoice. The selected audio track comes first in the track-list,
-// as it does in mpv's.
+// chosen returns the mpv id of the track the rule chooses, 0 for no
+// subtitles, or keepsMpvsChoice. The selected audio track comes first in
+// the track-list, as it does in mpv's.
 func chosen(tracks []ruleTrack, audioLanguage string, prefs subtitlePreferences) int {
 	list, counts := mpvTracks(tracks)
 	choice := chooseSubtitle(classifySubtitleTracks(append([]mpvTrack{audio(audioLanguage)}, list...), counts), audioLanguage, prefs)
@@ -208,10 +202,6 @@ func chosen(tracks []ruleTrack, audioLanguage string, prefs subtitlePreferences)
 	return choice.track.ID
 }
 
-// The rule of plan 90: a full or SDH track in the order of the subtitle
-// languages, then the forced track that belongs to the audio, and a
-// commentary track last. In auto, audio in the first language takes only its
-// forced track.
 func TestChooseSubtitle(t *testing.T) {
 	cases := loadRuleCases(t)
 	for _, one := range cases.Choose {
@@ -221,9 +211,9 @@ func TestChooseSubtitle(t *testing.T) {
 	}
 }
 
-// The file holds cases of every kind, so a file that fails to parse into
-// these fields, or loses a section, fails here and not as a test that ran
-// no case.
+// A cases file that fails to parse into these fields, or loses a section,
+// fails here. Otherwise the tests that loop over that section would run no
+// case and pass.
 func TestTheSharedCasesHoldEverySection(t *testing.T) {
 	cases := loadRuleCases(t)
 	mustMatch(t, len(cases.Classify) > 0 && len(cases.FileNames) > 0 &&

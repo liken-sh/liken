@@ -1,10 +1,5 @@
 package main
 
-// These tests cover the view a pass reads: the order of a collection,
-// the conversion into the operator's own structs, and the answer for an
-// object the view does not hold. The first test reads a store of
-// client-go's own, the kind an informer fills.
-
 import (
 	"errors"
 	"reflect"
@@ -16,9 +11,8 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// The view reads an informer's store by the keys the informer files
-// each object under: namespace/name, and name alone for a
-// cluster-scoped object.
+// The view reads a client-go store by the informer's keys: namespace/name,
+// or the name alone for a cluster-scoped object.
 func TestTheViewReadsAnInformersStore(t *testing.T) {
 	pods := cache.NewStore(cache.DeletionHandlingMetaNamespaceKeyFunc)
 	mustSucceed(t, pods.Add(asObject(t, housePlaybackPod())))
@@ -38,9 +32,9 @@ func TestTheViewReadsAnInformersStore(t *testing.T) {
 	mustMatch(t, display.Status.Observed.Power, "on")
 }
 
-// The view answers a whole collection in the API server's order, by
-// namespace and then by name, whatever order the store holds it in.
-func TestTheViewAnswersInTheAPIServersOrder(t *testing.T) {
+// The view sorts a collection by namespace and then by name, which is
+// the API server's order, whatever order the store returns.
+func TestTheViewReturnsACollectionInTheAPIServersOrder(t *testing.T) {
 	cluster := newFakeCluster()
 	for _, key := range []string{"den/b", "attic/z", "den/a"} {
 		namespace, name, _ := strings.Cut(key, "/")
@@ -57,8 +51,8 @@ func TestTheViewAnswersInTheAPIServersOrder(t *testing.T) {
 	mustMatch(t, strings.Join(keys, ","), "attic/z,den/a,den/b")
 }
 
-// A Play converts whole, each item's presentation included, and an item
-// with no presentation converts to none.
+// A Play converts completely, including each item's presentation, and
+// an item with no presentation converts to a nil presentation.
 func TestTheViewConvertsAPlayWithItsPresentations(t *testing.T) {
 	full := &Presentation{
 		Type:         "video",
@@ -106,9 +100,9 @@ func TestTheViewConvertsAPlayersDeviceParameters(t *testing.T) {
 	mustMatch(t, string(player.Spec.Display.Parameters.Values), `{"brightness":80}`)
 }
 
-// An object the view does not hold answers apiclient.ErrNotFound, the answer the
-// API client gives, so a caller treats the two the same.
-func TestAnObjectTheViewDoesNotHoldIsNotFound(t *testing.T) {
+// An object that the view does not have returns apiclient.ErrNotFound,
+// the same error the API client returns.
+func TestAnObjectMissingFromTheViewIsNotFound(t *testing.T) {
 	_, err := newFakeCluster().view().ResourceClaim("house", "movie-devices")
 
 	mustMatch(t, errors.Is(err, apiclient.ErrNotFound), true)

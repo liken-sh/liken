@@ -2,9 +2,9 @@
 
 package main
 
-// This program writes keycodes.go from the kernel's
-// input-event-codes.h. `make codes` runs it, and the result is
-// committed, so a build reads no kernel header.
+// keycodegen writes keycodes.go from the kernel's input-event-codes.h.
+// `make codes` runs it. keycodes.go is committed, so a build does not
+// need the kernel header.
 
 import (
 	"fmt"
@@ -14,8 +14,9 @@ import (
 	"strings"
 )
 
-// The three names in the KEY_ space that are not controls: two bounds
-// and one alias the kernel keeps for its own filtering.
+// notCodes lists the KEY_ defines that are not keys. KEY_MAX and
+// KEY_CNT are bounds, and KEY_MIN_INTERESTING is an alias that the
+// kernel uses internally.
 var notCodes = map[string]bool{
 	"KEY_MAX":             true,
 	"KEY_CNT":             true,
@@ -26,12 +27,12 @@ var define = regexp.MustCompile(`^#define\s+((?:KEY|BTN)_[A-Z0-9_]+)\s+(\S+)`)
 
 func main() {
 	if len(os.Args) != 3 {
-		fmt.Fprintln(os.Stderr, "usage: keycodegen <input-event-codes.h> <output.go>")
+		fmt.Fprintf(os.Stderr, "keycodegen: got %d arguments, want 2\nusage: keycodegen <input-event-codes.h> <output.go>\n", len(os.Args)-1)
 		os.Exit(1)
 	}
 	header, err := os.ReadFile(os.Args[1])
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "reading the header: %v\n", err)
+		fmt.Fprintf(os.Stderr, "keycodegen: reading the header: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -60,10 +61,9 @@ func main() {
 		read = append(read, entry{name: name, code: code, literal: !aliased})
 	}
 
-	// A name the header immediately re-defines with the same literal
-	// code is a range marker, such as BTN_GAMEPAD before BTN_SOUTH: it
-	// names a class of device and not a control, so the table drops it
-	// and keeps the control's own name.
+	// The header gives some range markers, such as BTN_GAMEPAD, the same
+	// literal code as the key defined after them, BTN_SOUTH. A marker
+	// names a class of device, not a key, so the table drops it.
 	var entries []entry
 	for index, each := range read {
 		next := index + 1
@@ -86,13 +86,13 @@ func main() {
 	out.WriteString("}\n")
 
 	if err := os.WriteFile(os.Args[2], []byte(out.String()), 0o644); err != nil {
-		fmt.Fprintf(os.Stderr, "writing the table: %v\n", err)
+		fmt.Fprintf(os.Stderr, "keycodegen: writing the table: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-// resolve reads one define's value: a literal, decimal or hexadecimal,
-// or the name of a code the header already defined.
+// resolve returns the code of a define's value, which is a decimal or
+// hexadecimal literal or the name of an earlier define.
 func resolve(value string, codes map[string]uint16) (uint16, bool) {
 	if code, aliased := codes[value]; aliased {
 		return code, true

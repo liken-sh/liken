@@ -1,15 +1,12 @@
-// Package edl reads and writes mpv's EDL v0 format. An album plays as one
-// EDL timeline: mpv reads it as one playlist entry with one duration and one
-// chapter per track, so the display drives track selection with the chapter
-// machinery a film already uses. The format lives in its own package
-// of its own: the player shim writes a timeline, the command sidecar reads one
-// back for the album's art, and the local tool prints one, and all three must
-// agree byte for byte.
+// Package edl reads and writes mpv's EDL v0 format. An album plays as
+// one EDL timeline, which mpv reads as one playlist entry with one
+// chapter for each track, so a remote's chapter keys skip between
+// tracks. The player shim writes the timeline in the playback pod, and
+// the local/edl tool prints the same timeline on a workstation.
+//
+// A timeline file is the header line and then one segment on each
+// line. A segment is a list of comma-separated fields.
 package edl
-
-// The format is a header line, one segment per line, and comma-separated
-// parameters, with a %<length>% quoting that lets a file name or a title
-// carry a comma.
 
 import (
 	"os"
@@ -18,23 +15,22 @@ import (
 	"strings"
 )
 
-// The header mpv reads an EDL by. A file that opens with anything else is no
-// timeline. The edl:// URL form carries no header, because the scheme has
-// already said what the text is.
+// Header is the first line of an EDL file. A timeline passed inline as
+// an edl:// URL has no header.
 const Header = "# mpv EDL v0"
 
-// One segment of a timeline: the file it plays, and the named
-// parameters the line carries, such as the title that becomes mpv's chapter
-// name. The positional start and length are not read here.
+// Segment is one line of a timeline: the file it plays and its named
+// parameters, such as the title that mpv shows as the chapter name.
+// The positional start and length fields are dropped.
 type Segment struct {
 	File   string
 	Params map[string]string
 }
 
-// Parse reads a timeline into its segments. It skips the header, the
-// comments, and the ! lines, which carry stream and chapter directives no
-// reader here has a use for. A line it cannot read is skipped rather than
-// fatal, so one malformed segment costs the album one cover and not the run.
+// Parse returns the segments of a timeline. It skips the header, the
+// comments, the header directives that start with !, such as
+// !no_chapters, and each line that it cannot parse, so one malformed
+// segment does not fail the whole timeline.
 func Parse(text string) []Segment {
 	var segments []Segment
 	for _, raw := range strings.Split(text, "\n") {
@@ -49,9 +45,9 @@ func Parse(text string) []Segment {
 	return segments
 }
 
-// ParseSegment reads one line: the file name first, then the
-// parameters. A positional field is the segment's start or length, which
-// nothing here reads, so only the named parameters are kept.
+// ParseSegment parses one segment line: the file name, then the
+// fields. It keeps only the named fields, because a positional field
+// is the segment's start or length.
 func ParseSegment(line string) (Segment, bool) {
 	fields, ok := splitFields(line)
 	if !ok || len(fields) == 0 || fields[0].name != "" || fields[0].value == "" {
@@ -67,17 +63,16 @@ func ParseSegment(line string) (Segment, bool) {
 	return segment, true
 }
 
-// One field of a segment line. A file name and a positional number
-// carry no name, and a parameter carries both halves of its name=value.
+// field is one field of a segment line. A file name or a positional
+// number has an empty name.
 type field struct {
 	name  string
 	value string
 }
 
-// splitFields breaks one line on its commas, with the quoting the
-// format defines: a %<length>% run states its own length in bytes, so the text
-// inside it may hold a comma, an equals sign, or a percent sign and still
-// arrive whole.
+// splitFields splits a line on its commas. A value quoted as
+// %<length>%<text> gives its length in bytes, so its text can contain
+// a comma, an equals sign, or a percent sign.
 func splitFields(line string) ([]field, bool) {
 	var fields []field
 	pos := 0
@@ -117,7 +112,6 @@ func splitFields(line string) ([]field, bool) {
 	}
 }
 
-// readValue reads the right half of a name=value field, quoted or plain.
 func readValue(line string, pos int) (value string, next int, ok bool) {
 	if pos < len(line) && line[pos] == '%' {
 		return readQuoted(line, pos)
@@ -129,9 +123,9 @@ func readValue(line string, pos int) (value string, next int, ok bool) {
 	return line[start:pos], pos, true
 }
 
-// readQuoted reads one %<length>%<text> run and returns the text and
-// where the line goes on. A length that does not parse, or one that runs past
-// the end of the line, is a line the reader cannot read.
+// readQuoted reads one %<length>%<text> value and returns the text and
+// the position after it. It fails when the second % is missing, or the
+// length is not a number or runs past the end of the line.
 func readQuoted(line string, pos int) (text string, next int, ok bool) {
 	end := strings.IndexByte(line[pos+1:], '%')
 	if end < 0 {
@@ -145,17 +139,17 @@ func readQuoted(line string, pos int) (text string, next int, ok bool) {
 	return line[end+1 : end+1+length], end + 1 + length, true
 }
 
-// Quote writes one value in the format's own quoting: a percent sign, the
-// length in bytes, another percent sign, then the text. The length is what
-// lets a file name or a title carry a comma, an equals sign, or a percent
-// sign, so every value is quoted and none is inspected first.
+// Quote returns a value as %<length>%<text>, with the length in bytes.
+// It quotes every value, so the caller does not check a file name or a
+// title for a comma, an equals sign, or a percent sign.
 func Quote(value string) string {
 	return "%" + strconv.Itoa(len(value)) + "%" + value
 }
 
-// SegmentPath is where one segment's file lives. A relative path is
-// measured from the timeline's own directory, the way mpv measures it, and an
-// absolute path or a URL stands on its own.
+// SegmentPath returns the location of a segment's file. As in mpv, a
+// relative path is relative to the timeline's directory. An absolute
+// path, a URL, or a file of an inline timeline, which has no
+// directory, is returned unchanged.
 func SegmentPath(dir, file string) string {
 	if dir == "" || filepath.IsAbs(file) || strings.Contains(file, "://") {
 		return file
@@ -163,9 +157,9 @@ func SegmentPath(dir, file string) string {
 	return filepath.Join(dir, file)
 }
 
-// ReadFile reads a timeline off disk. A file that opens with anything
-// but the header is no timeline, and the caller reads it as the media file it
-// names.
+// ReadFile returns the text of a timeline file. It returns false when
+// the file cannot be read, and when it does not start with Header, as
+// a media file does not.
 func ReadFile(path string) (text string, ok bool) {
 	data, err := os.ReadFile(path)
 	if err != nil {

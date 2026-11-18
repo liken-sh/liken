@@ -1,13 +1,15 @@
 package main
 
-// This file is the router. The grammar is
-// /v1/{domain}/[namespaces/{ns}/]{plural}/{name}/{aspect}[.{ext}],
-// shared by the three capture APIs. The domain segment, media here,
-// lets one ingress later mount every domain's API under one host name
-// with no path clash. The router is a table of templates rather than
-// a pattern mux, because the same table is the discovery document,
-// the OpenAPI document, and the route label of every metric and log
-// line, and one list cannot drift from itself.
+// This file routes the media capture API. Every path has the form
+// /v1/{domain}/[namespaces/{ns}/]{plural}/{name}/{aspect}[.{ext}], as
+// the display and audio capture APIs do. The domain segment ("media"
+// here) lets one ingress serve every domain's API on one host name.
+//
+// The routes are a table of templates, not a pattern mux, so each
+// metric and log line can use the matched template as its route label.
+// routeTemplates in apiopenapi.go builds the OpenAPI paths from the
+// same captureAspects, and TestTheOpenAPIDocumentNamesEveryRoute fails
+// when the two lists differ.
 
 import (
 	"crypto/rand"
@@ -20,9 +22,6 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// The base every route of this domain is under, the one template
-// every Player route extends, and the two probe paths outside the
-// grammar.
 const (
 	apiBasePath       = "/v1/media"
 	apiPlayerTemplate = apiBasePath + "/namespaces/{namespace}/players/{name}"
@@ -30,29 +29,22 @@ const (
 	readyTemplate     = "/readyz"
 )
 
-// apiAllowedMethods is the three methods this API permits, as Allow
-// states them.
 const apiAllowedMethods = "GET, HEAD, OPTIONS"
 
-// apiRealm is the realm every WWW-Authenticate field names.
 const apiRealm = "media-api"
 
-// aboutBlank is the problem type for an error that needs no page of
-// its own. RFC 9457 section 4.2.1 makes the status phrase its title.
+// aboutBlank is the problem type for an error that has no documentation
+// page. RFC 9457 section 4.2.1 makes its title the HTTP status phrase.
 const aboutBlank = "about:blank"
 
-// apiRoute is one row of the table: the template, which the metrics
-// and the log line carry as the route, and the handler behind it.
 type apiRoute struct {
 	template string
 	handle   func(*apiExchange)
 }
 
-// apiExchange stores one request for its lifetime: the route it matched,
-// the path variables, the request id, and the facts the log line
-// carries. The handlers fill the facts as they learn them, and finish
-// writes the one log line, so every route logs the same fields and
-// no handler can forget one.
+// apiExchange is the state of one request. Handlers set the log fields
+// as they go, and finish writes one log line when the request ends, so
+// every route logs the same fields.
 type apiExchange struct {
 	server  *apiServer
 	writer  http.ResponseWriter
@@ -74,10 +66,9 @@ type apiExchange struct {
 	ffmpeg    string
 }
 
-// newRequestID is four random bytes as eight hex characters. A
-// counter would repeat after a restart and read the same in two pods,
-// and the id must name one request in the log and in a problem
-// document's instance.
+// newRequestID returns a random id, because a counter would repeat
+// after a restart and across replicas, and the id must pick out one
+// request in the log and in a problem document's instance.
 func newRequestID() string {
 	raw := make([]byte, 4)
 	if _, err := rand.Read(raw); err != nil {
@@ -86,11 +77,8 @@ func newRequestID() string {
 	return hex.EncodeToString(raw)
 }
 
-// routes is the table: the three document routes, then for each
-// aspect the negotiated route and one row per form. Each extension is
-// its own row rather than one row with a wildcard, so an extension no
-// form names is a 404 and not a route that fails later, and the same
-// rows are the OpenAPI path items.
+// routes returns the route table. Each file extension has its own row,
+// not a wildcard, so an extension that no form defines is a 404.
 func (s *apiServer) routes() []apiRoute {
 	routes := []apiRoute{
 		{template: apiBasePath, handle: s.serveDiscovery},
@@ -120,10 +108,9 @@ func (s *apiServer) fixedHandler(aspect captureAspect, form mediaForm) func(*api
 	return func(e *apiExchange) { s.serveCapture(e, aspect, form, false) }
 }
 
-// matchTemplate matches a path against one template segment by
-// segment. A literal segment must be equal; {namespace} and {name}
-// take the path's segment. An empty segment matches nothing, so a
-// path with a doubled slash or a missing name is a 404.
+// matchTemplate returns the {namespace} and {name} segments of a path
+// that matches template. An empty segment never matches, so a doubled
+// slash or a missing name is a 404.
 func matchTemplate(template, path string) (namespace, name string, ok bool) {
 	wanted := strings.Split(strings.TrimPrefix(template, "/"), "/")
 	got := strings.Split(strings.TrimPrefix(path, "/"), "/")
@@ -148,11 +135,12 @@ func matchTemplate(template, path string) (namespace, name string, ok bool) {
 	return namespace, name, true
 }
 
-// handler is the one entry point. It handles the two probe paths
-// first, with no auth and no links. Every other path gets Vary and
-// the service links, then the first template that matches, then the
-// method rules every route shares. A path no row matches is a 404
-// under the route unmatched, so the metric stays bounded.
+// handler serves the probe paths first, with no authentication and no
+// links. Every other response has Vary: Accept, on an extension route
+// too, because RFC 9110 section 12.5.5 uses Vary to list the request
+// headers that might have influenced the response. A path that matches
+// no template gets the route label "unmatched", so the metric label
+// cannot grow with arbitrary request paths.
 func (s *apiServer) handler() http.Handler {
 	routes := s.routes()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -182,7 +170,7 @@ func (s *apiServer) handler() http.Handler {
 				continue
 			}
 			e.route, e.namespace, e.name = route.template, namespace, name
-			e.prepare()
+			e.addDescribedByLink()
 			if e.methodRefused() {
 				return
 			}
@@ -194,16 +182,15 @@ func (s *apiServer) handler() http.Handler {
 	})
 }
 
-// methodRefused answers a method other than GET and HEAD, the probe
-// paths included: 204 with Allow for OPTIONS, and 405 with Allow and
-// a problem document for the rest.
+// methodRefused writes the response for any method other than GET and
+// HEAD, and returns true when it did.
 func (e *apiExchange) methodRefused() bool {
 	switch e.request.Method {
 	case http.MethodGet, http.MethodHead:
 		return false
 	case http.MethodOptions:
 		e.writer.Header().Set("Allow", apiAllowedMethods)
-		e.answer(http.StatusNoContent)
+		e.writeStatus(http.StatusNoContent)
 		return true
 	default:
 		e.writer.Header().Set("Allow", apiAllowedMethods)
@@ -213,28 +200,22 @@ func (e *apiExchange) methodRefused() bool {
 	}
 }
 
-// prepare adds the describedby link every Player route carries. Vary:
-// Accept is set on every response, extension routes included, because
-// RFC 9110 section 12.5.5 gives the field a second purpose: it tells
-// a cache which request fields the server reads, whether or not they
-// changed the answer.
-func (e *apiExchange) prepare() {
+// addDescribedByLink links a Player route to the Player's object in the
+// Kubernetes API.
+func (e *apiExchange) addDescribedByLink() {
 	if e.name == "" {
 		return
 	}
 	addLink(e.writer.Header(), describedByTarget(e.namespace, e.name), relDescribedBy, "")
 }
 
-// instance is the request path plus # plus the request id. The
-// problem document carries it, and the log line carries the id, so a
-// client and an operator name the same request.
+// instance is the problem document's instance field. The log line has
+// the same request id, so a client's error report can be matched to
+// the operator's log.
 func (e *apiExchange) instance() string {
 	return e.request.URL.Path + "#" + e.id
 }
 
-// aspectPath builds a route of this Player, with or without an
-// extension. Every Location, Link, and Content-Location goes through
-// it, so the path is spelt one way.
 func (e *apiExchange) aspectPath(aspect, extension string) string {
 	path := apiBasePath + "/namespaces/" + e.namespace + "/players/" + e.name + "/" + aspect
 	if extension == "" {
@@ -243,49 +224,40 @@ func (e *apiExchange) aspectPath(aspect, extension string) string {
 	return path + "." + extension
 }
 
-// answer writes the status and records it with the instant the
-// headers went out, the two facts the log line and the request
-// histogram read.
-func (e *apiExchange) answer(status int) {
+// writeStatus writes the status line and records the status and its time
+// for the log line and the request histogram.
+func (e *apiExchange) writeStatus(status int) {
 	e.status = status
 	e.headerAt = e.server.clock()
 	e.writer.WriteHeader(status)
 }
 
-// answerStreaming is answer for a route whose body follows later. It
-// pushes the headers to the client at once, because net/http holds a
-// written status until the first bytes of the body fill its buffer,
-// and a composition's first byte waits on the muxer's first fragment.
-// Without the flush a caller reads the status seconds after this API
-// decided it, and a client that wants to know a capture began has
-// nothing to read. A redirect and a document need none of this: each
-// writes its whole body before it returns.
-//
-// A writer that cannot flush is not a failure. The caller then reads
-// the status with the first byte, which is what it read before.
-func (e *apiExchange) answerStreaming(status int) {
-	e.answer(status)
+// writeStreamingStatus writes the status line and flushes it at once.
+// net/http otherwise holds the headers until the body fills its buffer,
+// and a composed capture writes no body until the muxer's first
+// fragment, so the client could not tell that the capture had started.
+// When the ResponseWriter cannot flush, the status reaches the client
+// with the first body bytes.
+func (e *apiExchange) writeStreamingStatus(status int) {
+	e.writeStatus(status)
 	_ = http.NewResponseController(e.writer).Flush()
 }
 
 func (e *apiExchange) fail(kind string, status int, title, detail string) {
-	e.answerProblem(newProblem(kind, status, title, detail, e.instance()))
+	e.writeProblemDocument(newProblem(kind, status, title, detail, e.instance()))
 }
 
-func (e *apiExchange) answerProblem(document problemDocument) {
+func (e *apiExchange) writeProblemDocument(document problemDocument) {
 	e.status = document.Status
 	e.headerAt = e.server.clock()
 	writeProblem(e.writer, e.head, document)
 }
 
-// authenticate names the caller the way the API server names one: a
-// client certificate this listener verified, and otherwise the token.
-// Either one is read before anything else, so an unauthenticated
-// request costs no read and is told nothing.
-//
-// The two refusals follow RFC 6750 section 3: no token gets the realm
-// alone, and a token the review refused gets error="invalid_token"
-// with the review's own words in error_description.
+// authenticate identifies the caller the way the Kubernetes API server
+// does: by a client certificate that this listener verified, or else by
+// a bearer token that a TokenReview accepts. The 401 answers follow
+// RFC 6750 section 3, and a rejected token's error_description is the
+// TokenReview's message.
 func (e *apiExchange) authenticate() (captureSubject, bool) {
 	if subject, named := certificateCaller(e.request.TLS); named {
 		e.subject = subject.User
@@ -302,8 +274,8 @@ func (e *apiExchange) authenticate() (captureSubject, bool) {
 	if errors.As(err, &refused) {
 		e.writer.Header().Set("WWW-Authenticate",
 			`Bearer realm="`+apiRealm+`", error="invalid_token", error_description="`+
-				quotedWords(refused.Words)+`"`)
-		e.fail(aboutBlank, http.StatusUnauthorized, "", refused.Words)
+				escapeQuotedString(refused.Message)+`"`)
+		e.fail(aboutBlank, http.StatusUnauthorized, "", refused.Message)
 		return captureSubject{}, false
 	}
 	if err != nil {
@@ -314,10 +286,11 @@ func (e *apiExchange) authenticate() (captureSubject, bool) {
 	return subject, true
 }
 
-// authorize runs the two reviews in order and answers whether the
-// handler may go on. It runs before the Player is read, so a 403
-// never says whether the name exists. A denial gets
-// error="insufficient_scope" with the failed check in scope.
+// authorize authenticates the caller and checks with a
+// SubjectAccessReview that the caller may get the subresource. It
+// returns false when it has written an error response. Handlers call it
+// before they read the Player, so a 403 does not reveal whether the
+// Player exists.
 func (e *apiExchange) authorize(subresource string) bool {
 	subject, ok := e.authenticate()
 	if !ok {
@@ -335,10 +308,9 @@ func (e *apiExchange) authorize(subresource string) bool {
 		}
 		e.writer.Header().Set("WWW-Authenticate",
 			`Bearer realm="`+apiRealm+`", error="insufficient_scope", scope="`+scope+`"`)
-		// The detail names the grant the caller lacks and the object it
-		// lacks it on, because a SubjectAccessReview carries no words
-		// of its own to relay and a caller needs to know what to ask
-		// an owner for.
+		// A SubjectAccessReview returns no message to pass on, so the
+		// detail gives the missing permission and the object, which the
+		// caller needs to ask for access.
 		e.fail(aboutBlank, http.StatusForbidden, "",
 			"not allowed to get "+scope+" on "+e.namespace+"/"+e.name)
 		return false
@@ -346,19 +318,18 @@ func (e *apiExchange) authorize(subresource string) bool {
 	return true
 }
 
-// unavailable answers an API server that will not answer a review or
-// a read. It is a 503 with Retry-After and not a 500, because the
-// fault is not in this API and a retry after the API server returns
-// clears it.
+// unavailable responds when a review or a read against the Kubernetes
+// API server failed. It is a 503 with Retry-After, not a 500, because
+// the fault is not in this API and a retry can succeed once the API
+// server is back.
 func (e *apiExchange) unavailable(detail string) {
 	e.writer.Header().Set("Retry-After", retryAfterSeconds)
 	e.fail(aboutBlank, http.StatusServiceUnavailable, "", detail)
 }
 
-// bearerToken reads the token out of an Authorization field in the
-// shape RFC 6750 fixes, the scheme Bearer then the token. The scheme
-// is matched without regard to case, because RFC 9110 section 11.1
-// makes authentication scheme names case-insensitive.
+// bearerToken returns the token of an Authorization header of the form
+// "Bearer <token>", or "". RFC 9110 section 11.1 makes the scheme name
+// case-insensitive.
 func bearerToken(authorization string) string {
 	const scheme = "bearer "
 	if len(authorization) < len(scheme) || !strings.EqualFold(authorization[:len(scheme)], scheme) {
@@ -367,16 +338,15 @@ func bearerToken(authorization string) string {
 	return strings.TrimSpace(authorization[len(scheme):])
 }
 
-// quotedWords escapes the review's words for a quoted-string: a
-// backslash and a quotation mark are escaped, and a line break
-// becomes a space, so the words cannot end the field or the header.
-func quotedWords(words string) string {
+// escapeQuotedString makes a message safe inside an HTTP quoted-string,
+// so it cannot end the quoted value or inject a header.
+func escapeQuotedString(words string) string {
 	replacer := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\r", " ", "\n", " ")
 	return replacer.Replace(words)
 }
 
-// player reads the Player the path names. A Player that does not
-// exist is a 404, and an API server that will not answer is a 503.
+// player reads the Player in the path. A missing Player is a 404, and
+// any other error is a 503.
 func (e *apiExchange) player() (*Player, bool) {
 	player, err := GetPlayer(e.server.client, e.namespace, e.name)
 	if errors.Is(err, apiclient.ErrNotFound) {

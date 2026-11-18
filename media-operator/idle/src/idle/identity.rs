@@ -1,27 +1,26 @@
-//! The identity block, the bottom-left element of the idle screen. It names
-//! the unit and lists its parts, so a person reads what the unit is and what
-//! it plays through while no film runs.
+//! The identity block in the bottom-left corner of the idle screen. It
+//! shows the unit's name above a list of its parts (screens, speakers,
+//! controllers), so a person can see what the unit plays through while
+//! nothing plays.
 //!
-//! Each part draws at its own brightness. A part with live state, a controller
-//! that connects and disconnects, draws dim while it is away and eases back to
-//! full when it returns. A part with no live state, a wired screen or its
-//! built-in speakers, draws at full brightness always, because a part that
-//! cannot be absent must not read as present-for-now.
+//! A part that reports whether it is connected, such as a controller,
+//! draws dim while it is disconnected and eases back to full brightness
+//! when it reconnects. A part that does not report it, such as a wired
+//! screen, always draws at full brightness.
 //!
-//! A part that reports a battery level draws it as a small bar in the
-//! left margin, on the part's own line. The bar carries no number and no
-//! charging state. Every bar ends on one column, left of the focus
-//! marker's place, so the names keep their flush-left column and a person
-//! reads the charges of two controllers against each other.
+//! A part that reports a battery level also draws a small bar in the
+//! left margin, with no number. Every bar ends at the same column, so
+//! the charge of two controllers can be compared at a glance.
 //!
-//! The block also shows focus. The status marks at most one part focused, the
-//! controller whose presses drive this unit, and that line takes a small
-//! hexagon in the left margin. The seed carries no focus, so no marker draws
-//! before the first status.
+//! The unit's status message marks at most one part as focused: the
+//! controller whose presses drive this unit. That line gets a small
+//! hexagon in the left margin. Before the first status arrives, the
+//! unit has only the names from the environment and no focus, so no
+//! marker draws.
 //!
-//! Every brightness here is a function of the clock and of the seconds in
-//! `Part`, so a captured frame is reproducible and a dropped frame is
-//! harmless.
+//! Every color is computed from the clock and the timestamps in `Part`,
+//! so a captured frame is reproducible and a skipped frame changes
+//! nothing.
 
 use iced_widget::canvas::Path;
 use iced_winit::core::{Color, Point, Rectangle};
@@ -33,93 +32,75 @@ use crate::unit::{Part, Unit};
 /// The left edge every line of the block is flush with.
 const LEFT: f32 = look::MARGIN_X;
 
-/// The header reads one step larger than the parts, so the unit's name leads
-/// the list.
+/// The unit's name is one size larger than the parts, so it reads as the
+/// title of the list.
 const HEADER_SIZE: f32 = look::LABEL;
 
-/// The line box a part's name draws in, in canvas pixels. It is four ASS units
-/// under the shared small size, so the parts read a touch lighter without
-/// changing that size for every other element.
-///
-/// That one number does two jobs, and this block keeps them apart.
-/// `ITEM_BOX` is the layout measure, and every step and offset below is a
-/// fraction of it. `ITEM_SIZE` is the type size the same number states.
+/// The line box height of a part's name, in canvas pixels. It is 4 less
+/// than `look::SMALL_BOX`, so the parts read slightly lighter than other
+/// small text. Most distances below are fractions of this height.
 const ITEM_BOX: f32 = look::SMALL_BOX - 4.0;
 
-/// The size a part's name draws at, which is `ITEM_BOX` through the face
-/// metric.
 const ITEM_SIZE: f32 = look::type_size(ITEM_BOX);
 
-/// The drop from one part's line to the next: 1.1 line boxes, the leading of
-/// its list.
 const ITEM_STEP: f32 = 1.1 * ITEM_BOX;
 
-/// The drop from the header to the first part, 1.3 line boxes. The gap is wider
-/// than `ITEM_STEP`, so the name reads as the title of the list under it.
+/// The distance from the header to the first part. It is wider than
+/// `ITEM_STEP`, so the name reads as the title of the list.
 const HEADER_STEP: f32 = 1.3 * ITEM_BOX;
 
-/// The focus marker's radius, from its center to a vertex. It is a fifth of a
-/// line box, so the marker scales with the line and stands 12 canvas pixels
-/// tall beside a part's name.
+/// The focus marker's radius, from its center to a vertex.
 const MARKER_R: f32 = ITEM_BOX / 5.0;
 
-/// The distance from the marker's center to `LEFT`. The marker draws inside
-/// the margin, so the names keep one flush-left column with or without a
-/// marker.
+/// The distance from the marker's center to `LEFT`. The marker draws in
+/// the margin, so the names stay flush left with or without a marker.
 const MARKER_GAP: f32 = 18.0;
 
-/// The lift from the line's anchor, the bottom of the line box, to the middle
-/// of the lowercase letters, where the marker's center draws. It is 0.42 of a
-/// line box.
+/// How far above the bottom of the line box the marker's center draws,
+/// which puts it at the middle of the lowercase letters.
 const MARKER_RISE: f32 = 0.42 * ITEM_BOX;
 
-/// The gap between the bar's right end and the marker's place. The bar
-/// draws left of every marker, drawn or not, so the two never touch and
-/// the bars of two parts end on one column whichever of them holds the
-/// focus.
+/// The space between a bar's right end and the marker's left edge. Every
+/// bar keeps it, with or without a marker, so all bars end on one column.
 const BAR_GAP: f32 = 12.0;
 
-/// The column every bar ends on, which is the marker's place less the
-/// gap.
 const BAR_RIGHT: f32 = LEFT - MARKER_GAP - MARKER_R - BAR_GAP;
 
-/// The bar is two characters long and an eighth of a line box tall. It
-/// reads as a measure beside the name and not as a second line of the
-/// list.
+/// The bar is two characters long and an eighth of a line box tall, so it
+/// reads as a measure beside the name and not as a second line.
 const BAR_LENGTH: f32 = 2.0 * ITEM_SIZE;
 const BAR_HEIGHT: f32 = ITEM_BOX / 8.0;
 
-/// Half the height rounds the ends to semicircles, which is the widest
-/// radius `look::rounded` holds for a shape this thin.
+/// Half the height, which rounds the ends to semicircles.
 const BAR_RADIUS: f32 = BAR_HEIGHT / 2.0;
 
-/// The charge the bar fills at, the top of the range a `Peripheral`
-/// reports.
+/// The battery level, in percent, that fills the bar.
 const FULL_CHARGE: f32 = 100.0;
 
-/// The time one part takes to move between dim and full.
+/// How long a part takes to ease between dim and full brightness.
 const DIM_SECONDS: f64 = 0.4;
 
-/// A beat rises in this time and falls in `BEAT_FALL_SECONDS`. The rise is the
-/// shorter of the two, so a controller that returns reads as one bright beat
-/// and not as a blink.
+/// A beat is a short white pulse: it rises over `BEAT_RISE_SECONDS` and
+/// falls over `BEAT_FALL_SECONDS`. The rise is shorter, so a controller
+/// that reconnects shows one bright pulse and not a blink.
 const BEAT_RISE_SECONDS: f64 = 0.12;
 const BEAT_FALL_SECONDS: f64 = 0.5;
 
-/// The marker's resting opacity on a lit line, one step under its own name.
+/// The marker's opacity at rest on a line at full brightness.
 const MARKER_REST: f32 = look::DIM;
 
-/// The marker's resting opacity on a dim line, which is `look::DIM` of
-/// `look::DIM`. The marker keeps the same fraction of a dim line that it keeps
-/// of a lit one, so it never reads brighter than the part it marks. The value
-/// is the ASS alpha byte 0xE1.
+/// The marker's opacity at rest on a dim line. It is the same fraction
+/// of the dim name as `MARKER_REST` is of the full name, so the marker
+/// never draws brighter than the name it marks. The value matches the
+/// ASS alpha byte 0xE1.
 const MARKER_DIM: f32 = look::DIM * look::DIM;
 
-/// Draw the element into the frame, in canvas units.
+/// Draws the block into `frame`, in canvas units. The last part is on
+/// the bottom margin and the rest stack upward from it.
 ///
-/// The block draws nothing while nothing names the unit, so a client that has
-/// no seed and no status shows the clock alone. The last part stands on the
-/// bottom margin, and the block builds upward from there.
+/// It draws nothing while the unit has no name, so a client that has
+/// neither a name from the environment nor a status shows only the
+/// clock.
 pub fn draw(frame: &mut Frame, layout: &Layout, unit: &Unit, at: f64, light: f32) {
     if unit.name.is_empty() {
         return;
@@ -138,9 +119,8 @@ pub fn draw(frame: &mut Frame, layout: &Layout, unit: &Unit, at: f64, light: f32
             look::under(drawn.color, light),
         );
         if let Some(bar) = bar(part, y, at) {
-            // The track reads as the room the charge has left, so it draws in the
-            // line's own colour at the track opacity rather than in the volume
-            // row's darker green.
+            // The track takes the line's color, not the green of the
+            // volume row, so it reads as the empty part of this bar.
             frame.fill(
                 &look::rounded(bar.track, BAR_RADIUS),
                 look::under(bar.color, look::TRACK_OPACITY * light),
@@ -171,46 +151,40 @@ pub fn draw(frame: &mut Frame, layout: &Layout, unit: &Unit, at: f64, light: f32
     );
 }
 
-/// One part's line at one moment: the color its name draws in, and its marker
-/// when the marker draws.
+/// How one part's line draws at one moment.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Line {
     color: Color,
     marker: Option<Marker>,
 }
 
-/// The focus marker of one line.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Marker {
     center: Point,
     color: Color,
 }
 
-/// One part's line, from the part and the clock alone.
-///
-/// The marker draws for the focused part, and for a part mid-beat whose status
-/// has not landed yet. A focus moment reaches the client before the status that
-/// marks the part focused, and the beat shows either way.
+/// The marker draws for the focused part, and also for a part whose
+/// focus beat is running. The client can receive the focus event before
+/// the status that marks the part focused, and the beat shows either way.
 fn line(part: &Part, y: f32, at: f64) -> Line {
     let level = brightness(part, at);
     let flash = flash(part, at);
     let focus = focus(part, at);
 
     Line {
-        color: look::faded(lit(flash), name_opacity(level)),
+        color: look::faded(flash_color(flash), name_opacity(level)),
         marker: (part.focused || focus > 0.0).then(|| Marker {
             center: Point::new(LEFT - MARKER_GAP, y - MARKER_RISE),
-            // The marker draws in the color its name draws in, so a controller
-            // that returns flashes both.
-            color: look::faded(lit(flash.max(focus)), marker_opacity(level, focus)),
+            // A controller that reconnects flashes its marker with its
+            // name.
+            color: look::faded(flash_color(flash.max(focus)), marker_opacity(level, focus)),
         }),
     }
 }
 
-/// The charge bar of one line: the track that carries the whole length,
-/// the fill the charge covers, and the colour both draw in. Every part
-/// that reports a charge draws one, and a part that reports none draws
-/// nothing.
+/// The battery bar of one line. The track spans 0 to 100 percent and the
+/// fill spans the charge.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Bar {
     track: Rectangle,
@@ -218,9 +192,8 @@ struct Bar {
     color: Color,
 }
 
-/// One part's charge bar, from the part and the clock alone. It takes the
-/// colour of the line, so the bar of a controller that is away dims with
-/// its name and the bar of one that returns flashes with it.
+/// The bar takes the color of the line, so it dims and flashes with the
+/// name. A part that reports no battery level has no bar.
 fn bar(part: &Part, y: f32, at: f64) -> Option<Bar> {
     let level = part.battery?;
     let track = Rectangle {
@@ -240,18 +213,15 @@ fn bar(part: &Part, y: f32, at: f64) -> Option<Bar> {
     })
 }
 
-/// How much of the bar one charge fills, in canvas pixels. A reading
-/// outside 0 to 100 fills to one end and no further.
+/// The width of the fill, in canvas pixels. A level outside 0 to 100 is
+/// clamped to the nearest end of the bar.
 fn filled(level: i64) -> f32 {
     BAR_LENGTH * (level as f32 / FULL_CHARGE).clamp(0.0, 1.0)
 }
 
-/// One run of text, anchored at its bottom left.
-///
-/// ASS `\an1` anchors a run at the bottom left, so a line's position is its own
-/// bottom and the stack builds from the bottom up. The line box is one type
-/// size tall, so the leadings above are the gaps between the anchors and
-/// nothing more.
+/// Draws one line of text with its bottom-left corner at `(LEFT, y)`, so
+/// a line's `y` is its bottom edge and the list stacks upward from the
+/// bottom margin.
 fn text(frame: &mut Frame, y: f32, content: &str, size: f32, color: Color) {
     frame.fill_text(look::line(
         content.to_owned(),
@@ -262,7 +232,6 @@ fn text(frame: &mut Frame, y: f32, content: &str, size: f32, color: Color) {
     ))
 }
 
-/// One filled hexagon about `center`, with the vertices `vertices` gives.
 fn hexagon(frame: &mut Frame, center: Point, r: f32, color: Color) {
     let points = vertices(center, r);
     let path = Path::new(|builder| {
@@ -276,14 +245,14 @@ fn hexagon(frame: &mut Frame, center: Point, r: f32, color: Color) {
     frame.fill(&path, color);
 }
 
-/// The y one part's line hangs from. `above` counts up the list from the last
-/// part, which is the part on the bottom margin.
+/// The y of one part's line. `above` counts lines up from the last part,
+/// which is on the bottom margin.
 fn item_y(bottom: f32, above: usize) -> f32 {
     bottom - above as f32 * ITEM_STEP
 }
 
-/// The y the unit's name hangs from, over `parts` lines of parts. A unit with
-/// no parts is a name on the bottom margin.
+/// The y of the unit's name above `parts` lines of parts. A unit with no
+/// parts has its name on the bottom margin.
 fn header_y(bottom: f32, parts: usize) -> f32 {
     let first = item_y(bottom, parts.saturating_sub(1));
     if parts == 0 {
@@ -293,16 +262,14 @@ fn header_y(bottom: f32, parts: usize) -> f32 {
     }
 }
 
-/// The six vertices of a pointy-top regular hexagon about `center`. `r` is the
-/// distance from the center to a vertex, and 0.8660254 is cos(30 degrees), the
-/// half-width of a pointy-top hexagon.
+/// The vertices of a regular pointy-top hexagon around `center`, where
+/// `r` is the distance from the center to a vertex. 0.8660254 is
+/// cos(30 degrees), the half-width in units of `r`.
 ///
-/// The marker is this formula, and not one of the fourteen hexagons that
-/// `liken_iced::mark::hexagons` reads out of `liken.svg`. Those fourteen are
-/// the same regular pointy-top shape, and each one draws with a stroke in its
-/// own fill that rounds its corners. The marker's corners are sharp, and its
-/// size comes from the line it marks, so the formula draws what the display
-/// draws.
+/// The marker does not reuse `liken_iced::mark::hexagons`, the hexagons
+/// of the `liken` mark. Those draw with a stroke that rounds their
+/// corners, and the marker has sharp corners and takes its size from the
+/// line it marks.
 fn vertices(center: Point, r: f32) -> [Point; 6] {
     let half = 0.866_025_4 * r;
     [
@@ -315,16 +282,15 @@ fn vertices(center: Point, r: f32) -> [Point; 6] {
     ]
 }
 
-/// The brightness one part draws at, from 0 at `look::DIM` to 1 at full.
+/// The brightness of one part, from 0 (drawn at `look::DIM`) to 1 (full).
 ///
-/// A part that reports no presence draws at full brightness always. A part that
-/// has been away since the first status rests at dim, because the client saw no
-/// moment to ease from.
+/// A part that does not report whether it is connected is always at 1. A
+/// part that has been disconnected since the first status is at 0, with
+/// no ease, because no disconnect time was recorded.
 ///
-/// A part that reports presence eases over `DIM_SECONDS` in both
-/// directions, from the level `Part::brightness_from` recorded at the
-/// moment it turned toward the end its presence names. `Unit` reads the
-/// level through this function, so the curve is stated once.
+/// When a part connects or disconnects, it eases over `DIM_SECONDS` from
+/// `Part::brightness_from`, its brightness at that moment. `Unit` records
+/// that value by calling this function, so the ease is defined only here.
 pub fn brightness(part: &Part, at: f64) -> f32 {
     match (part.connected, part.returned, part.left) {
         (None, _, _) => 1.0,
@@ -341,27 +307,22 @@ pub fn brightness(part: &Part, at: f64) -> f32 {
     }
 }
 
-/// The white flash on the name of a controller that returned: the beat
-/// `returned` and `flash_from` state.
+/// The beat on the name of a controller that reconnected.
 pub fn flash(part: &Part, at: f64) -> f32 {
     beat(part.returned, part.flash_from, at)
 }
 
-/// The beat on the marker of a controller that took focus: the beat
-/// `marked` and `focus_from` state.
+/// The beat on the marker of a controller that took focus.
 pub fn focus(part: &Part, at: f64) -> f32 {
     beat(part.marked, part.focus_from, at)
 }
 
-/// One white beat, 0 at rest and 1 at its peak. It rises from `moment` over
-/// `BEAT_RISE_SECONDS` and falls over `BEAT_FALL_SECONDS`. Two beats run on one
-/// part, the flash on the name of a controller that returned and the beat on
-/// the marker of a controller that took focus, and both read their moment from
-/// `Part`.
+/// A beat's level at `at`, 0 at rest and 1 at its peak, for a beat that
+/// started at `moment`.
 ///
-/// `from` is the level the beat stood at when the moment landed, so a
-/// beat that lands inside another climbs from there instead of dropping
-/// to rest first.
+/// `from` is the level of the previous beat at `moment`. A beat that
+/// starts during an earlier one climbs from that level instead of
+/// dropping to 0 first.
 fn beat(moment: Option<f64>, from: f32, at: f64) -> f32 {
     let Some(moment) = moment else {
         return 0.0;
@@ -375,73 +336,66 @@ fn beat(moment: Option<f64>, from: f32, at: f64) -> f32 {
     }
 }
 
-/// How far a move of `over` seconds has run at `elapsed` seconds, from 0 to 1.
-/// The move is linear, which is the step the display takes on its timer. A
-/// moment the clock has not reached yet gives 0.
+/// How far a linear animation of `over` seconds has run after `elapsed`
+/// seconds, from 0 to 1. A negative `elapsed`, for a start time that the
+/// clock has not reached, gives 0.
 fn progress(elapsed: f64, over: f64) -> f32 {
     (elapsed / over).clamp(0.0, 1.0) as f32
 }
 
-/// The opacity one part's name draws at: opaque at brightness 1, and
-/// `look::DIM` at 0.
 fn name_opacity(brightness: f32) -> f32 {
     between(look::DIM, 1.0, brightness)
 }
 
-/// The opacity one part's marker draws at. At rest it runs with the line's own
-/// brightness, from `MARKER_DIM` on a disconnected line to `MARKER_REST` on a
-/// lit one, so the marker reports the presence the name reports. The beat then
-/// lifts it to opaque, and that lift is what a person sees when focus arrives.
+/// At rest the marker dims with its line, from `MARKER_DIM` to
+/// `MARKER_REST`. A focus beat raises it to opaque.
 fn marker_opacity(brightness: f32, beat: f32) -> f32 {
     let rest = between(MARKER_DIM, MARKER_REST, brightness);
 
     between(rest, 1.0, beat)
 }
 
-/// One value between `at_zero` and `at_one`, in step with `t` from 0 to 1.
+/// Linear interpolation from `at_zero` (at `t` = 0) to `at_one` (at `t` = 1).
 fn between(at_zero: f32, at_one: f32, t: f32) -> f32 {
     at_zero + (at_one - at_zero) * t
 }
 
-/// The whole of one beat, the rise and the fall together.
 const BEAT_SECONDS: f64 = BEAT_RISE_SECONDS + BEAT_FALL_SECONDS;
 
-/// The second the block next changes, for [`super::Idle::next_frame`].
+/// The time the block next needs a frame, for [`super::Idle::next_frame`].
 ///
-/// Every move here changes a colour on every frame it covers, so the block
-/// answers with `at` and the harness draws now. A block whose parts have all
-/// settled states nothing, which is every second of an idle screen except the
-/// few after a controller arrives, leaves, or takes focus.
+/// An animation changes a color on every frame, so while any part is
+/// animating this returns `at` and the harness draws again at once. When
+/// every part has settled it returns `None`.
 pub fn next_frame(unit: &Unit, at: f64) -> Option<f64> {
-    unit.parts.iter().any(|part| moving(part, at)).then_some(at)
+    unit.parts
+        .iter()
+        .any(|part| is_moving(part, at))
+        .then_some(at)
 }
 
-/// Whether any of one part's three moves is still running at `at`: the change
-/// between dim and full, the flash on a name that returned, and the beat on a
-/// marker that took focus.
-///
-/// The presence decides which moment the brightness eases from, and this match
-/// reads the same one [`brightness`] reads. A part that reports no presence
-/// holds one brightness, and so does a part that has no moment to ease from.
-fn moving(part: &Part, at: f64) -> bool {
+/// Whether the part's ease, its name's flash, or its marker's focus beat
+/// is running at `at`. The ease starts at `returned` for a connected part
+/// and at `left` for a disconnected one, as in [`brightness`].
+fn is_moving(part: &Part, at: f64) -> bool {
     let dimming = match part.connected {
-        Some(true) => running(part.returned, DIM_SECONDS, at),
-        Some(false) => running(part.left, DIM_SECONDS, at),
+        Some(true) => is_running(part.returned, DIM_SECONDS, at),
+        Some(false) => is_running(part.left, DIM_SECONDS, at),
         None => false,
     };
 
-    dimming || running(part.returned, BEAT_SECONDS, at) || running(part.marked, BEAT_SECONDS, at)
+    dimming
+        || is_running(part.returned, BEAT_SECONDS, at)
+        || is_running(part.marked, BEAT_SECONDS, at)
 }
 
-/// Whether a move of `over` seconds from `moment` is still running at `at`. A
-/// part that read no such moment never moves on it.
-fn running(moment: Option<f64>, over: f64, at: f64) -> bool {
+fn is_running(moment: Option<f64>, over: f64, at: f64) -> bool {
     moment.is_some_and(|moment| at < moment + over)
 }
 
-/// The color one part draws in. At beat 0 it is `look::text()`, and at 1 every
-/// channel reaches white, the bright beat of a controller that returned.
-fn lit(beat: f32) -> Color {
+/// The color of a part's name during a flash: `look::text()` at 0, and
+/// white at 1.
+fn flash_color(beat: f32) -> Color {
     let text = look::text();
     let toward_white = |channel: f32| between(channel, 1.0, beat);
 
@@ -466,17 +420,14 @@ mod tests {
         }
     }
 
-    /// Two readings of one measure, where `measured` lands `tolerance` away
-    /// from `expected`.
     #[track_caller]
     fn assert_close(measured: f32, expected: f32, tolerance: f32) {
         assert!(
             (measured - expected).abs() < tolerance,
-            "{measured} is not {expected}"
+            "the value is {measured}, want {expected} within {tolerance}"
         );
     }
 
-    /// A part that reports `level`, for the bar the charge draws.
     fn charged(level: i64) -> Part {
         Part {
             battery: Some(level),
@@ -518,7 +469,7 @@ mod tests {
     }
 
     #[test]
-    fn the_track_carries_the_whole_bar_and_the_fill_starts_where_it_starts() {
+    fn the_track_spans_the_whole_bar_and_the_fill_starts_at_its_left_end() {
         let drawn = bar(&charged(50), 990.0, 10.0).expect("no bar");
 
         assert_eq!(drawn.track.width, BAR_LENGTH);
@@ -528,16 +479,23 @@ mod tests {
     }
 
     #[test]
-    fn every_bar_ends_on_one_column_clear_of_the_marker_and_inside_the_margin() {
+    fn every_bar_ends_on_one_column_left_of_the_marker_and_inside_the_screen() {
         let drawn = bar(&charged(50), 990.0, 10.0).expect("no bar");
         let right = drawn.track.x + drawn.track.width;
         // `vertices` puts the marker's left vertices this far left of its
-        // centre, and the centre stands `MARKER_GAP` inside `LEFT`.
+        // center, and the center is `MARKER_GAP` left of `LEFT`.
         let marker_left = LEFT - MARKER_GAP - 0.866_025_4 * MARKER_R;
 
         assert_eq!(right, LEFT - MARKER_GAP - MARKER_R - BAR_GAP);
-        assert!(right < marker_left, "{right} touches the marker");
-        assert!(drawn.track.x > 0.0, "{} is off the screen", drawn.track.x);
+        assert!(
+            right < marker_left,
+            "the bar ends at {right}, which touches the marker at {marker_left}"
+        );
+        assert!(
+            drawn.track.x > 0.0,
+            "the bar starts at {}, off the screen",
+            drawn.track.x
+        );
         assert_eq!(
             bar(&charged(100), 924.0, 10.0).expect("no bar").track.x,
             drawn.track.x
@@ -545,7 +503,7 @@ mod tests {
     }
 
     #[test]
-    fn the_bar_centres_on_the_rise_the_marker_takes() {
+    fn the_bar_is_centered_at_the_height_of_the_marker() {
         let drawn = bar(&charged(50), 990.0, 10.0).expect("no bar");
 
         assert_close(
@@ -556,7 +514,7 @@ mod tests {
     }
 
     #[test]
-    fn the_bar_draws_in_the_colour_of_the_line_it_stands_on() {
+    fn the_bar_draws_in_the_color_of_its_line() {
         let away = Part {
             battery: Some(50),
             ..part(Some(false))
@@ -584,23 +542,23 @@ mod tests {
 
     #[test]
     fn the_markers_two_resting_opacities_are_the_ass_alphas() {
-        // The ASS alpha bytes 0xA8 and 0xE1 leave 87 and 30 of the 255 steps
-        // of light. Half a step is under what a panel draws.
+        // The ASS alpha bytes 0xA8 and 0xE1 leave 87 and 30 of 255 steps
+        // of light. Half a step is below what a panel can show.
         assert_close(MARKER_REST, 87.0 / 255.0, 0.5 / 255.0);
         assert_close(MARKER_DIM, 30.0 / 255.0, 0.5 / 255.0);
     }
 
     #[test]
     fn the_block_measures_in_line_boxes_and_draws_at_the_size_that_box_states() {
-        // The block lists its parts in a 30 pixel line box, which is 22.6
-        // canvas pixels of type, and it places the marker a fifth of that box
-        // wide and 0.42 of it over the line.
+        // The line box is 30 pixels, which is a 22.6 pixel font size.
+        // The marker radius is a fifth of the box, and its center is 0.42
+        // of the box above the line's anchor.
         assert_close(ITEM_BOX, 30.0, 0.1);
         assert_close(ITEM_SIZE, 22.6, 0.1);
         assert_close(MARKER_R, 6.0, 0.1);
         assert_close(MARKER_RISE, 12.6, 0.1);
-        // The charge bar is two of those 22.6 pixel characters long and an
-        // eighth of the line box tall.
+        // The bar is two characters (2 x 22.6 pixels) long and an eighth
+        // of the line box tall.
         assert_close(BAR_LENGTH, 45.2, 0.2);
         assert_close(BAR_HEIGHT, 3.75, 0.01);
     }
@@ -626,7 +584,7 @@ mod tests {
     }
 
     #[test]
-    fn a_part_that_went_away_eases_down_over_400_ms() {
+    fn a_part_that_disconnected_eases_down_over_400_ms() {
         let part = Part {
             left: Some(10.0),
             brightness_from: 1.0,
@@ -640,7 +598,7 @@ mod tests {
     }
 
     #[test]
-    fn a_part_that_has_been_away_since_the_first_status_rests_at_dim() {
+    fn a_part_disconnected_since_the_first_status_rests_at_dim() {
         assert_eq!(brightness(&part(Some(false)), 12.0), 0.0);
     }
 
@@ -658,9 +616,9 @@ mod tests {
     }
 
     #[test]
-    fn a_part_that_came_back_mid_fade_eases_up_from_the_level_it_stood_at() {
-        // The part left at 10.0 and came back at 10.2, halfway down the
-        // 400 ms fade, so the ease up leaves from half brightness.
+    fn a_part_that_returned_mid_fade_eases_up_from_the_level_it_was_at() {
+        // The part left at 10.0 and returned at 10.2, halfway through the
+        // 400 ms fade down, so the ease up starts from half brightness.
         let part = Part {
             returned: Some(10.2),
             left: Some(10.0),
@@ -674,7 +632,7 @@ mod tests {
     }
 
     #[test]
-    fn a_part_that_went_away_mid_ease_fades_down_from_the_level_it_stood_at() {
+    fn a_part_that_disconnected_mid_ease_fades_down_from_the_level_it_was_at() {
         let part = Part {
             returned: Some(10.0),
             left: Some(10.2),
@@ -700,16 +658,16 @@ mod tests {
     }
 
     #[test]
-    fn a_beat_that_has_not_landed_is_at_rest() {
+    fn a_beat_that_has_not_started_is_at_rest() {
         assert_eq!(beat(None, 0.0, 10.0), 0.0);
         assert_eq!(beat(Some(12.0), 0.0, 10.0), 0.0);
     }
 
     #[test]
-    fn a_second_focus_beat_inside_the_first_climbs_from_the_level_it_held() {
-        // The first beat stood at half on its way down when the second
-        // focus moment landed at 10.37, so the marker climbs from 0.5 to
-        // 1 over the 120 ms rise rather than dropping to rest first.
+    fn a_second_focus_beat_inside_the_first_climbs_from_the_level_it_was_at() {
+        // The first beat was at 0.5 on its way down when the second
+        // focus moment arrived at 10.37, so the marker climbs from 0.5 to
+        // 1 over the 120 ms rise and does not drop to 0 first.
         let part = Part {
             marked: Some(10.37),
             focus_from: 0.5,
@@ -722,7 +680,7 @@ mod tests {
     }
 
     #[test]
-    fn a_second_flash_inside_the_first_climbs_from_the_level_it_held() {
+    fn a_second_flash_inside_the_first_climbs_from_the_level_it_was_at() {
         let part = Part {
             returned: Some(10.37),
             flash_from: 0.5,
@@ -735,10 +693,10 @@ mod tests {
 
     #[test]
     fn a_flash_reaches_white_and_settles_on_the_text_color() {
-        assert_eq!(lit(0.0), look::text());
-        assert_eq!(lit(1.0), Color::from_rgb(1.0, 1.0, 1.0));
+        assert_eq!(flash_color(0.0), look::text());
+        assert_eq!(flash_color(1.0), Color::from_rgb(1.0, 1.0, 1.0));
 
-        let half = lit(0.5);
+        let half = flash_color(0.5);
         assert!(half.r > look::text().r && half.r < 1.0);
     }
 
@@ -760,7 +718,7 @@ mod tests {
     }
 
     #[test]
-    fn a_part_the_status_marks_focused_takes_the_marker() {
+    fn a_part_the_status_marks_focused_draws_the_marker() {
         let part = Part {
             focused: true,
             ..part(Some(true))
@@ -772,7 +730,7 @@ mod tests {
     }
 
     #[test]
-    fn a_part_mid_beat_takes_the_marker_before_its_status_lands() {
+    fn a_part_mid_beat_draws_the_marker_before_its_status_arrives() {
         let part = Part {
             marked: Some(10.0),
             ..part(Some(true))
@@ -783,7 +741,7 @@ mod tests {
     }
 
     #[test]
-    fn a_part_with_no_focus_and_no_beat_takes_no_marker() {
+    fn a_part_with_no_focus_and_no_beat_draws_no_marker() {
         assert_eq!(line(&part(Some(true)), 990.0, 10.0).marker, None);
     }
 
@@ -802,33 +760,31 @@ mod tests {
 
     #[test]
     fn the_parts_stack_upward_from_the_bottom_margin() {
-        // One step is 1.1 of the 30 canvas pixels of a part's line box, and
-        // each step is 33.
+        // One step is 1.1 of the 30 pixel line box, which is 33.
         assert_close(item_y(990.0, 0), 990.0, 0.2);
         assert_close(item_y(990.0, 1), 957.0, 0.2);
         assert_close(item_y(990.0, 2), 924.0, 0.2);
     }
 
     #[test]
-    fn the_header_reads_a_wider_gap_over_the_first_part() {
-        // The header's step is 1.3 of the same line box, which is 39, six
-        // pixels wider than a step between two parts.
+    fn the_header_is_a_wider_step_above_the_first_part() {
+        // The header step is 1.3 of the line box, which is 39 pixels and
+        // 6 more than a step between two parts.
         assert_close(header_y(990.0, 3), 924.0 - 39.0, 0.2);
         assert_close(header_y(990.0, 1), 990.0 - 39.0, 0.2);
         assert_close(header_y(990.0, 0), 990.0, 0.2);
     }
 
-    /// A unit whose one part is `part`.
     fn unit(part: Part) -> Unit {
         Unit {
-            name: "The Den".into(),
+            name: "Unit A".into(),
             parts: vec![part],
             ..Unit::default()
         }
     }
 
     #[test]
-    fn a_part_that_went_away_asks_for_a_frame_for_400_ms() {
+    fn next_frame_is_now_for_400_ms_after_a_part_disconnects() {
         let unit = unit(Part {
             left: Some(10.0),
             ..part(Some(false))
@@ -839,9 +795,9 @@ mod tests {
     }
 
     #[test]
-    fn a_part_that_returned_asks_for_a_frame_for_the_whole_620_ms_beat() {
-        // The name eases up over 400 ms and the flash runs 120 ms up and 500
-        // down, so the beat outlasts the ease and sets the schedule.
+    fn next_frame_is_now_for_the_whole_620_ms_after_a_part_returns() {
+        // The name eases up over 400 ms and the flash takes 120 ms up and
+        // 500 ms down, so the flash outlasts the ease and sets the time.
         let unit = unit(Part {
             returned: Some(10.0),
             ..part(Some(true))
@@ -852,7 +808,7 @@ mod tests {
     }
 
     #[test]
-    fn a_marker_that_took_focus_asks_for_a_frame_while_it_beats() {
+    fn next_frame_is_now_while_a_focus_beat_runs() {
         let unit = unit(Part {
             focused: true,
             marked: Some(10.0),
@@ -864,7 +820,7 @@ mod tests {
     }
 
     #[test]
-    fn a_block_whose_parts_have_settled_asks_for_no_frame() {
+    fn next_frame_is_none_when_all_parts_have_settled() {
         assert_eq!(next_frame(&unit(part(None)), 600.0), None);
         assert_eq!(next_frame(&unit(part(Some(true))), 600.0), None);
         assert_eq!(next_frame(&unit(part(Some(false))), 600.0), None);
@@ -880,13 +836,17 @@ mod tests {
             let reach = ((point.x - center.x).powi(2) + (point.y - center.y).powi(2)).sqrt();
             assert!(
                 (reach - MARKER_R).abs() < 0.001,
-                "{reach} is not {MARKER_R}"
+                "a vertex is {reach} from the center, want {MARKER_R}"
             );
         }
 
         let width = points[1].x - points[5].x;
         let height = points[3].y - points[0].y;
-        assert!((height - 2.0 * MARKER_R).abs() < 0.001, "{height}");
+        assert!(
+            (height - 2.0 * MARKER_R).abs() < 0.001,
+            "the marker is {height} high, want {}",
+            2.0 * MARKER_R
+        );
         assert!((width / height - 0.866).abs() < 0.001);
     }
 }

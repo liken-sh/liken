@@ -1,9 +1,5 @@
 package main
 
-// These tests carry RFC 8288's field syntax and the link relations of
-// the plan's worked example, byte for byte: the two extension
-// relations, describedby, related with a type, and alternate.
-
 import (
 	"net/http"
 	"testing"
@@ -75,7 +71,7 @@ func TestLinkFieldsAreOneLineEach(t *testing.T) {
 	})
 }
 
-func TestServiceLinksRideOnEveryResponse(t *testing.T) {
+func TestServiceLinksAreTheTwoRFC8631Links(t *testing.T) {
 	header := http.Header{}
 
 	addServiceLinks(header)
@@ -86,7 +82,7 @@ func TestServiceLinksRideOnEveryResponse(t *testing.T) {
 	})
 }
 
-func TestDescribedByTargetNamesThePlayerAbsolutely(t *testing.T) {
+func TestDescribedByTargetIsAnAbsoluteURLOfThePlayer(t *testing.T) {
 	cases := []struct {
 		name      string
 		namespace string
@@ -94,16 +90,16 @@ func TestDescribedByTargetNamesThePlayerAbsolutely(t *testing.T) {
 		want      string
 	}{
 		{
-			name:      "the plan's example",
+			name:      "a Player in the media namespace",
 			namespace: "media",
 			player:    "studio",
 			want:      "https://kubernetes.default.svc/apis/media.liken.sh/v1alpha1/namespaces/media/players/studio",
 		},
 		{
-			name:      "another namespace",
-			namespace: "house",
-			player:    "living-room",
-			want:      "https://kubernetes.default.svc/apis/media.liken.sh/v1alpha1/namespaces/house/players/living-room",
+			name:      "another namespace and name",
+			namespace: "lab",
+			player:    "second",
+			want:      "https://kubernetes.default.svc/apis/media.liken.sh/v1alpha1/namespaces/lab/players/second",
 		},
 	}
 

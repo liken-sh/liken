@@ -12,9 +12,10 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
-// fakeAPI holds objects by path and answers the four verbs the agent
-// sends. A POST to a collection stores the object under its name. It
-// records each request that is not a GET, so a test can count writes.
+// fakeAPI stores objects by path and serves the GET, POST, PUT, and
+// DELETE requests that the agent sends. A POST stores the object at the
+// collection path plus its metadata.name. It records every request that
+// is not a GET, so a test can count writes.
 type fakeAPI struct {
 	mu      sync.Mutex
 	objects map[string][]byte
@@ -53,19 +54,17 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// put stores an object at a path, as JSON.
 func (f *fakeAPI) put(t *testing.T, path string, object any) {
 	t.Helper()
 	body, err := json.Marshal(object)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("encoding the object at %s: %v", path, err)
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.objects[path] = body
 }
 
-// get decodes the object at a path, and reports whether it exists.
 func get[T any](t *testing.T, f *fakeAPI, path string) (T, bool) {
 	t.Helper()
 	f.mu.Lock()
@@ -74,13 +73,13 @@ func get[T any](t *testing.T, f *fakeAPI, path string) (T, bool) {
 	body, ok := f.objects[path]
 	if ok {
 		if err := json.Unmarshal(body, &out); err != nil {
-			t.Fatal(err)
+			t.Fatalf("decoding the object at %s: %v", path, err)
 		}
 	}
 	return out, ok
 }
 
-// writesTo counts the writes whose method and path start with prefix.
+// writesTo counts the writes whose "METHOD path" starts with prefix.
 func (f *fakeAPI) writesTo(prefix string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -93,7 +92,6 @@ func (f *fakeAPI) writesTo(prefix string) int {
 	return count
 }
 
-// startAPI serves a fake API server and returns a client of it.
 func startAPI(t *testing.T) (*fakeAPI, *apiclient.Client) {
 	t.Helper()
 	api := &fakeAPI{objects: map[string][]byte{}}
@@ -101,9 +99,9 @@ func startAPI(t *testing.T) (*fakeAPI, *apiclient.Client) {
 	return api, apiclient.New(apiservertest.Host, server.Client(), "")
 }
 
-// startAPIAnswering serves an API server that answers every request
-// with one status code.
-func startAPIAnswering(t *testing.T, code int) (*apiservertest.Server, *apiclient.Client) {
+// startAPIFailing starts an API server that fails every request with
+// the status code.
+func startAPIFailing(t *testing.T, code int) (*apiservertest.Server, *apiclient.Client) {
 	t.Helper()
 	server := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"kind":"Status","message":"etcdserver: request timed out"}`, code)

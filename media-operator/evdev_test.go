@@ -50,7 +50,7 @@ func TestParseInputEvents(t *testing.T) {
 	}
 }
 
-func TestBitmapCarriesOneBitPerCode(t *testing.T) {
+func TestBitmapHasCode(t *testing.T) {
 	bitmap := bitmapOf(keyBitmapBytes, 0x130, 0x13b, 0x2ff)
 
 	cases := []struct {
@@ -73,10 +73,7 @@ func TestBitmapCarriesOneBitPerCode(t *testing.T) {
 	}
 }
 
-// The reader keeps any node that declares a key code or a hat axis,
-// because a Keymap may bind either and the reader holds no keymap to
-// narrow it. A node that declares neither is not a controller.
-func TestControllerBitmapsKeepTheNodeThatCarriesInput(t *testing.T) {
+func TestControllerBitmapsAcceptANodeWithAKeyCodeOrAHatAxis(t *testing.T) {
 	cases := []struct {
 		name string
 		keys []byte
@@ -129,7 +126,7 @@ func TestControllerBitmapsKeepTheNodeThatCarriesInput(t *testing.T) {
 
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
-			mustMatch(t, controllerBitmaps(each.keys, each.axes), each.want)
+			mustMatch(t, declaresKeyOrHat(each.keys, each.axes), each.want)
 		})
 	}
 }
@@ -152,9 +149,8 @@ func TestBitmapRequestNumbers(t *testing.T) {
 	}
 }
 
-// eventBytes writes events in the kernel's own record layout, 24
-// little-endian bytes each, which is what a read on an event node
-// returns.
+// eventBytes encodes events in the kernel's record layout, 24
+// little-endian bytes each, as a read on an event node returns them.
 func eventBytes(events ...inputEvent) []byte {
 	written := make([]byte, 0, len(events)*inputEventSize)
 	for _, event := range events {
@@ -169,8 +165,8 @@ func eventBytes(events ...inputEvent) []byte {
 	return written
 }
 
-// bitmapOf is one node's answer to EVIOCGBIT: a bit set for each
-// code the node reports.
+// bitmapOf returns a capability bitmap of the given length with a bit
+// set for each code, like the result of EVIOCGBIT.
 func bitmapOf(length int, codes ...uint16) []byte {
 	bitmap := make([]byte, length)
 	for _, code := range codes {
@@ -179,16 +175,11 @@ func bitmapOf(length int, codes ...uint16) []byte {
 	return bitmap
 }
 
-// The reader requests each node's name from the kernel, and the ioctl
-// number carries the buffer's length the way the bitmap requests do.
 func TestNameRequestNumber(t *testing.T) {
 	mustMatch(t, nameRequest(nodeNameBytes), uintptr(0x80804506))
 }
 
-// The kernel writes the name with a trailing NUL and reports the bytes
-// it wrote, so the string ends at the NUL and an empty answer is no
-// name.
-func TestTheNodeNameEndsAtTheKernelsNul(t *testing.T) {
+func TestNodeNameEndsAtTheFirstNul(t *testing.T) {
 	cases := []struct {
 		name    string
 		buffer  []byte
@@ -208,7 +199,7 @@ func TestTheNodeNameEndsAtTheKernelsNul(t *testing.T) {
 			want:    "Wireless Controller",
 		},
 		{
-			name:    "an answer of nothing",
+			name:    "nothing written",
 			buffer:  make([]byte, 16),
 			written: 0,
 			want:    "",
@@ -228,9 +219,7 @@ func TestTheNodeNameEndsAtTheKernelsNul(t *testing.T) {
 	}
 }
 
-// The declared codes are what the node's bitmaps state it can report,
-// read with no button pressed, in code order.
-func TestTheDeclaredCodesComeOffTheBitmaps(t *testing.T) {
+func TestDeclaredCodesAreTheSetBitsInCodeOrder(t *testing.T) {
 	mustMatchAll(t, declaredKeyCodes(bitmapOf(keyBitmapBytes, 0x131, 0x130, 0x2ff)),
 		[]uint16{0x130, 0x131, 0x2ff})
 	mustMatchAll(t, declaredKeyCodes(bitmapOf(keyBitmapBytes)), nil)
@@ -239,9 +228,7 @@ func TestTheDeclaredCodesComeOffTheBitmaps(t *testing.T) {
 	mustMatchAll(t, declaredHatAxes(bitmapOf(absBitmapBytes, 0x00, 0x01)), nil)
 }
 
-// One line per node carries the decision and the counts behind it, so
-// a controller that reaches nothing shows why.
-func TestTheVerdictLineCarriesTheDecisionAndItsCounts(t *testing.T) {
+func TestVerdictLineGivesTheDecisionAndTheCounts(t *testing.T) {
 	cases := []struct {
 		name string
 		node nodeVerdict
@@ -282,17 +269,13 @@ func TestTheVerdictLineCarriesTheDecisionAndItsCounts(t *testing.T) {
 	}
 }
 
-// The mask the reader sets on a node and the publishable gate must
-// agree code for code: an event the kernel still delivers and the
-// gate then drops is work the reader did for nothing.
+// The masks must pass exactly the events that publishable accepts.
 func TestTheEventMaskDeliversExactlyWhatThePodPublishes(t *testing.T) {
 	types := publishableTypes()
 	axes := publishableAxes()
 
 	t.Run("the event types", func(t *testing.T) {
 		for evType := range uint16(len(types) * 8) {
-			// A type passes the mask when any code of that type is
-			// publishable, and EV_KEY carries every key code.
 			want := evType == evKey || evType == evAbs
 			mustMatch(t, bitmapHasCode(types, evType), want)
 		}
@@ -306,9 +289,8 @@ func TestTheEventMaskDeliversExactlyWhatThePodPublishes(t *testing.T) {
 	})
 }
 
-// The kernel reads a mask's length in whole machine words and answers
-// EINVAL for any other length, so a bitmap that covers the codes is
-// not enough on its own.
+// The kernel returns EINVAL for a mask whose length is not a multiple
+// of sizeof(long).
 func TestTheMaskLengthsAreWholeMachineWords(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -325,7 +307,6 @@ func TestTheMaskLengthsAreWholeMachineWords(t *testing.T) {
 	}
 }
 
-// maskBytes rounds a count of codes up to the length the kernel takes.
 func TestMaskBytesRoundsUpToAWholeWord(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -351,10 +332,9 @@ func TestMaskRequestNumber(t *testing.T) {
 	mustMatch(t, maskRequest(), uintptr(0x40104593))
 }
 
-// A descriptor that is not an event node refuses the mask, and the
-// reader has to hear that rather than believe it narrowed a node it
-// did not.
-func TestTheMaskIsRefusedOnADescriptorThatIsNotANode(t *testing.T) {
+// The error must reach the reader, which logs that the node delivers
+// every event.
+func TestRestrictToPublishableFailsOnADescriptorThatIsNotAnEventNode(t *testing.T) {
 	file, err := os.CreateTemp(t.TempDir(), "node")
 	mustSucceed(t, err)
 	defer file.Close()

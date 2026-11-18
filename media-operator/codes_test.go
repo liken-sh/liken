@@ -1,9 +1,5 @@
 package main
 
-// These tests cover the codes desk, the boundary between the standing
-// pod's declared-codes document and the reconcile pass, and the gap
-// the pass reports.
-
 import (
 	"testing"
 	"testing/synctest"
@@ -14,8 +10,8 @@ func testDeclared() remoteCodes {
 	return remoteCodes{Keys: []uint16{0x130, 0x131}, Axes: []uint16{0x10}}
 }
 
-// woke reports whether the desk poked the loop, under a short deadline so
-// a desk that wakes nothing fails fast.
+// woke reports whether a wake arrives within 50ms on the fake clock of
+// the test's synctest bubble.
 func woke(wake <-chan struct{}) bool {
 	select {
 	case <-wake:
@@ -25,87 +21,75 @@ func woke(wake <-chan struct{}) bool {
 	}
 }
 
-// A fresh document is a status the pass must rewrite, so it wakes the
-// loop.
-func TestADeclaredCodeSetWakesTheLoop(t *testing.T) {
+func TestNewCodesWakeThePass(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		wake := make(chan struct{}, 1)
-		desk := newCodesDesk(wake)
+		cache := newCodesCache(wake)
 
-		desk.setCodes(controllerKey("house", "sofa"), testDeclared())
+		cache.setCodes(controllerKey("house", "sofa"), testDeclared())
 
 		mustMatch(t, woke(wake), true)
 	})
 }
 
-// The retained topic delivers the same document on every reconnect, so
-// a repeat wakes nothing.
-func TestARepeatedCodeSetWakesNothing(t *testing.T) {
+func TestRepeatedCodesDoNotWakeThePass(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		wake := make(chan struct{}, 1)
-		desk := newCodesDesk(wake)
-		desk.setCodes(controllerKey("house", "sofa"), testDeclared())
+		cache := newCodesCache(wake)
+		cache.setCodes(controllerKey("house", "sofa"), testDeclared())
 		<-wake
 
-		desk.setCodes(controllerKey("house", "sofa"), testDeclared())
+		cache.setCodes(controllerKey("house", "sofa"), testDeclared())
 
 		mustMatch(t, woke(wake), false)
 	})
 }
 
-// A controller whose nodes vanished clears its topic, and the desk
-// then holds nothing for it.
-func TestAClearedDocumentLeavesTheDeskHoldingNothing(t *testing.T) {
+func TestClearingCodesDeletesThemAndWakesThePass(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		wake := make(chan struct{}, 1)
-		desk := newCodesDesk(wake)
-		desk.setCodes(controllerKey("house", "sofa"), testDeclared())
+		cache := newCodesCache(wake)
+		cache.setCodes(controllerKey("house", "sofa"), testDeclared())
 		<-wake
 
-		desk.clear(controllerKey("house", "sofa"))
+		cache.clear(controllerKey("house", "sofa"))
 
-		_, held := desk.codesFor(controllerKey("house", "sofa"))
+		_, held := cache.codesFor(controllerKey("house", "sofa"))
 		mustMatch(t, held, false)
 		mustMatch(t, woke(wake), true)
 	})
 }
 
-// A retained document outlives the pod that wrote it, so a document
-// stops standing while its pod is offline.
-func TestAnOfflinePodHoldsNoDeclaredCodes(t *testing.T) {
-	desk := newCodesDesk(nil)
-	desk.setCodes(controllerKey("house", "sofa"), testDeclared())
+func TestCodesAreIgnoredWhileThePodIsOffline(t *testing.T) {
+	cache := newCodesCache(nil)
+	cache.setCodes(controllerKey("house", "sofa"), testDeclared())
 
-	desk.setAvailability(controllerKey("house", "sofa"), false)
+	cache.setAvailability(controllerKey("house", "sofa"), false)
 
-	_, held := desk.codesFor(controllerKey("house", "sofa"))
+	_, held := cache.codesFor(controllerKey("house", "sofa"))
 	mustMatch(t, held, false)
 
-	desk.setAvailability(controllerKey("house", "sofa"), true)
-	codes, held := desk.codesFor(controllerKey("house", "sofa"))
+	cache.setAvailability(controllerKey("house", "sofa"), true)
+	codes, held := cache.codesFor(controllerKey("house", "sofa"))
 	mustMatch(t, held, true)
 	mustMatchAll(t, codes.Keys, testDeclared().Keys)
 }
 
-// The desk shrinks to the Remotes the cluster still holds.
-func TestTheCodesDeskDropsAControllerTheClusterNoLongerHolds(t *testing.T) {
-	desk := newCodesDesk(nil)
-	desk.setCodes(controllerKey("house", "sofa"), testDeclared())
-	desk.setAvailability(controllerKey("house", "sofa"), true)
-	desk.setCodes(controllerKey("house", "gone"), testDeclared())
+func TestRetainDeletesTheCodesOfADeletedRemote(t *testing.T) {
+	cache := newCodesCache(nil)
+	cache.setCodes(controllerKey("house", "sofa"), testDeclared())
+	cache.setAvailability(controllerKey("house", "sofa"), true)
+	cache.setCodes(controllerKey("house", "gone"), testDeclared())
 
-	desk.retain(map[string]bool{controllerKey("house", "sofa"): true})
+	cache.retain(map[string]bool{controllerKey("house", "sofa"): true})
 
-	_, held := desk.codesFor(controllerKey("house", "sofa"))
+	_, held := cache.codesFor(controllerKey("house", "sofa"))
 	mustMatch(t, held, true)
-	_, stillHeld := desk.codesFor(controllerKey("house", "gone"))
+	_, stillHeld := cache.codesFor(controllerKey("house", "gone"))
 	mustMatch(t, stillHeld, false)
 }
 
-// The status reports the gap: every declared control the table maps to
-// nothing, each entry with the code, its evdev name, and its event
-// type.
-func TestTheGapIsWhatTheTableMapsToNothing(t *testing.T) {
+func TestUnboundCodesAreTheCodesTheTableMapsToNoKey(t *testing.T) {
 	cases := []struct {
 		name     string
 		declared remoteCodes

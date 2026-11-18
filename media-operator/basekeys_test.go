@@ -1,18 +1,13 @@
 package main
 
-// These tests cover the base table and the fold a Keymap makes over
-// it, which together are what a controller means before any consumer
-// reads it.
-
 import (
 	"reflect"
 	"strings"
 	"testing"
 )
 
-// The base compiled, as the rows a pod with no Keymap reads. It is
-// written out in full because it is the contract every controller
-// arrives on.
+// wantedBase is the compiled base table, written out in full so that a
+// change to the base fails a test.
 var wantedBase = []compiledBinding{
 	{EventType: evKey, Code: 0x130, Value: 1, Key: "KEY_ENTER"},
 	{EventType: evKey, Code: 0x131, Value: 1, Key: "KEY_BACK"},
@@ -22,8 +17,6 @@ var wantedBase = []compiledBinding{
 	{EventType: evAbs, Code: 0x10, Value: 1, Key: "KEY_RIGHT", RepeatDelay: 400, RepeatInterval: 250},
 }
 
-// A Remote that names no Keymap gets the base alone, so a controller
-// works before anybody writes a table for it.
 func TestARemoteWithNoKeymapGetsTheBaseTable(t *testing.T) {
 	table, err := compileTable(nil)
 
@@ -33,16 +26,12 @@ func TestARemoteWithNoKeymapGetsTheBaseTable(t *testing.T) {
 	}
 }
 
-// The base binds the two face buttons every console reads as enter and
-// back, and the two hat axes as the four arrows with a repeat.
-func TestTheBaseBindsTheHatsAndTheTwoFaceButtons(t *testing.T) {
+func TestTheBaseBindsTheHatsAndTheSouthAndEastButtons(t *testing.T) {
 	if !reflect.DeepEqual(baseKeys, wantedBase) {
 		t.Errorf("base = %+v, want %+v", baseKeys, wantedBase)
 	}
 }
 
-// A Keymap row replaces the base row for the same control, so a pad
-// whose south button should mute reports the mute and not the enter.
 func TestAKeymapRowReplacesTheBaseRowForTheSameControl(t *testing.T) {
 	keymap := &Keymap{
 		Metadata: ObjectMeta{Name: "pad"},
@@ -60,9 +49,7 @@ func TestAKeymapRowReplacesTheBaseRowForTheSameControl(t *testing.T) {
 	mustMatch(t, table[2], compiledBinding{EventType: evAbs, Code: 0x11, Value: -1, Key: keyNone})
 }
 
-// A Keymap row for a control the base does not name joins the table
-// after it, so the base rows the Keymap says nothing about survive.
-func TestAKeymapRowForANewControlJoinsTheTable(t *testing.T) {
+func TestAKeymapRowForANewControlIsAppended(t *testing.T) {
 	keymap := &Keymap{
 		Metadata: ObjectMeta{Name: "x6"},
 		Spec:     KeymapSpec{Buttons: []KeymapButton{{Press: "BTN_LEFT", Key: "KEY_ENTER"}}},
@@ -75,9 +62,7 @@ func TestAKeymapRowForANewControlJoinsTheTable(t *testing.T) {
 	mustMatch(t, table[len(table)-1], compiledBinding{EventType: evKey, Code: 0x110, Value: 1, Key: "KEY_ENTER"})
 }
 
-// A Keymap the operator cannot compile leaves no table at all, so the
-// caller publishes nothing and the last good table stands.
-func TestAKeymapThatDoesNotCompileFoldsNoTable(t *testing.T) {
+func TestAKeymapThatDoesNotCompileReturnsNoTable(t *testing.T) {
 	keymap := &Keymap{
 		Metadata: ObjectMeta{Name: "pad"},
 		Spec:     KeymapSpec{Buttons: []KeymapButton{{Press: "BTN_SOUTH", Key: "KEY_NONSENSE"}}},
@@ -90,13 +75,10 @@ func TestAKeymapThatDoesNotCompileFoldsNoTable(t *testing.T) {
 		t.Errorf("table = %+v, want none", table)
 	}
 	if !strings.Contains(err.Error(), "KEY_NONSENSE") {
-		t.Errorf("err = %q, want it to name the key", err)
+		t.Errorf("the error is %q, want it to name KEY_NONSENSE", err)
 	}
 }
 
-// A key's row states the press, and the release and the autorepeat
-// carry the same name, so the lookup ignores the value for a key and
-// matches it exactly for a hat.
 func TestTheLookupNormalisesAKeysValueAndMatchesAHatsExactly(t *testing.T) {
 	cases := []struct {
 		name  string

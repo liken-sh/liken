@@ -1,13 +1,8 @@
 package main
 
-// These tests cover the panel desk and the fold: the desire
-// the idle screen client published reaches the desk, and the Display's
-// observed values become the word the Player's status carries.
-
 import "testing"
 
-// A cleared retained value is not a live signal, so the desk
-// holds the desire it had.
+// An empty payload clears a retained message and is not a new desire.
 func TestAClearedPanelTopicLeavesTheDesireAlone(t *testing.T) {
 	cluster := newFakeCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
@@ -20,44 +15,35 @@ func TestAClearedPanelTopicLeavesTheDesireAlone(t *testing.T) {
 	mustMatch(t, media.panels.stateFor(playerKey("house", "theater")), panelDesireOff)
 }
 
-// The desk wakes the loop on a state it did not hold and on a
-// change, and not when the retained topic delivers the same message
-// again.
 func TestThePanelDeskWakesOnlyOnChange(t *testing.T) {
 	wake := make(chan struct{}, 1)
-	desk := newPanelDesk(wake)
+	cache := newPanelCache(wake)
 	key := playerKey("house", "theater")
 
-	desk.setState(key, panelDesireOff)
+	cache.setState(key, panelDesireOff)
 	mustMatch(t, len(wake), 1)
 
 	<-wake
-	desk.setState(key, panelDesireOff)
+	cache.setState(key, panelDesireOff)
 	mustMatch(t, len(wake), 0)
 
-	desk.setState(key, panelDesireOn)
+	cache.setState(key, panelDesireOn)
 	mustMatch(t, len(wake), 1)
 }
 
-// The desk shrinks to the units the cluster still holds, so a
-// long-running operator keeps no key for a deleted Player.
 func TestThePanelDeskDropsADeletedPlayer(t *testing.T) {
-	desk := newPanelDesk(make(chan struct{}, 1))
-	desk.setState(playerKey("house", "theater"), panelDesireOff)
-	desk.setState(playerKey("house", "studio"), panelDesireOn)
+	cache := newPanelCache(make(chan struct{}, 1))
+	cache.setState(playerKey("house", "theater"), panelDesireOff)
+	cache.setState(playerKey("house", "studio"), panelDesireOn)
 
-	desk.retain(map[string]bool{playerKey("house", "studio"): true})
+	cache.retain(map[string]bool{playerKey("house", "studio"): true})
 
-	mustMatch(t, desk.stateFor(playerKey("house", "theater")), "")
-	mustMatch(t, desk.stateFor(playerKey("house", "studio")), panelDesireOn)
+	mustMatch(t, cache.stateFor(playerKey("house", "theater")), "")
+	mustMatch(t, cache.stateFor(playerKey("house", "studio")), panelDesireOn)
 }
 
-// The display-operator observes five power words, and its
-// override writes whichever of off, hardOff, and standby the panel
-// declares. Every word but on is a panel held down, so every one of
-// them reads Off. The display-operator spells each word in lowercase
-// or in PascalCase, depending on its build, so both spellings fold to
-// the same status word.
+// display-operator can report a power value in lowercase or in
+// PascalCase, so both spellings map to the same status.
 func TestThePanelWordReadsEveryPowerDownWord(t *testing.T) {
 	cases := []struct {
 		power string
@@ -82,9 +68,6 @@ func TestThePanelWordReadsEveryPowerDownWord(t *testing.T) {
 	}
 }
 
-// The status word is folded from what the display-operator
-// last observed, so a panel a person turned down by hand still reads
-// On, and a Display that observed nothing carries no word at all.
 func TestThePanelWordFoldsTheObservedState(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -109,8 +92,7 @@ func TestThePanelWordFoldsTheObservedState(t *testing.T) {
 	}
 }
 
-// The override this operator writes is the PascalCase Off, the form of
-// every enum value in a Kubernetes resource.
+// The Display resource's enum values are PascalCase.
 func TestTheOverrideWritesThePascalCaseOff(t *testing.T) {
 	cases := []struct {
 		mode string

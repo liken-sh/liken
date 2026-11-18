@@ -1,13 +1,10 @@
-//! The preview keys, the workstation stand-in for the bus, and the legend that
-//! names them on the screen itself.
+//! The preview keys, and the legend that lists them on the screen.
 //!
-//! On a cluster the idle command pod publishes the `Player`'s status, its level,
-//! and the screen's moments, and the pod has no keyboard. On a workstation
-//! `local/idle` sets `IDLE_PREVIEW=1` and the keys below build the same
-//! [`Moment`] values those topics carry. The client folds each one through
-//! `Client::receive`, the call the bus reader's own messages take, so a person
-//! plays every ramp, every dim, and every beat against the real handlers and
-//! not against a second set written for a workstation.
+//! On a cluster the [`Moment`] values come from the bus and from
+//! `media-screen`. On a workstation `local/idle` sets `IDLE_PREVIEW=1`, and
+//! each key press here builds the moments instead. The client passes them to
+//! `Client::receive`, the same call that bus messages go through, so a person
+//! can try every animation of the screen against the real handlers.
 
 use iced_winit::core::Point;
 
@@ -17,63 +14,52 @@ use media_screen::Moment;
 use media_screen::status::{Activity, Component, Play, Status};
 use media_screen::volume::{MAX_LEVEL, MIN_LEVEL, Volume};
 
-/// The kind the preview gives every part but the last. A screen and a set of
-/// speakers both draw at full brightness with no presence, so one word covers
-/// both and the last part alone carries the presence the `d` key toggles.
+/// The kind of every part except the last one, the remote. The identity block
+/// draws a screen and a speaker the same way, with no presence, so the
+/// preview uses one kind for both.
 const SINK: &str = "sink";
 
-/// The charge the preview's controller reports, so the identity block draws
-/// a level beside the name the way a bonded device makes it draw one.
+/// The battery percentage of the preview's remote, so the identity block
+/// draws a charge level beside its name.
 const PREVIEW_BATTERY: i64 = 62;
 
-/// The `Play` the preview names while one starts or runs. The operator
-/// publishes the object's name and the one line the screen draws, so the
-/// preview states both.
+/// The `Play` in the preview status while one is starting or running.
 const PLAY_NAME: &str = "sailing";
 const PLAY_TITLE: &str = "Sailing";
 
-/// The controller a focus moment names. A focus counts the controllers in the
-/// order the status lists them, and the preview's status lists one, so the
-/// index is always the first.
+/// The index of the remote in a `Focus` moment. The index counts the remotes
+/// in the order the status lists them, and the preview lists one.
 const REMOTE: usize = 0;
 
-/// How far one volume key moves the level, out of the 1.0 that is the top of
-/// the range: a step big enough to read on the bar at a glance, and small
-/// enough that the range takes twenty of them.
+/// How far one volume key press moves the level, on a range of 0.0 to 1.0.
 const VOLUME_STEP: f64 = 0.05;
 
-/// The state behind the keys: what the fake status says about the unit now.
-///
-/// The bus holds this state on a cluster, and the client only reads it. With no
-/// broker the presses have to hold it themselves, so each key changes one field
-/// here and then states the whole unit again, the way the operator republishes
-/// a whole status for one change.
+/// The fake status of the unit that the keys change. Each key changes one
+/// field and returns the complete status, as the operator republishes the
+/// whole status after any change.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Keys {
-    /// The unit's name and its parts, from the same environment seed the
-    /// operator sets on the idle container. The preview calls the last part the
-    /// remote, because the parts read in the order the operator lists them and
-    /// a controller is the part a person adds last.
+    /// The unit's name and its parts, from the environment variables the
+    /// operator sets on the idle container. The operator lists the display,
+    /// then the sinks, then the remotes, so the preview treats the last part
+    /// as the remote.
     name: String,
     parts: Vec<String>,
     activity: Activity,
-    /// Whether the remote is connected. The `d` key toggles it.
+    /// Whether the remote is connected.
     connected: bool,
-    /// Whether the status marks the remote focused. The `f` key sets it and
-    /// beats the marker, the way a live mark landing here does, and the `g` key
-    /// clears it, the way a cycle onto another unit does.
+    /// Whether the status marks the remote focused.
     focused: bool,
-    /// Whether the `s` key last put the screen to sleep, so the one key plays
-    /// the two edges of the fade in turn.
+    /// Whether the last `s` press put the screen to sleep, so the next one
+    /// wakes it.
     asleep: bool,
     volume: Volume,
 }
 
 impl Keys {
-    /// The keys for a unit the environment named. The seed carries names and no
-    /// kinds, so every part reads as a sink until the last one, which is the
-    /// remote.
-    pub fn seeded(name: String, parts: Vec<String>) -> Self {
+    /// The keys for the unit that the environment describes, with the remote
+    /// connected, nothing playing, and the screen awake.
+    pub fn before_first_status(name: String, parts: Vec<String>) -> Self {
         Self {
             name,
             parts,
@@ -85,30 +71,26 @@ impl Keys {
         }
     }
 
-    /// The messages one key press stands for, in the order the bus would carry
-    /// them. A key this module does not bind carries nothing, so the arrow keys
-    /// the harness also delivers change nothing here.
+    /// The moments that one key press produces, in the order the bus would
+    /// send them. A key that this module does not bind produces none.
     pub fn press(&mut self, key: &str) -> Vec<Moment> {
         match key {
             "p" => vec![self.doing(Activity::Starting)],
             "o" => vec![self.doing(Activity::Playing)],
-            // The end of a film: the status returns to `Idle`, which is the
-            // client's cue that the screen is its own again.
+            // The end of a film.
             "i" => vec![self.doing(Activity::Idle)],
             "d" => {
                 self.connected = !self.connected;
                 vec![self.status()]
             }
-            // A live focus message naming this unit: the status marks the
-            // remote and the moment beats its marker. A first press draws the
-            // marker and beats it, and every later press beats it again, which
-            // is the cycle press that wraps onto the unit already focused.
+            // Focus moves to this unit. The status marks the remote, and the
+            // `Focus` moment pulses its marker. A later press pulses it again,
+            // as a focus cycle that wraps onto the focused unit does.
             "f" => {
                 self.focused = true;
                 vec![self.status(), Moment::Focus { remote: REMOTE }]
             }
-            // The focus cycling away. The status stops marking the remote, the
-            // marker goes, and nothing beats.
+            // Focus moves to another unit, so the marker disappears.
             "g" => {
                 self.focused = false;
                 vec![self.status()]
@@ -130,15 +112,13 @@ impl Keys {
         }
     }
 
-    /// Move the unit to one activity and state the whole status again.
     fn doing(&mut self, activity: Activity) -> Moment {
         self.activity = activity;
         self.status()
     }
 
-    /// The status as the operator would publish it now. The `Play` block
-    /// appears only while a `Play` starts or runs, which is the rule the
-    /// operator writes it under.
+    /// The status as the operator would publish it now. It has a `Play` only
+    /// while one is starting or running.
     fn status(&self) -> Moment {
         let last = self.parts.len().saturating_sub(1);
         let components = self
@@ -177,17 +157,15 @@ impl Keys {
         })
     }
 
-    /// Move the level by one step, held inside the range the operator holds it
-    /// in, and state it.
+    /// Moves the level by `step`, within the range the operator allows.
     fn step(&mut self, step: f64) -> Moment {
         self.volume.level = (self.volume.level + step).clamp(MIN_LEVEL, MAX_LEVEL);
         self.level()
     }
 
-    /// The level as a live message. The first level of a bus session is the
-    /// broker's retained catch-up, which no person changed and which draws no
-    /// indicator. A key is a change every time, so the indicator shows every
-    /// time.
+    /// The level with `pressed` set, so the volume row shows. On the bus,
+    /// the first level of a session is the broker's retained message, which
+    /// no person caused, and it is not pressed.
     fn level(&self) -> Moment {
         Moment::Level {
             volume: self.volume,
@@ -196,8 +174,7 @@ impl Keys {
     }
 }
 
-/// The legend, one key and what it does per pair, in the order the line reads
-/// them. The screen names the keys itself and not only in this file.
+/// Each key and its description, in the order the legend shows them.
 const LEGEND: [(&str, &str); 10] = [
     ("p", "play starts"),
     ("o", "playing"),
@@ -208,17 +185,14 @@ const LEGEND: [(&str, &str); 10] = [
     ("s", "sleep"),
     ("9/0", "volume"),
     ("m", "mute"),
-    // The one key of the legend this module does not bind. The harness reads
-    // the quit key itself, and the legend names it beside the rest because a
-    // person reading the line needs the way out.
+    // The harness, not this module, reads the quit key.
     (crate::harness::QUIT, "quit"),
 ];
 
-/// The gap between one pair and the next, wide enough that a reader takes the
-/// key and its words as one.
+/// The space between pairs, wider than the space between a key and its
+/// description.
 const LEGEND_GAP: &str = "    ";
 
-/// The legend as one line.
 fn legend_line() -> String {
     LEGEND
         .iter()
@@ -227,11 +201,8 @@ fn legend_line() -> String {
         .join(LEGEND_GAP)
 }
 
-/// Draw the legend. The client calls this only where the preview keys are
-/// bound, so a cluster's idle screen carries none.
-///
-/// The line hangs from its own bottom-right corner, which mirrors the identity
-/// block's bottom-left across the screen.
+/// Draws the legend at the bottom-right corner, opposite the identity block
+/// at the bottom-left.
 pub fn legend(frame: &mut Frame, layout: &Layout, light: f32) {
     frame.fill_text(look::line(
         legend_line(),
@@ -247,7 +218,7 @@ mod tests {
     use super::*;
 
     fn keys() -> Keys {
-        Keys::seeded(
+        Keys::before_first_status(
             "Studio Lab".to_string(),
             vec![
                 "Portable Screen".to_string(),
@@ -259,13 +230,13 @@ mod tests {
 
     fn status(moment: &Moment) -> &Status {
         let Moment::Status(status) = moment else {
-            panic!("the press states a status");
+            panic!("the press produced {moment:?}, want a Moment::Status");
         };
         status
     }
 
     #[test]
-    fn the_seed_names_the_unit_and_its_parts() {
+    fn the_status_has_the_seeded_name_and_parts() {
         let pressed = keys().press("d");
         let status = status(&pressed[0]);
 
@@ -292,13 +263,13 @@ mod tests {
     }
 
     #[test]
-    fn a_unit_with_no_parts_states_none() {
-        let mut keys = Keys::seeded("Studio Lab".to_string(), Vec::new());
+    fn a_unit_with_no_parts_has_no_components() {
+        let mut keys = Keys::before_first_status("Studio Lab".to_string(), Vec::new());
         assert!(status(&keys.press("d")[0]).components.is_empty());
     }
 
     #[test]
-    fn the_play_keys_state_the_three_activities() {
+    fn the_play_keys_set_starting_playing_and_idle() {
         let mut keys = keys();
 
         assert_eq!(status(&keys.press("p")[0]).activity, Activity::Starting);
@@ -307,7 +278,7 @@ mod tests {
     }
 
     #[test]
-    fn a_play_names_a_title_and_a_unit_at_rest_names_none() {
+    fn the_status_has_a_play_while_starting_and_none_at_rest() {
         let mut keys = keys();
 
         let starting = keys.press("p");
@@ -324,7 +295,7 @@ mod tests {
     }
 
     #[test]
-    fn the_end_of_a_film_returns_the_status_alone() {
+    fn the_film_end_key_sends_only_a_status() {
         let pressed = keys().press("i");
 
         assert_eq!(pressed.len(), 1);
@@ -343,7 +314,7 @@ mod tests {
     }
 
     #[test]
-    fn focus_marks_the_remote_and_beats_its_marker() {
+    fn the_focus_key_marks_the_remote_and_pulses_its_marker() {
         let mut keys = keys();
 
         let landed = keys.press("f");
@@ -351,13 +322,12 @@ mod tests {
         assert_eq!(status(&landed[0]).components[2].focused, Some(true));
         assert_eq!(landed[1], Moment::Focus { remote: 0 });
 
-        // The cycle press that wraps onto the unit already focused beats it
-        // again.
+        // A second press pulses the marker again.
         assert_eq!(keys.press("f")[1], Moment::Focus { remote: 0 });
     }
 
     #[test]
-    fn focus_cycling_away_stops_marking_the_remote_and_beats_nothing() {
+    fn the_unfocus_key_unmarks_the_remote_and_sends_no_focus_moment() {
         let mut keys = keys();
         keys.press("f");
 
@@ -368,7 +338,7 @@ mod tests {
     }
 
     #[test]
-    fn the_sleep_key_plays_the_two_edges_of_the_fade_in_turn() {
+    fn the_sleep_key_alternates_sleep_and_wake() {
         let mut keys = keys();
 
         assert_eq!(keys.press("s"), [Moment::Sleep], "the quiet window ran out");
@@ -376,7 +346,7 @@ mod tests {
     }
 
     #[test]
-    fn a_volume_key_steps_the_level_as_a_press() {
+    fn a_volume_key_steps_the_level_with_pressed_set() {
         let mut keys = keys();
 
         assert_eq!(
@@ -404,7 +374,7 @@ mod tests {
     }
 
     #[test]
-    fn the_level_stays_inside_the_range_the_operator_holds_it_in() {
+    fn the_level_stays_within_min_and_max() {
         let mut keys = keys();
         for _ in 0..30 {
             keys.press("9");
@@ -418,7 +388,7 @@ mod tests {
     }
 
     #[test]
-    fn the_mute_key_carries_the_muted_state_on_the_same_indicator() {
+    fn the_mute_key_toggles_muted_in_a_pressed_level() {
         let mut keys = keys();
 
         assert_eq!(
@@ -446,7 +416,7 @@ mod tests {
     }
 
     #[test]
-    fn a_key_this_module_does_not_bind_carries_nothing() {
+    fn an_unbound_key_produces_no_moments() {
         let mut keys = keys();
         assert!(keys.press("up").is_empty());
         assert!(keys.press("z").is_empty());
@@ -454,7 +424,7 @@ mod tests {
     }
 
     #[test]
-    fn the_preview_binds_every_key_the_legend_names_but_the_harness_key() {
+    fn every_legend_key_except_quit_is_bound() {
         let mut keys = keys();
         let bound_to_nothing: Vec<&str> = LEGEND
             .iter()
@@ -466,7 +436,7 @@ mod tests {
     }
 
     #[test]
-    fn the_legend_line_reads_each_key_beside_what_it_does() {
+    fn the_legend_line_lists_each_key_with_its_description() {
         assert_eq!(
             legend_line(),
             "p play starts    o playing    i film ends    d presence    f focus    \

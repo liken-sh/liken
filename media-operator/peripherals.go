@@ -1,16 +1,14 @@
 package main
 
-// Reading the bluetooth-operator's Peripherals.
-//
-// The bluetooth-operator publishes one cluster-scoped Peripheral per
-// bonded device, and writes on it the two facts this layer draws: the
-// Connected condition, which is the record of the controller's link,
-// and the charge the device reports. A Peripheral is named by the
-// device's lowercase dashed address, which is the same name a claim's
-// allocation result carries as the device for the bluetooth.liken.sh
-// driver. So a Remote's standing claim names the Peripheral of the
-// controller it holds, and the operator resolves the claim's allocation
-// to reach it. This layer reads a Peripheral and never writes one.
+// bluetooth-operator publishes one cluster-scoped Peripheral for each
+// bonded device. media-operator reads two facts from it: the Connected
+// condition, which is True while the controller's link is up, and the
+// battery block, which has the charge the device reports. A Peripheral
+// is named by the device's address, lowercase and dash-separated, and
+// the bluetooth.liken.sh driver uses the same string as the device name
+// in a claim's allocation. So media-operator finds the Peripheral of a
+// Remote's controller from the allocation of the Remote's ResourceClaim.
+// It never writes a Peripheral.
 
 import (
 	"fmt"
@@ -19,24 +17,16 @@ import (
 	"sync"
 )
 
-// The group the bluetooth-operator serves. A Peripheral is
-// cluster-scoped, because a bonded device belongs to no namespace.
 const peripheralAPIVersion = "bluetooth.liken.sh/v1alpha1"
 
-// The DRA driver whose devices are bonded Bluetooth peripherals. An
-// allocation result from this driver names its Peripheral by the device
-// name it carries.
 const bluetoothDriver = "bluetooth.liken.sh"
 
-// The condition that carries the link, and the value that means the link
-// is up.
 const (
 	peripheralConnected = "Connected"
 	conditionTrue       = "True"
 )
 
-// A Peripheral carries only what this operator reads: the link and the
-// charge the device reports.
+// Peripheral has only the fields that media-operator reads.
 type Peripheral struct {
 	Metadata ObjectMeta       `json:"metadata"`
 	Status   PeripheralStatus `json:"status"`
@@ -47,45 +37,40 @@ type PeripheralStatus struct {
 	Conditions []PeripheralCondition `json:"conditions,omitempty"`
 }
 
-// The charge the device reports. A device that reports no level carries
-// no battery block at all.
+// A device that reports no charge has no battery block.
 type PeripheralBattery struct {
 	Percentage int `json:"percentage,omitempty"`
 }
 
-// One condition on a Peripheral. The operator reads the type and the
-// status alone.
 type PeripheralCondition struct {
 	Type   string `json:"type"`
 	Status string `json:"status"`
 }
 
-// peripheralDesk holds what one pass read about the controllers: the
-// Peripherals by name, and the Peripheral each Remote's standing claim
-// allocated, by controller key. A Peripheral change wakes the loop
-// through the watch, and the pass then reads the collection again.
+// peripheralCache caches what the last pass read: the Peripherals by
+// name, and the name of the Peripheral allocated to each Remote's claim,
+// by controller key. A change to a Peripheral starts a new pass through
+// the watch, and that pass replaces the cache.
 //
-// One mutex covers both maps. The pass writes them, and both the pass
-// and the bus reader read them when they build a Player's bus status,
-// because an ending is answered on the bus reader's goroutine.
-type peripheralDesk struct {
-	mutex sync.Mutex
-	held  map[string]Peripheral
-	named map[string]string
+// The pass writes the cache. The pass and the bus reader both read it to
+// build a Player's bus status, because the bus reader publishes that
+// status when a Play ends. So one mutex covers both maps.
+type peripheralCache struct {
+	mutex        sync.Mutex
+	byName       map[string]Peripheral
+	byController map[string]string
 }
 
-func newPeripheralDesk() *peripheralDesk {
-	return &peripheralDesk{
-		held:  map[string]Peripheral{},
-		named: map[string]string{},
+func newPeripheralCache() *peripheralCache {
+	return &peripheralCache{
+		byName:       map[string]Peripheral{},
+		byController: map[string]string{},
 	}
 }
 
-// hold replaces what the desk holds with what this pass read. The maps go
-// in whole, so a Peripheral the cluster no longer holds and a controller
-// whose claim lost its allocation leave no entry behind, and the desk
-// needs no separate shrink.
-func (p *peripheralDesk) hold(peripherals []Peripheral, named map[string]string) {
+// replace replaces both maps whole, so a Peripheral that no longer exists
+// and a controller whose claim lost its allocation leave no entry.
+func (p *peripheralCache) replace(peripherals []Peripheral, named map[string]string) {
 	held := make(map[string]Peripheral, len(peripherals))
 	for _, peripheral := range peripherals {
 		held[peripheral.Metadata.Name] = peripheral
@@ -95,28 +80,26 @@ func (p *peripheralDesk) hold(peripherals []Peripheral, named map[string]string)
 	}
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
-	p.held = held
-	p.named = named
+	p.byName = held
+	p.byController = named
 }
 
-// peripheralFor names the Peripheral one controller's standing claim
-// allocated. It is empty for a controller whose claim carries no
-// allocation, and for one whose device comes from another driver.
-func (p *peripheralDesk) peripheralFor(key string) string {
+// peripheralFor returns an empty string when the controller's claim has
+// no allocation, or when the allocated device comes from another driver.
+func (p *peripheralCache) peripheralFor(key string) string {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
-	return p.named[key]
+	return p.byController[key]
 }
 
-// connectedFor reports one Peripheral's link and whether the desk holds an
-// answer. A Peripheral the cluster does not hold, and one that carries no
-// Connected condition, is neither connected nor disconnected, so the
-// status it appears in carries no connected key at all.
-func (p *peripheralDesk) connectedFor(name string) (connected, held bool) {
+// connectedFor returns known as false when the Peripheral does not
+// exist or has no Connected condition. The Player's bus status then
+// leaves out the connected key.
+func (p *peripheralCache) connectedFor(name string) (connected, known bool) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
-	peripheral, standing := p.held[name]
-	if !standing {
+	peripheral, found := p.byName[name]
+	if !found {
 		return false, false
 	}
 	for _, condition := range peripheral.Status.Conditions {
@@ -127,29 +110,27 @@ func (p *peripheralDesk) connectedFor(name string) (connected, held bool) {
 	return false, false
 }
 
-// batteryFor is the charge one Peripheral reports. A device that reports
-// no level answers nil, and the status it appears in carries no battery
-// key.
-func (p *peripheralDesk) batteryFor(name string) *int {
+// batteryFor returns nil when the Peripheral does not exist or reports
+// no charge. The Player's bus status then leaves out the battery key.
+func (p *peripheralCache) batteryFor(name string) *int {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
-	peripheral, standing := p.held[name]
-	if !standing || peripheral.Status.Battery == nil {
+	peripheral, found := p.byName[name]
+	if !found || peripheral.Status.Battery == nil {
 		return nil
 	}
 	percentage := peripheral.Status.Battery.Percentage
 	return &percentage
 }
 
-// observePeripherals reads the cluster's Peripherals and resolves which
-// one each Remote holds. It runs before the pass writes any Player
-// status, because a unit's bus status carries its controllers' links.
-// It reads each Remote's standing claim from the view, and returns
-// those reads by controller key so the standing reconcile makes none of
-// its own. A claim read that fails has no entry, and the reconcile then
-// reads that one claim itself. A Peripherals read that fails leaves the
-// desk holding what it had, so one failed read does not blank every
-// controller on the idle screen.
+// observePeripherals runs before the pass writes any Player status,
+// because a Player's bus status includes the links of its controllers.
+// It returns the claim of each Remote by controller key, so the
+// reconcile of the Remote's claim does not read it again. A claim that
+// fails to read has no entry, and that reconcile reads it itself. When
+// the list of Peripherals fails, the cache keeps its previous contents,
+// so one failed read does not clear the link and charge of every
+// controller.
 func (o *operator) observePeripherals(remotes []Remote) map[string]claimRead {
 	claims := make(map[string]claimRead, len(remotes))
 	named := make(map[string]string, len(remotes))
@@ -159,38 +140,38 @@ func (o *operator) observePeripherals(remotes []Remote) map[string]claimRead {
 		read, err := o.readClaim(remote.Metadata.Namespace,
 			remoteClaimName(remote.Metadata.Name))
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "reading the claim of remote %s/%s: %v\n",
+			fmt.Fprintf(os.Stderr, "reading the ResourceClaim of Remote %s/%s: %v\n",
 				remote.Metadata.Namespace, remote.Metadata.Name, err)
 			continue
 		}
 		claims[key] = read
-		if name, held := peripheralOf(read.claim); held {
+		if name, allocated := peripheralOf(read.claim); allocated {
 			named[key] = name
 		}
 	}
 	list, err := o.view.Peripherals()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "reading peripherals: %v\n", err)
+		fmt.Fprintf(os.Stderr, "listing Peripherals, so the cache keeps the previous ones: %v\n", err)
 		return claims
 	}
 	before := o.peripherals.links()
-	o.peripherals.hold(list, named)
+	o.peripherals.replace(list, named)
 	o.logLinks(before, o.peripherals.links())
 	return claims
 }
 
-// links reads the link of every controller whose Peripheral carries a
-// Connected condition, by controller key.
-func (p *peripheralDesk) links() map[string]bool {
+// links returns, by controller key, whether the link is up for each
+// controller whose Peripheral has a Connected condition.
+func (p *peripheralCache) links() map[string]bool {
 	p.mutex.Lock()
-	named := make(map[string]string, len(p.named))
-	for key, name := range p.named {
+	named := make(map[string]string, len(p.byController))
+	for key, name := range p.byController {
 		named[key] = name
 	}
 	p.mutex.Unlock()
 	links := make(map[string]bool, len(named))
 	for key, name := range named {
-		if connected, held := p.connectedFor(name); held {
+		if connected, known := p.connectedFor(name); known {
 			links[key] = connected
 		}
 	}
@@ -198,9 +179,9 @@ func (p *peripheralDesk) links() map[string]bool {
 }
 
 // logLinks writes one line for each controller whose link changed
-// between two passes. A link the last pass did not know is the first
-// read of it, and writes no line, so a restarted operator does not
-// report every controller at once.
+// between two passes. A controller with no link state in the earlier
+// pass gets no line, so the first pass after a restart does not log
+// every controller.
 func (o *operator) logLinks(before, after map[string]bool) {
 	keys := make([]string, 0, len(after))
 	for key := range after {
@@ -221,12 +202,8 @@ func (o *operator) logLinks(before, after map[string]bool) {
 	}
 }
 
-// peripheralOf names the Peripheral a standing claim's allocation
-// holds. The allocation result for the bluetooth.liken.sh driver names
-// the device, and that device name is the Peripheral's own name,
-// because the bluetooth-operator names both from the device's address.
-// A claim the scheduler has not allocated names none, and so does a
-// controller some other driver publishes.
+// peripheralOf returns false when the scheduler has not allocated the
+// claim, or when another driver publishes the controller.
 func peripheralOf(claim *ResourceClaim) (string, bool) {
 	if claim == nil || claim.Status == nil || claim.Status.Allocation == nil {
 		return "", false

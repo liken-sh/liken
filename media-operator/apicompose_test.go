@@ -1,11 +1,5 @@
 package main
 
-// These tests cover the composition: the ffmpeg command line for every
-// stream count, the offset measured between two header instants, the
-// status each upstream answer maps to, the fields a refusal carries and
-// does not, and one real mux over fixture streams read back with
-// ffprobe.
-
 import (
 	"encoding/json"
 	"io"
@@ -23,7 +17,7 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
-func TestComposeArgumentsCarryTheOffsetOfEachTrack(t *testing.T) {
+func TestComposeArgumentsSetAnOffsetForEachAudioTrack(t *testing.T) {
 	got := composeArguments(composedMP4Extension, true, []float64{0.04, -0.012})
 
 	want := []string{
@@ -46,7 +40,7 @@ func TestComposeArgumentsWriteMatroskaLive(t *testing.T) {
 	mustMatch(t, strings.Join(got[len(got)-7:], " "), "-c copy -live 1 -f matroska pipe:1")
 }
 
-func TestTheComposedContentTypeCarriesTheUpstreamsProfile(t *testing.T) {
+func TestTheComposedContentTypeAddsOpusToTheUpstreamsVideoCodecs(t *testing.T) {
 	rows := []struct {
 		name  string
 		form  mediaForm
@@ -68,10 +62,9 @@ func TestTheComposedContentTypeCarriesTheUpstreamsProfile(t *testing.T) {
 	}
 }
 
-// The codecs parameter is copied whole from the sibling that encoded
-// the track. Nothing here reads it, because only display-api knows
-// what it sent, and a sibling that names none leaves it empty.
-func TestTheCodecsParameterIsCopiedWholeFromTheUpstream(t *testing.T) {
+// The display API chose the codecs that it encoded, so this API copies
+// the codecs parameter unchanged and never fills in a missing one.
+func TestTheCodecsParameterIsCopiedUnchangedFromTheUpstream(t *testing.T) {
 	rows := []struct {
 		field string
 		want  string
@@ -88,9 +81,9 @@ func TestTheCodecsParameterIsCopiedWholeFromTheUpstream(t *testing.T) {
 	}
 }
 
-// The -itsoffset the mux is given is the difference of the two header
-// instants, audio minus screen, measured on this API's own clock.
-func TestTheOffsetComesFromTheTwoHeaderInstants(t *testing.T) {
+// The -itsoffset passed to ffmpeg is the audio header arrival time
+// minus the screen header arrival time, measured on this API's clock.
+func TestTheOffsetIsTheDifferenceOfTheHeaderArrivalTimes(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
 		fixture.plane.players[testAPIPlayer] = shapedPlayer(true, 1, true)
@@ -108,9 +101,10 @@ func TestTheOffsetComesFromTheTwoHeaderInstants(t *testing.T) {
 	})
 }
 
-// recordingFFmpeg is a stand-in for ffmpeg. It writes down the
-// arguments it was called with, drains the two bodies it inherited so
-// the feeds finish, and writes a few bytes so the response has a body.
+// recordingFFmpeg returns the path of a script that replaces ffmpeg.
+// It writes its arguments to the file arguments, reads the two input
+// pipes to the end so the copies into them finish, and prints a few
+// bytes so the response has a body.
 func recordingFFmpeg(t *testing.T, arguments string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "ffmpeg")
@@ -120,11 +114,7 @@ func recordingFFmpeg(t *testing.T, arguments string) string {
 	return path
 }
 
-// Every answer a sibling can give, and the status, problem type, and
-// detail the client of this API reads instead: a 400 and a 404 relay
-// the upstream's own problem, a 409 relays as away, a 503 relays its
-// Retry-After, and an answer that is not a problem document is 502.
-func TestAnUpstreamAnswerMapsToThisAPIsOwnStatus(t *testing.T) {
+func TestAnUpstreamResponseMapsToThisAPIsStatus(t *testing.T) {
 	rows := []struct {
 		name        string
 		status      int
@@ -197,7 +187,8 @@ func TestAnUpstreamAnswerMapsToThisAPIsOwnStatus(t *testing.T) {
 }
 
 // A refused connection is a 503 with Retry-After, because a sibling
-// that is restarting comes back and a retry clears it.
+// that is restarting will accept connections again, so a retry can
+// succeed.
 func TestAnUnreachableUpstreamIsAServiceUnavailable(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
@@ -210,10 +201,10 @@ func TestAnUnreachableUpstreamIsAServiceUnavailable(t *testing.T) {
 	})
 }
 
-// The composition limit is this API's own bound, and it answers the
-// shared capture-busy type with Retry-After, the way a busy sidecar
-// does.
-func TestTheCompositionLimitAnswersCaptureBusy(t *testing.T) {
+// When this API is already running its maximum number of compositions,
+// it returns a 503 with the capture-busy problem type and Retry-After,
+// the same response a busy sidecar gives.
+func TestTheCompositionLimitReturnsCaptureBusy(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
 		fixture.server.compositions = make(chan struct{}, 1)
@@ -229,8 +220,8 @@ func TestTheCompositionLimitAnswersCaptureBusy(t *testing.T) {
 	})
 }
 
-// A capture that produces bytes leaves a Captured Event on the Player,
-// so kubectl describe player answers who looked and when.
+// A capture that produces bytes posts a Captured Event on the Player,
+// so `kubectl describe player` shows who captured it and when.
 func TestACaptureWritesTheCapturedEvent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
@@ -248,10 +239,7 @@ func TestACaptureWritesTheCapturedEvent(t *testing.T) {
 	})
 }
 
-// One real mux over a fixture video and two fixture audio streams,
-// read back with ffprobe: one video track, then two audio tracks, in
-// order.
-func TestOneRealMuxCarriesOneVideoAndTwoAudioTracks(t *testing.T) {
+func TestARealMuxOutputsOneVideoTrackAndTwoAudioTracks(t *testing.T) {
 	requireFFmpeg(t)
 	directory := t.TempDir()
 	video := fixtureVideo(t, directory)
@@ -284,9 +272,9 @@ func requireFFmpeg(t *testing.T) {
 	}
 }
 
-// fixtureVideo is a short fragmented MP4, the form the display API
-// serves, because the mux demuxes its input from a pipe and a plain
-// MP4 with its moov at the end cannot be read that way.
+// fixtureVideo returns a short fragmented MP4, the form the display
+// API serves. ffmpeg reads its input from a pipe, which cannot seek,
+// so it cannot read a plain MP4 that has its moov atom at the end.
 func fixtureVideo(t *testing.T, directory string) []byte {
 	t.Helper()
 	path := filepath.Join(directory, "screen.mp4")
@@ -338,11 +326,8 @@ func run(t *testing.T, name string, arguments ...string) []byte {
 	return output
 }
 
-// An upstream that sends no headers within the header timeout is a
-// 504 with a plain problem document.
-// It runs in a synctest bubble, so the bound runs its full ten seconds
-// on the bubble's clock, and the test checks that the answer comes at
-// the bound.
+// On the fake clock of the synctest bubble, the 504 arrives exactly
+// when upstreamHeaderTimeout ends.
 func TestAnUpstreamThatSendsNoHeadersInTimeIsAGatewayTimeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
@@ -357,10 +342,7 @@ func TestAnUpstreamThatSendsNoHeadersInTimeIsAGatewayTimeout(t *testing.T) {
 	})
 }
 
-// A unit with sinks and no screen composes the sound alone: the
-// command line has no video input and no video map, and the audio
-// tracks take inputs 0 and 1.
-func TestASoundOnlyCompositionCarriesNoVideoInput(t *testing.T) {
+func TestASoundOnlyCompositionHasNoVideoInput(t *testing.T) {
 	got := composeArguments(composedMP4Extension, false, []float64{0, 0.02})
 
 	want := []string{
@@ -376,9 +358,6 @@ func TestASoundOnlyCompositionCarriesNoVideoInput(t *testing.T) {
 	}
 }
 
-// Two sinks and no screen reach the mux as two audio requests and no
-// display request, with a codecs parameter that names Opus alone and
-// no rel/screen link.
 func TestTwoSinksAndNoScreenComposeTheSoundAlone(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
@@ -394,16 +373,13 @@ func TestTwoSinksAndNoScreenComposeTheSoundAlone(t *testing.T) {
 		mustMatch(t, len(fixture.audio.made()), 2)
 		for _, link := range recorder.Header().Values("Link") {
 			if strings.Contains(link, relScreen) {
-				t.Errorf("a composition with no screen sent %s", link)
+				t.Errorf("the response has the Link %s, want none with rel %s because the composition has no screen", link, relScreen)
 			}
 		}
 	})
 }
 
-// A composition refused at the limit carries the problem document
-// alone: no Content-Disposition, no Accept-Ranges, no
-// Content-Location, and only the service links.
-func TestARefusedCompositionCarriesNoCaptureFields(t *testing.T) {
+func TestARefusedCompositionHasNoCaptureHeaders(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
 		fixture.server.compositions = make(chan struct{}, 1)
@@ -420,17 +396,16 @@ func TestARefusedCompositionCarriesNoCaptureFields(t *testing.T) {
 		for _, link := range recorder.Header().Values("Link") {
 			for _, relation := range []string{relScreen, relAudio, relAlternate} {
 				if strings.Contains(link, relation) {
-					t.Errorf("a refused composition sent %s", link)
+					t.Errorf("the refusal has the Link %s, want none with rel %s", link, relation)
 				}
 			}
 		}
 	})
 }
 
-// An upstream refusal relayed to the client carries the problem
-// document alone, with none of the capture fields and only the three
-// service links.
-func TestARelayedFaultCarriesNoCaptureFields(t *testing.T) {
+// The only Link fields of a relayed refusal are service-desc,
+// service-doc, and describedby, which every Player route sends.
+func TestARelayedFaultHasNoCaptureHeaders(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
 		fixture.display.status = http.StatusNotFound
@@ -446,9 +421,6 @@ func TestARelayedFaultCarriesNoCaptureFields(t *testing.T) {
 	})
 }
 
-// The stderr the log line carries is the end of what ffmpeg wrote. An
-// ffmpeg that fails on every packet writes a line per packet, and the
-// lines that end a stream say why it ended.
 func TestTheStderrTailKeepsTheLastLines(t *testing.T) {
 	writer := &tailWriter{}
 
@@ -463,8 +435,6 @@ func TestTheStderrTailKeepsTheLastLines(t *testing.T) {
 	mustMatch(t, strings.Contains(tail, "line 0\n"), false)
 }
 
-// A short stderr is kept whole, so a single failing line reaches the
-// log line unchanged.
 func TestAShortStderrIsKeptWhole(t *testing.T) {
 	writer := &tailWriter{}
 
@@ -474,11 +444,10 @@ func TestAShortStderrIsKeptWhole(t *testing.T) {
 	mustMatch(t, writer.tail(), "Output file is empty, nothing was encoded")
 }
 
-// PROSE: an idle Player that resolves a screen and no sink is one
-// video stream. The composed route streams that screen through this
-// API and never answers a 307, so a caller behind one port-forward
-// reads the bytes without reaching display-api by name.
-func TestAScreenOnlyMediaStreamsWithNoRedirect(t *testing.T) {
+// A caller behind one port-forward to this API cannot reach the display
+// API by its in-cluster name, so even a screen alone is streamed here
+// and not redirected.
+func TestAScreenOnlyMediaIsStreamedWithoutARedirect(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
 		fixture.server.now = time.Now
@@ -497,11 +466,7 @@ func TestAScreenOnlyMediaStreamsWithNoRedirect(t *testing.T) {
 	})
 }
 
-// PROSE: a Player that resolves one sink and no screen is one audio
-// stream. The composed route streams that sink through this API and
-// never answers a 307, and its Content-Type names Opus with no video
-// element.
-func TestASinkOnlyMediaStreamsWithNoRedirect(t *testing.T) {
+func TestASinkOnlyMediaIsStreamedWithoutARedirect(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
 		fixture.server.now = time.Now
@@ -521,9 +486,9 @@ func TestASinkOnlyMediaStreamsWithNoRedirect(t *testing.T) {
 	})
 }
 
-// PROSE: copyingFFmpegOne is a stand-in ffmpeg for a one-input
-// composition. It copies the single inherited body on fd 3 to stdout,
-// so a screen-only or sink-only stream reaches the recorder unchanged.
+// copyingFFmpegOne returns the path of a script that replaces ffmpeg
+// for a composition with one input. It copies file descriptor 3 to
+// stdout, so the single stream reaches the recorder unchanged.
 func copyingFFmpegOne(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "ffmpeg")
@@ -532,10 +497,7 @@ func copyingFFmpegOne(t *testing.T) string {
 	return path
 }
 
-// A zero-stream 409 names the action for the whole unit, because a
-// Player that resolves neither a screen nor a sink is not answered by
-// a sentence about sound alone.
-func TestAZeroStreamComposedRefusalNamesTheWholeUnit(t *testing.T) {
+func TestAComposedRefusalWithNoStreamsIsAboutTheWholePlayer(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
 		fixture.plane.players[testAPIPlayer] = shapedPlayer(false, 0, false)
@@ -546,27 +508,25 @@ func TestAZeroStreamComposedRefusalNamesTheWholeUnit(t *testing.T) {
 		document := problemOf(t, recorder)
 		mustMatch(t, document.Type, problemNotPlaying)
 		mustMatch(t, document.Detail,
-			"run a Play on this Player; it resolves nothing to capture until one runs")
+			"this Player resolves nothing to capture until a Play runs on it")
 	})
 }
 
-// The composed response's headers reach the client when this API
-// decides them, not when the muxer writes its first fragment. The
-// drill read HTTP/2 200 at 4.32 s while the log line reported the
-// headers at 0.496 s, because net/http holds a written status until
-// the body fills its buffer.
+// net/http does not send a written status until the body fills its
+// buffer or the handler flushes. Without a flush after the headers, the
+// client would receive the status only with the first body bytes.
 //
-// The test runs outside a synctest bubble, on the real clock, because
-// the composition runs a stand-in ffmpeg as a child process. This API
-// reads the child's output from an OS pipe, and that read is not
-// durably blocked, so a bubble's clock would never reach the end of the
-// siblings' 600 ms hold.
+// The test runs on the real clock, outside a synctest bubble. This API
+// reads the stand-in ffmpeg's output from an OS pipe, and a bubble does
+// not count that read as blocked, so its fake clock would never reach
+// the end of the siblings' 600 ms delay.
 func TestTheComposedHeadersReachTheClientBeforeTheFirstByte(t *testing.T) {
 	fixture := newAPIFixture(t)
 	fixture.server.now = time.Now
 	fixture.server.ffmpeg = copyingFFmpeg(t)
-	// Both siblings answer at once and hold their first byte, which is
-	// a capture waiting for its first keyframe.
+	// Both fake siblings send headers at once and delay the first body
+	// byte, as a real capture does while it waits for its first
+	// keyframe.
 	fixture.display.bodyDelay = 600 * time.Millisecond
 	fixture.audio.bodyDelay = 600 * time.Millisecond
 	fixture.display.body = []byte("frame")
@@ -588,9 +548,9 @@ func TestTheComposedHeadersReachTheClientBeforeTheFirstByte(t *testing.T) {
 	mustMatch(t, response.StatusCode, http.StatusOK)
 	mustMatch(t, string(body), "frame")
 	if headers > 400*time.Millisecond {
-		t.Errorf("the headers took %v, and the siblings held their first byte for 600ms", headers)
+		t.Errorf("the headers arrived after %v, want under 400ms, because the sibling captures send their first body byte after 600ms", headers)
 	}
 	if firstByte < 500*time.Millisecond {
-		t.Errorf("the body arrived in %v, so the siblings did not hold it", firstByte)
+		t.Errorf("the body arrived after %v, want at least 500ms, because the sibling captures send their first body byte after 600ms", firstByte)
 	}
 }

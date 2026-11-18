@@ -1,26 +1,27 @@
 package main
 
-// The display sidecar's liveness on a run. This file derives the
-// DisplayAlive condition a Play reports, feeds the restart counter the
-// metrics serve, and decides the point where a display that keeps
-// crashing ends the run.
+// This file derives a Play's DisplayAlive condition from the display
+// sidecar of its playback pod, counts the sidecar's restarts in
+// media_display_restarts_total, and ends the run when the sidecar
+// restarts too often.
 
 import "fmt"
 
-// The DisplayAlive condition a Play carries, and its two reasons.
+// The type and the reasons of the DisplayAlive condition.
 const (
 	displayAliveCondition   = "DisplayAlive"
 	displayReasonRunning    = "Running"
 	displayReasonRestarting = "Restarting"
 )
 
-// A run whose display has restarted more than displayRestartsEnding
-// times has no display a viewer can use, so the run ends.
-const displayRestartsEnding = 2
+// maxDisplayRestarts is the number of display restarts a run survives.
+// On the next restart the run ends, so a display that keeps crashing
+// does not restart forever.
+const maxDisplayRestarts = 2
 
-// displayContainerStatus returns the status of the display container.
-// A playback pod with no screen has no display container, so the second
-// value reports whether the pod has one at all.
+// displayContainerStatus returns the status of the display container,
+// which is a native sidecar and so reports among the init containers.
+// The second value is false when the pod has no display container.
 func displayContainerStatus(pod *Pod) (ContainerStatus, bool) {
 	for _, container := range pod.Status.InitContainerStatuses {
 		if container.Name == displayContainer {
@@ -31,8 +32,8 @@ func displayContainerStatus(pod *Pod) (ContainerStatus, bool) {
 }
 
 // displayAlive derives the run's DisplayAlive condition from the pod.
-// The second value is false where the pod reports too little to state
-// one: no display container, or a container that has not started yet.
+// The second value is false when the pod has no display container, or
+// the container has not started yet.
 func displayAlive(pod *Pod) (PlayCondition, bool) {
 	container, reported := displayContainerStatus(pod)
 	if !reported {
@@ -46,8 +47,8 @@ func displayAlive(pod *Pod) (PlayCondition, bool) {
 			Message: displayRestartMessage(container),
 		}, true
 	}
-	// A container that has neither started nor ended belongs to a pod
-	// that is still starting, which is no fault of the display.
+	// A container that is not running and has never terminated has not
+	// started yet, which is not a display fault.
 	if container.LastState.Terminated == nil {
 		return PlayCondition{}, false
 	}
@@ -59,12 +60,9 @@ func displayAlive(pod *Pod) (PlayCondition, bool) {
 	}, true
 }
 
-// displayRestartMessage states the restart count and the last exit the
-// kubelet recorded, its reason and its exit code, because those are the
-// facts a person acts on.
-//
-// A display with a restart count of 0 has no message, because there is
-// no exit to report and the status and reason say the rest.
+// displayRestartMessage returns the restart count with the reason and
+// exit code of the last termination, or "" when the display has not
+// restarted.
 func displayRestartMessage(container ContainerStatus) string {
 	if container.RestartCount == 0 {
 		return ""
@@ -85,14 +83,14 @@ func displayRestartMessage(container ContainerStatus) string {
 }
 
 // displayKeepsDying reports whether the display has restarted more
-// than displayRestartsEnding times, the most one run allows.
+// than maxDisplayRestarts times, which ends the run.
 func displayKeepsDying(pod *Pod) bool {
 	container, reported := displayContainerStatus(pod)
-	return reported && container.RestartCount > displayRestartsEnding
+	return reported && container.RestartCount > maxDisplayRestarts
 }
 
-// displayRestartCount returns the restart count of one run's display.
-// It is zero where the pod is gone or has no display container.
+// displayRestartCount returns the restart count of the display, or 0
+// when the pod is nil or has no display container.
 func displayRestartCount(pod *Pod) int {
 	if pod == nil {
 		return 0
@@ -104,21 +102,19 @@ func displayRestartCount(pod *Pod) int {
 	return container.RestartCount
 }
 
-// displayRestartMemo is the restart count one run has already added to
-// the counter, and the Player its series is labeled with, so the run's
-// end can delete that series.
+// displayRestartMemo records, for one run, the restart count already
+// added to the counter and the Player that labels the series. The
+// Player is kept because the series is deleted after the Play is gone.
 type displayRestartMemo struct {
 	player string
 	count  int
 }
 
-// countDisplayRestarts adds the growth of the kubelet's count since the
-// last pass to media_display_restarts_total. A recreated pod starts its
-// count at zero again, and a count that fell adds nothing, so the total
-// never falls.
-//
-// The series is created at 0 on the pass that first reads the run's
-// pod, so a scrape of a healthy run reports 0 and not an absent series.
+// countDisplayRestarts adds to media_display_restarts_total the
+// restarts since the previous pass. A recreated pod starts its count at
+// 0 again, and a lower count adds nothing, so the counter never
+// decreases. The series is created on the first pass that reads the
+// run's pod, so a healthy run exports 0 instead of no series.
 func (o *operator) countDisplayRestarts(play *Play, pod *Pod) {
 	key := runKey(play.Metadata.Namespace, play.Metadata.Name)
 	count := displayRestartCount(pod)
@@ -133,9 +129,7 @@ func (o *operator) countDisplayRestarts(play *Play, pod *Pod) {
 	}
 }
 
-// forgetDisplayRestarts drops one run's memo and deletes the series the
-// run created, the way the pass drops every other memo of a run the
-// collection no longer holds.
+// forgetDisplayRestarts deletes the run's memo and its metric series.
 func (o *operator) forgetDisplayRestarts(key string) {
 	memo := o.displayRestarts[key]
 	delete(o.displayRestarts, key)

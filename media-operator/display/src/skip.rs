@@ -1,21 +1,23 @@
-//! The skip control: "Skip intro" or "Skip recap" while the playhead is inside
-//! one of those spans, and a seek to the span's end when a person selects it.
-//! Inside the end credits of a film with a scene after them, it reads "Skip to
-//! post-credits scene" and seeks to the scene. It never skips on its own,
-//! because a viewer who has not seen the show may want the recap or the
-//! intro, and a viewer may want to read the credits.
+//! The skip button. While the playhead is inside an intro or a recap
+//! span it reads "Skip intro" or "Skip recap", and selecting it seeks
+//! to the end of the span. Inside the end credits of a film that has a
+//! scene after them, it reads "Skip to post-credits scene" and seeks to
+//! that scene. It never skips by itself, because a viewer who has not
+//! seen the show may want the recap or the intro, and a viewer may want
+//! to read the credits.
 //!
-//! It draws on the up-next chip's row, at the left margin, with the chip's
-//! metrics and the card's fill, so it reads as one of the offer's family
-//! and never collides with the chip or the card at the right margin. It shows
-//! over the bare video for as long as the playhead is inside the span, on a
-//! fade of its own, and inside the OSD it is a focus stop.
+//! The button is on the up-next chip's row, with the chip's metrics and
+//! the card's fill, so it looks like part of the same set of controls.
+//! It is at the left margin, and the chip and the card are at the right
+//! margin, so they do not overlap. It shows over the bare video, with
+//! its own fade, for as long as the playhead is inside the span. While
+//! the OSD is up, it is one of the OSD's focus stops.
 //!
-//! Over the bare video, the control for an intro or a recap draws focused,
-//! and a select takes it, so a viewer skips with one press of the remote.
-//! The skip to the post-credits scene draws unfocused there, because the card
-//! is up during the credits, and a viewer may press select to pause and read
-//! them.
+//! Over the bare video, the intro and recap button is drawn focused and
+//! a select activates it, so a viewer can skip with one press of the
+//! remote. The post-credits button is drawn unfocused there, and a
+//! select pauses the film, because the up-next card is also up during
+//! the credits and a viewer may want to pause and read them.
 
 use iced::{Point, Rectangle, Size};
 use serde_json::json;
@@ -27,25 +29,23 @@ use crate::marks::{Jump, Kind};
 use crate::theme;
 use crate::upnext::{CARD_ALPHA, CHIP_H, CHIP_PAD_X, CHIP_PAD_Y, CHIP_R, CHIP_Y};
 
-/// The span the control offers to leave, and its own fade.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Skip {
-    /// The span the playhead is inside and the second a select seeks to,
-    /// while the control offers them.
+    /// The span that the playhead is inside, and the time that a select
+    /// seeks to. It is `None` while the button is not offered.
     jump: Option<Jump>,
-    /// The kind the control offered last. The control keeps its label while
-    /// it fades out, after the span has gone.
+    /// The kind of span last offered. The button keeps this label while
+    /// it fades out after the playhead has left the span.
     kind: Option<Kind>,
-    /// The span a select skipped. mpv reports a position or two from inside
-    /// it before the seek lands, and the control stays down for those. A
-    /// position outside the span clears this, so a seek back into the intro
-    /// offers the skip again.
+    /// The span that a select skipped. mpv can report a position inside
+    /// the span before the seek completes, and the button stays hidden
+    /// for those reports. A report of any other span, or of none, clears
+    /// this field, so a later seek back into the span offers it again.
     passed: Option<Jump>,
     clock: Clock,
 }
 
 impl Skip {
-    /// The control's own fade, which the frame loop steps while it is moving.
     pub fn fade(&self) -> &Fade {
         self.clock.fade()
     }
@@ -54,9 +54,9 @@ impl Skip {
         self.clock.fade_mut()
     }
 
-    /// Take the jump the marks offer at the playhead, or nothing. It answers
-    /// whether the control came or went, so the frame loop redraws only for a
-    /// change.
+    /// Sets the jump that the marks offer at the playhead, or `None`.
+    /// Returns whether the offered jump changed, so the frame loop
+    /// redraws only on a change.
     pub fn on_position(&mut self, inside: Option<Jump>) -> bool {
         if self.passed != inside {
             self.passed = None;
@@ -69,8 +69,8 @@ impl Skip {
         match offered {
             Some(jump) => {
                 self.kind = Some(jump.span.kind);
-                // The control stays for the whole span, so it arms no hide
-                // window.
+                // The button stays up for the whole span, so it requests
+                // no hide timer.
                 self.clock.show(Hide::Keep);
             }
             None => self.clock.hide(),
@@ -78,21 +78,22 @@ impl Skip {
         true
     }
 
-    /// The stop is present only while the playhead is inside a span.
+    /// Returns whether the button offers a span, which makes it a focus
+    /// stop.
     pub fn available(&self) -> bool {
         self.jump.is_some()
     }
 
-    /// Whether a select over the bare video takes the control: while it offers
-    /// an intro or a recap.
+    /// Returns whether a select over the bare video activates the
+    /// button, which it does while it offers an intro or a recap.
     pub fn takes_select_outside(&self) -> bool {
         self.jump.is_some_and(|jump| takes_select(jump.span.kind))
     }
 
-    /// Seek to the target, exactly, so the first frame after the intro, or
-    /// the first frame of the scene, is the frame that shows. The control
-    /// leaves at once, and stays down until the playhead leaves the span it
-    /// skipped.
+    /// Returns the command that seeks to the jump's target. The seek is
+    /// exact, so the first frame after the intro, or the first frame of
+    /// the scene, is the one shown. The button hides at once and stays
+    /// hidden until the playhead leaves the span it skipped.
     pub fn take(&mut self) -> Vec<Command> {
         let Some(jump) = self.jump.take() else {
             return Vec::new();
@@ -102,17 +103,16 @@ impl Skip {
         vec![vec![json!("seek"), json!(jump.to), json!("absolute+exact")]]
     }
 
-    /// Draw the control as part of the OSD, bright on the panel while the
-    /// focus is on it.
+    /// Draws the button as part of the OSD, on the focus panel while it
+    /// has focus.
     pub fn draw(&self, brush: &mut Brush<'_>, focused: bool) {
         if let Some(jump) = self.jump {
             pill(brush, jump.span.kind, focused);
         }
     }
 
-    /// Draw the control over the bare video, at its own fade. While the OSD is
-    /// up the OSD draws it, so this draws nothing then. An intro or a recap
-    /// draws focused, because a select takes it.
+    /// Draws the button over the bare video, with its own fade. While
+    /// the OSD is up, the OSD draws the button, so this draws nothing.
     pub fn draw_outside(&self, brush: &mut Brush<'_>, osd_visible: bool) {
         if !self.draws_outside(osd_visible) {
             return;
@@ -125,21 +125,19 @@ impl Skip {
         });
     }
 
-    /// Whether the control has anything to draw over the bare video, so the
-    /// frame loop draws no layer for a control that is not there.
+    /// Returns whether `draw_outside` would draw anything, so the frame
+    /// loop adds no layer when the button is not visible.
     pub fn draws_outside(&self, osd_visible: bool) -> bool {
         !osd_visible && self.kind.is_some() && self.fade().value() > 0.0
     }
 }
 
-/// The kinds a select over the bare video takes. The credits are not one,
-/// because the card is up then too.
 fn takes_select(kind: Kind) -> bool {
     matches!(kind, Kind::Intro | Kind::Recap)
 }
 
-/// The words the control reads. The span's kind picks them: the marks offer a
-/// jump out of an intro, a recap, or the end credits alone.
+/// Returns the button's label for a kind of span. The marks only offer
+/// jumps out of an intro, a recap, or the end credits.
 fn label(kind: Kind) -> &'static str {
     match kind {
         Kind::Recap => "Skip recap",
@@ -148,10 +146,10 @@ fn label(kind: Kind) -> &'static str {
     }
 }
 
-/// The box behind the label, which measures the label. It hangs one padding
-/// outside the left margin, the way the chip's panel hangs one padding
-/// outside the right margin. The left margin is the same on every canvas
-/// width, so the box reads no canvas.
+/// Returns the box behind the label. It extends one padding past the
+/// left margin, as the chip's panel extends one padding past the right
+/// margin. The left margin is the same at every canvas width, so the
+/// box does not depend on the canvas.
 fn pill_box(kind: Kind) -> Rectangle {
     let width = measure(label(kind), theme::type_scale::TINY) + 2.0 * CHIP_PAD_X;
     Rectangle::new(
@@ -160,8 +158,8 @@ fn pill_box(kind: Kind) -> Rectangle {
     )
 }
 
-/// The label stands on the box's middle row, so the pad above the caps and
-/// below them match, and the two cannot drift apart.
+/// Returns the label, centred vertically in the box, so the padding
+/// above and below the capitals is equal.
 fn pill_line(kind: Kind) -> Line {
     Line::new(
         label(kind),
@@ -172,9 +170,9 @@ fn pill_line(kind: Kind) -> Line {
     )
 }
 
-/// The control is a button over the film, so it always draws on a fill. The
-/// unfocused fill is the unfocused card's, and the focused one is the panel
-/// every focused control takes, both rounded at the button's half height.
+/// Draws the button on a fill, because it appears over the film. The
+/// unfocused fill is the unfocused up-next card's, and the focused fill
+/// is the panel that every focused control uses.
 fn pill(brush: &mut Brush<'_>, kind: Kind, focused: bool) {
     let shape = pill_box(kind);
     if focused {
@@ -208,7 +206,7 @@ mod tests {
     }
 
     #[test]
-    fn outside_every_span_the_control_offers_nothing() {
+    fn outside_every_span_the_button_offers_nothing() {
         let mut skip = Skip::default();
         assert!(!skip.on_position(None));
         assert!(!skip.available());
@@ -216,10 +214,8 @@ mod tests {
         assert!(skip.take().is_empty());
     }
 
-    /// The control comes when the playhead enters the span, draws over the
-    /// bare video for the whole of it, and fades when the playhead leaves.
     #[test]
-    fn the_control_follows_the_playhead_through_the_span() {
+    fn the_button_follows_the_playhead_through_the_span() {
         let mut skip = Skip::default();
         assert!(skip.on_position(Some(intro())));
         assert!(skip.available());
@@ -237,10 +233,10 @@ mod tests {
         assert!(!skip.draws_outside(false));
     }
 
-    /// A select seeks to the span's end and takes the control down, and a
-    /// report from inside the span before the seek lands leaves it down.
+    /// A position report from inside the span before the seek completes
+    /// leaves the button hidden.
     #[test]
-    fn a_take_seeks_to_the_end_and_the_control_stays_down() {
+    fn a_select_seeks_to_the_end_and_the_button_stays_hidden() {
         let mut skip = Skip::default();
         skip.on_position(Some(intro()));
         assert_eq!(
@@ -252,10 +248,10 @@ mod tests {
         assert!(!skip.available());
     }
 
-    /// Inside the end credits the control seeks to the scene after them,
-    /// which need not be where the credits span ends.
+    /// The scene after the credits can start before the credits span
+    /// ends.
     #[test]
-    fn a_take_in_the_credits_seeks_to_the_scene() {
+    fn a_select_in_the_credits_seeks_to_the_scene() {
         let mut skip = Skip::default();
         skip.on_position(Some(Jump {
             span: Span {
@@ -275,10 +271,8 @@ mod tests {
         );
     }
 
-    /// Over the bare video, the control for an intro or a recap takes a
-    /// select, and the skip to the scene after the credits does not.
     #[test]
-    fn an_intro_or_a_recap_takes_a_select_outside_the_osd() {
+    fn a_select_outside_the_osd_activates_an_intro_or_a_recap_button() {
         let cases = [
             (Kind::Intro, true),
             (Kind::Recap, true),
@@ -286,7 +280,10 @@ mod tests {
         ];
         for (kind, takes) in cases {
             let mut skip = Skip::default();
-            assert!(!skip.takes_select_outside(), "{kind:?}");
+            assert!(
+                !skip.takes_select_outside(),
+                "a new Skip takes Select outside for {kind:?}, want false"
+            );
             skip.on_position(Some(Jump {
                 span: Span {
                     kind,
@@ -294,14 +291,19 @@ mod tests {
                 },
                 ..intro()
             }));
-            assert_eq!(skip.takes_select_outside(), takes, "{kind:?}");
+            assert_eq!(
+                skip.takes_select_outside(),
+                takes,
+                "takes_select_outside for {kind:?}"
+            );
             skip.take();
-            assert!(!skip.takes_select_outside(), "{kind:?}");
+            assert!(
+                !skip.takes_select_outside(),
+                "a taken Skip takes Select outside for {kind:?}, want false"
+            );
         }
     }
 
-    /// Once the playhead has left the span it skipped, a seek back into it
-    /// offers the skip again.
     #[test]
     fn a_seek_back_into_a_skipped_span_offers_it_again() {
         let mut skip = Skip::default();
@@ -312,10 +314,10 @@ mod tests {
         assert!(skip.available());
     }
 
-    /// The control is on the chip's row at the left margin and clears
-    /// the row the scrubber's time label draws on.
+    /// The button ends above row 846, where the scrubber's time label
+    /// starts.
     #[test]
-    fn the_control_is_on_the_chips_row_at_the_left_margin() {
+    fn the_button_is_on_the_chips_row_at_the_left_margin() {
         let cases = [
             (Kind::Intro, "Skip intro"),
             (Kind::Recap, "Skip recap"),

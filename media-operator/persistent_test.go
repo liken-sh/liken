@@ -1,19 +1,14 @@
 package main
 
-// These tests cover the template hash and the rule both standing pairs
-// follow: a stale object is deleted and the next pass creates the
-// replacement, a claim divergence takes the pod with it, and a pair that
-// matches the template is left as it stands.
-
 import (
 	"net/http"
 	"strings"
 	"testing"
 )
 
-// seedStanding puts one claim and one pod in the cluster the way a
-// previous pass left them, stamped with the hashes of the specs given.
-func seedStanding(t *testing.T, cluster *fakeCluster, claim *ResourceClaim, pod *Pod) {
+// seedPersistent adds a claim and a pod to the cluster as an earlier pass
+// would have created them, with the hashes of their specs.
+func seedPersistent(t *testing.T, cluster *fakeCluster, claim *ResourceClaim, pod *Pod) {
 	t.Helper()
 	mustSucceed(t, stampTemplateHash(&claim.Metadata, claim.Spec))
 	mustSucceed(t, stampTemplateHash(&pod.Metadata, pod.Spec))
@@ -21,8 +16,7 @@ func seedStanding(t *testing.T, cluster *fakeCluster, claim *ResourceClaim, pod 
 	cluster.pods[pod.Metadata.Name] = pod
 }
 
-// countRequests counts the requests of one method against one kind of
-// object, so a test reads what a pass did rather than what it left.
+// countRequests counts the requests of one method against one resource.
 func countRequests(cluster *fakeCluster, method, kind string) int {
 	count := 0
 	for _, request := range cluster.requests {
@@ -33,10 +27,10 @@ func countRequests(cluster *fakeCluster, method, kind string) int {
 	return count
 }
 
-// The hash reads the spec alone, so stamping the annotation does not
-// change it, and a second build of the same Remote stamps the same value.
+// Writing the annotation does not change the hash, and building the same
+// Remote again gives the same hash.
 func TestTemplateHashIgnoresTheAnnotationItStamps(t *testing.T) {
-	remote := standingRemote()
+	remote := remoteWithController()
 	claim := buildRemoteClaim(remote)
 
 	before, err := templateHash(claim.Spec)
@@ -53,12 +47,8 @@ func TestTemplateHashIgnoresTheAnnotationItStamps(t *testing.T) {
 	mustMatch(t, again.Metadata.Annotations[templateHashAnnotation], before)
 }
 
-// A release that changes the image the idle pod runs, a household that
-// changes the zone the idle clock reads, an edit to the fade policy,
-// and an added controller each change the pod hash, which is what rolls
-// the standing pod.
 func TestTemplateHashFollowsThePodSpec(t *testing.T) {
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 	claim := buildIdleClaim(player, "display-draw")
 	base, err := templateHash(plainIdlePod(player, claim, testBusAddress, testTopicBase, "America/New_York").Spec)
 	mustSucceed(t, err)
@@ -82,16 +72,14 @@ func TestTemplateHashFollowsThePodSpec(t *testing.T) {
 			hash, err := templateHash(one.pod.Spec)
 			mustSucceed(t, err)
 			if hash == one.base {
-				t.Errorf("%s changed and the hash stayed %q", one.name, hash)
+				t.Errorf("the hash is %[2]q after %[1]s changed, want a different hash", one.name, hash)
 			}
 		})
 	}
 }
 
-// A changed resource setting changes the pod's hash, so a cluster owner's
-// patch recreates each standing pod once with the new values.
 func TestTemplateHashFollowsTheResourceSettings(t *testing.T) {
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 	claim := buildIdleClaim(player, "display-draw")
 	defaults, err := templateHash(resourceSettings(nil).apply(
 		plainIdlePod(player, claim, testBusAddress, testTopicBase, "")).Spec)
@@ -102,14 +90,12 @@ func TestTemplateHashFollowsTheResourceSettings(t *testing.T) {
 	mustSucceed(t, err)
 
 	if patched == defaults {
-		t.Errorf("the settings changed and the hash stayed %q", patched)
+		t.Errorf("the hash is %q after the settings changed, want a different hash", patched)
 	}
 }
 
-// An edit to the Remote's device selector changes the claim hash, which
-// is what replaces the immutable claim and the pod that holds it.
 func TestTemplateHashFollowsTheClaimSelector(t *testing.T) {
-	remote := standingRemote()
+	remote := remoteWithController()
 	base, err := templateHash(buildRemoteClaim(remote).Spec)
 	mustSucceed(t, err)
 
@@ -118,18 +104,16 @@ func TestTemplateHashFollowsTheClaimSelector(t *testing.T) {
 	mustSucceed(t, err)
 
 	if edited == base {
-		t.Errorf("the selector changed and the hash stayed %q", edited)
+		t.Errorf("the hash is %q after the selector changed, want a different hash", edited)
 	}
 }
 
-// A pair that matches the template is left as it stands: the pass reads
-// both objects and writes nothing.
-func TestReconcileStandingKeepsAMatchingPair(t *testing.T) {
+func TestReconcilePersistentKeepsAMatchingPair(t *testing.T) {
 	cluster := newFakeCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
-	remote := standingRemote()
+	remote := remoteWithController()
 	claim := buildRemoteClaim(remote)
-	seedStanding(t, cluster, claim, media.resources.apply(
+	seedPersistent(t, cluster, claim, media.resources.apply(
 		buildRemotePod(remote, claim, media.sidecarImage, media.busAddress, media.topicBase)))
 
 	mustSucceed(t, media.reconcileRemote(remote, claimRead{}))
@@ -139,75 +123,70 @@ func TestReconcileStandingKeepsAMatchingPair(t *testing.T) {
 	mustMatch(t, countRequests(cluster, http.MethodPost, "namespaces"), 0)
 }
 
-// An image-only release changes the pod and not the claim. The pass
-// deletes the pod alone, so the claim keeps the allocation that holds a
-// sleeping controller, and the next pass creates the pod on the new
-// image.
-func TestReconcileStandingReplacesThePodAlone(t *testing.T) {
+// A release that changes only the image deletes the pod and keeps the
+// claim, so a sleeping controller keeps its allocation. The next pass
+// creates the pod with the new image.
+func TestReconcilePersistentReplacesThePodAlone(t *testing.T) {
 	cluster := newFakeCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
-	remote := standingRemote()
+	remote := remoteWithController()
 	claim := buildRemoteClaim(remote)
-	seedStanding(t, cluster, claim,
+	seedPersistent(t, cluster, claim,
 		buildRemotePod(remote, claim, "registry.example/sidecar:old", media.busAddress, media.topicBase))
 	stamped := claim.Metadata.Annotations[templateHashAnnotation]
 
 	mustSucceed(t, media.reconcileRemote(remote, claimRead{}))
 
-	if _, stands := cluster.pods["sofa-remote"]; stands {
-		t.Errorf("the stale pod stands: %v", cluster.requests)
+	if _, exists := cluster.pods["sofa-remote"]; exists {
+		t.Errorf("the pod still exists, want it deleted (requests: %v)", cluster.requests)
 	}
-	held, stands := cluster.claims["sofa-remote-devices"]
-	if !stands {
-		t.Fatalf("the claim was deleted with the pod: %v", cluster.requests)
+	held, exists := cluster.claims["sofa-remote-devices"]
+	if !exists {
+		t.Fatalf("the claim no longer exists, want it kept (requests: %v)", cluster.requests)
 	}
 	mustMatch(t, held.Metadata.Annotations[templateHashAnnotation], stamped)
 	mustMatch(t, countRequests(cluster, http.MethodDelete, "resourceclaims"), 0)
 
 	mustSucceed(t, media.reconcileRemote(remote, claimRead{}))
 
-	replacement, stands := cluster.pods["sofa-remote"]
-	if !stands {
-		t.Fatalf("no replacement pod was created: %v", cluster.requests)
+	replacement, exists := cluster.pods["sofa-remote"]
+	if !exists {
+		t.Fatalf("the pod does not exist, want a replacement (requests: %v)", cluster.requests)
 	}
 	mustMatch(t, replacement.Spec.Containers[0].Image, media.sidecarImage)
 }
 
-// A claim the Remote reshaped is stale, and so is the pod that holds its
-// allocation. The pass deletes both, the pod first, because a claim in
-// use stays terminating until every pod that holds it is gone.
-func TestReconcileStandingReplacesBothWhenTheClaimDiverges(t *testing.T) {
+func TestReconcilePersistentReplacesBothWhenTheClaimDiverges(t *testing.T) {
 	cluster := newFakeCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
-	remote := standingRemote()
+	remote := remoteWithController()
 	claim := buildRemoteClaim(remote)
-	seedStanding(t, cluster, claim,
+	seedPersistent(t, cluster, claim,
 		buildRemotePod(remote, claim, media.sidecarImage, media.busAddress, media.topicBase))
 
 	remote.Spec.Device.Selector = `device.attributes["bluetooth.liken.sh"].address == "7C:66"`
 	mustSucceed(t, media.reconcileRemote(remote, claimRead{}))
 
-	if _, stands := cluster.pods["sofa-remote"]; stands {
-		t.Errorf("the pod stands over a stale claim: %v", cluster.requests)
+	if _, exists := cluster.pods["sofa-remote"]; exists {
+		t.Errorf("the pod still exists, want it deleted with the stale claim (requests: %v)", cluster.requests)
 	}
-	if _, stands := cluster.claims["sofa-remote-devices"]; stands {
-		t.Errorf("the stale claim stands: %v", cluster.requests)
+	if _, exists := cluster.claims["sofa-remote-devices"]; exists {
+		t.Errorf("the stale claim still exists, want it deleted (requests: %v)", cluster.requests)
 	}
 
 	mustSucceed(t, media.reconcileRemote(remote, claimRead{}))
 
-	rebuilt, stands := cluster.claims["sofa-remote-devices"]
-	if !stands {
-		t.Fatalf("no replacement claim was created: %v", cluster.requests)
+	rebuilt, exists := cluster.claims["sofa-remote-devices"]
+	if !exists {
+		t.Fatalf("the claim does not exist, want a replacement (requests: %v)", cluster.requests)
 	}
 	selector := rebuilt.Spec.Devices.Requests[0].Exactly.Selectors[0].CEL.Expression
 	mustMatch(t, selector, `device.attributes["bluetooth.liken.sh"].address == "7C:66"`)
 }
 
-// An object an older release created carries no stamp, which never
-// equals a hash, so the first pass that carries the stamp rolls it once.
-// An unstamped claim takes its pod with it; an unstamped pod goes alone.
-func TestReconcileStandingRollsAnUnstampedObject(t *testing.T) {
+// An object from an older release has no hash annotation, so the first
+// pass replaces it.
+func TestReconcilePersistentReplacesAnUnstampedObject(t *testing.T) {
 	cases := []struct {
 		name       string
 		strip      func(claim *ResourceClaim, pod *Pod)
@@ -220,27 +199,24 @@ func TestReconcileStandingRollsAnUnstampedObject(t *testing.T) {
 		t.Run(one.name, func(t *testing.T) {
 			cluster := newFakeCluster()
 			media := testOperator(t, cluster, make(chan struct{}, 1))
-			remote := standingRemote()
+			remote := remoteWithController()
 			claim := buildRemoteClaim(remote)
 			pod := buildRemotePod(remote, claim, media.sidecarImage, media.busAddress, media.topicBase)
-			seedStanding(t, cluster, claim, pod)
+			seedPersistent(t, cluster, claim, pod)
 			one.strip(claim, pod)
 
 			mustSucceed(t, media.reconcileRemote(remote, claimRead{}))
 
-			if _, stands := cluster.pods["sofa-remote"]; stands {
-				t.Errorf("the unstamped pair kept its pod: %v", cluster.requests)
+			if _, exists := cluster.pods["sofa-remote"]; exists {
+				t.Errorf("the pod of the unstamped pair still exists, want it deleted (requests: %v)", cluster.requests)
 			}
-			_, stands := cluster.claims["sofa-remote-devices"]
-			mustMatch(t, stands, one.claimAfter)
+			_, exists := cluster.claims["sofa-remote-devices"]
+			mustMatch(t, exists, one.claimAfter)
 		})
 	}
 }
 
-// A delete this operator sent is in progress while the deletionTimestamp
-// stands. The pass leaves the whole pair alone until the delete
-// completes, so one divergence causes one delete and not one per pass.
-func TestReconcileStandingLeavesATerminatingPairAlone(t *testing.T) {
+func TestReconcilePersistentLeavesATerminatingPairAlone(t *testing.T) {
 	cases := []struct {
 		name string
 		mark func(claim *ResourceClaim, pod *Pod)
@@ -252,10 +228,10 @@ func TestReconcileStandingLeavesATerminatingPairAlone(t *testing.T) {
 		t.Run(one.name, func(t *testing.T) {
 			cluster := newFakeCluster()
 			media := testOperator(t, cluster, make(chan struct{}, 1))
-			remote := standingRemote()
+			remote := remoteWithController()
 			claim := buildRemoteClaim(remote)
 			stale := buildRemotePod(remote, claim, "registry.example/sidecar:old", media.busAddress, media.topicBase)
-			seedStanding(t, cluster, claim, stale)
+			seedPersistent(t, cluster, claim, stale)
 			one.mark(claim, stale)
 
 			mustSucceed(t, media.reconcileRemote(remote, claimRead{}))
@@ -267,33 +243,32 @@ func TestReconcileStandingLeavesATerminatingPairAlone(t *testing.T) {
 	}
 }
 
-// The idle pair follows the same rule as the remote pair. An edit to the
-// Player's friendly name changes the idle pod's environment, so the pod
-// rolls and the claim stays.
-func TestReconcileIdleRollsThePodOnAPlayerEdit(t *testing.T) {
+// Editing the Player's display name changes the idle pod's environment,
+// so the pod is replaced and the claim is kept.
+func TestReconcileIdleReplacesThePodOnAPlayerEdit(t *testing.T) {
 	cluster := newFakeCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	media.idleDisplayClass = "display-draw"
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 	claim := buildIdleClaim(player, media.idleDisplayClass)
-	seedStanding(t, cluster, claim,
+	seedPersistent(t, cluster, claim,
 		plainIdlePod(player, claim, media.busAddress, media.topicBase, "America/New_York"))
 
 	player.Spec.DisplayName = "Studio Lab"
 	mustSucceed(t, media.reconcileIdle(player, "America/New_York", nil))
 
-	if _, stands := cluster.pods["theater-idle"]; stands {
-		t.Errorf("the stale idle pod stands: %v", cluster.requests)
+	if _, exists := cluster.pods["theater-idle"]; exists {
+		t.Errorf("the idle pod still exists, want it deleted (requests: %v)", cluster.requests)
 	}
-	if _, stands := cluster.claims["theater-idle-devices"]; !stands {
-		t.Fatalf("the idle claim was deleted with the pod: %v", cluster.requests)
+	if _, exists := cluster.claims["theater-idle-devices"]; !exists {
+		t.Fatalf("the idle claim no longer exists, want it kept (requests: %v)", cluster.requests)
 	}
 
 	mustSucceed(t, media.reconcileIdle(player, "America/New_York", nil))
 
-	replacement, stands := cluster.pods["theater-idle"]
-	if !stands {
-		t.Fatalf("no replacement idle pod was created: %v", cluster.requests)
+	replacement, exists := cluster.pods["theater-idle"]
+	if !exists {
+		t.Fatalf("the idle pod does not exist, want a replacement (requests: %v)", cluster.requests)
 	}
 	env := map[string]string{}
 	for _, entry := range replacement.Spec.Containers[0].Env {
@@ -302,8 +277,8 @@ func TestReconcileIdleRollsThePodOnAPlayerEdit(t *testing.T) {
 	mustMatch(t, env[idlePlayerNameVariable], "Studio Lab")
 }
 
-// reservedBy marks one claim as held by the named pods, the way the
-// scheduler marks an allocated claim.
+// reservedBy sets status.reservedFor on a claim to the named pods, as
+// the scheduler does when a pod is scheduled with the claim.
 func reservedBy(claim *ResourceClaim, pods ...string) {
 	claim.Status = &ResourceClaimStatus{}
 	for _, pod := range pods {
@@ -312,8 +287,8 @@ func reservedBy(claim *ResourceClaim, pods ...string) {
 	}
 }
 
-// deleteOrder is the objects one pass deleted, in the order it sent the
-// deletes, as kind and name.
+// deleteOrder returns the resource and name of each delete request, in
+// the order they were sent.
 func deleteOrder(cluster *fakeCluster) []string {
 	var sent []string
 	for _, request := range cluster.requests {
@@ -326,15 +301,13 @@ func deleteOrder(cluster *fakeCluster) []string {
 	return sent
 }
 
-// a claim the pass would rebuild takes every pod that holds it
-// with it, the delegate's pod included, because an allocated claim stays
-// Terminating until every holder is gone. The holders go before the
-// claim.
-func TestReconcileStandingDeletesTheClaimHoldersBeforeTheClaim(t *testing.T) {
+// Replacing a claim deletes every pod that holds it first, including a
+// pod that another operator created.
+func TestReconcilePersistentDeletesTheClaimHoldersBeforeTheClaim(t *testing.T) {
 	cluster := newFakeCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	media.idleDisplayClass = "display-draw"
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 	player.Spec.Idle = &IdlePolicy{Controller: "library.liken.sh/media-browser"}
 	claim := buildIdleClaim(player, media.idleDisplayClass)
 	mustSucceed(t, stampTemplateHash(&claim.Metadata, claim.Spec))
@@ -345,22 +318,22 @@ func TestReconcileStandingDeletesTheClaimHoldersBeforeTheClaim(t *testing.T) {
 	player.Spec.Render = nil
 	mustSucceed(t, media.reconcileIdle(player, "America/New_York", nil))
 
-	if _, stands := cluster.pods["browser"]; stands {
-		t.Errorf("the delegate's pod stands over a stale claim: %v", cluster.requests)
+	if _, exists := cluster.pods["browser"]; exists {
+		t.Errorf("the delegate's pod still exists, want it deleted before the stale claim (requests: %v)", cluster.requests)
 	}
-	if _, stands := cluster.claims["theater-idle-devices"]; stands {
-		t.Errorf("the stale claim stands: %v", cluster.requests)
+	if _, exists := cluster.claims["theater-idle-devices"]; exists {
+		t.Errorf("the stale claim still exists, want it deleted (requests: %v)", cluster.requests)
 	}
 	mustMatchAll(t, deleteOrder(cluster), []string{"pods/browser", "resourceclaims/theater-idle-devices"})
 }
 
-// a holder the API server no longer holds is a pod that already
-// went, so the delete reads the absence as success and the claim follows.
-func TestReconcileStandingReadsAnAbsentHolderAsGone(t *testing.T) {
+// A holder that the API server no longer has counts as deleted, and the
+// claim is deleted next.
+func TestReconcilePersistentReadsAnAbsentHolderAsGone(t *testing.T) {
 	cluster := newFakeCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	media.idleDisplayClass = "display-draw"
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 	player.Spec.Idle = &IdlePolicy{Controller: "library.liken.sh/media-browser"}
 	claim := buildIdleClaim(player, media.idleDisplayClass)
 	mustSucceed(t, stampTemplateHash(&claim.Metadata, claim.Spec))
@@ -370,29 +343,29 @@ func TestReconcileStandingReadsAnAbsentHolderAsGone(t *testing.T) {
 	player.Spec.Render = nil
 	mustSucceed(t, media.reconcileIdle(player, "America/New_York", nil))
 
-	if _, stands := cluster.claims["theater-idle-devices"]; stands {
-		t.Errorf("the stale claim stands: %v", cluster.requests)
+	if _, exists := cluster.claims["theater-idle-devices"]; exists {
+		t.Errorf("the stale claim still exists, want it deleted (requests: %v)", cluster.requests)
 	}
 }
 
-// a pod the pass no longer wants is deleted though its template
-// never changed, and the claim it referenced stands, because the claim is
-// still wanted.
-func TestReconcileStandingDeletesAPodItNoLongerWants(t *testing.T) {
+// When spec.idle.controller names another operator, the idle client pod
+// is deleted although its hash is unchanged, and the claim is kept for
+// that operator's pod.
+func TestReconcilePersistentDeletesAPodItNoLongerWants(t *testing.T) {
 	cluster := newFakeCluster()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	media.idleDisplayClass = "display-draw"
-	player := standingIdlePlayer()
+	player := playerWithDisplay()
 	claim := buildIdleClaim(player, media.idleDisplayClass)
-	seedStanding(t, cluster, claim, plainIdlePod(player, claim, testBusAddress, testTopicBase, "America/New_York"))
+	seedPersistent(t, cluster, claim, plainIdlePod(player, claim, testBusAddress, testTopicBase, "America/New_York"))
 
 	player.Spec.Idle = &IdlePolicy{Controller: "library.liken.sh/media-browser"}
 	mustSucceed(t, media.reconcileIdle(player, "America/New_York", nil))
 
-	if _, stands := cluster.pods["theater-idle"]; stands {
-		t.Errorf("the idle client pod stands under a delegate: %v", cluster.requests)
+	if _, exists := cluster.pods["theater-idle"]; exists {
+		t.Errorf("the idle client pod still exists, want it deleted (requests: %v)", cluster.requests)
 	}
-	if _, stands := cluster.claims["theater-idle-devices"]; !stands {
-		t.Errorf("the claim went with the pod: %v", cluster.requests)
+	if _, exists := cluster.claims["theater-idle-devices"]; !exists {
+		t.Errorf("the claim no longer exists, want it kept (requests: %v)", cluster.requests)
 	}
 }

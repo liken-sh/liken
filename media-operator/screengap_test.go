@@ -1,11 +1,5 @@
 package main
 
-// These tests cover a screen that goes away for a short time. The pod
-// that draws the idle screen holds the idle claim, and the claim loses
-// its allocation while that pod is replaced. The unit keeps its
-// Receiver match through such a gap, and loses it when the screen stays
-// away past the bound.
-
 import (
 	"strings"
 	"testing"
@@ -13,19 +7,19 @@ import (
 	"time"
 )
 
-// gapStart is the moment each test's clock starts at.
 var gapStart = time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
 
-// gapOperator builds an operator over a unit wired through a Receiver,
-// with the idle screen on and a clock the test moves. The idle claim
-// carries the stamp the pass builds, so the pass keeps it and a test
-// can take its allocation away and give it back.
+// gapOperator builds an operator for a Player wired through a Receiver,
+// with the idle screen on and a clock the test controls. The idle claim
+// already has the template hash that the pass would write on it, so the
+// pass does not replace the claim while the test removes and restores
+// its allocation.
 func gapOperator(t *testing.T) (*operator, *fakeCluster, *testClock) {
 	t.Helper()
 	cluster := receiverCluster()
 	claim := cluster.claims[idleClaimName("theater")]
 	if err := stampTemplateHash(&claim.Metadata, claim.Spec); err != nil {
-		t.Fatal(err)
+		t.Fatalf("stamping the template hash on the claim: %v", err)
 	}
 	media := testOperator(t, cluster, make(chan struct{}, 1))
 	media.idleDisplayClass = "display-draw"
@@ -34,9 +28,9 @@ func gapOperator(t *testing.T) (*operator, *fakeCluster, *testClock) {
 	return media, cluster, clock
 }
 
-// runGap runs one pass with the idle claim unallocated at the given
-// offset from the start of the gap, and answers the Receiver the ensure
-// desk holds for the unit after it.
+// runGap runs one pass at the given offset from the start of the gap,
+// with the idle claim unallocated. It returns the Receiver that
+// playerReceivers records for the Player after the pass.
 func runGap(t *testing.T, media *operator, cluster *fakeCluster, clock *testClock, offset time.Duration) string {
 	t.Helper()
 	cluster.claims[idleClaimName("theater")].Status = nil
@@ -45,12 +39,10 @@ func runGap(t *testing.T, media *operator, cluster *fakeCluster, clock *testCloc
 	return wiredReceiver(media)
 }
 
-// A screen pod that another operator replaces leaves the idle claim
-// unallocated until the scheduler places the new pod. A gap within the
-// bound changes nothing: the session stands and the ensure desk still
-// holds the Receiver, so a press during the gap still asks for the
-// input. A screen that stays away past the bound lifts the session and
-// drops the Receiver until the screen comes back.
+// A gap shorter than the bound changes nothing: the session stays on
+// the Receiver, and playerReceivers still records the Receiver, so a press
+// during the gap still switches the input. A gap as long as the bound
+// removes the session and the Receiver until the screen resolves again.
 func TestAScreenGapKeepsTheReceiverMatchOnlyWithinTheBound(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -91,9 +83,9 @@ func TestAScreenGapKeepsTheReceiverMatchOnlyWithinTheBound(t *testing.T) {
 	}
 }
 
-// A screen that resolves again ends the gap, so the next gap has the
+// A screen that resolves again ends the gap, so the next gap gets the
 // whole bound again.
-func TestAScreenThatComesBackStartsTheNextGapAfresh(t *testing.T) {
+func TestAScreenThatResolvesAgainRestartsTheBoundForTheNextGap(t *testing.T) {
 	media, cluster, clock := gapOperator(t)
 
 	runPlayers(media, []Player{*housePlayer()}, nil)
@@ -108,8 +100,8 @@ func TestAScreenThatComesBackStartsTheNextGapAfresh(t *testing.T) {
 	mustMatch(t, appliedSessions(cluster), "den-receiver: GAME")
 }
 
-// A unit that never resolved a screen in this run has no match to keep,
-// so an unallocated claim matches no Receiver from the first pass.
+// A Player that has not resolved a screen since the operator started
+// has no last screen, so an unallocated claim matches no Receiver.
 func TestAScreenThatNeverResolvedMatchesNothing(t *testing.T) {
 	media, cluster, _ := gapOperator(t)
 	cluster.claims[idleClaimName("theater")].Status = nil
@@ -120,10 +112,10 @@ func TestAScreenThatNeverResolvedMatchesNothing(t *testing.T) {
 	mustMatch(t, appliedSessions(cluster), "")
 }
 
-// A Player that is gone takes its held screen with it, so a Player
-// created again under the same name does not match through a gap it
-// never had.
-func TestAPlayerThatIsGoneForgetsItsScreen(t *testing.T) {
+// When a Player is deleted, the operator forgets its screen, so a
+// Player created again under the same name does not match through a gap
+// it never had.
+func TestADeletedPlayerLeavesNoScreenForTheNextPlayerOfThatName(t *testing.T) {
 	media, cluster, _ := gapOperator(t)
 
 	runPlayers(media, []Player{*housePlayer()}, nil)
@@ -135,9 +127,7 @@ func TestAPlayerThatIsGoneForgetsItsScreen(t *testing.T) {
 	mustMatch(t, appliedSessions(cluster), "den-receiver: GAME, den-receiver: lift")
 }
 
-// The first pass of a gap wakes the pass again at the bound, so a
-// screen that is really gone loses its match when the bound ends, and
-// not at the next unrelated event.
+// The first pass of a gap requeues a pass at the end of the bound.
 func TestAScreenGapWakesThePassAtTheBound(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		wake := make(chan struct{}, 1)

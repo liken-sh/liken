@@ -1,17 +1,9 @@
 package main
 
-// The power keys. A person turns a Player off and on with the remote,
-// so this operator reads each press off the controller's events topic,
-// gated by the same focus mark as the input asks (ensure.go), and
-// writes the unit's spec.power. A pass then turns the hardware to
-// follow it (playerpower.go). kubectl writes the same field, and the
+// A power key on a remote writes spec.power of the Player that the
+// controller has focus on. The next pass switches the hardware to match
+// (playerpower.go). A person with kubectl writes the same field, and the
 // last write wins.
-//
-// The press writes spec.power by server-side apply under a field
-// manager that owns that one field. A GitOps copy of the Player that
-// leaves the field out then never removes it or takes it back, and an
-// apply that states the field again forces it away from kubectl, which
-// is what the press means.
 
 import (
 	"encoding/json"
@@ -25,40 +17,39 @@ import (
 	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
-// toggleKeys are the two power synonyms a shell and a Bluetooth remote
-// send. Each press turns the Player off when it is on and on when it is
-// off.
+// toggleKeys are the two names that remotes send for a power button. A
+// press switches the Player to the opposite power state.
 var toggleKeys = []string{"KEY_POWER", "KEY_POWER2"}
 
-// powerOffKey and powerOnKey are the names the kernel's rc-cec keymap
-// gives a TV remote's Power Off Function and Power On Function. Each
-// names the state it wants (HDMI-CEC 1.3a, CEC 13.13.3), so a second
-// press leaves the Player in that state. The Rust crate media-screen
-// holds the four power names as POWER in
-// media-screen/src/screen/keys.rs, because a Go list cannot reach it:
-// a change to one changes both.
+// powerOffKey and powerOnKey are the names that the kernel's rc-cec
+// keymap gives to a TV remote's Power Off Function and Power On
+// Function (HDMI-CEC 1.3a, section 13.13.3). Each sets a fixed state,
+// so a second press changes nothing. POWER in
+// media-screen/src/screen/keys.rs lists the same four power keys for
+// the Rust screen client. Change both together.
 const (
 	powerOffKey = "KEY_SLEEP"
 	powerOnKey  = "KEY_WAKEUP"
 )
 
-// The two values of spec.power. An absent field is On.
+// The values of spec.power. An absent field means On.
 const (
 	playerPowerOn  = "On"
 	playerPowerOff = "Off"
 )
 
-// powerFieldManager owns spec.power and no other field. It is not the
-// manager of the operator's other applies, because an apply removes
-// each field its manager owned and did not state again.
+// powerFieldManager is the server-side apply field manager for
+// spec.power alone. An apply removes each field that its manager owned
+// and the new body omits, so the operator's other applies, and a GitOps
+// copy of the Player that omits spec.power, leave the field alone.
 const powerFieldManager = "media-operator-power"
 
-// powerKey answers whether one key name is a power key.
+// powerKey reports whether key is one of the four power keys.
 func powerKey(key string) bool {
 	return slices.Contains(toggleKeys, key) || key == powerOffKey || key == powerOnKey
 }
 
-// specPower reads a Player's spec.power, with an absent field as On.
+// specPower returns the Player's spec.power, with an absent field as On.
 func specPower(player *Player) string {
 	if player.Spec.Power == playerPowerOff {
 		return playerPowerOff
@@ -66,10 +57,10 @@ func specPower(player *Player) string {
 	return playerPowerOn
 }
 
-// pressedPower answers the spec.power one press sets on a Player whose
-// power is now, and whether that moves it. Any key that is not a power
-// key turns a Player that is off on, so a person gets the room back
-// with whatever control they touched.
+// pressedPower returns the spec.power that a press of key sets on a
+// Player whose power is now, and whether it differs from now. Any key
+// that is not a power key turns on a Player that is off, so any button
+// of the remote turns the screen and speakers on.
 func pressedPower(key, now string) (string, bool) {
 	switch {
 	case slices.Contains(toggleKeys, key) && now == playerPowerOn:
@@ -84,25 +75,24 @@ func pressedPower(key, now string) (string, bool) {
 	return now, false
 }
 
-// pressPower writes the spec.power one press sets, and answers whether
-// the press turned the Player on. A press that turns the Player on does
-// nothing else: the wake that follows selects the unit's input, and a
-// room that was off takes no volume step. A power key acts on the press
-// alone and never on a repeat, because a held key would turn the room
-// off and on under the hand.
+// pressPower applies the spec.power that a press sets, and returns
+// true when the press turned the Player on. The caller then ignores the
+// press, because turning the Player on already selects its input, and
+// a volume key must not change the level of a Player that was off. A
+// key repeat or release changes nothing, so a held power key toggles
+// the power once.
 func (o *operator) pressPower(namespace, controller string, payload []byte) bool {
 	key, pressed := pressOf(payload)
 	if !pressed {
 		return false
 	}
-	player, unit := o.focusedUnit(namespace, controller)
-	if unit == "" {
+	player, focused := o.focusedPlayer(namespace, controller)
+	if focused == "" {
 		return false
 	}
 	trigger := fmt.Sprintf("remote %s: %s pressed with focus on player %s",
 		controllerKey(namespace, controller), key, player)
-	// A mark can name a Player that is gone, and that press has no power
-	// to move.
+	// The controller can have focus on a Player that was deleted.
 	held, err := o.view.Player(o.client, namespace, player)
 	if errors.Is(err, apiclient.ErrNotFound) {
 		return false
@@ -124,8 +114,8 @@ func (o *operator) pressPower(namespace, controller string, payload []byte) bool
 	return next == playerPowerOn
 }
 
-// playerPowerApply is the body of the apply: the Player's identity and
-// spec.power, and nothing else.
+// playerPowerApply is the apply body: the Player's identity and
+// spec.power, and no other field.
 type playerPowerApply struct {
 	APIVersion string          `json:"apiVersion"`
 	Kind       string          `json:"kind"`
@@ -137,10 +127,11 @@ type playerPowerSpec struct {
 	Power string `json:"power"`
 }
 
-// ApplyPlayerPower writes one Player's spec.power under the power field
-// manager, and notes the version of the copy the API server answered,
-// so the next press toggles from this write and not from a store copy
-// the watch has not updated yet.
+// ApplyPlayerPower applies one Player's spec.power under
+// powerFieldManager, with force, so it takes the field from any other
+// manager. It records the resource version that the API server
+// returns, so the next press toggles from this write and not from a
+// cached copy that the watch has not refreshed yet.
 func ApplyPlayerPower(c *apiclient.Client, versions *memo.Versions, namespace, name, power string) error {
 	body, err := json.Marshal(&playerPowerApply{
 		APIVersion: mediaAPIVersion,

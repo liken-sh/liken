@@ -1,15 +1,15 @@
-A `Remote` is one physical controller: the device it is and, where
-its model needs one, the [`Keymap`](/docs/reference/keymaps/) for its
-model. The base table already gives a `Remote` with no `Keymap` the
-arrows, OK, back, and every `KEY_*` code the device emits, and a
-`Keymap` corrects a device the base gets wrong. It names no
-player. A `Player` names the `Remote`s it owns through
-`spec.remotes`, so the unit that owns a controller is the one that
-lists it, and one controller can drive several units.
+A `Remote` is one physical controller. It selects the controller's
+device and, when the model needs one, a
+[`Keymap`](/docs/reference/keymaps/). Without a `Keymap`, the base
+table maps the arrows, OK, back, and every `KEY_*` code the device
+emits. Add a `Keymap` to correct a button that the base table maps
+wrongly. A `Remote` does not name a `Player`. Each `Player` lists the
+`Remote`s that control it in `spec.remotes`, so one controller can
+control several `Player`s.
 
-A `Remote` name is at most 32 characters, because `media-operator` builds the names
-of the objects it creates from it, and Kubernetes limits some of those
-names to 63 characters.
+A `Remote` name has at most 32 characters, because `media-operator`
+builds the names of the objects it creates for the `Remote` from it,
+and Kubernetes limits some of those names to 63 characters.
 
     apiVersion: media.liken.sh/v1alpha1
     kind: Remote
@@ -22,10 +22,12 @@ names to 63 characters.
         selector: device.attributes["bluetooth.liken.sh"].address == "04:4A:5B:11:22:33"
       keymap: dualsense
 
-`spec.device.parameters` is opaque configuration for the driver that
-prepares the controller. A `Remote` uses it to name the classes of
-input it needs, in the driver's own words. The bluetooth operator's
-manual documents its `inputs` parameter and the classes it accepts.
+`spec.device.parameters` is configuration for the driver that
+prepares the controller, and `media-operator` copies it unchanged
+into the controller's device claim. For example, the Bluetooth
+operator's `inputs` parameter chooses which input classes, such as
+`joystick`, reach the container that reads the controller. The
+Bluetooth operator's manual lists the classes.
 
     spec:
       device:

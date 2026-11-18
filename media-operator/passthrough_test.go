@@ -1,19 +1,13 @@
 package main
 
-// These tests cover the passthrough decision: which encoded formats mpv
-// sends to the receiver unchanged, the option that carries them to the
-// player container, and the line a play start writes for a Player that
-// states passthrough On.
-
 import (
 	"strings"
 	"testing"
 )
 
-// passthroughCluster is the house unit wired into a reachable Receiver,
-// with the front Sink remembered on the Player. The Player states
-// passthrough On, and the front Sink accepts every encoded format the
-// audio operator reports.
+// passthroughCluster is volumeCluster with spec.passthrough On for the
+// Player theater, whose Sink front reports every format in
+// spdifFormats.
 func passthroughCluster() *fakeCluster {
 	cluster := volumeCluster()
 	cluster.players["theater"].Spec.Passthrough = passthroughOn
@@ -21,10 +15,7 @@ func passthroughCluster() *fakeCluster {
 	return cluster
 }
 
-// Each audio-operator name maps to its mpv name, in one fixed order
-// whatever order the Sink lists them in, and a name that is not one of
-// the five is dropped.
-func TestTheSinksFormatsMapToMpvCodecs(t *testing.T) {
+func TestSinkFormatsMapToMpvCodecsInFixedOrder(t *testing.T) {
 	cases := []struct {
 		name    string
 		formats []string
@@ -43,39 +34,35 @@ func TestTheSinksFormatsMapToMpvCodecs(t *testing.T) {
 	}
 }
 
-// mpv gets the Sink's codecs only when the Player asks for passthrough,
-// plays through one sink, has its level set by a reachable Receiver, and
-// remembers a Sink that accepts an encoded format. Otherwise the Player
-// that asked hears why it decodes.
-func TestThePassthroughDecision(t *testing.T) {
+func TestPassthroughDecision(t *testing.T) {
 	cases := []struct {
 		name   string
 		change func(*fakeCluster)
 		codecs string
 		reason string
 	}{
-		{name: "every condition holds", change: func(*fakeCluster) {},
+		{name: "all conditions met", change: func(*fakeCluster) {},
 			codecs: "ac3,eac3,dts,dts-hd,truehd"},
 		{name: "passthrough unset", change: func(c *fakeCluster) { c.players["theater"].Spec.Passthrough = "" }},
 		{name: "passthrough Off", change: func(c *fakeCluster) { c.players["theater"].Spec.Passthrough = passthroughOff }},
 		{name: "two sinks", change: func(c *fakeCluster) {
 			c.players["theater"].Spec.Sinks = append(c.players["theater"].Spec.Sinks, PlayerDevice{Class: "audio-speaker"})
-		}, reason: "passthrough needs exactly one entry in spec.sinks, and the player states 2"},
+		}, reason: "spec.sinks has 2 entries, and passthrough needs exactly one"},
 		{name: "receiver unreachable", change: func(c *fakeCluster) {
 			c.receivers["den-receiver"].Status.Conditions = []ReceiverCondition{{Type: receiverReachableCondition, Status: "False"}}
-		}, reason: "no Receiver with a Reachable condition of True sets the unit's level"},
+		}, reason: "no Receiver matches the Player's screen with a Reachable condition of True, and passthrough needs one to set the volume"},
 		{name: "no receiver", change: func(c *fakeCluster) { c.receiversAbsent = true },
-			reason: "no Receiver with a Reachable condition of True sets the unit's level"},
-		{name: "no remembered sink", change: func(c *fakeCluster) { c.players["theater"].Status.Sinks = nil },
-			reason: "status.sinks names no Sink yet, which is the case until the player's first playback claim is allocated"},
-		{name: "remembered sink not in the view", change: func(c *fakeCluster) { delete(c.sinks, "front") },
-			reason: "the operator holds no Sink front"},
-		{name: "remembered sink does not convert", change: func(c *fakeCluster) { c.fails[sinksPath+"/front"] = true },
-			reason: "reading Sink front failed: Garbled front does not convert: cannot restore struct from: string"},
+			reason: "no Receiver matches the Player's screen with a Reachable condition of True, and passthrough needs one to set the volume"},
+		{name: "no sink in status.sinks", change: func(c *fakeCluster) { c.players["theater"].Status.Sinks = nil },
+			reason: "status.sinks lists no Sink, and stays empty until the Player's first playback claim is allocated"},
+		{name: "sink missing from the operator view", change: func(c *fakeCluster) { delete(c.sinks, "front") },
+			reason: "Sink front does not exist"},
+		{name: "sink fails to convert", change: func(c *fakeCluster) { c.fails[sinksPath+"/front"] = true },
+			reason: "reading Sink front: Garbled front does not convert: cannot restore struct from: string"},
 		{name: "sink accepts nothing", change: func(c *fakeCluster) { c.sinks["front"].Status.Passthrough = nil },
-			reason: "sink front accepts no encoded format in status.passthrough"},
+			reason: "Sink front lists no encoded format in status.passthrough"},
 		{name: "sink accepts only unknown names", change: func(c *fakeCluster) { c.sinks["front"].Status.Passthrough = []string{"PCM"} },
-			reason: "sink front accepts no encoded format in status.passthrough"},
+			reason: "Sink front lists no encoded format in status.passthrough"},
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
@@ -91,10 +78,7 @@ func TestThePassthroughDecision(t *testing.T) {
 	}
 }
 
-// The option travels in the player container's options variable, after
-// the preference options when there are any and alone when there are
-// none.
-func TestThePassthroughOptionReachesThePlayer(t *testing.T) {
+func TestPassthroughOptionReachesThePlayer(t *testing.T) {
 	cases := []struct {
 		name   string
 		prefs  resolvedPreferences
@@ -117,10 +101,7 @@ func TestThePassthroughOptionReachesThePlayer(t *testing.T) {
 	}
 }
 
-// A play start on a Player that states On writes one line, either the
-// codecs mpv passes through or why it decodes. A Player that states
-// nothing writes no new line, and its pod carries no option.
-func TestAPlayStartLogsThePassthroughDecision(t *testing.T) {
+func TestPlayStartLogsPassthroughDecision(t *testing.T) {
 	cases := []struct {
 		name   string
 		change func(*fakeCluster)
@@ -128,12 +109,12 @@ func TestAPlayStartLogsThePassthroughDecision(t *testing.T) {
 		option string
 	}{
 		{name: "passes through", change: func(*fakeCluster) {}, want: []string{
-			"play house/movie: mpv passes ac3,eac3,dts,dts-hd,truehd through to sink front, because player theater states passthrough On",
+			"play house/movie: mpv passes ac3,eac3,dts,dts-hd,truehd through to sink front, because Player theater sets spec.passthrough to On",
 		}, option: "--audio-spdif=ac3,eac3,dts,dts-hd,truehd"},
 		{name: "decodes", change: func(c *fakeCluster) { c.sinks["front"].Status.Passthrough = nil }, want: []string{
-			"play house/movie: mpv decodes every track, although player theater states passthrough On, because sink front accepts no encoded format in status.passthrough",
+			"play house/movie: mpv decodes every track, although Player theater sets spec.passthrough to On, because Sink front lists no encoded format in status.passthrough",
 		}},
-		{name: "not asked", change: func(c *fakeCluster) { c.players["theater"].Spec.Passthrough = "" }},
+		{name: "passthrough unset", change: func(c *fakeCluster) { c.players["theater"].Spec.Passthrough = "" }},
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
@@ -150,8 +131,6 @@ func TestAPlayStartLogsThePassthroughDecision(t *testing.T) {
 	}
 }
 
-// passthroughLines keeps the Play's lines about passthrough, past the
-// lines about its pod and its phase.
 func passthroughLines(log *logBuffer) []string {
 	var kept []string
 	for _, line := range linesAbout(log, "play house/movie") {

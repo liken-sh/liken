@@ -1,9 +1,8 @@
 package main
 
-// These tests cover what the route table alone does not: which sink
-// an audio redirect names and how it links the rest, what the 409
-// tells a unit with nothing to tap, and which query keys each upstream
-// request carries.
+// These tests cover behavior that the route table tests do not: which
+// sink an audio redirect points to and how it links the others, what
+// the 409 detail says, and which query keys each upstream URL carries.
 
 import (
 	"net/http"
@@ -11,9 +10,9 @@ import (
 	"testing/synctest"
 )
 
-// An audio redirect names the first sink in its Location and links the
-// rest, so the response says the other sinks exist without a read of
-// the Player.
+// An audio redirect points to the first sink in its Location and
+// lists the other sinks in Link headers, so a client learns about them
+// without reading the Player.
 func TestAnAudioRedirectLinksTheOtherSinks(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
@@ -30,9 +29,9 @@ func TestAnAudioRedirectLinksTheOtherSinks(t *testing.T) {
 	})
 }
 
-// The detail of a 409 names the action that clears it, and the action
-// differs: a unit with no running Play needs a Play, and a unit that
-// plays but resolved no Sink needs spec.sinks.
+// The detail of a 409 says what to do. A Player with no running Play
+// needs a Play, and a Player that plays but has no resolved Sink needs
+// spec.sinks.
 func TestTheDetailOfA409NamesTheAction(t *testing.T) {
 	rows := []struct {
 		name    string
@@ -41,7 +40,7 @@ func TestTheDetailOfA409NamesTheAction(t *testing.T) {
 		detail  string
 	}{
 		{"no Play runs", false, 2, "run a Play on this Player to open its sound"},
-		{"a Play runs and no sink resolved", true, 0, "this Player resolves no Sink; state spec.sinks on it and run a Play"},
+		{"a Play runs and no sink resolved", true, 0, "this Player resolves no Sink. Set spec.sinks on it and run a Play"},
 	}
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
@@ -58,10 +57,9 @@ func TestTheDetailOfA409NamesTheAction(t *testing.T) {
 	}
 }
 
-// Each upstream carries the knobs its own aspect takes and no others:
-// the screen knobs go to the display API and bitrate to the audio
-// API, each with the lead-in added to t=.
-func TestEachUpstreamCarriesItsOwnKnobs(t *testing.T) {
+// The display URL gets only the screen keys and the audio URL gets
+// only t= and bitrate=. Both add the lead-in to t=.
+func TestEachUpstreamURLGetsOnlyItsAspectKeys(t *testing.T) {
 	query, err := parseCaptureQuery("t=0,10&xywh=0,0,960,540&width=480&framerate=15&quality=85&bitrate=128",
 		mediaCaptureKeys)
 	mustSucceed(t, err)
@@ -73,8 +71,8 @@ func TestEachUpstreamCarriesItsOwnKnobs(t *testing.T) {
 		testAudioBase+"/v1/audio/sinks/hdmi-0-pch/audio.opus?t=1,11&bitrate=128")
 }
 
-// The health paths obey the same method rules as every other route: a
-// POST is 405 with Allow, and an OPTIONS is 204.
+// The health paths follow the same method rules as the other routes:
+// POST gets 405 with an Allow header, and OPTIONS gets 204.
 func TestTheHealthPathsRefuseOtherMethods(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)

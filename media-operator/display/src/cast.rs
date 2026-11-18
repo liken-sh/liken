@@ -1,34 +1,37 @@
-//! The cast row: the credited people in the scene. The library's
-//! appearances fact writes a spans file for the item, one span per stretch
-//! of the film with the same people in the picture, left to right. The
-//! producer cuts a span at nearly every shot change, so a dialogue filmed
-//! shot and reverse shot gives one span for each speaker in turn. A row
-//! that drew only the span under the playhead would swap its cards on every
-//! cut. So the row shows the scene: everyone named in any span that
-//! overlaps the last `LINGER` seconds before the playhead.
+//! The cast row: a card for each credited person in the current scene.
 //!
-//! A person who is in the picture now draws at full strength. A person who
-//! left the picture draws fainter as the time since their last span grows,
-//! and leaves the row when that time reaches `LINGER`.
+//! The `appearances` tool of `library-operator` writes a spans file for each
+//! video. A span is a stretch of the video in which the same people are on
+//! screen, listed left to right. The tool starts a new span when the people
+//! on screen change, so a dialogue filmed as shot and reverse shot gives one
+//! span for each speaker in turn. A row that showed only the span at the
+//! playhead would replace its cards on every cut. So the row shows everyone
+//! listed in any span that overlaps the last `LINGER` seconds before the
+//! playhead.
 //!
-//! The cards stay in the order the people arrived. A person's arrival is the
-//! start of their current run of appearances, where a gap of at most
-//! `LINGER` between two spans does not end the run. A newcomer appends at
-//! the right, and when a person ages out, the cards to their right move one
-//! place left. The order is a function of the spans and the playhead alone,
-//! so a seek gives the row that playing to the same second gives.
+//! A person who is on screen now is drawn at full strength. A person who has
+//! left the picture fades as the time since their last span grows, and leaves
+//! the row when that time reaches `LINGER`.
+//!
+//! Cards are ordered by arrival. A person arrives at the start of their
+//! current run of appearances, and a gap of at most `LINGER` between two of
+//! their spans does not end the run. A newcomer is added at the right, and
+//! when a person leaves, the cards to their right move one place left. The
+//! order depends only on the spans and the playhead, so a seek to a second
+//! gives the same row as playing to that second.
 //!
 //! Each card shows the portrait, the actor's name, the character's name in
-//! italic and faint the way the library's browser shows it, and a line of
-//! ages: how old the person was when the film came out, and how old they are
-//! today or the year they died. The file holds dates and not ages, so the
-//! row works out each age against the release date and the wall clock.
+//! faint italics, and a line of ages: the person's age when the film came
+//! out, and their age today or the year they died. The spans file holds
+//! dates and not ages, so the row computes the ages from the release date
+//! and today's date.
 //!
-//! The row is a focus stop above the up-next offer. Up reaches it, and left
-//! and right move along it. The focus belongs to a person and not to a
-//! place, so a cut that changes the row leaves the focus on the same person.
-//! A row with more people than the screen holds runs off the right edge, and
-//! the row slides to keep the focused card on screen.
+//! The row is a focus stop above the up-next offer. Up moves the focus to
+//! it, and left and right move the focus along it. The focus follows a
+//! person and not a position, so when a cut changes the row, the focus stays
+//! on the same person. A row with more people than fit on the screen runs
+//! off the right edge, and the row scrolls to keep the focused card on
+//! screen.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -45,64 +48,66 @@ use crate::header::BETWEEN;
 use crate::theme;
 use crate::upnext::{CARD_ALPHA, CARD_R};
 
-/// The portrait's box, which the decode fills.
+/// The size of the portrait, which the decoded image fills.
 pub const PORTRAIT_W: f32 = 57.0;
 pub const PORTRAIT_H: f32 = 76.0;
 
-/// The card's type sizes. The row shows while the film plays, so the cards
-/// draw a step under the bar's own type and cover less of the picture.
+/// The card's text sizes. The row shows while the film plays, so its text is
+/// smaller than the control bar's, and the cards cover less of the picture.
 const NAME_SIZE: f32 = 30.0;
 const LINE_SIZE: f32 = 24.0;
 
-/// One card's box and the pitch between two cards. The card is wide enough
-/// for a long name and the ages line at the type sizes it draws in.
+/// The size of one card and the space between two cards. The card is wide
+/// enough for a long name and for the ages line at these text sizes.
 const CARD_W: f32 = 330.0;
 const CARD_H: f32 = PORTRAIT_H + 2.0 * PAD;
 const GAP: f32 = 14.0;
 const PAD: f32 = 8.0;
 const TEXT_GAP: f32 = 12.0;
 
-/// The row's top edge and its heading. The cards end above the row where the
-/// skip control and the up-next chip draw, so the row never moves when one
-/// of them comes or goes.
+/// The top edge of the cards and of the heading. The cards end above the
+/// skip control and the up-next chip, so the row stays in place when either
+/// one appears.
 const ROW_TOP: f32 = 688.0;
 const HEADING_Y: f32 = 652.0;
-/// The top of the heading's line box, the highest row the cast row draws on.
+/// The highest y that the row draws at, the top of the heading.
 pub const TOP: f32 = HEADING_Y;
 const HEADING: &str = "In this scene";
 
-/// The drop from the card's top to each of its three lines.
+/// The offset from the card's top edge to the top of each line of text.
 const NAME_Y: f32 = 5.0;
 const CHARACTER_Y: f32 = 34.0;
 const AGES_Y: f32 = 58.0;
 
-/// While the up-next card stands, the row ends this far short of it.
+/// While the up-next card is showing, the row ends this far to the left of
+/// the card.
 pub const CARD_CLEAR: f32 = 24.0;
 
-/// The card that runs off the right edge draws at this share of the fade, so
-/// the row shows that more people wait to the right.
+/// The card cut off by the right edge is drawn at this fraction of normal
+/// strength, to show that more people are further right.
 const PEEK: f32 = 0.35;
 
-/// How long, in seconds of the film, a person stays in the row after their
+/// How long, in seconds of film time, a person stays in the row after their
 /// last span ends. It is also the longest gap between two spans of one
-/// person that keeps their place in the order.
+/// person that still counts as the same run of appearances.
 const LINGER: f64 = 10.0;
 
-/// The format the appearances fact writes.
+/// The `format` value of the spans file that the `appearances` tool writes.
 const FORMAT: &str = "liken.sh/appearances/spans/v1";
 
-/// One person as a card shows them.
+/// The data a card shows for one person.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Person {
     pub name: String,
     pub character: Option<String>,
-    /// The portrait's path under the library's .contributors directory.
+    /// The portrait's path relative to the library's `.contributors`
+    /// directory.
     pub portrait: Option<String>,
     pub born: Option<Date>,
     pub died: Option<Date>,
 }
 
-/// One span: its seconds and its people, left to right.
+/// One span: its start and end in seconds, and its people, left to right.
 #[derive(Debug, Clone, PartialEq)]
 struct Span {
     start: f64,
@@ -110,7 +115,7 @@ struct Span {
     people: Vec<String>,
 }
 
-/// One item's spans file, as the display reads it.
+/// The parsed spans file of one item.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Spans {
     released: Option<Date>,
@@ -119,8 +124,8 @@ pub struct Spans {
 }
 
 impl Spans {
-    /// Read one spans file. A file of another format, or text that does not
-    /// parse, gives nothing, and the item shows no row.
+    /// Parses the text of a spans file. Returns `None` for another format or
+    /// for text that does not parse, and the item then shows no row.
     pub fn parse(text: &str) -> Option<Self> {
         let value: Value = serde_json::from_str(text).ok()?;
         if value.get("format")?.as_str()? != FORMAT {
@@ -173,23 +178,23 @@ impl Spans {
         })
     }
 
-    /// Read the file at one path. This runs on the blocking pool, because the
-    /// path is on the library's volume and a read over the network must
-    /// never hold up a frame.
+    /// Reads and parses the spans file at `path`. Call this on the blocking
+    /// pool, because the file is on the library's volume and a slow network
+    /// read must not hold up a frame.
     pub fn read(path: &str) -> Option<Self> {
         let text = std::fs::read_to_string(path).ok();
         if text.is_none() {
-            eprintln!("media-display: no spans file at {path}");
+            eprintln!("media-display: cannot read the spans file {path}");
         }
         Self::parse(&text?)
     }
 
-    /// The people in the scene at one second, in order of arrival, each with
-    /// the seconds since their last span ended. A key the file names in a
-    /// span but not under `people` draws no card.
+    /// The people in the scene at `second`, in order of arrival, each with
+    /// the seconds since their last span ended. A key that a span lists but
+    /// that is missing from `people` gets no card.
     ///
-    /// The spans are in time order and do not overlap, so two binary searches
-    /// find the spans that overlap the last `LINGER` seconds.
+    /// The spans are sorted by time and do not overlap, so two binary
+    /// searches find the spans that overlap the last `LINGER` seconds.
     fn row(&self, second: f64) -> Vec<Presence<'_>> {
         let first = self
             .spans
@@ -227,14 +232,12 @@ impl Spans {
         row
     }
 
-    /// Each person's arrival: the start of the earliest span of their current
-    /// run, and their place left to right in that span. The walk goes back
-    /// from the playhead through the spans before `reach`, and a person's run
-    /// ends at the first gap longer than `LINGER`. The walk stops when every
-    /// run has ended, so its cost is the number of spans since the earliest
-    /// arrival. A person who never leaves the picture for longer than
-    /// `LINGER` makes the walk cover every span before the playhead, on
-    /// every call.
+    /// Each person's arrival: the start of the earliest span of their
+    /// current run, and their position from the left in that span. It walks
+    /// backwards from `reach`, ends a person's run at the first gap longer
+    /// than `LINGER`, and stops when every run has ended. When a person is
+    /// never absent for longer than `LINGER`, each call walks every span
+    /// before the playhead.
     fn arrivals<'a>(
         &self,
         people: &HashMap<&'a str, f64>,
@@ -267,9 +270,10 @@ impl Spans {
                     }
                 }
             }
-            // Every earlier span ends at or before this span's start, so a
-            // run that starts more than `LINGER` after it cannot reach back
-            // any further.
+            // Every earlier span ends at or before this span's start. A run
+            // that starts more than `LINGER` after this span's start has a
+            // gap longer than `LINGER` before it, so no earlier span can
+            // extend it.
             for run in runs.values_mut().filter(|run| run.open) {
                 if run.start - span.start > LINGER {
                     run.open = false;
@@ -283,63 +287,66 @@ impl Spans {
     }
 }
 
-/// One person's run of appearances as the walk back finds it.
+/// One person's run of appearances, as `arrivals` builds it while it walks
+/// backwards.
 struct Run {
     start: f64,
     place: usize,
     open: bool,
 }
 
-/// One card of the row.
+/// One person in the row, before the row is drawn.
 #[derive(Debug)]
 struct Presence<'a> {
     key: &'a str,
     person: &'a Person,
-    /// Seconds since the person's last span ended, and zero while a span
-    /// at the playhead names them.
+    /// Seconds since the person's last span ended, or zero while a span at
+    /// the playhead lists them.
     age: f64,
     arrival: f64,
     place: usize,
 }
 
-/// The share of a card's strength at one age: full in the picture, falling
-/// in a straight line to nothing at `LINGER`.
+/// The strength of a card for a given age: 1.0 while the person is on
+/// screen, falling linearly to 0.0 at `LINGER`.
 fn presence(age: f64) -> f32 {
     (1.0 - age / LINGER).clamp(0.0, 1.0) as f32
 }
 
-/// The focus within the row. It names the focused person, so a change to the
-/// row leaves the focus on them. The index is where that person last stood,
-/// and the focus moves to the card at that index when the person leaves.
+/// The focus within the row. It records the focused person by key, so a
+/// change to the row keeps the focus on that person. `index` is the person's
+/// last known position, and when the person leaves the row, the focus moves
+/// to the card now at that index.
 #[derive(Debug, Default)]
 struct Focus {
     key: Option<String>,
     index: usize,
-    /// The first card the row shows.
+    /// The index of the first card that is drawn.
     first: usize,
 }
 
-/// The row's state: the item's spans, the library's .contributors
-/// directory, and the focus within the row.
+/// The state of the row: the item's spans, the library's `.contributors`
+/// directory, and the focus.
 #[derive(Debug, Default)]
 pub struct Cast {
-    /// How many items have asked for a spans file, so a read the item swap
-    /// outran lands on nothing.
+    /// A counter that `on_item` increments for each new item. A read result
+    /// carries the value it was started with, so the result of a read for a
+    /// previous item is discarded.
     item: u64,
     spans: Option<Spans>,
     contributors: Option<String>,
-    /// The focus moves when the row changes under it, and the row changes
-    /// with the playhead between two presses, so the draw settles it.
+    /// The row changes with the playhead between key presses, and the focus
+    /// must follow, so `draw` updates it through `&self`.
     focus: RefCell<Focus>,
-    /// How many whole cards the last frame had room for, which a press reads
-    /// to know when the row has to slide.
+    /// How many whole cards fit in the last frame. A key press reads it to
+    /// decide when the row has to scroll.
     room: Cell<usize>,
 }
 
 impl Cast {
-    /// A new item drops the last item's spans. It returns the file to read
-    /// and the count the answer must carry, or nothing for an item with no
-    /// spans file.
+    /// Starts a new item and discards the previous item's spans. Returns
+    /// the item counter and the path of the spans file to read, or `None`
+    /// when the item has no spans file. Pass the counter back to `on_read`.
     pub fn on_item(
         &mut self,
         appearances: Option<&str>,
@@ -352,7 +359,8 @@ impl Cast {
         Some((self.item, appearances?.to_string()))
     }
 
-    /// The read came back. It returns whether it landed.
+    /// Stores the result of a spans file read. Returns `false` and discards
+    /// it when `item` is not the current item.
     pub fn on_read(&mut self, item: u64, spans: Option<Spans>) -> bool {
         if item != self.item {
             return false;
@@ -361,7 +369,7 @@ impl Cast {
         true
     }
 
-    /// The people in the scene, in the order the row draws them.
+    /// The people in the row, in the order the row draws them.
     pub fn people(&self, film: &Film) -> Vec<&Person> {
         self.row(film).into_iter().map(|card| card.person).collect()
     }
@@ -373,15 +381,16 @@ impl Cast {
         }
     }
 
-    /// The row shows while it holds anyone, in the picture or lingering,
-    /// playing or paused, so the display shows who is in the scene whenever
-    /// it is up.
+    /// Whether the row has anyone to show, including people who left the
+    /// picture less than `LINGER` seconds ago. It does not depend on whether
+    /// the film plays or is paused.
     pub fn available(&self, film: &Film) -> bool {
         !self.row(film).is_empty()
     }
 
-    /// Move the focus one card left or right. The focus stops at both ends,
-    /// and the row slides only when the focus leaves the cards on screen.
+    /// Moves the focus one card left or right. The focus stops at both ends
+    /// and does not wrap. The row scrolls only when the focus would leave the
+    /// cards on screen.
     pub fn step(&mut self, direction: i64, film: &Film) {
         let row = self.row(film);
         if row.is_empty() {
@@ -397,12 +406,12 @@ impl Cast {
         self.place(&row);
     }
 
-    /// The focused card and the first card shown. The focus stays on its
-    /// person wherever they now stand. A person who left the row passes the
-    /// focus to the card now at their index, or to the last card, so the
-    /// focus lands on a neighbour. The first card moves only as far as it
-    /// must to keep the focused card on screen, and the row never shows
-    /// empty room at its right end while cards wait to the left.
+    /// Returns the index of the focused card and the index of the first
+    /// card drawn, and saves both. When the focused person has left the row,
+    /// the focus moves to the card now at their old index, or to the last
+    /// card. The first card moves only as far as needed to keep the focused
+    /// card on screen, and the row leaves no empty space at its right end
+    /// while cards are scrolled off the left.
     fn place(&self, row: &[Presence<'_>]) -> (usize, usize) {
         let mut state = self.focus.borrow_mut();
         let Some(last) = row.len().checked_sub(1) else {
@@ -426,7 +435,7 @@ impl Cast {
         (index, first)
     }
 
-    /// The portraits the row draws now, as paths the display opens.
+    /// The paths of the portraits that the row draws now.
     pub fn portraits(&self, film: &Film) -> Vec<String> {
         self.people(film)
             .into_iter()
@@ -439,9 +448,10 @@ impl Cast {
         Some(format!("{directory}/{}", person.portrait.as_deref()?))
     }
 
-    /// Draw the heading and the cards. `limit` is where the row must end:
-    /// the up-next card's left edge less a clearance while it stands, and
-    /// nothing otherwise, so the cards run off the right edge of the screen.
+    /// Draws the heading and the cards. `limit` is the x where the row must
+    /// end: the left edge of the up-next card minus `CARD_CLEAR` while that
+    /// card is showing, and `None` otherwise, so the cards run off the right
+    /// edge of the screen.
     pub fn draw(
         &self,
         brush: &mut Brush<'_>,
@@ -476,14 +486,14 @@ impl Cast {
             }
             let bounds = Rectangle::new(Point::new(x, ROW_TOP), Size::new(CARD_W, CARD_H));
             let whole = x + CARD_W <= end;
-            // The card the edge cuts is the hint that the row goes on. It
-            // draws only at the screen's own edge, so it never draws under
-            // the up-next card.
+            // A card cut off by the screen edge hints that the row goes on.
+            // It is drawn only at the screen's own edge, so a card is never
+            // drawn partly under the up-next card.
             if !whole && limit.is_some() {
                 break;
             }
-            // A lingering card fades as a whole, its box, portrait, and text
-            // together, so it reads as the same card on its way out.
+            // A lingering card fades as a unit, with its box, portrait, and
+            // text together, so it still reads as the same card.
             let fade = brush.fade() * presence(card.age);
             let fade = match whole {
                 true => fade,
@@ -554,8 +564,8 @@ fn draw_card(
 }
 
 /// The ages line: the age at the release, then the age today or the year of
-/// death. A part with no date to work from is left out, and a person with no
-/// dates at all has no line.
+/// death. A part with no date to compute it from is left out, and a person
+/// with no dates has no line.
 pub fn ages(person: &Person, released: Option<Date>, today: Date) -> Option<String> {
     let mut parts = Vec::new();
     if let (Some(born), Some(released)) = (person.born, released)
@@ -571,8 +581,8 @@ pub fn ages(person: &Person, released: Option<Date>, today: Date) -> Option<Stri
     (!parts.is_empty()).then(|| parts.join(BETWEEN))
 }
 
-/// Whole years from one date to a later one: a birthday not yet reached in
-/// the later year does not count.
+/// Whole years from `from` to the later date `to`. A birthday that has not
+/// yet come in `to`'s year is not counted.
 fn years(from: Date, to: Date) -> i16 {
     let before = (to.month(), to.day()) < (from.month(), from.day());
     to.year() - from.year() - i16::from(before)
@@ -584,8 +594,8 @@ mod tests {
     use jiff::civil::date;
     use serde_json::json;
 
-    /// The spans file of a film with three spans: Jane and John together,
-    /// a gap that names nobody, and four people in one shot.
+    /// The spans file of a film with two spans and a gap between them: John
+    /// and Jane together, then four people in one shot.
     fn file() -> String {
         json!({
             "format": FORMAT,
@@ -609,7 +619,10 @@ mod tests {
         let (item, _) = cast
             .on_item(Some("/media/1/spans.json"), Some("/media/1/.contributors/"))
             .unwrap();
-        assert!(cast.on_read(item, Spans::parse(&file())));
+        assert!(
+            cast.on_read(item, Spans::parse(&file())),
+            "the read for the current item was discarded"
+        );
         cast
     }
 
@@ -626,42 +639,70 @@ mod tests {
     }
 
     #[test]
-    fn the_row_holds_the_people_of_the_last_linger_in_order_of_arrival() {
+    fn the_row_shows_the_people_of_the_last_linger_in_order_of_arrival() {
         let cast = cast();
         assert_eq!(names(&cast, &paused_at(12.0)), vec!["John Doe", "Jane Roe"]);
         // John and Jane linger through the gap, and at 30 they are still in
-        // the run that arrived at 10, so the two newcomers append to the right.
+        // the run that arrived at 10, so the two newcomers are added at the
+        // right.
         assert_eq!(names(&cast, &paused_at(25.0)), vec!["John Doe", "Jane Roe"]);
         assert_eq!(
             names(&cast, &paused_at(31.0)),
             vec!["John Doe", "Jane Roe", "A", "B"]
         );
         assert_eq!(names(&cast, &paused_at(49.0)).len(), 4);
-        assert!(names(&cast, &paused_at(50.0)).is_empty());
-        assert!(names(&cast, &paused_at(5.0)).is_empty());
+        assert!(
+            names(&cast, &paused_at(50.0)).is_empty(),
+            "the row is empty after the last span ends"
+        );
+        assert!(
+            names(&cast, &paused_at(5.0)).is_empty(),
+            "the row is empty before the first span starts"
+        );
     }
 
     #[test]
     fn the_row_is_a_stop_while_anyone_is_in_it_playing_or_paused() {
         let cast = cast();
-        assert!(cast.available(&paused_at(12.0)));
-        assert!(cast.available(&paused_at(25.0)));
-        assert!(!cast.available(&paused_at(55.0)));
+        assert!(
+            cast.available(&paused_at(12.0)),
+            "no stop at 12 seconds while paused"
+        );
+        assert!(
+            cast.available(&paused_at(25.0)),
+            "no stop at 25 seconds while paused"
+        );
+        assert!(
+            !cast.available(&paused_at(55.0)),
+            "a stop at 55 seconds, when nobody is in the row"
+        );
         let playing = Film {
             paused: false,
             ..paused_at(12.0)
         };
-        assert!(cast.available(&playing));
-        assert!(!Cast::default().available(&paused_at(12.0)));
+        assert!(
+            cast.available(&playing),
+            "no stop at 12 seconds while playing"
+        );
+        assert!(
+            !Cast::default().available(&paused_at(12.0)),
+            "a stop with no spans loaded"
+        );
     }
 
     #[test]
-    fn a_read_the_item_swap_outran_lands_on_nothing() {
+    fn a_read_that_finishes_after_the_item_changed_is_discarded() {
         let mut cast = Cast::default();
         let (stale, _) = cast.on_item(Some("a"), None).unwrap();
         cast.on_item(Some("b"), None);
-        assert!(!cast.on_read(stale, Spans::parse(&file())));
-        assert!(names(&cast, &paused_at(12.0)).is_empty());
+        assert!(
+            !cast.on_read(stale, Spans::parse(&file())),
+            "a read for a previous item was accepted"
+        );
+        assert!(
+            names(&cast, &paused_at(12.0)).is_empty(),
+            "the discarded read filled the row"
+        );
         assert_eq!(Cast::default().on_item(None, None), None);
     }
 
@@ -684,7 +725,7 @@ mod tests {
     }
 
     #[test]
-    fn the_focus_moves_along_the_row_and_the_row_slides_to_keep_it() {
+    fn the_focus_moves_along_the_row_and_the_row_scrolls_to_keep_it_on_screen() {
         let mut cast = cast();
         let film = paused_at(35.0);
         cast.room.set(2);
@@ -700,8 +741,8 @@ mod tests {
         assert_eq!(place(&cast, &film), (1, 1));
     }
 
-    /// A row of one-letter people from a list of spans, each as its start,
-    /// its end, and its people left to right.
+    /// A cast of one-letter people built from a list of spans, each given as
+    /// its start, its end, and its people from left to right.
     fn scene(spans: &[(f64, f64, &[&str])]) -> Cast {
         let people = spans
             .iter()
@@ -729,7 +770,10 @@ mod tests {
             people,
             spans,
         };
-        assert!(cast.on_read(item, Some(file)));
+        assert!(
+            cast.on_read(item, Some(file)),
+            "the read for the current item was discarded"
+        );
         cast
     }
 
@@ -743,7 +787,7 @@ mod tests {
         row[focus].person.name.clone()
     }
 
-    /// A dialogue cut shot and reverse shot: A, then B, then A, then B.
+    /// A dialogue cut as shot and reverse shot: A, then B, then A, then B.
     fn dialogue() -> Cast {
         scene(&[
             (0.0, 4.0, &["a"]),
@@ -774,7 +818,10 @@ mod tests {
         let cast = dialogue();
         assert_eq!(names(&cast, &paused_at(25.9)), vec!["a", "b"]);
         assert_eq!(names(&cast, &paused_at(26.0)), vec!["a"]);
-        assert!(names(&cast, &paused_at(30.0)).is_empty());
+        assert!(
+            names(&cast, &paused_at(30.0)).is_empty(),
+            "the row is not empty at 30 seconds"
+        );
     }
 
     #[test]
@@ -797,7 +844,7 @@ mod tests {
             (10.0, 15.0, &["b", "a", "c"]),
         ]);
         assert_eq!(names(&cast, &paused_at(12.0)), vec!["c", "b", "a"]);
-        // After a gap longer than the linger, b and a arrive again.
+        // After a gap longer than `LINGER`, b and a arrive again.
         let cast = scene(&[(0.0, 5.0, &["a", "b"]), (20.0, 25.0, &["b", "a"])]);
         assert_eq!(names(&cast, &paused_at(21.0)), vec!["b", "a"]);
     }
@@ -840,7 +887,7 @@ mod tests {
         cast.step(1, &paused_at(2.0));
         assert_eq!(focused(&cast, &paused_at(2.0)), "b");
         assert_eq!(focused(&cast, &paused_at(20.0)), "c");
-        // The focus now follows c, and does not return to b's place.
+        // The focus now follows c and does not go back to b's position.
         assert_eq!(focused(&cast, &paused_at(25.0)), "c");
     }
 

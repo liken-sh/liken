@@ -1,8 +1,5 @@
-// The client the idle pod runs. It reads the unit's state off the bus, holds
-// it, and draws the idle screen.
-//
-// The screen draws the ground and nothing over it. What the client holds is
-// `Unit`, and every element reads its facts and its seconds from there.
+// The client that the idle pod runs. It reads the state of the unit from the
+// message bus, keeps it in a `Unit`, and draws the idle screen from it.
 
 use std::convert::Infallible;
 
@@ -20,59 +17,48 @@ use crate::look;
 use crate::unit::{Arrival, Unit};
 use crate::wiring::Wiring;
 
-/// The name this client connects to the broker under, before the machine's
-/// own name is appended. A broker closes the older connection when two arrive
+/// The client identifier prefix for the broker connection. The hostname is
+/// appended to it. A broker closes the older connection when two arrive
 /// under one identifier, so no two clients on one machine may share it.
 ///
-/// It is also this client's `component` label on `liken_build_info`: the
-/// broker and a Prometheus both read the same one word for what this
-/// process is.
+/// It is also the `component` label of this process on `liken_build_info`.
 pub const CLIENT: &str = "idle-screen";
 
 #[derive(Debug)]
 pub struct Client {
     unit: Unit,
-    /// The subscription, or nothing when the operator named no broker. A run on
-    /// a workstation draws the seeds alone.
-    ///
-    /// It is the trait and not the reader itself, so a test folds real
-    /// moments and reads a real request for the shade with no socket
-    /// under it.
+    /// `None` when the wiring names no broker, as on a workstation run. The
+    /// screen then shows only the names from the wiring. It is a `Bus` trait
+    /// object so that a test can replace the `Reader` with a channel.
     bus: Option<Box<dyn Bus>>,
-    /// The preview keys, on a run that binds them. They stand in for the bus
-    /// on a workstation, and the legend draws where they are bound.
+    /// Set when the wiring turns on preview. Each preview key sends the
+    /// messages that the bus would send, and the screen draws a legend of
+    /// the keys.
     keys: Option<Keys>,
-    /// The second of the frame being drawn. The view is a function of it, so
-    /// the tick records it and every element reads it.
+    /// The second of the last `tick`, on the screen's clock.
     at: f64,
-    /// How far the wall clock is into its minute. The clock reads it to name
-    /// the second its reading turns. It is a field so a test states the wall
-    /// clock instead of reading the real one.
+    /// Reads how far the wall clock is into its current minute. A test
+    /// replaces it to set the wall clock.
     wall: fn() -> f64,
-    /// What `wall` read at the tick, so the turn of the minute is measured
-    /// from the second of the frame being drawn. The harness asks for the
-    /// next frame at that second, after the frame's work, and a reading
-    /// taken then would name the turn early by that work: the frame drawn
-    /// at that early second shows the old minute, and when the minute turns
-    /// during its work, the next ask names the turn after it.
+    /// What `wall` returned at the last `tick`. The harness calls
+    /// `next_frame` after the frame's work is done. Reading `wall` then
+    /// would schedule the minute turn early by the length of that work, and
+    /// the frame drawn at that second would still show the old minute.
     into_minute: f64,
 }
 
 impl Client {
-    /// The client one wiring describes. The binary reads the environment once
-    /// and hands the whole of it here, so this file names no variable. The
-    /// seeds name the unit before the broker answers, so the first frame is
-    /// never blank.
+    /// The unit starts with the player and component names from `wiring`, so
+    /// the first frame, drawn before the broker sends anything, is not blank.
     pub fn open(wiring: Wiring) -> Self {
         let client_id = reader::client_id(CLIENT, &reader::hostname());
-        let keys = wiring
-            .preview
-            .then(|| Keys::seeded(wiring.player_name.clone(), wiring.components.clone()));
-        // The stock idle screen owns no topic and keeps no retained state
-        // of its own, so it names none.
+        let keys = wiring.preview.then(|| {
+            Keys::before_first_status(wiring.player_name.clone(), wiring.components.clone())
+        });
+        // The idle screen subscribes to no topic of its own.
         let bus = Reader::open(&wiring.screen, &client_id, &[]);
         Self {
-            unit: Unit::seeded(wiring.player_name, wiring.components),
+            unit: Unit::before_first_status(wiring.player_name, wiring.components),
             bus: bus.map(|reader| Box::new(reader) as Box<dyn Bus>),
             keys,
             at: 0.0,
@@ -81,14 +67,12 @@ impl Client {
         }
     }
 
-    /// The unit as the screen holds it.
     pub fn unit(&self) -> &Unit {
         &self.unit
     }
 
-    /// The screen the client draws, at the second the clock last read. The
-    /// view and the schedule read one screen, so what the harness sleeps
-    /// toward is what the next frame draws.
+    /// The screen as of the last `tick`. `view` and `next_frame` both build
+    /// it here, so the drawing and the schedule use the same values.
     fn screen(&self) -> Idle<'_> {
         Idle {
             unit: &self.unit,
@@ -98,26 +82,21 @@ impl Client {
         }
     }
 
-    /// Fold one message in, at `at` seconds on the screen's clock. Every
-    /// message reaches the unit.
+    /// Applies one message to the unit at `at` seconds on the screen's clock.
     ///
-    /// The status's move to `Idle` is the arrival: the `Play` on the unit is
-    /// over, and the mark's return starts from that second. The move is
-    /// what marks it, and never the activity the status carries, so a
-    /// repeated `Idle` from a pass over an unchanged `Player` starts no
-    /// second return. The mark records the activity the unit left, because
-    /// an arrival from under a film owes the mark a new ramp and an arrival
-    /// from a `Play` that never played does not.
-    ///
-    /// The status topic is retained, so a client that connects after a
-    /// `Play` ended reads the move it missed.
+    /// When a status changes the activity to `Idle`, the `Play` has ended,
+    /// so `receive` records an `Arrival` at that second. Only a change
+    /// records one, because a later status that keeps `Idle` and changes
+    /// another field must not restart the arrival. The arrival records the
+    /// activity the unit left, because the energy of the mark depends on
+    /// it: an arrival from `Playing` starts at full energy, and an arrival
+    /// from `Starting` starts at the energy that the mark already had.
     pub fn receive(&mut self, moment: Moment, at: f64) {
-        // Every key the crate does not own reaches this client, except the
-        // power keys, which media-operator answers. The stock idle screen
-        // draws no list, so every key but back reaches nothing, and back is
-        // the shade. The client decides this and not the crate, because a
-        // client with levels sleeps on back at its top level alone, and
-        // only the client reads its levels.
+        // `media-screen` passes this client every key except its own and the
+        // power keys. This screen has no list to move through, so it acts
+        // only on back, and asks the bus to dim the screen. The client
+        // decides this and not `media-screen`, because a client with nested
+        // screens dims only when back is pressed at its top screen.
         if let Moment::Press(key) = &moment
             && media_screen::screen::keys::back(key)
             && let Some(bus) = &self.bus
@@ -133,19 +112,16 @@ impl Client {
 }
 
 impl Screen for Client {
-    // Nothing on the screen emits a message yet, and the type says so.
+    // The screen produces no messages of its own.
     type Message = Infallible;
 
     fn background(&self) -> Color {
         look::BACKGROUND
     }
 
-    /// One key press. A run with no preview keys bound takes none, so a
-    /// keyboard attached to a pod changes nothing on a screen in a house.
-    ///
-    /// A bound key builds the messages the bus would carry and folds them
-    /// through the call the bus reader's messages take, so the press exercises
-    /// the handlers a cluster exercises.
+    /// Without preview keys this does nothing, so a keyboard plugged into
+    /// the machine changes nothing on the screen. A preview key's messages
+    /// go through `receive`, the same path that bus messages take.
     fn key(&mut self, name: &str) {
         let Some(keys) = &mut self.keys else {
             return;
@@ -162,18 +138,19 @@ impl Screen for Client {
         self.into_minute = (self.wall)();
     }
 
-    /// Hand the loop's waker to the reader, so a press on a controller shows
-    /// on the next frame rather than on the harness's next backstop wake.
+    /// Gives the event loop's waker to the reader, so a controller press is
+    /// drawn on the next frame and not at the harness's next timed wake.
     fn wake_by(&mut self, wake: media_screen::Waker) {
         if let Some(bus) = &self.bus {
             bus.wake_on_delivery(wake);
         }
     }
 
-    /// Drain the reader and fold in what arrived. The harness calls this on
-    /// every wake of the loop rather than on a frame, because a covered
-    /// client draws no frame, and the status that says a film ended arrives
-    /// exactly while the client is covered.
+    /// Applies the messages that arrived since the last call and returns
+    /// whether there were any. The harness calls this on every wake of the
+    /// loop and not only in a frame, because while a film plays its surface
+    /// covers this screen, no frames are drawn, and the status that ends the
+    /// film arrives then.
     fn pump(&mut self, at: f64) -> bool {
         let Some(bus) = &self.bus else {
             return false;
@@ -193,12 +170,12 @@ impl Screen for Client {
             .into()
     }
 
-    /// The second the screen next changes. The elements answer it, and the
-    /// bus does not: a delivery wakes the loop itself through the waker, and
-    /// the reader drains in `pump` on every wake. The harness bounds every
-    /// wait by its backstop, so the broker is still read at least once a
-    /// second if the wake ever fails, and a settled screen still draws only
-    /// when the clock's minute turns.
+    /// The second at which an animation or the clock next changes the
+    /// screen. Bus messages are not part of this schedule: each delivery
+    /// wakes the loop through the waker. While a frame is scheduled, the
+    /// harness also wakes at least once a second to call `pump`, in case a
+    /// wake is lost. With nothing
+    /// animating, the next frame is at the next minute turn.
     fn next_frame(&self, at: f64) -> Option<f64> {
         self.screen().next_frame(at)
     }
@@ -214,10 +191,9 @@ mod tests {
     use crate::idle::{activity, energy};
     use media_screen::status::{Activity, Status};
 
-    /// A bus over a plain channel, standing in for the reader's threads, so a
-    /// test folds real moments and reads the client's own request for the
-    /// shade with no broker under it. The count of those requests is shared,
-    /// because the client owns the bus once it takes it.
+    /// A `Bus` over a channel, so a test can send moments and count dimming
+    /// requests with no broker. The count is shared because the client owns
+    /// the bus.
     #[derive(Debug)]
     struct Channel {
         moments: mpsc::Receiver<Moment>,
@@ -233,16 +209,13 @@ mod tests {
             self.slept.fetch_add(1, Ordering::SeqCst);
         }
 
-        // The idle screen has no topic of its own, so it publishes
-        // nothing and this stands in for a call no client of this crate
-        // makes here.
         fn publish(&self, _topic: &str, _payload: Vec<u8>, _retained: bool) {}
 
         fn wake_on_delivery(&self, _wake: media_screen::Waker) {}
     }
 
-    /// A client whose bus is that channel, and the two ends a test reads: what
-    /// it sends the client, and how often the client asked for the shade.
+    /// Replaces the bus of `client` with a `Channel`, and returns the sender
+    /// for moments and the count of dimming requests.
     fn on_a_channel(client: &mut Client) -> (mpsc::Sender<Moment>, Arc<AtomicUsize>) {
         let (sender, moments) = mpsc::channel();
         let slept = Arc::new(AtomicUsize::new(0));
@@ -253,7 +226,7 @@ mod tests {
         (sender, slept)
     }
 
-    fn seeded() -> Client {
+    fn before_first_status() -> Client {
         Client::open(Wiring {
             player_name: "The Den".into(),
             components: vec!["The screen".into()],
@@ -262,39 +235,36 @@ mod tests {
     }
 
     #[test]
-    fn the_client_draws_on_the_theme_ground() {
-        assert_eq!(seeded().background(), look::BACKGROUND);
+    fn the_client_draws_on_the_theme_background() {
+        assert_eq!(before_first_status().background(), look::BACKGROUND);
     }
 
     #[test]
-    fn a_client_with_no_broker_draws_the_seeds() {
-        let mut client = seeded();
+    fn a_client_with_no_broker_draws_the_names_from_the_wiring() {
+        let mut client = before_first_status();
         assert_eq!(client.unit().name, "The Den");
         assert_eq!(client.unit().parts.len(), 1);
 
-        // The clock advances with no reader, and nothing changes.
         client.tick(1.0);
         assert_eq!(client.unit().name, "The Den");
     }
 
     #[test]
-    fn a_settled_client_asks_for_a_frame_when_the_minute_turns() {
-        let mut client = seeded();
+    fn a_client_with_no_animation_schedules_a_frame_for_the_next_minute_turn() {
+        let mut client = before_first_status();
         client.wall = || 50.0;
         client.tick(7.25);
 
-        // The clock names the turn of the wall clock's minute, ten seconds
-        // on, and nothing else on a settled screen names a second before it.
+        // The wall clock is 50 seconds into its minute, so the minute turns
+        // 10 seconds later.
         assert_eq!(client.next_frame(7.25), Some(17.25));
     }
 
-    // The harness asks for the next frame after the work of the last one, at
-    // the second of that frame, and the wall clock has moved on by the work.
-    // The turn is read with the frame, so the frame that draws the new minute
-    // is due at the turn and not one frame's work before it.
+    // The wall clock moves on between the tick and `next_frame`, and the
+    // frame for the new minute must still be due at the turn.
     #[test]
-    fn the_turn_of_the_minute_is_read_at_the_frame_on_the_glass() {
-        let mut client = seeded();
+    fn the_minute_turn_is_measured_from_the_second_of_the_frame() {
+        let mut client = before_first_status();
         client.wall = || 50.0;
         client.tick(7.25);
         client.wall = || 50.02;
@@ -302,7 +272,7 @@ mod tests {
         assert_eq!(client.next_frame(7.25), Some(17.25));
     }
 
-    // A press that `media-operator` turned into a level.
+    // A level message that a volume key press caused.
     fn pressed() -> Moment {
         Moment::Level {
             volume: media_screen::volume::Volume {
@@ -313,29 +283,28 @@ mod tests {
         }
     }
 
-    // The volume row, pressed at the second 10: it fades in until 10.35,
-    // holds until 14.0, and fades out until 14.6.
+    // A volume change at second 10: the row fades in until 10.35, stays until
+    // 14.0, and fades out until 14.6.
     fn a_press() -> Vec<(Moment, f64)> {
         vec![(pressed(), 10.0)]
     }
 
-    // The shade, sent down at the second 10: it falls to dark until 14.0.
+    // A `Sleep` at second 10: the screen dims until it is dark at 14.0.
     fn a_sleep() -> Vec<(Moment, f64)> {
         vec![(Moment::Sleep, 10.0)]
     }
 
-    // The shade, dark since the second 6 and lifted at 10: it eases to clear
-    // until 10.4.
+    // A `Sleep` at second 6 and a `Wake` at 10: the screen brightens until it
+    // is clear at 10.4.
     fn a_wake() -> Vec<(Moment, f64)> {
         vec![(Moment::Sleep, 6.0), (Moment::Wake, 10.0)]
     }
 
-    // The eases that end on their own. A frame drawn a hundredth of a second
-    // short of the end is due again at once, and a frame at the end or after
-    // it leaves the screen to the clock's next minute, or to the row's
-    // leaving.
+    // A frame drawn 0.01 seconds before an animation ends is due again at
+    // once. A frame at or after the end is next due at the start of the
+    // volume row's fade out or at the next minute turn.
     #[test]
-    fn a_frame_drawn_short_of_an_ease_s_end_is_due_another() {
+    fn a_frame_drawn_just_before_an_animation_ends_is_due_again() {
         let cases = [
             (a_press(), 10.34, Some(10.34)),
             (a_press(), 10.35, Some(14.0)),
@@ -347,7 +316,7 @@ mod tests {
             (a_wake(), 10.5, Some(50.5)),
         ];
         for (moments, drawn, due) in cases {
-            let mut client = seeded();
+            let mut client = before_first_status();
             client.wall = || 20.0;
             for (moment, at) in moments {
                 client.receive(moment, at);
@@ -358,8 +327,8 @@ mod tests {
     }
 
     #[test]
-    fn the_pump_folds_what_the_bus_delivered_and_says_so() {
-        let mut client = seeded();
+    fn the_pump_applies_bus_messages_and_reports_whether_any_arrived() {
+        let mut client = before_first_status();
         let (sender, _slept) = on_a_channel(&mut client);
 
         assert!(!client.pump(1.0));
@@ -376,15 +345,14 @@ mod tests {
     }
 
     #[test]
-    fn a_back_press_asks_the_bus_for_the_shade() {
-        let mut client = seeded();
+    fn a_back_press_asks_the_bus_to_dim_the_screen() {
+        let mut client = before_first_status();
         let (_sender, slept) = on_a_channel(&mut client);
 
         for key in media_screen::screen::keys::BACK {
             client.receive(Moment::Press(key.into()), 1.0);
         }
-        // The arrows and select reach nothing, because this screen draws no
-        // list to move through.
+        // The arrow and select keys do nothing.
         client.receive(Moment::Press("KEY_UP".into()), 2.0);
         client.receive(Moment::Press("KEY_ENTER".into()), 2.0);
 
@@ -395,8 +363,8 @@ mod tests {
     }
 
     #[test]
-    fn a_client_with_no_bus_asks_no_one_for_the_shade() {
-        let mut client = seeded();
+    fn a_client_with_no_bus_ignores_a_back_press() {
+        let mut client = before_first_status();
 
         client.receive(Moment::Press("KEY_BACK".into()), 1.0);
 
@@ -405,7 +373,7 @@ mod tests {
 
     #[test]
     fn the_clock_moves_without_the_bus() {
-        let mut client = seeded();
+        let mut client = before_first_status();
         client.wall = || 59.0;
         client.tick(3.5);
         assert_eq!(client.next_frame(3.5), Some(4.5));
@@ -413,7 +381,7 @@ mod tests {
 
     #[test]
     fn a_status_reaches_the_unit() {
-        let mut client = seeded();
+        let mut client = before_first_status();
         client.receive(
             Moment::Status(Status {
                 activity: Activity::Playing,
@@ -425,8 +393,8 @@ mod tests {
     }
 
     #[test]
-    fn the_status_move_to_idle_marks_the_arrival() {
-        let mut client = seeded();
+    fn a_status_change_to_idle_records_the_arrival() {
+        let mut client = before_first_status();
         client.receive(
             Moment::Status(Status {
                 activity: Activity::Playing,
@@ -452,30 +420,28 @@ mod tests {
         );
     }
 
-    /// The second the lifecycle table below reads its first status at.
+    /// The second at which the table below applies its first status.
     const FIRST: f64 = 1.0;
 
-    /// The second most of its rows read the second status at. It is past the
-    /// ramp up's own 1200 ms, so the energy there is the level the first
-    /// status settled at.
+    /// A second status at `SETTLED` arrives after the 1200 ms ramp up has
+    /// ended, so the energy has reached the level that the first status set.
     const SETTLED: f64 = 5.0;
 
-    /// The second one row reads the second status at, halfway up that ramp.
-    /// It is the frame a `Play` that fails early ends on.
+    /// A second status at `MID_RAMP` arrives halfway up the ramp, as when a
+    /// `Play` fails early.
     const MID_RAMP: f64 = 1.6;
 
-    /// Two readings of one curve, compared the way `energy`'s own tests
-    /// compare them. A difference this small is the arithmetic of the seconds
-    /// above and not the motion.
+    /// Compares two energy values with the tolerance that the tests of
+    /// `energy` use.
     #[track_caller]
     fn assert_close(measured: f64, expected: f64, row: &str) {
         assert!(
             (measured - expected).abs() < 1e-9,
-            "the energy on {row} is {measured}, not {expected}"
+            "the energy on {row} is {measured}, want {expected}"
         );
     }
 
-    /// One activity as it arrives on the status topic.
+    /// A status message that carries only `activity`.
     fn saying(activity: Activity) -> Moment {
         Moment::Status(Status {
             activity,
@@ -483,44 +449,33 @@ mod tests {
         })
     }
 
-    /// A client that read one status at [`FIRST`] and a second at `at`. Both
-    /// go through `receive`, which is the whole path a status takes:
-    /// `Unit::fold` reads the activity, and this file reads the move to
-    /// `Idle`.
+    /// A client that applied one status at [`FIRST`] and a second at `at`,
+    /// both through `receive`, because `receive` records the arrival.
     fn moved(from: Activity, to: Activity, at: f64) -> Client {
-        let mut client = seeded();
+        let mut client = before_first_status();
         client.receive(saying(from), FIRST);
         client.receive(saying(to), at);
         client
     }
 
-    /// Every move of the activity, and the four things a move settles: the
-    /// arrival mark, whether the energy's ramp starts over, the energy the
-    /// mark holds at the second of the move, and the alpha the activity line
-    /// draws at.
+    /// The mark starts moving at `Starting`, before the film starts, and
+    /// stops at `Playing`, because the film's surface covers this screen. A
+    /// change to `Idle` records the arrival, and the mark's energy and the
+    /// activity line then fall together over the ramp down. A status that
+    /// repeats the current activity changes neither the arrival nor the
+    /// ramp.
     ///
-    /// The rule is the media browser's, so the two screens answer one set of
-    /// events. A `Play` a person asks for reaches `Starting`, and the mark
-    /// starts moving there rather than waiting for the film. `Playing` stops
-    /// it, because the film's surface covers this one. A move to `Idle` from
-    /// any other activity marks the arrival once, and the mark and the line
-    /// leave together over the ramp down. A repeated status carries the
-    /// activity the unit already holds and settles neither the mark nor a new
-    /// ramp, so a `Player` the operator passes over again leaves the screen
-    /// alone.
-    ///
-    /// The last two rows are the same move at two seconds, and they are why
-    /// the arrival records the activity it came from. The mark returns at full
-    /// swing from under a film alone. A `Play` that ends halfway up the ramp
-    /// reads 0.5 in the frame it ended on, the level the mark already stood
-    /// at, and the line reads full in that frame the way it did in the one
-    /// before.
+    /// The last two rows are the same change at two different seconds, and
+    /// show why the arrival records the activity it left. An arrival from
+    /// `Playing` starts at full energy, and an arrival from `Starting` keeps
+    /// the energy the mark had: 0.5 for a `Play` that ends halfway up the
+    /// ramp. The line stays fully opaque in that frame.
     #[test]
-    fn each_move_of_the_activity_settles_the_mark_and_the_line() {
+    fn each_activity_change_sets_the_arrival_the_ramp_and_the_line() {
         use Activity::{Idle, Playing, Starting};
 
-        // from, to, the second of the move, the activity the arrival names,
-        // a ramp that starts over, the energy, the line's alpha
+        // from, to, the second of the change, the activity recorded in the
+        // arrival, whether the ramp restarts, the energy, the line's opacity
         let table = [
             (Idle, Starting, SETTLED, None, true, 0.0, 1.0),
             (Starting, Playing, SETTLED, None, true, 0.0, 1.0),
@@ -554,8 +509,8 @@ mod tests {
     }
 
     #[test]
-    fn a_run_with_no_preview_keys_takes_no_key() {
-        let mut client = seeded();
+    fn a_run_with_no_preview_keys_ignores_key_presses() {
+        let mut client = before_first_status();
         let before = client.unit().clone();
 
         client.key("p");
@@ -616,7 +571,7 @@ mod tests {
     }
 
     #[test]
-    fn the_sleep_key_draws_the_shade_down_and_then_up() {
+    fn the_sleep_key_dims_the_screen_and_then_restores_it() {
         let mut client = previewing();
         client.tick(6.0);
 
@@ -628,7 +583,7 @@ mod tests {
     }
 
     #[test]
-    fn a_volume_key_shows_the_indicator_the_way_a_press_shows_it() {
+    fn a_volume_key_shows_the_volume_row_like_a_press() {
         let mut client = previewing();
         client.tick(7.0);
 

@@ -1,20 +1,15 @@
-// The binary waits for mpv, then opens the window. The compositor's
-// controller stacks a claim's surfaces newest on top, so the display's
-// surface has to arrive after the film's.
-
 use media_display::ipc::Ipc;
 use media_display::window;
 
 fn main() {
     let ipc = Ipc::from_environment();
 
-    // The wait runs on a runtime of its own that ends before the window
-    // opens. The toolkit starts its own runtime for the window, and this
-    // one exists only to hold the gate.
+    // This runtime is dropped before the window opens, because the GUI
+    // toolkit starts its own runtime.
     let waiting = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .expect("a runtime for the gate");
+        .expect("building the runtime that waits for mpv");
     let playing = waiting.block_on(ipc.playing(window::PLAYER_GRACE));
     drop(waiting);
 

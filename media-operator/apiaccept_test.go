@@ -1,10 +1,8 @@
 package main
 
-// These tests carry the negotiation rows the three capture API plans
-// share: no Accept is the default, an exact type beats a discounted
-// wildcard, a deprecated alias matches, and a form at q=0 is refused.
-// Each row is one rule as the plan states it, so the table is the
-// proof that the parser follows the plan.
+// These tests check how the Accept header selects a form: no header
+// gives the default form, an exact type beats a wildcard with a lower
+// quality, an alias matches its form, and q=0 refuses a form.
 
 import "testing"
 

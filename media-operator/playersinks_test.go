@@ -7,18 +7,13 @@ import (
 	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
-// The two sinks the fixture Player plays through. The first is a wired
-// endpoint under the audio operator's inventory name. The second is a
-// Bluetooth speaker, whose device name, and so whose Sink name, is its
-// address in lowercase dashed form.
+// A wired endpoint and a Bluetooth speaker. A Bluetooth speaker's Sink
+// name is its address in lowercase with dashes.
 const (
 	testWiredSink   = "hdmi-0-pch"
 	testSpeakerSink = "aa-bb-cc-dd-ee-ff"
 )
 
-// A Player with two sinks, the case status.sinks exists for: one video
-// track and two audio tracks, and a client with no way to learn the
-// second Sink's name from the spec alone.
 func twoSinkPlayer() *Player {
 	player := housePlayer()
 	player.Spec.Sinks = []PlayerDevice{
@@ -28,10 +23,9 @@ func twoSinkPlayer() *Player {
 	return player
 }
 
-// The playback claim as the scheduler left it: the claim the Player
-// produced, with one allocation result per request the caller states.
-// The results arrive in the order given, so a test can hand them over
-// out of spec order.
+// allocatedPlaybackClaim returns the Play's claim with the given
+// allocation results, in the given order, so a test can put them out
+// of spec order.
 func allocatedPlaybackClaim(results ...DeviceRequestAllocationResult) *ResourceClaim {
 	claim := buildClaim(housePlay("https://nas/film.mkv"), twoSinkPlayer())
 	claim.Status = &ResourceClaimStatus{
@@ -93,8 +87,6 @@ func TestSinksAreEmptyUntilTheClaimIsAllocated(t *testing.T) {
 	mustMatch(t, len(sinksOf(claim, 2)), 0)
 }
 
-// A pass writes the list a running Play's allocated claim resolved,
-// in spec order, on the Player's status.
 func TestAPassWritesTheSinksTheClaimResolved(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
@@ -118,9 +110,7 @@ func TestAPassWritesTheSinksTheClaimResolved(t *testing.T) {
 	}
 }
 
-// The list is memory. It stands after the Play, its claim, and its pod
-// go, the way status.screen does, while the Player reads idle.
-func TestTheSinksStandAfterThePlayRetires(t *testing.T) {
+func TestTheSinksRemainAfterThePlayRetires(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.plays["movie"] = housePlay("https://nas/film.mkv")
 	cluster.players["theater"] = twoSinkPlayer()
@@ -144,9 +134,7 @@ func TestTheSinksStandAfterThePlayRetires(t *testing.T) {
 	}
 }
 
-// A Player that states no sink remembers none, so a memory left by an
-// earlier spec does not outlive the selection that produced it.
-func TestAPlayerWithNoSinkRemembersNone(t *testing.T) {
+func TestAPlayerWithNoSinkSelectionHasNoSinkStatus(t *testing.T) {
 	cluster := newFakeCluster()
 	player := housePlayer()
 	player.Spec.Sinks = nil
@@ -159,12 +147,11 @@ func TestAPlayerWithNoSinkRemembersNone(t *testing.T) {
 	mustMatch(t, len(cluster.players["theater"].Status.Sinks), 0)
 }
 
-// The store's copy of a Player can be older than the operator's own
-// status write. A pass that carried the Sinks forward from that copy
-// would write the older memory back, and the unit would forget the Sinks
-// its last run resolved. The pass reads the Player from the API server
-// instead, and keeps them.
-func TestAPassKeepsThePlayerMemoryItWroteOverAnOlderCopy(t *testing.T) {
+// The store's copy of a Player can be older than the operator's last
+// status write. A pass that kept the Sinks of that copy would write
+// back the older list. The pass reads a Player from the API server when
+// its store copy is older than the last write, so it keeps the Sinks.
+func TestAPassKeepsTheSinksItWroteOverAnOlderStoreCopy(t *testing.T) {
 	cluster := runningCluster(twoSinkPlayer())
 	cluster.claims[claimName("movie")] = allocatedPlaybackClaim(
 		audioResult(audioRequestPrefix+"0", testWiredSink),
@@ -178,22 +165,22 @@ func TestAPassKeepsThePlayerMemoryItWroteOverAnOlderCopy(t *testing.T) {
 	}
 	mustMatch(t, reflect.DeepEqual(cluster.players["theater"].Status.Sinks, want), true)
 
-	// The run is over, so no claim says which Sinks the unit plays
-	// through, and the watch has not delivered the Player write.
+	// The Play is gone, and the store has not yet received the status
+	// write.
 	delete(cluster.plays, "movie")
 	delete(cluster.pods, podName("movie"))
 	media.view.players.View.Store = runningCluster(twoSinkPlayer()).view().players.View.Store
 	media.pass()
 
 	if got := cluster.players["theater"].Status.Sinks; !reflect.DeepEqual(got, want) {
-		t.Errorf("sinks = %+v, want the memory %+v", got, want)
+		t.Errorf("sinks = %+v, want the earlier list %+v", got, want)
 	}
 }
 
-// A Player whose spec a person edited since the pass read it answers the
-// status write with 409. The write reads the Player again and writes
-// the status onto the fresh copy, and the spec edit stands.
-func TestAPlayerStatusWriteAfterASpecEditLandsOnTheFreshCopy(t *testing.T) {
+// When a person edits a Player's spec after the pass read it, the
+// status write gets a 409. writePlayerStatus then reads the Player again
+// and writes the status onto the current copy, so the edit is kept.
+func TestAPlayerStatusWriteAfterASpecEditUsesTheCurrentCopy(t *testing.T) {
 	cluster := newFakeCluster()
 	read := twoSinkPlayer()
 	read.Metadata.ResourceVersion = "4"

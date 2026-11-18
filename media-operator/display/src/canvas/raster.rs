@@ -1,17 +1,15 @@
-//! Shapes as pictures. Every shape the display draws, from the scrubber's
-//! segments to the playhead and the panels, is rasterized here on the CPU
-//! with its edges antialiased, and the frame draws the result as a picture.
+//! Rasterizes each shape on the CPU with antialiased edges, and the
+//! frame draws the result as an image. The scrubber's segments, the
+//! playhead, and the panels are drawn this way.
 //!
-//! The toolkit draws a shape as a mesh, and it can antialias a mesh in two
-//! ways, neither of which suits this window. With multisampling off, a
-//! shape's edges step from one pixel to the next. With it on, every layer
-//! that holds a mesh renders into a multisampled target the size of the whole
-//! surface, then resolves that target and blends it over the frame. The
-//! display's window covers the whole screen, so that is three passes over
-//! every pixel of a 3840 by 2160 surface to draw a bar and a hexagon. A
-//! picture costs one texture read for each pixel it covers, and a shape that
-//! holds still is rasterized once and read back from the cache on every later
-//! frame.
+//! iced draws a shape as a mesh. Without multisampling, the mesh has
+//! jagged edges. With multisampling, every layer that has a mesh
+//! renders into a multisampled target the size of the whole surface,
+//! resolves it, and blends the result over the frame. The display's
+//! window covers the whole screen, so that is three passes over every
+//! pixel of a 3840 by 2160 surface to draw a bar and a hexagon. An
+//! image costs one texture read for each pixel it covers, and the cache
+//! below rasterizes a shape that does not change only once.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -26,31 +24,32 @@ use tiny_skia::{FillRule, Mask, PathBuilder, Stroke, Transform};
 /// How a shape covers its pixels.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Paint {
-    /// Inside the path, by the nonzero rule, which is the toolkit's default.
+    /// Inside the path, by the nonzero rule, which is the toolkit's
+    /// default.
     Fill,
-    /// Along the path, at a width in logical pixels. The toolkit strokes a
-    /// path at the width it is given after the frame's own scale has moved
-    /// the path, so the width scales with the window's scale factor and not
-    /// with the canvas. The raster keeps that rule, so a border keeps the
-    /// width it had.
+    /// Along the path, with a width in logical pixels. iced applies the
+    /// stroke width after the canvas scale, so the width scales with the
+    /// window's scale factor and not with the canvas scale. The raster
+    /// does the same, so a border is as wide as iced would draw it.
     Stroke(f32),
 }
 
-/// The largest picture the toolkit uploads inside the frame that asks for
-/// it. A picture at or over this size uploads on a thread of its own and
-/// draws no earlier than the next frame, so a large shape would be missing
-/// from the frame it first appears in. A raster over it is cut into bands.
+/// iced_wgpu uploads an image of this many bytes or more on a worker
+/// thread and draws it no earlier than the next frame. A large shape
+/// would then be missing from the first frame it appears in, so
+/// `rasterize` cuts a raster into bands under this size. The value is
+/// `MAX_SYNC_SIZE` in iced_wgpu's `src/image/cache.rs`.
 const MAX_SYNC: usize = 2 * 1024 * 1024;
 
-/// How many rasters the cache holds before it starts again. A redraw that
-/// moves one shape by a whole pixel reuses its raster, and a shape that
-/// changes size makes a new one, so the cache grows while the playhead and
-/// the fills move. It is cleared when it passes this, which costs one raster
-/// of every shape on screen.
+/// The number of shapes the cache keeps rasters for. A shape that
+/// moves by whole pixels reuses its raster, but a shape that changes
+/// size adds a new entry, so the cache grows while the playhead and the
+/// fills change size. When the cache reaches this size it is cleared,
+/// and each shape on screen is rasterized again.
 const CACHE_LIMIT: usize = 256;
 
-/// One horizontal band of a rasterized shape: the canvas rectangle it covers,
-/// and the toolkit image that holds it.
+/// One horizontal slice of a rasterized shape: the canvas rectangle it
+/// covers, and the toolkit image that holds its pixels.
 #[derive(Debug, Clone)]
 pub struct Band {
     pub bounds: Rectangle,
@@ -58,25 +57,23 @@ pub struct Band {
 }
 
 thread_local! {
-    // The frame loop draws on one thread, so the cache is that thread's own
-    // and takes no lock.
+    // The frame loop draws on one thread, so the cache needs no lock.
     static CACHE: RefCell<HashMap<u64, Vec<Band>>> = RefCell::new(HashMap::new());
 }
 
-/// Rasterize one shape in one colour, and answer the bands that cover it in
-/// canvas units. The colour's alpha stays out of the pixels: the caller draws
-/// the bands at that alpha, so a shape that fades rasterizes once.
+/// Rasterizes one shape in one colour and returns the bands that cover
+/// it, in canvas units. The pixels do not include the colour's alpha.
+/// The caller draws the bands at that alpha, so a shape that fades is
+/// rasterized once.
 ///
-/// `scale` is the canvas scale, the logical pixels one canvas unit covers,
-/// and `density` is the window's scale factor, the output pixels one logical
-/// pixel covers. The shape rasterizes at output pixels, the resolution the
-/// toolkit would have drawn it at, and its box lands on whole output pixels,
-/// so the picture maps one pixel to one pixel.
+/// `scale` is the logical pixels in one canvas unit, and `density` is
+/// the window's scale factor, the output pixels in one logical pixel.
+/// The shape is rasterized at output resolution, and its bounding box
+/// is aligned to whole output pixels, so each image pixel draws on one
+/// screen pixel.
 ///
-/// The raster of a shape does not depend on where it stands to the nearest
-/// whole output pixel, so the cache keys each shape by its outline relative
-/// to its own box. A playhead that moves by whole pixels draws the same
-/// raster at each new place.
+/// The cache key is the outline relative to the shape's own box, so a
+/// shape that moves by whole output pixels reuses its raster.
 pub fn raster(path: &Path, paint: Paint, color: Color, scale: f32, density: f32) -> Vec<Band> {
     let pixels = scale * density;
     let Some(outline) = outline(path, pixels) else {
@@ -96,9 +93,9 @@ pub fn raster(path: &Path, paint: Paint, color: Color, scale: f32, density: f32)
         return Vec::new();
     };
 
-    // The box on the output pixel grid. A pixel the edge crosses carries the
-    // part of it the shape covers, so the box takes every pixel the bounds
-    // touch.
+    // Round the box outward to whole output pixels, because a pixel
+    // that an edge crosses holds partial coverage and must be in the
+    // image.
     let bounds = shape.bounds();
     let (left, top) = (bounds.left().floor(), bounds.top().floor());
     let width = (bounds.right().ceil() - left) as u32;
@@ -125,8 +122,8 @@ pub fn raster(path: &Path, paint: Paint, color: Color, scale: f32, density: f32)
         }
     };
 
-    // The cache holds the bands at the origin of their own box, so the bands
-    // move to where this shape stands.
+    // The cached bands are relative to their own box, so move them to
+    // this shape's position.
     let (x, y) = (left / pixels, top / pixels);
     bands
         .into_iter()
@@ -140,7 +137,7 @@ pub fn raster(path: &Path, paint: Paint, color: Color, scale: f32, density: f32)
         .collect()
 }
 
-/// The iced path as a tiny-skia path, in output pixels.
+/// Converts an iced path to a tiny-skia path, scaled to output pixels.
 fn outline(path: &Path, pixels: f32) -> Option<tiny_skia::Path> {
     let at = |point: Point| (point.x * pixels, point.y * pixels);
     let mut builder = PathBuilder::new();
@@ -177,8 +174,6 @@ fn outline(path: &Path, pixels: f32) -> Option<tiny_skia::Path> {
     builder.finish()
 }
 
-/// The cache key: the outline relative to its own box, how it is painted,
-/// and the colour.
 fn key(shape: &tiny_skia::Path, left: f32, top: f32, paint: Paint, rgb: [u8; 3]) -> u64 {
     let mut hasher = DefaultHasher::new();
     for point in shape.points() {
@@ -194,10 +189,11 @@ fn key(shape: &tiny_skia::Path, left: f32, top: f32, paint: Paint, rgb: [u8; 3])
     hasher.finish()
 }
 
-/// Rasterize the shape into a coverage mask, and read the mask into straight
-/// RGBA in the shape's colour, with the coverage as the alpha. That is what
-/// the toolkit blends a picture on, and a coverage of one keeps the colour
-/// exact where a premultiplied pixmap would round it.
+/// Rasterizes the shape into a coverage mask, then writes RGBA pixels
+/// that all have the shape's exact colour, with the coverage as alpha.
+/// iced blends images as RGBA that is not premultiplied, and a
+/// premultiplied pixmap would round the colour of each pixel that the
+/// shape covers only in part.
 fn rasterize(
     shape: &tiny_skia::Path,
     left: f32,
@@ -242,7 +238,8 @@ fn rasterize(
 mod tests {
     use super::*;
 
-    /// The alpha bytes of every band, top to bottom, and the width of a row.
+    /// The alpha bytes of every band, top to bottom, and the width of a
+    /// row.
     fn coverage(bands: &[Band]) -> (u32, Vec<u8>) {
         let mut width = 0;
         let alphas = bands
@@ -264,8 +261,6 @@ mod tests {
         Path::rectangle(at, Size::new(side, side))
     }
 
-    /// A square on whole pixels covers every pixel of its box fully, in its
-    /// own colour, and the box is the square.
     #[test]
     fn a_square_on_whole_pixels_covers_its_box() {
         let bands = raster(
@@ -282,15 +277,18 @@ mod tests {
         );
         let (width, alphas) = coverage(&bands);
         assert_eq!(width, 4);
-        assert!(alphas.iter().all(|alpha| *alpha == 255), "{alphas:?}");
+        assert!(
+            alphas.iter().all(|alpha| *alpha == 255),
+            "the alphas are {alphas:?}, want all 255"
+        );
         let Handle::Rgba { pixels, .. } = &bands[0].handle else {
-            panic!("a raster is RGBA");
+            panic!("the handle is not Handle::Rgba");
         };
         assert_eq!(&pixels[..3], &[0x12, 0x34, 0x56]);
     }
 
-    /// A square that starts half a pixel in covers half of each edge pixel,
-    /// which is the antialiasing multisampling gave the edge.
+    /// A square that starts half a pixel in covers half of each edge
+    /// pixel.
     #[test]
     fn an_edge_between_pixels_covers_part_of_them() {
         let bands = raster(
@@ -303,15 +301,21 @@ mod tests {
         let (width, alphas) = coverage(&bands);
         assert_eq!(width, 3);
         let first_row = &alphas[..3];
-        assert!((first_row[0] as i32 - 128).abs() <= 2, "{first_row:?}");
+        assert!(
+            (first_row[0] as i32 - 128).abs() <= 2,
+            "the first edge pixel is {}, want 128 within 2",
+            first_row[0]
+        );
         assert_eq!(first_row[1], 255);
-        assert!((first_row[2] as i32 - 128).abs() <= 2, "{first_row:?}");
+        assert!(
+            (first_row[2] as i32 - 128).abs() <= 2,
+            "the last edge pixel is {}, want 128 within 2",
+            first_row[2]
+        );
     }
 
-    /// The canvas scale and the window's scale factor both multiply the
-    /// shape into output pixels, and the bands come back in canvas units.
     #[test]
-    fn the_raster_counts_output_pixels_and_answers_canvas_units() {
+    fn the_raster_has_output_pixels_and_returns_canvas_units() {
         let bands = raster(
             &square(Point::new(1.0, 1.0), 2.0),
             Paint::Fill,
@@ -327,8 +331,6 @@ mod tests {
         );
     }
 
-    /// A stroke is as wide as it states in logical pixels, scaled by the
-    /// window's scale factor alone, the way the toolkit strokes it.
     #[test]
     fn a_stroke_scales_with_the_window_and_not_the_canvas() {
         let line = Path::line(Point::new(0.0, 5.0), Point::new(10.0, 5.0));
@@ -341,10 +343,10 @@ mod tests {
         assert_eq!(stroke(1.0, 2.0), 4.0);
     }
 
-    /// A shape too large for one upload arrives as bands under the limit,
-    /// which together cover the whole box.
+    /// The bands of a large shape cover its whole box, with no gap or
+    /// overlap.
     #[test]
-    fn a_large_shape_arrives_in_bands() {
+    fn a_large_shape_is_cut_into_bands() {
         let bands = raster(
             &Path::rectangle(Point::ORIGIN, Size::new(1920.0, 1080.0)),
             Paint::Fill,
@@ -362,8 +364,7 @@ mod tests {
         );
     }
 
-    /// A shape that moves by whole pixels draws the same raster at its new
-    /// place, and one that moves by part of a pixel rasterizes again.
+    /// A shape that moves by part of a pixel is rasterized again.
     #[test]
     fn a_whole_pixel_move_reuses_the_raster() {
         let at = |x: f32| {
@@ -382,7 +383,6 @@ mod tests {
         assert_ne!(first.handle.id(), between.handle.id());
     }
 
-    /// A path with no area draws nothing.
     #[test]
     fn a_shape_with_no_area_draws_nothing() {
         let bands = raster(

@@ -1,19 +1,13 @@
 package main
 
-// The operator role's Prometheus metrics, and the layer 1 both roles
-// this binary can run share. Milestone 65 in the liken repository is
-// the contract every process in the organization follows: the three
-// layers, the names, the port, and the monitoring component. Plan 26
-// in this repository states what this operator adds under the
-// contract. commandmetrics.go holds the command sidecar role's own
-// series, on top of the baseMetrics this file builds.
+// This file has the Prometheus metrics of the operator role, and
+// baseMetrics, which every role of this binary publishes.
+// commandmetrics.go and apimetrics.go add the series of the command
+// sidecar and the API server.
 //
-// One registry per process, so a test builds its own with nothing left
-// over from the last one, and a listener that serves it with no other
-// path to the registry.
-//
-// Every series here reads a fact the reconcile loop already derives
-// for a Play's or a Player's status.
+// Each process builds its own registry in place of the Prometheus
+// default registry, so a test starts with no series, and the listener
+// serves only the series that this process registered.
 
 import (
 	"fmt"
@@ -26,15 +20,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// buildInfoComponent is the operator's own name in liken_build_info,
-// the one series every process in the organization publishes under its
-// own name so a single panel lists every release in the cluster.
-// commandMetrics carries the command sidecar's name for the same
-// gauge, because the two roles are the one binary and share this file.
+// buildInfoComponent is the component label of liken_build_info for
+// the operator role. The other roles of this binary set their own value,
+// so a scrape shows which role a process runs.
 const buildInfoComponent = "media-operator"
 
-// The kinds layer 2 labels its three series with, one per collection
-// the reconcile loop reads or watches.
+// The values of the kind label on the reconcile and watch series.
 const (
 	kindPlay             = "Play"
 	kindRemote           = "Remote"
@@ -51,39 +42,31 @@ const (
 	kindTelevision       = "Television"
 )
 
-// The fixed vocabulary for media_playback_failures_total. A Play that
-// never reached a pod, because it named no Player, its items would
-// not resolve, or its Remotes would not gather, failed at setup. A
-// Play whose pod existed and failed is a pod failure: mpv's own exit,
-// or the kubelet's.
+// The values of the reason label of media_playback_failures_total. A
+// Play that fails before it has a pod, for example because it names no
+// Player, counts as setup. A Play that fails after its pod was created
+// counts as pod, whether mpv exited or the kubelet failed the pod.
 const (
 	failureReasonSetup = "setup"
 	failureReasonPod   = "pod"
 )
 
-// The three words media_players reports. A unit with no Play running
-// or with one still starting is idle for this gauge's purpose; only a
-// Play in the Running phase reads as playing or paused, the same fold
-// the Play's own activity performs.
+// The values of the state label of media_players. A Player counts as
+// playing or paused only while its Play is in the Running phase. A
+// Player with no Play, or with a Play that is still Pending, counts as
+// idle.
 const (
 	playerMetricIdle    = "idle"
 	playerMetricPlaying = "playing"
 	playerMetricPaused  = "paused"
 )
 
-// baseMetrics is layer 1: a fresh registry carrying the Go and process
-// collectors every process in the organization gets for free, and
-// liken_build_info under that process's own component name. The
-// operator role and the command role are the one binary, and each
-// builds its own series on top of this, so this is the one place layer
-// 1 exists rather than twice.
+// baseMetrics is a registry with the Go and process collectors and
+// liken_build_info. Each role registers its own series on it.
 type baseMetrics struct {
 	registry *prometheus.Registry
 }
 
-// newBaseMetrics registers layer 1 on a fresh registry and reports
-// component and version once, at construction, because liken_build_info
-// never changes for the life of a process.
 func newBaseMetrics(component, version string) baseMetrics {
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(collectors.NewGoCollector())
@@ -99,10 +82,10 @@ func newBaseMetrics(component, version string) baseMetrics {
 	return baseMetrics{registry: registry}
 }
 
-// serve starts the metrics listener in the background. An empty
-// address turns it off, the setting every process in the organization
-// shares. A listener that cannot bind is logged and nothing else: a
-// scrape endpoint must never hold up the work the process exists for.
+// serve starts the metrics listener in the background, and does nothing
+// when address is empty. When the listener fails, serve logs the error
+// and the process keeps running, because a broken metrics endpoint must
+// not stop playback.
 func (b baseMetrics) serve(address string) {
 	if address == "" {
 		return
@@ -116,9 +99,9 @@ func (b baseMetrics) serve(address string) {
 	}()
 }
 
-// mediaMetrics holds every series the operator role publishes. The
-// pass and the watches write to it directly; nothing here reads the
-// API server or the bus, so a scrape never blocks on either.
+// mediaMetrics holds the series of the operator role. The reconcile pass
+// and the watches write them as they run, so a scrape reads no API
+// server or bus and does not wait on either.
 type mediaMetrics struct {
 	baseMetrics
 
@@ -133,9 +116,6 @@ type mediaMetrics struct {
 	busConnected     prometheus.Gauge
 }
 
-// newMediaMetrics builds the operator's metrics on a fresh registry.
-// version is what liken_build_info reports; the operator's own image
-// tag is the release it runs.
 func newMediaMetrics(version string) *mediaMetrics {
 	base := newBaseMetrics(buildInfoComponent, version)
 	m := &mediaMetrics{
@@ -170,7 +150,7 @@ func newMediaMetrics(version string) *mediaMetrics {
 		}, []string{"player"}),
 		busConnected: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "media_bus_connected",
-			Help: "Whether the operator's own MQTT client holds a live session.",
+			Help: "Whether the operator's own MQTT client is connected to the broker.",
 		}),
 	}
 	base.registry.MustRegister(
@@ -186,10 +166,6 @@ func newMediaMetrics(version string) *mediaMetrics {
 	return m
 }
 
-// observeReconcile records one reconcile of one kind: how long it took,
-// and whether it returned an error. The pass calls this around each
-// kind it reconciles, so a reconcile that changes nothing still counts
-// as a run, the way milestone 65 requires.
 func (m *mediaMetrics) observeReconcile(kind string, duration time.Duration, err error) {
 	m.reconcileDuration.WithLabelValues(kind).Observe(duration.Seconds())
 	if err != nil {
@@ -197,12 +173,9 @@ func (m *mediaMetrics) observeReconcile(kind string, duration time.Duration, err
 	}
 }
 
-// notePlaybackPhase folds a Play's phase before and after one
-// reconcile into the two lifecycle counters. Both counters are
-// edge-triggered: a Play that stays Running or stays Failed across a
-// pass counts once, on the pass that changed it, because a status
-// write that changes nothing must not inflate a total meant to answer
-// "how many, over time".
+// notePlaybackPhase counts a start or a failure only on the reconcile
+// where the Play's phase changes to Running or Failed, so a Play that
+// stays in that phase across passes is counted once.
 func (m *mediaMetrics) notePlaybackPhase(previous string, status PlayStatus) {
 	if status.Phase == phaseRunning && previous != phaseRunning {
 		m.playbackStarts.Inc()
@@ -216,8 +189,6 @@ func (m *mediaMetrics) notePlaybackPhase(previous string, status PlayStatus) {
 	}
 }
 
-// boolToFloat is the gauge encoding milestone 65 fixes for a fact that
-// is really a boolean: 1 or 0, never anything between.
 func boolToFloat(value bool) float64 {
 	if value {
 		return 1
@@ -225,10 +196,9 @@ func boolToFloat(value bool) float64 {
 	return 0
 }
 
-// watchRestartFunc closes over one kind's counter, so a watch loop that
-// knows nothing about Prometheus can still report each reconnect. It
-// answers nil when m is nil, which is what lets a test call a watch*
-// function with no registry at all.
+// watchRestartFunc returns a function that counts one reopen of the
+// watch of kind, so a watch loop needs no Prometheus import. It returns
+// nil when m is nil, so a test can run a watch without metrics.
 func watchRestartFunc(m *mediaMetrics, kind string) func() {
 	if m == nil {
 		return nil

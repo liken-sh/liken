@@ -1,10 +1,5 @@
 package main
 
-// These tests cover the document routes: the discovery shape and the
-// lists copied from the siblings, the info document's facts and stream
-// count, the conditional read with If-None-Match, and that the
-// committed OpenAPI document names every route the router serves.
-
 import (
 	"encoding/json"
 	"flag"
@@ -16,8 +11,9 @@ import (
 	"testing/synctest"
 )
 
-// updateOpenAPI is the switch that rewrites the committed document
-// from the router. `go generate` runs the test with it set.
+// updateOpenAPI makes the test rewrite the committed OpenAPI document
+// from the router instead of comparing against it. `go generate` runs
+// the test with it set.
 var updateOpenAPI = flag.Bool("update-openapi", false, "write openapi.json from the router")
 
 func TestDiscoveryNamesEveryAspectOfAPlayer(t *testing.T) {
@@ -48,8 +44,8 @@ func TestDiscoveryNamesEveryAspectOfAPlayer(t *testing.T) {
 	})
 }
 
-// The screen and audio lists are the siblings' own: what the display
-// API and the audio API publish replaces this API's copies.
+// The media types and extensions that the display API and the audio API
+// publish replace this API's built-in lists.
 func TestDiscoveryCopiesTheSiblingsLists(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
@@ -71,8 +67,8 @@ func TestDiscoveryCopiesTheSiblingsLists(t *testing.T) {
 	})
 }
 
-// A sibling that will not answer leaves this API's own list in place,
-// so discovery never shows an empty aspect.
+// When a sibling does not respond, discovery keeps its built-in list, so
+// an aspect is never empty.
 func TestDiscoveryKeepsItsOwnListWhenASiblingIsSilent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
@@ -100,10 +96,9 @@ func siblingDiscovery(t *testing.T, plural, aspect string, types, extensions []s
 	return body
 }
 
-// The info document carries the facts a client reads before it asks
-// for a capture: the Display and its node, the Sinks, whether a Play
-// runs, the stream count, and a related link to every capture route.
-func TestTheInfoDocumentAnswersTheStreamCount(t *testing.T) {
+// The info document gives the Display and its node, the Sinks, whether a
+// Play runs, and the stream count, and links to every capture route.
+func TestTheInfoDocumentDescribesThePlayer(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
 		fixture.plane.players[testAPIPlayer] = shapedPlayer(true, 2, true)
@@ -127,9 +122,9 @@ func TestTheInfoDocumentAnswersTheStreamCount(t *testing.T) {
 	})
 }
 
-// An idle unit reports the sinks it remembers and a stream count of
-// one, the screen, because a sink is tappable only while a Play runs.
-func TestTheInfoDocumentShowsAnIdleUnitsRememberedSinks(t *testing.T) {
+// An idle Player lists the sinks in its status and has a stream count of
+// one, the screen, because a sink can be tapped only while a Play runs.
+func TestTheInfoDocumentOfAnIdlePlayerCountsOnlyTheScreen(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
 		fixture.plane.players[testAPIPlayer] = shapedPlayer(true, 2, false)
@@ -144,9 +139,9 @@ func TestTheInfoDocumentShowsAnIdleUnitsRememberedSinks(t *testing.T) {
 	})
 }
 
-// Every document route answers a matching If-None-Match with 304, no
+// Every document route responds to a matching If-None-Match with 304, no
 // body, and Vary: Accept.
-func TestADocumentRouteAnswersIfNoneMatch(t *testing.T) {
+func TestADocumentRouteRespondsToIfNoneMatch(t *testing.T) {
 	rows := []string{apiBasePath, apiBasePath + "/openapi.json", playerPathFor("")}
 	for _, row := range rows {
 		t.Run(row, func(t *testing.T) {
@@ -165,9 +160,7 @@ func TestADocumentRouteAnswersIfNoneMatch(t *testing.T) {
 	}
 }
 
-// The two documents the router compiles in carry the build version as
-// their ETag.
-func TestTheCompiledDocumentsCarryTheBuildVersion(t *testing.T) {
+func TestTheDiscoveryAndOpenAPIDocumentsUseTheBuildVersionAsETag(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
 
@@ -177,9 +170,8 @@ func TestTheCompiledDocumentsCarryTheBuildVersion(t *testing.T) {
 	})
 }
 
-// The info document is validated by its own body and not the build
-// version, so a Player that changed answers 200 with a new ETag and
-// not 304.
+// The info document's ETag comes from its body and not the build version,
+// so a changed Player gets 200 with a new ETag and not 304.
 func TestTheInfoDocumentIsValidatedByItsOwnBody(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
@@ -197,9 +189,7 @@ func TestTheInfoDocumentIsValidatedByItsOwnBody(t *testing.T) {
 	})
 }
 
-// A document route carries none of the capture fields: no file name,
-// no range statement, and no Location.
-func TestADocumentRouteCarriesNoCaptureFields(t *testing.T) {
+func TestADocumentRouteSendsNoCaptureHeaders(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
 
@@ -224,8 +214,8 @@ func TestTheOpenAPIDocumentNamesEveryRoute(t *testing.T) {
 	mustMatchAll(t, openAPIPaths(committedOpenAPI), served)
 }
 
-// The committed copy is what the router produces, servers aside. With
-// the switch set, the test rewrites it instead of comparing.
+// The committed document equals what the router produces, except for the
+// servers list.
 func TestTheOpenAPIDocumentMatchesTheRouter(t *testing.T) {
 	generated := openAPIDocument()
 	if *updateOpenAPI {
@@ -234,7 +224,7 @@ func TestTheOpenAPIDocumentMatchesTheRouter(t *testing.T) {
 	}
 
 	if !reflect.DeepEqual(withoutServers(t, generated), withoutServers(t, committedOpenAPI)) {
-		t.Error("openapi.json is not what the router produces; run go generate ./...")
+		t.Error("openapi.json differs from the document that the router produces. Run go generate ./... to write it again")
 	}
 }
 
@@ -263,9 +253,9 @@ func TestTheServedOpenAPINamesTheOrigin(t *testing.T) {
 	})
 }
 
-// One round trip expands the published RFC 6570 template and calls
-// what it produces, so the template and the router cannot drift apart.
-func TestThePublishedTemplateExpandsToARouteThatAnswers(t *testing.T) {
+// The test expands the media template from the discovery document and
+// requests the result, so the template and the router cannot differ.
+func TestThePublishedTemplateExpandsToAServedRoute(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newAPIFixture(t)
 		var document discoveryDocument
@@ -282,9 +272,8 @@ func TestThePublishedTemplateExpandsToARouteThatAnswers(t *testing.T) {
 	})
 }
 
-// expandTemplate does the RFC 6570 level 3 expansion this round trip
-// needs and no more: the two path variables, the extension, and the
-// form query.
+// expandTemplate does the part of RFC 6570 expansion that the templates
+// use: the two path variables, the extension, and the form-style query.
 func expandTemplate(template, namespace, name, extension, query string) string {
 	expanded := template
 	for _, pair := range [][2]string{

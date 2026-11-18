@@ -1,10 +1,10 @@
-// The timed decisions of a run, kept out of the code that needs a window:
-// which script keys are due, whether the run has reached its deadline, and
-// when the loop draws its next frame. Every decision is a function of the
-// clock, so a test drives it with numbers and never opens a window.
+// When a run's script keys fire, when the run reaches its deadline, and
+// when the loop draws its next frame. The functions take the time as an
+// argument, so tests call them with numbers and open no window.
 
-/// The script and the deadline, with a cursor into the script. The cursor only
-/// moves forward, so a step fires once.
+/// The `--script` keys, the `--quit-after` deadline, and the index of
+/// the next script key to fire. The index only increases, so each key
+/// fires once.
 #[derive(Debug, Default)]
 pub struct Timeline {
     script: Vec<(f64, String)>,
@@ -13,7 +13,6 @@ pub struct Timeline {
 }
 
 impl Timeline {
-    /// The schedule the flags asked for, at second zero.
     pub fn new(script: Vec<(f64, String)>, quit_after: Option<f64>) -> Self {
         Self {
             script,
@@ -22,10 +21,9 @@ impl Timeline {
         }
     }
 
-    /// The keys at or before `at`, in the order the script names them. The
-    /// cursor moves past every key this call returned, so a later call never
-    /// looks back. The harness hands each one to the same call a keyboard
-    /// press takes, and that call holds the rule for the key that ends a run.
+    /// Returns the script keys scheduled at or before `at`, in script
+    /// order, and skips past them so a later call does not return them
+    /// again. The harness handles each key as a keyboard press.
     pub fn due(&mut self, at: f64) -> Vec<String> {
         let mut keys = Vec::new();
 
@@ -39,15 +37,14 @@ impl Timeline {
         keys
     }
 
-    /// True once the clock reaches the `--quit-after` second.
+    /// True once `at` reaches the `--quit-after` second.
     pub fn past_deadline(&self, at: f64) -> bool {
         self.quit_after.is_some_and(|limit| at >= limit)
     }
 
-    /// The next second the run itself must catch: the next script key, or the
-    /// deadline. The loop folds it into the wake time, so a scripted or
-    /// deadlined run sleeps between its seconds instead of drawing every
-    /// pass, and a measurement under `--quit-after` reads a paced run.
+    /// The earlier of the next script key's second and the deadline. The
+    /// loop sleeps until then, so a run measured with `--quit-after`
+    /// draws only when the screen changes, as it does in a pod.
     pub fn next_due(&self) -> Option<f64> {
         let step = self.script.get(self.next_step).map(|(when, _)| *when);
         [step, self.quit_after]
@@ -57,43 +54,36 @@ impl Timeline {
     }
 }
 
-/// The longest the loop sleeps between two reads of the screen's sources, in
-/// seconds. A delivery from the bus wakes the loop through the waker the
-/// screen holds, and this bound is what still reads the broker if that wake
-/// ever fails. A wake at the bound with nothing due draws no frame, so a
-/// screen that changes once a minute still draws once a minute.
+/// The longest the loop sleeps between two reads of the screen's
+/// sources, in seconds. A bus message normally wakes the loop through
+/// the screen's waker, and this bound makes the loop read the bus even
+/// when that wake fails. A wake with nothing due draws no frame.
 pub const BACKSTOP: f64 = 1.0;
 
-/// What the loop does until it draws again.
+/// When the loop draws its next frame.
 #[derive(Debug, PartialEq)]
 pub enum Wake {
-    /// Draw now, and take the next pass of the loop as soon as it comes.
+    /// Draw now.
     Now,
-    /// Draw at this second on the screen's clock. The loop sleeps toward it
-    /// no longer than [`sleep_until`] allows, and reads the sources on each
-    /// wake on the way.
+    /// Draw at this second on the run's clock. The loop sleeps toward it
+    /// in steps of at most [`BACKSTOP`] and reads the screen's sources on
+    /// each wake.
     At(f64),
-    /// Draw when an event arrives, and on nothing else.
+    /// Draw only when an event arrives.
     Never,
 }
 
-/// When the loop draws its next frame. `at` is the second of the frame that
-/// was drawn last, and `next` is the earliest second anything is due: the
-/// screen's own change, the next script key, the next capture, or the
-/// deadline, whichever comes first.
-///
-/// A screen at rest changes on its own schedule, once a minute for a clock
-/// that draws no seconds, and a loop that drew at the rate of the display
-/// would build sixty identical frames a second for it. `immediate` is the
-/// exception: a surface that changed size holds a stale frame, and the loop
-/// draws now whatever the schedule says.
+/// Returns when the loop draws next. `at` is the current second on the
+/// run's clock, and `next` is the earliest second at which anything is
+/// due: a change in the screen, the next script key, the next capture,
+/// or the deadline. `immediate` is set after the surface changes size,
+/// because the last frame no longer fits it.
 pub fn wake(immediate: bool, at: f64, next: Option<f64>) -> Wake {
     if immediate {
         return Wake::Now;
     }
     match next {
-        // A second the clock never reaches is a screen with nothing scheduled,
-        // and it is also the one value a wake time cannot hold.
+        // An infinite second means that nothing is scheduled.
         Some(next) if next.is_infinite() => Wake::Never,
         Some(next) if next > at => Wake::At(next),
         Some(_) => Wake::Now,
@@ -101,8 +91,8 @@ pub fn wake(immediate: bool, at: f64, next: Option<f64>) -> Wake {
     }
 }
 
-/// The second the loop sleeps until on its way to a frame due at `next`:
-/// that second, or one [`BACKSTOP`] after `at`, whichever comes first.
+/// The second the loop wakes next while it waits for a frame due at
+/// `next`.
 pub fn sleep_until(at: f64, next: f64) -> f64 {
     next.min(at + BACKSTOP)
 }
@@ -133,7 +123,7 @@ mod tests {
     }
 
     #[test]
-    fn every_step_the_clock_has_passed_comes_out_in_order_and_once() {
+    fn due_returns_every_passed_step_in_order_and_once() {
         let mut timeline = scripted(&[(0.1, "up"), (0.2, "down"), (0.3, "p")]);
         assert_eq!(timeline.due(0.25), keys(&["up", "down"]));
         assert_eq!(timeline.due(0.25), keys(&[]));
@@ -143,18 +133,27 @@ mod tests {
     #[test]
     fn a_run_ends_at_its_deadline() {
         let timeline = Timeline::new(Vec::new(), Some(3.0));
-        assert!(!timeline.past_deadline(2.999));
-        assert!(timeline.past_deadline(3.0));
+        assert!(
+            !timeline.past_deadline(2.999),
+            "the run is past its 3 second deadline at 2.999 seconds"
+        );
+        assert!(
+            timeline.past_deadline(3.0),
+            "the run is not past its 3 second deadline at 3 seconds"
+        );
     }
 
     #[test]
     fn a_run_with_no_script_and_no_deadline_has_nothing_due() {
         assert_eq!(Timeline::default().next_due(), None);
-        assert!(!Timeline::default().past_deadline(86_400.0));
+        assert!(
+            !Timeline::default().past_deadline(86_400.0),
+            "a run with no deadline is past it"
+        );
     }
 
     #[test]
-    fn the_next_step_is_due_until_it_fires_and_then_the_one_after_it() {
+    fn next_due_moves_to_the_following_step_after_a_step_fires() {
         let mut timeline = scripted(&[(1.0, "p"), (2.5, "q")]);
         assert_eq!(timeline.next_due(), Some(1.0));
 
@@ -164,7 +163,7 @@ mod tests {
     }
 
     #[test]
-    fn the_deadline_is_due_when_it_comes_before_the_next_step() {
+    fn next_due_is_the_deadline_when_it_comes_before_the_next_step() {
         let timeline = Timeline::new(vec![(5.0, "p".into())], Some(3.0));
         assert_eq!(timeline.next_due(), Some(3.0));
     }
@@ -176,24 +175,24 @@ mod tests {
     }
 
     #[test]
-    fn a_screen_that_changes_later_sleeps_until_then() {
+    fn a_screen_that_changes_later_wakes_at_that_second() {
         assert_eq!(wake(false, 4.0, Some(60.0)), Wake::At(60.0));
     }
 
     #[test]
-    fn a_screen_that_has_changed_draws_now() {
+    fn a_screen_whose_change_is_due_draws_now() {
         assert_eq!(wake(false, 4.0, Some(4.0)), Wake::Now);
         assert_eq!(wake(false, 4.0, Some(3.5)), Wake::Now);
     }
 
     #[test]
-    fn a_frame_far_off_sleeps_no_longer_than_the_backstop() {
+    fn a_distant_frame_sleeps_no_longer_than_the_backstop() {
         assert_eq!(sleep_until(4.0, 60.0), 4.0 + BACKSTOP);
         assert_eq!(sleep_until(4.0, 4.5), 4.5);
     }
 
     #[test]
-    fn a_screen_with_nothing_scheduled_waits_for_an_event() {
+    fn a_screen_with_nothing_scheduled_draws_only_on_an_event() {
         assert_eq!(wake(false, 4.0, None), Wake::Never);
         assert_eq!(wake(false, 4.0, Some(f64::INFINITY)), Wake::Never);
     }

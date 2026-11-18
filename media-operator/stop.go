@@ -1,16 +1,12 @@
 package main
 
-// The stop press during a film. HDMI-CEC 1.3a, CEC 13.13.3, says a TV
-// remote's Stop Function stops the media and keeps it stopped when
-// repeated, and the kernel's rc-cec keymap names it KEY_STOPCD. A Play
-// that ended has nothing left to play, so stop ends the run and asks
-// the client nothing: the unit returns to its idle screen, and a second
-// press reaches no film.
-
-// The action word for stop. The Play's commands topic accepts it.
+// actionStop is the action of a command on the Play's commands topic.
 const actionStop = "stop"
 
-// stop ends the run by the path every ending takes.
+// stop ends the run, for the Stop function of a remote (HDMI-CEC 1.3a,
+// section CEC 13.13.3), which the kernel's rc-cec keymap maps to
+// KEY_STOPCD. Unlike home, it publishes nothing on the Player's commands
+// topic, so the Player returns to its idle screen.
 func (c *commander) stop(trigger string) {
 	logLine(c.log, "command: %s: stop, so the run ends", trigger)
 	c.exit()

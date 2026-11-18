@@ -1,10 +1,10 @@
 package main
 
-// What these tests prove: a clear that the bus dropped because its write
-// queue was full goes out again on a later pass. A clear is an empty
-// retained publish, and a dropped one leaves the old message on the broker
-// for every later subscriber, so the operator forgets a topic, a run, or a
-// Play only once the bus queued its clear.
+// A clear is an empty retained publish. When the bus drops a clear
+// because its write queue is full, the old retained message stays on
+// the broker for every later subscriber. So the operator removes a
+// topic, a run, or a Play from its records only after the bus queued
+// the clear, and a later pass publishes a dropped clear again.
 
 import (
 	"fmt"
@@ -13,10 +13,11 @@ import (
 	"testing/synctest"
 )
 
-// fillQueue publishes more frames than the bus's write queue holds while the
-// broker takes none of them, so the next publish is dropped. The first
-// round runs while the broker still reads the frames its buffer holds, and
-// the second fills the slots that reading freed.
+// fillQueue fills the bus's write queue, so the next publish is
+// dropped. The fake broker stops reading once its pubs channel is full,
+// because nothing reads that channel yet. The first round fills the
+// channel and the queue, and the second round refills the queue slots
+// that the broker's reads freed.
 func fillQueue(bus *Bus) {
 	for range 2 {
 		for index := range 2 * busQueueDepth {
@@ -26,9 +27,9 @@ func fillQueue(bus *Bus) {
 	}
 }
 
-// drainBroker takes every publish the broker reads from now on, and answers
-// a read of each topic that received a retained empty payload. A caller
-// reads it after synctest.Wait.
+// drainBroker reads every publish that the broker receives from now on.
+// It returns a map from topic to whether the latest publish on that
+// topic was a clear. Read the map only after synctest.Wait.
 func drainBroker(t *testing.T, broker *fakeBroker) map[string]bool {
 	t.Helper()
 	cleared := map[string]bool{}
@@ -112,9 +113,9 @@ func TestAReleaseWhoseClearWasDroppedKeepsThePlayUntilTheNextPass(t *testing.T) 
 
 		media.pass()
 
-		held, standing := cluster.plays["movie"]
-		if !standing || !reflect.DeepEqual(held.Metadata.Finalizers, []string{playFinalizer}) {
-			t.Fatalf("a release whose clear was dropped took the finalizer off")
+		kept, exists := cluster.plays["movie"]
+		if !exists || !reflect.DeepEqual(kept.Metadata.Finalizers, []string{playFinalizer}) {
+			t.Fatal("the Play lost its finalizer after its clear was dropped, want it kept until the next pass")
 		}
 		cleared := drainBroker(t, broker)
 		media.pass()
@@ -122,8 +123,8 @@ func TestAReleaseWhoseClearWasDroppedKeepsThePlayUntilTheNextPass(t *testing.T) 
 
 		mustMatch(t, cleared[playStatusTopic(defaultTopicBase, "house", "movie")], true)
 		mustMatch(t, cleared[playAvailabilityTopic(defaultTopicBase, "house", "movie")], true)
-		if _, standing := cluster.plays["movie"]; standing {
-			t.Error("the Play is still held after its clear was queued")
+		if _, exists := cluster.plays["movie"]; exists {
+			t.Error("the Play still exists after the next pass queued its clear, want it deleted")
 		}
 	})
 }
@@ -132,7 +133,7 @@ func TestAPanelClearDroppedOnAFullQueueIsPublishedOnTheNextPass(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cluster := screenCluster()
 		media, broker := busOperator(t, cluster)
-		statePanel(media, []Player{*housePlayer()}, panelDesireOff, nil)
+		sendPanelDesireAndReconcile(media, []Player{*housePlayer()}, panelDesireOff, nil)
 		player := *cluster.players["theater"]
 		player.Spec.Idle = &IdlePolicy{Controller: idleControllerNone}
 		fillQueue(media.bus)

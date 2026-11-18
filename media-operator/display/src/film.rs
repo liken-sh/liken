@@ -1,18 +1,18 @@
-// What mpv reports about the film that is playing. The display observes
-// each of these properties; mpv pushes it once at registration and then on
-// every change, so the display runs no timer of its own for these values.
+//! The properties of the playing film that the display observes from mpv.
+//! After `observe_property`, mpv sends the property's current value and
+//! then a new value on every change, so no timer reads them again.
 
 use serde_json::Value;
 
-// One chapter of the film, as chapter-list carries it.
+/// One entry of mpv's `chapter-list`.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Chapter {
     pub time: f64,
     pub title: Option<String>,
 }
 
-// One track of the file, as track-list carries it. kind is the list's own
-// type field.
+/// One entry of mpv's `track-list`. `kind` is the entry's `type` field:
+/// `video`, `audio`, or `sub`.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Track {
     pub id: i64,
@@ -23,9 +23,8 @@ pub struct Track {
 }
 
 impl Track {
-    /// Name a track by what a viewer recognizes: the title and the language.
-    /// When the file gives neither, the id is the only handle left, so the
-    /// label falls back to it.
+    /// The name a viewer sees for the track: its title and language. When
+    /// the file sets neither, the label is `Track <id>`.
     pub fn label(&self) -> String {
         let lang = self.lang.as_ref().map(|lang| lang.to_uppercase());
         match (
@@ -40,25 +39,24 @@ impl Track {
     }
 }
 
-// The properties the display holds, one field per observed property. Every
-// module reads its film state here instead of asking mpv inside a frame,
-// because an IPC client cannot read a property inside a frame the way a
-// script can.
+/// The last value of each observed mpv property. Drawing code reads these
+/// fields and never queries mpv, because a `get_property` request over the
+/// IPC socket returns its reply in a later message, not during the frame.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Film {
     pub duration: Option<f64>,
     pub position: Option<f64>,
     pub chapter: Option<i64>,
     pub chapters: Vec<Chapter>,
-    /// The title of the chapter mpv plays now, which a music item draws as its
+    /// The title of the playing chapter, which a music item shows as its
     /// track name.
     pub chapter_title: Option<String>,
     pub tracks: Vec<Track>,
     pub metadata: Vec<(String, String)>,
     pub media_title: Option<String>,
-    /// The file mpv plays, as the playlist named it. The music cover reads the
-    /// picture inside it, or a cover file beside it, when the item's block
-    /// states none.
+    /// The path of the playing file, as the playlist gave it. The music
+    /// cover reads the picture embedded in this file, or a cover file
+    /// beside it, when the item's block gives no cover.
     pub path: Option<String>,
     pub playlist_pos: Option<i64>,
     pub playlist_count: Option<i64>,
@@ -68,8 +66,9 @@ pub struct Film {
 }
 
 impl Film {
-    // Take one property push. The name is the property the display observed,
-    // and the value is what mpv pushed.
+    /// Stores the value that mpv sent for the property `name`. It ignores a
+    /// property the display does not observe. A missing or null value
+    /// becomes the field's empty value.
     pub fn apply(&mut self, name: &str, value: &Value) {
         match name {
             "duration" => self.duration = value.as_f64(),
@@ -90,15 +89,16 @@ impl Film {
         }
     }
 
-    // The tracks of one kind, in the order track-list carries them. Every
-    // caller counts, finds, or walks them, so none of them takes a list.
+    /// The tracks whose `kind` is `kind`, in `track-list` order.
     pub fn tracks_of<'a>(&'a self, kind: &'a str) -> impl Iterator<Item = &'a Track> + 'a {
         self.tracks.iter().filter(move |track| track.kind == kind)
     }
 
-    /// A standalone track plays as a plain file, so mpv reads its tags. An
-    /// album plays as one timeline, and mpv reads the first track's tags and
-    /// keeps them for the whole run.
+    /// The value of the file tag `name`, matched without regard to case.
+    /// An empty value counts as no tag. A standalone track plays as its own
+    /// file, so `metadata` holds that file's tags. An album plays as one
+    /// mpv EDL timeline, and mpv reports the first file's tags for the
+    /// whole timeline.
     pub fn tag(&self, name: &str) -> Option<&str> {
         self.metadata
             .iter()
@@ -107,8 +107,9 @@ impl Film {
             .filter(|value| !value.is_empty())
     }
 
-    /// The chapter mpv plays now, which is the one the bar marks and the one
-    /// the line below the bar names.
+    /// The chapter that is playing, which the bar marks and the line below
+    /// it names. Returns `None` when mpv reports no chapter or an index
+    /// outside `chapter-list`.
     pub fn current_chapter(&self) -> Option<&Chapter> {
         let at = self.chapter.filter(|at| *at >= 0)?;
         self.chapters.get(usize::try_from(at).ok()?)
@@ -202,7 +203,7 @@ mod tests {
     }
 
     #[test]
-    fn a_push_lands_on_the_property_it_names() {
+    fn a_property_push_updates_its_own_field() {
         let film = film();
         assert_eq!(film.duration, Some(6000.0));
         assert_eq!(film.position, Some(1199.0));

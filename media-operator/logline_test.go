@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-// logBuffer collects the lines a role prints. The roles write from more
-// than one goroutine, so the buffer takes a lock, and the race detector
-// reads a test's writer the way it reads the role's own state.
+// logBuffer collects the lines that a role prints. A role writes from
+// several goroutines, so the buffer takes a lock, and the race detector
+// does not flag the test's reads.
 type logBuffer struct {
 	mutex  sync.Mutex
 	buffer bytes.Buffer
@@ -32,17 +32,17 @@ func (b *logBuffer) lines() []string {
 	return strings.Split(text, "\n")
 }
 
-// mustLogOnce asserts that exactly one line was written, and that it
-// carries each fact.
+// mustLogOnce asserts that exactly one line was written and that the
+// line contains each fact.
 func mustLogOnce(t *testing.T, log *logBuffer, facts ...string) {
 	t.Helper()
 	lines := log.lines()
 	if len(lines) != 1 {
-		t.Fatalf("wanted one line, got %d: %q", len(lines), lines)
+		t.Fatalf("the log has %d lines %q, want one", len(lines), lines)
 	}
 	for _, fact := range facts {
 		if !strings.Contains(lines[0], fact) {
-			t.Errorf("the line %q does not say %q", lines[0], fact)
+			t.Errorf("the line is %q, want it to contain %q", lines[0], fact)
 		}
 	}
 }
@@ -51,11 +51,11 @@ func mustLogOnce(t *testing.T, log *logBuffer, facts ...string) {
 func mustLogNothing(t *testing.T, log *logBuffer) {
 	t.Helper()
 	if lines := log.lines(); len(lines) != 0 {
-		t.Errorf("wanted no line, got %q", lines)
+		t.Errorf("the log has the lines %q, want none", lines)
 	}
 }
 
-func TestALineGoesToTheWriterTheRoleHolds(t *testing.T) {
+func TestALineGoesToTheGivenWriter(t *testing.T) {
 	var log logBuffer
 
 	logLine(&log, "remote: %s pressed", "KEY_UP")
@@ -63,7 +63,7 @@ func TestALineGoesToTheWriterTheRoleHolds(t *testing.T) {
 	mustMatchAll(t, log.lines(), []string{"remote: KEY_UP pressed"})
 }
 
-func TestRemoteOfTopicNamesTheRemoteAControllerTopicBelongsTo(t *testing.T) {
+func TestRemoteOfTopicReturnsNamespaceAndNameOfTheTopicsRemote(t *testing.T) {
 	cases := []struct {
 		topic string
 		want  string

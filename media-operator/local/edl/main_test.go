@@ -1,8 +1,5 @@
 package main
 
-// The tests build an album folder under t.TempDir(), with the tags each case
-// names, and check the block the tool prints for it.
-
 import (
 	"encoding/json"
 	"path/filepath"
@@ -15,18 +12,17 @@ import (
 func mustSucceed(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
-		t.Fatalf("wanted no error, got %v", err)
+		t.Fatalf("the step returned an error, want none: %v", err)
 	}
 }
 
 func mustMatch[T comparable](t *testing.T, got, want T) {
 	t.Helper()
 	if got != want {
-		t.Errorf("got %+v, want %+v", got, want)
+		t.Errorf("the value is %+v, want %+v", got, want)
 	}
 }
 
-// blockJSON is the JSON the tool prints for one album folder.
 func blockJSON(t *testing.T, files []string) string {
 	t.Helper()
 	encoded, err := json.Marshal(albumBlock(files))
@@ -34,10 +30,7 @@ func blockJSON(t *testing.T, files []string) string {
 	return string(encoded)
 }
 
-// The block carries the album's words from the first tagged file, and omits a
-// field no file states. The type and the hint are always there, because the
-// block is meant to be pasted into a Play item and the hint is what makes the
-// pod expand the folder.
+// A field that no file's tags set is left out of the block.
 func TestTheBlockFields(t *testing.T) {
 	cases := []struct {
 		name   string

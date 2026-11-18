@@ -1,12 +1,11 @@
 package main
 
-// This file is the client one liken API uses to call another. It
-// sends the token projected for the sibling's audience under this
-// API's own ServiceAccount, dials through the sibling's published CA,
-// and turns each answer the sibling can give into an open stream or
-// a fault this API's own client can read: the sibling's problem
-// document relayed under a mapped status, with its own words as the
-// detail.
+// This file is the client that this API uses to call the display and
+// audio APIs, called the upstreams here. Each request carries a bearer
+// token that Kubernetes projects for the upstream's audience into a
+// file of this pod. A 200 response becomes an open stream, and any other
+// response becomes an upstreamFault, which the caller returns to its own
+// client as a problem document.
 
 import (
 	"context"
@@ -19,23 +18,21 @@ import (
 	"time"
 )
 
-// The two bounds on an upstream leg. Both are variables because a test
-// that streams a body through the stand-in ffmpeg runs a subprocess,
-// which a synctest bubble cannot wait on, so that test runs on the
-// machine's clock and drives the bound in milliseconds.
-//
-// The header bound is 10 s, plus the caller's begin where there is one,
-// then 504.
+// upstreamHeaderTimeout is how long an upstream has to send its response
+// headers, plus the request's begin offset. A late upstream becomes a
+// 504. It is a variable so that a test that streams through a stand-in
+// ffmpeg, which runs on the real clock, can shorten it.
 var upstreamHeaderTimeout = 10 * time.Second
 
-// The idle bound on an upstream body is 30 s, counted from the first
-// body byte or from begin, whichever is later.
+// upstreamIdleTimeout is how long an upstream body may go without
+// sending data, counted from the first body byte or from begin,
+// whichever is later.
 var upstreamIdleTimeout = 30 * time.Second
 
-// upstreamStream is one open upstream body with the instant its
-// headers arrived on this API's clock. That instant is the whole of
-// the offset correction: the difference between two streams' instants
-// is the -itsoffset the mux applies.
+// upstreamStream is an open upstream response body. headersAt is when
+// the headers arrived. The composition handler passes the difference
+// between two streams' headersAt values to ffmpeg as -itsoffset, so
+// the inputs line up in time.
 type upstreamStream struct {
 	name      string
 	target    string
@@ -57,10 +54,8 @@ func (s *upstreamStream) close() {
 	}
 }
 
-// upstreamFault is what an upstream answer that is not a stream
-// becomes for the client of this API: the mapped status, the problem
-// type and title, the upstream's own words, its URL, and its
-// Retry-After where it sent one.
+// upstreamFault is the problem document that this API returns for an
+// upstream failure. upstream is the upstream's URL.
 type upstreamFault struct {
 	status     int
 	kind       string
@@ -70,9 +65,8 @@ type upstreamFault struct {
 	retryAfter string
 }
 
-// upstreamClient holds what a call to a sibling needs: the HTTP
-// client that dials through the sibling anchors, the token for each
-// audience, the metrics, and the clock that stamps header arrival.
+// upstreamClient calls upstream APIs. token returns the bearer token
+// for an upstream, and clock returns the headersAt time of a stream.
 type upstreamClient struct {
 	http    *http.Client
 	token   func(upstream string) (string, error)
@@ -80,15 +74,12 @@ type upstreamClient struct {
 	clock   func(upstream string) time.Time
 }
 
-// open sends one upstream request and answers the stream or the
-// fault. The header bound is a timer that cancels the request's
-// context, not a client timeout, because a client timeout covers the
-// whole exchange and would cut a live stream on schedule. Stop answers
-// whether it prevented the cancel from running, so it is also the
-// question "did the headers arrive in time": a stream whose deadline
-// fired is refused rather than handed back on a context that is
-// already cancelled. Once the headers are in, nothing bounds the body
-// but the idle watchdog.
+// open sends a GET to target and returns the open stream, or a fault
+// when the request fails or the headers do not arrive within
+// headerTimeout. The deadline is a timer that cancels the request
+// context. http.Client.Timeout would also limit the body and cut off a
+// live stream. After the headers arrive, the caller's idle watchdog
+// limits the body.
 func (u *upstreamClient) open(parent context.Context, name, target string, headerTimeout time.Duration) (*upstreamStream, *upstreamFault) {
 	ctx, cancel := context.WithCancel(parent)
 	timer := time.AfterFunc(headerTimeout, cancel)
@@ -124,9 +115,9 @@ func (u *upstreamClient) open(parent context.Context, name, target string, heade
 			detail: err.Error(), upstream: target, retryAfter: retryAfterSeconds,
 		}
 	}
-	// The deadline can fire as the headers land. The context is
-	// cancelled by then, so the body would fail on its first read, and
-	// a refusal the client can read beats a stream that dies at once.
+	// When the deadline fires just as the headers arrive, the context is
+	// cancelled and the first body read would fail, so return the 504
+	// now.
 	if !inTime {
 		drain(response.Body)
 		cancel()
@@ -149,8 +140,8 @@ func (u *upstreamClient) open(parent context.Context, name, target string, heade
 	}, nil
 }
 
-// lateFault is the answer to a sibling that did not send its headers
-// within the bound, which is ten seconds plus the caller's begin.
+// lateFault returns the 504 for an upstream that did not send its
+// headers within headerTimeout.
 func (u *upstreamClient) lateFault(name, target string, headerTimeout time.Duration) *upstreamFault {
 	u.metrics.observeUpstream(name, "timeout")
 	return &upstreamFault{
@@ -160,24 +151,22 @@ func (u *upstreamClient) lateFault(name, target string, headerTimeout time.Durat
 	}
 }
 
-// relayFault maps a sibling's status to this API's own: a 400 and a
-// 404 relay as themselves with the upstream's problem as the detail,
-// a 409 relays as away, a 503 relays as capture-busy with the
-// upstream's Retry-After, and any other status is a 502.
-//
-// A sibling answers 409 only for an object that is away: a Display
-// with no panel on its connector, or a Sink or Source with no node.
-// No retry clears it, so the relay carries no Retry-After, and the
-// sibling's detail says what a person does about it. An answer that is not a problem document
-// is a 502 whatever its status, because this API cannot say what it
-// means and must not pass it off as its own.
+// relayFault converts a non-200 upstream response into this API's own
+// fault, with the upstream's detail. A 400 and a 404 keep their status.
+// A 409 becomes problemAway with no Retry-After, because the upstreams
+// return 409 only for a Display with no monitor connected or a Sink or
+// Source with no node, and a retry fails until a person fixes that. A
+// 503 becomes problemCaptureBusy with the upstream's Retry-After. Any
+// other status becomes a 502, and so does any response that is not a
+// problem document, because this API cannot tell what its status
+// means.
 func relayFault(response *http.Response, target string) *upstreamFault {
 	detail, problem := upstreamDetail(response)
 	switch {
 	case !problem:
 		return &upstreamFault{
 			status: http.StatusBadGateway, kind: problemUpstreamFailed,
-			title:  "The upstream answered something this API cannot relay",
+			title:  "The upstream sent a response that this API cannot relay",
 			detail: detail, upstream: target,
 		}
 	case response.StatusCode == http.StatusBadRequest:
@@ -209,16 +198,16 @@ func relayFault(response *http.Response, target string) *upstreamFault {
 	default:
 		return &upstreamFault{
 			status: http.StatusBadGateway, kind: problemUpstreamFailed,
-			title:  "The upstream answered a status this API cannot relay",
+			title:  "The upstream returned a status that this API cannot relay",
 			detail: detail, upstream: target,
 		}
 	}
 }
 
-// upstreamDetail reads the sibling's own words out of its answer, this
-// repository's error rule: the problem document's detail, or its
-// title when the detail is empty. An answer that is not a problem
-// document gives its status line and body as the words, and false.
+// upstreamDetail returns the text to show for an upstream response and
+// whether the response was a problem document. For a problem document
+// the text is its detail, or its title when the detail is empty. For
+// any other response it is the status line and the body.
 func upstreamDetail(response *http.Response) (string, bool) {
 	body, _ := io.ReadAll(io.LimitReader(response.Body, 8<<10))
 	kind, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
@@ -235,10 +224,9 @@ func upstreamDetail(response *http.Response) (string, bool) {
 	return document.Detail, true
 }
 
-// upstreamCodecs answers the codecs parameter of an upstream's
-// Content-Type, whole and unread. The composed type carries what the
-// sibling said about its own track and never a value this API invented,
-// so a sibling that names no codec leaves the parameter off.
+// upstreamCodecs returns the codecs parameter of an upstream's
+// Content-Type, or an empty string when there is none. The composed
+// response reports only the codecs that an upstream sent, never a guess.
 func upstreamCodecs(contentType string) string {
 	_, parameters, err := mime.ParseMediaType(contentType)
 	if err != nil {
@@ -247,14 +235,13 @@ func upstreamCodecs(contentType string) string {
 	return strings.TrimSpace(parameters["codecs"])
 }
 
-// maxDrain bounds the read in drain. Past this size, the connection is
-// the cheaper thing to lose.
+// maxDrain is the most that drain reads, because past this size a new
+// connection costs less than reading the rest of the body.
 const maxDrain = 4 << 20
 
-// drain reads whatever is left in a body, then closes it. Go returns a
-// connection to its pool only when the body reaches EOF, so an early
-// close costs a fresh connection and TLS handshake, and reaches the
-// server as a hang-up on a request it answered.
+// drain reads the rest of a body, up to maxDrain, and closes it, because
+// the HTTP transport reuses a connection only after its body was read
+// to EOF. A body closed early costs a new connection and TLS handshake.
 func drain(body io.ReadCloser) {
 	_, _ = io.Copy(io.Discard, io.LimitReader(body, maxDrain))
 	_ = body.Close()

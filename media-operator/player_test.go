@@ -37,10 +37,6 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 			},
 		},
 		{
-			// A run of nothing but music blanks mpv's video, so the display
-			// composes the whole frame instead of annotating a framed cover.
-			// The window is forced open over the blanked video, because mpv
-			// opens none for a run with no video track.
 			name:  "an album and a track, both music",
 			items: []string{"/ipc/album-1.edl", "/media/1/track.flac"},
 			blocks: []json.RawMessage{
@@ -63,7 +59,6 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 			},
 		},
 		{
-			// One film in the list keeps video on for the whole run.
 			name:  "a film beside an album",
 			items: []string{"/media/1/film.mkv", "/ipc/album-2.edl"},
 			blocks: []json.RawMessage{
@@ -85,8 +80,6 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 			},
 		},
 		{
-			// The declared start becomes --start ahead of the items, so
-			// the first file begins where the spec says.
 			name:  "the spec declares a start",
 			start: "0:10:00",
 			items: []string{"/media/0/film.mkv"},
@@ -106,8 +99,6 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 			},
 		},
 		{
-			// MEDIA_PLAYER_VERBOSE drops --quiet from the list, so mpv prints
-			// its status line into the pod log, and the shim adds no -v.
 			name:    "the operator asks for mpv's full output",
 			verbose: "1",
 			items:   []string{"/media/0/film.mkv"},
@@ -132,14 +123,12 @@ func TestPlayerArgvBuildsMPVsCommand(t *testing.T) {
 			t.Setenv(playerVerboseVariable, each.verbose)
 			argv, err := playerArgv(each.items, each.blocks)
 			mustSucceed(t, err)
-			// argv[0] is the resolved binary, so the want list is the
-			// mpv path followed by the arguments the shim built.
 			mustMatchAll(t, argv, append([]string{mpv}, each.want...))
 		})
 	}
 }
 
-func TestPlayerArgvFailsWhenTheImageCarriesNoMPV(t *testing.T) {
+func TestPlayerArgvFailsWhenTheImageHasNoMPV(t *testing.T) {
 	was := mpvBinary
 	t.Cleanup(func() { mpvBinary = was })
 	mpvBinary = "definitely-not-a-real-mpv-binary"
@@ -148,10 +137,8 @@ func TestPlayerArgvFailsWhenTheImageCarriesNoMPV(t *testing.T) {
 	mustFail(t, err)
 }
 
-// useMPV writes a stand-in mpv the shim can resolve, points mpvBinary
-// at it, and returns its path. The stand-in never runs; playerArgv only
-// resolves the path, so the file's contents do not matter, only that it
-// is executable.
+// useMPV points mpvBinary at a stand-in and returns its path.
+// playerArgv never runs the file, so it only has to be executable.
 func useMPV(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "fake-mpv")
@@ -162,8 +149,6 @@ func useMPV(t *testing.T) string {
 	return path
 }
 
-// useSocket moves the mpv IPC socket path for the length of one test,
-// so the shim writes the --input-ipc-server flag the test expects.
 func useSocket(t *testing.T, path string) {
 	t.Helper()
 	was := mpvSocketPath

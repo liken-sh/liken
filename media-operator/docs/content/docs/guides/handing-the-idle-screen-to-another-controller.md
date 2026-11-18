@@ -6,48 +6,50 @@ description: "Hand a Player's idle screen to another operator through spec.idle.
 
 # Hand the idle screen to another controller
 
-By default the media operator draws a `Player`'s idle screen with its
-own client. `spec.idle.controller` names what draws it instead. This
-guide covers both sides: the field a cluster owner sets, and the
-contract an operator follows to take a screen over.
+When a `Player` plays nothing, its screen shows an idle screen.
+`media-operator` draws it with its own client by default. Set
+`spec.idle.controller` to let another program draw it, such as the
+media browser of `library-operator`. The first section is for the
+cluster owner who sets the field. The rest is for the author of the
+program that draws the screen.
 
 You need:
 
 * The operator and its bus, from the [install](/docs/guides/install/).
-* A `Player` with a display, so the operator holds a display claim
+* A `Player` with a display, so the operator creates a display claim
   for it.
 
 ## Name the controller
 
 `controller` is a domain-qualified name, `<domain>/<name>`. Set it on
-one `Player`, or on `MediaPreferences` as the household default. The
-`Player` wins where both are set.
+one `Player`, or on `MediaPreferences` as the default for every
+`Player`. When both set it, the `Player` wins.
 
     spec:
       idle:
         controller: library.liken.sh/media-browser
 
-Two names belong to the media operator:
+Two names belong to `media-operator`:
 
 * `media.liken.sh/idle-screen` is the default. The operator draws the
-  idle screen with the client `spec.idle.image` names.
-* `media.liken.sh/none` turns the unit's idle screen off. The operator
-  holds no display claim and runs no idle pod for it.
+  idle screen with the client image in `spec.idle.image`.
+* `media.liken.sh/none` turns the idle screen off. The operator
+  creates no display claim and no idle pod for the `Player`.
 
-Any other name is a delegate. The operator keeps the display claim,
-runs no client of its own, and writes what the
-delegate needs to the `Player` status. `spec.idle.image` has no effect
-under a delegate. `library.liken.sh/media-browser` is the
-[library operator](https://liken.sh/library/)'s media browser, the one
-delegate that exists today.
+Any other name is a delegate. The operator still creates the display
+claim, but it starts no client of its own. It writes what the
+delegate needs into the `Player` status, and the delegate runs its own
+pod. `spec.idle.image` has no effect under a delegate.
+`library.liken.sh/media-browser` is the media browser of
+[`library-operator`](https://liken.sh/library/).
 
 `kubectl get players` shows the resolved name in its `Idle` column.
 
 ## Read the status
 
-The delegate acts on `status.idle` and never on `spec.idle`. The spec
-may inherit its controller from `MediaPreferences`, and the media
-operator resolves the two into one name.
+A delegate reads `status.idle`, not `spec.idle`, because the
+controller can come from `MediaPreferences`. The operator resolves
+the two and writes the result to the status:
 
     status:
       idle:
@@ -67,24 +69,24 @@ operator resolves the two into one name.
             - events: liken/media/remotes/den/den-gamepad/events
               focus: liken/media/remotes/den/den-gamepad/focus
 
-* `controller` is the resolved name. Act when it is yours.
-* `claim` is the `ResourceClaim` in the `Player`'s namespace that
+* `controller` is the resolved name. Act only when it is yours.
+* `claim` is the `ResourceClaim`, in the `Player`'s namespace, that
   holds the screen. Your pod references it by name.
-* `requests` are the request names in the claim. `draw` is the
-  shared draw device on the unit's screen. `render` is the GPU render
-  node, present when the `Player` has one.
-* `fadeAfterSeconds` and `offAfterSeconds` are the resolved quiet
-  windows, in seconds. Both are always written. Zero on the first means
-  the screen never fades on its own, and zero on the second means the
-  panel never goes dark on its own.
-* `bus` is the broker and every topic the client reads or writes. The
-  section on presses below covers each one, and
-  [the media bus](/docs/reference/bus/) gives the rules they follow.
+* `requests` are the request names in the claim. `draw` gives your
+  pod a window on the `Player`'s screen, and other pods share it.
+  `render` is the GPU render node, and it is present only when the
+  `Player` has one.
+* `fadeAfterSeconds` is the time with no press before the screen dims,
+  and `offAfterSeconds` is the time with no press before the panel
+  turns off. The operator always writes both. A value of 0 turns that
+  step off.
+* `bus` is the MQTT broker address and every topic the client reads or
+  writes. [The media bus](/docs/reference/bus/) describes each topic.
 
 ## Build the pod
 
 Run one pod in the `Player`'s namespace. Reference the claim by name,
-and give the container one entry per request:
+and list one `claims` entry in the container for each request:
 
     spec:
       resourceClaims:
@@ -100,184 +102,190 @@ and give the container one entry per request:
               - name: devices
                 request: render
 
-The draw device delivers `WAYLAND_DISPLAY`, a compositor socket the
-display operator opened for this claim alone. Open it and map your
-window. The socket says which screen the window belongs on, so the
-window needs no app-id and no flag.
+The `draw` device sets `WAYLAND_DISPLAY` to a compositor socket that
+`display-operator` opened for this claim only. Open the socket and map
+your window. The socket belongs to this screen, so the window needs no
+app-id and no flag to choose a screen.
 
-The draw device is shared. Your pod and a `Play`'s playback pod hold
-the screen at once, and the playback window draws over yours while
-media plays.
+Your pod and the playback pod of a `Play` both hold the `draw`
+device. While media plays, the playback window draws over yours.
 
-A window can go away under a running client when the compositor
-restarts. Nothing inside the process can open the connection again, so
-exit when no window exists for longer than a grace period. The
-operator's own client exits with code 7 in that case, so a person
-reading a container's last state finds the same code whichever client
-the image runs.
+When the compositor restarts, a running client loses its window and
+cannot reconnect from inside the process. So exit when no window has
+existed for longer than a grace period that you choose. Exit with
+code 7, as the operator's own client does, so a person who reads a
+container's last state sees the same code for every client.
 
-If your client's exit ends its container, the kubelet counts it as a
-crash, and a second compositor restart within ten minutes leaves your
-screen dark for 10 seconds or more while the kubelet's crash backoff
-runs. The operator's own client avoids that wait: the container's
-first process runs the client as a child, waits for the compositor's
-socket to accept a connection, and starts the client again. Only an
-exit with another code ends its container.
+The kubelet counts that exit as a crash. After a second compositor
+restart within ten minutes, the kubelet waits 10 seconds before it
+starts your container again, and the wait doubles with each crash up
+to 5 minutes. The operator's own client avoids this wait. The first
+process of its container runs the client as a child. When the client
+exits with code 7 because a new compositor replaced the old one, that
+process waits for the new compositor's socket and starts the client
+again. The container exits when the client exits with any other code,
+when the same compositor is still running, or when no compositor
+accepts a connection within a time limit.
 
 ## Read the presses
 
-The client that draws a screen also answers its controllers. It holds
-the focus gate, the shade, the fade and off windows, the volume
-indicator, the cycle request, and the panel desire, in its own
-process. The operator runs no pod between the bus and the client.
+The program that draws the screen also handles the controllers. The
+operator runs no pod between the bus and the client, so the client
+applies these rules itself, in its own process:
 
-There are two ways to hold that contract:
+* It acts on a press only while the controller's focus message names
+  this `Player` and no `Play` runs on it.
+* It dims the screen and turns the panel off after the quiet periods
+  in `status.idle`.
+* It draws the volume indicator.
+* It asks `media-operator` to move a controller's focus to its next
+  `Player`.
+* It publishes whether the panel should be on or off.
 
-* Take the `media-screen` crate from the `liken-sh/liken` repository
-  as a git dependency pinned to a release tag. Cargo finds the crate
-  by its name inside the repository. It reads the variables below,
-  runs every rule, and hands the client what it draws: a press, the
-  shade down or up, and a focus. Name topics of your own when you open
-  the reader. Every message on one comes back on the same connection,
-  so a client reads back the retained state it owns.
-* Read the same topics yourself and hold the same gates. The
+There are two ways to follow these rules:
+
+* Use the `media-screen` crate from the `liken-sh/liken` repository as
+  a git dependency, pinned to a release tag. Cargo finds the crate by
+  its name inside the repository. The crate reads the environment
+  variables below, applies every rule, and returns the events the
+  client draws: a press to act on, the screen dimming or brightening,
+  and a focus change. When you open its reader, you can also pass
+  topics that your client owns. The reader subscribes to them on the
+  same connection and returns each message, so your client reads back
+  the retained messages that it published.
+* Read the same topics yourself and apply the same rules. The
   [bus reference](/docs/reference/bus/) describes each topic.
 
 Set these variables on your container. Each value comes from
 `status.idle`:
 
 * `MEDIA_BUS_ADDRESS`, from `bus.address`.
-* `MEDIA_PLAYER_NAME`, the `Player`'s `metadata.name`. It is not the
-  friendly name. Every focus mark holds this value, so a client that
-  sets it wrong answers no press.
+* `MEDIA_PLAYER_NAME`, the `Player`'s `metadata.name`. Do not use the
+  friendly name. Every focus message holds this value, so a client that
+  sets it wrong acts on no press.
 * `MEDIA_PLAYER_STATUS_TOPIC`, from `bus.statusTopic`.
-* `MEDIA_PLAYER_VOLUME_TOPIC`, from `bus.volumeTopic`. The media
-  operator relays the unit's level there, retained, as
-  `{"level": 0.63, "muted": false}`, where the level is the fraction
-  of the device's max. Draw the level and send none. The retained
-  message the broker delivers when the client subscribes sets the
-  level and draws nothing, and each live message draws the indicator.
-  The payload carries `"indicator": "receiver"` while a `Receiver`
-  that shows its own volume overlay on the TV sets the level. Track
-  the level and the mute then, and draw no bar. An absent field means
-  the client draws the bar. A live message that differs from the last
-  one only in `indicator` draws nothing either.
-  The client handles no volume key: the operator reads
+* `MEDIA_PLAYER_VOLUME_TOPIC`, from `bus.volumeTopic`. The operator
+  publishes the `Player`'s volume on this topic, retained, as
+  `{"level": 0.63, "muted": false}`. The level is a fraction of the
+  device's maximum. The client never publishes to this topic. The
+  retained message that the broker sends on subscribe sets the level
+  and draws nothing. Each later message draws the volume indicator.
+
+  While a `Receiver` shows its own volume overlay on the TV, the
+  payload has `"indicator": "receiver"`, and the client tracks the
+  level and the mute state but draws no bar. A message that differs
+  from the one before it only in `indicator` draws nothing.
+
+  The client handles no volume key. The operator reads
   `KEY_VOLUMEUP`, `KEY_VOLUMEDOWN`, `KEY_MUTE`, and `KEY_UNMUTE` from
-  the controller's events topic and sets the room's level. A client
-  that offers a volume control of its own, such as an on-screen
+  the controller's events topic and sets the level of the `Player`'s
+  devices. A client with its own volume control, such as an on-screen
   slider, publishes `{"step": "up"}`, `{"step": "down"}`,
-  `{"mute": "toggle"}`, `{"mute": true}`, or `{"mute": false}`, not
-  retained, on this topic plus `/commands`, and the operator treats
-  each message the same as a press. The field is empty for a unit with
-  no sinks. Set nothing then, and the client draws no level.
+  `{"mute": "toggle"}`, `{"mute": true}`, or `{"mute": false}` to this
+  topic plus `/commands`, not retained. The operator handles each of
+  these messages like a key press. The variable is empty for a `Player`
+  with no sinks. Then the client draws no level.
 * `MEDIA_PLAYER_COMMANDS_TOPIC`, from `bus.commandsTopic`. The playback
-  pod publishes `{"action": "play-next"}` there when a person takes the
-  up-next offer on the scrubber, for a client that starts what follows.
-  It publishes `{"action": "home"}` there when a person presses home
-  during a film, just before the `Play` ends. The client reads that
-  message as a press of the home key. The
-  `media-screen` crate holds this rule. When a `Play` ends, the client's
-  own surface is on the screen again without a command from the client, and the
-  retained status is the cue. Nothing else arrives, and the client
-  publishes nothing back.
-* `MEDIA_PLAYER_POWER_TOPIC`, from `bus.powerTopic`. Every unit has
-  it. The media operator owns the `Player`'s power in `spec.power`,
-  and it publishes two asks here, not retained:
-  `{"action": "sleep"}` when the `Player` turns off, and
-  `{"action": "wake"}` when it turns on. It publishes the same two
-  when the room's TV asks over HDMI-CEC: `wake` when a person picks
-  the unit's input in the TV's source menu while the screen sleeps,
-  and `sleep` when the TV goes to standby. Answer `wake` by waking
-  the screen and stating the `on` desire. Answer `sleep` by bringing
-  the shade down and stating the `off` desire at once, while the unit
-  plays nothing. The client publishes nothing here. The media
-  operator turns the panel, the TV, and the receiver off and on
-  itself, so the client's desire only follows.
+  pod publishes `{"action": "play-next"}` here when a person accepts
+  the up-next offer on the scrubber, for a client that starts what
+  follows. It publishes `{"action": "home"}` here when a person
+  presses home during a film, just before the `Play` ends. The client
+  treats that message as a press of the home key, as the `media-screen`
+  crate does. When a `Play` ends, the client's screen shows again
+  without a command, and the retained status reports the change. The
+  client publishes nothing to this topic.
+* `MEDIA_PLAYER_POWER_TOPIC`, from `bus.powerTopic`. Every `Player` has
+  this topic. The operator owns the `Player`'s power through
+  `spec.power`. It publishes `{"action": "sleep"}` when the `Player`
+  turns off and `{"action": "wake"}` when it turns on, not retained.
+  It publishes the same messages for HDMI-CEC requests from the TV:
+  `wake` when a person selects the `Player`'s input in the TV's source
+  menu while the screen sleeps, and `sleep` when the TV goes to
+  standby. On `wake`, the client brightens the screen and publishes
+  `on` to the panel topic. On `sleep`, while the `Player` plays nothing,
+  the client dims the screen and publishes `off` to the panel topic at
+  once. The client publishes nothing to the power topic. The operator
+  turns the panel, the TV, and the receiver off and on itself, so the
+  client's panel message only matches what the operator already did.
 * `MEDIA_PLAYER_PANEL_TOPIC`, from `bus.panelTopic`. The client
-  publishes `{"desire": "on"}` or `{"desire": "off"}` there, retained.
-  The operator turns the desire into an override on the screen's
-  `Display`.
+  publishes `{"desire": "on"}` or `{"desire": "off"}` here, retained.
+  This is the panel state the client requests. The operator turns it
+  into an override on the screen's `Display`.
 * `MEDIA_REMOTE_EVENTS_TOPICS` and `MEDIA_REMOTE_FOCUS_TOPICS`, from
-  `bus.remotes`. Join each field with newlines, one line per entry, in
-  the order the status lists them, so the two lists stay aligned.
+  `bus.remotes`. Join each field with newlines, one line per entry,
+  in the order of `bus.remotes`, so that the two lists match entry
+  for entry.
 * `IDLE_FADE_AFTER_SECONDS`, from `fadeAfterSeconds`.
 * `IDLE_OFF_AFTER_SECONDS`, from `offAfterSeconds`.
 
 A press arrives on a controller's events topic as
-`{"key": "KEY_UP", "value": 1}`, the same JSON every reader of the
-`Remote`'s events topic gets. A press acts only while the
-controller's focus mark names this `Player`, and only while the unit
-plays nothing.
+`{"key": "KEY_UP", "value": 1}`. This is the same JSON that every
+reader of a `Remote`'s events topic gets. A held key arrives again
+with value 2, and a release arrives with value 0, which the client
+ignores.
 
-A press on a sleeping screen wakes it. While the panel is on, the
-client then receives the press too, after the wake, so it lifts the
-shade and answers the key in one press. The panel stays on behind the
-shade until the off window runs out, and for good when
-`offAfterSeconds` is 0, so without this rule a person would press
-twice after each quiet stretch. A press while the panel is off only
-wakes the screen and states the `on` desire, because the person
-pressed at a dark TV and could not see what the press would act on.
-The panel is off after the off window runs out, and after the client
-receives `sleep` on the power topic. Back, `KEY_BACK`, `KEY_ESC`,
-`KEY_EXIT`, or `KEY_BACKSPACE`, on a sleeping screen only wakes it too,
-for every client.
-The operator's own client lowers the shade on back, and one rule for
-every client keeps a press of back from undoing the wake there. A
-repeat that finds the screen asleep does nothing, because the control
-was held while the shade came down and its press acted before that: a
-wake on the repeat would lift a shade the client just lowered, or
-light a panel that was just turned off. The client receives none of
-the repeats of a control whose press only woke the screen, or whose
-repeat found the screen asleep, until the control is released or the
-same remote sends its next press.
+A press on a dim screen wakes it. While the panel is on, the client
+also acts on that press after the wake, so a person does not press
+twice after each quiet period. The panel stays on while the screen is
+dim, until `offAfterSeconds` passes, or forever when it is 0. While
+the panel is off, a press only wakes the screen and publishes `on` to
+the panel topic, because the person pressed at a dark TV and could not
+see what the key would do. The panel is off after `offAfterSeconds`
+passes and after the client receives `sleep` on the power topic.
 
-The power keys, `KEY_POWER`, `KEY_POWER2`, `KEY_SLEEP`, and
-`KEY_WAKEUP`, are the media operator's: it reads them from the same
-topic and turns the `Player` off and on, so the client acts on none
-of them and moves no shade for them. A press of any other key on a
+A back key (`KEY_BACK`, `KEY_ESC`, `KEY_EXIT`, or `KEY_BACKSPACE`) on a
+dim screen only wakes it, for every client. The operator's own client
+dims the screen on back, and without this rule the press of back
+would dim the screen again right after the wake. A repeat of a key
+that arrives while the screen is dim does nothing, because the person
+held the key while the screen dimmed and its first press already
+acted. The client receives no repeats of a key whose press only woke
+the screen, or whose repeat arrived while the screen was dim, until
+the key is released or the same remote sends its next press.
+
+The power keys `KEY_POWER`, `KEY_POWER2`, `KEY_SLEEP`, and
+`KEY_WAKEUP` belong to the operator. It reads them from the same
+topic and turns the `Player` off and on, so the client does nothing
+for them and does not dim the screen. A press of any other key on a
 `Player` that is off turns it on, and the client then receives `wake`
-on the power topic. A held control arrives again as value 2, and a
-release, value 0, acts on nothing.
+on the power topic.
 
-A live focus mark that moves to this `Player` wakes the screen. A
-repeat of the mark the client already holds wakes nothing, because
-the operator can publish the same mark again with no person behind it.
-The one repeat that acts is the answer to the client's own cycle
-request, on a controller that only this `Player` lists.
-
-The client brings its own shade down. The operator's client does it on
-back. A client with levels does it on back when back has no level left
-to return to.
+A focus message that moves focus to this `Player` from elsewhere
+wakes the screen. A repeat of the current focus message wakes nothing,
+because the operator can publish the same message again with no
+person pressing a key. One repeat does wake the screen: the operator's
+response to the client's own request to move focus, on a controller
+that only this `Player` lists.
 
 ## Expect the claim to change
 
-A `ResourceClaim` is immutable. When the `Player`'s display selector
-or its render request changes, the operator replaces the claim. Before
-it deletes the claim, it deletes every pod the claim's
-`status.reservedFor` names, because a claim in use stays in Terminating
-until its holders are gone. Your pod is one of those holders.
+A `ResourceClaim` cannot be edited. When the `Player`'s display
+selector or its render request changes, the operator replaces the
+claim. First it deletes every pod in the claim's `status.reservedFor`,
+because a claim that a pod uses stays in `Terminating` until those pods
+are gone. Your pod is one of them.
 
-So run the pod under something that recreates it. An operator's next
-pass does that, and so does a `Deployment`. The replacement stays
-`Pending` until the new claim exists, then schedules against it. The
-same happens when a `Player` switches to `media.liken.sh/none`: the
-claim's holders go, then the claim.
+So run the pod under something that creates it again, such as a
+`Deployment`. The replacement pod stays `Pending` until the new claim
+exists, and then it schedules against it. The same happens when a
+`Player` switches to `media.liken.sh/none`: the operator deletes the
+pods that use the claim, and then the claim.
 
 When the `Player` switches away from your name, `status.idle` changes
 and your client no longer controls the screen. Remove its pod. The
 operator deletes it only when it replaces the claim.
 
-## What stays with the operator
+## What the operator keeps
 
-The operator keeps the display claim. It writes the focus mark for
-each controller and answers the cycle request. It publishes the
-`Player` status and the bus status. It writes the override on the
-screen's `Display` from the panel desire your client publishes. A
-client that publishes no panel desire leaves the panel lit, because
-the operator writes no override without one.
+The operator creates the display claim. For each controller it writes
+the focus message, and it handles each request to move focus. It
+publishes the `Player` status and the bus status. It sets the
+override on the screen's `Display` from the panel state that your
+client publishes. A client that publishes no panel state leaves the
+panel on, because the operator sets no override without one.
 
-The fade window, the off window, the press gate, the shade, the volume
-indicator, and the panel desire are the client's. The room's level is
-the operator's: it sets the level from the volume keys and the
-`volume/commands` asks, and relays it on the volume topic.
+The client owns the quiet periods, the rules for which presses to act
+on, the dimming, the volume indicator, and the panel state it
+requests. The operator owns the volume level. It sets the level from
+the volume keys and from messages on the `/commands` topic of the
+volume topic, and it publishes the level on the volume topic.

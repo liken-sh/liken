@@ -1,37 +1,31 @@
 package main
 
-// The report desk is the boundary between the bus and the reconcile
-// loop. The operator subscribes to every Play's status and availability
-// topic, and the bus handler folds each message in here. The reconcile
-// pass reads the newest report per Play and writes it into the Play's
-// status. The playback pod holds no API credentials, so this desk is
-// the only path a report takes to the control plane.
+// The playback pods have no API credentials, so they publish their
+// status on the bus. The bus handler stores each message here, and the
+// reconcile loop reads the newest report of each Play from here and
+// writes it to the Play's status.
 
 import (
 	"strings"
 	"sync"
 )
 
-// reports holds the newest report per run and the wake the loop reads.
-// One mutex covers the maps, because the bus handler runs on the bus
-// reader's goroutine and the loop runs on its own.
+// reports stores the bus messages of each run, keyed by runKey. The bus
+// handler and the reconcile loop run on different goroutines, so one
+// mutex covers all the maps.
 //
-// seen holds every run the desk has taken any bus message for, online or
-// offline. latest drops a run the moment it goes offline, so it cannot
-// answer which runs still have a retained topic on the broker; seen can,
-// and it is how the operator finds a deleted Play's gravestone to clear.
-//
-// ended holds, for each run that reported the ending, the UID of the pod
-// that reported it. It is kept beside latest rather than read out of it,
-// because the sidecar publishes the ending and then goes offline, and
-// offline drops the latest report. The mark has to outlive that drop: the
-// pod lives on for seconds after the film is over, and the Player is idle
-// for every one of them. The mark counts only while its pod is the run's
-// pod (runpod.go), so the ending of a pod that crashed or was deleted
-// stops counting once the run moves on to a new pod.
-//
-// pods is what tells the run's current pod from an older one under the
-// same name. runpod.go says how.
+//   - latest is the newest report of each run. An offline message
+//     deletes it.
+//   - seen has every run that sent any bus message. Because offline
+//     deletes from latest, only seen can find a deleted Play whose
+//     retained topics are still on the broker.
+//   - ended has the UID of the pod that reported the end of each run.
+//     The sidecar publishes the end and then goes offline, which deletes
+//     the report, but the pod keeps running for a few seconds and the
+//     Player must show idle during that time. A mark counts only while
+//     its pod is still the run's pod (runpod.go).
+//   - pods tells the run's current pod from an older pod with the same
+//     name.
 type reports struct {
 	mutex  sync.Mutex
 	latest map[string]playReport
@@ -51,45 +45,37 @@ func newReports(wake chan<- struct{}) *reports {
 	}
 }
 
-// runKey is the one key shape for a run. Namespace and name identify a
-// run everywhere in this operator, and one shape keeps the map and the
-// pass in step.
 func runKey(namespace, name string) string {
 	return namespace + "/" + name
 }
 
-// splitRunKey reverses runKey. A namespace and a name hold no slash, so
-// the first one separates the two.
+// splitRunKey reverses runKey. Kubernetes names and namespaces contain
+// no slash, so the first slash separates them.
 func splitRunKey(key string) (namespace, name string) {
 	namespace, name, _ = strings.Cut(key, "/")
 	return namespace, name
 }
 
-// fold records the newest report for a run. A report is a whole
-// observation, so the newest one says everything an older one did.
+// fold stores a run's newest report in place of the previous one.
 //
-// The ending, a pause, or an item change is what a person waits to see,
-// so each wakes the loop at once. The ending is the one a person is
-// looking at the screen for: the pass it wakes is what turns the idle
-// screen back on. A position that only advances updates the desk and
-// wakes nothing: the reconcile pass reads the current position off the
-// desk on its next tick, so a steadily playing film writes its
-// resource on that interval and not on every report. This is the
-// throttle that keeps a one-second bus cadence from becoming a
-// one-second write to etcd.
+// fold wakes the reconcile loop for a run's first report and for a
+// report that changes Ended, Paused, or Item, because a person at the
+// screen waits for those. A report that only advances the position
+// wakes nothing, so the loop writes the position on its tick and not on
+// every report.
 //
-// The mark follows the report rather than latching, so a Play recreated
-// under the same name reports a run of its own and starts not ended.
+// A report with Ended false clears the ended mark, so a Play recreated
+// under the same name does not start ended.
 //
-// fold answers whether this report is where the run's ending began, which
-// the caller reads to publish the unit's idle state at once. It is the
-// mark and not the previous report that decides that, because a sidecar
-// that goes offline drops the previous report while the mark stands, and a
-// run whose ending was already answered must not be answered again.
+// fold returns true when this report starts the run's end: Ended is set
+// and the ended mark does not already hold this pod. The bus handler
+// then publishes the Player's status at once. The check reads the ended
+// mark and not the previous report, because the offline message that
+// follows the end deletes the report, and an end that was handled once
+// must not be handled again.
 //
-// A report from a pod that is not the run's pod says nothing about the
-// run, so the desk drops it and wakes nothing. A report with no pod UID
-// names no pod, and the desk takes it as the run's.
+// fold drops a report from a pod that is not the run's pod. A report
+// with no pod UID counts as the run's.
 func (r *reports) fold(namespace, name string, report playReport) (endingBegan bool) {
 	key := runKey(namespace, name)
 	r.mutex.Lock()
@@ -110,42 +96,39 @@ func (r *reports) fold(namespace, name string, report playReport) (endingBegan b
 	r.mutex.Unlock()
 	if !had || report.Ended != previous.Ended ||
 		report.Paused != previous.Paused || report.Item != previous.Item {
-		poke(r.wake)
+		signalWake(r.wake)
 	}
 	return endingBegan
 }
 
-// replacing records that the operator is about to delete the run's pod
-// with this UID to replace it. The pass calls it before it sends the
-// delete, because the delete is what makes the kubelet send the SIGTERM,
-// and the old pod's ending can reach the bus reader before the delete
-// request returns or the pod store shows the delete.
-func (r *reports) replacing(namespace, name, pod string) {
+// markReplaced marks the run's pod with this UID as gone before the pass
+// deletes it to replace it. The kubelet sends SIGTERM as soon as the
+// API server accepts the delete, so the old pod's end message can reach
+// the bus handler before the delete request returns or the pod store
+// shows the delete.
+func (r *reports) markReplaced(namespace, name, pod string) {
 	r.mutex.Lock()
 	r.pods.markGone(runKey(namespace, name), pod)
 	r.mutex.Unlock()
 }
 
-// keeping takes back the record of a run whose delete failed. That pod
-// still runs as the run's pod, so its messages must count again, and the
-// next pass that replaces it records it again.
-func (r *reports) keeping(namespace, name, pod string) {
+// unmarkReplaced undoes markReplaced when the delete fails, so the pod's messages
+// count again.
+func (r *reports) unmarkReplaced(namespace, name, pod string) {
 	r.mutex.Lock()
-	r.pods.back(runKey(namespace, name), pod)
+	r.pods.unmarkGone(runKey(namespace, name), pod)
 	r.mutex.Unlock()
 }
 
-// readPodsFrom points the desk at the pod store. The bus reader runs
-// before the watches have read the cluster, so until this call the desk
-// knows only the pods it recorded, and the mutex hands the store to the
-// bus reader's goroutine.
+// readPodsFrom sets the pod store that fold and availability read to
+// tell the run's pod from an older one. The bus reader starts before
+// the watches have listed the cluster, so the store is set later.
 //
-// The desk reads the store alone, even while the API server forbids the
-// pod watch. It reads a pod for each report, about one a second for each
-// playing run, under its mutex, so a read of the API server would cost a
-// request for each report and could hold the mutex through a 429. The
-// desk already takes a store that lags behind the API server
-// (runpod.go).
+// The check reads only the store, never the API server, even while the
+// API server forbids the pod watch. It runs under the mutex for every
+// report, up to once per reportInterval for each playing run, and an API
+// request could hold the mutex while it waits out a 429. runpod.go
+// handles a store that lags behind the API server.
 func (r *reports) readPodsFrom(view *clusterView) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
@@ -153,24 +136,22 @@ func (r *reports) readPodsFrom(view *clusterView) {
 }
 
 // observe records the run's pod as the pass reads it from the pod store,
-// nil for none. The pass calls it for every Play before it reads the
-// ending marks. runpod.go says what it records.
+// or nil when the store has none. The pass calls it for every Play
+// before it reads the ended marks.
 func (r *reports) observe(namespace, name string, pod *Pod) {
 	r.mutex.Lock()
 	r.pods.observe(runKey(namespace, name), pod)
 	r.mutex.Unlock()
 }
 
-// availability marks a Play online or offline. Either way the run is one
-// the desk has now seen, so it joins seen. Offline also drops the latest
-// report, because the retained status the broker still holds describes a
-// pod that is gone, and a stale report must not read as a live Play; the
-// wake lets the pass rewrite the status the drop changed.
+// availability handles an online or offline message for a run. Offline
+// deletes the latest report, because it describes a pod that is gone,
+// and wakes the loop to rewrite the Play's status.
 //
-// An availability from a pod that is not the run's pod changes nothing.
-// The broker publishes a dead pod's Last Will when the pod's keepalive
-// runs out, which can be after the run's new pod came online, and that
-// offline would drop the new pod's report.
+// A message from a pod that is not the run's pod changes only seen. The
+// broker publishes a dead pod's Last Will when its keepalive runs out,
+// which can be after the run's new pod came online, and that offline
+// message must not delete the new pod's report.
 func (r *reports) availability(namespace, name string, online bool, pod string) {
 	key := runKey(namespace, name)
 	r.mutex.Lock()
@@ -184,12 +165,10 @@ func (r *reports) availability(namespace, name string, online bool, pod string) 
 	}
 	r.mutex.Unlock()
 	if !online {
-		poke(r.wake)
+		signalWake(r.wake)
 	}
 }
 
-// latestFor returns the newest report, the only one kept, or nil when
-// the desk holds none.
 func (r *reports) latestFor(namespace, name string) *playReport {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
@@ -200,19 +179,19 @@ func (r *reports) latestFor(namespace, name string) *playReport {
 	return &report
 }
 
-// endedFor reports whether the run's sidecar has said the run is over.
-// The Play and its pod still exist while this is true, and the Play's
-// phase still reads from the pod; only the Player's presentable state
-// reads the mark.
+// endedFor reports whether the run's pod has reported the end. The Play
+// and its pod can still exist while this is true. Only the Player's
+// status reads it, to show idle, and the Play's phase still comes from
+// the pod.
 func (r *reports) endedFor(namespace, name string) bool {
 	_, ended := r.endedBy(namespace, name)
 	return ended
 }
 
-// endedBy answers the UID of the pod whose ending marks the run over, and
-// whether a mark counts. A mark counts only while its pod is still the
-// run's pod: once the pod store or the operator's own delete shows that
-// pod gone, the run goes on in another pod and the mark says nothing.
+// endedBy returns the UID of the pod that reported the run's end, and
+// false when there is no mark or that pod is no longer the run's pod.
+// The pod stops being the run's pod when the pod store or replacing
+// shows it gone.
 func (r *reports) endedBy(namespace, name string) (string, bool) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
@@ -223,11 +202,10 @@ func (r *reports) endedBy(namespace, name string) (string, bool) {
 	return pod, true
 }
 
-// retain drops the latest report of a deleted Play. The pass hands over
-// the set of runs that still exist, and the map shrinks to match, so the
-// desk never serves a report for a run the collection no longer holds.
-// seen is left alone: the operator still needs it to find and clear the
-// deleted Play's retained topics.
+// retain deletes the latest report and the ended mark of every run that
+// is not in live, the runs that still have a Play, so a Play created
+// later under the same name does not start ended. seen keeps its
+// entries until forget, because stale reads them.
 func (r *reports) retain(live map[string]bool) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
@@ -236,9 +214,6 @@ func (r *reports) retain(live map[string]bool) {
 			delete(r.latest, key)
 		}
 	}
-	// The ending mark goes with the report it came on. A Play that no
-	// longer exists names nothing, and a Play later created under the same
-	// name must not start life ended.
 	for key := range r.ended {
 		if !live[key] {
 			delete(r.ended, key)
@@ -247,10 +222,9 @@ func (r *reports) retain(live map[string]bool) {
 	r.pods.retain(live)
 }
 
-// stale returns the runs the desk has seen a bus message for that the
-// pass's list of Plays does not hold. Each is a Play the API server no
-// longer holds whose retained status and availability the broker still
-// holds, and the operator clears both on the pass that reads it.
+// stale returns the runs that sent a bus message but are not in live.
+// Each is a deleted Play whose retained status and availability topics
+// are still on the broker, and the pass clears both.
 func (r *reports) stale(live map[string]bool) []string {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
@@ -263,8 +237,9 @@ func (r *reports) stale(live map[string]bool) []string {
 	return gone
 }
 
-// forget drops every trace of one run, after the operator has cleared
-// its retained topics, so the desk does not offer it as stale again.
+// forget deletes everything stored about a run. The operator calls it
+// after it clears the run's retained topics, so stale does not return
+// the run again.
 func (r *reports) forget(key string) {
 	r.mutex.Lock()
 	delete(r.latest, key)

@@ -1,11 +1,12 @@
 package main
 
-// A unit's activity on the bus moves forward for each Play: a subscriber
-// that reads Idle for a Play never reads Playing for it again. The idle
-// screen, a remote, and a home automation all act on each move, so a
-// move back, even for a few milliseconds, draws a film that is over or
-// wakes a room for nothing. These tests run whole passes and read the
-// operator's activity lines, which it writes on each published move.
+// For each Play, the activity that the operator publishes for its
+// Player only moves forward: after a subscriber reads Idle for a Play,
+// it never reads Playing for that Play again. The idle screen, a
+// remote, and a home automation act on every change, so even a brief
+// return to Playing draws the screen of a film that is over, or turns
+// on the lights for nothing. These tests run whole passes and read the
+// line that the operator logs each time it publishes an activity.
 
 import (
 	"net/http"
@@ -17,7 +18,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
-// activityLines keeps the lines about the house unit's activity.
+// activityLines returns the log lines about the activity of the
+// `house/theater` Player.
 func activityLines(log *logBuffer) []string {
 	var kept []string
 	for _, line := range linesAbout(log, "player house/theater") {
@@ -28,10 +30,10 @@ func activityLines(log *logBuffer) []string {
 	return kept
 }
 
-// A deleted Play is over for its unit from the delete. The release
-// forgets the run's ending mark on the pass that clears its topics, and
-// that pass still holds the Play in its list, so the Play must name
-// nothing from its deletion mark on, not only while the mark stands.
+// A deleted Play is over for its Player once its deletion timestamp is
+// set. The pass that clears the Play's topics also forgets that the run
+// reported its end, and that pass still lists the Play. So the Play
+// must not make its Player Playing again, before or after that pass.
 func TestADeletedPlayNeverTurnsItsPlayerBackToPlaying(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cluster := runningCluster(housePlayer())
@@ -42,17 +44,17 @@ func TestADeletedPlayNeverTurnsItsPlayerBackToPlaying(t *testing.T) {
 		media.log = &log
 		media.pass()
 
-		// A person deletes the Play. The pass deletes its pod, which stays
-		// while its containers stop.
+		// A person deletes the Play. The pass deletes its pod, which
+		// remains while its containers stop.
 		cluster.plays["movie"].Metadata.DeletionTimestamp = "2026-09-09T10:30:00Z"
 		media.pass()
 
-		// The sidecar reports the ending on the pod's SIGTERM.
+		// The sidecar sends the end report when the pod receives SIGTERM.
 		media.handleBusMessage(playStatusTopic(defaultTopicBase, "house", "movie"),
 			[]byte(`{"item":1,"position":"1:00:00","ended":true}`))
 
-		// The pod is gone, so the pass clears the run's topics and releases
-		// the Play, and the pass after it reads the Play gone.
+		// The pod is gone, so the pass clears the run's topics and
+		// removes the finalizer, and the next pass finds the Play gone.
 		delete(cluster.pods, "movie-playback")
 		media.pass()
 		media.pass()
@@ -67,8 +69,8 @@ func TestADeletedPlayNeverTurnsItsPlayerBackToPlaying(t *testing.T) {
 
 // The store's copy of a Play can be older than the operator's own
 // status write, because the watch delivers the write a moment later. A
-// pass that derived the unit's activity from that copy would publish
-// the phase the Play already left, and then the one the write set.
+// pass that derived the Player's activity from that copy would publish
+// the phase the Play already left, and then the phase the write set.
 func TestAPassDoesNotActOnACopyOlderThanItsOwnWrite(t *testing.T) {
 	starting := func() *fakeCluster {
 		cluster := runningCluster(housePlayer())
@@ -93,12 +95,13 @@ func TestAPassDoesNotActOnACopyOlderThanItsOwnWrite(t *testing.T) {
 	})
 }
 
-// passWithAnEndingDuringIt runs one pass over a running unit and folds
-// the run's ending while the pass works on the unit. The pass derives
-// each unit's activity and publishes it at the end of the unit's work,
-// and the bus reader publishes Idle the moment an ending arrives. The
-// receiver session is a request the pass sends between the two, so the
-// test holds it and folds the ending while the pass waits.
+// passWithAnEndingDuringIt runs one pass over a playing Player and
+// delivers the run's end report while the pass works on that Player.
+// The pass derives the Player's activity first and publishes it last,
+// and the bus reader publishes Idle as soon as an end report arrives.
+// Between those steps the pass sends a PATCH to the Receiver's status,
+// so the test holds that request and delivers the end report while the
+// pass waits.
 func passWithAnEndingDuringIt(t *testing.T) (*fakeCluster, *operator, *logBuffer) {
 	t.Helper()
 	cluster := runningCluster(housePlayer())
@@ -138,8 +141,8 @@ func passWithAnEndingDuringIt(t *testing.T) (*fakeCluster, *operator, *logBuffer
 	return cluster, media, &log
 }
 
-// An ending that arrives while the pass works on a unit is not
-// published over with the Playing the pass derived before it.
+// An end report that arrives during a pass is not overwritten by the
+// Playing that the pass derived before it.
 func TestAnEndingDuringThePassIsNotPublishedOver(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		_, media, log := passWithAnEndingDuringIt(t)
@@ -152,8 +155,9 @@ func TestAnEndingDuringThePassIsNotPublishedOver(t *testing.T) {
 	})
 }
 
-// The Player's status and the media_players gauge say the state the
-// pass published, not the state it derived before an ending arrived.
+// The Player's status and the media_players gauge show the published
+// activity, not the activity that the pass derived before the end
+// report arrived.
 func TestAnEndingDuringThePassReachesTheStatusAndTheGauge(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cluster, media, _ := passWithAnEndingDuringIt(t)

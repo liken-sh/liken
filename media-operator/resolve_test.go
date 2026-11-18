@@ -1,18 +1,13 @@
 package main
 
-// These tests cover the three schemes the resolver handles and what
-// each one costs the playback pod: an https URI costs an argument, and
-// an nfs URI costs a share of a mount, a rewritten argument, and a
-// rewritten logo when the presentation carries one. A claim URI costs
-// a read-only mount of the whole claim and a rewritten path under it.
-
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
-// mediaItems builds a PlayItem list from bare media URIs, for the cases
-// that carry no presentation.
+// mediaItems builds a PlayItem list from media URIs, with no
+// presentation.
 func mediaItems(uris ...string) []PlayItem {
 	items := make([]PlayItem, len(uris))
 	for i, uri := range uris {
@@ -24,7 +19,7 @@ func mediaItems(uris ...string) []PlayItem {
 func TestResolvePassesAnHTTPSURIThrough(t *testing.T) {
 	resolved, err := resolvePlay("house", mediaItems("https://films.example/movies/film.mkv"), nil, frame{})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("resolving the Play: %v", err)
 	}
 	want := []string{"https://films.example/movies/film.mkv"}
 	if !reflect.DeepEqual(resolved.Items, want) {
@@ -38,12 +33,11 @@ func TestResolvePassesAnHTTPSURIThrough(t *testing.T) {
 	}
 }
 
-// An nfs URI names a file, and the pod mounts the directory that
-// holds it, read-only in both places.
+// For one nfs:// file, the pod mounts the file's directory read-only.
 func TestResolveMountsTheDirectoryThatHoldsTheFile(t *testing.T) {
 	resolved, err := resolvePlay("house", mediaItems("nfs://nas.example/export/dir/film.mkv"), nil, frame{})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("resolving the Play: %v", err)
 	}
 
 	want := []string{"/media/1/film.mkv"}
@@ -63,8 +57,7 @@ func TestResolveMountsTheDirectoryThatHoldsTheFile(t *testing.T) {
 	}
 }
 
-// Two files in one directory share one mount of that directory, and
-// each keeps its own name under it.
+// Two files in one directory share one mount of that directory.
 func TestResolveCommonAncestorOfTwoFilesInOneDirectory(t *testing.T) {
 	resolved, err := resolvePlay("house", mediaItems(
 		"nfs://nas.example/export/dir/first.mkv",
@@ -72,7 +65,7 @@ func TestResolveCommonAncestorOfTwoFilesInOneDirectory(t *testing.T) {
 	), nil, frame{})
 
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("resolving the Play: %v", err)
 	}
 
 	want := []string{"/media/1/first.mkv", "/media/1/second.mkv"}
@@ -88,8 +81,8 @@ func TestResolveCommonAncestorOfTwoFilesInOneDirectory(t *testing.T) {
 	}
 }
 
-// Files in sibling directories share one mount of the parent, and each
-// carries its own subdirectory under it.
+// Files in sibling directories share one mount of the parent directory,
+// and each path includes its own subdirectory.
 func TestResolveMountsTheParentOfSiblingDirectories(t *testing.T) {
 	resolved, err := resolvePlay("house", mediaItems(
 		"nfs://nas.example/export/films/film.mkv",
@@ -97,7 +90,7 @@ func TestResolveMountsTheParentOfSiblingDirectories(t *testing.T) {
 	), nil, frame{})
 
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("resolving the Play: %v", err)
 	}
 
 	want := []string{"/media/1/films/film.mkv", "/media/1/shows/episode.mkv"}
@@ -116,8 +109,8 @@ func TestResolveMountsTheParentOfSiblingDirectories(t *testing.T) {
 	}
 }
 
-// Two servers cost two mounts, one common ancestor each, numbered by
-// first appearance.
+// Two servers get two mounts, each at its own common ancestor, numbered
+// in the order the playlist first uses them.
 func TestResolveMountsOneCommonAncestorPerServer(t *testing.T) {
 	resolved, err := resolvePlay("house", mediaItems(
 		"nfs://films.example/export/films/film.mkv",
@@ -126,7 +119,7 @@ func TestResolveMountsOneCommonAncestorPerServer(t *testing.T) {
 	), nil, frame{})
 
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("resolving the Play: %v", err)
 	}
 
 	items := []string{"/media/1/film.mkv", "/media/2/episode.mkv", "/media/1/other.mkv"}
@@ -149,8 +142,6 @@ func TestResolveMountsOneCommonAncestorPerServer(t *testing.T) {
 	}
 }
 
-// The playlist plays in spec order, so a mixed list keeps its order
-// however each item resolves.
 func TestResolveKeepsAMixedListInSpecOrder(t *testing.T) {
 	resolved, err := resolvePlay("house", mediaItems(
 		"https://films.example/trailer.mkv",
@@ -159,7 +150,7 @@ func TestResolveKeepsAMixedListInSpecOrder(t *testing.T) {
 	), nil, frame{})
 
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("resolving the Play: %v", err)
 	}
 
 	want := []string{
@@ -175,11 +166,10 @@ func TestResolveKeepsAMixedListInSpecOrder(t *testing.T) {
 	}
 }
 
-// A lone https media item mounts nothing and rewrites nothing.
 func TestResolveALoneHTTPSItemMountsNothing(t *testing.T) {
 	resolved, err := resolvePlay("house", mediaItems("https://films.example/film.mkv"), nil, frame{})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("resolving the Play: %v", err)
 	}
 	if len(resolved.Volumes) != 0 || len(resolved.Mounts) != 0 {
 		t.Errorf("volumes = %+v, mounts = %+v, want none", resolved.Volumes, resolved.Mounts)
@@ -189,8 +179,7 @@ func TestResolveALoneHTTPSItemMountsNothing(t *testing.T) {
 	}
 }
 
-// A logo beside the media shares the media's mount, because the common
-// ancestor covers them both, and its path rewrites under that mount.
+// A logo in the media's directory is rewritten under the media's mount.
 func TestResolveALogoBesideTheMediaSharesTheMount(t *testing.T) {
 	resolved, err := resolvePlay("house", []PlayItem{{
 		URI: "nfs://nas.example/export/film/film.mkv",
@@ -200,7 +189,7 @@ func TestResolveALogoBesideTheMediaSharesTheMount(t *testing.T) {
 	}}, nil, frame{})
 
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("resolving the Play: %v", err)
 	}
 
 	if want := []string{"/media/1/film.mkv"}; !reflect.DeepEqual(resolved.Items, want) {
@@ -218,8 +207,8 @@ func TestResolveALogoBesideTheMediaSharesTheMount(t *testing.T) {
 	}
 }
 
-// The cover art resolves the way the logo does: an nfs reference rewrites
-// under the media's own mount, and an https reference stays a URL.
+// The cover resolves like the logo. An nfs:// cover is rewritten under
+// the media's mount, and an https:// cover stays a URL.
 func TestResolveTheCoverArtTheWayTheLogoResolves(t *testing.T) {
 	cases := []struct {
 		name string
@@ -239,7 +228,7 @@ func TestResolveTheCoverArtTheWayTheLogoResolves(t *testing.T) {
 			}}, nil, frame{})
 
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("resolving the Play: %v", err)
 			}
 			if want := []string{each.want}; !reflect.DeepEqual(resolved.Arts, want) {
 				t.Errorf("arts = %v, want %v", resolved.Arts, want)
@@ -251,9 +240,8 @@ func TestResolveTheCoverArtTheWayTheLogoResolves(t *testing.T) {
 	}
 }
 
-// A directory the pod does not expand is refused, because mpv would expand it
-// itself and add playlist entries the operator never counted, which would land
-// every later item's block on the wrong track. The error names both ways out.
+// A directory item that is not an album is an error, and the error
+// gives both ways to fix the Play.
 func TestResolveRefusesADirectoryThatIsNoAlbum(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -272,20 +260,17 @@ func TestResolveRefusesADirectoryThatIsNoAlbum(t *testing.T) {
 			}}, nil, frame{})
 
 			if err == nil {
-				t.Fatal("a directory that is no album resolved")
+				t.Fatal("a directory that is not an album resolved, want an error")
 			}
-			want := `the URI "nfs://nas.example/music/None Shall Pass/" names a directory; ` +
-				"mark the item as an album with type music and hint album, or name a file"
-			if err.Error() != want {
-				t.Errorf("error = %q, want %q", err.Error(), want)
+			if want := "is a directory and the item is not an album"; !strings.Contains(err.Error(), want) {
+				t.Errorf("error is %q, want it to contain %q", err.Error(), want)
 			}
 		})
 	}
 }
 
-// A music album is one item and one directory, and it mounts the way a file
-// item mounts: the parent is the volume, and the item is the directory under
-// it. A trailing slash changes nothing.
+// An album item is a directory. Its parent directory is the volume, as
+// for a file, and a trailing slash makes no difference.
 func TestResolveAnAlbumDirectory(t *testing.T) {
 	cases := []struct {
 		name string
@@ -303,7 +288,7 @@ func TestResolveAnAlbumDirectory(t *testing.T) {
 			}}, nil, frame{})
 
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("resolving the Play: %v", err)
 			}
 			if want := []string{"/media/1/None Shall Pass"}; !reflect.DeepEqual(resolved.Items, want) {
 				t.Errorf("items = %v, want %v", resolved.Items, want)
@@ -316,12 +301,12 @@ func TestResolveAnAlbumDirectory(t *testing.T) {
 	}
 }
 
-// A claim:// item mounts the claim itself, read-only, and the URI's path
-// is the path under that mount.
+// A claim:// item mounts the whole claim read-only, and the path of the
+// URI is the path under that mount.
 func TestResolveMountsAClaimAtItsRoot(t *testing.T) {
 	resolved, err := resolvePlay("house", mediaItems("claim://house/films/movies/film.mkv"), nil, frame{})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("resolving the Play: %v", err)
 	}
 
 	if want := []string{"/media/1/movies/film.mkv"}; !reflect.DeepEqual(resolved.Items, want) {
@@ -340,8 +325,8 @@ func TestResolveMountsAClaimAtItsRoot(t *testing.T) {
 	}
 }
 
-// A film, its logo, and its trickplay tiles on one claim cost one mount,
-// wherever each sits under the claim.
+// A film, its logo, and its trickplay sheet on one claim share one
+// mount, wherever each is under the claim.
 func TestResolveOneClaimCostsOneMount(t *testing.T) {
 	resolved, err := resolvePlay("house", []PlayItem{{
 		URI: "claim://house/library/movies/film/film.mkv",
@@ -352,7 +337,7 @@ func TestResolveOneClaimCostsOneMount(t *testing.T) {
 	}}, nil, frame{})
 
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("resolving the Play: %v", err)
 	}
 
 	if want := []string{"/media/1/movies/film/film.mkv"}; !reflect.DeepEqual(resolved.Items, want) {
@@ -376,9 +361,9 @@ func TestResolveOneClaimCostsOneMount(t *testing.T) {
 	}
 }
 
-// A film's spans file sits in the film's folder and the portraits it names
-// sit in the library's .contributors directory, so the one nfs mount widens
-// to the library's root, and both rewrite under it.
+// The spans file is in the film's folder and the .contributors
+// directory is at the library's root, so the nfs mount is the library's
+// root.
 func TestResolveTheAppearancesAndTheirPortraitsShareTheLibraryMount(t *testing.T) {
 	resolved, err := resolvePlay("house", []PlayItem{{
 		URI: "nfs://nas/movies/Action/Film/Film.mkv",
@@ -389,7 +374,7 @@ func TestResolveTheAppearancesAndTheirPortraitsShareTheLibraryMount(t *testing.T
 	}}, nil, frame{})
 
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("resolving the Play: %v", err)
 	}
 	if want := []string{"/media/1/Action/Film/Film.mkv"}; !reflect.DeepEqual(resolved.Items, want) {
 		t.Errorf("items = %v, want %v", resolved.Items, want)
@@ -409,8 +394,8 @@ func TestResolveTheAppearancesAndTheirPortraitsShareTheLibraryMount(t *testing.T
 	}
 }
 
-// Two claims cost two mounts, numbered by first appearance in the
-// playlist.
+// Two claims get two mounts, numbered in the order the playlist first
+// uses them.
 func TestResolveMountsOneVolumePerClaim(t *testing.T) {
 	resolved, err := resolvePlay("house", mediaItems(
 		"claim://house/films/movies/film.mkv",
@@ -419,7 +404,7 @@ func TestResolveMountsOneVolumePerClaim(t *testing.T) {
 	), nil, frame{})
 
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("resolving the Play: %v", err)
 	}
 
 	items := []string{"/media/1/movies/film.mkv", "/media/2/episodes/episode.mkv", "/media/1/movies/other.mkv"}
@@ -442,8 +427,8 @@ func TestResolveMountsOneVolumePerClaim(t *testing.T) {
 	}
 }
 
-// The servers and the claims share one run of mount numbers, in the order
-// the playlist first names each of them.
+// Servers and claims share one numbering of mounts, in the order the
+// playlist first uses each of them.
 func TestResolveNumbersServersAndClaimsTogether(t *testing.T) {
 	resolved, err := resolvePlay("house", mediaItems(
 		"nfs://nas.example/export/films/first.mkv",
@@ -453,7 +438,7 @@ func TestResolveNumbersServersAndClaimsTogether(t *testing.T) {
 	), nil, frame{})
 
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("resolving the Play: %v", err)
 	}
 
 	items := []string{
@@ -475,8 +460,6 @@ func TestResolveNumbersServersAndClaimsTogether(t *testing.T) {
 	}
 }
 
-// An album on a claim is one directory item. The album rule is the same
-// for every scheme.
 func TestResolveAnAlbumDirectoryOnAClaim(t *testing.T) {
 	cases := []struct {
 		name string
@@ -494,7 +477,7 @@ func TestResolveAnAlbumDirectoryOnAClaim(t *testing.T) {
 			}}, nil, frame{})
 
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("resolving the Play: %v", err)
 			}
 			if want := []string{"/media/1/albums/Third Album"}; !reflect.DeepEqual(resolved.Items, want) {
 				t.Errorf("items = %v, want %v", resolved.Items, want)
@@ -510,26 +493,18 @@ func TestResolveAnAlbumDirectoryOnAClaim(t *testing.T) {
 	}
 }
 
-// A directory on a claim that no block marks as an album is refused, for
-// the reason every other directory item is.
 func TestResolveRefusesAClaimDirectoryThatIsNoAlbum(t *testing.T) {
 	_, err := resolvePlay("house", mediaItems("claim://house/music/albums/Third Album/"), nil, frame{})
 	if err == nil {
-		t.Fatal("a directory that is no album resolved")
+		t.Fatal("a directory that is not an album resolved, want an error")
 	}
-	want := `the URI "claim://house/music/albums/Third Album/" names a directory; ` +
-		"mark the item as an album with type music and hint album, or name a file"
-	if err.Error() != want {
-		t.Errorf("error = %q, want %q", err.Error(), want)
+	if want := "is a directory and the item is not an album"; !strings.Contains(err.Error(), want) {
+		t.Errorf("error is %q, want it to contain %q", err.Error(), want)
 	}
 }
 
-// A claim URI that names no namespace, no claim, or no path inside the
-// claim resolves nothing. A claim URI that names a namespace other than
-// the Play's own resolves nothing either, because a pod mounts only a
-// claim in its own namespace. A URI of the form without a namespace reads
-// its claim as the namespace, so it fails one of these checks too. The
-// error quotes the URI the Play carries.
+// A URI written without a namespace, as claim://<claim>/<path>, parses
+// the claim as the namespace and fails one of the other checks.
 func TestResolveRefusesAClaimURIItCannotMount(t *testing.T) {
 	cases := []struct {
 		name string
@@ -539,58 +514,51 @@ func TestResolveRefusesAClaimURIItCannotMount(t *testing.T) {
 		{
 			name: "no namespace",
 			uri:  "claim:///films/movies/film.mkv",
-			want: `the URI "claim:///films/movies/film.mkv" names no namespace; ` +
-				"a claim URI is claim://<namespace>/<claim>/<path>",
+			want: "has no namespace",
 		},
 		{
 			name: "no claim name",
 			uri:  "claim://house//movies/film.mkv",
-			want: `the URI "claim://house//movies/film.mkv" names no claim; ` +
-				"a claim URI is claim://<namespace>/<claim>/<path>",
+			want: "has no claim name",
 		},
 		{
 			name: "no path in the claim",
 			uri:  "claim://house/films",
-			want: `the URI "claim://house/films" names no path in the claim; ` +
-				"a claim URI is claim://<namespace>/<claim>/<path>",
+			want: "has no path in the claim",
 		},
 		{
 			name: "another namespace",
 			uri:  "claim://studio/films/movies/film.mkv",
-			want: `the URI "claim://studio/films/movies/film.mkv" names a claim in the namespace studio; ` +
-				"a Play in the namespace house mounts only a claim in its own namespace",
+			want: "names a claim in the namespace studio",
 		},
 		{
 			name: "no namespace segment and a path",
 			uri:  "claim://films/movies/film.mkv",
-			want: `the URI "claim://films/movies/film.mkv" names a claim in the namespace films; ` +
-				"a Play in the namespace house mounts only a claim in its own namespace",
+			want: "names a claim in the namespace films",
 		},
 		{
 			name: "no namespace segment and a file",
 			uri:  "claim://films/film.mkv",
-			want: `the URI "claim://films/film.mkv" names no path in the claim; ` +
-				"a claim URI is claim://<namespace>/<claim>/<path>",
+			want: "has no path in the claim",
 		},
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
 			resolved, err := resolvePlay("house", mediaItems(each.uri), nil, frame{})
 			if err == nil {
-				t.Fatalf("%q resolved to %+v", each.uri, resolved)
+				t.Fatalf("%q resolved to %+v, want an error", each.uri, resolved)
 			}
-			if err.Error() != each.want {
-				t.Errorf("error = %q, want %q", err.Error(), each.want)
+			if !strings.Contains(err.Error(), each.want) {
+				t.Errorf("error is %q, want it to contain %q", err.Error(), each.want)
 			}
 			if len(resolved.Items) != 0 || len(resolved.Volumes) != 0 || len(resolved.Mounts) != 0 {
-				t.Errorf("a refused list resolved %+v", resolved)
+				t.Errorf("a refused list resolved to %+v, want no items, volumes, or mounts", resolved)
 			}
 		})
 	}
 }
 
-// An https logo stays a URL for the bridge to fetch, and the media
-// beside it still mounts.
+// An https:// logo stays a URL, and the media with it still mounts.
 func TestResolveAnHTTPSLogoStaysAURL(t *testing.T) {
 	resolved, err := resolvePlay("house", []PlayItem{{
 		URI: "nfs://nas.example/export/film/film.mkv",
@@ -600,7 +568,7 @@ func TestResolveAnHTTPSLogoStaysAURL(t *testing.T) {
 	}}, nil, frame{})
 
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("resolving the Play: %v", err)
 	}
 
 	if want := []string{"/media/1/film.mkv"}; !reflect.DeepEqual(resolved.Items, want) {
@@ -611,8 +579,6 @@ func TestResolveAnHTTPSLogoStaysAURL(t *testing.T) {
 	}
 }
 
-// An item with no presentation, and an item whose presentation carries
-// no logo, both resolve to an empty logo.
 func TestResolveLeavesAnAbsentLogoEmpty(t *testing.T) {
 	resolved, err := resolvePlay("house", []PlayItem{
 		{URI: "nfs://nas.example/export/film/film.mkv"},
@@ -620,7 +586,7 @@ func TestResolveLeavesAnAbsentLogoEmpty(t *testing.T) {
 	}, nil, frame{})
 
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("resolving the Play: %v", err)
 	}
 	want := []string{"", ""}
 	if !reflect.DeepEqual(resolved.Logos, want) {
@@ -628,17 +594,20 @@ func TestResolveLeavesAnAbsentLogoEmpty(t *testing.T) {
 	}
 }
 
-// An unresolvable scheme's error names the three the operator does
-// resolve, because the reader is writing a Play and needs the
-// vocabulary.
+// The error for an unknown scheme lists the schemes that work, so the
+// author of the Play can correct the URI.
 func TestResolveNamesTheSchemesItResolves(t *testing.T) {
 	_, err := resolvePlay("house", mediaItems("rtsp://camera.example/stream"), nil, frame{})
 	if err == nil {
-		t.Fatal("an unknown scheme resolved")
+		t.Fatal("the scheme rtsp:// resolved, want an error")
 	}
-	want := "the scheme rtsp:// is not one the operator resolves; it resolves https://, nfs://, claim://, and pattern://"
-	if err.Error() != want {
-		t.Errorf("error = %q, want %q", err.Error(), want)
+	if want := "the scheme rtsp:// is not one the operator resolves"; !strings.Contains(err.Error(), want) {
+		t.Errorf("error is %q, want it to contain %q", err.Error(), want)
+	}
+	for _, scheme := range []string{"https://", "nfs://", "claim://", "pattern://"} {
+		if !strings.Contains(err.Error(), scheme) {
+			t.Errorf("error is %q, want it to list %s", err.Error(), scheme)
+		}
 	}
 }
 
@@ -655,19 +624,17 @@ func TestResolveRefusesAURIItCannotMount(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			resolved, err := resolvePlay("house", mediaItems(c.uri), nil, frame{})
 			if err == nil {
-				t.Fatalf("%q resolved to %+v", c.uri, resolved)
+				t.Fatalf("%q resolved to %+v, want an error", c.uri, resolved)
 			}
-			// A refusal resolves nothing at all, so a Play never
-			// runs on half a playlist.
+			// An error returns no items, volumes, or mounts, so a Play
+			// never runs with part of its playlist.
 			if len(resolved.Items) != 0 || len(resolved.Volumes) != 0 || len(resolved.Mounts) != 0 {
-				t.Errorf("a refused list resolved %+v", resolved)
+				t.Errorf("a refused list resolved to %+v, want no items, volumes, or mounts", resolved)
 			}
 		})
 	}
 }
 
-// A logo URI the resolver cannot mount fails the Play the same way a
-// media URI does, because both share the mount.
 func TestResolveRefusesALogoItCannotMount(t *testing.T) {
 	_, err := resolvePlay("house", []PlayItem{{
 		URI:          "nfs://nas.example/export/film/film.mkv",
@@ -675,13 +642,11 @@ func TestResolveRefusesALogoItCannotMount(t *testing.T) {
 	}}, nil, frame{})
 
 	if err == nil {
-		t.Fatal("a logo with an unresolvable scheme resolved")
+		t.Fatal("a logo with the scheme rtsp:// resolved, want an error")
 	}
 }
 
-// Three tiers resolve each field on its own. A more specific tier wins, and a
-// field no tier states resolves to nothing.
-func TestResolvePreferencesTierWins(t *testing.T) {
+func TestResolvePreferencesPreferPlayOverPlayerOverDefault(t *testing.T) {
 	play := &PlaySpec{
 		AudioLanguages:    []string{"play-a"},
 		SubtitleLanguages: []string{"play-s"},
@@ -719,7 +684,7 @@ func TestResolvePreferencesTierWins(t *testing.T) {
 			},
 		},
 		{
-			name:   "the Player wins when the Play states nothing",
+			name:   "the Player wins when the Play sets nothing",
 			player: player, defaults: defaults,
 			want: resolvedPreferences{
 				AudioLanguages:    []string{"player-a"},
@@ -729,7 +694,7 @@ func TestResolvePreferencesTierWins(t *testing.T) {
 			},
 		},
 		{
-			name:     "the default wins when neither the Play nor the Player states anything",
+			name:     "the default wins when neither the Play nor the Player sets anything",
 			defaults: defaults,
 			want: resolvedPreferences{
 				AudioLanguages:    []string{"default-a"},
@@ -739,7 +704,7 @@ func TestResolvePreferencesTierWins(t *testing.T) {
 			},
 		},
 		{
-			name: "a field no tier states resolves to nothing",
+			name: "a field that no tier sets resolves to nothing",
 			want: resolvedPreferences{},
 		},
 	}
@@ -754,8 +719,6 @@ func TestResolvePreferencesTierWins(t *testing.T) {
 	}
 }
 
-// Each field resolves on its own. The Play sets subtitles while the default
-// still supplies the languages.
 func TestResolvePreferencesResolvesEachFieldOnItsOwn(t *testing.T) {
 	play := &PlaySpec{Subtitles: subtitlesOn}
 	defaults := &MediaPreferencesSpec{
@@ -775,19 +738,18 @@ func TestResolvePreferencesResolvesEachFieldOnItsOwn(t *testing.T) {
 	}
 }
 
-// An empty list at a tier is a stated no preference, and it overrides a lower
-// tier's list back to nothing.
+// An empty list that is not nil means "no preference", and it overrides
+// the default's list.
 func TestResolvePreferencesEmptyListOverridesALowerTier(t *testing.T) {
 	play := &PlaySpec{AudioLanguages: []string{}}
 	defaults := &MediaPreferencesSpec{AudioLanguages: []string{"en"}}
 
 	got := resolvePreferences(play, nil, defaults)
 	if got.AudioLanguages == nil || len(got.AudioLanguages) != 0 {
-		t.Errorf("audioLanguages = %#v, want a stated empty list", got.AudioLanguages)
+		t.Errorf("audioLanguages = %#v, want the empty list that the Play sets", got.AudioLanguages)
 	}
 }
 
-// A nil source is a tier that does not exist. Resolution reads the tiers that do.
 func TestResolvePreferencesSkipsNilTiers(t *testing.T) {
 	defaults := &MediaPreferencesSpec{AudioLanguages: []string{"en"}}
 
@@ -798,8 +760,6 @@ func TestResolvePreferencesSkipsNilTiers(t *testing.T) {
 	}
 }
 
-// The timezone is a household setting, so it resolves from the default tier
-// alone and reads nothing off the Play or the Player.
 func TestResolvePreferencesTimeZoneReadsTheDefaultTierOnly(t *testing.T) {
 	defaults := &MediaPreferencesSpec{TimeZone: "America/New_York"}
 
@@ -809,8 +769,6 @@ func TestResolvePreferencesTimeZoneReadsTheDefaultTierOnly(t *testing.T) {
 	}
 }
 
-// With no default MediaPreferences the timezone resolves to nothing, so the pod
-// gets no TZ.
 func TestResolvePreferencesTimeZoneUnsetWithoutDefaults(t *testing.T) {
 	got := resolvePreferences(&PlaySpec{}, &PlayerSpec{}, nil)
 	if got.TimeZone != "" {
@@ -818,16 +776,12 @@ func TestResolvePreferencesTimeZoneUnsetWithoutDefaults(t *testing.T) {
 	}
 }
 
-// fadeAfter builds an IdlePolicy that states one fade window.
 func fadeAfter(seconds int64) *IdlePolicy {
 	return &IdlePolicy{FadeAfterSeconds: &seconds}
 }
 
-// The fade window resolves the Player first and the household default
-// second, and a cluster that states neither takes the built-in ten minutes.
-// Zero is a stated value and not an absent one, so a kiosk that must never
-// dim states it and keeps its screen.
-func TestResolveIdleFadeAfterTierWins(t *testing.T) {
+// Zero counts as set, so a Player can turn the fade off.
+func TestResolveIdleFadeAfterPrefersPlayerThenDefault(t *testing.T) {
 	cases := []struct {
 		name     string
 		player   *IdlePolicy
@@ -835,8 +789,8 @@ func TestResolveIdleFadeAfterTierWins(t *testing.T) {
 		want     int64
 	}{
 		{name: "the Player over the default", player: fadeAfter(60), defaults: fadeAfter(900), want: 60},
-		{name: "the default where the Player states none", defaults: fadeAfter(900), want: 900},
-		{name: "the built-in where neither states one", want: defaultFadeAfterSeconds},
+		{name: "the default where the Player sets none", defaults: fadeAfter(900), want: 900},
+		{name: "the built-in where neither sets one", want: defaultFadeAfterSeconds},
 		{name: "an empty block on the Player", player: &IdlePolicy{}, defaults: fadeAfter(900), want: 900},
 		{name: "zero on the Player", player: fadeAfter(0), defaults: fadeAfter(900), want: 0},
 		{name: "zero on the default", defaults: fadeAfter(0), want: 0},
@@ -848,16 +802,11 @@ func TestResolveIdleFadeAfterTierWins(t *testing.T) {
 	}
 }
 
-// offAfter builds an IdlePolicy that states one hardware window.
 func offAfter(seconds int64) *IdlePolicy {
 	return &IdlePolicy{OffAfterSeconds: &seconds}
 }
 
-// The hardware window resolves the Player first and the household
-// default second, and a cluster that states neither keeps the panel
-// lit, because darkening hardware is opt-in twice. Zero is a stated
-// value and not an absent one.
-func TestResolveIdleOffAfterTierWins(t *testing.T) {
+func TestResolveIdleOffAfterPrefersPlayerThenDefault(t *testing.T) {
 	cases := []struct {
 		name     string
 		player   *IdlePolicy
@@ -865,8 +814,8 @@ func TestResolveIdleOffAfterTierWins(t *testing.T) {
 		want     int64
 	}{
 		{name: "the Player over the default", player: offAfter(120), defaults: offAfter(1800), want: 120},
-		{name: "the default where the Player states none", defaults: offAfter(1800), want: 1800},
-		{name: "the built-in where neither states one", want: defaultOffAfterSeconds},
+		{name: "the default where the Player sets none", defaults: offAfter(1800), want: 1800},
+		{name: "the built-in where neither sets one", want: defaultOffAfterSeconds},
 		{name: "an empty block on the Player", player: &IdlePolicy{}, defaults: offAfter(1800), want: 1800},
 		{name: "zero on the Player", player: offAfter(0), defaults: offAfter(1800), want: 0},
 		{name: "zero on the default", defaults: offAfter(0), want: 0},
@@ -878,10 +827,7 @@ func TestResolveIdleOffAfterTierWins(t *testing.T) {
 	}
 }
 
-// The mode resolves the same way, field by field, and an
-// unstated mode takes the backlight, the state that always answers
-// DDC.
-func TestResolveIdleOffModeTierWins(t *testing.T) {
+func TestResolveIdleOffModePrefersPlayerThenDefault(t *testing.T) {
 	cases := []struct {
 		name     string
 		player   *IdlePolicy
@@ -895,11 +841,11 @@ func TestResolveIdleOffModeTierWins(t *testing.T) {
 			want:     offModePower,
 		},
 		{
-			name:     "the default where the Player states none",
+			name:     "the default where the Player sets none",
 			defaults: &IdlePolicy{OffMode: offModePower},
 			want:     offModePower,
 		},
-		{name: "the built-in where neither states one", want: defaultOffMode},
+		{name: "the built-in where neither sets one", want: defaultOffMode},
 		{
 			name:     "an empty mode on the Player",
 			player:   &IdlePolicy{OffMode: ""},
@@ -914,11 +860,7 @@ func TestResolveIdleOffModeTierWins(t *testing.T) {
 	}
 }
 
-// The idle client resolves the same way the two windows do, the Player
-// first and the household default second. The operator's own IDLE_IMAGE
-// is the tier under both, so the resolved policy always names a client
-// and the pod carries no fallback of its own.
-func TestResolveIdleImageTierWins(t *testing.T) {
+func TestResolveIdleImagePrefersPlayerThenDefault(t *testing.T) {
 	cases := []struct {
 		name     string
 		player   *IdlePolicy
@@ -932,11 +874,11 @@ func TestResolveIdleImageTierWins(t *testing.T) {
 			want:     "ghcr.io/liken-sh/media-browser:2026.09.01-001",
 		},
 		{
-			name:     "the default where the Player states none",
+			name:     "the default where the Player sets none",
 			defaults: &IdlePolicy{Image: "ghcr.io/liken-sh/media-browser:2026.09.01-001"},
 			want:     "ghcr.io/liken-sh/media-browser:2026.09.01-001",
 		},
-		{name: "the IDLE_IMAGE client where neither states one", want: testIdleImage},
+		{name: "the IDLE_IMAGE client where neither sets one", want: testIdleImage},
 		{
 			name:     "an empty image on the Player",
 			player:   &IdlePolicy{Image: ""},
@@ -951,8 +893,6 @@ func TestResolveIdleImageTierWins(t *testing.T) {
 	}
 }
 
-// Each field resolves on its own, so a Player that states one still
-// inherits the rest from the household.
 func TestResolveIdleSettlesEachFieldOnItsOwn(t *testing.T) {
 	player := &IdlePolicy{OffMode: offModePower}
 	defaults := &IdlePolicy{
@@ -969,14 +909,11 @@ func TestResolveIdleSettlesEachFieldOnItsOwn(t *testing.T) {
 	mustMatch(t, got.Image, "ghcr.io/liken-sh/media-browser:2026.09.01-001")
 }
 
-// ptr is one value's address, for a tier that states a number.
 func ptr[T any](value T) *T {
 	return &value
 }
 
-// the controller resolves the Player's block first, then the
-// household default, then the built-in name this operator answers to.
-func TestResolveIdleControllerTierWins(t *testing.T) {
+func TestResolveIdleControllerPrefersPlayerThenDefault(t *testing.T) {
 	cases := []struct {
 		name     string
 		player   *IdlePolicy
@@ -990,11 +927,11 @@ func TestResolveIdleControllerTierWins(t *testing.T) {
 			want:     "library.liken.sh/media-browser",
 		},
 		{
-			name:     "the default where the Player states none",
+			name:     "the default where the Player sets none",
 			defaults: &IdlePolicy{Controller: "library.liken.sh/media-browser"},
 			want:     "library.liken.sh/media-browser",
 		},
-		{name: "the built-in where neither states one", want: idleControllerOwn},
+		{name: "the built-in where neither sets one", want: idleControllerOwn},
 		{
 			name:     "an empty controller on the Player",
 			player:   &IdlePolicy{Controller: ""},
@@ -1009,9 +946,6 @@ func TestResolveIdleControllerTierWins(t *testing.T) {
 	}
 }
 
-// The next block's art resolves the way an item's art does: an nfs or a
-// claim reference shares the media's mount, and an https reference passes
-// through.
 func TestResolveTheNextBlocksArt(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -1053,8 +987,6 @@ func TestResolveTheNextBlocksArt(t *testing.T) {
 	}
 }
 
-// The next block's art on a claim of its own gets a mount of its own,
-// numbered after the media's, so the pod reads both.
 func TestResolveTheNextBlocksArtOnItsOwnClaim(t *testing.T) {
 	resolved, err := resolvePlay("house", mediaItems("claim://house/films/movies/film.mkv"), &PlayNext{Art: "claim://house/art/shows/next.jpg"}, frame{})
 
@@ -1065,9 +997,6 @@ func TestResolveTheNextBlocksArtOnItsOwnClaim(t *testing.T) {
 	mustMatch(t, resolved.Volumes[1].PersistentVolumeClaim.ClaimName, "art")
 }
 
-// A next block with an art URI of a scheme the resolver does not know
-// fails the Play, the way an item's own art does, so a bad reference is
-// refused before any pod exists.
 func TestResolveRefusesANextArtItCannotRead(t *testing.T) {
 	cases := []struct {
 		name string

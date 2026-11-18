@@ -1,31 +1,25 @@
 package main
 
-// The view is what a pass reads the cluster through. Each collection
-// in it is the store of one informer (clusterwatch.go), which the watch
-// keeps current, so a pass that finds everything as it wants it sends
-// the API server no request at all. While the API server forbids a
-// collection's watch, the view reads that collection from the API
-// server instead (watchedsource.go).
+// clusterView is how a reconcile pass reads the cluster. Each collection
+// comes from the store of one informer (clusterwatch.go), so a pass that
+// finds nothing to change sends the API server no request. While the API
+// server forbids a collection's watch, the view lists that collection
+// from the API server instead (watchedsource.go).
 //
-// A read here can be a moment behind the API server: the informer
-// takes a change a few milliseconds after the API server writes it.
-// That is the right answer for a pass that only compares, because a
-// change that has not arrived yet wakes or reaches the next pass. It is
-// not the right answer for a pass that is about to act, because a
-// create or a delete this operator sent on the last pass can still be
-// on its way. So a pass decides from the view, and before it creates,
-// deletes, or recreates anything it reads the objects again from the
-// API server (reconcile, ensurePlayback, and reconcileStanding), and
-// acts on that read.
+// A store can lag the API server. That is fine for deciding what to do,
+// because a change that has not arrived yet triggers another pass when
+// it arrives. It is not fine for acting: a create or delete that the
+// previous pass sent may not be in the store yet, and a pass that acted
+// on the store could repeat it. So reconcile, ensurePlayback, and
+// reconcilePersistent read the objects again from the API server before
+// they create, delete, or recreate anything.
 //
-// The Plays and the Players are read through the object cache
-// (objectcache.go), with a memo of the operator's own writes, because a
-// pass acts on what their status holds.
+// Plays and Players are read through the object cache (objectcache.go),
+// which also records the versions this operator wrote and read, because
+// a pass acts on their status.
 //
-// The other accessors answer the operator's own structs. An object that
-// does not convert fails the read that holds it, with an error that
-// names it, the way a list fails when the API server answers it with an
-// object that does not decode.
+// An object that does not convert into the operator's struct fails the
+// read of its whole collection, with an error that names the object.
 
 import (
 	"fmt"
@@ -37,18 +31,17 @@ import (
 )
 
 // objectSource is what the view reads of one collection: every object,
-// and one object by its key, namespace/name or name. A watch's store
-// answers both while it is ready, and the API server answers them
-// otherwise (watchedsource.go). Stored answers one object from the
-// store alone, whatever the watch's state, for a reader that must send
-// no request.
+// and one object by its key (namespace/name, or name for a
+// cluster-scoped kind). While the watch is ready, both read the
+// watch's store. Otherwise they read the API server (watchedsource.go).
+// Stored always reads the store alone, for a caller that must not send
+// a request.
 type objectSource interface {
 	List() ([]any, error)
 	GetByKey(key string) (item any, exists bool, err error)
 	Stored(key string) (item any, exists bool)
 }
 
-// clusterView holds one source per collection a pass reads.
 type clusterView struct {
 	plays       informer.Held
 	players     informer.Held
@@ -56,25 +49,26 @@ type clusterView struct {
 	keymaps     objectSource
 	preferences objectSource
 	peripherals objectSource
-	// pods holds the operator's own pods: the playback pods, the idle
+	// pods has only this operator's pods: the playback pods, the idle
 	// pods, and the Remotes' reader pods.
 	pods      objectSource
 	claims    objectSource
 	displays  objectSource
 	slices    objectSource
 	receivers objectSource
-	// sinks and televisions are the audio operator's and the equipment
-	// operator's. The volume engine reads the Sinks a unit plays
-	// through, and the screen relay reads the Televisions' asks.
+	// Sink is a kind of audio-operator and Television a kind of
+	// equipment-operator. The volume code reads the Sinks that a Player
+	// plays through, and relayScreenAsks reads the screen requests in each
+	// Television's status.
 	sinks       objectSource
 	televisions objectSource
 }
 
-// listOf converts every object in a source, in the order the API server
-// lists them: by namespace, then by name. A pass reads the collection
-// in the same order every time, so what it builds from the order, such
-// as which Play on a unit runs, does not change from one pass to the
-// next.
+// listOf converts every object in a source and sorts them by namespace,
+// then name, which is the order the API server lists them in. A store
+// returns objects in no fixed order, and a decision that depends on the
+// order, such as which Play runs on a Player, must come out the same on
+// every pass.
 func listOf[T any](source objectSource) ([]T, error) {
 	items, err := source.List()
 	if err != nil {
@@ -84,7 +78,7 @@ func listOf[T any](source objectSource) ([]T, error) {
 	for _, item := range items {
 		object, ok := item.(*unstructured.Unstructured)
 		if !ok {
-			return nil, fmt.Errorf("the store holds a %T, not an object", item)
+			return nil, fmt.Errorf("the cache holds a %T, want an *unstructured.Unstructured", item)
 		}
 		objects = append(objects, object)
 	}
@@ -105,9 +99,9 @@ func listOf[T any](source objectSource) ([]T, error) {
 	return out, nil
 }
 
-// oneOf converts one object by its key, and answers
-// apiclient.ErrNotFound for an object the source does not hold, the
-// answer the API client gives, so a caller treats the two the same.
+// oneOf returns apiclient.ErrNotFound when the source has no object at
+// key, the same error the API client returns, so a caller handles both
+// sources the same way.
 func oneOf[T any](source objectSource, key string) (*T, error) {
 	item, exists, err := source.GetByKey(key)
 	if err != nil {
@@ -158,12 +152,12 @@ func (v *clusterView) Pod(namespace, name string) (*Pod, error) {
 	return oneOf[Pod](v.pods, namespacedKey(namespace, name))
 }
 
-// StoredPod answers one pod from the pod store alone, and nil for a pod
-// the store does not hold or that does not convert. It sends no
+// StoredPod reads one pod from the pod store alone, and returns nil when
+// the store does not have it or it does not convert. It never sends a
 // request, even while the API server forbids the pod watch.
 func (v *clusterView) StoredPod(namespace, name string) *Pod {
-	item, held := v.pods.Stored(namespacedKey(namespace, name))
-	if !held {
+	item, stored := v.pods.Stored(namespacedKey(namespace, name))
+	if !stored {
 		return nil
 	}
 	pod, err := informer.Convert[Pod](item)

@@ -1,29 +1,21 @@
-# The docs domain builds the manual for liken.sh/media/. Five of the
-# reference pages are generated, never edited: crdref, the generator
-# the brand component publishes, renders each page from its CRD
-# schema in deploy/, a hand-written preamble that opens the page, and
-# a hand-written postamble that carries its bus sections. The schema
-# descriptions become the field tables, so a schema edit is a manual
-# edit. The sixth generated page is the route reference, which apiref
-# renders from the API's own OpenAPI document. go.mod names both
-# generators as tools, the way it names Hugo, and each rule lists its
-# generator's sources as inputs, so a change to a generator
-# regenerates its pages.
+# Builds the manual for liken.sh/media/. The pages that GENERATED lists
+# are generated, so edit their sources and not the pages. crdref, from
+# brand/, renders each CRD page from the CRD in deploy/ and a
+# hand-written preamble and postamble in crdref/. The schema
+# descriptions become the field tables, so editing a schema edits the
+# manual. apiref renders the route reference from openapi.json. go.mod
+# lists crdref, apiref, and Hugo as tools.
 HUGO := go tool hugo
 CRDREF := go tool crdref
 APIREF := go tool apiref
 
-# A recipe that fails, or a build that is killed during one, leaves its
-# target partly written and newer than its inputs. make deletes that
-# target, so the next build makes it again and does not take it as
-# current.
+# A failed or killed recipe leaves a partly written target that is newer
+# than its inputs. make deletes it, so the next build writes it again.
 .DELETE_ON_ERROR:
 
-# crdref and apiref come from brand/ through the replace directive in
-# go.mod, so an edit to their sources never changes go.mod. Each
-# generated page names its generator's sources as inputs, and go.mod
-# for the generator's own dependencies, so an edit to either one
-# regenerates the page.
+# go.mod takes crdref and apiref from brand/ through a replace
+# directive, so an edit to their sources does not change go.mod. Each
+# page therefore also depends on its generator's sources.
 BRAND := ../../brand
 CRDREF_SOURCES := go.mod $(BRAND)/go.mod \
 	$(filter-out %_test.go,$(wildcard $(BRAND)/crdref/*.go $(BRAND)/linkcheck/*.go))
@@ -32,9 +24,8 @@ APIREF_SOURCES := go.mod $(BRAND)/go.mod \
 
 REFERENCE := content/docs/reference
 
-# The OpenAPI document is committed at the top of media-operator/, where the
-# program embeds it. `go generate ./...` is the one command that
-# rewrites it, from the router.
+# The program embeds this OpenAPI document. `go generate ./...` writes
+# it from the router.
 OPENAPI := ../openapi.json
 
 GENERATED := \
@@ -48,10 +39,8 @@ GENERATED := \
 SKILLS := go tool skills
 BASE := https://liken.sh/media/
 
-# The generate target builds every generated reference page and
-# nothing else. The test-docs target in ../Makefile runs it with -B,
-# so that every page is regenerated, and fails when one differs from
-# what git has staged.
+# The test-docs target in ../Makefile runs this with -B and fails when
+# a page differs from what git has staged.
 .PHONY: generate
 generate: $(GENERATED)
 
@@ -59,17 +48,15 @@ generate: $(GENERATED)
 build: $(GENERATED)
 	$(HUGO) --destination dist/site
 
-# The site's own tests: every internal link resolves before the build
-# (manual_test.go passes this site's exceptions). Depending on the
-# generated pages means the link test checks freshly generated
-# output, not whatever was last committed.
+# Checks that every internal link resolves (manual_test.go lists the
+# exceptions). It depends on the generated pages, so make writes any
+# stale page before the test reads it.
 .PHONY: test
 test: $(GENERATED)
 	go test ./...
 
-# The skills target emits every guide as an Agent Skill into ../skills,
-# one SKILL.md per guide, with the generator the brand component
-# publishes (its README says what the output holds). The output is
+# Writes each guide as an Agent Skill, one SKILL.md per guide, into
+# ../skills (brand/README.md describes the output). The output is
 # committed, and the test-docs target in ../Makefile fails when it is
 # stale.
 .PHONY: skills
@@ -91,9 +78,7 @@ $(REFERENCE)/keymaps.md: ../deploy/keymaps-crd.yaml crdref/keymaps-preamble.md c
 $(REFERENCE)/mediapreferences.md: ../deploy/mediapreferences-crd.yaml crdref/mediapreferences-preamble.md crdref/mediapreferences-postamble.md $(CRDREF_SOURCES)
 	$(CRDREF) -title MediaPreferences -weight 50 -postamble crdref/mediapreferences-postamble.md $< $@ crdref/mediapreferences-preamble.md
 
-# The route reference is the OpenAPI document as a page: one section
-# per route, with its parameters, its answers, and the fields they
-# carry. The hand-written API page beside it holds the narrative,
-# which no document can generate.
+# The route reference has one section for each route in the OpenAPI
+# document. The hand-written API page beside it explains the API.
 $(REFERENCE)/routes.md: $(OPENAPI) apiref/routes-preamble.md apiref/routes-postamble.md $(APIREF_SOURCES)
 	$(APIREF) -title Routes -weight 66 -postamble apiref/routes-postamble.md $< $@ apiref/routes-preamble.md
