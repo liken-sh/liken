@@ -20,11 +20,14 @@ func (s *scanner) logReplaced(reopened reopenedFacts) {
 
 // One line of counts for the read, and none where it reopened nothing. The
 // missing outputs get a count and no line each, because one deleted tree of
-// tiles or art can be thousands of them.
+// tiles or art can be thousands of them. The attempts of files that are gone
+// are in the line too, though they reopen nothing, because the read leaves
+// them out the same way.
 func (s *scanner) logReopened(reopened reopenedFacts) {
-	if len(reopened.replaced) == 0 && reopened.missing == 0 && reopened.reshown == 0 {
+	if len(reopened.replaced) == 0 && reopened.missing == 0 && reopened.reshown == 0 && reopened.gone == 0 {
 		return
 	}
-	s.logf("reopened the facts of %d replaced files, %d missing outputs, and %d art files of another show",
-		len(reopened.replaced), reopened.missing, reopened.reshown)
+	s.logf("reopened the facts of %d replaced files, %d missing outputs, and %d art files of another show, "+
+		"and left out %d attempts of files that are gone",
+		len(reopened.replaced), reopened.missing, reopened.reshown, reopened.gone)
 }

@@ -33,6 +33,7 @@ func TestALedgerThatIsNotYAMLIsAnError(t *testing.T) {
 
 func TestAProbeAttemptIsWrittenInThePlansShape(t *testing.T) {
 	folder := t.TempDir()
+	writeFile(t, filepath.Join(folder, "The Long Survey (1982).mkv"), "video")
 
 	err := newVolumeWriter("movies-enrich").updateLikenLedger(folder, factProbe, func(ledger *likenLedger) {
 		ledger.noteAttempt(likenAttempt{Path: "The Long Survey (1982).mkv", At: ledgerTime, Result: attemptFound})
@@ -92,6 +93,8 @@ func TestAnIdentityLedgerHoldsCandidatesWithTheirReceipts(t *testing.T) {
 
 func TestALaterEntryReplacesTheOneForItsOwnPath(t *testing.T) {
 	folder := t.TempDir()
+	writeFile(t, filepath.Join(folder, "a.mkv"), "video")
+	writeFile(t, filepath.Join(folder, "b.mkv"), "video")
 	writer := newVolumeWriter("movies-enrich")
 
 	for _, result := range []string{attemptError, attemptFound} {

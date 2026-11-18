@@ -256,7 +256,15 @@ func parseLikenLedger(data []byte, fact string) (likenLedger, error) {
 // stays: the door applies this change again to what that writer left. The
 // change may run more than once, so it sets what it records rather than
 // adding to it, which every note on a ledger does.
+//
+// A ledger of a fact that names media files also drops what it holds for a
+// file that is no longer in the folder. A file that is deleted, or replaced
+// by a release with another name, would otherwise leave its entries in the
+// ledger for good. The fact is the ledger's one writer and it is writing the
+// file now, so this is where the entries can go, for one listing of the
+// folder.
 func (w *volumeWriter) updateLikenLedger(folder, fact string, change func(*likenLedger)) error {
+	held := mediaFilesBeside(folder, fact)
 	_, err := w.updateInto(filepath.Join(folder, likenDirectory), likenLedgerName(fact),
 		func(current []byte) ([]byte, error) {
 			ledger, err := parseLikenLedger(current, fact)
@@ -264,9 +272,46 @@ func (w *volumeWriter) updateLikenLedger(folder, fact string, change func(*liken
 				return nil, err
 			}
 			change(&ledger)
+			ledger.dropGone(held)
 			return yaml.Marshal(ledger)
 		})
 	return err
+}
+
+// The names in a folder, for a fact whose ledger names media files, and nil
+// for every other fact. A folder that cannot be listed reads as nil too, so
+// a listing that fails drops nothing.
+func mediaFilesBeside(folder, fact string) map[string]bool {
+	if !namesAMediaFile(fact) {
+		return nil
+	}
+	entries, err := os.ReadDir(folder)
+	if err != nil {
+		return nil
+	}
+	held := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		held[entry.Name()] = true
+	}
+	return held
+}
+
+// Drops every entry whose path names a file that the folder's listing does
+// not hold. An entry for the folder itself, or for a path below the folder,
+// stays, because the listing cannot say.
+func (l *likenLedger) dropGone(held map[string]bool) {
+	if held == nil {
+		return
+	}
+	gone := func(path string) bool {
+		return path != "" && path != likenSelfPath && !strings.ContainsRune(path, filepath.Separator) && !held[path]
+	}
+	l.Attempts = slices.DeleteFunc(l.Attempts, func(entry likenAttempt) bool { return gone(entry.Path) })
+	l.Items = slices.DeleteFunc(l.Items, func(entry likenItem) bool { return gone(entry.Path) })
+	l.Probes = slices.DeleteFunc(l.Probes, func(entry probedFile) bool { return gone(entry.Path) })
+	l.Marks = slices.DeleteFunc(l.Marks, func(entry markEntry) bool { return gone(entry.Path) })
+	l.Appearances = slices.DeleteFunc(l.Appearances, func(entry appearancesEntry) bool { return gone(entry.Path) })
+	l.Files = slices.DeleteFunc(l.Files, func(entry arrivalEntry) bool { return gone(entry.Path) })
 }
 
 // One path holds one attempt, the latest, so a file grows with the titles

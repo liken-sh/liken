@@ -208,11 +208,21 @@ thumbnail beside an episode, poster, season art, trailer file, headshot,
 or biography that its fact recorded, that fact's gap opens. So a person
 who deletes an output gets it back on the next walk or webhook rescan.
 
+An upgrade can also import the new file under a new name and delete the
+old one, and a person can delete a video. The folder's ledgers then
+still hold the entries of the file that is gone. The walk counts none
+of the `probe`, `arrival`, `trickplay`, `episode-thumb`, `marks`,
+`appearances`, and `titles` attempts at a path that holds no file, and
+the sweep removes their rows from the catalog. The walk does not write
+to the volume, so the entries stay in the ledger files until one of
+those facts next writes a ledger of that folder. That write lists the
+folder and drops the entries of each file that is not there.
+
 The walk logs each replaced file with both sizes, and one count of what
-it opened:
+it opened and what it left out:
 
     replaced file path:6f1c2a90d3b4: 3345988372 bytes in the probe record, 3362396196 on the volume
-    reopened the facts of 16 replaced files and 32 missing outputs
+    reopened the facts of 16 replaced files, 32 missing outputs, and 0 art files of another show, and left out 5 attempts of files that are gone
 
 ## When a scan runs
 

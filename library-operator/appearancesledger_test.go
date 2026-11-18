@@ -28,6 +28,7 @@ func sampleAppearances() appearancesEntry {
 
 func TestTheAppearancesLedgerHoldsTheCountsAndNoFace(t *testing.T) {
 	folder := t.TempDir()
+	writeFile(t, filepath.Join(folder, sampleAppearances().Path), "video")
 	writer := newVolumeWriter("movies-appearances")
 
 	err := writer.updateLikenLedger(folder, factAppearances, func(ledger *likenLedger) {

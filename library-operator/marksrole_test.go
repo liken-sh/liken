@@ -276,6 +276,8 @@ func TestAMissClearsTheSpansAndAFailureKeepsThem(t *testing.T) {
 			root := t.TempDir()
 			work, log := testEnricher(t, libraryKindSeries, root, nil)
 			season := filepath.Join(root, "Show", "Season 01")
+			writeFile(t, filepath.Join(season, "Show - S01E01.mkv"), "video")
+			writeFile(t, filepath.Join(season, "Show - S01E02.mkv"), "video")
 			writeFile(t, filepath.Join(season, likenDirectory, likenLedgerName(factMarks)), `marks:
   - {path: Show - S01E01.mkv, kind: intro, end: 50000, source: theintrodb}
   - {path: Show - S01E02.mkv, kind: intro, end: 60000, source: theintrodb}

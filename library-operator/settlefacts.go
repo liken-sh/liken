@@ -12,6 +12,13 @@ package main
 // of the earlier file with it, and fileidentity.go says how the walk tells the
 // two files apart. And a found attempt says its output is on the volume, so
 // an output that is gone opens the fact that wrote it.
+//
+// A third case opens no gap. A media file that left its folder, deleted or
+// replaced by a release with another name, leaves its entries in the folder's
+// ledgers. The read finds no file at the path, so it lifts none of those
+// attempts, and the sweep removes their rows. Without this, each walk would
+// lift them again, and the catalog would hold the attempts of every file the
+// folder ever held.
 
 import (
 	"slices"
@@ -27,11 +34,19 @@ var fileFacts = map[string]bool{
 	factAppearances: true, factTitles: true,
 }
 
+// The facts whose attempt names one media file of the folder: the file facts,
+// and arrival, which keys on the same path.
+func namesAMediaFile(fact string) bool {
+	return fileFacts[fact] || fact == factArrival
+}
+
 // What one folder read reopened: the files replaced at their paths, and the
 // found attempts whose output the read did not find.
 type reopenedFacts struct {
 	replaced []replacedFile
 	missing  int
+	// The attempts that name a media file the read did not find.
+	gone int
 	// The art files a fact wrote under another season mapping.
 	reshown int
 	// Each <showid> a season.nfo held that the walk skipped.
@@ -42,6 +57,7 @@ type reopenedFacts struct {
 func (r reopenedFacts) add(other reopenedFacts) reopenedFacts {
 	r.replaced = append(r.replaced, other.replaced...)
 	r.missing += other.missing
+	r.gone += other.gone
 	r.reshown += other.reshown
 	r.skippedShows = append(r.skippedShows, other.skippedShows...)
 	return r
@@ -67,6 +83,10 @@ func (r *walkResult) settleFacts() {
 	earlierMarks := map[string]bool{}
 	kept := r.attempts[:0]
 	for _, attempt := range r.attempts {
+		if namesAMediaFile(attempt.Fact) && !outputs.files[attempt.Item] {
+			r.reopened.gone++
+			continue
+		}
 		if fileFacts[attempt.Fact] && attempt.At < identities[attempt.Item].cutoff(attempt.Fact) {
 			if attempt.Fact == factMarks {
 				earlierMarks[attempt.Item] = true
@@ -82,7 +102,7 @@ func (r *walkResult) settleFacts() {
 	}
 	r.attempts = kept
 	r.marks = slices.DeleteFunc(r.marks, func(mark markRow) bool {
-		return earlierMarks[mark.Path] || identities[mark.Path].sizeChanged
+		return earlierMarks[mark.Path] || identities[mark.Path].sizeChanged || !outputs.files[mark.Path]
 	})
 	for _, path := range sortedPaths(identities) {
 		if identity := identities[path]; identity.sizeChanged {
