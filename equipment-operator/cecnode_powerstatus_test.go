@@ -1,10 +1,5 @@
 package main
 
-// The power the adapter reports for itself. The machine never sleeps,
-// but to the TV a playback device with no picture is in standby, so
-// the adapter reports On only while a Player's session holds the room
-// awake on its Display.
-
 import (
 	"testing"
 	"testing/synctest"
@@ -14,8 +9,9 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/cec/cectest"
 )
 
-// reportedPower asks the adapter at logical address 4 for its power, as
-// the TV does, and answers the power of its last report.
+// reportedPower sends Give Device Power Status from the TV to the
+// adapter at logical address 4, and returns the status in the adapter's
+// Report Power Status reply.
 func reportedPower(t *testing.T, api *cecAPI, wire *cectest.Bus) cec.PowerStatus {
 	t.Helper()
 	before := len(wire.Sent())
@@ -48,7 +44,7 @@ func TestTheAdapterReportsItsPowerFromTheSession(t *testing.T) {
 			api, _ := sleepingRoom(t, wire)
 			return api
 		}, cec.PowerStandby},
-		{"a session that holds the room awake", func(t *testing.T, wire *cectest.Bus) *cecAPI {
+		{"an awake session", func(t *testing.T, wire *cectest.Bus) *cecAPI {
 			session := wokeNow()
 			api := awakeRoom(t, wire, session)
 			wokeWith(t, api, session)
@@ -66,7 +62,7 @@ func TestTheAdapterReportsItsPowerFromTheSession(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
-				wire := roomWithTV(televisionTV(cec.PowerOn))
+				wire := busWithTV(televisionTV(cec.PowerOn))
 				api := c.room(t, wire)
 
 				mustMatch(t, reportedPower(t, api, wire), c.power)

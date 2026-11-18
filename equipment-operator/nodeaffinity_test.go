@@ -12,7 +12,7 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// daemonSetIn is the one DaemonSet in the manifest file.
+// daemonSetIn returns the DaemonSet in the manifest file at path.
 func daemonSetIn(t *testing.T, path string) *appsv1.DaemonSet {
 	t.Helper()
 	raw, err := os.ReadFile(path)
@@ -29,16 +29,17 @@ func daemonSetIn(t *testing.T, path string) *appsv1.DaemonSet {
 		}
 		return found
 	}
-	t.Fatalf("%s holds no DaemonSet", path)
+	t.Fatalf("%s contains no DaemonSet", path)
 	return nil
 }
 
-// A person keeps the pod off a node with no CEC adapter by one label on
-// that node. NotIn also matches a node with no such label, so the
-// requirement must be the only term: a second term would be ORed with
-// it and let the pod back onto the labeled node. It must also be the
-// only expression in that term, because a second one narrows where the
-// pod runs on a node with no label.
+// A person keeps the pod off a node that has no CEC adapter by labeling
+// the node equipment.liken.sh/cec=none. NotIn also matches a node with
+// no such label, so every other node runs the pod. The affinity must be
+// this one expression in one term. Node selector terms are ORed, so a
+// second term could admit the labeled node, and the expressions of a
+// term are ANDed, so a second expression could exclude a node with no
+// label.
 func TestTheDaemonSetStaysOffANodeLabeledNone(t *testing.T) {
 	t.Parallel()
 	daemonSet := daemonSetIn(t, "deploy/cec.yaml")
@@ -60,8 +61,8 @@ func TestTheDaemonSetStaysOffANodeLabeledNone(t *testing.T) {
 }
 
 // The pod watch selects the DaemonSet's pods by their label, and the
-// probes reach the listener the DaemonSet names, so the manifest and
-// the code must agree.
+// probes call the listener that the DaemonSet's environment sets, so
+// the manifest and the code must agree.
 func TestTheDaemonSetMatchesThePodWatchAndTheProbe(t *testing.T) {
 	t.Parallel()
 	daemonSet := daemonSetIn(t, "deploy/cec.yaml")
@@ -78,21 +79,20 @@ func TestTheDaemonSetMatchesThePodWatchAndTheProbe(t *testing.T) {
 		mustMatch(t, probe.HTTPGet.Path, "/healthz")
 		mustMatch(t, probe.HTTPGet.Port.String(), container.Ports[0].Name)
 		if time.Duration(probe.TimeoutSeconds)*time.Second <= cecProbeWait {
-			t.Errorf("a probe waits %ds, not longer than the handler's %s", probe.TimeoutSeconds, cecProbeWait)
+			t.Errorf("a probe waits %ds, want more than the handler wait %s", probe.TimeoutSeconds, cecProbeWait)
 		}
 	}
 	window := func(probe *corev1.Probe) time.Duration {
 		return time.Duration(probe.PeriodSeconds*probe.FailureThreshold) * time.Second
 	}
-	// A new pod's entry stays current for the readiness window, the
-	// time a Ready pod whose loop stops answering takes to lose
-	// readiness. The window covers one 30-second request to the API
-	// server and a join scan, and the liveness window is longer still.
+	// The readiness window is how long a pod whose loop stops answering
+	// stays Ready, and cecStartupGrace must equal it. It must cover one
+	// 30-second request to the API server and one joinScan of the bus.
 	mustMatch(t, window(container.ReadinessProbe), cecStartupGrace)
 	if window(container.ReadinessProbe) < time.Minute {
-		t.Errorf("the readiness window is %s, shorter than a request and a scan", window(container.ReadinessProbe))
+		t.Errorf("the readiness window is %s, want at least 1m to cover a request and a scan", window(container.ReadinessProbe))
 	}
 	if window(container.LivenessProbe) < 2*window(container.ReadinessProbe) {
-		t.Errorf("the liveness window is %s, not clearly longer than the readiness window %s", window(container.LivenessProbe), window(container.ReadinessProbe))
+		t.Errorf("the liveness window is %s, want at least twice the readiness window %s", window(container.LivenessProbe), window(container.ReadinessProbe))
 	}
 }

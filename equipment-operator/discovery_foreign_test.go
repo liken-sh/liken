@@ -1,7 +1,7 @@
 package main
 
-// Discovery against a LinkPlay device that is not a WiiM: another brand
-// advertises the same mDNS service and answers the same API.
+// Other brands of LinkPlay device advertise the same mDNS service as a
+// WiiM and respond to the same API, so discovery finds them too.
 
 import (
 	"strings"
@@ -10,8 +10,9 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/wiim"
 )
 
-// foreignDiscovery is a discovery that found the first device and was
-// told that the device reports another brand's project.
+// foreignDiscovery returns a discovery that has found the device with
+// firstUUID. Each test then calls skip, as a driver does when the
+// device reports another brand's project.
 func foreignDiscovery(t *testing.T, list ...Receiver) (*discoveryAPI, *discovery, *logBuffer) {
 	t.Helper()
 	api, client := startDiscoveryAPI(t)

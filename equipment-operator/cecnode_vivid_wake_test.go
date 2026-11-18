@@ -1,11 +1,9 @@
 package main
 
-// The wake against the kernel's own CEC core, through the vivid
-// driver: the node workload wakes the TV, makes its Display the active
-// source, and takes the input back from a second vivid output that
-// plays a streaming player. The TV the test plays records what it
-// heard, which is what the bus reports at the TV. cec/AGENTS.md gives
-// the commands that set vivid up.
+// A wake on a vivid bus. The test acts as the TV and records what it
+// receives. A second vivid output acts as a streaming player that takes
+// the input, and the node workload must take it back. cec/AGENTS.md has
+// the commands that set up vivid.
 
 import (
 	"context"
@@ -18,10 +16,10 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/cec"
 )
 
-// playPlayer opens a vivid output other than the one at skip, and
-// makes it a streaming player that claims Active Source once, after
-// another device's claim, until the test ends. It answers the player's
-// physical address.
+// playPlayer makes a vivid output other than skip act as a streaming
+// player until the test ends, and returns its physical address. The
+// player sends Active Source once, half a second after the first Active
+// Source from another device.
 func playPlayer(t *testing.T, skip cec.PhysicalAddress) cec.PhysicalAddress {
 	t.Helper()
 	paths, _ := filepath.Glob("/dev/cec*")
@@ -67,9 +65,9 @@ func playPlayer(t *testing.T, skip cec.PhysicalAddress) cec.PhysicalAddress {
 	return cec.InvalidPhysicalAddress
 }
 
-// waitForClaim waits for the kernel to finish an adapter's claim, which
-// polls the wire at the speed of a real CEC bus, and answers the
-// address.
+// waitForClaim waits until the kernel has claimed a logical address for
+// the adapter, and returns it. vivid runs the bus at real CEC speed, so
+// the claim takes time.
 func waitForClaim(t *testing.T, device *cec.Device) cec.LogicalAddress {
 	t.Helper()
 	deadline := time.Now().Add(vividScanTime)
@@ -94,9 +92,8 @@ func TestVividTheWakeShowsTheDisplay(t *testing.T) {
 	t.Cleanup(func() { cecWakeGuard, cecWakeSettle = guard, settle })
 	tv, output, address := vividPair(t, true)
 	heard := playWakingTV(t, tv)
-	// The wake starts once the node workload joins, which can be before
-	// the kernel finishes the TV's claim, and a TV with no address NACKs
-	// Image View On.
+	// The wake starts as soon as the node workload joins, and a TV with
+	// no logical address yet does not acknowledge Image View On.
 	waitForClaim(t, tv)
 	player := playPlayer(t, address)
 	api := startCECAPI(t)
@@ -116,7 +113,7 @@ func TestVividTheWakeShowsTheDisplay(t *testing.T) {
 	t.Logf("WakeApplied: %s %s: %s", applied.Status, applied.Reason, applied.Message)
 	mustMatch(t, applied.Status, ConditionTrue)
 	if !strings.Contains(applied.Message, "claimed the input once") {
-		t.Errorf("the player's claim is not in the message: %s", applied.Message)
+		t.Errorf("the WakeApplied message is %q, want it to say the player claimed the input once", applied.Message)
 	}
 	var seen []string
 	for _, message := range heard() {
@@ -133,15 +130,15 @@ func TestVividTheWakeShowsTheDisplay(t *testing.T) {
 		viewOn,
 		viewOn,
 		claimed,
-		cec.ActiveSource(seenFrom(t, heard(), player), player).String(),
+		cec.ActiveSource(senderOfActiveSource(t, heard(), player), player).String(),
 		viewOn,
 		claimed,
 	})
 }
 
-// seenFrom answers the logical address the TV heard claim a physical
-// address.
-func seenFrom(t *testing.T, heard []cec.Message, physical cec.PhysicalAddress) cec.LogicalAddress {
+// senderOfActiveSource returns the logical address of the device that
+// sent the TV an Active Source for the physical address.
+func senderOfActiveSource(t *testing.T, heard []cec.Message, physical cec.PhysicalAddress) cec.LogicalAddress {
 	t.Helper()
 	for _, message := range heard {
 		operands := message.Operands()

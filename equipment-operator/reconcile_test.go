@@ -1,7 +1,8 @@
 package main
 
-// The controller against a fake receiver and a fake API server, both on
-// in-memory connections, on the fake clock of a synctest bubble.
+// Tests for the controller. The receiver and the API server are fakes
+// on in-memory connections, and time is the fake clock of a synctest
+// bubble.
 
 import (
 	"context"
@@ -26,17 +27,17 @@ func TestPokeNeverBlocksAndDrainPokesClearsTheQueue(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		wake := make(chan struct{}, 1)
 
-		poke(wake)
-		poke(wake)
+		sendWake(wake)
+		sendWake(wake)
 		mustMatch(t, len(wake), 1)
 
-		drainPokes(wake)
+		drainWakes(wake)
 		mustMatch(t, len(wake), 0)
 	})
 }
 
-// fakeAPI is an API server that answers the collection a test sets and
-// records every status the operator applies.
+// fakeAPI is a fake API server. It serves the collection that a test
+// sets and records every status and power that the operator applies.
 type fakeAPI struct {
 	client  *Client
 	events  *eventstest.Events
@@ -51,15 +52,17 @@ type fakeAPI struct {
 	powersSet    []equipment.Power
 	refusing     bool
 	powerGate    chan struct{}
-	// lists counts the lists of the Receivers.
+	// lists counts the list requests for Receivers.
 	lists int
-	// applied names the Receiver of each apply on the main resource.
+	// applied lists the name of the Receiver in each apply on the main
+	// resource.
 	applied []string
-	// throttlingStatus answers every status write with a 429 that asks
-	// for a five-second wait, and statusThrottles counts those answers.
+	// throttlingStatus makes every status write fail with a 429 that
+	// asks for a five-second wait, and statusThrottles counts those
+	// responses.
 	throttlingStatus bool
 	statusThrottles  int
-	// eventGate holds each Event write until releaseEvents.
+	// eventGate blocks each Event write until releaseEvents.
 	eventGate chan struct{}
 }
 
@@ -79,8 +82,8 @@ func startFakeAPI(t *testing.T) *fakeAPI {
 	return api
 }
 
-// gateEvents makes every Event write wait until releaseEvents, so a
-// test can hold the recorder's request open.
+// gateEvents blocks every Event write until releaseEvents, so a test
+// can keep the recorder's request open.
 func (a *fakeAPI) gateEvents() {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
@@ -126,9 +129,9 @@ func (a *fakeAPI) serveList(w http.ResponseWriter) {
 	_ = json.NewEncoder(w).Encode(list)
 }
 
-// The watch answers a streaming list with the Receivers a test set,
-// the way the API server does, and then holds the connection open.
-// This fake sends no later event: a test runs each pass itself.
+// serveWatch sends the Receivers that a test set as the watch's initial
+// events, as the API server does, and then keeps the connection open
+// with no later event, because each test runs its own passes.
 func (a *fakeAPI) serveWatch(w http.ResponseWriter, r *http.Request) {
 	a.mutex.Lock()
 	list := a.list
@@ -182,8 +185,8 @@ func (a *fakeAPI) recordStatus(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(&Receiver{Metadata: applied.Metadata, Status: ReceiverStoredStatus{ReceiverStatus: applied.Status}})
 }
 
-// recordPower answers the operator's apply on the main resource, which
-// owns spec.power, and records the power the body named.
+// recordPower handles the operator's apply on the main resource, which
+// owns spec.power, and records the power in the request body.
 func (a *fakeAPI) recordPower(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	var applied receiverPowerApply
@@ -203,8 +206,8 @@ func (a *fakeAPI) recordPower(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(&Receiver{Metadata: applied.Metadata, Spec: applied.Spec})
 }
 
-// appliedReceivers names the Receiver of each apply on the main
-// resource, in order.
+// appliedReceivers returns the name of the Receiver in each apply on
+// the main resource, in order.
 func (a *fakeAPI) appliedReceivers() []string {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
@@ -217,8 +220,8 @@ func (a *fakeAPI) setReceivers(items ...Receiver) {
 	a.list = ReceiverList{Metadata: ListMeta{ResourceVersion: "1"}, Items: items}
 }
 
-// gatePowers makes every power write wait until releasePowers, so a
-// test can hold a handler open at its API patch.
+// gatePowers blocks every power write until releasePowers, so a test
+// can keep the API request open.
 func (a *fakeAPI) gatePowers() {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
@@ -246,7 +249,6 @@ func (a *fakeAPI) breakTheList() {
 	a.broken = true
 }
 
-// lastStatus answers the last status the operator applied.
 func (a *fakeAPI) lastStatus() ReceiverStatus {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
@@ -259,7 +261,8 @@ func (a *fakeAPI) writeCount() int {
 	return len(a.statuses)
 }
 
-// waitForStatus reads applied statuses until one satisfies ready.
+// waitForStatus reads the applied statuses until one satisfies ready,
+// and returns it.
 func (a *fakeAPI) waitForStatus(t *testing.T, ready func(ReceiverStatus) bool) ReceiverStatus {
 	t.Helper()
 	deadline := time.After(testTimeout)
@@ -270,19 +273,19 @@ func (a *fakeAPI) waitForStatus(t *testing.T, ready func(ReceiverStatus) bool) R
 				return status
 			}
 		case <-deadline:
-			t.Fatal("the operator applied no status the test was waiting for")
+			t.Fatal("no applied status satisfied the test before the deadline, want one")
 			return ReceiverStatus{}
 		}
 	}
 }
 
-// refuseStatus fails the test if any status is applied within the
-// window.
+// refuseStatus fails the test if the operator applies any status within
+// the given time.
 func (a *fakeAPI) refuseStatus(t *testing.T, within time.Duration) {
 	t.Helper()
 	select {
 	case status := <-a.written:
-		t.Fatalf("the operator applied a status it did not need to: %+v", status)
+		t.Fatalf("the operator applied the status %+v, want no status write", status)
 	case <-time.After(within):
 	}
 }
@@ -294,8 +297,9 @@ func testReceiver(name, address string) Receiver {
 	}
 }
 
-// startController leaves statusDebounce at its own value, because a
-// unit's writer goroutine outlives the test and would race a restore.
+// startController does not change statusDebounce, because a unit's
+// writer goroutine outlives the test and would race with restoring the
+// value.
 func startController(t *testing.T, api *fakeAPI) *controller {
 	t.Helper()
 	operator := newController(api.client, testMetrics(t))
@@ -306,10 +310,10 @@ func startController(t *testing.T, api *fakeAPI) *controller {
 	return operator
 }
 
-// waitForSurvey waits until every unit the operator has reached has
-// surveyed its receiver, which is what gates the settings apply. A unit
-// the operator has not reached is skipped: it has nothing to compare.
-func waitForSurvey(t *testing.T, operator *controller) {
+// waitForFirstRead waits until the driver of each unit whose receiver is
+// reachable has finished its first full read of it, because the operator applies settings only
+// after the first full read.
+func waitForFirstRead(t *testing.T, operator *controller) {
 	t.Helper()
 	deadline := time.After(4 * time.Second)
 	for {
@@ -318,7 +322,7 @@ func waitForSurvey(t *testing.T, operator *controller) {
 			if unit.driver == nil {
 				continue
 			}
-			if unit.driver.State().Reachable == equipment.ConditionTrue && !unit.driver.Surveyed() {
+			if unit.driver.State().Reachable == equipment.ConditionTrue && !unit.driver.FirstReadDone() {
 				waiting = true
 			}
 		}
@@ -327,15 +331,14 @@ func waitForSurvey(t *testing.T, operator *controller) {
 		}
 		select {
 		case <-deadline:
-			t.Fatal("a connected driver never surveyed its receiver")
+			t.Fatal("the driver had not finished its first full read of the receiver before the deadline, want it finished")
 		case <-time.After(time.Millisecond):
 		}
 	}
 }
 
-// connected answers whether a status says Reachable is True and holds
-// no condition other than the InputSelected that a standing session
-// adds.
+// connected returns true when status has exactly one condition other
+// than InputSelected, which a running session adds, and it is True.
 func connected(status ReceiverStatus) bool {
 	others := slices.DeleteFunc(slices.Clone(status.Conditions), func(condition Condition) bool {
 		return condition.Type == inputSelectedConditionType
@@ -367,8 +370,6 @@ func TestTheOperatorReportsWhatTheReceiverSaid(t *testing.T) {
 	})
 }
 
-// The connect answers nine lines this operator reads, and they make one
-// status write.
 func TestTheConnectBurstMakesOneStatusWrite(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -415,10 +416,10 @@ func TestASecondPassWritesNothingFurther(t *testing.T) {
 		operator := startController(t, api)
 		mustSucceed(t, operator.pass(t.Context()))
 		api.waitForStatus(t, connected)
-		// The first pass after the survey settles the declared blocks and
-		// records them, which is a write. The pass after that has nothing
-		// left to write.
-		waitForSurvey(t, operator)
+		// The first pass after the first full read records the declared blocks
+		// as settled, which changes the status. The next pass has
+		// nothing left to write.
+		waitForFirstRead(t, operator)
 		mustSucceed(t, operator.pass(t.Context()))
 		api.waitForStatus(t, func(status ReceiverStatus) bool { return len(status.SettledSettings) > 0 })
 
@@ -428,9 +429,9 @@ func TestASecondPassWritesNothingFurther(t *testing.T) {
 	})
 }
 
-// A receiver repeats a line whenever its own menu or remote touches a
-// field, often with the value it already reported. The burst that line
-// starts builds the same status, so the operator writes nothing.
+// A receiver repeats a line when its own menu or remote touches a
+// field, often with the value it already reported. The status that the
+// burst builds is unchanged, so the operator writes nothing.
 func TestALineThatRepeatsTheStateWritesNoStatus(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -440,7 +441,7 @@ func TestALineThatRepeatsTheStateWritesNoStatus(t *testing.T) {
 		operator := startController(t, api)
 		mustSucceed(t, operator.pass(t.Context()))
 		api.waitForStatus(t, connected)
-		waitForSurvey(t, operator)
+		waitForFirstRead(t, operator)
 		mustSucceed(t, operator.pass(t.Context()))
 		settled := api.waitForStatus(t, func(status ReceiverStatus) bool { return len(status.SettledSettings) > 0 })
 
@@ -498,7 +499,7 @@ func TestAReceiverWithNoProtocolStartsNothing(t *testing.T) {
 	})
 }
 
-func TestPassAnswersTheErrorWhenTheListFails(t *testing.T) {
+func TestPassReturnsTheErrorWhenTheListFails(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)
@@ -509,8 +510,8 @@ func TestPassAnswersTheErrorWhenTheListFails(t *testing.T) {
 	})
 }
 
-// sessionedReceiver is a Receiver that names a session on one input,
-// with a Play standing on it.
+// sessionedReceiver returns a Receiver whose spec.session selects input
+// and is active, as it is while a Play runs.
 func sessionedReceiver(name, address, input string) Receiver {
 	held := testReceiver(name, address)
 	held.Spec.Session = &ReceiverSession{
@@ -521,9 +522,8 @@ func sessionedReceiver(name, address, input string) Receiver {
 	return held
 }
 
-// A session that appears selects the input, a session under a new input
-// selects that one, and a session that is lifted selects nothing
-// further.
+// A new session selects its input, a session on another input selects
+// that one, and removing the session sends nothing further.
 func TestASessionThatChangesSelectsTheNewInput(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -547,8 +547,8 @@ func TestASessionThatChangesSelectsTheNewInput(t *testing.T) {
 	})
 }
 
-// A session the pass reads again is left alone, because power and input
-// are one-shots the receiver answers once.
+// A session that a later pass reads unchanged is left alone, because
+// the session sends its power and input commands once.
 func TestASessionThatHasNotChangedIsLeftAlone(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -568,8 +568,8 @@ func TestASessionThatHasNotChangedIsLeftAlone(t *testing.T) {
 	})
 }
 
-// The loop reconciles before any event arrives, answers a wake, and
-// stops every unit when its context ends.
+// The loop runs a pass before any event arrives, runs another on a
+// wake, and stops every unit when its context ends.
 func TestTheLoopRunsUntilItsContextEndsAndStopsEveryUnit(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -587,21 +587,20 @@ func TestTheLoopRunsUntilItsContextEndsAndStopsEveryUnit(t *testing.T) {
 		}()
 
 		api.waitForStatus(t, connected)
-		poke(operator.wake)
+		sendWake(operator.wake)
 		cancel()
 
 		select {
 		case <-stopped:
 		case <-time.After(testTimeout):
-			t.Fatal("the loop did not stop")
+			t.Fatal("the loop was still running after the context ended, want it stopped")
 		}
 		mustMatch(t, len(operator.units), 0)
 	})
 }
 
-// A status write the API server refuses is not recorded, so the next
-// change writes the whole status again instead of skipping it as
-// already applied.
+// A status write that the API server refuses is not recorded as
+// applied, so the next change writes the whole status again.
 func TestARefusedStatusWriteIsTriedAgain(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -621,9 +620,9 @@ func TestARefusedStatusWriteIsTriedAgain(t *testing.T) {
 	})
 }
 
-// serve reads the collection once before it runs, and answers the error
-// when that read fails.
-func TestServeAnswersTheErrorWhenTheFirstListFails(t *testing.T) {
+// serve lists the Receivers once before it runs the loop, and returns
+// the error when that list fails.
+func TestServeReturnsTheErrorWhenTheFirstListFails(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)
@@ -633,7 +632,6 @@ func TestServeAnswersTheErrorWhenTheFirstListFails(t *testing.T) {
 	})
 }
 
-// serve runs the loop until its context ends.
 func TestServeRunsTheLoopUntilItsContextEnds(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -654,13 +652,13 @@ func TestServeRunsTheLoopUntilItsContextEnds(t *testing.T) {
 		select {
 		case <-stopped:
 		case <-time.After(testTimeout):
-			t.Fatal("serve did not stop")
+			t.Fatal("serve was still running after the context ended, want it stopped")
 		}
 	})
 }
 
-// A Play that starts on a waking screen turns both flags on in one
-// write, and the session selects the input once and at once.
+// A Play that starts on a waking screen sets both flags in one write.
+// The session then selects the input once, without waiting.
 func TestOneWriteThatTurnsBothFlagsOnSelectsTheInputOnce(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -674,7 +672,7 @@ func TestOneWriteThatTurnsBothFlagsOnSelectsTheInputOnce(t *testing.T) {
 		rule := ReceiverVolume{Max: 69.5, Step: 1}
 		api.setReceivers(idleReceiver(equipment.address(), rule))
 		mustSucceed(t, operator.pass(t.Context()))
-		waitForSurvey(t, operator)
+		waitForFirstRead(t, operator)
 
 		woken := playingReceiver(equipment.address(), rule)
 		woken.Spec.Session.Awake = true
@@ -688,16 +686,16 @@ func TestOneWriteThatTurnsBothFlagsOnSelectsTheInputOnce(t *testing.T) {
 	})
 }
 
-// playingReceiver is one Denon with a Play standing on it and a
-// declared scale.
+// playingReceiver returns a Receiver on a Denon with an active session,
+// as while a Play runs, and a declared volume scale.
 func playingReceiver(address string, rule ReceiverVolume) Receiver {
 	held := idleReceiver(address, rule)
 	held.Spec.Session.Active = true
 	return held
 }
 
-// idleReceiver is the same receiver with the Player at its idle screen:
-// a session that asks the equipment for nothing.
+// idleReceiver returns the same Receiver with the Player at its idle
+// screen. Its session is not active, so it sends the receiver nothing.
 func idleReceiver(address string, rule ReceiverVolume) Receiver {
 	held := testReceiver("theater", address)
 	held.Spec.Volume = &rule
@@ -708,23 +706,23 @@ func idleReceiver(address string, rule ReceiverVolume) Receiver {
 	return held
 }
 
-// heldSession answers the session a unit runs now, which is the same
-// pointer across a change that does not restart the session.
-func heldSession(t *testing.T, operator *controller, name string) *session {
+// runningSession returns the unit's session. The pointer stays the same
+// across a change that does not restart the session.
+func runningSession(t *testing.T, operator *controller, name string) *session {
 	t.Helper()
 	unit, running := operator.units[name]
 	if !running {
-		t.Fatalf("no unit is running for receiver %s", name)
+		t.Fatalf("no unit runs for Receiver %s, want one", name)
 	}
 	unit.mutex.Lock()
 	defer unit.mutex.Unlock()
 	return unit.session
 }
 
-// The media operator holds the session whenever the Player has a
-// screen, and flips active when a Play starts. The flip must reach the
-// session that stands, and not start another.
-func TestAnActiveFlipReachesAStandingSession(t *testing.T) {
+// The media operator writes a session whenever the Player has a screen,
+// and sets active when a Play starts. That change must reach the
+// running session and not start another.
+func TestAnActiveFlipReachesTheRunningSession(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)
@@ -737,20 +735,18 @@ func TestAnActiveFlipReachesAStandingSession(t *testing.T) {
 
 		api.setReceivers(idleReceiver(equipment.address(), rule))
 		mustSucceed(t, operator.pass(t.Context()))
-		waitForSurvey(t, operator)
+		waitForFirstRead(t, operator)
 		equipment.refuseCommand(t, "SIGAME", quietPeriod)
-		before := heldSession(t, operator, "theater")
+		before := runningSession(t, operator, "theater")
 
 		api.setReceivers(playingReceiver(equipment.address(), rule))
 		mustSucceed(t, operator.pass(t.Context()))
 
 		equipment.waitForCommands(t, "SIGAME")
-		mustMatch(t, heldSession(t, operator, "theater"), before)
+		mustMatch(t, runningSession(t, operator, "theater"), before)
 	})
 }
 
-// The sound-mode lookup reads the declared inputs and answers nothing
-// for an input the wiring does not name.
 func TestInputSoundModeReadsTheDeclaredInputs(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -765,10 +761,10 @@ func TestInputSoundModeReadsTheDeclaredInputs(t *testing.T) {
 	})
 }
 
-// A declarative spec.power change the operator sees while it runs is
-// applied once the receiver is reachable and surveyed, and a re-list
-// with the same value sends nothing further: the operator owns the
-// field and never re-asserts it.
+// A spec.power change that arrives while the operator runs is sent
+// once, after the receiver is reachable and has finished its first full read. A later list with
+// the same value sends nothing, because the operator owns the field and
+// does not re-assert it.
 func TestADeclarativePowerChangeAppliesOnce(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -779,9 +775,9 @@ func TestADeclarativePowerChangeAppliesOnce(t *testing.T) {
 		operator := startController(t, api)
 		mustSucceed(t, operator.pass(t.Context()))
 		api.waitForStatus(t, connected)
-		waitForSurvey(t, operator)
+		waitForFirstRead(t, operator)
 
-		// Once surveyed, the change applies once.
+		// After the first full read, the change is sent once.
 		receiver.Spec.Power = equipment.PowerOn
 		receiver.Metadata.Generation = 5
 		api.setReceivers(receiver)
@@ -789,20 +785,20 @@ func TestADeclarativePowerChangeAppliesOnce(t *testing.T) {
 		fake.waitForCommands(t, denon.PowerOnCommand)
 		mustMatch(t, <-api.powers, equipment.PowerOn)
 
-		// A re-list with the same value sends nothing.
+		// A list with the same value sends nothing more.
 		mustSucceed(t, operator.pass(t.Context()))
 		fake.refuseCommand(t, denon.PowerOnCommand, quietPeriod)
 		select {
 		case power := <-api.powers:
-			t.Fatalf("the operator re-applied power %q", power)
+			t.Fatalf("the operator applied power %q again, want no second write for an unchanged list", power)
 		case <-time.After(quietPeriod):
 		}
 	})
 }
 
-// A declared setting the receiver reports at another value is applied
-// once the receiver is reachable, and once the receiver reports the
-// declared value, a re-list with the same settings sends nothing.
+// A declared setting that the receiver reports at another value is sent
+// once the receiver is reachable. After the receiver reports the
+// declared value, a later list with the same settings sends nothing.
 func TestADeclarativeSettingChangeAppliesOnce(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -814,11 +810,12 @@ func TestADeclarativeSettingChangeAppliesOnce(t *testing.T) {
 		api.setReceivers(receiver)
 		operator := startController(t, api)
 
-		// The first pass starts the driver, which connects asynchronously, so
-		// the change waits for a reachable receiver.
+		// The first pass starts the driver, which connects in the
+		// background, so the change is not sent until the receiver is
+		// reachable.
 		mustSucceed(t, operator.pass(t.Context()))
 		api.waitForStatus(t, connected)
-		waitForSurvey(t, operator)
+		waitForFirstRead(t, operator)
 		fake.holdSetting("PSBAS 53", "PSBAS 53")
 		fake.volunteer("PSBAS 50")
 		waitForObservedSettings(t, operator, "theater", func(s denon.Settings) bool {
@@ -836,9 +833,9 @@ func TestADeclarativeSettingChangeAppliesOnce(t *testing.T) {
 	})
 }
 
-// Declared zone controls the zone reports at other values reach the
-// right wire lines for each non-main zone, and once the zone reports
-// them, a re-list with the same zones sends nothing further.
+// Declared controls that a non-main zone reports at other values are
+// sent as the matching commands for that zone. After the zone reports
+// them, a later list with the same zones sends nothing.
 func TestDeclaredZoneControlsApplyOnce(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -877,7 +874,7 @@ func TestDeclaredZoneControlsApplyOnce(t *testing.T) {
 
 				mustSucceed(t, operator.pass(t.Context()))
 				api.waitForStatus(t, connected)
-				waitForSurvey(t, operator)
+				waitForFirstRead(t, operator)
 				for index, command := range one.want {
 					fake.holdSetting(command, one.reports[index])
 				}
@@ -888,8 +885,8 @@ func TestDeclaredZoneControlsApplyOnce(t *testing.T) {
 				for _, want := range one.want {
 					fake.waitForCommands(t, want)
 				}
-				// The sleep is the last report of the burst, so once it arrives
-				// the receiver has reported every control.
+				// The sleep is the last report of the burst, so when it
+				// arrives the receiver has reported every control.
 				waitFor(t, func() bool {
 					zone, _ := operator.units["theater"].driver.State().Zone(one.zone)
 					return zone.Volume == int(one.volume*2) && zone.Sleep == one.sleep
@@ -902,9 +899,9 @@ func TestDeclaredZoneControlsApplyOnce(t *testing.T) {
 	}
 }
 
-// A zones map that names the main zone is rejected, so the main zone
-// never has two writers: spec.power and spec.zones.
-func TestAZonesMapThatNamesMainIsRejected(t *testing.T) {
+// setZones skips a main entry in spec.zones, because spec.power and the
+// session control the main zone.
+func TestAZonesMapThatNamesMainIsSkipped(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)
@@ -916,17 +913,16 @@ func TestAZonesMapThatNamesMainIsRejected(t *testing.T) {
 
 		mustSucceed(t, operator.pass(t.Context()))
 		api.waitForStatus(t, connected)
-		waitForSurvey(t, operator)
+		waitForFirstRead(t, operator)
 		mustSucceed(t, operator.pass(t.Context()))
 
 		fake.refuseCommand(t, "PWON", quietPeriod)
 	})
 }
 
-// zonesApplied returns a copy and setZones stores a fresh map, so a
-// snapshot read before a later setZones keeps the earlier value; the two
-// never share a backing map.
-func TestASettledZoneSnapshotSurvivesALaterSetZones(t *testing.T) {
+// zonesApplied returns a copy and setZones stores a new map, so a
+// snapshot taken before a later setZones keeps its earlier contents.
+func TestAZoneSnapshotKeepsItsContentsAfterALaterSetZones(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)
@@ -939,7 +935,7 @@ func TestASettledZoneSnapshotSurvivesALaterSetZones(t *testing.T) {
 
 		mustSucceed(t, operator.pass(t.Context()))
 		api.waitForStatus(t, connected)
-		waitForSurvey(t, operator)
+		waitForFirstRead(t, operator)
 		fake.holdSetting("Z2MV30", "Z230")
 		fake.volunteer("Z220")
 		waitForObservedZone(t, operator, "theater", "zone2", 40)
@@ -949,23 +945,24 @@ func TestASettledZoneSnapshotSurvivesALaterSetZones(t *testing.T) {
 		unit := operator.units["theater"]
 		snapshot, _ := unit.zonesApplied()
 
-		// A later setZones drives a second zone and must not reach back into
-		// the snapshot read before it.
+		// A later setZones drives a second zone. It must not change the
+		// snapshot taken before it.
 		receiver.Spec.Zones = map[string]ZoneSpec{"zone2": {Volume: &volume}, "zone3": {Power: equipment.PowerOn}}
 		api.setReceivers(receiver)
 		mustSucceed(t, operator.pass(t.Context()))
 		fake.waitForCommands(t, "Z3ON")
 
 		if _, held := snapshot["zone3"]; held {
-			t.Errorf("a later setZones mutated an earlier snapshot")
+			t.Errorf("the earlier snapshot holds zone3 after a later setZones, want it unchanged")
 		}
 		mustMatch(t, len(snapshot), 1)
 		mustMatch(t, *snapshot["zone2"].Volume, volume)
 	})
 }
 
-// A declared setting the receiver cannot carry is logged and not
-// recorded, so the next pass tries again; a later valid change lands.
+// A declared setting that the receiver cannot take is logged and not
+// recorded as applied, so the next pass tries again, and a later valid
+// change is sent.
 func TestADeclarativeSettingThatFailsToApplyIsRetried(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -979,11 +976,12 @@ func TestADeclarativeSettingThatFailsToApplyIsRetried(t *testing.T) {
 
 		mustSucceed(t, operator.pass(t.Context()))
 		api.waitForStatus(t, connected)
-		waitForSurvey(t, operator)
+		waitForFirstRead(t, operator)
 		mustSucceed(t, operator.pass(t.Context()))
 
-		// ApplySettings errors on the word no command can carry, so nothing
-		// is recorded and the value stays pending.
+		// ApplySettings returns an error for a value that no command
+		// can carry, so nothing is recorded and the value stays
+		// pending.
 		bass := 3
 		receiver.Spec.Denon.Settings = denon.Settings{Tone: denon.ToneSettings{Bass: &bass}}
 		api.setReceivers(receiver)
@@ -993,8 +991,9 @@ func TestADeclarativeSettingThatFailsToApplyIsRetried(t *testing.T) {
 	})
 }
 
-// A zone control the receiver cannot carry is logged and not recorded,
-// so the next pass tries again; a later valid change lands.
+// A zone control that the receiver cannot take is logged and not
+// recorded as applied, so the next pass tries again, and a later valid
+// change is sent.
 func TestAZoneControlThatFailsToApplyIsRetried(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -1008,11 +1007,11 @@ func TestAZoneControlThatFailsToApplyIsRetried(t *testing.T) {
 
 		mustSucceed(t, operator.pass(t.Context()))
 		api.waitForStatus(t, connected)
-		waitForSurvey(t, operator)
+		waitForFirstRead(t, operator)
 		mustSucceed(t, operator.pass(t.Context()))
 
-		// SetSleep rejects the timer past the receiver's range, so nothing
-		// is recorded and the value stays pending.
+		// SetSleep rejects a timer past the receiver's range, so
+		// nothing is recorded and the value stays pending.
 		volume := 40.0
 		receiver.Spec.Zones = map[string]ZoneSpec{"zone2": {Volume: &volume}}
 		api.setReceivers(receiver)
@@ -1022,8 +1021,8 @@ func TestAZoneControlThatFailsToApplyIsRetried(t *testing.T) {
 	})
 }
 
-// waitForObservedSettings waits for the driver's reported settings to
-// satisfy check, which is the receiver's echo reaching the state before
+// waitForObservedSettings waits until the driver's reported settings
+// satisfy check, so the receiver's echo has reached the driver before
 // the next pass reads it.
 func waitForObservedSettings(t *testing.T, operator *controller, name string, check func(denon.Settings) bool) {
 	t.Helper()
@@ -1035,15 +1034,15 @@ func waitForObservedSettings(t *testing.T, operator *controller, name string, ch
 		}
 		select {
 		case <-deadline:
-			t.Fatal("the receiver never reported the settings the test expected")
+			t.Fatal("the receiver reported none of the settings the test wants before the deadline")
 			return
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
 }
 
-// waitForObservedZone waits for the driver to report one zone's
-// volume, in the driver's steps.
+// waitForObservedZone waits until the driver reports the given volume
+// for a zone, in the driver's steps.
 func waitForObservedZone(t *testing.T, operator *controller, name, zone string, volume int) {
 	t.Helper()
 	unit := operator.units[name]
@@ -1054,16 +1053,16 @@ func waitForObservedZone(t *testing.T, operator *controller, name, zone string, 
 		}
 		select {
 		case <-deadline:
-			t.Fatal("the receiver never reported the zone volume the test expected")
+			t.Fatal("the receiver did not report the wanted zone volume before the deadline")
 			return
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
 }
 
-// A declared setting the receiver accepts but does not apply is sent
-// again on the next pass until the receiver reports the declared value,
-// then the operator stops.
+// A declared setting that the receiver accepts but does not apply is
+// sent again on each pass until the receiver reports the declared
+// value. The operator then sends once more and stops.
 func TestASettingTheReceiverIgnoresIsRetriedUntilReported(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -1075,14 +1074,15 @@ func TestASettingTheReceiverIgnoresIsRetriedUntilReported(t *testing.T) {
 		api.setReceivers(receiver)
 		operator := startController(t, api)
 
-		// The first pass starts the driver, which connects asynchronously, so
-		// the change waits for a reachable receiver.
+		// The first pass starts the driver, which connects in the
+		// background, so the change is not sent until the receiver is
+		// reachable.
 		mustSucceed(t, operator.pass(t.Context()))
 		api.waitForStatus(t, connected)
-		waitForSurvey(t, operator)
+		waitForFirstRead(t, operator)
 
-		// The receiver is in standby, so it takes the eco command but keeps
-		// reporting the standby value.
+		// The receiver is in standby, so it takes the eco command but
+		// keeps reporting the standby value.
 		fake.holdSetting("ECOON", "ECOOFF")
 		fake.volunteer("ECOOFF")
 		waitForObservedSettings(t, operator, "theater", func(s denon.Settings) bool {
@@ -1095,13 +1095,13 @@ func TestASettingTheReceiverIgnoresIsRetriedUntilReported(t *testing.T) {
 			return s.System.Eco != nil && *s.System.Eco == "off"
 		})
 
-		// The receiver still has not reported the declared value, so the
-		// operator sends the command again on the next pass.
+		// The receiver has still not reported the declared value, so
+		// the operator sends the command again on the next pass.
 		mustSucceed(t, operator.pass(t.Context()))
 		fake.waitForCommands(t, "ECOON")
 
-		// Once the receiver reports the declared value, the operator sends
-		// once more and then stops.
+		// Once the receiver reports the declared value, the operator
+		// sends once more and then stops.
 		fake.holdSetting("ECOON", "ECOON")
 		mustSucceed(t, operator.pass(t.Context()))
 		fake.waitForCommands(t, "ECOON")
@@ -1113,9 +1113,9 @@ func TestASettingTheReceiverIgnoresIsRetriedUntilReported(t *testing.T) {
 	})
 }
 
-// A declared zone control the receiver accepts but does not apply is
-// sent again on the next pass until the zone reports the declared
-// value, then the operator stops.
+// A declared zone control that the receiver accepts but does not apply
+// is sent again on each pass until the zone reports the declared value.
+// The operator then sends once more and stops.
 func TestAZoneTheReceiverIgnoresIsRetriedUntilReported(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -1129,12 +1129,12 @@ func TestAZoneTheReceiverIgnoresIsRetriedUntilReported(t *testing.T) {
 
 		mustSucceed(t, operator.pass(t.Context()))
 		api.waitForStatus(t, connected)
-		waitForSurvey(t, operator)
+		waitForFirstRead(t, operator)
 
 		// The zone takes the volume command but keeps reporting its old
-		// volume, so the operator re-sends until the zone reports the
-		// declared level. The set command is Z2MV40, and the receiver
-		// reports a volume as Z2 followed by the digits.
+		// volume, so the operator sends it again until the zone reports
+		// the declared level. The set command is Z2MV40, and the
+		// receiver reports a volume as Z2 followed by the digits.
 		fake.holdSetting("Z2MV40", "Z230")
 		fake.volunteer("Z230")
 		waitForObservedZone(t, operator, "theater", "zone2", 60)
@@ -1145,8 +1145,8 @@ func TestAZoneTheReceiverIgnoresIsRetriedUntilReported(t *testing.T) {
 		mustSucceed(t, operator.pass(t.Context()))
 		fake.waitForCommands(t, "Z2MV40")
 
-		// The zone starts reporting the declared volume, so the operator
-		// sends once more and then stops.
+		// The zone starts reporting the declared volume, so the
+		// operator sends once more and then stops.
 		fake.holdSetting("Z2MV40", "Z240")
 		mustSucceed(t, operator.pass(t.Context()))
 		fake.waitForCommands(t, "Z2MV40")

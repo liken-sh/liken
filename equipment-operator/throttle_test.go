@@ -1,10 +1,9 @@
 package main
 
-// An API server that is not ready answers 429 with the seconds to wait.
-// A new CRD makes it answer so for a second or two while its storage
-// starts, and the shared client waits and asks again. A 429 that lasts
-// longer than the client waits reaches the caller, and the starting
-// lists ask again until their context ends, so the operator does not
+// The API server returns 429 while it starts the storage of a new CRD.
+// The shared client waits and sends the request again, up to
+// maxThrottleWait, and returns a longer 429 to the caller. The lists at
+// startup then retry until their context ends, so the operator does not
 // exit.
 
 import (
@@ -17,9 +16,8 @@ import (
 	"time"
 )
 
-// busyAPI answers 429 to the first busy requests, the way the API
-// server answers while a new CRD's storage starts, and the collection
-// after that.
+// busyAPI returns 429 to the first busy requests and an empty list after
+// that.
 type busyAPI struct {
 	mutex    sync.Mutex
 	busy     int
@@ -43,22 +41,20 @@ func (a *busyAPI) handle(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(`{"metadata":{"resourceVersion":"5"},"items":[]}`))
 }
 
-// The Status body the API server sends with a 429 while a CRD's
-// storage starts. It asks for the shortest wait, one second, so a test
-// that meets it waits one second.
+// initializingBody is the Status that the API server sends with a 429
+// while a CRD's storage starts.
 const initializingBody = `{"kind":"Status","apiVersion":"v1","status":"Failure","message":"storage is (re)initializing","reason":"TooManyRequests","details":{"retryAfterSeconds":1},"code":429}`
 
-// A failed delete names the object, and carries the server's own text
-// without the newline the API server ends it with, so the log line
-// stays whole.
-func TestADeleteErrorCarriesTheServersTextWithoutTheTrailingNewline(t *testing.T) {
+// The error drops the newline that ends the server's text, so it stays
+// on one log line.
+func TestADeleteErrorIncludesTheServersTextWithoutTheTrailingNewline(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name   string
 		delete func(*Client) error
 		what   string
 	}{
-		{"a Receiver", func(c *Client) error { return DeleteReceiver(c, "theater") }, "deleting receiver theater: "},
+		{"a Receiver", func(c *Client) error { return DeleteReceiver(c, "theater") }, "deleting Receiver theater: "},
 		{"a CECBus", func(c *Client) error { return DeleteCECBus(c, "den") }, "deleting CECBus den: "},
 		{"a Television", func(c *Client) error { return DeleteTelevision(c, "den") }, "deleting Television den: "},
 	}
@@ -72,23 +68,21 @@ func TestADeleteErrorCarriesTheServersTextWithoutTheTrailingNewline(t *testing.T
 			err := c.delete(client)
 
 			if err == nil || !strings.HasPrefix(err.Error(), c.what) || !strings.HasSuffix(err.Error(), ": forbidden") {
-				t.Errorf("got %q", err)
+				t.Errorf("the error is %q, want the prefix %q and the suffix \": forbidden\"", err, c.what)
 			}
 		})
 	}
 }
 
-// The Deployment and the node workload each start with a list, and a
-// 429 there is a wait, not an exit. A 429 that asks for eleven seconds
-// is more than the client waits, so the client answers it at once, and
-// the starting list asks again after the wait the 429 asked for.
+// A Retry-After of 11 is longer than the client waits, so the client
+// returns the 429 at once and the starting list retries it.
 func TestTheStartingListsWaitOutA429(t *testing.T) {
 	cases := []struct {
 		name   string
 		busy   int
 		header string
 	}{
-		{"a 429 the client waits out", 1, ""},
+		{"a 429 that the client waits out", 1, ""},
 		{"a 429 longer than the client waits", 3, "11"},
 	}
 	t.Parallel()
@@ -109,7 +103,7 @@ func TestTheStartingListsWaitOutA429(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
 				api := &busyAPI{busy: c.busy, header: c.header, body: initializingBody}
-				_, device := usbAdapter(cecRoom())
+				_, device := usbAdapter(fakeCECBus())
 				node, err := newCECNode(testAPIClient(t, http.HandlerFunc(api.handle)), testNamespace, "node-1", device)
 				mustSucceed(t, err)
 				ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
@@ -121,17 +115,16 @@ func TestTheStartingListsWaitOutA429(t *testing.T) {
 	}
 }
 
-// A starting list that meets a 429 longer than the client waits asks
-// again only after the wait the API server asked for, and not once a
-// second with a log line each time.
-func TestAStartingListWaitsWhatTheAPIServerAskedFor(t *testing.T) {
+// A starting list waits for the full Retry-After before it retries, and
+// does not retry and log every second.
+func TestAStartingListWaitsForTheRetryAfterTheAPIServerSent(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := &busyAPI{busy: 2, header: "11", body: initializingBody}
 		client := testAPIClient(t, http.HandlerFunc(api.handle))
 		began := time.Now()
 
-		err := untilAnswered(t.Context(), func() error {
+		err := retryWhileThrottled(t.Context(), func() error {
 			_, err := ListCECBuses(client)
 			return err
 		})

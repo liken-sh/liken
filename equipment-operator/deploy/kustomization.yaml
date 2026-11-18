@@ -1,16 +1,13 @@
-# The kustomize base for the equipment operator.
-#
-# This base is for the cluster owner to take. liken does not apply it
-# and does not name it. Take it through your own GitOps with patches
-# of your own, or read it and write your own manifests.
+# The kustomize base for equipment-operator. Nothing in liken applies
+# it. You apply it with your own patches, or read it and write your own
+# manifests.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# The namespace is set with a transformer, not with the top-level
-# namespace field, because unsetOnly keeps an object that states its
-# own namespace where it belongs. The top-level field overwrites a
-# stated namespace, and Flux merges a Kustomization's components into
-# this file, so the field would move the monitoring component's
+# The NamespaceTransformer with unsetOnly sets liken-system only on
+# objects that have no namespace. The top-level namespace field would
+# overwrite every namespace, and because Flux merges a Kustomization's
+# components into this file, it would move the monitoring component's
 # dashboard out of the monitoring namespace.
 transformers:
   - |-
@@ -21,10 +18,10 @@ transformers:
       namespace: liken-system
     unsetOnly: true
 
-# kustomize stamps the namespace below onto the DeviceClass too,
-# because resource.k8s.io/v1 is not in its compiled OpenAPI schema and
-# an unknown kind is treated as namespaced. The stamp is harmless: the
-# API server ignores a namespace on a cluster-scoped object.
+# kustomize also sets the namespace on the DeviceClass, because
+# resource.k8s.io/v1 is not in its built-in OpenAPI schema and it treats
+# an unknown kind as namespaced. The API server ignores a namespace on a
+# cluster-scoped object.
 resources:
   - receivers-crd.yaml
   - cecbuses-crd.yaml

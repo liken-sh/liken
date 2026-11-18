@@ -1,21 +1,19 @@
 package cec
 
-// Reading the bus, and the answers a follower owes.
-
 import (
 	"context"
 	"errors"
 	"time"
 )
 
-// waitSlice bounds each wait of the read loop, so the loop sees a
-// cancelled context within this time even on a silent bus.
+// Read waits at most waitSlice at a time, so that it returns soon after
+// ctx is canceled even when the bus is silent.
 const waitSlice = 250 * time.Millisecond
 
-// Read passes every message and every event the kernel queues for this
-// handle to the two functions, until ctx ends or a call fails. The
-// error of a call that fails is returned; IsGone reports whether it
-// means the adapter left.
+// Read calls message for each message and event for each event that the
+// kernel queues for this handle, until ctx ends or a call fails. It
+// returns the error of the failed call, and IsGone reports whether that
+// error means the adapter was removed.
 func Read(ctx context.Context, device *Device, message func(Message), event func(Event)) error {
 	for ctx.Err() == nil {
 		ready, err := device.Wait(waitSlice)
@@ -43,11 +41,11 @@ func Read(ctx context.Context, device *Device, message func(Message), event func
 	return nil
 }
 
-// answers are the opcodes that answer a request. A follower receives
-// them when a reply arrives after its request timed out, and it must
-// not answer an answer with a Feature Abort. The kernel also passes
-// the remote's User Control messages to a follower, and those are not
-// requests either.
+// answers is the set of opcodes that are replies or notifications, not
+// requests. A follower can receive a reply after its own request timed
+// out, and it must not send a Feature Abort for it. The kernel also
+// passes the remote's User Control messages to a follower, and those are
+// not requests either.
 var answers = map[Opcode]bool{
 	OpFeatureAbort:          true,
 	OpReportPhysicalAddr:    true,
@@ -77,27 +75,24 @@ var answers = map[Opcode]bool{
 	OpStandby:               true,
 }
 
-// Answer is the reply a follower at address own sends to one received
-// message, and false when it sends none. The kernel sends a Feature
-// Abort for an unsupported message only when no follower exists, so a
-// follower owes one for every directed request it does not support.
-// It answers one request itself: Give Device Power Status, with the
-// power the caller states, because the kernel does not answer it.
+// Answer returns the reply that a follower at logical address own sends
+// to message, and false when it sends none. The kernel sends a Feature
+// Abort for an unsupported message only when no follower is registered,
+// so a follower must send one for each directed request it does not
+// support. The only request that gets a reply with content is Give
+// Device Power Status, because the kernel does not reply to it.
 //
-// audioSystem says whether the bus has an audio system, a device at
-// logical address 5. The node workload sends System Audio Mode Request
-// only on such a bus, so only there does it support System Audio
-// Control. HDMI-CEC 1.3a, CEC Table 25, says a device that sends the
-// request shall not Feature Abort Set System Audio Mode or System Audio
-// Mode Status, and CEC Table 24 says a device that takes Set System
-// Audio Mode shall be able to send the request, which a follower on a
-// bus with no audio system never does. So on that bus a directed Set
-// System Audio Mode or System Audio Mode Status gets a Feature Abort.
-// A broadcast gets none, because a follower ignores a broadcast it
-// does not support (CEC 12.3).
+// audioSystem is true when the bus has a device at logical address 5.
+// The node workload sends System Audio Mode Request only to that device.
+// HDMI-CEC 1.3a, CEC Table 25, says that a device that sends the request
+// shall not Feature Abort Set System Audio Mode or System Audio Mode
+// Status. CEC Table 24 says that a device that accepts Set System Audio
+// Mode shall be able to send the request. So on a bus with no audio
+// system, a directed Set System Audio Mode or System Audio Mode Status
+// gets a Feature Abort. A broadcast gets none (CEC 12.3).
 //
-// A message from the unregistered address gets no answer. An answer
-// to address 15 would be a broadcast, and a Feature Abort and a Report
+// A message from the unregistered address, 15, gets no reply, because a
+// reply to address 15 would be a broadcast, and Feature Abort and Report
 // Power Status are directed messages.
 func Answer(message Message, own LogicalAddress, power PowerStatus, audioSystem bool) (Message, bool) {
 	if message.IsBroadcast() || message.IsPoll() || message.To != own || message.From == own ||

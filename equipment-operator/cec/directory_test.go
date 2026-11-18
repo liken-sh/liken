@@ -6,9 +6,9 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/cec"
 )
 
-// peerAfter folds one message into a directory for an adapter at
-// logical address 4, and answers what the directory holds for the
-// message's sender.
+// peerAfter applies one message to a directory for an adapter at
+// logical address 4, and returns the directory's peer for the message's
+// sender, with whether there is one.
 func peerAfter(t *testing.T, message cec.Message) (cec.Peer, bool) {
 	t.Helper()
 	directory := cec.NewDirectory()
@@ -53,9 +53,7 @@ func TestTheDirectoryLearnsOneFactFromEachMessage(t *testing.T) {
 		{"a broadcast Set System Audio Mode Off", cec.SetSystemAudioMode(5, 15, cec.SystemAudioOff), func(p cec.Peer) bool {
 			return p.SystemAudioMode == cec.SystemAudioOff
 		}},
-		// The audio system directs its first [On] to the TV, and stops when
-		// the TV answers it with a Feature Abort, so a directed [On] does
-		// not show that the mode started.
+		// A directed [On] does not show that the mode started (see learn).
 		{"a Set System Audio Mode to the TV", cec.SetSystemAudioMode(5, 0, cec.SystemAudioOn), func(p cec.Peer) bool {
 			return p.SystemAudioMode == cec.SystemAudioUnknown && p.SystemAudioModeAt.IsZero()
 		}},
@@ -70,16 +68,15 @@ func TestTheDirectoryLearnsOneFactFromEachMessage(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			peer, held := peerAfter(t, c.message)
 			if !held || !c.check(peer) {
-				t.Errorf("after %v the directory holds %+v (held %v)", c.message, peer, held)
+				t.Errorf("after %v the directory has the peer %+v (present %v), want the peer to satisfy the case %q", c.message, peer, held, c.name)
 			}
 		})
 	}
 }
 
-// A Device Vendor ID of 000000 names no vendor, and it never replaces
-// a vendor the device stated before. From a device with no vendor yet,
-// it is an answer the directory records once, so no introduction asks
-// again. A device that states another real vendor is still believed.
+// A Device Vendor ID of 000000 never replaces a vendor the device
+// reported before. From a device with no vendor yet, it changes the
+// directory once, by setting NoVendor.
 func TestAVendorOfZeroNamesNoVendor(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -112,7 +109,7 @@ func TestAVendorOfZeroNamesNoVendor(t *testing.T) {
 	}
 }
 
-func TestTheDirectoryIgnoresNoDevice(t *testing.T) {
+func TestTheDirectoryAddsNoPeerForItsOwnOrTheUnregisteredAddress(t *testing.T) {
 	cases := []struct {
 		name    string
 		message cec.Message
@@ -123,13 +120,13 @@ func TestTheDirectoryIgnoresNoDevice(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if _, held := peerAfter(t, c.message); held {
-				t.Errorf("the directory holds a peer after %v", c.message)
+				t.Errorf("after %v the directory has a peer, want none", c.message)
 			}
 		})
 	}
 }
 
-func TestObserveAnswersWhetherAnythingChanged(t *testing.T) {
+func TestObserveReturnsWhetherAnythingChanged(t *testing.T) {
 	directory := cec.NewDirectory()
 	report := cec.ReportPowerStatus(0, 4, cec.PowerOn)
 
@@ -138,11 +135,11 @@ func TestObserveAnswersWhetherAnythingChanged(t *testing.T) {
 	changed := directory.Observe(cec.ReportPowerStatus(0, 4, cec.PowerStandby))
 
 	if !first || again || !changed {
-		t.Errorf("first %v, again %v, changed %v; want true, false, true", first, again, changed)
+		t.Errorf("Observe returned %v for a new report, %v for the same report again, and %v for a different power status, want true, false, true", first, again, changed)
 	}
 }
 
-func TestPresentForgetAndResetKeepTheList(t *testing.T) {
+func TestPresentForgetAndResetUpdateThePeers(t *testing.T) {
 	directory := cec.NewDirectory()
 	directory.SetOwn(4)
 
@@ -154,14 +151,14 @@ func TestPresentForgetAndResetKeepTheList(t *testing.T) {
 	forgotAgain := directory.Forget(5)
 
 	if !added || addedAgain || own || !forgot || forgotAgain {
-		t.Errorf("added %v %v, own %v, forgot %v %v", added, addedAgain, own, forgot, forgotAgain)
+		t.Errorf("Present(0) returned %v then %v, Present(own) %v, Forget(5) %v then %v, want true, false, false, true, false", added, addedAgain, own, forgot, forgotAgain)
 	}
 	if peers := directory.Peers(); len(peers) != 1 || peers[0].Logical != 0 || peers[0].Type != cec.TypeTV {
 		t.Errorf("peers = %+v, want the TV alone", peers)
 	}
 	directory.Reset()
 	if peers := directory.Peers(); len(peers) != 0 {
-		t.Errorf("peers after reset = %+v", peers)
+		t.Errorf("peers after Reset = %+v, want none", peers)
 	}
 }
 
@@ -185,11 +182,11 @@ func TestPeersAreInLogicalOrder(t *testing.T) {
 	peers := directory.Peers()
 
 	if len(peers) != 3 || peers[0].Logical != 0 || peers[1].Logical != 5 || peers[2].Logical != 8 {
-		t.Errorf("peers = %+v", peers)
+		t.Errorf("peers = %+v, want logical addresses 0, 5, 8 in that order", peers)
 	}
 }
 
-func TestHearAnswersTheSenderBeforeAndAfter(t *testing.T) {
+func TestHearReturnsTheSenderBeforeAndAfter(t *testing.T) {
 	directory := cec.NewDirectory()
 	directory.SetOwn(4)
 	directory.Observe(cec.SetOSDName(0, 4, "TV"))
@@ -197,44 +194,44 @@ func TestHearAnswersTheSenderBeforeAndAfter(t *testing.T) {
 	before, after, changed := directory.Hear(cec.ReportPowerStatus(0, 4, cec.PowerStandby))
 
 	if before.Power != cec.PowerUnknown || after.Power != cec.PowerStandby || after.OSDName != "TV" || !changed {
-		t.Errorf("before %+v, after %+v, changed %v", before, after, changed)
+		t.Errorf("Hear returned before %+v, after %+v, changed %v, want power Unknown then Standby, name TV, changed true", before, after, changed)
 	}
 }
 
-func TestHearAnswersANewSenderWithEveryFactUnknown(t *testing.T) {
+func TestHearReturnsANewSenderWithEveryFactUnknownBefore(t *testing.T) {
 	directory := cec.NewDirectory()
 
 	before, after, changed := directory.Hear(cec.ActiveSource(8, 0x1500))
 
 	if before.Physical != cec.InvalidPhysicalAddress || before.Type != cec.TypePlayback || after.Physical != 0x1500 || !changed {
-		t.Errorf("before %+v, after %+v, changed %v", before, after, changed)
+		t.Errorf("Hear returned before %+v, after %+v, changed %v, want an unknown Playback peer before, physical address 0x1500 after, changed true", before, after, changed)
 	}
 }
 
-func TestHearAnswersNoDeviceWithEveryFactUnknown(t *testing.T) {
+func TestHearReturnsEveryFactUnknownForTheUnregisteredAddress(t *testing.T) {
 	directory := cec.NewDirectory()
 
 	before, after, changed := directory.Hear(cec.ActiveSource(15, 0x1500))
 
 	if after.Physical != cec.InvalidPhysicalAddress || after.Type != cec.TypeUnregistered || before != after || changed {
-		t.Errorf("before %+v, after %+v, changed %v", before, after, changed)
+		t.Errorf("Hear returned before %+v, after %+v, changed %v, want the same unregistered peer with no known facts, changed false", before, after, changed)
 	}
 }
 
-func TestLookupAnswersAPeerOrEveryFactUnknown(t *testing.T) {
+func TestLookupReturnsAPeerOrEveryFactUnknown(t *testing.T) {
 	directory := cec.NewDirectory()
 	directory.Observe(cec.SetOSDName(5, 0, "AVR"))
 
 	held, stranger := directory.Lookup(5), directory.Lookup(8)
 
 	if held.OSDName != "AVR" || stranger.OSDName != "" || stranger.Logical != 8 || stranger.Physical != cec.InvalidPhysicalAddress {
-		t.Errorf("held %+v, stranger %+v", held, stranger)
+		t.Errorf("Lookup(5) = %+v and Lookup(8) = %+v, want the AVR, and a peer at logical address 8 with no known facts", held, stranger)
 	}
 }
 
-// tvPowerAfter folds one message into a directory that holds the TV at
-// a power and the message's sender, and answers the TV's power after it
-// and whether Hear saw a change.
+// tvPowerAfter applies one message to a directory that has the TV at
+// power held and the message's sender present, and returns the TV's
+// power and whether Hear reported a change.
 func tvPowerAfter(held cec.PowerStatus, message cec.Message) (cec.PowerStatus, bool) {
 	directory := cec.NewDirectory()
 	directory.SetOwn(4)
@@ -244,9 +241,7 @@ func tvPowerAfter(held cec.PowerStatus, message cec.Message) (cec.PowerStatus, b
 	return directory.Lookup(0).Power, changed
 }
 
-// The TV's power follows what the bus carries, so the node workload
-// needs no question on a timer to keep it current.
-func TestTheTVsPowerFollowsWhatTheBusCarries(t *testing.T) {
+func TestTheTVsPowerFollowsBusMessages(t *testing.T) {
 	cases := []struct {
 		name    string
 		held    cec.PowerStatus
@@ -278,8 +273,6 @@ func TestTheTVsPowerFollowsWhatTheBusCarries(t *testing.T) {
 	}
 }
 
-// A message about the TV does not show that a TV is on the bus, so the
-// directory adds no TV for it.
 func TestAMessageAboutTheTVAddsNoTV(t *testing.T) {
 	directory := cec.NewDirectory()
 	directory.SetOwn(4)

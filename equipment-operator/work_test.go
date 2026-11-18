@@ -8,10 +8,9 @@ import (
 	"time"
 )
 
-// awaitWork answers false while a counted goroutine runs past the
-// bound, and true once every one has stopped. A context with no group
-// runs the work anyway.
-func TestAwaitWorkAnswersWhetherTheWorkStopped(t *testing.T) {
+// awaitWork returns false while a goroutine of the group runs, and true
+// after it stops. goWork still runs work under a context with no group.
+func TestAwaitWorkReturnsWhetherTheWorkStopped(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		var group sync.WaitGroup
@@ -32,9 +31,9 @@ func TestAwaitWorkAnswersWhetherTheWorkStopped(t *testing.T) {
 	})
 }
 
-// At a shutdown, a status write that waits out a 429 stops waiting, so
-// the Receiver loop returns within workStopWait and the Deployment
-// releases its Lease.
+// On shutdown, a status write that waits after a 429 response stops
+// waiting, so the Receiver loop returns at once and the operator can
+// release its Lease.
 func TestAShutdownEndsTheWaitOfAWriteThatMetA429(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -77,9 +76,9 @@ func TestAShutdownEndsTheWaitOfAWriteThatMetA429(t *testing.T) {
 	})
 }
 
-// At a shutdown, the Receiver loop returns only after a power write
-// that is in flight has finished, because the Deployment releases its
-// Lease after the loop returns.
+// On shutdown, the Receiver loop returns only after a power write in
+// flight has finished, because the operator releases its Lease when the
+// loop returns.
 func TestTheLoopWaitsForAWriteInFlightBeforeItReturns(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -103,7 +102,7 @@ func TestTheLoopWaitsForAWriteInFlightBeforeItReturns(t *testing.T) {
 		api.gatePowers()
 		defer api.releasePowers()
 		api.setReceivers(askingPower(receiver, "toggle", askAt(1)))
-		poke(operator.wake)
+		sendWake(operator.wake)
 		select {
 		case <-api.powers:
 		case <-time.After(testTimeout):

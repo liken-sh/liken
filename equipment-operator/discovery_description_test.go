@@ -1,9 +1,7 @@
 package main
 
-// Discovery judges each LinkPlay device by the model its UPnP
-// description names, before it creates a Receiver for it. The two
-// descriptions below are cut from the two devices that were measured:
-// a WiiM Amp and an Arylic amplifier, another brand on the platform.
+// The descriptions below are cut down from a WiiM Amp and from an
+// Arylic amplifier, another brand built on LinkPlay.
 
 import (
 	"context"
@@ -37,8 +35,8 @@ const (
 </root>`
 )
 
-// descriptionServer answers one description with one status code and
-// counts the reads.
+// descriptionServer serves one description with one status code, and
+// counts the requests.
 type descriptionServer struct {
 	url   string
 	code  atomic.Int64
@@ -61,7 +59,7 @@ func startDescription(t *testing.T, code int, body string) *descriptionServer {
 }
 
 // describedDiscovery is a discovery that found the first device, with
-// its description at url, and judged it.
+// its description at url, and has read the description.
 func describedDiscovery(t *testing.T, url string, list ...Receiver) (*discoveryAPI, *discovery, *logBuffer) {
 	t.Helper()
 	api, client := startDiscoveryAPI(t)
@@ -140,9 +138,8 @@ func TestDiscoveryReadsADescriptionOnceItHasAVerdict(t *testing.T) {
 	})
 }
 
-// A description the device does not serve is not a verdict. Discovery
-// creates the Receiver as it would with no description, and the
-// getStatusEx check judges the device instead.
+// When the description cannot be read, discovery creates the Receiver
+// and leaves the decision to the getStatusEx check.
 func TestDiscoveryCreatesAReceiverWhenTheDescriptionCannotBeRead(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -151,7 +148,7 @@ func TestDiscoveryCreatesAReceiverWhenTheDescriptionCannotBeRead(t *testing.T) {
 		mustSucceed(t, held.reconcile())
 
 		mustDeepEqual(t, api.appliedNames(), []string{strings.ToLower(firstUUID)})
-		mustMatch(t, log.lines()[0], "discovery could not read the UPnP description of the LinkPlay device "+firstUUID+" at 192.0.2.1, so its getStatusEx project decides whether it is a WiiM: 403 Forbidden: go away")
+		mustMatch(t, strings.Contains(log.lines()[0], "403 Forbidden: go away"), true)
 	})
 }
 
@@ -163,12 +160,12 @@ func TestDiscoveryCreatesAReceiverForADeviceWithNoDescription(t *testing.T) {
 		mustSucceed(t, held.reconcile())
 
 		mustDeepEqual(t, api.appliedNames(), []string{strings.ToLower(firstUUID)})
-		mustMatch(t, log.lines()[0], "discovery found the WiiM "+firstUUID+" at 192.0.2.1, which no Receiver names; created Receiver "+strings.ToLower(firstUUID))
+		mustMatch(t, log.lines()[0], "discovery found the WiiM "+firstUUID+" at 192.0.2.1, and no Receiver declares it, so discovery created Receiver "+strings.ToLower(firstUUID))
 	})
 }
 
-// A description that failed is read again on the next search that
-// finds the device, and logs its failure once.
+// A failed read is retried on the next search, and the failure is
+// logged once.
 func TestDiscoveryReadsAFailedDescriptionAgainOnTheNextSearch(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

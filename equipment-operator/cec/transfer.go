@@ -1,7 +1,5 @@
 package cec
 
-// Sending and receiving messages, and reading the adapter's events.
-
 import (
 	"errors"
 	"fmt"
@@ -11,31 +9,31 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// A Result is what one transmit did on the wire. Acked says that the
-// destination pulled the acknowledge bit, which is the whole answer to
-// a poll. Nacked says that the destination left the bit unset, which
-// is the one failure that means no device holds the address; a lost
-// arbitration or a wire error says nothing about the destination. Reply is the answer a request waited for, and it is nil when
-// the request asked for none, when the reply did not arrive in time,
-// and when the destination answered with a Feature Abort.
+// A Result is the outcome of one transmit. Acked is true when the
+// destination pulled the acknowledge bit low, which is all that a poll
+// checks. Nacked is true when no device pulled the bit low. Only Nacked
+// shows that no device uses the address: a lost arbitration or a wire
+// error says nothing about the destination. Reply is nil when the
+// request waited for no reply, when no reply arrived in time, and when
+// the destination replied with a Feature Abort.
 type Result struct {
 	Acked   bool
 	Nacked  bool
 	Aborted bool
 	Reply   *Message
-	// Status describes a transmit that failed, in the kernel's words,
-	// so a log line says why.
+	// Status lists the kernel's names for the failure bits of the
+	// transmit, for log lines.
 	Status string
 }
 
-// Transmit sends one message and, when reply is not zero, waits up to
-// timeout for the destination's answer with that opcode. The handle
-// must be blocking, because a non-blocking transmit returns before the
-// message is on the wire.
+// Transmit sends one message. When reply is not zero, it also waits up
+// to timeout for a message with that opcode from the destination. The
+// handle must be blocking, because on a non-blocking handle the call
+// returns before the message is on the wire.
 //
-// A message the destination does not acknowledge is not an error: it
-// is a Result with Acked false. The error is for a call the kernel
-// refused.
+// A message that the destination does not acknowledge is not an error.
+// It returns a Result with Acked false. The error is for a call that
+// the kernel refuses.
 func (d *Device) Transmit(message Message, reply Opcode, timeout time.Duration) (Result, error) {
 	raw := KernelMsg{}
 	if err := encode(&raw, message); err != nil {
@@ -61,7 +59,6 @@ func (d *Device) Transmit(message Message, reply Opcode, timeout time.Duration) 
 	return result, nil
 }
 
-// encode fills the kernel's message from ours.
 func encode(raw *KernelMsg, message Message) error {
 	if len(message.Body)+1 > maxMessageSize {
 		return fmt.Errorf("a CEC message holds at most %d bytes after its header, and this one holds %d", maxMessageSize-1, len(message.Body))
@@ -72,7 +69,6 @@ func encode(raw *KernelMsg, message Message) error {
 	return nil
 }
 
-// decode reads a message out of the kernel's.
 func decode(raw *KernelMsg) Message {
 	length := min(int(raw.Len), maxMessageSize)
 	message := Message{
@@ -85,8 +81,8 @@ func decode(raw *KernelMsg) Message {
 	return message
 }
 
-// txStatusText names the failure bits of a transmit, the words the
-// kernel documentation uses for each bit.
+// txStatusText joins the names of the failure bits set in status, as the
+// kernel documentation spells them.
 func txStatusText(status uint8) string {
 	names := []struct {
 		bit  uint8
@@ -113,12 +109,14 @@ func txStatusText(status uint8) string {
 	return text
 }
 
-// ErrNothingReceived says that no message arrived within the timeout.
+// ErrNothingReceived is returned by Receive when no message arrives
+// within the timeout.
 var ErrNothingReceived = errors.New("no CEC message arrived")
 
-// Receive reads the next message the kernel queued for this handle,
-// waiting up to timeout. A monitor receives every message it can hear,
-// and a follower receives the ones the kernel does not answer.
+// Receive returns the next message the kernel queued for this handle,
+// waiting up to timeout. A monitor handle receives every message on the
+// bus. A follower handle receives only the messages that the kernel does
+// not answer itself.
 func (d *Device) Receive(timeout time.Duration) (Message, error) {
 	raw := KernelMsg{Timeout: uint32(timeout / time.Millisecond)}
 	if err := d.ioctl(RequestReceive, unsafe.Pointer(&raw)); err != nil {
@@ -130,10 +128,11 @@ func (d *Device) Receive(timeout time.Duration) (Message, error) {
 	return decode(&raw), nil
 }
 
-// An Event is a change the kernel reports about the adapter itself.
-// A state change carries the adapter's new physical address and the
-// logical addresses it now holds. Lost counts messages the kernel
-// dropped because this handle did not read them in time.
+// An Event is something the kernel reports about the adapter itself.
+// For a state change, Physical is the adapter's new physical address and
+// LogicalMask is the set of logical addresses it now holds. Lost is the
+// number of messages the kernel dropped because this handle did not read
+// them in time.
 type Event struct {
 	StateChange bool
 	Physical    PhysicalAddress
@@ -141,9 +140,9 @@ type Event struct {
 	Lost        uint32
 }
 
-// NextEvent reads the oldest event the kernel queued for this handle.
-// Call it after Wait reports an event; on a blocking handle it waits
-// for one otherwise.
+// NextEvent returns the oldest event the kernel queued for this handle.
+// Call it after Wait reports an event. On a blocking handle it waits for
+// an event when none is queued.
 func (d *Device) NextEvent() (Event, error) {
 	var raw KernelEvent
 	if err := d.ioctl(RequestDequeueEvent, unsafe.Pointer(&raw)); err != nil {
@@ -151,11 +150,11 @@ func (d *Device) NextEvent() (Event, error) {
 	}
 	switch raw.Event {
 	case EventStateChange:
-		// struct cec_event_state_change starts the union with two
-		// __u16 fields: the physical address, then the logical address
-		// mask. The first uint32 of the union holds both, the address
-		// in its low half on a little-endian machine, which every
-		// machine liken runs on is.
+		// struct cec_event_state_change starts the union with two __u16
+		// fields: the physical address, then the logical address mask.
+		// Raw[0] covers both, with the physical address in the low half
+		// on a little-endian machine, as every machine `liken` runs on
+		// is.
 		return Event{
 			StateChange: true,
 			Physical:    PhysicalAddress(raw.Raw[0] & 0xffff),

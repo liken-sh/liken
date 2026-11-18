@@ -1,8 +1,7 @@
 package main
 
-// The Deployment's line for each command it sends a receiver: a spec
-// change it acts on, and a session that starts, changes, or ends. A
-// pass that sends nothing adds no line.
+// The Deployment writes one log line for each action it takes on a
+// receiver, and none for a pass that sends nothing.
 
 import (
 	"testing"
@@ -13,7 +12,6 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
-// loggedController is a controller with its log in a buffer.
 func loggedController(t *testing.T, api *fakeAPI) (*controller, *logBuffer) {
 	t.Helper()
 	operator := newController(api.client, testMetrics(t))
@@ -25,9 +23,8 @@ func loggedController(t *testing.T, api *fakeAPI) (*controller, *logBuffer) {
 	return operator, log
 }
 
-// reachedController runs the first passes of a controller for one
-// receiver: the pass that connects, and the pass once the receiver has
-// answered its survey.
+// reachedController runs a controller until it has connected to the
+// receiver and the first full read has finished.
 func reachedController(t *testing.T, receiver Receiver) (*fakeAPI, *controller, *logBuffer) {
 	t.Helper()
 	api := startFakeAPI(t)
@@ -35,19 +32,17 @@ func reachedController(t *testing.T, receiver Receiver) (*fakeAPI, *controller, 
 	operator, log := loggedController(t, api)
 	mustSucceed(t, operator.pass(t.Context()))
 	api.waitForStatus(t, connected)
-	waitForSurvey(t, operator)
+	waitForFirstRead(t, operator)
 	return api, operator, log
 }
 
-// Each declared change is one line when the operator sends it, and a
-// later pass with the same spec adds none.
 func TestADeclaredChangeIsOneLine(t *testing.T) {
 	drc, lfe, volume, last := "low", 0, 40.0, "last"
 	cases := []struct {
 		name    string
 		declare func(*Receiver)
-		// prepare has the receiver report the values the spec differs
-		// from, and report each declared value once it is sent.
+		// prepare makes the receiver report values that differ from the
+		// spec, and report each declared value after it is sent.
 		prepare func(*testing.T, *fakeDenon, *controller)
 		command string
 		want    string
@@ -121,8 +116,6 @@ func TestADeclaredChangeIsOneLine(t *testing.T) {
 	}
 }
 
-// A restart against a receiver that already holds every declared value
-// sends nothing, so it writes no line.
 func TestARestartAgainstASettledReceiverWritesNoLine(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -141,8 +134,7 @@ func TestARestartAgainstASettledReceiverWritesNoLine(t *testing.T) {
 	})
 }
 
-// A command the driver refuses states the driver's own error.
-func TestARefusedSpecPowerStatesTheDriversError(t *testing.T) {
+func TestARefusedSpecPowerLogsTheDriversError(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		amp := startFakeWiim(t)
@@ -154,14 +146,12 @@ func TestARefusedSpecPowerStatesTheDriversError(t *testing.T) {
 		unit.setPower(equipment.PowerStandby)
 
 		mustDeepEqual(t, log.lines(), []string{
-			"Receiver studio: generation 3 asks power Standby; sent power Standby; the command failed: a WiiM has no standby command; power off is not supported",
+			"Receiver studio: generation 3 requests power Standby; sent power Standby; the command was not applied: a WiiM has no standby command, so it cannot power off",
 		})
 	})
 }
 
-// A session's start, each change of its flags, and its end are one
-// line each, and a pass that changes nothing adds none.
-func TestASessionsStartFlagsAndEndAreOneLineEach(t *testing.T) {
+func TestASessionsStartFlagsAndEndWriteOneLineEach(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		fake := startFakeDenon(t)
@@ -182,9 +172,8 @@ func TestASessionsStartFlagsAndEndAreOneLineEach(t *testing.T) {
 	})
 }
 
-// A WiiM has no standby, so it always reports On, and a spec.power of
-// On sends nothing. The line says why.
-func TestASpecPowerOnForAWiimSaysNothingWasSent(t *testing.T) {
+// A WiiM has no standby, so it always reports power On.
+func TestASpecPowerOnForAWiimLogsThatNothingWasSent(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		amp := startFakeWiim(t)
@@ -197,7 +186,7 @@ func TestASpecPowerOnForAWiimSaysNothingWasSent(t *testing.T) {
 		unit.setPower(equipment.PowerOn)
 
 		mustDeepEqual(t, log.lines(), []string{
-			"Receiver studio: generation 3 asks power On; sent nothing, because the receiver reports power On",
+			"Receiver studio: generation 3 requests power On; sent nothing, because the receiver reports power On",
 		})
 		mustDeepEqual(t, amp.sent(), []string(nil))
 	})

@@ -1,12 +1,12 @@
 package main
 
-// The operator's loop: level-triggered, woken by the Receiver watch and
-// by discovery, with a ticker as the backstop for the failures no event
-// follows. A pass reads the whole collection, so a restarted operator
-// starts correct.
-// One client per Receiver holds the receiver's connection for as long
-// as the Receiver stands. A debounced writer folds the burst of lines
-// that follows one change into a single status write.
+// The controller runs a pass over every Receiver when the Receiver
+// watch or discovery wakes it, and on a slow tick for failures that no
+// event follows. A pass reads the whole collection, so a restarted
+// operator needs no saved state to start correctly.
+//
+// Each Receiver has a receiverUnit, which keeps the connection to the
+// receiver open for as long as the Receiver exists.
 
 import (
 	"context"
@@ -30,36 +30,30 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events"
 )
 
-// How often the loop reconciles with nothing to prompt it. It is a
-// backstop, and no state reaches the loop through it alone: a change to
-// a Receiver's spec or status wakes the loop through the watch, and a
-// discovered address wakes it through discovery. The tick covers the
-// failures that no event follows: a list the API server refused, a
-// Television's status.session write it refused, a declared setting
-// whose send failed, and a setting the receiver took and still reports
-// at another value, which the send budget allows a few more sends. A
-// tick reads the Receivers from the watch's store, so on a settled
-// cluster it sends the API server no read of them, and it sends nothing
-// to a receiver that already matches its spec. The pass lists the
-// Receivers from the API server only while the store has nothing to
-// give (objectcache.go).
+// backstopInterval is how often the loop runs a pass when nothing wakes
+// it. The watch and discovery wake the loop for every change. The tick
+// retries what no event follows: a list or a Television status.session
+// write that the API server refused, a setting whose send failed, and a
+// setting that the receiver still reports at another value, while the
+// send budget allows more sends. A tick reads the Receivers from the
+// watch's store (objectcache.go), so on a settled cluster it sends
+// nothing to the API server or to a receiver.
 const backstopInterval = 30 * time.Second
 
-// How long a burst of lines is collected before one status write.
+// statusDebounce is how long the status writer waits after the first
+// line of a burst, so the whole burst produces one status write.
 const statusDebounce = 250 * time.Millisecond
 
-// receiverUnit is one Receiver's running parts: the connection, the
-// status writer, the settings and zones it drives, the session a Player
-// holds, and the asks it applies.
+// receiverUnit drives one Receiver: the connection to the device, the
+// status writes, the declared settings and zones, and the session that a
+// Player writes into the Receiver.
 type receiverUnit struct {
-	// ctx is the unit's own context. Each goroutine the unit starts runs
-	// under it, and is counted in the group it carries (work.go).
-	ctx     context.Context
-	name    string
-	address string
-	client  *Client
-	// recorder posts the Events of the Receiver's conditions, about the
-	// object reference names.
+	// Each goroutine of the unit runs under ctx, and the wait group in
+	// ctx counts it (work.go).
+	ctx         context.Context
+	name        string
+	address     string
+	client      *Client
 	recorder    *events.Recorder
 	reference   events.ObjectReference
 	dial        dialFunc
@@ -68,62 +62,59 @@ type receiverUnit struct {
 	driver      equipment.Driver
 	denonClient *denon.Client
 	wiimClient  *wiim.Client
-	// foreign tells discovery which device reports a project that is
-	// not a WiiM. It is nil in a test that builds a unit alone.
+	// foreign tells discovery that the device at an address reports a
+	// project other than WiiM. It is nil in a test that builds a unit
+	// alone.
 	foreign    func(uuid, project, address string)
 	readings   *metrics
 	log        *receiverLog
 	cancel     context.CancelFunc
 	dirty      chan struct{}
 	generation atomic.Int64
-	// The declared inputs live here and not on the session, so an edit to
-	// them reaches a standing session with no restart: the sound mode an
-	// input names is read when the session selects it.
+	// The declared inputs are kept on the unit, not on the session, so
+	// an edit to them reaches a running session without a restart.
 	inputs atomic.Pointer[[]ReceiverInput]
-	// The last power the operator settled, so a reconcile and a toggle
-	// share one memory of what was sent and neither re-asserts it.
+	// The power the operator last settled. Reconcile and the session's
+	// power toggle both read it, so neither sends a power that the other
+	// has already sent.
 	power atomic.Pointer[equipment.Power]
-	// The last settings the operator applied. A field the receiver does
-	// not report is compared with it, so the field is sent once per spec
-	// change.
-	settings atomic.Pointer[denon.Settings]
-	// The same memory for a WiiM, which has its own settings type and no
-	// shared field with the Denon's.
+	// The settings and zone controls the operator last applied. A field
+	// that the receiver does not report is compared with these, so it is
+	// sent once for each change of the spec.
+	settings     atomic.Pointer[denon.Settings]
 	wiimSettings atomic.Pointer[wiim.Settings]
-	// The last zone controls the operator applied, keyed by zone, for
-	// the controls a zone does not report, the same way as settings.
-	zones atomic.Pointer[map[string]ZoneSpec]
-	// How many times the operator sent each declared field at its
-	// declared value, so a field the receiver never confirms stops.
+	zones        atomic.Pointer[map[string]ZoneSpec]
+	// budget counts the sends of each declared field, so a field that
+	// the receiver never confirms stops being sent.
 	budget *sendBudget
-	// The digest of each declared block the operator has sent, read from
-	// status.settledSettings when the unit starts and written back with
-	// the status.
+	// settled holds a digest of each declared block that the operator
+	// has sent. It is read from status.settledSettings when the unit
+	// starts and written back with the status.
 	settled *settledRecord
 
-	// seen holds the at of each ask the unit has read, and volumeAsks
-	// holds the volume ask the receiver has not been sent yet
+	// seen and volumeAsks track the asks of status.session
 	// (session_asks.go).
 	seen       seenAsks
 	volumeAsks *volumeAsker
 
 	mutex   sync.Mutex
 	session *session
-	// sessions writes the status.session of the TV the session shows,
-	// and is nil in a test that builds a unit with no TV.
+	// sessions writes status.session of the Television that shows the
+	// session's Display. It is nil in a test that builds a unit with no
+	// Television.
 	sessions *televisionSessions
 	applied  ReceiverStatus
 	written  bool
 }
 
-// observe is where every line the receiver sends reaches the operator.
-// It wakes the status writer and the volume ask that waits for a
-// report, and it reaches the session.
+// observe receives every event that the driver reads from the receiver.
+// A volume or mute report also wakes the volume ask sender, which waits
+// for the receiver's report of one ask before it sends the next.
 func (u *receiverUnit) observe(event equipment.Event) {
-	poke(u.dirty)
+	sendWake(u.dirty)
 	u.log.observe()
 	if u.volumeAsks != nil && (event.Field == equipment.EventVolume || event.Field == equipment.EventMute) {
-		poke(u.volumeAsks.reported)
+		sendWake(u.volumeAsks.reported)
 	}
 	u.mutex.Lock()
 	held := u.session
@@ -133,8 +124,8 @@ func (u *receiverUnit) observe(event equipment.Event) {
 	}
 }
 
-// report writes the status a burst of lines settles on, one write per
-// burst, and only when the write would change something.
+// report writes the status once for each burst of lines from the
+// receiver, statusDebounce after the first line.
 func (u *receiverUnit) report(ctx context.Context) {
 	for {
 		select {
@@ -147,10 +138,10 @@ func (u *receiverUnit) report(ctx context.Context) {
 			return
 		case <-time.After(statusDebounce):
 		}
-		drainPokes(u.dirty)
-		// A select answers a ready timer as readily as a ready context, so a
-		// unit stopped inside the debounce is asked again here before it
-		// writes.
+		drainWakes(u.dirty)
+		// When the timer and the context are both ready, select picks
+		// one at random. Check the context again so that a unit stopped
+		// during the debounce does not write.
 		if ctx.Err() != nil {
 			return
 		}
@@ -158,14 +149,13 @@ func (u *receiverUnit) report(ctx context.Context) {
 	}
 }
 
+// write builds the status from the driver's state and applies it when it
+// differs from the last one applied.
 func (u *receiverUnit) write() {
 	now := u.now()
 	state := u.driver.State()
-	// Metrics are read from the same state and the same moment that
-	// build the status below, and set whether or not the status itself
-	// turns out to have changed: observation_last_success_timestamp_seconds
-	// advances on every settled burst, not only on a burst that changed
-	// what a person reads in status.
+	// The metrics are recorded even when the status is unchanged, so
+	// observation_last_success_timestamp_seconds advances on every burst.
 	u.readings.recordObservation(u.name, state, u.driver.VolumeResolution(), now)
 	if u.wiimClient != nil {
 		u.readings.recordWiim(u.name, u.wiimClient.Readings())
@@ -192,25 +182,24 @@ func (u *receiverUnit) write() {
 	u.applied, u.written = status, true
 }
 
-// setSession starts, flips, replaces, or lifts the session. A session
-// that has not changed is left alone, because power and input are one-
-// shots the receiver answers once.
+// setSession makes the running session match spec, which is nil when
+// the Receiver has no session. When spec differs only in the active and
+// awake flags, the running session takes the new flags and keeps
+// running, because a session sends its power and input commands once,
+// when it starts. Any other difference stops the session and starts a
+// new one.
 //
-// A flip of either flag is not a change of session: it reaches the
-// session that stands.
-//
-// adopted is empty for a session the operator sees appear while it
-// runs. Otherwise it names why the session was already standing: the
-// operator found it in its first pass, or the unit a new wiring
-// replaced handed it over. Such a session adopts its flags and sends
-// the receiver nothing for them, and the line ends with adopted.
+// adopted is empty for a session that appears while the operator runs.
+// Otherwise it is the reason, for the log line, that the session was
+// already running: the operator found it in its first pass, or the unit
+// for the Receiver's old address handed it over. An adopted session
+// sends the receiver nothing for its flags.
 func (u *receiverUnit) setSession(ctx context.Context, spec *ReceiverSession, adopted string) {
 	u.mutex.Lock()
 	held := u.session
 	u.mutex.Unlock()
-	// A session that starts or ends changes the InputSelected condition,
-	// which the status writer derives from the session that stands.
-	defer poke(u.dirty)
+	// The InputSelected condition depends on the running session.
+	defer sendWake(u.dirty)
 
 	if held != nil && spec != nil && held.spec == spec.withoutFlags() {
 		if flips := flagFlips(held, spec); flips != "" {
@@ -243,8 +232,8 @@ func (u *receiverUnit) setSession(ctx context.Context, spec *ReceiverSession, ad
 	started.start(spec.Active, spec.Awake, adopting)
 }
 
-// flagFlips names each flag of a standing session that the new spec
-// changes, and answers an empty string when it changes none.
+// flagFlips describes each flag of the running session that spec
+// changes, and returns an empty string when it changes none.
 func flagFlips(held *session, spec *ReceiverSession) string {
 	var flips []string
 	if was := held.active.Load(); was != spec.Active {
@@ -256,15 +245,13 @@ func flagFlips(held *session, spec *ReceiverSession) string {
 	return strings.Join(flips, ", ")
 }
 
-// setInputs records the declared inputs and the sound mode each names,
-// which a later input selection reads.
 func (u *receiverUnit) setInputs(inputs []ReceiverInput) {
 	held := slices.Clone(inputs)
 	u.inputs.Store(&held)
 }
 
-// roomFor answers the link a session uses to tell its TV what it did,
-// and nil for a unit that writes no TV session.
+// roomFor returns the link a session uses to tell its Television what
+// it did, or nil for a unit that writes no Television session.
 func (u *receiverUnit) roomFor(spec *ReceiverSession) roomEvents {
 	if u.sessions == nil {
 		return nil
@@ -272,9 +259,8 @@ func (u *receiverUnit) roomFor(spec *ReceiverSession) roomEvents {
 	return u.sessions.room(u.log, spec.Player, spec.Input, u.inputMonitor)
 }
 
-// inputMonitor answers the monitor one declared input names, which is
-// the Display whose picture the input carries, and an empty string when
-// the input is not declared.
+// inputMonitor returns the Display whose picture a declared input
+// carries, or an empty string when the input is not declared.
 func (u *receiverUnit) inputMonitor(input string) string {
 	held := u.inputs.Load()
 	if held == nil {
@@ -288,8 +274,8 @@ func (u *receiverUnit) inputMonitor(input string) string {
 	return ""
 }
 
-// inputSoundMode answers the sound mode one declared input names, and
-// an empty string when it names none.
+// inputSoundMode returns the sound mode declared for an input, or an
+// empty string when the input is not declared or has none.
 func (u *receiverUnit) inputSoundMode(input string) string {
 	held := u.inputs.Load()
 	if held == nil {
@@ -303,38 +289,37 @@ func (u *receiverUnit) inputSoundMode(input string) string {
 	return ""
 }
 
-// setPower drives the receiver to the power a person declared. The
-// operator owns this field and acts only on a change of it: a
-// spec.power the operator already settled is not sent again, so a
-// person who turns the receiver on or off by hand is not overruled, and
-// a generation that changes another field, such as a session flag,
-// sends nothing. The value the operator finds in its first pass is
-// adopted, unless status.settledPower says it changed while the
-// operator was down, in resumePower. A Receiver created while the
-// operator runs has no settled value, so its spec.power is a change. A
-// spec.power the operator has not settled waits for the survey,
-// and then goes out only when the receiver reports another power. A
-// command sent before the connection is open is dropped, so the change
-// waits for a reachable receiver. A Denon cannot tell Standby from Off,
-// so both mean Standby, and a WiiM has no standby, so it always reports
-// On. An empty value is no declarative intent, and the receiver is left
-// where it is.
+// setPower sends spec.power to the receiver only when it differs from
+// the power that the operator last settled. The operator does not send a
+// settled value again, so it does not overrule a person who turns the
+// receiver on or off by hand, and an edit to another field of the spec
+// sends no power.
+//
+// The value found in the first pass counts as settled (see
+// resumePower). A Receiver created while the operator runs has no
+// settled value, so its spec.power is sent. The send waits until the
+// receiver is reachable and has finished its first full read, so the operator can read the
+// receiver's power, and it is skipped when the receiver already
+// reports that power. Standby and Off both send
+// standby, because a Denon reports both as Standby. A WiiM has no
+// standby and always reports On. An empty spec.power leaves the
+// receiver as it is.
 func (u *receiverUnit) setPower(power equipment.Power) {
 	if power == "" || power == u.powerApplied() {
 		return
 	}
-	if !u.driver.Surveyed() || u.driver.State().Reachable != equipment.ConditionTrue {
+	if !u.driver.FirstReadDone() || u.driver.State().Reachable != equipment.ConditionTrue {
 		return
 	}
-	asks := fmt.Sprintf("generation %d asks power %s", u.generation.Load(), power)
+	request := fmt.Sprintf("generation %d requests power %s", u.generation.Load(), power)
 	on := power == equipment.PowerOn
 	if observed := mainZone(u.driver.State()); on == (observed.Power == equipment.PowerOn) {
-		u.log.printf("%s; sent nothing, because the receiver reports %s", asks, powerWords(observed, 0))
+		u.log.printf("%s; sent nothing, because the receiver reports %s", request, powerWords(observed, 0))
 		u.applyPower(power)
 		return
 	}
 	sent := powerWords(equipment.ZoneState{Power: commandedPower(on)}, 0)
-	line := fmt.Sprintf("%s; sent %s", asks, sent)
+	line := fmt.Sprintf("%s; sent %s", request, sent)
 	began := time.Now()
 	if err := u.driver.SetPower(equipment.MainZone, on); err != nil {
 		u.log.refused(line, err)
@@ -344,11 +329,11 @@ func (u *receiverUnit) setPower(power equipment.Power) {
 	u.applyPower(power)
 }
 
-// resumePower settles the spec.power the operator finds in its first
-// pass. A spec.power that differs from status.settledPower is a change
-// no operator settled, such as an edit while the operator was down, so
-// the unit keeps the settled value and setPower compares the new one
-// with the receiver. Any other value is adopted.
+// resumePower determines whether the spec.power found in the first pass
+// counts as settled. When status.settledPower records a different
+// value, spec.power changed while no operator was running, so the unit
+// settles the recorded value and setPower sends the new one. Otherwise
+// the unit adopts spec.power.
 func (u *receiverUnit) resumePower(stored ReceiverStoredStatus, power equipment.Power) {
 	if settled := stored.SettledPower; settled != "" && power != "" && settled != power {
 		u.power.Store(&settled)
@@ -357,31 +342,29 @@ func (u *receiverUnit) resumePower(stored ReceiverStoredStatus, power equipment.
 	u.adoptPower(power)
 }
 
-// adoptPower takes the spec.power the operator finds in its first pass
-// as settled, and sends nothing. A value the operator merely finds may
-// be stale: the session's toggle writes spec.power, and a Play or a
-// person can turn the receiver on after it. So a restart at the settled
-// value adopts, and so does an upgrade, which finds no
-// status.settledPower.
+// adoptPower records spec.power as settled without sending it. The
+// spec.power found at startup can be older than the receiver's power,
+// because a Play or a person can turn the receiver on or off after the
+// session's toggle last wrote spec.power. Sending it would undo that
+// change.
 func (u *receiverUnit) adoptPower(power equipment.Power) {
 	u.power.Store(&power)
-	poke(u.dirty)
+	sendWake(u.dirty)
 	if power != "" {
-		u.log.printf("generation %d asks power %s; the operator found it when it started, so it sent nothing", u.generation.Load(), power)
+		u.log.printf("generation %d requests power %s; the operator found it when it started, so it sent nothing", u.generation.Load(), power)
 	}
 }
 
-// carryPower gives a unit that replaces another for a new address the
-// spec.power the old one settled, because a new wiring is no change of
-// spec.power.
+// carryPower copies the settled power from the unit that this one
+// replaces, because a changed address is not a change of spec.power.
 func (u *receiverUnit) carryPower(old *receiverUnit) {
 	if held := old.power.Load(); held != nil {
 		u.power.Store(held)
 	}
 }
 
-// denonSettings answers the last settings a Denon reported, and nil for
-// a receiver another protocol drives.
+// denonSettings returns the settings that the Denon last reported, or
+// nil when another protocol drives the receiver.
 func (u *receiverUnit) denonSettings() *denon.Settings {
 	if u.denonClient == nil {
 		return nil
@@ -390,8 +373,8 @@ func (u *receiverUnit) denonSettings() *denon.Settings {
 	return &settings
 }
 
-// wiimStatus answers the last snapshot a WiiM reported, and nil for a
-// receiver another protocol drives.
+// wiimStatus returns the status that the WiiM last reported, or nil
+// when another protocol drives the receiver.
 func (u *receiverUnit) wiimStatus() *wiim.Status {
 	if u.wiimClient == nil {
 		return nil
@@ -400,30 +383,28 @@ func (u *receiverUnit) wiimStatus() *wiim.Status {
 	return &status
 }
 
-// setSettings drives the receiver to the settings a person declared.
-// It sends only the declared fields that Pending keeps: a field the
-// receiver reports at another value, and a field the receiver does not
-// report that the spec changed since the last apply. A restart against
-// a receiver that already holds the declared settings sends nothing
-// and logs nothing, and a change made at the receiver is sent back on
-// the next pass. A field the receiver reports is sent on each pass
-// until the receiver reports the declared value. A field it does not
-// report is sent once per change of the block. After a restart it is
-// sent only when the block differs from the one status.settledSettings
-// records, which unrecorded explains. The apply waits for the survey,
-// because before it the receiver has reported nothing to compare with.
-// An apply error is logged and the spec is not recorded as applied, so
-// the next pass tries again. It answers whether the pass settled the
-// block, which is what lets the caller record the generation.
+// setSettings sends a Denon the fields of spec.denon.settings that
+// Pending keeps. A field that the receiver reports is sent on each pass
+// until the receiver reports the declared value, within the send
+// budget, so a change made at the receiver is sent back. A field that
+// the receiver does not report is sent once for each change of the
+// block. After a restart it is sent only when the block differs from
+// status.settledSettings (see differsFromSettled). The apply waits for
+// the first full read, because before it the receiver has reported nothing to
+// compare with.
+//
+// setSettings returns true when the block is applied, so the caller can
+// record it as settled. After a failed send it returns false, and the
+// next pass tries again.
 func (u *receiverUnit) setSettings(want denon.Settings) bool {
 	if u.denonClient == nil {
 		return false
 	}
-	if !u.driver.Surveyed() || u.driver.State().Reachable != equipment.ConditionTrue {
+	if !u.driver.FirstReadDone() || u.driver.State().Reachable != equipment.ConditionTrue {
 		return false
 	}
 	previous, known := u.settingsApplied()
-	known = known || u.unrecorded(denonSettingsBlock, want)
+	known = known || u.differsFromSettled(denonSettingsBlock, want)
 	pending := budgeted(u, denonSettingsBlock, want.Pending(u.denonClient.Settings(), previous, known))
 	if !reflect.DeepEqual(pending, denon.Settings{}) {
 		line := fmt.Sprintf("generation %d declares spec.denon.settings %s; sent it", u.generation.Load(), declared(pending))
@@ -440,41 +421,39 @@ func (u *receiverUnit) setSettings(want denon.Settings) bool {
 	return true
 }
 
-// unrecorded answers whether a declared block differs from the one
-// status.settledSettings records. The operator starts with no memory of
-// the fields it applied, so after a restart it compares an unreported
-// field with nothing. When the record holds the block, the operator
-// sent those fields before it restarted, and it sends nothing. When it
-// differs, the Receiver is new or the block changed while the operator
-// was down, and the operator sends every unreported field of the block
-// once.
-func (u *receiverUnit) unrecorded(path string, block any) bool {
+// differsFromSettled reports whether the declared block differs from
+// its digest in status.settledSettings. After a restart the unit has no
+// earlier value to compare an unreported field with, so it compares
+// the digest. When it matches, the fields were sent before the restart.
+// When it differs, the Receiver is new or the block changed while no
+// operator was running, and each unreported field is sent once.
+func (u *receiverUnit) differsFromSettled(path string, block any) bool {
 	return !u.settled.holds(path, block)
 }
 
 // recordSettled records that the operator has sent a declared block,
-// and asks for a status write when status.settledSettings changes.
+// and wakes the status writer when status.settledSettings changes.
 func (u *receiverUnit) recordSettled(path string, block any) {
 	if u.settled.settle(path, block) {
-		poke(u.dirty)
+		sendWake(u.dirty)
 	}
 }
 
-// budgeted spends the unit's send budget on one block's pending fields
-// and answers the fields it may send. When the fields the budget holds
-// back change, it asks for a status write, so the SettingsConfirmed
-// condition follows.
+// budgeted returns the pending fields of one block that the send budget
+// still allows. When the set of fields that the budget holds back
+// changes, it wakes the status writer, because the SettingsConfirmed
+// condition is built from that set.
 func budgeted[T any](u *receiverUnit, family string, pending T) T {
 	before := u.budget.unconfirmed()
 	kept := spend(u.budget, family, pending)
 	if !slices.Equal(before, u.budget.unconfirmed()) {
-		poke(u.dirty)
+		sendWake(u.dirty)
 	}
 	return kept
 }
 
-// settingsApplied answers the last settings the operator settled on,
-// and whether it has settled on any since it started.
+// settingsApplied returns the settings that the operator last applied,
+// and whether it has applied any since it started.
 func (u *receiverUnit) settingsApplied() (denon.Settings, bool) {
 	if held := u.settings.Load(); held != nil {
 		return *held, true
@@ -482,17 +461,13 @@ func (u *receiverUnit) settingsApplied() (denon.Settings, bool) {
 	return denon.Settings{}, false
 }
 
-// setWiimSettings drives the device to the settings a person declared.
-// It is the Denon path in WiiM's own terms: it sends only the declared
-// fields that Pending keeps, so a restart against a device that already
-// holds them sends nothing, and a change made at the device is sent
-// back. The two settings types never meet.
+// setWiimSettings is setSettings for spec.wiim.settings.
 func (u *receiverUnit) setWiimSettings(want wiim.Settings) bool {
-	if !u.driver.Surveyed() || u.driver.State().Reachable != equipment.ConditionTrue {
+	if !u.driver.FirstReadDone() || u.driver.State().Reachable != equipment.ConditionTrue {
 		return false
 	}
 	previous, known := u.wiimSettingsApplied()
-	known = known || u.unrecorded(wiimSettingsBlock, want)
+	known = known || u.differsFromSettled(wiimSettingsBlock, want)
 	pending := budgeted(u, wiimSettingsBlock, want.Pending(u.wiimClient.Settings(), previous, known))
 	if !reflect.DeepEqual(pending, wiim.Settings{}) {
 		line := fmt.Sprintf("generation %d declares spec.wiim.settings %s; sent it", u.generation.Load(), declared(pending))
@@ -509,8 +484,8 @@ func (u *receiverUnit) setWiimSettings(want wiim.Settings) bool {
 	return true
 }
 
-// wiimSettingsApplied answers the last WiiM settings the operator
-// settled on, and whether it has settled on any since it started.
+// wiimSettingsApplied returns the WiiM settings that the operator last
+// applied, and whether it has applied any since it started.
 func (u *receiverUnit) wiimSettingsApplied() (wiim.Settings, bool) {
 	if held := u.wiimSettings.Load(); held != nil {
 		return *held, true
@@ -518,28 +493,16 @@ func (u *receiverUnit) wiimSettingsApplied() (wiim.Settings, bool) {
 	return wiim.Settings{}, false
 }
 
-// setZones drives the non-main zones to the controls a person
-// declared. For each zone it sends only the controls that
-// ZoneSpec.Pending keeps: a control the zone reports at another value,
-// and a control the zone does not report that the spec changed since
-// the last apply. A restart against a receiver whose zones already
-// hold the declared controls sends nothing and logs nothing, and a
-// change made at the receiver is sent back on the next pass. A control
-// the zone does not report is sent once per change of spec.zones, and
-// after a restart only when spec.zones differs from the block
-// status.settledSettings records. The main zone is spec.power and the
-// session, so a zones map that names main is a misconfiguration and is
-// rejected rather than fought. An apply error is logged and the zone is
-// not recorded as applied, so the next pass tries again.
+// setZones sends each zone of spec.zones the controls that
+// ZoneSpec.Pending keeps, by the same rules as setSettings. spec.power
+// and the session control the main zone, so setZones logs and skips a
+// main entry.
 func (u *receiverUnit) setZones(want map[string]ZoneSpec) bool {
-	if !u.driver.Surveyed() || u.driver.State().Reachable != equipment.ConditionTrue {
+	if !u.driver.FirstReadDone() || u.driver.State().Reachable != equipment.ConditionTrue {
 		return false
 	}
-	// zonesApplied returns a copy, so this loop writes a fresh map that
-	// never shares its backing with the snapshot the last pass stored; a
-	// later setZones cannot reach back into an earlier one.
 	applied, known := u.zonesApplied()
-	known = known || u.unrecorded(zonesBlock, want)
+	known = known || u.differsFromSettled(zonesBlock, want)
 	settled := true
 	state := u.driver.State()
 	resolution := u.driver.VolumeResolution()
@@ -571,55 +534,56 @@ func (u *receiverUnit) setZones(want map[string]ZoneSpec) bool {
 	return settled
 }
 
-// zonesApplied answers the last zone controls the operator settled on,
-// as a copy, so a caller can never mutate the stored snapshot.
+// zonesApplied returns a copy of the zone controls that the operator
+// last applied, so a caller cannot change the stored map, and whether
+// it has applied any since it started.
 func (u *receiverUnit) zonesApplied() (map[string]ZoneSpec, bool) {
 	if held := u.zones.Load(); held != nil {
-		copy := make(map[string]ZoneSpec, len(*held))
+		snapshot := make(map[string]ZoneSpec, len(*held))
 		for name, spec := range *held {
-			copy[name] = spec
+			snapshot[name] = spec
 		}
-		return copy, true
+		return snapshot, true
 	}
 	return map[string]ZoneSpec{}, false
 }
 
-// applyZone sends the declared controls for one zone. Volume is in
-// display units, so it is turned into the driver's smallest steps
-// before it is sent. An unknown zone is an error the caller logs.
+// applyZone sends the controls declared for one zone. The volume is in
+// display units, so applyZone converts it to the driver's smallest
+// steps first. It returns the first error, named for the control that
+// failed, and an unknown zone is an error. The caller logs it.
 func (u *receiverUnit) applyZone(name string, spec ZoneSpec) error {
 	if spec.Power != "" {
 		if err := u.driver.SetPower(name, spec.Power != equipment.PowerStandby && spec.Power != equipment.PowerOff); err != nil {
-			return fmt.Errorf("power: %w", err)
+			return fmt.Errorf("setting the power: %w", err)
 		}
 	}
 	if spec.Input != "" {
 		if err := u.driver.SetInput(name, spec.Input); err != nil {
-			return fmt.Errorf("input: %w", err)
+			return fmt.Errorf("setting the input: %w", err)
 		}
 	}
 	if spec.Volume != nil {
 		steps := int(math.Round(*spec.Volume * float64(u.driver.VolumeResolution())))
 		if err := u.driver.SetVolume(name, steps); err != nil {
-			return fmt.Errorf("volume: %w", err)
+			return fmt.Errorf("setting the volume: %w", err)
 		}
 	}
 	if spec.Mute != nil {
 		if err := u.driver.SetMute(name, *spec.Mute); err != nil {
-			return fmt.Errorf("mute: %w", err)
+			return fmt.Errorf("setting the mute: %w", err)
 		}
 	}
 	if spec.Sleep != nil {
 		if err := u.driver.SetSleep(name, *spec.Sleep); err != nil {
-			return fmt.Errorf("sleep: %w", err)
+			return fmt.Errorf("setting the sleep timer: %w", err)
 		}
 	}
 	return nil
 }
 
-// settingsCheck answers a check for a declared block, which confirmed
-// reads the way ConfirmedBy does: no value the receiver reports differs
-// from the block.
+// settingsCheck turns a ConfirmedBy test into the check that
+// receiverLog.confirm runs, with the words that the log line ends with.
 func settingsCheck(confirmed func() bool) func() (string, bool) {
 	return func() (string, bool) {
 		if confirmed() {
@@ -629,7 +593,8 @@ func settingsCheck(confirmed func() bool) func() (string, bool) {
 	}
 }
 
-// powerApplied answers the last power the operator settled on.
+// powerApplied returns the power that the operator last settled, or an
+// empty string when it has settled none.
 func (u *receiverUnit) powerApplied() equipment.Power {
 	if held := u.power.Load(); held != nil {
 		return *held
@@ -637,24 +602,23 @@ func (u *receiverUnit) powerApplied() equipment.Power {
 	return ""
 }
 
-// applyPower records the power the receiver now stands at and writes it
-// to the spec, so the next reconcile sees no change to re-assert, and
-// asks for a status write so status.settledPower follows. The session
-// calls it after a toggle settles; setPower calls it after a
-// declarative change, by a command or because the receiver already
-// reported the value.
+// applyPower writes power to spec.power and records it as settled, so
+// the next pass has no change to send, and wakes the status writer for
+// status.settledPower. The session calls it after a power toggle, and
+// setPower after a declared change. When the write fails, nothing is
+// recorded.
 func (u *receiverUnit) applyPower(power equipment.Power) {
 	if _, err := ApplyReceiverPower(u.client, u.name, power); err != nil {
 		fmt.Fprintf(os.Stderr, "writing the power of receiver %s: %v\n", u.name, err)
 		return
 	}
 	u.power.Store(&power)
-	poke(u.dirty)
+	sendWake(u.dirty)
 }
 
-// standingSession answers the session that stands, with the flags it
-// holds now, and nil when none stands.
-func (u *receiverUnit) standingSession() *ReceiverSession {
+// runningSessionSpec returns the spec of the running session with its
+// current flags, or nil when no session is running.
+func (u *receiverUnit) runningSessionSpec() *ReceiverSession {
 	u.mutex.Lock()
 	defer u.mutex.Unlock()
 	if u.session == nil {
@@ -665,8 +629,8 @@ func (u *receiverUnit) standingSession() *ReceiverSession {
 	return &spec
 }
 
-// player names the Player whose session stands, and an empty string
-// when none stands.
+// player returns the name of the Player whose session is running, or an
+// empty string when no session is running.
 func (u *receiverUnit) player() string {
 	u.mutex.Lock()
 	defer u.mutex.Unlock()
@@ -676,10 +640,8 @@ func (u *receiverUnit) player() string {
 	return u.session.spec.Player
 }
 
-// stop ends the session and closes the connection, which is what a
-// deleted Receiver, a new wiring, and an operator shutdown leave
-// behind. The metrics scoped to this receiver go with it, so a Receiver
-// that is gone stops being reported.
+// stop ends the session, closes the connection, and removes the
+// receiver's metrics.
 func (u *receiverUnit) stop() {
 	u.mutex.Lock()
 	held := u.session
@@ -692,39 +654,39 @@ func (u *receiverUnit) stop() {
 	u.readings.forgetReceiver(u.name)
 }
 
-// controller holds what every pass needs and the units it runs.
+// controller runs the passes over the Receivers and owns their units.
 type controller struct {
 	client *Client
-	// recorder posts each Receiver's condition transitions as Events.
-	// Nil posts none.
+	// When recorder is nil, no Event is posted.
 	recorder *events.Recorder
-	// dial reaches each receiver and each UPnP description, and listen
-	// opens the listener each WiiM sends its events to.
+	// dial opens the connection to each receiver and to each UPnP
+	// description, and listen opens the listener that each WiiM sends
+	// its events to.
 	dial      dialFunc
 	listen    listenFunc
 	wake      chan struct{}
 	now       func() time.Time
 	readings  *metrics
 	discovery *discovery
-	// networkDiscoveryOff keeps discovery from running at all, so the
-	// operator sends no search onto the LAN and creates no Receiver
+	// networkDiscoveryOff stops discovery from running. The operator
+	// then sends no search onto the LAN and creates no Receiver
 	// (main.go).
 	networkDiscoveryOff bool
-	// receivers holds the Receiver watch's store, which the pass and
+	// receivers is the Receiver watch's store, which the pass and
 	// discovery read (objectcache.go).
 	receivers *watchStore
 	units     map[string]*receiverUnit
-	// sessions writes every Television's status.session for the units'
+	// sessions writes status.session of each Television for the units'
 	// sessions.
 	sessions *televisionSessions
-	// live says the first pass has ended. A session the first pass finds
-	// was there when the operator started, and it adopts its flags.
+	// live is true after the first pass ends. A session that the first
+	// pass finds was already running before the operator started, so
+	// its unit adopts the session and sends nothing for its flags.
 	live bool
-	// stopped says that at the end of run, every goroutine that a unit or
-	// a session started, and discovery, had stopped (work.go).
+	// stopped is true when run ended after every goroutine of the
+	// units, the sessions, and discovery had stopped (work.go).
 	stopped bool
-	// log takes the lines a person reads to follow the receivers, the
-	// way the node workload's log does for its adapter.
+	// log receives the log lines about each receiver.
 	log io.Writer
 }
 
@@ -741,23 +703,19 @@ func newController(client *Client, readings *metrics) *controller {
 		log:       os.Stderr,
 		receivers: &watchStore{},
 	}
-	// Discovery wakes the same loop a watch event does, so a Receiver it
-	// creates or an address it finds reaches a reconcile pass at once.
-	c.discovery = newDiscovery(client, func() { poke(c.wake) })
+	// Discovery wakes the loop, so a Receiver that it creates or an
+	// address that it finds is reconciled at once.
+	c.discovery = newDiscovery(client, func() { sendWake(c.wake) })
 	c.discovery.receivers = c.receivers
 	return c
 }
 
-// pass derives every unit from the collection as it stands now. It
-// starts a client for a Receiver that names a protocol, moves a session
-// that changed, and stops the client of a Receiver that is gone. The
-// whole pass is one equipment_reconcile_duration_seconds observation,
-// because this loop reconciles the collection as a unit and not one
-// resource at a time.
+// pass reconciles every Receiver that has a protocol block, and stops
+// the unit of each Receiver that is gone or has none. The whole pass is
+// one observation of equipment_reconcile_duration_seconds.
 func (c *controller) pass(ctx context.Context) error {
-	// The wall clock times this pass, and not c.now, because c.now is a
-	// fixture a test holds still to make a status's own timestamp
-	// deterministic; the duration this measures is real regardless.
+	// The pass is timed with the wall clock and not c.now, because
+	// tests fix c.now to fix the timestamps of a status.
 	began := time.Now()
 	err := c.doPass(ctx)
 	c.readings.observeReconcile(time.Since(began), err)
@@ -765,12 +723,9 @@ func (c *controller) pass(ctx context.Context) error {
 }
 
 func (c *controller) doPass(ctx context.Context) error {
-	// Each unit writes its Receiver's status, and a new unit takes what
-	// the old one settled from the stored status. The store can hold the
-	// copy from before the last write until the write's own event
-	// arrives, and a unit that read it would send a receiver a setting
-	// again, so the read replaces such a copy with the API server's
-	// (objectcache.go).
+	// A new unit reads what was settled from the stored status, so the
+	// read must not return a copy older than the operator's last status
+	// write (objectcache.go).
 	list, err := readReceivers(c.client, c.receivers)
 	if err != nil {
 		return err
@@ -786,17 +741,18 @@ func (c *controller) doPass(ctx context.Context) error {
 		c.reconcile(ctx, receiver)
 	}
 
-	// The first pass adopts what it finds. From its end on, a session
-	// that appears is a change a person caused. A TV's session that an
-	// earlier pass could not write is written again here.
+	// The first pass adopts what it finds. After it, a session that
+	// appears is a new session. retry writes each Television session
+	// that an earlier pass could not write.
 	defer func() { c.live = true }()
 	defer c.sessions.markLive()
 	defer c.sessions.retry()
 	for name, unit := range c.units {
 		if !live[name] {
-			// A deleted Receiver ends its session for good, so its TV's
-			// session goes too. A stop at shutdown lifts none, because the
-			// next operator takes the same session over.
+			// A deleted Receiver ends its session, so the session is
+			// removed from its Television too. stopAll at shutdown
+			// removes none, because the next operator adopts the
+			// session.
 			player := unit.player()
 			unit.stop()
 			delete(c.units, name)
@@ -808,20 +764,21 @@ func (c *controller) doPass(ctx context.Context) error {
 	return nil
 }
 
-// reconcile brings one Receiver's unit up to its spec. An address that
-// changed is a different receiver wiring, so the unit is replaced and
-// not redialled.
+// reconcile brings the unit of one Receiver up to its spec. A changed
+// address is a different receiver, so the unit is replaced and not
+// reconnected.
 func (c *controller) reconcile(ctx context.Context, receiver *Receiver) {
 	name := receiver.Metadata.Name
 	unit, held := c.units[name]
 	var replaced *receiverUnit
 	var carried *ReceiverSession
 	if held && unit.address != c.resolvedAddress(&receiver.Spec) {
-		// A new wiring is not a new session. The new unit starts the same
-		// session, with the flags the old one held, as one that stands. The
-		// lift lets that session return to the same TV without a wake.
+		// The new unit adopts the old unit's session with its current
+		// flags. lift removes the session from its Television only
+		// after a delay, so when the adopted session opens on the same
+		// Display first, the TV is not woken again.
 		player := unit.player()
-		carried = unit.standingSession()
+		carried = unit.runningSessionSpec()
 		unit.stop()
 		delete(c.units, name)
 		held, replaced = false, unit
@@ -863,9 +820,8 @@ func (c *controller) reconcile(ctx context.Context, receiver *Receiver) {
 	unit.takeAsks(receiver.session(), !c.live)
 }
 
-// protocolAddress is the address the receiver's protocol block declares.
-// A change to it is a different receiver wiring, so the unit is
-// replaced and not redialled.
+// protocolAddress returns the address in the Receiver's protocol block,
+// or an empty string when the block has none.
 func protocolAddress(spec *ReceiverSpec) string {
 	if spec.Denon != nil {
 		return spec.Denon.Address
@@ -876,6 +832,8 @@ func protocolAddress(spec *ReceiverSpec) string {
 	return ""
 }
 
+// start creates the unit for a Receiver and starts its driver, status
+// writer, and volume ask sender.
 func (c *controller) start(parent context.Context, receiver *Receiver) *receiverUnit {
 	ctx, cancel := context.WithCancel(parent)
 	unit := &receiverUnit{
@@ -895,32 +853,33 @@ func (c *controller) start(parent context.Context, receiver *Receiver) *receiver
 		dirty:     make(chan struct{}, 1),
 		budget:    newSendBudget(),
 		settled:   newSettledRecord(receiver.Status, receiver.Spec),
-		// The driver's goroutine reads volumeAsks for each line the
-		// receiver sends, so it exists before the driver starts.
+		// The driver's goroutine reads volumeAsks for each line that
+		// the receiver sends, so volumeAsks must exist before the
+		// driver starts.
 		volumeAsks: newVolumeAsker(),
 	}
-	// The stored conditions are the unit's first previous ones, so an
-	// operator that starts again keeps each lastTransitionTime and posts
-	// an Event only for a condition that changed while it was away.
+	// The stored conditions are the unit's first previous conditions,
+	// so an operator that restarts keeps each lastTransitionTime and
+	// posts an Event only for a condition that changed while it was
+	// away.
 	unit.applied.Conditions = receiver.Status.Conditions
 	unit.setInputs(receiver.Spec.Inputs)
 	unit.foreign = c.discovery.skip
 	unit.startDriver(receiver, unit.address, c.readings.reportCommand)
 	// The generation is stored before anything can write, so the first
-	// status names the spec it was built from.
+	// status carries the generation of the spec that it was built from.
 	unit.generation.Store(receiver.Metadata.Generation)
 	goWork(ctx, func() { unit.driver.Run(ctx) })
 	goWork(ctx, func() { unit.report(ctx) })
 	goWork(ctx, func() { unit.applyVolumeAsks(ctx) })
-	// The first write says the operator holds the receiver and has not
-	// reached it yet, before any line arrives.
-	poke(unit.dirty)
+	// The first status write reports that the unit exists and has not
+	// reached the receiver yet. It happens before any line arrives.
+	sendWake(unit.dirty)
 	return unit
 }
 
-// startDriver builds the driver the receiver's protocol block names and
-// points the unit at it. A Receiver names exactly one protocol block, so
-// the choice is a branch and not a table.
+// startDriver creates the driver for the protocol block that the
+// Receiver declares and stores it on the unit.
 func (u *receiverUnit) startDriver(receiver *Receiver, address string, report func(string)) {
 	switch {
 	case receiver.Spec.Denon != nil:
@@ -945,13 +904,13 @@ func (u *receiverUnit) startDriver(receiver *Receiver, address string, report fu
 	}
 }
 
-// run reconciles once before any event arrives, then on every wake and
-// every tick of backstopInterval, until ctx ends.
+// run runs one pass before any event arrives, then another on each wake
+// and each tick of backstopInterval, until ctx ends.
 func (c *controller) run(ctx context.Context) {
-	// Discovery and every goroutine a unit or a session starts are
-	// counted, and run waits for them after it stops every unit, because
-	// each one can write, and the Deployment releases its Lease after
-	// run returns (work.go).
+	// Discovery and every goroutine that a unit or a session starts are
+	// counted. After run stops every unit it waits for them, because
+	// each can write and the Deployment releases its Lease after run
+	// returns (work.go).
 	var working sync.WaitGroup
 	ctx = withWork(ctx, &working)
 	c.startDiscovery(ctx)
@@ -972,11 +931,12 @@ func (c *controller) run(ctx context.Context) {
 	}
 }
 
-// startDiscovery starts the search for amps, or with discovery off,
-// writes the one line that says so. With discovery off, a WiiM
-// Receiver gets no address from a search, so it reaches its amp only
-// through spec.wiim.address. The discovered Receivers already in the
-// cluster stay, because only a search is evidence that deletes one.
+// startDiscovery starts the search for receivers. When discovery is off
+// it writes one log line that says so. A WiiM Receiver then gets no
+// address from a search and reaches its device only through
+// spec.wiim.address. Receivers that discovery created earlier stay,
+// because discovery deletes a Receiver only on the evidence of a
+// search.
 func (c *controller) startDiscovery(ctx context.Context) {
 	if c.networkDiscoveryOff {
 		fmt.Fprintf(c.log, "%s is off: the operator sends no mDNS or SSDP search and creates no Receiver, and a WiiM Receiver reaches its amp only at spec.wiim.address\n", networkDiscoveryVariable)
@@ -986,7 +946,7 @@ func (c *controller) startDiscovery(ctx context.Context) {
 	goWork(ctx, func() { c.discovery.run(ctx) })
 }
 
-// stopAll closes every unit at operator shutdown.
+// stopAll stops every unit at operator shutdown.
 func (c *controller) stopAll() {
 	c.sessions.stop()
 	for name, unit := range c.units {
@@ -995,18 +955,19 @@ func (c *controller) stopAll() {
 	}
 }
 
-// poke never blocks, and a wake channel buffers exactly one, because
-// the pass that answers a wake reads the whole collection.
-func poke(wake chan<- struct{}) {
+// sendWake sends to wake without blocking. A wake channel buffers one
+// value, because a pass reads the whole collection and one pending wake
+// covers any number of events.
+func sendWake(wake chan<- struct{}) {
 	select {
 	case wake <- struct{}{}:
 	default:
 	}
 }
 
-// drainPokes clears the wakes a burst queued behind the one already
-// taken.
-func drainPokes(wake <-chan struct{}) {
+// drainWakes discards the wakes that a burst queued behind the one
+// already taken.
+func drainWakes(wake <-chan struct{}) {
 	for {
 		select {
 		case <-wake:
@@ -1016,10 +977,10 @@ func drainPokes(wake <-chan struct{}) {
 	}
 }
 
-// operate reads the configuration, waits for the Lease, and then hands
-// the leader's client to operateAsLeader. Every failure here ends the
-// process, because the kubelet restarts the pod with backoff and the
-// failure shows in kubectl instead of hiding in a retry loop.
+// operate reads the settings, waits for the Lease, and then runs
+// operateAsLeader with the leader's client. A failure ends the process,
+// because the kubelet restarts the pod with backoff and the failure
+// shows in kubectl instead of hiding in a retry loop.
 func operate() {
 	config, err := readSettings()
 	if err != nil {
@@ -1028,9 +989,9 @@ func operate() {
 	}
 
 	// The kubelet stops a pod with SIGTERM. The context ends on it, so
-	// the loop stops every receiver's unit, and then the operator
-	// releases its Lease, before the process exits. A signal that
-	// arrives while the copy waits for the Lease ends the wait.
+	// the loop stops every unit, and then the operator releases its
+	// Lease before the process exits. A signal that arrives while the
+	// operator waits for the Lease ends the wait.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
 	_, err = lead(config).actWhileLeading(ctx, func(client *Client) error {
@@ -1042,34 +1003,34 @@ func operate() {
 	}
 }
 
-// operateAsLeader is everything the Deployment's operator does once it
-// holds the Lease: it binds the metrics listener and runs serve. It
-// returns when ctx ends, after every part that writes has stopped.
+// operateAsLeader does what the operator does while it holds the Lease:
+// it binds the metrics listener and runs serve. It returns when ctx
+// ends, after every part that writes has stopped.
 func operateAsLeader(ctx context.Context, client *Client, config settings) error {
 	readings := newMetrics(version)
 	if _, err := readings.Serve(ctx, config.metricsAddress); err != nil {
-		return fmt.Errorf("metrics listener: %w", err)
+		return fmt.Errorf("opening the metrics listener: %w", err)
 	}
 	return serve(ctx, client, config, readings)
 }
 
-// serve proves the collection can be read, starts the watch, and runs
-// the loop until ctx ends. It answers errStillWriting when a goroutine
-// that can write did not stop in time (work.go), or when the Event
-// recorder's last write did not return in time.
+// serve checks that the Receivers can be listed, starts the watch, and
+// runs the loop until ctx ends. It returns errStillWriting when a
+// goroutine that can write did not stop in time (work.go), or when the
+// Event recorder's last write did not return in time.
 func serve(ctx context.Context, client *Client, config settings, readings *metrics) error {
-	err := untilAnswered(ctx, func() error {
+	err := retryWhileThrottled(ctx, func() error {
 		_, err := ListReceivers(client.withContext(ctx))
 		return err
 	})
 	if err != nil {
-		return fmt.Errorf("listing receivers: %w", err)
+		return fmt.Errorf("listing the Receivers: %w", err)
 	}
 
-	// serve returns only after the goroutines it started stop, so none
-	// of them reads the API after it. The recorder outlives ctx, so the
-	// Events of the last pass are written, and serve shuts it down after
-	// every loop that posts has returned.
+	// serve returns only after the goroutines it started have stopped,
+	// so none of them reads the API after it returns. The recorder
+	// outlives ctx so that the Events of the last pass are written.
+	// serve shuts it down after every loop that posts has returned.
 	recorder := events.New(context.Background(), client.Client, "equipment-operator", events.Options{})
 	operator := newController(client, readings)
 	operator.recorder = recorder

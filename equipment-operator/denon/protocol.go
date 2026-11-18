@@ -1,8 +1,9 @@
-// Package denon is the protocol driver for a Denon or Marantz A/V
-// receiver. It parses the Denon ASCII protocol on port 23, records the
-// state each line reports, and reconnects when the read deadline or a
-// socket error ends the connection. It implements equipment.Driver and
-// reports volume in half steps, two per display unit.
+// Package denon implements equipment.Driver for a Denon or Marantz A/V
+// receiver. It sends commands in the receiver's ASCII control protocol
+// on port 23, keeps the state that the receiver's lines report, and
+// reconnects when the read deadline expires or a socket error ends the
+// connection. Volume is counted in half steps, two for each display
+// unit.
 //
 // The protocol reference is https://assets.denon.com/documentmaster/uk/
 // avr1713_avr1613_protocol_v860.pdf. The lines this file parses were
@@ -14,18 +15,17 @@ import (
 	"strconv"
 )
 
-// Port is the control port a Denon answers on, used when the declared
-// address names none.
+// Port is the receiver's control port. It is added to a declared
+// address that has no port.
 const Port = "23"
 
-// Terminator ends every command and every reply: an ASCII carriage
-// return.
+// Terminator is the carriage return that ends every command and every
+// line from the receiver.
 const Terminator = '\r'
 
-// Queries are the status queries the driver sends on every connect,
-// front-loaded with the zone and volume lines. A model that does not
-// answer one simply ignores it, so the set is a union and not a
-// requirement.
+// Queries are the status queries that the driver sends each time it
+// connects. The list covers every model, and a model ignores the
+// queries it does not support.
 var Queries = []string{
 	"PW?", "ZM?", "Z2?", "MV?", "MU?", "Z2MU?", "SI?", "MS?",
 	"SLP?", "Z2SLP?", "ECO?", "DIM ?", "STBY?", "SPPR ?", "SD?", "SV?", "CV?",
@@ -35,7 +35,7 @@ var Queries = []string{
 	"BTTX ?", hdmiAudioOutQuery, hdmiSetupQuery,
 }
 
-// The set commands this operator sends.
+// Set commands, and the prefixes of the set commands that take a value.
 const (
 	PowerOnCommand      = "PWON"
 	MuteOnCommand       = "MUON"
@@ -46,13 +46,14 @@ const (
 	SoundModePrefix     = "MS"
 )
 
-// The two power words the status carries.
+// The values of the power field.
 const (
 	powerOn      = "On"
 	powerStandby = "Standby"
 )
 
-// The fields a line can name, which is what a listener switches on.
+// The names of the state fields. applyDenonLine returns the name of
+// the field that a line changed.
 const (
 	powerField     = "power"
 	inputField     = "input"
@@ -62,12 +63,12 @@ const (
 	soundModeField = "soundMode"
 )
 
-// VolumeCommand is the set command for one half-step count.
+// VolumeCommand returns the set command for a volume in half steps.
 func VolumeCommand(halves int) string {
 	return VolumePrefix + HalfStepDigits(halves)
 }
 
-// MuteCommand is the set command for one mute state.
+// MuteCommand returns the set command that mutes or unmutes.
 func MuteCommand(muted bool) string {
 	if muted {
 		return MuteOnCommand
@@ -75,23 +76,23 @@ func MuteCommand(muted bool) string {
 	return MuteOffCommand
 }
 
-// InputCommand selects one input by the name the receiver carries for
-// it.
+// InputCommand returns the set command that selects an input, by the
+// name the receiver uses for it.
 func InputCommand(input string) string {
 	return InputPrefix + input
 }
 
-// SoundModeCommand selects one sound mode by the name the receiver
-// carries for it.
+// SoundModeCommand returns the set command that selects a sound mode,
+// by the name the receiver uses for it.
 func SoundModeCommand(mode string) string {
 	return SoundModePrefix + mode
 }
 
-// The set commands for the settings a receiver declares. Each one
-// carries the display value the status reports, and each returns the
-// error that a value outside the receiver's vocabulary carries.
+// The set commands below write the fields of Settings. Each takes the
+// value in the form that the status reports, and returns an error for a
+// value that the receiver does not accept.
 
-// EcoCommand is the set command for one eco mode.
+// EcoCommand returns the set command for one eco mode.
 func EcoCommand(mode string) (string, error) {
 	word, err := ecoWire(mode)
 	if err != nil {
@@ -100,7 +101,7 @@ func EcoCommand(mode string) (string, error) {
 	return "ECO" + word, nil
 }
 
-// DimmerCommand is the set command for one dimmer level.
+// DimmerCommand returns the set command for one dimmer level.
 func DimmerCommand(mode string) (string, error) {
 	word, err := dimmerWire(mode)
 	if err != nil {
@@ -109,7 +110,8 @@ func DimmerCommand(mode string) (string, error) {
 	return "DIM " + word, nil
 }
 
-// AutoStandbyCommand is the set command for one auto-standby timer.
+// AutoStandbyCommand returns the set command for one auto-standby
+// timer.
 func AutoStandbyCommand(mode string) (string, error) {
 	word, err := autoStandbyWire(mode)
 	if err != nil {
@@ -118,16 +120,17 @@ func AutoStandbyCommand(mode string) (string, error) {
 	return "STBY" + word, nil
 }
 
-// SpeakerPresetCommand is the set command for one speaker preset. The
-// receiver carries presets 1 through 4.
+// SpeakerPresetCommand returns the set command for a speaker preset.
+// The receiver has presets 1 through 4.
 func SpeakerPresetCommand(preset int) (string, error) {
 	if preset < 1 || preset > 4 {
-		return "", fmt.Errorf("speaker preset %d", preset)
+		return "", fmt.Errorf("speaker preset %d is outside 1 through 4", preset)
 	}
 	return "SPPR " + strconv.Itoa(preset), nil
 }
 
-// AudioInputModeCommand is the set command for one audio input mode.
+// AudioInputModeCommand returns the set command for one audio input
+// mode.
 func AudioInputModeCommand(mode string) (string, error) {
 	word, err := inputModeWire(mode)
 	if err != nil {
@@ -136,19 +139,21 @@ func AudioInputModeCommand(mode string) (string, error) {
 	return "SD" + word, nil
 }
 
-// VideoSelectCommand is the set command for one video select source.
-// The source is a name the receiver already knows, or off.
+// VideoSelectCommand returns the set command for the video select
+// source. The source is an input name that the receiver reports, or
+// "off".
 func VideoSelectCommand(sel string) (string, error) {
 	if sel == "off" {
 		return "SVOFF", nil
 	}
 	if sel == "" {
-		return "", fmt.Errorf("video select names no source")
+		return "", fmt.Errorf("the video select source is empty, want an input name or off")
 	}
 	return "SV" + sel, nil
 }
 
-// BluetoothTransmitterCommand is the set command for the transmitter.
+// BluetoothTransmitterCommand returns the set command for the
+// transmitter.
 func BluetoothTransmitterCommand(mode string) (string, error) {
 	word, err := bluetoothModeWire(mode)
 	if err != nil {
@@ -157,7 +162,8 @@ func BluetoothTransmitterCommand(mode string) (string, error) {
 	return "BTTX " + word, nil
 }
 
-// BluetoothOutputCommand is the set command for the transmitter output.
+// BluetoothOutputCommand returns the set command for the transmitter
+// output.
 func BluetoothOutputCommand(mode string) (string, error) {
 	word, err := bluetoothOutputWire(mode)
 	if err != nil {
@@ -166,35 +172,35 @@ func BluetoothOutputCommand(mode string) (string, error) {
 	return "BTTX " + word, nil
 }
 
-// ToneControlCommand is the set command for the tone control switch.
+// ToneControlCommand returns the set command for the tone control
+// switch.
 func ToneControlCommand(on bool) (string, error) {
 	return "PSTONE CTRL " + onOffWire(on), nil
 }
 
-// bassTrebleLimit is one side of the tone trim band the receiver
-// carries, 12dB on each side of the 50 that reads as 0dB.
+// bassTrebleLimit is the largest bass or treble trim in either
+// direction, in dB.
 const bassTrebleLimit = 12
 
-// BassCommand is the set command for one bass trim, in display units.
-// The receiver's band is 12dB on each side of the 50 that reads as 0dB.
+// BassCommand returns the set command for a bass trim in dB. The wire
+// value is 50 for 0dB, so a trim of -12 to 12 is sent as 38 to 62.
 func BassCommand(display int) (string, error) {
 	if display < -bassTrebleLimit || display > bassTrebleLimit {
-		return "", fmt.Errorf("bass trim %ddB", display)
+		return "", fmt.Errorf("bass trim %ddB is outside -%d to %ddB", display, bassTrebleLimit, bassTrebleLimit)
 	}
 	return fmt.Sprintf("PSBAS %02d", display+50), nil
 }
 
-// TrebleCommand is the set command for one treble trim, in display
-// units. The receiver's band is 12dB on each side of the 50 that reads
-// as 0dB.
+// TrebleCommand returns the set command for a treble trim in dB. The
+// wire value is 50 for 0dB, as for bass.
 func TrebleCommand(display int) (string, error) {
 	if display < -bassTrebleLimit || display > bassTrebleLimit {
-		return "", fmt.Errorf("treble trim %ddB", display)
+		return "", fmt.Errorf("treble trim %ddB is outside -%d to %ddB", display, bassTrebleLimit, bassTrebleLimit)
 	}
 	return fmt.Sprintf("PSTRE %02d", display+50), nil
 }
 
-// MultEqCommand is the set command for one Audyssey MultEQ mode.
+// MultEqCommand returns the set command for one Audyssey MultEQ mode.
 func MultEqCommand(mode string) (string, error) {
 	word, err := multEqWire(mode)
 	if err != nil {
@@ -203,22 +209,23 @@ func MultEqCommand(mode string) (string, error) {
 	return "PSMULTEQ:" + word, nil
 }
 
-// DynamicEqCommand is the set command for the Dynamic EQ switch.
+// DynamicEqCommand returns the set command for the Dynamic EQ switch.
 func DynamicEqCommand(on bool) (string, error) {
 	return "PSDYNEQ " + onOffWire(on), nil
 }
 
-// ReferenceLevelOffsetCommand is the set command for one reference
-// level offset. The receiver carries only 0, 5, 10, and 15dB.
+// ReferenceLevelOffsetCommand returns the set command for a reference
+// level offset. The receiver accepts only 0, 5, 10, and 15dB.
 func ReferenceLevelOffsetCommand(offset int) (string, error) {
 	switch offset {
 	case 0, 5, 10, 15:
 		return "PSREFLEV " + strconv.Itoa(offset), nil
 	}
-	return "", fmt.Errorf("reference level offset %ddB", offset)
+	return "", fmt.Errorf("reference level offset %ddB is not one of 0, 5, 10, 15", offset)
 }
 
-// DynamicVolumeCommand is the set command for one Dynamic Volume mode.
+// DynamicVolumeCommand returns the set command for one Dynamic
+// Volume mode.
 func DynamicVolumeCommand(mode string) (string, error) {
 	word, err := dynamicVolumeWire(mode)
 	if err != nil {
@@ -227,13 +234,14 @@ func DynamicVolumeCommand(mode string) (string, error) {
 	return "PSDYNVOL " + word, nil
 }
 
-// LoudnessManagementCommand is the set command for the Loudness
+// LoudnessManagementCommand returns the set command for the Loudness
 // Management switch.
 func LoudnessManagementCommand(on bool) (string, error) {
 	return "PSLOM " + onOffWire(on), nil
 }
 
-// DynamicRangeCommand is the set command for one Dynamic Range mode.
+// DynamicRangeCommand returns the set command for one Dynamic Range
+// mode.
 func DynamicRangeCommand(mode string) (string, error) {
 	word, err := drcWire(mode)
 	if err != nil {
@@ -242,48 +250,47 @@ func DynamicRangeCommand(mode string) (string, error) {
 	return "PSDRC " + word, nil
 }
 
-// LFECommand is the set command for one LFE level, in display units
-// where the receiver's positive wire value is negative decibels. The
-// receiver cuts only, from 0dB down to 10dB, so the wire value is never
-// negative.
+// LFECommand returns the set command for an LFE level in dB, from -10
+// to 0. The receiver can only reduce the level, so the wire value is
+// the number of dB of reduction and is never negative.
 func LFECommand(display int) (string, error) {
 	if display > 0 || display < -10 {
-		return "", fmt.Errorf("LFE level %ddB", display)
+		return "", fmt.Errorf("LFE level %ddB is outside -10 to 0dB", display)
 	}
 	return fmt.Sprintf("PSLFE %02d", -display), nil
 }
 
-// EffectCommand is the set command for one effect level.
+// EffectCommand returns the set command for one effect level.
 func EffectCommand(value int) (string, error) {
 	return fmt.Sprintf("PSEFF %02d", value), nil
 }
 
-// delayLimit is the longest delay time, in milliseconds, the receiver
-// carries.
+// delayLimit is the longest delay time that the receiver accepts, in
+// milliseconds.
 const delayLimit = 999
 
-// DelayCommand is the set command for one delay time.
+// DelayCommand returns the set command for one delay time.
 func DelayCommand(value int) (string, error) {
 	if value < 0 || value > delayLimit {
-		return "", fmt.Errorf("delay %dms", value)
+		return "", fmt.Errorf("delay %dms is outside 0 to %dms", value, delayLimit)
 	}
 	return fmt.Sprintf("PSDEL %03d", value), nil
 }
 
-// AudioDelayCommand is the set command for one audio delay.
+// AudioDelayCommand returns the set command for one audio delay.
 func AudioDelayCommand(value int) (string, error) {
 	if value < 0 || value > delayLimit {
-		return "", fmt.Errorf("audio delay %dms", value)
+		return "", fmt.Errorf("audio delay %dms is outside 0 to %dms", value, delayLimit)
 	}
 	return fmt.Sprintf("PSDELAY %03d", value), nil
 }
 
-// SubwooferCommand is the set command for the subwoofer switch.
+// SubwooferCommand returns the set command for the subwoofer switch.
 func SubwooferCommand(on bool) (string, error) {
 	return "PSSWR " + onOffWire(on), nil
 }
 
-// RestorerCommand is the set command for one Audio Restorer mode.
+// RestorerCommand returns the set command for one Audio Restorer mode.
 func RestorerCommand(mode string) (string, error) {
 	word, err := restorerWire(mode)
 	if err != nil {
@@ -292,7 +299,7 @@ func RestorerCommand(mode string) (string, error) {
 	return "PSRSTR " + word, nil
 }
 
-// GraphicEqCommand is the set command for the Graphic EQ switch.
+// GraphicEqCommand returns the set command for the Graphic EQ switch.
 func GraphicEqCommand(mode string) (string, error) {
 	word, err := onOffModeWire(mode)
 	if err != nil {
@@ -301,7 +308,8 @@ func GraphicEqCommand(mode string) (string, error) {
 	return "PSGEQ " + word, nil
 }
 
-// HeadphoneEqCommand is the set command for the Headphone EQ switch.
+// HeadphoneEqCommand returns the set command for the Headphone EQ
+// switch.
 func HeadphoneEqCommand(mode string) (string, error) {
 	word, err := onOffModeWire(mode)
 	if err != nil {
@@ -310,13 +318,13 @@ func HeadphoneEqCommand(mode string) (string, error) {
 	return "PSHEQ " + word, nil
 }
 
-// SpeakerVirtualizerCommand is the set command for the Speaker
+// SpeakerVirtualizerCommand returns the set command for the Speaker
 // Virtualizer switch.
 func SpeakerVirtualizerCommand(on bool) (string, error) {
 	return "PSSPV " + onOffWire(on), nil
 }
 
-// DialogEnhancerCommand is the set command for one Dialog Enhancer
+// DialogEnhancerCommand returns the set command for one Dialog Enhancer
 // level.
 func DialogEnhancerCommand(mode string) (string, error) {
 	word, err := dialogEnhancerWire(mode)
@@ -326,19 +334,21 @@ func DialogEnhancerCommand(mode string) (string, error) {
 	return "PSDEH " + word, nil
 }
 
-// ChannelVolumeCommand is the set command for one channel's trim, in
-// display units.
+// ChannelVolumeCommand returns the set command for the trim of one
+// channel, in dB. The wire value is the trim plus 50, written in the
+// same digits as a volume, so a trim can be a half step.
 func ChannelVolumeCommand(channel string, display float64) (string, error) {
 	if channel == "" {
-		return "", fmt.Errorf("channel volume names no channel")
+		return "", fmt.Errorf("the channel name for a channel volume is empty")
 	}
 	halves := int((display + 50) * 2)
 	return "CV" + channel + " " + HalfStepDigits(halves), nil
 }
 
-// The wire words the set commands carry, written from the display
-// value the status reports. Each one answers the error that a word the
-// receiver does not know carries.
+// The functions below translate a value in the form that the status
+// reports into the word that the set command sends. Each returns an
+// error for a value that the receiver does not accept.
+
 func ecoWire(mode string) (string, error) {
 	switch mode {
 	case "on":
@@ -348,7 +358,7 @@ func ecoWire(mode string) (string, error) {
 	case "auto":
 		return "AUTO", nil
 	}
-	return "", fmt.Errorf("eco mode %q", mode)
+	return "", fmt.Errorf("eco mode %q is not one of on, off, auto", mode)
 }
 
 func dimmerWire(mode string) (string, error) {
@@ -362,7 +372,7 @@ func dimmerWire(mode string) (string, error) {
 	case "bright":
 		return "BRI", nil
 	}
-	return "", fmt.Errorf("dimmer %q", mode)
+	return "", fmt.Errorf("dimmer mode %q is not one of off, dim, dark, bright", mode)
 }
 
 func autoStandbyWire(mode string) (string, error) {
@@ -382,7 +392,7 @@ func autoStandbyWire(mode string) (string, error) {
 	case "8h":
 		return "8H", nil
 	}
-	return "", fmt.Errorf("auto standby %q", mode)
+	return "", fmt.Errorf("auto standby mode %q is not one of off, 15m, 30m, 60m, 2h, 4h, 8h", mode)
 }
 
 func inputModeWire(mode string) (string, error) {
@@ -396,7 +406,7 @@ func inputModeWire(mode string) (string, error) {
 	case "analog":
 		return "ANALOG", nil
 	}
-	return "", fmt.Errorf("audio input mode %q", mode)
+	return "", fmt.Errorf("audio input mode %q is not one of auto, hdmi, digital, analog", mode)
 }
 
 func bluetoothModeWire(mode string) (string, error) {
@@ -406,7 +416,7 @@ func bluetoothModeWire(mode string) (string, error) {
 	case "off":
 		return "OFF", nil
 	}
-	return "", fmt.Errorf("bluetooth transmitter %q", mode)
+	return "", fmt.Errorf("bluetooth transmitter mode %q is not one of on, off", mode)
 }
 
 func bluetoothOutputWire(mode string) (string, error) {
@@ -416,7 +426,7 @@ func bluetoothOutputWire(mode string) (string, error) {
 	case "bluetooth":
 		return "BT", nil
 	}
-	return "", fmt.Errorf("bluetooth output %q", mode)
+	return "", fmt.Errorf("bluetooth output %q is not one of speakers, bluetooth", mode)
 }
 
 func multEqWire(mode string) (string, error) {
@@ -432,7 +442,7 @@ func multEqWire(mode string) (string, error) {
 	case "off":
 		return "OFF", nil
 	}
-	return "", fmt.Errorf("multEQ mode %q", mode)
+	return "", fmt.Errorf("MultEQ mode %q is not one of reference, l/r bypass, flat, manual, off", mode)
 }
 
 func dynamicVolumeWire(mode string) (string, error) {
@@ -446,7 +456,7 @@ func dynamicVolumeWire(mode string) (string, error) {
 	case "heavy":
 		return "HEV", nil
 	}
-	return "", fmt.Errorf("dynamic volume %q", mode)
+	return "", fmt.Errorf("dynamic volume mode %q is not one of off, light, medium, heavy", mode)
 }
 
 func restorerWire(mode string) (string, error) {
@@ -460,7 +470,7 @@ func restorerWire(mode string) (string, error) {
 	case "high":
 		return "HI", nil
 	}
-	return "", fmt.Errorf("audio restorer %q", mode)
+	return "", fmt.Errorf("audio restorer mode %q is not one of off, low, medium, high", mode)
 }
 
 func drcWire(mode string) (string, error) {
@@ -476,7 +486,7 @@ func drcWire(mode string) (string, error) {
 	case "auto":
 		return "AUTO", nil
 	}
-	return "", fmt.Errorf("dynamic range %q", mode)
+	return "", fmt.Errorf("dynamic range mode %q is not one of off, low, mid, hi, auto", mode)
 }
 
 func dialogEnhancerWire(mode string) (string, error) {
@@ -490,10 +500,10 @@ func dialogEnhancerWire(mode string) (string, error) {
 	case "high":
 		return "HIGH", nil
 	}
-	return "", fmt.Errorf("dialog enhancer %q", mode)
+	return "", fmt.Errorf("dialog enhancer mode %q is not one of off, low, mid, high", mode)
 }
 
-// onOffWire writes a switch the way a set command carries it.
+// onOffWire returns the word that a set command uses for a switch.
 func onOffWire(on bool) string {
 	if on {
 		return "ON"
@@ -501,8 +511,8 @@ func onOffWire(on bool) string {
 	return "OFF"
 }
 
-// onOffModeWire writes a switch word, on or off, the way a set command
-// carries it.
+// onOffModeWire is onOffWire for a switch that arrives as the string
+// "on" or "off".
 func onOffModeWire(mode string) (string, error) {
 	switch mode {
 	case "on":
@@ -510,5 +520,5 @@ func onOffModeWire(mode string) (string, error) {
 	case "off":
 		return "OFF", nil
 	}
-	return "", fmt.Errorf("switch %q", mode)
+	return "", fmt.Errorf("switch value %q is not one of on, off", mode)
 }

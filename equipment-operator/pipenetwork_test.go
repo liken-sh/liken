@@ -1,12 +1,10 @@
 package main
 
-// The network the fake receivers and amps listen on. Each
-// connection to a fake is a net.Pipe, whose reads and writes wait on
-// channels. So a test in a synctest bubble that talks to a fake waits
-// on nothing outside the bubble, and its fake clock advances. The
-// operator reaches the fakes through the dialFunc that the controller
-// and the clients take, and opens each WiiM's event listener through
-// the network's listenFunc.
+// An in-memory network for the fake receivers and amps. Each
+// connection is a net.Pipe, which blocks on channels and not on a
+// socket, so a test in a synctest bubble never waits outside the bubble
+// and the fake clock can advance. Tests give the operator the network's
+// dial as its dialFunc and bind as its listenFunc.
 
 import (
 	"context"
@@ -20,32 +18,29 @@ import (
 	"testing"
 )
 
-// pipeNetwork hands each dial to an address a fake listens on one end
-// of a new pipe, and the fake the other end. A dial to any other
-// address fails with ECONNREFUSED, the way a closed port on loopback
-// answers.
+// pipeNetwork connects a dial to a fake's address with a pipe. A dial
+// to an address with no fake fails with ECONNREFUSED, as a closed
+// loopback port does.
 type pipeNetwork struct {
 	mutex     sync.Mutex
 	ports     int
 	listeners map[string]func(net.Conn)
 }
 
-// testNetwork is the network every test's fakes listen on. Each fake
-// takes an address of its own, so two tests never reach each other's
-// fakes, and the address of a fake that stopped refuses.
+// testNetwork is shared by every test. Each fake gets its own address,
+// so one test never reaches another test's fake.
 var testNetwork = &pipeNetwork{listeners: map[string]func(net.Conn){}}
 
-// listen takes a new loopback address, and serves each connection to it
-// on a goroutine of its own until the test ends.
+// listen returns a new address and runs serve on a new goroutine for
+// each connection to it, until the test ends.
 func (n *pipeNetwork) listen(t *testing.T, serve func(net.Conn)) string {
 	t.Helper()
-	address := n.take(serve)
+	address := n.reserve(serve)
 	t.Cleanup(func() { n.free(address) })
 	return address
 }
 
-// take holds a new loopback address for serve.
-func (n *pipeNetwork) take(serve func(net.Conn)) string {
+func (n *pipeNetwork) reserve(serve func(net.Conn)) string {
 	n.mutex.Lock()
 	defer n.mutex.Unlock()
 	n.ports++
@@ -54,27 +49,24 @@ func (n *pipeNetwork) take(serve func(net.Conn)) string {
 	return address
 }
 
-// free gives an address up, so a dial to it is refused.
 func (n *pipeNetwork) free(address string) {
 	n.mutex.Lock()
 	defer n.mutex.Unlock()
 	delete(n.listeners, address)
 }
 
-// bind is the listenFunc of a test. It opens a listener at a new
-// loopback address, whatever address the caller asks for, and the
-// address is free again when the listener closes.
+// bind is the listenFunc that tests pass to the operator. It ignores
+// the requested address and listens at a new one.
 func (n *pipeNetwork) bind(string, string) (net.Listener, error) {
 	listener := &pipeListener{accepted: make(chan net.Conn), closed: make(chan struct{})}
-	address := n.take(listener.hand)
+	address := n.reserve(listener.deliver)
 	listener.address, _ = net.ResolveTCPAddr("tcp", address)
 	listener.free = func() { n.free(address) }
 	return listener, nil
 }
 
-// serveHTTP answers every request to a new address with handler until
-// the test ends, and answers the address. It serves TLS with
-// certificate when certificate is not nil.
+// serveHTTP serves handler at a new address until the test ends and
+// returns the address. It serves TLS when certificate is not nil.
 func (n *pipeNetwork) serveHTTP(t *testing.T, handler http.Handler, certificate *tls.Certificate) string {
 	t.Helper()
 	listener, _ := n.bind("tcp", ":0")
@@ -87,8 +79,8 @@ func (n *pipeNetwork) serveHTTP(t *testing.T, handler http.Handler, certificate 
 	return listener.Addr().String()
 }
 
-// pipeListener takes the server end of each pipe a dial to its address
-// opens.
+// pipeListener is a net.Listener that accepts the server end of each
+// pipe that a dial to its address creates.
 type pipeListener struct {
 	address  *net.TCPAddr
 	accepted chan net.Conn
@@ -97,9 +89,9 @@ type pipeListener struct {
 	free     func()
 }
 
-// hand gives one connection to Accept, or closes it when the listener
-// has closed.
-func (l *pipeListener) hand(conn net.Conn) {
+// deliver passes conn to Accept, or closes it when the listener is
+// closed.
+func (l *pipeListener) deliver(conn net.Conn) {
 	select {
 	case l.accepted <- conn:
 	case <-l.closed:
@@ -126,7 +118,7 @@ func (l *pipeListener) Close() error {
 
 func (l *pipeListener) Addr() net.Addr { return l.address }
 
-// dial is the dialFunc of a test.
+// dial is the dialFunc that tests pass to the operator.
 func (n *pipeNetwork) dial(_ context.Context, network, address string) (net.Conn, error) {
 	n.mutex.Lock()
 	serve, listening := n.listeners[address]

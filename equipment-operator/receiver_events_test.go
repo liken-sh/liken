@@ -1,8 +1,5 @@
 package main
 
-// The Events of a Receiver's Reachable condition, against a fake Denon
-// that drops its connections.
-
 import (
 	"testing"
 	"testing/synctest"
@@ -10,10 +7,8 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events"
 )
 
-// A receiver that drops off the network posts one Warning, and one
-// Normal when it answers again. The recorder counts the second
-// Connected on the first, because the two are the same Event within
-// ten minutes.
+// The second Connected Event has count 2, because the recorder patches
+// the count of an identical Event written in the last ten minutes.
 func TestAReceiverThatDropsOffPostsUnreachableAndConnected(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -36,8 +31,9 @@ func TestAReceiverThatDropsOffPostsUnreachableAndConnected(t *testing.T) {
 	})
 }
 
-// withoutConnecting drops the Event of the first write, which says
-// Connecting only when the write runs before the receiver answers.
+// withoutConnecting removes the Connecting Event. The first status
+// write posts it only when the write happens before the receiver
+// responds, so the test cannot depend on it.
 func withoutConnecting(list []posted) []posted {
 	var out []posted
 	for _, one := range list {

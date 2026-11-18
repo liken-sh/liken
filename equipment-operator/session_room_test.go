@@ -1,9 +1,7 @@
 package main
 
-// What a session tells the TV of its room: a session that starts is
-// adopted and wakes nothing, a flag that turns on and a toggle to on are
-// wakes, and a toggle to standby or both flags going off is a sleep.
-// television_session_test.go tests what each of them writes.
+// When a session reports a wake or a sleep to the TV of its room.
+// television_session_test.go tests what each report writes.
 
 import (
 	"fmt"
@@ -17,14 +15,12 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
-// roomRecord records the wakes and the sleeps a session reports. The
-// TV side is the API server's, and these tests are about when the
-// session reports, so a record is the narrowest stand-in.
+// roomRecord records the calls that a session makes on its room.
 type roomRecord struct {
 	mutex  sync.Mutex
 	events []string
-	// name and power are the TV the room reports to a power press, and
-	// empty for a room with no TV.
+	// name and power are what television returns: the TV's name and
+	// its status.power, both empty for a room with no TV.
 	name, power string
 }
 
@@ -62,8 +58,6 @@ func (r *roomRecord) slept() {
 	r.events = append(r.events, "slept")
 }
 
-// waitFor waits until the record holds a count of events, and answers
-// them.
 func (r *roomRecord) waitFor(t *testing.T, count int) []string {
 	t.Helper()
 	deadline := time.Now().Add(testTimeout)
@@ -75,14 +69,14 @@ func (r *roomRecord) waitFor(t *testing.T, count int) []string {
 			return events
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the room heard %q, want %d events", events, count)
+			t.Fatalf("the room heard %q before the deadline, want %d events", events, count)
 		}
 		time.Sleep(time.Millisecond)
 	}
 }
 
-// A session that starts, even with both flags on, is adopted and wakes
-// nothing; a flag that turns on later is a wake.
+// A session that starts with both flags on wakes nothing, because the
+// operator adopts it.
 func TestASessionWakesTheRoomOnlyWhenAFlagTurnsOn(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -124,9 +118,9 @@ func TestASessionWakesTheRoomOnlyWhenAFlagTurnsOn(t *testing.T) {
 	}
 }
 
-// In a room with no TV, the remote's power button wakes the room when
-// it turns the receiver on, and puts it to sleep when it turns the
-// receiver off.
+// In a room with no TV, the remote's power button puts the room to
+// sleep when it turns the receiver off, and wakes it when it turns the
+// receiver on.
 func TestAToggleWakesAndSleepsTheRoom(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -145,7 +139,7 @@ func TestAToggleWakesAndSleepsTheRoom(t *testing.T) {
 		mustDeepEqual(t, room.waitFor(t, 3), []string{
 			"opened (awake false)",
 			"slept",
-			"woke: status.session.powerAsk asks toggle, and the receiver reports power Standby",
+			"woke: status.session.powerAsk requests toggle, and the receiver reports power Standby",
 		})
 	})
 }

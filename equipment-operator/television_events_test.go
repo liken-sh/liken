@@ -1,7 +1,5 @@
 package main
 
-// The Events of the conditions a node workload writes on a Television.
-
 import (
 	"testing"
 	"testing/synctest"
@@ -10,12 +8,12 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events"
 )
 
-// A TV that ignores every power command makes the application end
-// Unconfirmed, a Warning.
+// When the TV ignores every power command, PowerApplied ends with the
+// reason Unconfirmed and the operator posts a Warning Event.
 func TestAPowerTheTVDidNotConfirmPostsAWarning(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		api := controlling(t, roomWithTV(stubbornTV()), lounge(TelevisionOn))
+		api := controlling(t, busWithTV(stubbornTV()), lounge(TelevisionOn))
 
 		appliedAt(t, api, "lounge", 1)
 
@@ -23,12 +21,12 @@ func TestAPowerTheTVDidNotConfirmPostsAWarning(t *testing.T) {
 	})
 }
 
-// A TV that takes the command makes the application end Confirmed, a
-// Normal Event.
+// When the TV obeys the power command, PowerApplied ends with the reason
+// Confirmed and the operator posts a Normal Event.
 func TestAPowerTheTVConfirmedPostsANormalEvent(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		api := controlling(t, roomWithTV(televisionTV(cec.PowerStandby)), lounge(TelevisionOn))
+		api := controlling(t, busWithTV(televisionTV(cec.PowerStandby)), lounge(TelevisionOn))
 
 		appliedAt(t, api, "lounge", 1)
 

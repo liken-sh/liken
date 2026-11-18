@@ -1,9 +1,9 @@
-// The network the fake amps and their UPnP sides listen on, in memory.
-// Each connection is a net.Pipe, whose reads and writes wait on
-// channels, so a test in a synctest bubble that talks to a fake waits
-// on nothing outside the bubble, and its fake clock advances. The
-// client reaches the fakes through its Dial, and the fakes reach the
-// client's event callback through the listener its Listen opens.
+// An in-memory network for the fake amps and their UPnP servers. Each
+// connection is a net.Pipe, which blocks on channels and not on a
+// socket, so a test in a synctest bubble never waits outside the bubble
+// and the fake clock can advance. A client dials the fakes through its
+// Dial field, and the fakes send events to the listener that its Listen
+// field opens.
 
 package wiim
 
@@ -27,23 +27,21 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
-// pipeNetwork hands each dial to an address a listener holds one end of
-// a new pipe, and the listener the other end. A dial to any other
-// address fails with ECONNREFUSED, the way a closed port on loopback
-// answers.
+// pipeNetwork connects a dial to a listener's address with a pipe. A
+// dial to an address with no listener fails with ECONNREFUSED, as a
+// closed loopback port does.
 type pipeNetwork struct {
 	mutex     sync.Mutex
 	ports     int
 	listeners map[string]*pipeListener
 }
 
-// testNetwork is the network every test's fakes listen on. Each
-// listener takes an address of its own, so two tests never reach each
-// other's fakes.
+// testNetwork is shared by every test. Each listener gets its own
+// address, so one test never reaches another test's fake.
 var testNetwork = &pipeNetwork{listeners: map[string]*pipeListener{}}
 
-// Listen is the Listen of a client under test. It opens a listener at a
-// new loopback address, whatever address the client asks for.
+// Listen is the Listen function that tests give a client. It ignores
+// the requested address and listens at a new one.
 func (n *pipeNetwork) Listen(string, string) (net.Listener, error) {
 	return n.open(), nil
 }
@@ -62,8 +60,8 @@ func (n *pipeNetwork) open() *pipeListener {
 	return listener
 }
 
-// dial is the Dial of a client under test, and of a fake that calls the
-// client back.
+// dial is the Dial function that tests give a client. A fake also uses
+// it to send events to the client's listener.
 func (n *pipeNetwork) dial(ctx context.Context, network, address string) (net.Conn, error) {
 	n.mutex.Lock()
 	listener, listening := n.listeners[address]
@@ -83,9 +81,9 @@ func (n *pipeNetwork) dial(ctx context.Context, network, address string) (net.Co
 	}
 }
 
-// serve answers each request to a new address with handler until the
-// test ends, and answers the address. A fake amp serves over TLS, the
-// way the amp's control API does, and its UPnP side serves plain HTTP.
+// serve serves handler at a new address until the test ends and
+// returns the address. A fake amp's control API uses TLS, as a real
+// amp's does, and its UPnP server uses plain HTTP.
 func (n *pipeNetwork) serve(t *testing.T, handler http.Handler, overTLS bool) string {
 	t.Helper()
 	listener := n.open()
@@ -99,8 +97,8 @@ func (n *pipeNetwork) serve(t *testing.T, handler http.Handler, overTLS bool) st
 	return listener.address.String()
 }
 
-// pipeListener takes the server end of each pipe a dial to its address
-// opens.
+// pipeListener is a net.Listener that accepts the server end of each
+// pipe that a dial to its address creates.
 type pipeListener struct {
 	network  *pipeNetwork
 	address  *net.TCPAddr
@@ -118,7 +116,7 @@ func (l *pipeListener) Accept() (net.Conn, error) {
 	}
 }
 
-// Close frees the address, so a later dial to it is refused.
+// Close releases the address, so a later dial to it is refused.
 func (l *pipeListener) Close() error {
 	l.once.Do(func() {
 		close(l.closed)
@@ -131,7 +129,6 @@ func (l *pipeListener) Close() error {
 
 func (l *pipeListener) Addr() net.Addr { return l.address }
 
-// testClient is a client for address that reaches the test network.
 func testClient(address string, listener func(equipment.Event)) *Client {
 	client := NewClient(address, listener)
 	client.Dial = testNetwork.dial
@@ -139,9 +136,8 @@ func testClient(address string, listener func(equipment.Event)) *Client {
 	return client
 }
 
-// testCertificate is a self-signed certificate for the fake amps. The
-// client skips verification, the way it does for a real amp, so any
-// certificate serves.
+// testCertificate returns a self-signed certificate for the fake amps.
+// The client does not verify an amp's certificate, so any one works.
 func testCertificate(t *testing.T) tls.Certificate {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

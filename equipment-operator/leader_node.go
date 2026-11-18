@@ -3,13 +3,11 @@
 package main
 
 // This file replaces leader.go in the node build, the binary that the
-// cec DaemonSet runs on each node with a CEC adapter. leader.go links
-// client-go's leader election, which links client-go's typed clientset
-// and its scheme. That more than doubles the binary and the memory the
-// node workload takes at start, and the node workload elects nothing:
-// each pod holds the one adapter on its own node. The node build sets
-// the build tag node, so leader.go, the election, and the typed
-// clientset stay out of it. The node workload's watches link only
+// cec DaemonSet runs on each node that has a CEC adapter. leader.go
+// imports client-go's leader election, which imports the typed
+// clientset and its scheme, and those make the binary and its memory
+// use much larger. The node workload needs no election, because each
+// pod is the only user of the adapter on its node. Its watches use only
 // client-go's reflector, dynamic client, and rest (watch.go). The
 // Deployment runs the full build.
 
@@ -19,14 +17,14 @@ import (
 	"os"
 )
 
-// leadership has no election in the node build.
+// leadership has no state in the node build, which runs no election.
 type leadership struct{}
 
-// lead refuses to run the Deployment's operator from the node build,
-// because the node build cannot take the Lease that keeps the operator
-// to one acting copy.
+// lead exits with an error, because the node build has no leader
+// election, and without the Lease more than one copy of the operator
+// would act at once.
 func lead(settings) *leadership {
-	fmt.Fprintf(os.Stderr, "%s runs the node workload only; the operator runs from %s\n",
+	fmt.Fprintf(os.Stderr, "%s runs the node workload only, and the operator runs from %s\n",
 		nodeBinary, operatorBinary)
 	os.Exit(1)
 	return nil

@@ -1,6 +1,3 @@
-// The read back after a setter: it never waits on a poll, and it never
-// undoes a change that landed while it read.
-
 package wiim
 
 import (
@@ -11,10 +8,9 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
-// A setter sent while a poll reads does not wait for the poll, because
-// the controller's pass sends it. The poll reads the setter's family
-// instead.
-func TestAReadBackDuringAPollIsLeftToThePoll(t *testing.T) {
+// A setter sent while a poll holds c.reads returns without waiting, and
+// the poll reads the setter's family.
+func TestThePollReadsTheFamilyOfASetterSentDuringIt(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp, client := quietAmp(t)
 		amp.answer(ledCommand, "0")
@@ -32,8 +28,8 @@ func TestAReadBackDuringAPollIsLeftToThePoll(t *testing.T) {
 	})
 }
 
-// A volume press that lands while a read back reads stays: the read
-// back writes only the fields it read.
+// A volume change that arrives during a read back is kept, because the
+// read back copies only the fields it read.
 func TestAReadBackKeepsAVolumeSentDuringIt(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp, client := quietAmp(t)

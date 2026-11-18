@@ -7,5 +7,5 @@ weight: 20
 
 The reference lists every field of the `Receiver`, `CECBus`, and
 `Television` resources, and the metrics that the operator serves. The
-field pages are generated from the CRDs in the repository's `deploy/`
+field pages are generated from the CRDs in the component's `deploy/`
 directory, so they match what `kubectl explain` shows.

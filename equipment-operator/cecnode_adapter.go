@@ -1,8 +1,8 @@
 package main
 
-// The node workload's two modes, the retries of a join that failed,
-// and how the node workload follows the kernel's changes to the
-// adapter's addresses.
+// The node workload puts the adapter in the mode of the `CECBus` spec,
+// Listen or Control, retries a failed join, and follows the kernel's
+// changes to the adapter's addresses.
 
 import (
 	"context"
@@ -18,11 +18,12 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// adapterConfig is what the spec asks of the adapter. In Control it
-// also holds the OSD name the adapter announces, and the physical
-// address the Display states or the reason the node workload has none.
-// A change of either is a new claim of the logical address, because
-// the kernel announces both from the claim.
+// adapterConfig is the adapter configuration that the `CECBus` spec
+// selects. In Control it also has the OSD name to announce and the
+// physical address from the `Display`, or a problem that explains why
+// the adapter cannot claim an address. The kernel announces the OSD
+// name and the physical address when it claims the logical address, so
+// a change to either needs a new claim.
 type adapterConfig struct {
 	mode     CECMode
 	osdName  string
@@ -31,20 +32,20 @@ type adapterConfig struct {
 	problem  string
 }
 
-// adapterDisplay is one good read of a Display: its name and the
-// physical address it stated.
+// adapterDisplay is the last successful read of a `Display`: its name
+// and the physical address in its status.
 type adapterDisplay struct {
 	name     string
 	physical cec.PhysicalAddress
 }
 
-// desired reads what the spec asks. In Control that includes a read of
-// the Display, because the adapter announces the Display's physical
-// address, and display-operator publishes it there from the EDID. A
-// read that fails is not a new address: the node workload keeps the
-// last good read of the same Display, so an API server that is briefly
-// unreachable does not take the adapter off the bus, and the entry's
-// message gives the read's error.
+// desired returns the configuration that the spec selects. In Control
+// the adapter announces the physical address that `display-operator`
+// reads from the EDID and writes in the `Display`'s status, so desired
+// reads the `Display`. When that read fails, desired reuses the address
+// of the last successful read of the same `Display`, so a short API
+// server outage does not take the adapter off the bus, and the entry's
+// message shows the read error.
 func (n *cecNode) desired(spec CECBusSpec, display string) adapterConfig {
 	n.displayNote = ""
 	if spec.Mode != CECControl {
@@ -78,17 +79,18 @@ func (n *cecNode) desired(spec CECBusSpec, display string) adapterConfig {
 	return want
 }
 
-// The waits between the tries of a join that failed. A join fails when
-// every playback address is taken or the kernel refuses a call, and
-// both can change with no change to the spec. The wait doubles after
-// each failed try up to its bound, so an adapter that cannot join does
-// not claim on the wire every pass.
+// A join fails when every playback logical address is taken or the
+// kernel refuses a call. Either can change without a change to the
+// spec, so the node workload tries again. The wait doubles after each
+// failure, from cecRetryFirst to cecRetryMax, so an adapter that cannot
+// join does not send a claim on every pass.
 const (
 	cecRetryFirst = 30 * time.Second
 	cecRetryMax   = 10 * time.Minute
 )
 
-// nextRetry is the wait after a failed try whose wait was last.
+// nextRetry returns the wait before the next try. last is the previous
+// wait, or zero after the first failure.
 func nextRetry(last time.Duration) time.Duration {
 	if last == 0 {
 		return cecRetryFirst
@@ -96,12 +98,13 @@ func nextRetry(last time.Duration) time.Duration {
 	return min(2*last, cecRetryMax)
 }
 
-// apply brings the adapter to a configuration when it differs from the
-// one the adapter runs, or when a join that failed is due for another
-// try. A change of mode or of address forgets what the adapter found,
-// because the adapter may now speak for another place in the tree.
-// Only a failure that means the adapter left is returned; any other
-// refusal becomes the entry's message.
+// apply configures the adapter as want when want differs from the
+// applied configuration, or when a failed join is due for another try.
+// A changed configuration clears the directory and the active source,
+// because the devices and the source that they recorded may not apply
+// to the new mode or physical address. apply returns only an error that
+// means the adapter left. Any other refusal becomes the entry's
+// message.
 func (n *cecNode) apply(ctx context.Context, want adapterConfig) error {
 	n.mutex.Lock()
 	same := n.applied == want && n.entry.Machine != ""
@@ -150,11 +153,10 @@ func (n *cecNode) apply(ctx context.Context, want adapterConfig) error {
 }
 
 // listen clears the adapter's logical addresses and makes the handle a
-// monitor. Clearing needs an initiator, so the handle takes that mode
-// first. The kernel then answers nothing for the adapter, and a
-// Pulse-Eight turns off its autonomous mode. The kernel allows a
-// monitor only to a process with CAP_NET_ADMIN, which is the one
-// capability the DaemonSet adds.
+// monitor. With no logical address the kernel answers nothing for the
+// adapter, and a Pulse-Eight turns off its autonomous mode. The kernel
+// allows a monitor only to a process with CAP_NET_ADMIN, which
+// `deploy/cec.yaml` adds to the `DaemonSet`'s pod.
 func (n *cecNode) listen() (CECAdapterStatus, error) {
 	entry := CECAdapterStatus{State: AdapterListening}
 	if err := n.device.Initiate(); err != nil {
@@ -167,7 +169,7 @@ func (n *cecNode) listen() (CECAdapterStatus, error) {
 	all := n.caps.Capabilities.Has(cec.CapMonitorAll)
 	if err := n.device.Monitor(all); err != nil {
 		if errors.Is(err, unix.EPERM) {
-			return entry, fmt.Errorf("%w; the kernel allows a monitor only to a process with CAP_NET_ADMIN", err)
+			return entry, fmt.Errorf("%w: the kernel allows a monitor only to a process with CAP_NET_ADMIN", err)
 		}
 		return entry, err
 	}
@@ -177,14 +179,13 @@ func (n *cecNode) listen() (CECAdapterStatus, error) {
 	return entry, nil
 }
 
-// osdName is the name the adapter announces: the bus's spec.osdName,
-// and liken for a bus that names none, such as one the API server
-// stored before the field had a default. A TV lists each source by
-// this name. The kernel's osd_name field is 15 bytes with the
-// terminating NUL, and the schema holds the name to 14 printable ASCII
-// characters, the limit of the [OSD Name] operand of Set OSD Name
-// (HDMI-CEC 1.3a, CEC Table 26), so the cut here only guards a bus the
-// API server did not validate.
+// osdName returns the name that the adapter announces and a TV shows
+// for this source: `spec.osdName`, or `defaultOSDName` when the field
+// is empty, as on a bus stored before the field had a default. The
+// [OSD Name] operand of Set OSD Name has at most 14 characters
+// (HDMI-CEC 1.3a, CEC Table 26), and the schema enforces that limit, so
+// the cut here applies only to a bus that the API server did not
+// validate.
 func osdName(spec CECBusSpec) string {
 	name := spec.OSDName
 	if name == "" {
@@ -196,20 +197,20 @@ func osdName(spec CECBusSpec) string {
 	return name
 }
 
-// The Joining messages for a claim the kernel did not complete.
+// Messages for an adapter in the Joining state, when the kernel has not
+// completed the claim.
 const (
-	joinWaitsForAddress = "the adapter has no physical address yet; the kernel claims a logical address once it has one"
+	joinWaitsForAddress = "the adapter has no physical address yet, and the kernel claims a logical address only once it has one"
 	joinFoundNoAddress  = "the kernel claimed no playback logical address: a device holds each of 4, 8, and 11"
 )
 
-// control makes the handle the adapter's only initiator and a
-// follower, sets the Display's physical address, and claims a playback
-// logical address. The claim clears any address a previous run left,
-// because the kernel refuses a new claim on a configured adapter. A
-// claim the kernel already holds with the same physical address, type,
-// OSD name, and passthrough is kept: a release and a claim take the
-// adapter off the bus and put it back, and the TV sees its source leave
-// and return.
+// control joins the bus as a playback device with the `Display`'s
+// physical address. The kernel refuses a new claim on a configured
+// adapter, so control first releases the addresses that a previous run
+// left. When the kernel already has the claim that control would make,
+// control keeps it, because a release and a new claim take the adapter
+// off the bus and back, and the TV then shows its source leaving and
+// returning.
 func (n *cecNode) control(want adapterConfig) (CECAdapterStatus, error) {
 	entry := CECAdapterStatus{State: AdapterJoining}
 	if err := n.device.Follow(); err != nil {
@@ -230,28 +231,27 @@ func (n *cecNode) control(want adapterConfig) (CECAdapterStatus, error) {
 		return entry, nil
 	}
 	// A USB adapter has no EDID and takes the address it is given. An
-	// adapter on a video port takes its own port's address from the
-	// EDID, and its driver refuses another one.
+	// adapter on a video port gets its address from the EDID of its
+	// port, and its driver refuses another one.
 	if n.caps.Capabilities.Has(cec.CapPhysAddr) {
 		if err := n.device.SetPhysicalAddress(want.physical); err != nil {
 			return entry, err
 		}
 	}
-	// Passthrough makes the kernel turn the TV remote's buttons into key
-	// events on the adapter's input device as well, which a media
-	// Remote claims.
+	// Passthrough makes the kernel turn the TV remote's buttons into
+	// key events on the adapter's input device, which a media
+	// `Remote` claims.
 	if err := n.device.Claim(cec.Claim{OSDName: want.osdName, Passthrough: true}); err != nil {
 		return entry, err
 	}
 	return n.readClaim(entry, want)
 }
 
-// holdsClaim answers whether the kernel already holds the claim that
-// control would make: one logical address of a playback device, with
-// the OSD name and passthrough the claim states, on an adapter that
-// announces the Display's physical address. An adapter on a video port
-// takes its address from its own port, so for it the address is not
-// compared.
+// holdsClaim returns whether the kernel already has the claim that
+// control would make: one playback logical address, the wanted OSD name,
+// passthrough, and the `Display`'s physical address. An adapter on a
+// video port takes its physical address from its port, so holdsClaim
+// does not compare that address.
 func (n *cecNode) holdsClaim(want adapterConfig) (bool, error) {
 	if want.problem != "" {
 		return false, nil
@@ -273,10 +273,10 @@ func (n *cecNode) holdsClaim(want adapterConfig) (bool, error) {
 	return actual == want.physical, nil
 }
 
-// readClaim fills the entry from the adapter's addresses as the kernel
-// holds them. With no physical address the kernel stores the claim and
-// completes it later, and the event it sends then brings the node
-// workload back here through syncAddresses.
+// readClaim fills the entry from the kernel's addresses. When the
+// adapter has no physical address, the kernel stores the claim and
+// completes it later, and syncAddresses calls readClaim again on the
+// kernel's state-change event.
 func (n *cecNode) readClaim(entry CECAdapterStatus, want adapterConfig) (CECAdapterStatus, error) {
 	actual, err := n.device.PhysicalAddress()
 	if err != nil {
@@ -313,9 +313,9 @@ func (n *cecNode) readClaim(entry CECAdapterStatus, want adapterConfig) (CECAdap
 	return entry, nil
 }
 
-// adapterChanged follows the kernel's reports about the adapter itself.
-// It runs on the read loop, so it only asks the next pass to read the
-// adapter's addresses; the pass owns every change to the adapter.
+// adapterChanged handles the kernel's events about the adapter itself.
+// It runs on the read loop, so it only requests a pass that reads the
+// adapter's addresses again.
 func (n *cecNode) adapterChanged(event cec.Event) {
 	if !event.StateChange {
 		return
@@ -323,15 +323,14 @@ func (n *cecNode) adapterChanged(event cec.Event) {
 	n.mutex.Lock()
 	n.resync = true
 	n.mutex.Unlock()
-	poke(n.wake)
+	sendWake(n.wake)
 }
 
-// syncAddresses brings the entry to the addresses the kernel holds
-// after a state change, in Control. The kernel can complete a stored
-// claim later, when an adapter on a video port gets its address, and
-// the adapter then joins with no call from the node workload. The
-// kernel can also take the logical address away, and the adapter then
-// joins again.
+// syncAddresses updates the entry in Control after the kernel's state
+// change. The kernel can complete a stored claim with no call from the
+// node workload, for example when an adapter on a video port gets its
+// physical address. When the kernel removes or changes the logical
+// address, syncAddresses applies the configuration again.
 func (n *cecNode) syncAddresses(ctx context.Context, want adapterConfig) error {
 	n.mutex.Lock()
 	wanted := n.resync
@@ -366,8 +365,8 @@ func (n *cecNode) syncAddresses(ctx context.Context, want adapterConfig) error {
 	return nil
 }
 
-// adapterError answers an error that ends the node workload, and logs
-// any other.
+// adapterError returns err when it means the adapter left, which ends
+// the node workload, and otherwise logs err and returns nil.
 func (n *cecNode) adapterError(err error) error {
 	if cec.IsGone(err) {
 		return err
@@ -376,38 +375,35 @@ func (n *cecNode) adapterError(err error) error {
 	return nil
 }
 
-// scanFailure starts the message of a scan the kernel refused.
+// scanFailure starts the entry's message after a failed scan, so a
+// later successful scan clears that message and no other.
 const scanFailure = "scanning the bus: "
 
 // startMode starts the work of an adapter that joined the bus in
-// Control. It scans the bus once, and after that it asks questions only
-// of a device that announces itself. Nothing in Control transmits on a
-// timer. A timed question is traffic on the wire, and some TVs answer
-// traffic they did not expect by switching their own input, so a timer
-// that asks would change the room with no person's action;
-// plans/completed/09-cec.md records the measurement. This is the node workload's
-// rule for the wire: the handle took the follower mode before the
-// claim, so the kernel queues every message the adapter hears from the
-// moment it joins, and the scan here is the one baseline read. When the
-// subscription fails, the node workload subscribes and scans again: an
-// adapter that leaves ends the process, and the kubelet starts a new
-// one; a claim the kernel takes away, a new physical address, and a
-// change of mode each join again, which runs startMode again. The
-// directory keeps the list current from what the devices
-// broadcast and from the answers they send, and the TV's power follows
-// the messages that change it, as cec.Directory states. stopMode waits
-// for a scan or a question in progress to finish, so neither transmits
-// after the handle leaves Control.
+// Control. It scans the bus once, and after that it sends a question
+// only to a device that announces itself. Nothing in Control transmits
+// on a timer, because some TVs switch their input when they receive
+// traffic they did not expect, and that would change the TV's input
+// with no action from a person.
+//
+// The handle became a follower before the claim, so the kernel queues
+// every message the adapter receives from the moment it joins, and the
+// scan is the baseline read after that subscription. After the scan the
+// directory stays current from the messages that the devices send, as
+// `cec.Directory` describes. Each new join runs startMode again, and
+// when the adapter leaves, the process ends and the kubelet starts a
+// new one, which scans again. stopMode waits for a scan or a question
+// in progress, so neither transmits after the handle leaves Control.
 func (n *cecNode) startMode(ctx context.Context, own cec.LogicalAddress) {
 	ctx, cancel := context.WithCancel(ctx)
 	work := &sync.WaitGroup{}
 	arrivals := make(chan cec.LogicalAddress, cecArrivals)
-	tvPowerAsk := make(chan struct{}, 1)
+	tvPowerReadQueue := make(chan struct{}, 1)
 	n.stopMode = func() { cancel(); work.Wait() }
 	n.modeContext, n.modeWork = ctx, work
 	n.mutex.Lock()
 	n.arrivals, n.introduced = arrivals, map[cec.LogicalAddress]cec.PhysicalAddress{}
-	n.tvPowerAsk, n.tvPowerAskedAt = tvPowerAsk, nil
+	n.tvPowerReadQueue, n.tvPowerQueuedAddress = tvPowerReadQueue, nil
 	n.mutex.Unlock()
 	work.Go(func() {
 		if !n.joinScan(ctx, own) {
@@ -421,8 +417,8 @@ func (n *cecNode) startMode(ctx context.Context, own cec.LogicalAddress) {
 				if !n.introduce(own, address) {
 					return
 				}
-			case <-tvPowerAsk:
-				if !n.answerTVPowerAsk(own) {
+			case <-tvPowerReadQueue:
+				if !n.runQueuedTVPowerRead(own) {
 					return
 				}
 			}
@@ -430,13 +426,13 @@ func (n *cecNode) startMode(ctx context.Context, own cec.LogicalAddress) {
 	})
 }
 
-// cecArrivals bounds the devices that wait for their questions. A bus
-// has at most 14 other devices, so a full queue already holds each one.
+// cecArrivals is the capacity of the queue of devices that wait for an
+// introduction. A bus has at most 14 other devices, so the queue has
+// room for each of them.
 const cecArrivals = 16
 
-// joinScan scans the bus once when the adapter joins, and again after a
-// wait only when the kernel refused the scan. The wait doubles from
-// cecRetryFirst up to cecRetryMax, as a join's does. It answers false
+// joinScan scans the bus when the adapter joins, and retries a failed
+// scan with the same doubling wait as a failed join. It returns false
 // when the mode ended or the adapter left.
 func (n *cecNode) joinScan(ctx context.Context, own cec.LogicalAddress) bool {
 	var wait time.Duration
@@ -452,8 +448,6 @@ func (n *cecNode) joinScan(ctx context.Context, own cec.LogicalAddress) bool {
 			n.entry.Message = scanFailure + err.Error()
 		case n.entry.State == AdapterJoined || n.entry.State == AdapterScanned:
 			n.entry.State = AdapterScanned
-			// A scan that works clears the failure of the last one, and
-			// leaves any other message in place.
 			if strings.HasPrefix(n.entry.Message, scanFailure) {
 				n.entry.Message = ""
 			}
@@ -477,15 +471,14 @@ func (n *cecNode) joinScan(ctx context.Context, own cec.LogicalAddress) bool {
 	}
 }
 
-// arrived asks the mode's work to introduce the sender of a message it
-// heard in Control, when the sender is new to the adapter or announced
-// a new physical address. A device that joins the bus claims a logical
-// address, and the kernel of that device broadcasts Report Physical
-// Address then, so a device that joins or moves after the scan is heard
-// here. Each device is introduced once for each physical address it
-// announces, so a device that repeats its broadcasts asks nothing more
-// of the adapter. The TV has one exception, in askTVPower. held says
-// whether the directory held the sender before the message.
+// arrived queues the sender of a message for an introduction when the
+// directory did not have the sender before the message (held is
+// false), when the adapter has not introduced it yet, or when it
+// announced a new physical address. A device that joins the bus or
+// moves broadcasts Report Physical Address, so the adapter hears it
+// after the scan. A device that repeats its broadcasts gets one
+// introduction for each physical address. queueTVPowerRead handles questions
+// about the TV's power.
 func (n *cecNode) arrived(message cec.Message, after cec.Peer, held bool) {
 	if message.From == cec.AddressUnregistered {
 		return
@@ -496,7 +489,7 @@ func (n *cecNode) arrived(message cec.Message, after cec.Peer, held bool) {
 	if n.arrivals == nil {
 		return
 	}
-	n.askTVPower(message, opcode, after)
+	n.queueTVPowerRead(message, opcode, after)
 	introduced, known := n.introduced[message.From]
 	moved := opcode == cec.OpReportPhysicalAddr && after.Physical != introduced
 	if held && known && !moved {
@@ -509,8 +502,8 @@ func (n *cecNode) arrived(message cec.Message, after cec.Peer, held bool) {
 	}
 }
 
-// introduce asks one device that arrived for the facts the directory
-// does not hold yet. It answers false when the adapter left.
+// introduce asks one device for the details that the directory does
+// not have yet. It returns false when the adapter left.
 func (n *cecNode) introduce(own, address cec.LogicalAddress) bool {
 	before := n.directory.Peers()
 	_, err := cec.Introduce(n.device, n.directory, own, address, n.tvPowerReader(own))
@@ -519,7 +512,7 @@ func (n *cecNode) introduce(own, address cec.LogicalAddress) bool {
 		return false
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "asking logical address %d for its facts from the adapter on %s: %v\n", address, n.machine, err)
+		fmt.Fprintf(os.Stderr, "reading the facts of logical address %d through the adapter on %s: %v\n", address, n.machine, err)
 	}
 	if !n.directory.Holds(address) {
 		// The device left, so a later message from it is a new arrival.
@@ -534,9 +527,9 @@ func (n *cecNode) introduce(own, address cec.LogicalAddress) bool {
 	return true
 }
 
-// heard is where every message the adapter receives arrives. It
-// updates the directory, logs a message a person notices, and in
-// Control it answers what a follower owes.
+// heard handles every message the adapter receives. It updates the
+// directory, logs a message that a person would notice, and in Control
+// sends the replies that the CEC specification requires of a follower.
 func (n *cecNode) heard(message cec.Message) {
 	held := n.directory.Holds(message.From)
 	before, after, changed := n.directory.Hear(message)
@@ -549,9 +542,10 @@ func (n *cecNode) heard(message cec.Message) {
 		operands := message.Operands()
 		n.noteSource(cec.PhysicalAddress(operands[0])<<8 | cec.PhysicalAddress(operands[1]))
 	}
-	// A Standby that reaches the TV is a recent command, so the next wake
-	// sends Image View On without trusting a power read that can still
-	// answer On.
+	// A Standby to the TV, or a broadcast Standby, counts as a recent
+	// command, because the TV can still report On for a while after it.
+	// A power command within cecPowerSettle after it is then sent
+	// without a read of the power first.
 	if opcode == cec.OpStandby && !message.IsPoll() && (message.To == cec.AddressTV || message.IsBroadcast()) {
 		n.mutex.Lock()
 		n.lastCommand = time.Now()
@@ -583,12 +577,12 @@ func (n *cecNode) heard(message cec.Message) {
 			n.fail(err)
 			return
 		}
-		fmt.Fprintf(os.Stderr, "answering %v: %v\n", message, err)
+		fmt.Fprintf(os.Stderr, "replying to %v: %v\n", message, err)
 	}
 }
 
-// devicesOf turns the directory's peers into the entry's devices, with
-// each fact in the words the status uses and an unknown fact absent.
+// devicesOf converts the directory's peers to the entry's devices. A
+// field that the directory has no value for is left empty.
 func devicesOf(peers []cec.Peer) []CECDevice {
 	devices := make([]CECDevice, 0, len(peers))
 	for _, peer := range peers {

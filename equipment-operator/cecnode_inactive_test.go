@@ -1,11 +1,5 @@
 package main
 
-// Inactive Source. The adapter tells the TV that the Display has no
-// picture when the Player's screen goes dark while the route still
-// leads to the Display, and when the node workload stops. A room that
-// goes to standby gets Standby instead, and a route that a person moved
-// to another source is that source's.
-
 import (
 	"testing"
 	"testing/synctest"
@@ -15,7 +9,7 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/cec/cectest"
 )
 
-// inactiveOf answers the Inactive Source messages the adapters sent.
+// inactiveOf returns the Inactive Source messages that the adapters sent.
 func inactiveOf(wire *cectest.Bus) []string {
 	var sent []string
 	for _, message := range wire.Sent() {
@@ -43,16 +37,16 @@ func TestADarkScreenSendsInactiveSource(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
-				wire := roomWithTV(televisionTV(cec.PowerOn))
+				wire := busWithTV(televisionTV(cec.PowerOn))
 				session := wokeNow()
 				api := awakeRoom(t, wire, session)
 				wokeWith(t, api, session)
 				for _, message := range c.before {
 					wire.Send(message)
 				}
-				// The adapter must hear the moved route before the
-				// screen goes dark, or it still holds the route to the
-				// Display and sends Inactive Source for it.
+				// The adapter must receive the route change before the
+				// screen sleeps, or it sends Inactive Source for the
+				// route it still has.
 				synctest.Wait()
 
 				asleep := *session
@@ -70,12 +64,12 @@ func TestADarkScreenSendsInactiveSource(t *testing.T) {
 	}
 }
 
-// After Inactive Source the adapter holds no route to the Display, so
-// it answers no Request Active Source for a screen that is dark.
+// After Inactive Source the adapter has no route to the Display, so it
+// does not answer a Request Active Source while the screen is dark.
 func TestInactiveSourceEndsTheRoute(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerOn))
+		wire := busWithTV(televisionTV(cec.PowerOn))
 		session := wokeNow()
 		api := awakeRoom(t, wire, session)
 		wokeWith(t, api, session)
@@ -94,11 +88,6 @@ func TestInactiveSourceEndsTheRoute(t *testing.T) {
 	})
 }
 
-// A node workload that stops while the route leads to its Display, and
-// no session holds the room awake, tells the TV that the Display has no
-// source behind it. A session that holds the room awake keeps its
-// picture through a restart of the node workload, so the adapter sends
-// nothing then.
 func TestAStoppedNodeSendsInactiveSource(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -108,7 +97,7 @@ func TestAStoppedNodeSendsInactiveSource(t *testing.T) {
 	}{
 		{"no session and a route to the Display",
 			false, []cec.Message{cec.NewMessage(cec.AddressTV, cec.AddressBroadcast, cec.OpSetStreamPath, 0x13, 0x00)}, []string{"4->0 9d 13 00"}},
-		{"a session that holds the room awake", true, nil, nil},
+		{"an awake session", true, nil, nil},
 		{"no session and a route to another source",
 			false, []cec.Message{cec.NewMessage(cec.AddressTV, cec.AddressBroadcast, cec.OpSetStreamPath, 0x15, 0x00)}, nil},
 	}
@@ -117,7 +106,7 @@ func TestAStoppedNodeSendsInactiveSource(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
-				wire := roomWithTV(televisionTV(cec.PowerOn))
+				wire := busWithTV(televisionTV(cec.PowerOn))
 				api := startCECAPI(t)
 				api.putTelevision(lounge(""))
 				_, stop, done := joinedNode(t, api, wire)
@@ -129,9 +118,6 @@ func TestAStoppedNodeSendsInactiveSource(t *testing.T) {
 				for _, message := range c.before {
 					wire.Send(message)
 				}
-				// The adapter must hear the moved route before the
-				// screen goes dark, or it still holds the route to the
-				// Display and sends Inactive Source for it.
 				synctest.Wait()
 				time.Sleep(quietPeriod)
 

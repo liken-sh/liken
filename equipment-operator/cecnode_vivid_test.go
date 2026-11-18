@@ -1,9 +1,9 @@
 package main
 
-// The node workload against the kernel's own CEC core, through the
-// vivid driver. It skips when no vivid adapter is open to this user,
-// which is the case in CI. cec/AGENTS.md gives the commands that set
-// vivid up.
+// Tests of the node workload against the kernel's CEC core, using the
+// vivid driver's emulated adapters. They skip when this user cannot
+// open a vivid adapter, as in CI. cec/AGENTS.md has the commands that
+// set up vivid.
 
 import (
 	"context"
@@ -20,17 +20,17 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// vividTVVariable names what plays vivid's TV. Unset, a test plays the
-// TV itself on vivid's capture adapter. With the value cec-follower,
-// cec-follower from v4l-utils plays it, and the test leaves the
-// capture adapter alone; cec/AGENTS.md gives the command.
+// vividTVVariable selects what acts as the TV on vivid's capture
+// adapter. When it is unset, the test acts as the TV. When it is
+// cec-follower, the cec-follower program from v4l-utils acts as the TV,
+// and the test leaves the capture adapter alone. cec/AGENTS.md has the
+// cec-follower command.
 const vividTVVariable = "CEC_VIVID_TV"
 
-// vividPair opens vivid's TV adapter and one output adapter that vivid
-// connected to the TV, and answers the output's physical address. The
-// TV's handle is for a test that plays the TV. A test that leaves the
-// TV to cec-follower passes playsTV false, and the handle closes with
-// no change to the claim cec-follower holds.
+// vividPair opens vivid's TV adapter and an output adapter connected to
+// it, and returns both with the output's physical address. With playsTV
+// false, vividPair closes the TV handle at once, so cleanup does not
+// release the logical address that cec-follower claimed.
 func vividPair(t *testing.T, playsTV bool) (*cec.Device, *cec.Device, cec.PhysicalAddress) {
 	t.Helper()
 	lockVivid(t)
@@ -73,18 +73,17 @@ func vividPair(t *testing.T, playsTV bool) (*cec.Device, *cec.Device, cec.Physic
 	return tv, output, address
 }
 
-// claimTV makes a vivid adapter a follower that holds the TV's logical
-// address 0. The kernel claims a TV's address by polling 0, and it
-// takes 14 instead when the poll ends in neither an acknowledgement
-// nor a NACK. On vivid that happens now and then with no adapter
-// holding 0, and a TV at 14 is not the TV any test expects, so the
-// claim is made again, a few times at most.
+// claimTV makes a vivid adapter a follower with TV logical address 0.
+// To claim a TV address the kernel polls address 0, and it takes 14
+// instead when the poll gets neither an ACK nor a NACK. vivid sometimes
+// does that even when no adapter has address 0, so claimTV tries the
+// claim up to three times.
 func claimTV(t *testing.T, tv *cec.Device) {
 	t.Helper()
 	mustSucceed(t, tv.Follow())
 	for range 3 {
-		// A run that was interrupted leaves its claim in the kernel, which
-		// refuses a new claim on a configured adapter with EBUSY.
+		// A claim from an interrupted earlier run stays in the kernel,
+		// which refuses a new claim on a configured adapter with EBUSY.
 		mustSucceed(t, tv.Release())
 		mustSucceed(t, tv.Claim(cec.Claim{Type: cec.TypeTV, OSDName: "TV"}))
 		held, err := tv.Addresses()
@@ -97,8 +96,8 @@ func claimTV(t *testing.T, tv *cec.Device) {
 	t.Fatal("the TV did not claim logical address 0")
 }
 
-// playTV makes a vivid adapter the TV, in standby, answering what a
-// follower owes, until the test ends.
+// playTV makes a vivid adapter act as a TV in standby until the test
+// ends. It replies to the messages that a CEC follower must reply to.
 func playTV(t *testing.T, tv *cec.Device) {
 	t.Helper()
 	claimTV(t, tv)
@@ -138,16 +137,15 @@ func TestVividTheNodeWorkloadJoinsAndFindsTheTV(t *testing.T) {
 	mustDeepEqual(t, entry.Devices[0], CECDevice{LogicalAddress: 0, PhysicalAddress: "0.0.0.0", Type: "TV", OSDName: "TV", CECVersion: "1.4", Power: "Standby"})
 }
 
-// lockVivid holds a lock file for the length of one test. The vivid
-// tests of this package and of the other package that has them share
-// one emulated bus, and go test runs the two packages at once, so a
-// test waits here until the other package's test releases the bus.
+// lockVivid takes an exclusive lock on a file until the test ends. The
+// vivid tests of this package and of the cec package share one emulated
+// bus, and go test runs the packages at the same time.
 func lockVivid(t *testing.T) {
 	t.Helper()
-	// The lock opens read-only, and the file is created only when it is
-	// missing, because the kernel refuses O_CREAT on another user's file
-	// in a sticky directory such as /tmp, and a privileged run of the
-	// monitor test shares the file with an ordinary one.
+	// Create the file only when it does not exist. The kernel refuses
+	// O_CREAT on a file that another user owns in a sticky directory such
+	// as /tmp, and a privileged run of the cec package's monitor test can
+	// leave the file owned by root.
 	path := filepath.Join(os.TempDir(), "equipment-operator-vivid.lock")
 	file, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -161,12 +159,12 @@ func lockVivid(t *testing.T) {
 	})
 }
 
-// playWakingTV makes a vivid adapter a TV in standby that obeys the
-// power commands, until the test ends. Image View On moves it to ToOn,
-// and a second later to On, because a TV takes time to wake and
-// reports the transition while it does. Standby moves it the same way
-// to Standby. It answers a read of every message the TV heard, polls
-// aside, in order.
+// playWakingTV makes a vivid adapter act as a TV in standby that obeys
+// power commands until the test ends. Image View On sets its power to
+// ToOn and, a second later, to On, the way a real TV reports a wake.
+// Standby moves it through ToStandby to Standby the same way. The
+// returned function returns every message the TV received except polls,
+// in order.
 func playWakingTV(t *testing.T, tv *cec.Device) func() []cec.Message {
 	t.Helper()
 	var heardMutex sync.Mutex
@@ -224,16 +222,17 @@ func playWakingTV(t *testing.T, tv *cec.Device) func() []cec.Message {
 	}
 }
 
-// vividPowerTime bounds one application of spec.power on vivid: the
-// node workload joins and scans at the speed of a real CEC wire, and a
-// TV that cec-follower plays takes about 9 seconds to wake.
+// vividPowerTime is the longest a test waits for one application of
+// spec.power on vivid. The node workload joins and scans at the speed
+// of a real CEC bus, and a TV that cec-follower plays is slow to wake.
 const vividPowerTime = 60 * time.Second
 
-// The node workload puts the kernel's TV in standby and wakes it again,
-// and each time reads the power back from the TV. The Deployment's pass
-// then copies the TV's power into the Television. A TV that already
-// reports the state gets no command, so the test asks for Standby
-// first, whatever state the TV is in when the test starts.
+// The node workload puts the vivid TV in standby, then wakes it, and
+// reads the TV's power after each command. The Deployment's pass copies
+// that power into the Television. The node workload sends no command to
+// a TV that already reports the requested power, so the test requests
+// Standby first, and the request for On then needs a command whatever
+// power the TV started in.
 func TestVividTheNodeWorkloadWakesTheTV(t *testing.T) {
 	external := os.Getenv(vividTVVariable) == "cec-follower"
 	tv, output, address := vividPair(t, !external)
@@ -258,10 +257,10 @@ func TestVividTheNodeWorkloadWakesTheTV(t *testing.T) {
 	t.Logf("PowerApplied: %s %s: %s", applied.Status, applied.Reason, applied.Message)
 	mustMatch(t, applied.Status, ConditionTrue)
 	if !strings.Contains(applied.Message, "sent Image View On") {
-		t.Errorf("the TV was on before the command: %s", applied.Message)
+		t.Errorf("the PowerApplied message is %q, want it to contain \"sent Image View On\"", applied.Message)
 	}
-	// The node workload's entry carries the TV's power to the
-	// Deployment, and the entry write follows the confirmation.
+	// The node workload reports the TV's power in its CECBus entry, and
+	// it writes the entry after it confirms the new power.
 	api.waitForEntryWithin(t, "den", "node-1", vividPowerTime, func(entry CECAdapterStatus) bool {
 		return len(entry.Devices) > 0 && entry.Devices[0].LogicalAddress == 0 && entry.Devices[0].Power == "On"
 	})

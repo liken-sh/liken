@@ -14,11 +14,9 @@ import (
 	"time"
 )
 
-// testCertificate is a self-signed certificate that is its own CA, for
-// a fake that serves TLS on the test network. It names every address
-// the test network gives out, so a client that verifies it against
-// testCAPEM accepts it. It is valid from an hour before the clock of
-// the caller, which in a synctest bubble is the bubble's fake clock.
+// testCertificate returns a self-signed CA certificate for a fake that
+// serves TLS, valid only for 127.0.0.1. It is valid for an hour either
+// side of time.Now, which in a synctest bubble is the fake clock.
 func testCertificate(t *testing.T) tls.Certificate {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -39,8 +37,8 @@ func testCertificate(t *testing.T) tls.Certificate {
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
 }
 
-// testCAPEM is the certificate in PEM form, the way a ServiceAccount's
-// ca.crt holds the cluster's CA.
+// testCAPEM encodes the certificate as PEM, the format of ca.crt in a
+// ServiceAccount's mounted credentials.
 func testCAPEM(certificate tls.Certificate) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificate.Certificate[0]})
 }

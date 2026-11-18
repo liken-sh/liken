@@ -1,8 +1,7 @@
 package main
 
-// The node workload's life around the adapter: the quiet report, the
-// release when it stops, the release when no bus names its machine,
-// and the retries. cecnode_test.go holds the fixtures.
+// Tests of the node workload's adapter lifecycle. cecnode_test.go has
+// the fixtures.
 
 import (
 	"context"
@@ -15,8 +14,8 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/cec/cectest"
 )
 
-// joinedNode is a node workload in Control on the room's wire that has
-// finished a scan.
+// joinedNode starts a node workload in Control mode and waits until it
+// has finished a scan.
 func joinedNode(t *testing.T, api *cecAPI, wire *cectest.Bus) (*cectest.Adapter, context.CancelFunc, <-chan error) {
 	t.Helper()
 	adapter, device := usbAdapter(wire)
@@ -43,14 +42,14 @@ func joinedNode(t *testing.T, api *cecAPI, wire *cectest.Bus) (*cectest.Adapter,
 	return adapter, cancel, done
 }
 
-// A stop ends the node workload's writes that wait out a 429, so the
-// workload ends within its grace period and not after the API server's
-// wait. The last entry waits at most cecStopWrite.
+// A stop cancels entry writes that wait to retry after a 429, so the
+// workload exits within its grace period. The write of the Stopped
+// entry waits at most cecStopWrite.
 func TestAStopEndsAWriteThatWaitsOutA429(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		wire := cecRoom()
+		wire := fakeCECBus()
 		_, cancel, done := joinedNode(t, api, wire)
 		api.mutex.Lock()
 		api.throttlingEntries = true
@@ -72,22 +71,21 @@ func TestAStopEndsAWriteThatWaitsOutA429(t *testing.T) {
 		case <-time.After(2 * cecStopWrite):
 			t.Fatal("the node workload did not stop")
 		}
-		// The adapter's read loop sees the end of its context within a
-		// quarter second (cec.Read), and the Stopped entry then meets the
-		// 429 and waits at most cecStopWrite.
+		// cec.Read notices the cancel within its 250 ms wait, and then
+		// the Stopped write waits at most cecStopWrite.
 		if took := time.Since(began); took > cecStopWrite+time.Second/4 {
 			t.Errorf("the node workload stopped after %s, want at most %s", took, cecStopWrite+time.Second/4)
 		}
 	})
 }
 
-// A SIGTERM lets a write already sent run to its answer, so the
-// Stopped entry is the last write and no earlier entry lands after it.
+// After a stop, a write that is already in flight completes before the
+// Stopped entry is written, so no earlier entry can overwrite it.
 func TestAStopLetsAWriteInFlightLandBeforeTheStoppedEntry(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		wire := cecRoom()
+		wire := fakeCECBus()
 		_, cancel, done := joinedNode(t, api, wire)
 		release := make(chan struct{})
 		arrived := make(chan struct{}, 64)
@@ -103,10 +101,10 @@ func TestAStopLetsAWriteInFlightLandBeforeTheStoppedEntry(t *testing.T) {
 		}
 
 		cancel()
-		// A workload that cut the write in flight writes its Stopped entry
-		// while the API server still holds the earlier write. The server
-		// answers that write once the Stopped entry arrives, or after a
-		// bound that ends the wait of a workload that waits for its answer.
+		// A workload that does not wait for the earlier write sends its
+		// Stopped entry now, and the test then releases the earlier write
+		// to overwrite it. A workload that waits gets the release after
+		// 300 ms.
 		select {
 		case <-stoppedEntry:
 		case <-time.After(300 * time.Millisecond):
@@ -125,14 +123,14 @@ func TestAStopLetsAWriteInFlightLandBeforeTheStoppedEntry(t *testing.T) {
 	})
 }
 
-// An adapter whose entry does not change writes nothing, however long
-// it runs, because the Deployment reads whether the entry is current
-// from the node workload's pod and not from the entry's age.
+// An unchanged entry is never written again. The Deployment judges
+// whether an entry is current from the node workload's pod, not from
+// the entry's age.
 func TestAnIdleNodeWritesNoEntry(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		joinedNode(t, api, cecRoom())
+		joinedNode(t, api, fakeCECBus())
 		before := api.writesOf("node-1")
 
 		time.Sleep(10 * time.Minute)
@@ -140,19 +138,19 @@ func TestAnIdleNodeWritesNoEntry(t *testing.T) {
 		mustMatch(t, api.writesOf("node-1"), before)
 		entry, _ := api.entry("den", "node-1")
 		if _, err := time.Parse(time.RFC3339, entry.ReportedAt); err != nil {
-			t.Errorf("reportedAt = %q: %v", entry.ReportedAt, err)
+			t.Errorf("parsing reportedAt %q: %v", entry.ReportedAt, err)
 		}
 	})
 }
 
-// A pod that stops takes the adapter off the bus, and its entry says
-// so, because a claim the kernel kept would leave the adapter answering
-// the TV for a machine no pod serves.
+// A stopping pod releases the adapter's logical address and stops
+// following the bus. Otherwise the kernel keeps the claim, and the
+// adapter keeps answering the TV for a machine that no pod serves.
 func TestAStoppedNodeReleasesTheAdapter(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		adapter, cancel, done := joinedNode(t, api, cecRoom())
+		adapter, cancel, done := joinedNode(t, api, fakeCECBus())
 
 		cancel()
 
@@ -163,7 +161,7 @@ func TestAStoppedNodeReleasesTheAdapter(t *testing.T) {
 		entry, _ := api.entry("den", "node-1")
 		mustMatch(t, entry.State, AdapterStopped)
 		if entry.LogicalAddress != nil || !strings.HasPrefix(entry.Message, "the node workload stopped: context canceled") {
-			t.Errorf("entry = %+v", entry)
+			t.Errorf("the entry is %+v, want no logical address and a message that starts with the node workload stopped", entry)
 		}
 	})
 }
@@ -172,7 +170,7 @@ func TestAnUnpluggedAdapterLeavesAStoppedEntry(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		adapter, _, done := joinedNode(t, api, cecRoom())
+		adapter, _, done := joinedNode(t, api, fakeCECBus())
 
 		adapter.Unplug()
 
@@ -182,7 +180,7 @@ func TestAnUnpluggedAdapterLeavesAStoppedEntry(t *testing.T) {
 		entry, _ := api.entry("den", "node-1")
 		mustMatch(t, entry.State, AdapterStopped)
 		if !strings.HasPrefix(entry.Message, "the adapter failed: ") || !strings.Contains(entry.Message, "no such device") {
-			t.Errorf("message = %q", entry.Message)
+			t.Errorf("the message is %q, want one that starts with the adapter failed and contains no such device", entry.Message)
 		}
 	})
 }
@@ -198,13 +196,14 @@ func waitForExit(t *testing.T, done <-chan error) error {
 	}
 }
 
-// When no bus names the machine and the node workload cannot make one,
-// the adapter leaves the bus it was on and its entry goes.
-func TestAnAdapterNoBusNamesLeavesTheBus(t *testing.T) {
+// When no CECBus lists the machine, and the workload cannot create one
+// because a CECBus with the machine's name exists, the adapter leaves
+// its bus.
+func TestAnAdapterLeavesTheBusWhenNoBusNamesItsMachine(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		adapter, _, _ := joinedNode(t, api, cecRoom())
+		adapter, _, _ := joinedNode(t, api, fakeCECBus())
 
 		api.putBus(CECBus{Metadata: ObjectMeta{Name: "node-1"}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-2"}}}})
 		api.putBus(controlBus("den", CECBusAdapter{Machine: "node-2", Display: "acm-0001-receiver"}))
@@ -216,13 +215,13 @@ func TestAnAdapterNoBusNamesLeavesTheBus(t *testing.T) {
 	})
 }
 
-// A Display that cannot be read is not a new address: the adapter
-// keeps the address it announces, stays joined, and says why.
+// When the Display cannot be read, the adapter keeps its physical
+// address and stays joined.
 func TestAFailedDisplayReadKeepsTheAdapterJoined(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		wire := cecRoom()
+		wire := fakeCECBus()
 		adapter, _, _ := joinedNode(t, api, wire)
 		claimsBefore := adapter.Claims()
 
@@ -239,13 +238,11 @@ func TestAFailedDisplayReadKeepsTheAdapterJoined(t *testing.T) {
 	})
 }
 
-// A join that failed is tried again on a later pass, with no change to
-// the spec.
 func TestAFailedJoinIsTriedAgain(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		wire := cecRoom()
+		wire := fakeCECBus()
 		for _, address := range []cec.LogicalAddress{4, 8, 11} {
 			wire.Add(cectest.Peer{Logical: address, Physical: 0x2000, PrimaryType: 4})
 		}
@@ -282,20 +279,20 @@ func TestTheRetryWaitGrowsToItsBound(t *testing.T) {
 	}
 }
 
-// An adapter on a video port with no address yet stores its claim, and
-// the kernel completes the claim when the address arrives. The node
-// workload follows the kernel's event, joins, and answers the TV.
-func TestAClaimTheKernelCompletesLaterJoins(t *testing.T) {
+// An adapter with no physical address yet is left with a pending
+// claim, which the kernel completes when the address arrives. The node
+// workload joins on the kernel's event.
+func TestAnAdapterJoinsWhenTheKernelCompletesItsClaim(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		wire := cecRoom()
+		wire := fakeCECBus()
 		adapter, device := wire.Adapter(cectest.Options{Physical: cec.InvalidPhysicalAddress, Capabilities: cec.CapLogAddrs | cec.CapTransmit})
 		api.putDisplay("acm-0001-receiver", "node-1", "2.0.0.0")
 		api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
 		startNode(t, api, "node-1", device)
 		entry := api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterJoining })
-		mustMatch(t, entry.Message, "the adapter has no physical address yet; the kernel claims a logical address once it has one")
+		mustMatch(t, entry.Message, "the adapter has no physical address yet, and the kernel claims a logical address only once it has one")
 
 		adapter.Connect(0x2000)
 
@@ -314,9 +311,9 @@ func TestAClaimTheKernelCompletesLaterJoins(t *testing.T) {
 	})
 }
 
-// The node workload compares its entry with the one the API server
-// stores, so an entry that a restore or another writer removed or
-// changed is written again on a quiet bus, with no change on the wire.
+// The node workload compares its entry with the stored one, so an
+// entry that a restore or another writer removed or changed is written
+// again while the bus is quiet.
 func TestAStoredEntryThatDiffersIsWrittenAgain(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -333,7 +330,7 @@ func TestAStoredEntryThatDiffersIsWrittenAgain(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
 				api := startCECAPI(t)
-				wire := cecRoom()
+				wire := fakeCECBus()
 				joinedNode(t, api, wire)
 				sent := len(wire.Sent())
 

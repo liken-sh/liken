@@ -1,6 +1,3 @@
-// The driver's half of the equipment.Driver contract: the state it
-// reports, the snapshot it hands the status, and the commands it sends.
-
 package denon
 
 import (
@@ -10,9 +7,8 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
-// The setters reject a zone the receiver does not carry, and sound mode
-// on a zone that carries none, so a caller learns before anything
-// reaches the wire.
+// A setter returns an error for a zone the receiver does not have, and
+// for a sound mode on a zone that has none, before it sends anything.
 func TestSettersRejectAnUnknownZone(t *testing.T) {
 	client := NewClient("192.0.2.1", nil)
 	cases := []struct {
@@ -29,15 +25,12 @@ func TestSettersRejectAnUnknownZone(t *testing.T) {
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			if one.send() == nil {
-				t.Fatalf("%s on an unknown zone did not error", one.name)
+				t.Fatalf("%s on zone9 returned nil, want an error because the receiver has no zone9", one.name)
 			}
 		})
 	}
 }
 
-// The zone-aware setters reach their own wire lines, so a second and
-// third zone each carry its Z2 or Z3 prefix and never the main zone's
-// command.
 func TestTheZoneSettersReachTheirOwnWireLines(t *testing.T) {
 	cases := []struct {
 		name string
@@ -70,16 +63,15 @@ func TestTheZoneSettersReachTheirOwnWireLines(t *testing.T) {
 	}
 }
 
-// SetSleep bounds the timer to the receiver's own 0 to 120 minute
-// range.
+// The receiver's sleep timer takes 0 to 120 minutes.
 func TestSetSleepRejectsAnOutOfRangeTimer(t *testing.T) {
 	client := NewClient("192.0.2.1", nil)
 
 	if err := client.SetSleep(equipment.MainZone, 121); err == nil {
-		t.Fatal("a timer above the receiver's range did not error")
+		t.Fatal("SetSleep(121) returned nil, want an error because the timer takes 0 to 120 minutes")
 	}
 	if err := client.SetSleep("zone2", -1); err == nil {
-		t.Fatal("a negative timer did not error")
+		t.Fatal("SetSleep(-1) returned nil, want an error because the timer takes 0 to 120 minutes")
 	}
 }
 
@@ -89,8 +81,6 @@ func TestVolumeResolutionIsTwoStepsPerDisplayUnit(t *testing.T) {
 	mustMatch(t, client.VolumeResolution(), 2)
 }
 
-// A disconnected client reports the state before the receiver answered:
-// unreachable, one main zone, and no volume yet.
 func TestStateBeforeTheReceiverAnswers(t *testing.T) {
 	client := NewClient("192.0.2.1", nil)
 
@@ -125,8 +115,7 @@ func TestSettingsCarriesTheParsedSnapshot(t *testing.T) {
 		harness := startHarness(t)
 		waitForField(t, harness.events, equipment.EventSoundMode)
 
-		// The noise lines arrive behind the sound mode, so poll until the
-		// folded snapshot holds them.
+		// The fake receiver sends these lines after the sound mode.
 		got := waitForSettings(t, harness.client, func(s Settings) bool {
 			return s.System.VideoSelect != nil && s.Audio.DRC != nil && s.Audio.LFE != nil
 		})
@@ -137,8 +126,6 @@ func TestSettingsCarriesTheParsedSnapshot(t *testing.T) {
 	})
 }
 
-// Every setter reaches the wire. The zone argument is main for now, and
-// the receiver's own command is what the fake reads back.
 func TestTheSettersSendEveryCommand(t *testing.T) {
 	cases := []struct {
 		name string
@@ -168,8 +155,6 @@ func TestTheSettersSendEveryCommand(t *testing.T) {
 	}
 }
 
-// A dropped connection is reported to the listener as a reachability
-// change, which is how the Receiver status learns the receiver is gone.
 func TestADroppedConnectionReportsUnreachable(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -187,16 +172,13 @@ func TestACommandReportsItsOutcomeToTheWiredReporter(t *testing.T) {
 	client := NewClient("192.0.2.1", nil)
 	client.Reporter = func(status string) { statuses = append(statuses, status) }
 
-	// A disconnected client drops the command and reports the failure.
 	client.SetPower(equipment.MainZone, true)
 
 	mustMatch(t, len(statuses), 1)
 	mustMatch(t, statuses[0], CommandFailed)
 }
 
-// A second zone appears in the equipment state only once the receiver
-// has named it.
-func TestStateCarriesASecondZoneOnceTheReceiverNamesIt(t *testing.T) {
+func TestStateHasASecondZoneOnlyAfterTheReceiverSendsALineForIt(t *testing.T) {
 	client := NewClient("192.0.2.1", nil)
 	client.fold("Z2ON")
 	client.fold("Z290")
@@ -208,6 +190,6 @@ func TestStateCarriesASecondZoneOnceTheReceiverNamesIt(t *testing.T) {
 	mustMatch(t, zone.Volume, 180)
 
 	if _, held := state.Zone("zone3"); held {
-		t.Error("a third zone the receiver never named is held")
+		t.Error("State has a zone3, want none because the receiver never reported one")
 	}
 }

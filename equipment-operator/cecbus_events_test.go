@@ -1,8 +1,6 @@
 package main
 
-// The Events of the Deployment's CECBus loop: each transition of a
-// bus's or a Television's conditions, and each Television that
-// discovery creates.
+// Tests of the Events that the Deployment's CECBus loop posts.
 
 import (
 	"testing"
@@ -12,8 +10,8 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events"
 )
 
-// startEventedBuses is the Deployment's CECBus loop at derivedAt, with
-// a recorder.
+// startEventedBuses returns the Deployment's CECBus loop with its clock
+// fixed at derivedAt and an Event recorder. The test runs each pass.
 func startEventedBuses(api *cecAPI, t *testing.T) *cecBusController {
 	controller := newCECBusController(api.client, testNamespace)
 	controller.now = func() time.Time { return derivedAt }
@@ -21,10 +19,9 @@ func startEventedBuses(api *cecAPI, t *testing.T) *cecBusController {
 	return controller
 }
 
-// An adapter that refuses its mode posts a Warning for each condition
-// it fails. Joined and Scanned fail with one reason and one message,
-// so the recorder counts the two on one Event. A pass that finds no
-// transition posts nothing more.
+// Joined and Scanned fail with the same reason and message, so the
+// recorder counts both on one Event. The second pass has no transition
+// and posts nothing.
 func TestARefusedAdapterPostsAWarningOnItsBus(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -43,8 +40,8 @@ func TestARefusedAdapterPostsAWarningOnItsBus(t *testing.T) {
 	})
 }
 
-// Discovery posts the Television it creates on the bus whose TV it
-// found, and the next pass posts the new Television's conditions.
+// When discovery creates a Television, it posts an Event on the bus,
+// and the next pass posts the Television's conditions.
 func TestDiscoveryPostsTheTelevisionItCreates(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

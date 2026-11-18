@@ -1,8 +1,3 @@
-// The client that reaches one WiiM over its stateless HTTPS API. There
-// is no connection to hold open: Run polls, folds each answer into the
-// device's own state, and translates between that state and the
-// equipment.Driver contract. A setter is its own GET.
-
 package wiim
 
 import (
@@ -24,88 +19,82 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/upnp"
 )
 
-// These bound one request and the wait between polls. A failed poll
-// backs off from the healthy interval, because a device that is down
-// should be asked less often than one that answers, not more.
-//
-// The poll is a heartbeat, and each one sends two GET requests.
-// getStatusEx is how the client finds the amp gone, because the amp
-// sends no event while nothing changes, and a subscription stays live
-// on the operator's side until its renewal, up to 25 minutes away. The
-// same read checks the amp's identity and carries its name.
-// getPlayerStatus carries the input, which no event the client
-// subscribes to is known to carry; plan 16's drill D2 owes the answer.
-// The events carry the volume, the mute, and the transport state, and
-// the poll keeps a field's event value only when the event came after
-// the poll started its read of the player (sequence.go).
-//
-// A poll reads more only when it has a reason: the track when the
-// player reports another one, the sleep timer while it counts down,
-// and every family when the client has a reason to think it missed a
-// change (readsEveryFamily).
-//
-// settingsResync is a backstop. The amp pushes no event when a person
-// changes the equalizer, the output, the subwoofer, the balance, a
-// timer, a preset, a pairing, or a control in the WiiM Home app or on
-// the amp: no source that plan 16 cites names an event that carries
-// one, and drill D2 has not run to look for one. Without the backstop,
-// such a change would reach the status only at the next new
-// subscription, and a declared setting the app moved would stay moved.
 var (
 	requestTimeout = 8 * time.Second
-	pollInterval   = 10 * time.Second
-	maxBackoff     = 30 * time.Second
+
+	// pollInterval is the wait between polls of a device that answers.
+	// The client polls although it subscribes to events, for two reasons.
+	// The amp sends no event while nothing changes, so a failed
+	// getStatusEx is how the client finds out that the amp is gone before
+	// the next subscription renewal fails. And the event parser reads only
+	// the volume, the mute, and the transport state, so getPlayerStatus is
+	// the client's only read of the input.
+	pollInterval = 10 * time.Second
+
+	maxBackoff = 30 * time.Second
+
+	// settingsResync is how long after the last read of every family the
+	// next poll reads them all again. The events report only the volume,
+	// the mute, and the transport state, so a change to the equalizer, the
+	// output, a timer, or another setting made in the WiiM Home app or on
+	// the amp reaches the client only through a read. Without this read,
+	// status shows such a change only after the next subscription opens,
+	// and the operator does not set back a declared setting that the app
+	// changed.
 	settingsResync = 30 * time.Minute
 
 	// pollFailures is how many polls in a row must fail before the
 	// client calls the device unreachable. A burst of commands can make
-	// the device miss one request and answer the next, and a poll is a
-	// single sample, so one miss is not the device going away.
+	// the device miss one request and answer the next, so one failed
+	// poll does not mean the device is gone.
 	pollFailures = 3
 )
 
-// maxSleepMinutes bounds the sleep timer the driver accepts.
 const maxSleepMinutes = 1440
 
-// trackRetries bounds the polls that read the track again after its
-// request failed, so a getMetaInfo that keeps failing is not sent on
-// every poll. A track change starts the count again.
+// trackRetries is the most getMetaInfo requests, one on each poll and
+// counting the first, that the client sends for one track while they
+// fail, so a getMetaInfo that always fails is not sent on every poll. A
+// track change starts the count again.
 const trackRetries = 3
 
-// readRetries bounds the full reads in a row that a command which
-// answered before may fail before the client leaves it to the backstop,
-// so a command that stopped answering does not make every poll a full
-// read, each one waiting out requestTimeout.
+// readRetries is the number of full reads in a row that a command which
+// answered before can fail in before the client stops counting its
+// failures. Until then, each failure makes the next poll a full read
+// again. After that, the command is still sent in each full read that
+// something else triggers, but its failure triggers no full read, so a
+// command that stopped answering does not make every poll a full read
+// that waits out requestTimeout.
 const readRetries = 3
 
-// volumeStepMax is the top of the device's own scale, which reads 0 to
-// 100 in whole steps.
+// volumeStepMax is the top of the device's volume scale of whole steps.
 const volumeStepMax = 100
 
-// Client holds one device's address and the state it last reported. The
-// API is unauthenticated HTTPS with a self-signed certificate, so the
-// transport skips verification.
+// Client drives one WiiM and keeps the state the device last reported.
+// The device's HTTPS API has no authentication and presents a
+// self-signed certificate, so the transport skips certificate
+// verification.
 type Client struct {
 	address  string
 	listener func(equipment.Event)
 
-	// upnpBase is the device's UPnP MediaRenderer, where the event
-	// subscriptions live. It is a fixed port beside the control port.
+	// upnpBase is the URL of the device's UPnP MediaRenderer, which
+	// serves the event subscriptions on a fixed port, not the control
+	// port.
 	upnpBase string
 
-	// upnp is the client for the subscription requests. The device
-	// closes the connection after it answers a SUBSCRIBE, so every
-	// request opens its own rather than reusing one the device has
-	// already closed.
+	// upnp sends the subscription requests. The device closes the
+	// connection after it answers a SUBSCRIBE, so each request opens its
+	// own connection.
 	upnp *http.Client
 
-	// Reporter counts the outcome of every command this client sends. A
-	// nil Reporter is a no-op.
+	// Reporter receives CommandOK or CommandFailed for each getStatusEx
+	// read, setter, and subscription request. It can be nil.
 	Reporter func(status string)
 
-	// Foreign is called when getStatusEx names a project that is not a
-	// WiiM, once for each project the device reports. After it, the
-	// client reads getStatusEx and nothing else from that device.
+	// Foreign is called when getStatusEx reports a project that is not a
+	// WiiM and differs from the last one reported. The client's polls then
+	// send that device getStatusEx and nothing else.
 	Foreign func(project string)
 
 	// UUID is the identity the device must report before the client
@@ -125,71 +114,74 @@ type Client struct {
 
 	http *http.Client
 
-	// reads holds one cycle of reads at a time: a poll, or the read back
-	// after a setter. Each cycle copies the state, reads into the copy,
-	// and publishes it, so two cycles that overlapped would publish one
-	// over the other and undo what the first one read.
+	// reads is held for one cycle of reads: a poll, or the read back
+	// after a setter. A cycle copies the state, reads into the copy, and
+	// publishes the copy. When two cycles overlap, each copies the state
+	// before the other publishes, so the later publish undoes the earlier
+	// cycle's reads.
 	reads sync.Mutex
 
 	mutex     sync.Mutex
 	state     Status
 	readings  Readings
 	reachable equipment.ConditionStatus
-	// resync is set while the next poll must read every family: before
-	// the first one, and after the client called the amp unreachable.
+	// resync is true while the next poll must read every family: before
+	// the first poll, and after the client called the amp unreachable.
 	// settingsRead is when a poll last read every family.
 	resync       bool
 	settingsRead time.Time
-	// owed holds the families a setter's read back left to the poll that
-	// held the reads (readback.go).
-	owed family
-	// writes numbers each write of an event or a setter to a field a poll
-	// also reads, and written holds the number of each field's last one
-	// (sequence.go).
+	// pendingReads is the families that a setter's read back left for
+	// the poll to read, because the poll held reads (readback.go).
+	pendingReads family
+	// writes numbers each write of an event or a setter to a field that
+	// a poll also reads. written is the number of the last write to each
+	// field (sequence.go).
 	writes  uint64
 	written fieldWrites
 
-	// readFailures counts the failed requests of commands that answered
-	// before, so a poll tells a full read that answered from one that did
-	// not. answeredOnce holds each command that has answered, and silent
-	// each command that failed before it ever answered, which is logged
-	// once. failedReads counts the failed reads in a row of each command
-	// that answered before. trackFailures counts the getMetaInfo
-	// requests in a row that failed. Only the holder of reads touches any
-	// of them.
+	// These fields belong to the holder of reads. readFailures counts
+	// the failed requests of commands that answered before. A poll
+	// compares it before and after a full read to tell whether every
+	// command answered. answeredOnce is the commands that have answered
+	// at least once. gaveUp is the commands whose failures the client has
+	// logged and stopped counting (readFailed). failedReads counts, for
+	// each command that answered before, the full reads in a row in which
+	// it failed. trackFailures is the number of getMetaInfo requests in a
+	// row that failed.
 	readFailures  int
 	answeredOnce  map[string]bool
-	silent        map[string]bool
+	gaveUp        map[string]bool
 	failedReads   map[string]int
 	trackFailures int
-	// unread holds each read command whose last answer held no value: the
-	// device's words for a command it does not carry or a read it cannot
-	// serve. Settings reports no value for a field whose read is here, so
-	// the snapshot's zero value is not taken for the device's setting. A
-	// request that failed changes nothing here, because one lost request
-	// is not the model's answer. The mutex guards it.
+	// unread is the read commands whose last answer had no value: the
+	// device's reply for a command it does not support or a read it cannot
+	// serve. Settings reports no value for a field whose command is in
+	// unread, so the zero value in the snapshot is not taken for the
+	// device's setting. A failed request does not change unread, because
+	// a lost request does not show whether the model supports the command.
+	// The mutex guards it.
 	unread map[string]bool
-	// misses counts the polls in a row the device did not answer, cleared
-	// by the next poll it does.
+	// misses is how many polls in a row the device did not answer. The
+	// next poll the device answers resets it.
 	misses int
-	// foreign is the project a non-WiiM device reported, and empty
-	// while the device is a WiiM or has not answered.
+	// foreign is the project that a device reported when it is not a
+	// WiiM. It is empty while the device is a WiiM or has not answered.
 	foreign string
-	// surveyed is set once one poll has read every family, so the
-	// controller knows the device's own facts are in hand before it
-	// applies a declared setting.
-	surveyed bool
-	// description is what the amp's UPnP description names, and
-	// describeRetry is the earliest moment the next read of a
-	// description that failed may start (description.go). The
-	// description is not under status.wiim: the model and the maker
-	// reach status.model and status.manufacturer through State, the
-	// same fields every driver fills.
+	// firstReadDone is true once a poll has read every family. The controller
+	// waits for it before it applies a declared setting, so it compares
+	// against the device's own values.
+	firstReadDone bool
+	// description is the amp's UPnP description, and describeRetry is
+	// the earliest time to retry a description read that failed
+	// (description.go). State returns its model and manufacturer, which
+	// the controller writes to status.model and status.manufacturer, so
+	// status.wiim does not repeat them.
 	description   upnp.Description
 	describeRetry time.Time
 
-	// The event side: the callback listener the device connects back to,
-	// the subscriptions it holds, and whether a loss has been reported.
+	// The event side: the callback listener that the device sends its
+	// events to, the subscriptions, and whether the client has reported
+	// losing events.
 	events             *eventServer
 	eventsMutex        sync.Mutex
 	eventsLost         bool
@@ -198,9 +190,11 @@ type Client struct {
 	subscriptionsMutex sync.Mutex
 }
 
-// NewClient builds a client for one address. The listener reports the
-// state after every poll. The address is a hint; set UUID to hold the
-// client to the device's identity.
+// NewClient returns a client for the device at address. The listener
+// receives an event after every poll and after every change that the
+// client records between polls (announce). Another device can answer at
+// an address that was right earlier, so set UUID to make the client
+// refuse a device with a different identity.
 func NewClient(address string, listener func(equipment.Event)) *Client {
 	c := &Client{
 		address:       address,
@@ -227,58 +221,53 @@ func NewClient(address string, listener func(equipment.Event)) *Client {
 	return c
 }
 
-// dial opens a connection through Dial. The transports call it on each
-// dial, so a Dial that a caller sets after NewClient still reaches them.
+// dial calls Dial when it is called, not when the client is built, so a
+// Dial that a caller sets after NewClient takes effect.
 func (c *Client) dial(ctx context.Context, network, address string) (net.Conn, error) {
 	return c.Dial(ctx, network, address)
 }
 
-// State returns the latest device state translated into equipment
-// units, and can run concurrently with Run.
+// State returns the latest device state in equipment units. It is safe
+// to call while Run is running.
 func (c *Client) State() equipment.State {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	return c.withDescription(c.state.equipmentState(c.reachable))
 }
 
-// Status returns the device's own typed snapshot, which the controller
-// writes under status.wiim.
+// Status returns the snapshot of the device's own fields, which the
+// controller writes under status.wiim.
 func (c *Client) Status() Status {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	return c.state
 }
 
-// Address answers the address discovery found for the amp.
+// Address returns the address that the client sends its requests to.
 func (c *Client) Address() string { return c.address }
 
-// VolumeResolution is the number of the device's steps in one display
-// unit: the wire counts whole steps from 0 to 100, so it is 1.
+// VolumeResolution is 1, because the device counts whole steps and the
+// display shows the same number.
 func (c *Client) VolumeResolution() int { return 1 }
 
-// HasStandby answers false: the HTTP API carries no power command, so
-// the amp is always on.
+// HasStandby is false, because the HTTP API has no power command.
 func (c *Client) HasStandby() bool { return false }
 
-// Surveyed answers whether one poll has read every family, which is
-// when the device's own facts are in hand.
-func (c *Client) Surveyed() bool {
+// FirstReadDone reports whether a poll has read every family.
+func (c *Client) FirstReadDone() bool {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	return c.surveyed
+	return c.firstReadDone
 }
 
-// Run polls until ctx ends, backing off after a poll the device did not
-// answer. Reachability flips false on a failed poll and true on the
-// next answered one.
+// Run polls the device until ctx ends. Reachability becomes false after
+// pollFailures failed polls in a row and true after the next answered
+// poll.
 func (c *Client) Run(ctx context.Context) {
 	c.startEvents(ctx)
 	defer c.stopEvents()
 	var waits pollWaits
 	for ctx.Err() == nil {
-		// The poll opens the subscriptions after its getStatusEx read,
-		// which decides whether the device is a WiiM: a device that is
-		// not gets no subscription and no read of its description.
 		wait := waits.after(c.poll(ctx))
 		if !c.isForeign() {
 			c.describe(ctx)
@@ -291,15 +280,13 @@ func (c *Client) Run(ctx context.Context) {
 	}
 }
 
-// pollWaits chooses the wait before the next poll. The first failure
-// waits the healthy interval, and each failure in a row after it
-// doubles the wait up to maxBackoff. An answered poll starts again from
-// the healthy interval.
+// pollWaits chooses the wait before the next poll. The first failed
+// poll waits pollInterval, and each further failure in a row doubles
+// the wait, up to maxBackoff. An answered poll resets it.
 type pollWaits struct {
 	next time.Duration
 }
 
-// after answers the wait that follows a poll.
 func (w *pollWaits) after(answered bool) time.Duration {
 	if answered {
 		w.next = 0
@@ -310,14 +297,21 @@ func (w *pollWaits) after(answered bool) time.Duration {
 	return wait
 }
 
-// poll reads the probe and the player, and the other families when it
-// has a reason to. getStatusEx comes first, because it carries the
-// identity: if the device is not the one the spec declares, the client
-// folds nothing and reports unreachable rather than drive the wrong
-// amp. Then the subscriptions open, before any other read, so an event
-// the amp pushes during the reads is not lost. Every other read is best
-// effort, so a command one model does not carry leaves its family as it
-// was.
+// poll reads the device once and publishes the result. It returns false
+// when getStatusEx fails or reports a UUID other than the declared one.
+//
+// Every poll reads getStatusEx and getPlayerStatus. The other reads are
+// grouped in families, such as the equalizer or the timers, and a poll
+// reads every family only when readsEveryFamily is true. Otherwise it
+// reads the track when the player reports a different one, the sleep
+// timer while it counts down, and the families that a setter's read
+// back left to it (readback.go).
+//
+// getStatusEx comes first because it reports the device's identity, and
+// a poll of a device with the wrong UUID merges nothing and counts a
+// miss. The subscriptions open before the other reads, so an event that
+// the amp sends during the reads is not lost. A failed read leaves its
+// family as it was.
 func (c *Client) poll(ctx context.Context) bool {
 	c.reads.Lock()
 	defer c.reads.Unlock()
@@ -337,24 +331,25 @@ func (c *Client) poll(ctx context.Context) bool {
 		return false
 	}
 	if next.Device.Model != "" && !IsWiiM(next.Device.Model) {
-		// Another brand built on the LinkPlay platform answers the same
-		// API. The client sends it nothing beyond this read, so it drives
-		// no device that is not a WiiM. The device counts as unreachable
-		// for the driver's purposes, because the driver cannot operate it.
+		// Other brands built on the LinkPlay platform answer the same
+		// API. The client sends such a device nothing after this read.
+		// It counts as a miss, so the device becomes unreachable, and
+		// the poll still returns true so that Run waits pollInterval and
+		// does not back off. A getStatusEx with no project does not make
+		// the device foreign, because it does not show whose device it is.
 		c.rejectForeign(next.Device.Model)
 		c.miss()
 		return true
 	}
 	if c.answered() {
-		// An amp that missed a poll may have rebooted, and a reboot drops
-		// its subscriptions while the client still holds them. A renewal
-		// asks the amp whether it holds them: it refuses a SID it does not
-		// hold, which drops the subscription, and manageSubscriptions then
-		// opens a new one and the poll reads every family. A refused
-		// renewal is a sign of a reboot, so the failing commands get their
-		// retries back.
+		// An amp that missed polls may have rebooted, which drops its
+		// subscriptions. The amp refuses to renew a SID that it lost, so
+		// the client drops that subscription, manageSubscriptions opens
+		// a new one, and this poll reads every family. A refused renewal
+		// shows a reboot, so the commands that failed while the amp was
+		// booting are retried again.
 		if c.renewAll(ctx) {
-			c.giveRetriesBack()
+			c.resetReadRetries()
 		}
 	}
 	c.report(CommandOK)
@@ -362,12 +357,12 @@ func (c *Client) poll(ctx context.Context) bool {
 	opened := c.manageSubscriptions(ctx)
 	every := c.readsEveryFamily(opened)
 	failures := c.readFailures
-	heard := next.Playback
-	// The mark is taken right before the player read, and the pushed
-	// fields are copied with it, so a write that lands after the mark
-	// stands over the read, and a write before it is in the copy and
-	// older than the read (sequence.go). The reads before this one can
-	// take many seconds, and an event in them is older than the read.
+	playbackBefore := next.Playback
+	// Take the write mark and copy the volume, the mute, and the play
+	// state right before the player read, not at the start of the poll,
+	// because the reads before it can take seconds. publishSince keeps a
+	// write after the mark, because it is newer than the player read. The
+	// player read replaces a write before the mark (sequence.go).
 	c.mutex.Lock()
 	mark := c.writes
 	next.Playback.Volume = c.state.Playback.Volume
@@ -379,7 +374,7 @@ func (c *Client) poll(ctx context.Context) bool {
 		c.readSettings(ctx, &next)
 	} else {
 		switch {
-		case trackMoved(heard, next.Playback):
+		case trackMoved(playbackBefore, next.Playback):
 			c.trackFailures = 0
 			c.readNowPlaying(ctx, &next)
 		case c.trackFailures > 0 && c.trackFailures < trackRetries:
@@ -389,14 +384,14 @@ func (c *Client) poll(ctx context.Context) bool {
 			c.readSleep(ctx, &next)
 		}
 	}
-	c.readOwed(ctx, &next)
+	c.readPending(ctx, &next)
 
-	// The survey is marked before the publish, so the event the publish
+	// firstReadDone is set before the publish, so the event that the publish
 	// sends already reports it.
 	c.mutex.Lock()
-	c.surveyed = true
-	// A full read with a read the amp did not answer leaves that family
-	// as it was, so the next poll reads every family again.
+	c.firstReadDone = true
+	// When a command failed in a full read, its family keeps its old
+	// value, so the next poll reads every family again.
 	switch {
 	case !every:
 	case c.readFailures == failures:
@@ -411,30 +406,28 @@ func (c *Client) poll(ctx context.Context) bool {
 	return true
 }
 
-// readsEveryFamily answers whether this poll reads every family. It
-// does on the first poll, on the first poll after the amp was called
-// unreachable, on a poll that opened a subscription, and once
-// settingsResync has passed since the last such read. A subscription
-// that opens again after an expiry or a refusal may have missed
-// events, and an amp that was gone may have rebooted or been changed
-// while the client could not see it. A renewal of a live subscription
-// is not a new subscription.
+// readsEveryFamily reports whether this poll reads every family: on the
+// first poll, after a full read in which a command failed, on the first
+// poll after the client called the amp unreachable, on a poll that
+// opened a subscription, and once settingsResync has passed since the
+// last full read. A new subscription can follow missed events, and an
+// unreachable amp may have rebooted or been changed. A renewal of a
+// live subscription does not count as opening one.
 func (c *Client) readsEveryFamily(opened bool) bool {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	return c.resync || opened || !time.Now().Before(c.settingsRead.Add(settingsResync))
 }
 
-// trackMoved answers whether the player's report names another track
-// than the one before it, which is when the track's details from
-// getMetaInfo can differ.
+// trackMoved reports whether the player's report shows a different
+// track than before, which is when getMetaInfo can return different
+// details.
 func trackMoved(before, after Playback) bool {
 	return before.Title != after.Title || before.Artist != after.Artist || before.Album != after.Album ||
 		before.Mode != after.Mode || before.Vendor != after.Vendor ||
 		before.LengthMS != after.LengthMS || before.PlaylistIndex != after.PlaylistIndex
 }
 
-// readSettings reads every family that no event carries.
 func (c *Client) readSettings(ctx context.Context, next *Status) {
 	c.readStaticIP(ctx, next)
 	c.readNowPlaying(ctx, next)
@@ -446,8 +439,6 @@ func (c *Client) readSettings(ctx context.Context, next *Status) {
 	c.readControls(ctx, next)
 }
 
-// isForeign answers whether the device reported a project that is not a
-// WiiM.
 func (c *Client) isForeign() bool {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
@@ -455,9 +446,7 @@ func (c *Client) isForeign() bool {
 }
 
 // rejectForeign records the project of a device that is not a WiiM and
-// tells Foreign once for each project. A device whose getStatusEx names
-// no project is not judged, because the absent field says nothing about
-// whose device it is.
+// calls Foreign when the project changed.
 func (c *Client) rejectForeign(project string) {
 	c.mutex.Lock()
 	changed := c.foreign != project
@@ -468,10 +457,10 @@ func (c *Client) rejectForeign(project string) {
 	}
 }
 
-// miss counts a poll the device did not answer. Enough polls in a row
-// that fail call the device unreachable; fewer than that leave the last
-// answer standing, so a request the device drops under load does not
-// read as the device leaving.
+// miss counts a poll that the device did not answer. After pollFailures
+// misses in a row the device is unreachable. Fewer misses keep the last
+// answer, so a request that the device drops under load does not look
+// like the device leaving.
 func (c *Client) miss() {
 	c.mutex.Lock()
 	c.misses++
@@ -482,41 +471,43 @@ func (c *Client) miss() {
 	}
 }
 
-// giveRetriesBack gives each command that answered before its retries
-// again, on a sign that the amp rebooted: an outage, or a renewal the
-// amp refused. A command that failed while the amp booted may answer
-// once it is up. A single missed poll is no such sign, and giving the
-// retries back on it would undo the bound for a command that always
-// fails. The caller holds the reads.
-func (c *Client) giveRetriesBack() {
+// resetReadRetries starts the readRetries count again for each command
+// that answered before. The client calls it when the amp probably
+// rebooted: when it called the amp unreachable, or when the amp refused
+// a renewal. A command that failed while the amp was booting may answer
+// once the amp is up. A single missed poll does not show a reboot, and a
+// reset on it would defeat readRetries for a command that always fails.
+// The caller holds reads.
+func (c *Client) resetReadRetries() {
 	clear(c.failedReads)
-	for command := range c.silent {
+	for command := range c.gaveUp {
 		if c.answeredOnce[command] {
-			delete(c.silent, command)
+			delete(c.gaveUp, command)
 		}
 	}
 }
 
-// lose calls the device unreachable. The poll that finds the amp again
-// reads every family, because the amp may have rebooted or changed
-// while the client could not see it. The client keeps its
-// subscriptions: an amp that was only cut off from the network still
-// holds them, and two new ones would leave two more on the amp for each
-// outage. The first poll the amp answers renews them (renewAll), and an
-// amp that rebooted refuses the renewal and is subscribed again.
+// lose marks the device unreachable. The next poll that the amp answers
+// reads every family, because the amp may have rebooted or been changed
+// while the client could not reach it. The client keeps its
+// subscriptions, because an amp that only lost its network still has
+// them, and new ones would leave two more subscriptions on the amp for
+// each outage. The first poll that the amp answers renews them
+// (renewAll), and an amp that rebooted refuses the renewal, so the
+// client subscribes again.
 func (c *Client) lose() {
 	c.mutex.Lock()
 	c.resync = true
-	// The readings of an amp that does not answer are not current, so
-	// each gauge leaves the scrape instead of holding its last value.
+	// An amp that does not answer has no current readings, so each gauge
+	// leaves the scrape and does not keep its last value.
 	c.readings = Readings{}
 	c.mutex.Unlock()
-	c.giveRetriesBack()
+	c.resetReadRetries()
 	c.record(equipment.ConditionFalse)
 }
 
-// answered clears the run of failed polls after one the device
-// answered, and answers whether the run held any.
+// answered resets the count of failed polls and reports whether any
+// polls had failed since the last answer.
 func (c *Client) answered() (missed bool) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
@@ -525,9 +516,10 @@ func (c *Client) answered() (missed bool) {
 	return missed
 }
 
-// identityMatches answers whether the device's reported uuid is the one
-// the spec declared. An empty expected value skips the check; a device
-// that reported no uuid cannot be confirmed.
+// identityMatches reports whether the uuid that the device reported is
+// the one that the spec declares. With no declared UUID every device
+// matches. A device that reported no uuid does not match a declared
+// one.
 func (c *Client) identityMatches(reported string) bool {
 	if c.UUID == "" {
 		return true
@@ -538,15 +530,14 @@ func (c *Client) identityMatches(reported string) bool {
 	return normalizeUUID(c.UUID) == normalizeUUID(reported)
 }
 
-// takeVolume folds the level the device was just told into the held
-// state, and takeMute folds the mute the same way. A poll reaches the
-// device at most once every interval, so without this a press computes
-// against a reading up to one interval old and two presses in that
-// window both move the room from the same place. The next poll carries
-// the device's own report and folds it as usual. A command the device
-// refuses returns before here, so a take never states a level that did
-// not land.
-func (c *Client) takeVolume(volume int) {
+// recordVolume stores the volume that the device just accepted, and
+// recordMute stores the mute the same way. Without this, a volume press
+// would compute from a poll's reading up to pollInterval old, and two
+// presses between polls would both start from the same level. The
+// setters call these only after the device accepts the command, so the
+// state never shows a refused level. The next poll replaces the value
+// with the device's own report, unless a later write wins (sequence.go).
+func (c *Client) recordVolume(volume int) {
 	c.mutex.Lock()
 	previous := c.state
 	wasReachable := c.reachable
@@ -557,7 +548,7 @@ func (c *Client) takeVolume(volume int) {
 	c.announce(previous, next, wasReachable)
 }
 
-func (c *Client) takeMute(muted bool) {
+func (c *Client) recordMute(muted bool) {
 	c.mutex.Lock()
 	previous := c.state
 	wasReachable := c.reachable
@@ -568,10 +559,11 @@ func (c *Client) takeMute(muted bool) {
 	c.announce(previous, next, wasReachable)
 }
 
-// announce reports what a state change moved, from the fields the
-// equipment contract names. A poll and a command that takes the level
-// it just sent both run through here, so a press looks the same to the
-// session as a hand on the device.
+// announce sends the listener an event for what changed between two
+// states, in the fields of the equipment contract. A poll, a device
+// event, a setter's read back, recordVolume, and recordMute all call it,
+// so the session sees a volume press the same way as a change made on
+// the device.
 func (c *Client) announce(previous, next Status, wasReachable equipment.ConditionStatus) {
 	state := next.equipmentState(equipment.ConditionTrue)
 	before := previous.equipmentState(equipment.ConditionTrue)
@@ -592,7 +584,7 @@ func (c *Client) announce(previous, next Status, wasReachable equipment.Conditio
 	c.notify(equipment.Event{Zone: equipment.MainZone, State: state})
 }
 
-// record changes the reachability verdict and notifies the listener.
+// record sets reachability and notifies the listener when it changed.
 func (c *Client) record(status equipment.ConditionStatus) {
 	c.mutex.Lock()
 	if c.reachable == status {
@@ -605,29 +597,29 @@ func (c *Client) record(status equipment.ConditionStatus) {
 	c.notify(equipment.Event{Zone: equipment.MainZone, Field: equipment.EventReachable, State: state})
 }
 
-// report tells the wired Reporter about one command's outcome.
 func (c *Client) report(status string) {
 	if c.Reporter != nil {
 		c.Reporter(status)
 	}
 }
 
-// notify runs on the polling goroutine, so a blocking listener delays
-// the wait before the next poll and nothing else.
+// notify calls the listener on the calling goroutine. During Run that
+// is the polling goroutine, so a listener that blocks delays the next
+// poll.
 func (c *Client) notify(event equipment.Event) {
 	if c.listener != nil {
 		c.listener(event)
 	}
 }
 
-// errNoAddress is the error of a call from a client that has no
-// address: the spec declares none, and discovery found none or is off.
+// errNoAddress is what a client with no address returns: the spec
+// declares none and discovery found none or is off.
 var errNoAddress = errors.New("the amp has no address: spec.wiim.address is empty and network discovery found none")
 
-// call performs one GET and answers the body. A non-2xx answer carries
-// the server's own text in the error. A client with no address sends
-// nothing, because Go dials an empty host as the local machine, and the
-// request would reach whatever answers on port 443 of the node.
+// call sends one GET request and returns the body. An error for a
+// non-2xx status includes the response body. A client with no address
+// sends nothing, because Go dials an empty host as the local machine,
+// and the request would reach whatever listens on port 443 of the node.
 func (c *Client) call(ctx context.Context, command string) ([]byte, error) {
 	if strings.TrimSpace(c.address) == "" {
 		return nil, errNoAddress
@@ -646,20 +638,14 @@ func (c *Client) call(ctx context.Context, command string) ([]byte, error) {
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return body, fmt.Errorf("%s answered %s: %s", command, resp.Status, strings.TrimSpace(string(body)))
+		return body, fmt.Errorf("%s returned %s: %s", command, resp.Status, strings.TrimSpace(string(body)))
 	}
 	return body, nil
 }
 
-// read calls one command and hands the body to parse. A command the
-// device does not carry, or a read it cannot serve, is a miss and not
-// an error: the family keeps its last value.
-//
-// A failed request of a command that has answered before counts in
-// readFailures, so the poll reads every family again. A command that
-// has never answered is one the model does not serve, which the
-// receiver settings rules make Unsupported, so it waits for the next
-// full read of the backstop and is logged once.
+// read sends one command and passes the body to parse. A reply that
+// means the device does not support the command or cannot serve the read
+// is a miss, not an error, and the family keeps its last value.
 func (c *Client) read(ctx context.Context, command string, parse func([]byte)) {
 	body, err := c.call(ctx, command)
 	if err != nil {
@@ -671,7 +657,7 @@ func (c *Client) read(ctx context.Context, command string, parse func([]byte)) {
 	}
 	c.answeredOnce[command] = true
 	delete(c.failedReads, command)
-	delete(c.silent, command)
+	delete(c.gaveUp, command)
 	miss := isMiss(body)
 	c.mutex.Lock()
 	if miss {
@@ -689,15 +675,17 @@ func (c *Client) read(ctx context.Context, command string, parse func([]byte)) {
 	parse(body)
 }
 
-// readFailed records one failed request of a read.
-//
-// A command that answered before counts in readFailures, so the poll
-// reads every family again, for readRetries reads in a row. After that,
-// and for a command that has never answered, the command is silent: it
-// is logged once and read again only on the next full read of the
-// backstop.
+// readFailed handles one failed request of a read. A command that
+// answered before counts in readFailures, so the next poll reads every
+// family again, until the command has failed in readRetries full reads
+// in a row. After that, and at once for a command that has never
+// answered, readFailed logs the failure and adds the command to gaveUp.
+// A command that has never answered is probably one that the model does
+// not support, and the receiver settings rules make its field
+// Unsupported. readFailed logs nothing more for a command in gaveUp
+// until the command answers or resetReadRetries removes it.
 func (c *Client) readFailed(command string, err error) {
-	if c.silent[command] {
+	if c.gaveUp[command] {
 		return
 	}
 	if c.answeredOnce[command] {
@@ -710,22 +698,23 @@ func (c *Client) readFailed(command string, err error) {
 			return
 		}
 	}
-	if c.silent == nil {
-		c.silent = map[string]bool{}
+	if c.gaveUp == nil {
+		c.gaveUp = map[string]bool{}
 	}
-	c.silent[command] = true
-	fmt.Fprintf(os.Stderr, "wiim: %s does not answer %s, so the client reads it again only on its next read of every family: %v\n", c.address, command, err)
+	c.gaveUp[command] = true
+	fmt.Fprintf(os.Stderr, "wiim: reading %s from %s: %v. The client logs no more errors for this command until it answers\n", command, c.address, err)
 }
 
-// isMiss answers whether a body is one of the device's words for a
-// command it does not carry or a read it cannot serve.
+// isMiss reports whether a body is the device's reply for a command it
+// does not support or a read it cannot serve.
 func isMiss(body []byte) bool {
 	text := strings.TrimSpace(string(body))
 	return text == "" || text == "unknown command" || text == "Failed"
 }
 
-// readStatusEx reads the identity and hardware block, which is the one
-// read a poll cannot miss, and answers the block for its readings.
+// readStatusEx reads getStatusEx into next and returns the raw block
+// for readingsFrom. A poll cannot continue without it, so it returns an
+// error where the other reads ignore failures.
 func (c *Client) readStatusEx(ctx context.Context, next *Status) (statusEx, error) {
 	body, err := c.call(ctx, statusCommand)
 	if err != nil {
@@ -733,18 +722,16 @@ func (c *Client) readStatusEx(ctx context.Context, next *Status) (statusEx, erro
 	}
 	var device statusEx
 	if err := json.Unmarshal(body, &device); err != nil {
-		return statusEx{}, fmt.Errorf("%s answered %s: %w", statusCommand, strings.TrimSpace(string(body)), err)
+		return statusEx{}, fmt.Errorf("parsing the reply of %s, %q: %w", statusCommand, strings.TrimSpace(string(body)), err)
 	}
 	applyStatusEx(next, device)
 	return device, nil
 }
 
-// readName reads getStatusEx back after the name was set.
 func (c *Client) readName(ctx context.Context, next *Status) {
 	_, _ = c.readStatusEx(ctx, next)
 }
 
-// readStaticIP reads the static configuration the device holds.
 func (c *Client) readStaticIP(ctx context.Context, next *Status) {
 	c.read(ctx, staticIPCommand, func(body []byte) {
 		var info staticIPInfo
@@ -764,7 +751,6 @@ func (c *Client) readStaticIP(ctx context.Context, next *Status) {
 	})
 }
 
-// readPlayback reads the player's own report.
 func (c *Client) readPlayback(ctx context.Context, next *Status) {
 	c.read(ctx, playerCommand, func(body []byte) {
 		var player playerStatus
@@ -775,16 +761,17 @@ func (c *Client) readPlayback(ctx context.Context, next *Status) {
 	})
 }
 
-// readNowPlaying reads the current track as plain JSON. A source with
-// no track answers "Failed", and the track is cleared rather than left
-// stale.
+// readNowPlaying reads the current track with getMetaInfo. A source
+// with no track answers "Failed", and the track is cleared so it does
+// not stay out of date.
 //
-// A request that fails is counted in trackFailures, and the poll reads
-// the track again up to trackRetries times, so one lost request does
-// not leave the track empty until the next track. Any answer settles
-// it, whatever title it names: on line-in, optical, and internet radio
-// the player and getMetaInfo name different titles, and a read that
-// waited for them to match would go out on every poll.
+// A failed request also clears the track and counts in trackFailures,
+// and the next polls send getMetaInfo again, up to trackRetries
+// requests in all. So a lost request leaves the track empty until a
+// retry succeeds, not until the next track change. Any answer ends the
+// retries, whatever title it has. On line-in, optical, and internet
+// radio the player and getMetaInfo report different titles, so a poll
+// that waited for them to match would send getMetaInfo every time.
 func (c *Client) readNowPlaying(ctx context.Context, next *Status) {
 	body, err := c.call(ctx, metaCommand)
 	if err != nil {
@@ -811,7 +798,6 @@ func (c *Client) readNowPlaying(ctx context.Context, next *Status) {
 	}
 }
 
-// readAudio reads the output block and the level controls.
 func (c *Client) readAudio(ctx context.Context, next *Status) {
 	c.read(ctx, outputModeCommand, func(body []byte) {
 		var mode outputMode
@@ -908,7 +894,6 @@ func (c *Client) readAudio(ctx context.Context, next *Status) {
 	})
 }
 
-// readBalance reads the left-right balance.
 func (c *Client) readBalance(ctx context.Context, next *Status) {
 	c.read(ctx, balanceCommand, func(body []byte) {
 		if value, ok := atof(string(body)); ok {
@@ -917,7 +902,6 @@ func (c *Client) readBalance(ctx context.Context, next *Status) {
 	})
 }
 
-// readEqualizer reads the equalizer's state and its presets.
 func (c *Client) readEqualizer(ctx context.Context, next *Status) {
 	c.read(ctx, eqStatCommand, func(body []byte) {
 		var answer eqAnswer
@@ -933,8 +917,6 @@ func (c *Client) readEqualizer(ctx context.Context, next *Status) {
 	})
 }
 
-// readTimers reads the sleep timer, the idle intervals, and the three
-// alarm slots.
 func (c *Client) readTimers(ctx context.Context, next *Status) {
 	c.readSleep(ctx, next)
 	c.read(ctx, powerModeCommand, func(body []byte) {
@@ -972,7 +954,6 @@ func (c *Client) readTimers(ctx context.Context, next *Status) {
 	next.Timers.Alarms = alarms
 }
 
-// readSleep reads the seconds left on the sleep timer.
 func (c *Client) readSleep(ctx context.Context, next *Status) {
 	c.read(ctx, shutdownCommand, func(body []byte) {
 		if seconds, ok := atoi(string(body)); ok {
@@ -981,7 +962,6 @@ func (c *Client) readSleep(ctx context.Context, next *Status) {
 	})
 }
 
-// readBluetooth reads the pairing state and the paired devices.
 func (c *Client) readBluetooth(ctx context.Context, next *Status) {
 	c.read(ctx, btPairCommand, func(body []byte) {
 		var pair btPairStatus
@@ -1002,7 +982,6 @@ func (c *Client) readBluetooth(ctx context.Context, next *Status) {
 	})
 }
 
-// readPresets reads the stored presets.
 func (c *Client) readPresets(ctx context.Context, next *Status) {
 	c.read(ctx, presetCommand, func(body []byte) {
 		var info presetInfo
@@ -1017,7 +996,6 @@ func (c *Client) readPresets(ctx context.Context, next *Status) {
 	})
 }
 
-// readControls reads the status light, the touch buttons, and CEC.
 func (c *Client) readControls(ctx context.Context, next *Status) {
 	c.read(ctx, ledCommand, func(body []byte) {
 		if value, ok := atoi(string(body)); ok {
@@ -1036,8 +1014,7 @@ func (c *Client) readControls(ctx context.Context, next *Status) {
 	})
 }
 
-// applyStatusEx folds the identity and hardware block into the
-// snapshot.
+// applyStatusEx copies the getStatusEx fields into the snapshot.
 func applyStatusEx(s *Status, d statusEx) {
 	s.Device.Name = d.DeviceName
 	s.Device.Group = d.GroupName
@@ -1096,8 +1073,8 @@ func applyStatusEx(s *Status, d statusEx) {
 	}
 }
 
-// applyPlayback folds the player's report into the snapshot, decoding
-// the hex-encoded text the player carries.
+// applyPlayback copies the getPlayerStatus fields into the snapshot.
+// The player sends the title, artist, and album as hex-encoded text.
 func applyPlayback(s *Status, p playerStatus) {
 	mode, _ := atoi(p.Mode)
 	s.Playback = Playback{
@@ -1122,8 +1099,8 @@ func applyPlayback(s *Status, p playerStatus) {
 	s.Equalizer.Preset = s.Playback.EQPreset
 }
 
-// intOr reads a number the device sent as a string, and answers the
-// fallback when it is not one.
+// intOr parses a number that the device sent as a string and returns
+// fallback when the string is not a number.
 func intOr(value string, fallback int) int {
 	if number, ok := atoi(value); ok {
 		return number
@@ -1131,10 +1108,9 @@ func intOr(value string, fallback int) int {
 	return fallback
 }
 
-// SetPower answers that a WiiM has no standby: the API carries no power
-// command, so on is a no-op and off is an error. Starting and stopping
-// playback belongs to the media session's transport, not to the
-// receiver's power.
+// SetPower does nothing for on and returns an error for off, because
+// the API has no power command and the amp has no standby. Starting and
+// stopping playback belongs to the media session's transport.
 func (c *Client) SetPower(zone string, on bool) error {
 	if zone != equipment.MainZone {
 		return unknownZone(zone)
@@ -1142,24 +1118,22 @@ func (c *Client) SetPower(zone string, on bool) error {
 	if on {
 		return nil
 	}
-	return fmt.Errorf("a WiiM has no standby command; power off is not supported")
+	return fmt.Errorf("a WiiM has no standby command, so it cannot power off")
 }
 
-// SetInput selects one input by mapping its name onto the device's own
-// switchmode value.
 func (c *Client) SetInput(zone, input string) error {
 	if zone != equipment.MainZone {
 		return unknownZone(zone)
 	}
 	mode, ok := modeForInput(input)
 	if !ok {
-		return fmt.Errorf("unknown input %q", input)
+		return fmt.Errorf("unknown input %q, want one of line-in, bluetooth, optical, hdmi, usb, udisk, or wifi", input)
 	}
 	return c.send(context.Background(), setInputPrefix+mode)
 }
 
-// SetVolume sets the volume, in whole steps. A count outside the
-// device's 0 to 100 scale is held to it rather than refused.
+// SetVolume sets the volume in whole steps. A value outside the
+// device's 0 to 100 scale is clamped to it and not refused.
 func (c *Client) SetVolume(zone string, steps int) error {
 	if zone != equipment.MainZone {
 		return unknownZone(zone)
@@ -1173,11 +1147,10 @@ func (c *Client) SetVolume(zone string, steps int) error {
 	if err := c.send(context.Background(), setVolumePrefix+strconv.Itoa(steps)); err != nil {
 		return err
 	}
-	c.takeVolume(steps)
+	c.recordVolume(steps)
 	return nil
 }
 
-// SetMute sets the mute.
 func (c *Client) SetMute(zone string, muted bool) error {
 	if zone != equipment.MainZone {
 		return unknownZone(zone)
@@ -1189,32 +1162,31 @@ func (c *Client) SetMute(zone string, muted bool) error {
 	if err := c.send(context.Background(), setMutePrefix+value); err != nil {
 		return err
 	}
-	c.takeMute(muted)
+	c.recordMute(muted)
 	return nil
 }
 
-// SetSoundMode answers that the protocol carries no sound mode.
+// SetSoundMode always fails, because the protocol has no sound mode.
 func (c *Client) SetSoundMode(zone, mode string) error {
-	return fmt.Errorf("a WiiM carries no sound mode")
+	return fmt.Errorf("a WiiM has no sound mode")
 }
 
-// SameSoundMode compares the two words. A WiiM reports no sound mode,
-// so the compare only answers the contract.
+// SameSoundMode compares the two strings, because a WiiM reports no
+// sound mode and the contract still needs the method.
 func (c *Client) SameSoundMode(declared, reported string) bool {
 	return declared == reported
 }
 
-// SetSleep sets the sleep timer in minutes. Zero cancels it, and a
-// positive value pauses playback when the timer reaches zero. The
-// device's own timer is the closest thing it has to power control. The
-// timer is read back after the send, because the poll reads it only
-// while the last read found it running.
+// SetSleep sets the sleep timer in minutes. Zero cancels it. When the
+// timer reaches zero the amp pauses playback, and it does not enter
+// standby. SetSleep reads the timer back after the send, because a poll
+// reads it only while the last read found it running.
 func (c *Client) SetSleep(zone string, minutes int) error {
 	if zone != equipment.MainZone {
 		return unknownZone(zone)
 	}
 	if minutes < 0 || minutes > maxSleepMinutes {
-		return fmt.Errorf("sleep %d minutes", minutes)
+		return fmt.Errorf("sleep of %d minutes is outside 0 to %d", minutes, maxSleepMinutes)
 	}
 	seconds := "-1"
 	if minutes > 0 {
@@ -1227,14 +1199,12 @@ func (c *Client) SetSleep(zone string, minutes int) error {
 	return nil
 }
 
-// unknownZone is the error a setter answers when a caller names a zone
-// the device does not carry.
 func unknownZone(zone string) error {
-	return fmt.Errorf("unknown zone %q", zone)
+	return fmt.Errorf("unknown zone %q, want %q", zone, equipment.MainZone)
 }
 
-// send performs one setter GET. The device answers OK, and anything
-// else is an error carrying the device's own words.
+// send sends one setter GET request. The device replies OK, and any
+// other reply is an error that includes the device's text.
 func (c *Client) send(ctx context.Context, command string) error {
 	body, err := c.call(ctx, command)
 	if err != nil {
@@ -1243,7 +1213,7 @@ func (c *Client) send(ctx context.Context, command string) error {
 	}
 	if isMiss(body) {
 		c.report(CommandFailed)
-		return fmt.Errorf("%s answered %s", command, strings.TrimSpace(string(body)))
+		return fmt.Errorf("%s returned %s", command, strings.TrimSpace(string(body)))
 	}
 	c.report(CommandOK)
 	return nil

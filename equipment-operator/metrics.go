@@ -1,16 +1,9 @@
 package main
 
-// This is the operator's half of liken's Prometheus contract
-// (plans/completed/65-prometheus-metrics.md at the top of the
-// repository, and this operator's own
-// plans/completed/01-prometheus-metrics.md): the runtime layer, the
-// reconcile loop layer, and the domain facts a Receiver's status
-// already carries, all on one registry a scrape reads from memory.
-//
-// A scrape never touches the network, the API server, or a receiver.
-// Every gauge here is set at the same moment the fact it reports
-// reaches a Receiver's status or the loop's own bookkeeping, and
-// never from a second read of the world.
+// The operator's Prometheus metrics. A scrape reads only memory and
+// never calls the API server or a receiver, because the reconcile loop
+// sets each receiver gauge from the same reading that it writes to the
+// Receiver's status.
 
 import (
 	"context"
@@ -25,66 +18,53 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// inputTracker remembers the input last reported for each receiver, so
-// setInput knows which series to delete when the input changes. It is
-// the only piece of state in this file that a Prometheus type does not
-// already hold, because a GaugeVec has no way to ask what value one of
-// its own label sets last took.
+// inputTracker records the input last reported for each receiver, so
+// setInput can delete the old series when the input changes. A
+// GaugeVec cannot list its own label sets.
 type inputTracker struct {
-	mutex sync.Mutex
-	held  map[string]string
+	mutex      sync.Mutex
+	byReceiver map[string]string
 }
 
 func newInputTracker() inputTracker {
-	return inputTracker{held: map[string]string{}}
+	return inputTracker{byReceiver: map[string]string{}}
 }
 
-// set records the input and answers the one it replaces, plus whether
-// this is a change at all: a report of the input the receiver already
-// holds touches no series.
+// set records the receiver's input and returns the input it replaces.
+// changed is false when the input is the one already recorded.
 func (t *inputTracker) set(receiver, input string) (previous string, changed bool) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
-	previous, known := t.held[receiver]
+	previous, known := t.byReceiver[receiver]
 	if known && previous == input {
 		return "", false
 	}
-	t.held[receiver] = input
+	t.byReceiver[receiver] = input
 	return previous, true
 }
 
-// forget removes the receiver and answers the input it last held, so
-// the caller can delete that series too.
+// forget removes the receiver and returns its last recorded input.
 func (t *inputTracker) forget(receiver string) (input string, known bool) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
-	input, known = t.held[receiver]
-	delete(t.held, receiver)
+	input, known = t.byReceiver[receiver]
+	delete(t.byReceiver, receiver)
 	return input, known
 }
 
-// metricsPrefix names every metric this operator publishes of its own,
-// under milestone 65's per-repository prefix. liken_build_info is the
-// one name every component in the organization shares, so it carries
-// no prefix of its own.
+// metricsPrefix starts the name of every metric this operator
+// publishes, except liken_build_info, which every liken component
+// publishes under the same name.
 const metricsPrefix = "equipment_"
 
-// metricsComponent is this operator's own name, the value
-// liken_build_info carries in its component label.
+// metricsComponent is the component label of liken_build_info.
 const metricsComponent = "equipment-operator"
 
-// receiverKind is the resource kind the Receiver loop serves. The
-// reconcile layer is labeled by kind so a dashboard built across
-// several operators reads the same series everywhere. The reconcile
-// series carry this one value; the watch restarts also count the
-// CECBus, Television, Display, and pod watches, each under its own
-// kind.
-// The Deployment's CECBus loop also watches the Receivers' specs, and
-// that watch counts under this kind with the Receiver loop's own.
+// receiverKind is the kind label of the reconcile metrics and of the
+// Receiver watch restarts. The CECBus controller also watches
+// Receivers, and its restarts count under this kind too.
 const receiverKind = "Receiver"
 
-// cecBusKind, televisionKind, displayKind, and podKind label the
-// restarts of the CECBus, Television, Display, and pod watches.
 const (
 	cecBusKind     = "CECBus"
 	televisionKind = "Television"
@@ -92,27 +72,23 @@ const (
 	podKind        = "Pod"
 )
 
-// The three outcomes equipment_commands_total counts. The Denon
-// protocol carries no acknowledgement tied to a particular command, so
-// ok means the command reached the socket, not that the receiver acted
-// on it. failed is a command dropped before it went out, or a write
-// that errored. timeout is the one wait this operator gives up on: the
-// power-on a session sends before it selects the input.
+// The status label of equipment_commands_total. The Denon protocol does
+// not acknowledge a command, so ok means the command was written to the
+// socket, not that the receiver acted on it. failed means the command
+// was dropped before it was sent or the write returned an error.
+// timeout means a session sent power on and the receiver did not report
+// power on within sessionPowerWait. The session sends the input anyway.
 const (
 	commandOK      = "ok"
 	commandFailed  = "failed"
 	commandTimeout = "timeout"
 )
 
-// reconcileBuckets bounds the histogram at what a level-triggered pass
-// over this operator's own collection actually takes: a pass with
-// nothing to do reads in about a millisecond, and a pass that writes
-// several statuses takes a few.
+// reconcileBuckets run from 1 ms to about 16 s, in steps of 4.
 var reconcileBuckets = prometheus.ExponentialBuckets(0.001, 4, 8)
 
-// metrics is the registry the listener serves and the whole of what
-// this operator reports about itself. One process builds one, and
-// hands it to the parts of itself that observe something.
+// metrics holds the registry that the listener serves and every metric
+// on it.
 type metrics struct {
 	registry *prometheus.Registry
 
@@ -133,9 +109,7 @@ type metrics struct {
 	wiim wiimGauges
 }
 
-// newMetrics builds the registry for this operator's one process.
-// version is the release the binary was built from, the fact
-// liken_build_info carries.
+// newMetrics builds the registry. liken_build_info reports version.
 func newMetrics(version string) *metrics {
 	m := &metrics{
 		registry: prometheus.NewRegistry(),
@@ -156,27 +130,27 @@ func newMetrics(version string) *metrics {
 
 		connected: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: metricsPrefix + "receiver_connected",
-			Help: "One while the operator has an answered exchange with the receiver, zero otherwise.",
+			Help: "1 while the operator's last exchange with the receiver succeeded, 0 otherwise.",
 		}, []string{"receiver"}),
 		obsValid: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: metricsPrefix + "observation_valid",
-			Help: "One while the named source's last read of a receiver is current, zero otherwise.",
+			Help: "1 while the receiver that the source label names is reachable, 0 otherwise.",
 		}, []string{"source"}),
 		obsLastGood: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: metricsPrefix + "observation_last_success_timestamp_seconds",
-			Help: "When the named source last answered, in seconds since the epoch.",
+			Help: "The last time the operator found the receiver that the source label names reachable, in seconds since the Unix epoch.",
 		}, []string{"source"}),
 		power: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: metricsPrefix + "receiver_power",
-			Help: "One while the receiver last reported itself on, zero while on standby.",
+			Help: "1 while the receiver last reported power On, 0 otherwise.",
 		}, []string{"receiver"}),
 		volume: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: metricsPrefix + "receiver_volume",
-			Help: "The master volume the receiver last reported, in its own scale.",
+			Help: "The master volume that the receiver last reported, in the receiver's display units.",
 		}, []string{"receiver"}),
 		inputInfo: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: metricsPrefix + "receiver_input_info",
-			Help: "The input the receiver last reported selected, as labels on a gauge that is always 1.",
+			Help: "The input that the receiver last reported as selected, as labels on a gauge whose value is always 1.",
 		}, []string{"receiver", "input"}),
 		commands: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: metricsPrefix + "commands_total",
@@ -187,11 +161,8 @@ func newMetrics(version string) *metrics {
 		wiim:   newWiimGauges(),
 	}
 
-	// Layer 1. buildInfo always holds 1, and its labels carry the
-	// release, which is the Prometheus convention for a string. One
-	// panel that reads liken_build_info across a cluster shows every
-	// component's release, because every liken process publishes this
-	// one name.
+	// Prometheus has no string metric, so the release is a label on a
+	// gauge whose value is always 1.
 	buildInfo := prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "liken_build_info",
 		Help: "The release each liken component runs, as labels on a gauge that is always 1.",
@@ -208,10 +179,9 @@ func newMetrics(version string) *metrics {
 	)
 	m.registry.MustRegister(m.wiim.collectors()...)
 
-	// Publishing every kind and every outcome at zero from the first
-	// scrape is what lets Prometheus compute a rate from the second
-	// reading: a counter that appears only when it first increases has
-	// no earlier reading to compare against.
+	// A series that first appears when it increases has no earlier
+	// sample, so rate() misses that first increase. Creating each series
+	// here publishes it at zero from the first scrape.
 	m.reconcileDuration.WithLabelValues(receiverKind)
 	m.reconcileErrors.WithLabelValues(receiverKind)
 	m.watchRestarts.WithLabelValues(receiverKind)
@@ -221,10 +191,9 @@ func newMetrics(version string) *metrics {
 	return m
 }
 
-// observeReconcile records one finished pass over the whole
-// collection. Every pass counts, including a pass that changed
-// nothing, because the rate of passes is what says the loop still
-// runs.
+// observeReconcile records one reconcile pass over all Receivers. It
+// counts passes that change nothing too, so the rate of passes shows
+// that the loop still runs.
 func (m *metrics) observeReconcile(took time.Duration, err error) {
 	m.reconcileDuration.WithLabelValues(receiverKind).Observe(took.Seconds())
 	if err != nil {
@@ -232,43 +201,37 @@ func (m *metrics) observeReconcile(took time.Duration, err error) {
 	}
 }
 
-// watchRestarted records one watch the operator opened again after the
-// API server closed the one before it.
+// watchRestarted records that a Receiver watch was opened again after
+// the API server closed the previous one.
 func (m *metrics) watchRestarted() {
 	m.watchRestarts.WithLabelValues(receiverKind).Inc()
 }
 
-// cecBusWatchRestarted records the same for the Deployment's CECBus
-// watch, under its own kind.
+// cecBusWatchRestarted records a restart of the CECBus watch.
 func (m *metrics) cecBusWatchRestarted() {
 	m.watchRestarts.WithLabelValues(cecBusKind).Inc()
 }
 
-// televisionWatchRestarted records the same for the Deployment's
-// Television watch.
+// televisionWatchRestarted records a restart of the Television watch.
 func (m *metrics) televisionWatchRestarted() {
 	m.watchRestarts.WithLabelValues(televisionKind).Inc()
 }
 
-// displayWatchRestarted records the same for the Deployment's Display
-// watch.
+// displayWatchRestarted records a restart of the Display watch.
 func (m *metrics) displayWatchRestarted() {
 	m.watchRestarts.WithLabelValues(displayKind).Inc()
 }
 
-// podWatchRestarted records the same for the Deployment's watch of the
-// node workload's pods.
+// podWatchRestarted records a restart of the watch of the node
+// workload's pods.
 func (m *metrics) podWatchRestarted() {
 	m.watchRestarts.WithLabelValues(podKind).Inc()
 }
 
-// recordObservation puts one receiver's freshly read state on the
-// gauges, from the same state that builds its status. connected
-// and observation_valid move together here, because the driver
-// connection is this operator's one source of a receiver's facts: a
-// dropped connection is itself a fresh, valid observation that the
-// receiver is gone, and not a missing reading. now is the moment the
-// state was read, which is what the timestamp gauge reports.
+// recordObservation sets a receiver's gauges from the state that the
+// reconcile loop writes to its status. receiver_connected and
+// observation_valid are always equal, because the driver connection is
+// the only source of a receiver's state. now is the time of the read.
 func (m *metrics) recordObservation(receiver string, state equipment.State, resolution int, now time.Time) {
 	main, _ := state.Zone(equipment.MainZone)
 	connected := state.Reachable == ConditionTrue
@@ -288,11 +251,9 @@ func (m *metrics) recordObservation(receiver string, state equipment.State, reso
 	}
 }
 
-// setInput moves the info gauge to the input named, deleting the
-// series for whichever input it held before. A gauge holds one row per
-// label set forever unless something deletes it, so the receiver's
-// previous input would otherwise linger on the scrape beside the one
-// that replaced it.
+// setInput sets the info gauge for the receiver's current input and
+// deletes the series of its previous input. Without the delete, a
+// scrape reports both inputs.
 func (m *metrics) setInput(receiver, input string) {
 	previous, changed := m.inputs.set(receiver, input)
 	if !changed {
@@ -304,9 +265,9 @@ func (m *metrics) setInput(receiver, input string) {
 	m.inputInfo.WithLabelValues(receiver, input).Set(1)
 }
 
-// reportCommand counts one command by its outcome. m is nil for a
-// denonClient a test builds with no metrics, and a nil receiver reports
-// nothing rather than crash.
+// reportCommand counts one command by outcome. It does nothing on a
+// nil *metrics, so a controller or session built without metrics can
+// still call it.
 func (m *metrics) reportCommand(status string) {
 	if m == nil {
 		return
@@ -314,9 +275,8 @@ func (m *metrics) reportCommand(status string) {
 	m.commands.WithLabelValues(status).Inc()
 }
 
-// forgetReceiver takes a receiver off every gauge this operator scopes
-// to one, so a Receiver that is gone stops being reported. The
-// counters are left alone: a command already sent still happened.
+// forgetReceiver deletes the gauges of a deleted Receiver.
+// equipment_commands_total has no receiver label, so it stays.
 func (m *metrics) forgetReceiver(receiver string) {
 	m.connected.DeleteLabelValues(receiver)
 	m.obsValid.DeleteLabelValues(receiver)
@@ -330,8 +290,6 @@ func (m *metrics) forgetReceiver(receiver string) {
 	m.wiim.forget(receiver)
 }
 
-// gaugeValue carries a state as one or zero, the shape every boolean
-// gauge in this file takes.
 func gaugeValue(state bool) float64 {
 	if state {
 		return 1
@@ -339,30 +297,23 @@ func gaugeValue(state bool) float64 {
 	return 0
 }
 
-// Handler answers a scrape from this operator's registry. It is
-// exported so a test can scrape without a socket.
+// Handler serves the registry in the Prometheus text format.
 func (m *metrics) Handler() http.Handler {
 	return promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{
-		// A collector that fails is reported as a broken scrape, rather
-		// than served as a document with a gap in it.
+		// Fail the scrape when a collector fails, instead of serving
+		// output with that collector's metrics missing.
 		ErrorHandling: promhttp.HTTPErrorOnError,
 	})
 }
 
-// listen is net.Listen. It is a variable so a test sees the bind and
-// hands Serve a listener in memory, which keeps a synctest bubble's
-// clock moving where a real socket stops it.
+// listen is net.Listen. A test replaces it with an in-memory listener,
+// because a real socket stops the fake clock of a synctest bubble.
 var listen = net.Listen
 
-// Serve starts the /metrics listener and returns at once, with the
-// address the listener holds so a caller can report the real port
-// after asking for port 0. An empty address turns the listener off,
-// which is what lets an owner who runs no Prometheus give up the port.
-//
-// The listen call happens here, in the caller's own goroutine, so a
-// port already in use is an error the caller can report. Serving runs
-// on its own goroutine, because the work this operator exists for must
-// never wait on a scraper, and it stops when ctx ends.
+// Serve starts the /metrics listener in its own goroutine and returns
+// its address, so a caller that passed port 0 learns the port. A port
+// already in use returns an error. An empty address starts no
+// listener. The server stops when ctx ends.
 func (m *metrics) Serve(ctx context.Context, address string) (net.Addr, error) {
 	if address == "" {
 		return nil, nil
@@ -376,17 +327,12 @@ func (m *metrics) Serve(ctx context.Context, address string) (net.Addr, error) {
 	mux.Handle("/metrics", m.Handler())
 	server := &http.Server{
 		Handler: mux,
-		// A client that opens a connection and sends no headers holds a
-		// goroutine for as long as it stays. This bound releases that
-		// goroutine, and it is the one timeout a metrics endpoint needs:
-		// the handler itself only reads memory.
+		// Without a timeout, a client that connects and sends no headers
+		// keeps a goroutine forever. The handler only reads memory, so no
+		// other timeout is needed.
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	// denon.go and bus.go use the same context.AfterFunc shape to
-	// unblock a read that has nowhere else to hear that ctx ended; here
-	// it closes a listener with nothing to read. The registration is
-	// left running for the life of the process, because Serve returns
-	// at once and nothing later stops watching ctx.
+	// server.Serve does not watch ctx, so close the server when ctx ends.
 	context.AfterFunc(ctx, func() { _ = server.Close() })
 	go func() { _ = server.Serve(listener) }()
 	return listener.Addr(), nil

@@ -1,8 +1,5 @@
 package cec_test
 
-// The fixtures the tests of the device, the scan, and the read loop
-// share: a bus in memory with a TV and a receiver on it.
-
 import (
 	"testing"
 
@@ -10,8 +7,6 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/cec/cectest"
 )
 
-// The two peers of the room. The values are invented; the vendor is
-// an OUI shape, not a real company's.
 var (
 	television = cectest.Peer{
 		Logical: 0, Physical: 0x0000, PrimaryType: 0, OSDName: "TV",
@@ -23,7 +18,6 @@ var (
 	}
 )
 
-// room is a bus with the TV and the receiver on it.
 func room() *cectest.Bus {
 	bus := cectest.NewBus()
 	bus.Add(television)
@@ -31,8 +25,8 @@ func room() *cectest.Bus {
 	return bus
 }
 
-// joined is a USB adapter on the room's bus that took the machine's
-// address and claimed a playback address as a follower.
+// joined returns an adapter on bus that is a follower and has claimed
+// a playback address.
 func joined(t *testing.T, bus *cectest.Bus) (*cectest.Adapter, *cec.Device) {
 	t.Helper()
 	adapter, device := bus.Adapter(cectest.Options{Physical: cec.InvalidPhysicalAddress})
@@ -45,6 +39,6 @@ func joined(t *testing.T, bus *cectest.Bus) (*cectest.Adapter, *cec.Device) {
 func mustSucceed(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("setting up the room: %v", err)
 	}
 }

@@ -2,8 +2,6 @@ package main
 
 import "testing"
 
-// The Deployment states every setting in the environment, and an
-// unset variable reads as empty.
 func TestReadSettingsTakesTheEnvironment(t *testing.T) {
 	t.Run("stated", func(t *testing.T) {
 		t.Setenv(podNamespaceVariable, "liken-system")
@@ -33,9 +31,6 @@ func TestReadSettingsTakesTheEnvironment(t *testing.T) {
 	})
 }
 
-// Network discovery is on unless the Deployment turns it off, and a
-// value other than on or off stops the operator, so a misspelled off
-// never leaves discovery on.
 func TestNetworkDiscoveryTakesOnOrOff(t *testing.T) {
 	cases := []struct {
 		value string

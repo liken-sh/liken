@@ -14,10 +14,10 @@ receiver's power, input, and volume.
 
 You need:
 
-* A `liken` cluster with the
+* A `liken` cluster with
   [`media-operator`](https://liken.sh/media/) installed. When a
   `Player` plays, `media-operator` writes what the receiver should do
-  into the `Receiver`'s status, and this operator carries it out.
+  into the `Receiver`'s status, and this operator does it.
 * A receiver on the network that speaks the Denon and Marantz control
   protocol, with network control enabled in its own menu, or a WiiM
   device.
@@ -40,38 +40,33 @@ the install needs no clone:
       -f https://liken.sh/equipment/deploy/cec.yaml
 
 `cec.yaml` runs the CEC node workload, the `equipment-operator-cec`
-`DaemonSet`. Its pod claims a USB CEC adapter through the
-`cec-adapter` `DeviceClass`, so on a node with no adapter the pod
-stays `Pending`, and the `DaemonSet` never reports all its pods
-ready. A node labeled `equipment.liken.sh/cec: none` gets no pod, as
-[Keep the pods off nodes with no CEC adapter](#keep-the-pods-off-nodes-with-no-cec-adapter)
-describes. The [`CECBus`](https://liken.sh/equipment/docs/reference/cecbuses/)
-reference describes what the pod reports, and the
-[`Television`](https://liken.sh/equipment/docs/reference/televisions/) reference describes the
-TV that a `CECBus` in `Control` finds.
+`DaemonSet`. Each of its pods claims a USB CEC adapter through the
+`cec-adapter` `DeviceClass`. On a node with no adapter the pod stays
+`Pending`, so
+[keep the pods off nodes with no CEC adapter](#keep-the-pods-off-nodes-with-no-cec-adapter).
+The [`CECBus`](https://liken.sh/equipment/docs/reference/cecbuses/) reference describes what the
+pod reports, and the [`Television`](https://liken.sh/equipment/docs/reference/televisions/)
+reference describes the TV that a `CECBus` in `Control` finds.
 
-The pod serves a readiness probe and a liveness probe at `/healthz` on
-port 9200. Each probe asks the node workload's loop to answer, so a
-pod whose loop stops answering stops being `Ready` after about 60
-seconds, and the kubelet restarts its container after about 150
-seconds. The operator's `Deployment` and each node workload watch
-these pods in `liken-system` to decide whether an adapter's report is
-current, as
+Each pod serves its readiness and liveness probes at `/healthz` on port
+9200, and they succeed only while the node workload's main loop
+responds. A pod whose loop stops responding becomes not `Ready` after
+about 60 seconds, and the kubelet restarts its container after about
+150 seconds. The operator's `Deployment` and the node workloads watch
+these pods to decide whether an adapter's report is current, as
 [Connect a CEC adapter](https://liken.sh/equipment/docs/guides/connect-a-cec-adapter/#give-the-adapter-control)
-describes. `rbac.yaml` grants both identities `get`, `list`, and
-`watch` on pods in the namespace, through the
-`equipment-operator-cec-pods` `Role`.
+describes. The `equipment-operator-cec-pods` `Role` in `rbac.yaml` lets
+them `get`, `list`, and `watch` pods in `liken-system`.
 
-For GitOps, point a `Kustomization` at the base and pin `<version>`
-to the operator's version, which is the release tag that last
-published it. The [GitHub release](https://github.com/liken-sh/liken/releases)
-for each tag lists every component and its version. The base sets the
-namespace `liken-system` with a transformer that leaves an object's own
-namespace alone, so the example sets no top-level `namespace:` field.
-That field overwrites a namespace an object states, and it would move
-the monitoring component's dashboard out of the monitoring namespace.
-The base names the image at `latest`, so pin the image to the same
-version:
+For GitOps, point a `Kustomization` at the base and set `<version>` to
+the release tag that last published the operator. The
+[GitHub release](https://github.com/liken-sh/liken/releases) of each
+tag lists every component and its version. The base sets the namespace
+`liken-system` on each object that has none, so leave out a top-level
+`namespace:` field. That field overwrites the namespace of every
+object, and it would move the monitoring component's dashboard out of
+the monitoring namespace. The base names the image at `latest`, so set
+the image to the same version:
 
     apiVersion: kustomize.config.k8s.io/v1beta1
     kind: Kustomization
@@ -83,12 +78,13 @@ version:
 
 ## Keep the pods off nodes with no CEC adapter
 
-The `DaemonSet` makes a pod on every node. On a node with no
-CEC adapter, the claim matches no device, and the pod stays `Pending`. To make no
-pod on such a node, label the node `equipment.liken.sh/cec: none`.
+The `DaemonSet` creates a pod on every node. On a node with no CEC
+adapter, the claim matches no device and the pod stays `Pending`. To
+create no pod on such a node, label the node
+`equipment.liken.sh/cec: none`.
 
-The `DaemonSet` in the base carries this node affinity, so no patch is
-needed:
+The `DaemonSet` in the base has this node affinity, so you need no
+patch:
 
 ```yaml
 affinity:
@@ -101,122 +97,118 @@ affinity:
               values: ["none"]
 ```
 
-`NotIn` matches a node whose label has a different value, and also a
-node that has no such label. The Kubernetes page on
+`NotIn` also matches a node that has no such label, as the Kubernetes
+page on
 [set-based requirements](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#set-based-requirement)
-gives this rule. So with no label the `DaemonSet` makes a pod on every
-node, and a node labeled `none` gets no pod. When a label changes, the
+describes. So the `DaemonSet` creates a pod on every node without the
+label, and on no node labeled `none`. When a label changes, the
 [`DaemonSet`](https://kubernetes.io/docs/concepts/workloads/controllers/daemonset/)
-controller deletes the pod from a node that no longer matches, and
-adds one to a node that matches again.
+controller deletes the pod from a node that no longer matches and
+creates one on a node that matches again.
 
-Declare the label in the node's `Machine`, so the label is part of
-the record of the machine:
+Declare the label in the node's `Machine`, so the machine's own record
+keeps it:
 
     spec:
       nodeLabels:
         equipment.liken.sh/cec: none
 
 A `Machine` accepts a key in a `liken.sh` subdomain from `liken`
-2026.09.28-002 on, and an older release refuses it, so on an older
-release use the `kubectl label` way below.
+2026.09.28-002 on. An older release refuses it, so on an older release
+use the `kubectl label` method below.
 
-The `liken` machine operator applies the label to the running node. A
-machine that is demoted or installed again registers a new Node, and
-the Node has the label from registration. To run the pod on that
-node again, remove the key from `spec.nodeLabels`, and `liken`
-removes the label from the node. `liken` also removes a label that
-you set with `kubectl` before the `Machine` declared it, when the key
-leaves the spec.
+The `liken` machine operator applies the label to the running node,
+and a machine that is demoted or installed again registers its new
+Node with the label. To run the pod on the node again, remove the key
+from `spec.nodeLabels`, and `liken` removes the label from the node,
+even when you had set it with `kubectl` first.
 
 You can also label the node with `kubectl`:
 
     kubectl label node node-1 equipment.liken.sh/cec=none
 
-The label stays on the node across reboots. `liken` leaves it in
-place, because `liken` removes only the labels that a `Machine`
-declared. The label goes with the Node object: a machine that is
-demoted or installed again registers a new Node, and you label it
-again. To run the pod on that node again, remove the label:
+The label stays on the node across reboots, because `liken` removes
+only the labels that a `Machine` declared. But it is on the Node
+object, so when the machine is demoted or installed again and
+registers a new Node, you must label the new Node. To run the pod on
+the node again, remove the label:
 
     kubectl label node node-1 equipment.liken.sh/cec-
 
-A patch of your own that sets a node affinity on this `DaemonSet`
-replaces the list of terms in the base, and the `none` term with it.
-Copy the `none` requirement into each term of your patch.
+If you patch a node affinity onto this `DaemonSet`, your patch
+replaces the base's list of terms, including the `none` term, so copy
+the `none` requirement into each term of your patch.
 
 ## Which devices the operator adopts
 
-Other brands build on the LinkPlay platform that WiiM uses. Their
-devices advertise the same `_linkplay._tcp.local.` mDNS service and
-answer the same `getStatusEx` request, and the mDNS answer names no
-model. The operator therefore checks each device in two places, and
-drives it only when neither check finds another brand.
+Other brands build devices on the LinkPlay platform that WiiM uses.
+Their devices advertise the same `_linkplay._tcp.local.` mDNS service
+and answer the same `getStatusEx` request, and the mDNS response does
+not include the model. So the operator checks each device twice, and
+controls it only when neither check finds another brand.
 
-Discovery checks first, before it creates a `Receiver`. Every LinkPlay
-device serves a UPnP device description over plain HTTP at
-`/description.xml`, on the port that its mDNS `SRV` record names. When
-a search finds a device that discovery has not judged, discovery reads
-that description with one `GET`. It creates a `Receiver` only when the
-`modelName` begins with `WiiM`, in any letter case. The check reads the
-model and not the manufacturer, because LinkPlay also makes devices
-that other brands sell:
+The first check is in discovery, before it creates a `Receiver`. Every
+LinkPlay device serves a UPnP device description over plain HTTP at
+`/description.xml`, on the port in its mDNS `SRV` record. The first
+time a search finds a device, discovery reads that description with
+one `GET`, and creates a `Receiver` only when the `modelName` begins
+with `WiiM`, in any letter case. The check reads the model and not the
+manufacturer, because LinkPlay also makes devices that other brands
+sell:
 
 | Device | `manufacturer` | `modelName` | Verdict |
 | --- | --- | --- | --- |
 | WiiM Amp | Linkplay Technology Inc. | WiiM Amp | a WiiM |
 | Arylic amplifier | Rakoit Technology(SZ) Co., Ltd. | A50 | not a WiiM |
 
-The description is on its own port over plain HTTP, so the check also
-works for a device that refuses the HTTPS control API. An Arylic
-amplifier refused HTTPS from the operator's address and still served
-its description. Discovery keeps each verdict until the operator
-restarts. For a device that is not a WiiM, discovery creates no
-`Receiver`, deletes the `Receiver` that it created for the device
-earlier, sends the device nothing more, and writes one line to its log:
+Because the description is on its own port over plain HTTP, this check
+also works for a device that refuses the HTTPS control API. Discovery
+keeps each result until the operator restarts. For a device that is
+not a WiiM, discovery creates no `Receiver`, deletes the `Receiver`
+that it created for the device earlier, sends the device nothing more,
+and writes one line to its log:
 
     discovery skipped the LinkPlay device <uuid> at <address>: its UPnP description names the manufacturer Rakoit Technology(SZ) Co., Ltd. and the model A50, which is not a WiiM
 
-A description that discovery cannot read or parse is not a verdict.
-Discovery writes one line with the cause, creates the `Receiver` as it
-does for a WiiM, and reads the description again on the next search
-that finds the device. The driver's check then decides:
+When discovery cannot read or parse the description, it writes one
+line to its log with the cause, creates the `Receiver` as it does for a
+WiiM, and reads the description again on the next search that finds
+the device. Until then the second check decides:
 
-    discovery could not read the UPnP description of the LinkPlay device <uuid> at <address>, so its getStatusEx project decides whether it is a WiiM: <cause>
+    discovery read no UPnP description from the LinkPlay device <uuid> at <address>, so its getStatusEx project decides whether it is a WiiM: <cause>
 
-The driver checks second, on every poll. It reads the `project` field
-of the `getStatusEx` answer and drives a device only when the field
-begins with `WiiM`, in any letter case. A WiiM Amp reports
-`WiiM_Amp_4layer`, and an Arylic amplifier reports `ARYLIC_A50TE`. This
-check covers a `Receiver` that exists before discovery reads the
-description, such as a `Receiver` that you declare. The operator
-already reads `getStatusEx` on every poll, so the check sends a WiiM no
-extra request. For a device whose `project` does not begin with
-`WiiM`, the operator sends `getStatusEx` and nothing else. It sends no
-setting, no command, no event subscription, and no read of the
+The second check is in the WiiM driver, on every poll. It reads the
+`project` field of the `getStatusEx` response and controls the device
+only when the field begins with `WiiM`, in any letter case. A WiiM Amp
+reports `WiiM_Amp_4layer`, and an Arylic amplifier reports
+`ARYLIC_A50TE`. This check also covers a `Receiver` that you declare.
+The operator reads `getStatusEx` on every poll anyway, so the check
+sends a WiiM no extra request. To a device whose `project` does not
+begin with `WiiM`, the operator sends `getStatusEx` and nothing else:
+no setting, no command, no event subscription, and no read of the
 description. It writes one line to its log for each such device:
 
     discovery skipped the LinkPlay device <uuid> at <address>: its project is ARYLIC_A50TE, which is not a WiiM
 
-When the answer names another brand, the operator deletes the
+When the `project` names another brand, the operator deletes the
 `Receiver` that discovery created for the device, and discovery
 creates no other for it until the operator restarts. Neither check
-deletes a `Receiver` that you declare. That `Receiver` reports the
+deletes a `Receiver` that you declared. That `Receiver` reports the
 device unreachable, and the operator still sends the device only
-`getStatusEx`. The driver does not judge a device that does not answer
-`getStatusEx`, or a device whose answer has no `project` field.
+`getStatusEx`. A device that does not answer `getStatusEx`, or whose
+response has no `project` field, is not treated as another brand.
 
 ## Turn network discovery off
 
 By default, the operator searches the LAN for WiiM amps with mDNS and
 SSDP. Each search takes 4 seconds, and the next one starts 30 seconds
-after it ends. It creates a `Receiver` for each amp that no
-`Receiver` names, and then it reads and drives that amp. Turn the
-search off when the cluster shares its LAN with amps that it must not
-drive, for example a test cluster on the same network as a home's own
-equipment. The `EQUIPMENT_NETWORK_DISCOVERY` variable on the
-`Deployment` takes `on` or `off`. Set it to `off` with a patch in your
-`Kustomization`:
+after the previous one ends. The operator creates a `Receiver` for each
+amp that no `Receiver` names, and then reads and controls that amp.
+Turn the search off when the cluster shares its LAN with amps that it
+must not control, for example when a test cluster is on the same
+network as a home's equipment. The `EQUIPMENT_NETWORK_DISCOVERY`
+environment variable on the `Deployment` is `on` or `off`, and `on` by
+default. To set it to `off`, add a patch to your `Kustomization`:
 
 ```yaml
 patches:
@@ -236,39 +228,39 @@ patches:
 ```
 
 Keep the quotes. A YAML 1.1 reader, such as `kubectl`, reads a bare
-`off` as the boolean false. Any value other than `on` or `off` stops
-the operator at start with an error that names the value, so a wrong
-value never leaves the search on.
+`off` as the boolean false. Any value other than `on` or `off` stops the
+operator at start with an error that names the value, so a wrong value
+never leaves the search on.
 
-With the search off, the operator writes one line to its log at start
-that says so. It sends no mDNS or SSDP search and creates no
-`Receiver`. A `Receiver` that you declare works as before. A WiiM
-`Receiver` must state `spec.wiim.address`, because nothing else finds
-the amp's address. A WiiM `Receiver` with no address sends nothing and
-reports the amp unreachable.
+With the search off, the operator logs one line at start that says so,
+sends no mDNS or SSDP search, and creates no `Receiver`. A `Receiver`
+that you declare works as before, but a WiiM `Receiver` must then set
+`spec.wiim.address`, because nothing else finds the amp. A WiiM
+`Receiver` with no address sends nothing and reports the amp
+unreachable.
 
-The operator does not delete the `Receiver` objects that the search
-created before you turned it off, because only a search, or a device
-that the driver finds to be another brand, deletes one.
-So a discovered `Receiver` also stays when you declare a `Receiver` for
-the same amp, and the two objects then name one amp. Each discovered
-`Receiver` has the `equipment.liken.sh/discovered` label. List them,
-and delete the ones you do not want:
+Turning the search off does not delete the `Receiver` objects that the
+search created earlier. Only a search, or the driver when it finds a
+device of another brand, deletes one. A discovered `Receiver` also
+stays when you declare your own `Receiver` for the same amp, and then
+two objects control one amp. Each discovered `Receiver` has the
+`equipment.liken.sh/discovered` label. List them, and delete the ones
+you do not want:
 
     kubectl get receivers -l equipment.liken.sh/discovered
 
-The setting covers the network search only. The CEC node workload
-still creates a `CECBus` in `Listen` for an adapter that no `CECBus`
-names, and a `Listen` adapter sends nothing on the HDMI wire. A
-`Television` is created only for a `CECBus` that a person sets to
-`Control`.
+The setting does not affect CEC. The CEC node workload still creates a
+`CECBus` in `Listen` for an adapter that no `CECBus` names, and an
+adapter in `Listen` sends nothing on the HDMI wire. The operator
+creates a `Television` only for a `CECBus` that you set to `Control`.
 
 ## Declare the receiver
 
-A `Receiver` names the protocol, the address, and the wiring. The
-wiring is the fact nothing can discover: which machine's HDMI output
-connects to which input. A receiver forwards one EDID on every
-input, so every entry names the machine as well as the monitor id.
+A `Receiver` sets the protocol, the address, and the wiring. The
+operator cannot discover the wiring, that is, which machine's HDMI
+output connects to which input. A receiver passes the same EDID to
+every input, so each entry names the machine as well as the monitor
+ID.
 
 ```yaml
 apiVersion: equipment.liken.sh/v1alpha1
@@ -287,107 +279,118 @@ spec:
     step: 0.5
 ```
 
-The input name is the receiver's own spelling. The monitor id is the
-one the [`display-operator`](https://liken.sh/display/) publishes for
-that cable. The volume block is in the receiver's own scale. `max` is
-the loudest level a press may set the room to, and a Denon requires
-it, because the limit a Denon reports moves with the volume. `step`
-is how far one press moves the volume, and half steps are allowed.
-`indicator` is `Player` by default, so the `Player`'s screens draw
-the volume bar. Set it to `Receiver` when the receiver shows its own
-overlay on the TV. `media-operator` reads `indicator`, and
-`equipment-operator` does not.
-`kubectl get receivers` shows the receiver's model, what the receiver
-last reported, and the `Player` whose session holds it:
+The input `name` is the spelling that the receiver uses. The monitor ID
+is the one that [`display-operator`](https://liken.sh/display/)
+publishes for that cable. The `volume` block uses the receiver's own
+scale. `max` is the loudest level that one press may set the room to,
+and a Denon requires it, because the limit that a Denon reports moves
+with the volume. `step` is how far one press moves the volume, and half
+steps are allowed. `indicator` is `Player` by default, so the
+`Player`'s screens draw the volume bar. Set it to `Receiver` when the
+receiver shows its own overlay on the TV. `media-operator` reads
+`indicator`, and `equipment-operator` does not.
+
+`kubectl get receivers` shows the receiver's model, the values that it
+last reported, and the `Player` whose session uses it:
 
     NAME          MODEL        POWER   INPUT   VOLUME   PLAYER              REACHABLE   AGE
     living-room   AVR-X1700H   On      MPLAY   50.0     house/living-room   True        2m
 
-The driver reads the model from the receiver's UPnP description, into
-`status.model`, and the maker into `status.manufacturer`. A WiiM serves
-its description on port 49152, and a Denon or Marantz receiver of the
-AVR-X 2016 generation or later serves one on port 60006. A receiver
-that serves none leaves the `MODEL` column empty.
+The driver reads the model from the receiver's UPnP description into
+`status.model`, and the manufacturer into `status.manufacturer`. A WiiM
+serves its description on port 49152. A Denon or Marantz receiver of the
+AVR-X 2016 generation or later serves it on port 60006. For a receiver
+that serves no description, the `MODEL` column is empty.
 
-`kubectl get receivers -o wide` adds the driver, the address, whether
-a `Play` stands, and the sound mode.
+`kubectl get receivers -o wide` adds the driver, the address, whether a
+`Play` is active, and the sound mode.
 
 ## Put it under a Player
 
-You declare no session by hand. The `media-operator` resolves each
-`Player` screen to a machine and monitor ID, then finds the input that
-matches both values. It applies `status.session` while the `Player`
-has that screen, including the idle screen. A `media-operator` that
-does not write `status.session` applies `spec.session` instead, and the
-operator reads that block while `status.session` is absent.
+You do not declare a session by hand. `media-operator` resolves each
+`Player` screen to a machine and a monitor ID, then finds the input that
+matches both. While the `Player` has that screen, including its idle
+screen, `media-operator` writes the session into `status.session`. An
+older `media-operator` that does not write `status.session` writes
+`spec.session` instead, and the operator reads `spec.session` while
+`status.session` is absent.
 
-There are no topics to configure. The operator connects to no message
-bus, and `media-operator` writes each press of the room remote into the
-session as an ask. A press of a volume key writes a `volumeAsk` with an
-absolute level in the receiver's own scale, at or below
-`spec.volume.max`. The operator sends each new ask to the receiver
-once, and when asks arrive faster than the receiver reports the volume
-it was last sent, it sends only the newest. So the room remote changes
-the receiver's level while a film plays and while the screen is idle.
-The [`Receiver`](https://liken.sh/equipment/docs/reference/receivers/) reference describes each
-ask.
+There are no message bus topics to configure, because the operator
+does not connect to a message bus. `media-operator` writes each press
+of the room remote into the session. A volume key becomes a
+`volumeAsk`, an absolute level in the receiver's own scale, at or below
+`spec.volume.max`. The operator sends each new request to the receiver
+once. When presses arrive faster than the receiver reports back the
+last volume it was sent, the operator sends only the newest. The room
+remote changes the volume both while a film plays and while the screen
+is idle. The [`Receiver`](https://liken.sh/equipment/docs/reference/receivers/) reference
+describes each request.
 
-When a `Play` starts, the session powers the receiver on and selects the input
-once. It sends each command only when the receiver reports another
-value. Waking the screen also triggers those commands through
-`status.session.awake`, even with no `Play`. Starting an idle screen after
-a reboot does not by itself power the receiver on, and an operator
-restart sends nothing for the sessions it finds.
+When a `Play` starts, the operator powers the receiver on and selects
+the input, each only when the receiver reports a different value.
+Waking the screen sets `status.session.awake` and sends the same
+commands, even when no `Play` is running. An idle screen that starts
+after a reboot does not power the receiver on, and after an operator
+restart the operator sends nothing for the sessions it finds.
 
 The remote's power button turns the whole room on or off.
-`media-operator` sets the `Player`'s `spec.power`, and when the
-`Player` turns off it writes a `powerAsk` of `off` into the session.
-When the session's input names a `Display` that a `Television` lists,
-the TV's power decides whether the ask moves the room: a TV that is on
-means the room is on, and a TV in standby means it is off already. The
-CEC node workload asks the TV for its power at each ask, because no
-timer asks the TV between asks, and a TV that a person turned off with
-its own remote may say nothing on the wire. The ask waits up to 3
-seconds for that answer, and it decides from the `Television`'s
-`status.power` when none arrives. With no `Television`, the receiver's
-power decides. An ask that turns the room off asks the TV for standby
-over CEC and puts the receiver in standby. A WiiM has no standby
-command, so it stays on, and its log line says so. When the `Player`
-turns on, its screen wakes, the session's `awake` flag turns true, and
-the room wakes the TV, shows the machine's input, and turns the
-receiver on. Only a `Player` that turns off turns the TV off. A `Play` that ends, a screen that goes idle,
-and an operator restart leave the TV as it is, because the TV can show
-another input, such as a streaming player, while the room's player is
-idle.
+`media-operator` sets the `Player`'s `spec.power`, and when the `Player`
+turns off it writes a `powerAsk` of `off` into the session. When the
+session's input is a `Display` that a `Television` lists, the TV's
+power decides what the request does: if the TV is on, the operator
+turns the room off, and if the TV is in standby, the room is already
+off and the operator sends nothing. The CEC node workload asks the TV
+for its power on each request, because a TV that a person turned off
+with its own remote may send nothing on the wire, and nothing reads
+the power between requests. The operator waits up to 3 seconds for
+that reading, and when none arrives it uses the `Television`'s
+`status.power`.
+With no `Television`, the receiver's power decides.
 
-A person at the receiver's own remote can change the receiver without
-the cluster changing it back immediately. If the person selects
-another input, the status records that input. The operator selects the
-configured input again only when `active` or `awake` changes from false
-to true. If the person turns the volume knob, the status reports the
-new volume, and `media-operator` steps the next press from that level.
-The TV's remote can change the volume too: while the receiver's System
-Audio Mode is on, the TV sends its remote's volume keys to the
-receiver over HDMI-CEC. The receiver holds one volume, so
-`status.zones` shows volume changes that `liken` did not make. The
+A request that turns the room off sends the TV a standby command over
+CEC and puts the receiver in standby. A WiiM has no standby command, so
+it stays on, and the operator's log line says so. When the `Player`
+turns on, its screen wakes and the session's `awake` flag becomes true,
+so the operator wakes the TV, switches it to the machine's input, and
+turns the receiver on. Only a `Player` that turns off turns the TV off.
+A `Play` that ends, a screen that goes idle, and an operator restart
+leave the TV as it is, because the TV can show another input, such as a
+streaming player, while the room's player is idle.
+
+A person can change the receiver with its own remote, and the operator
+does not change it back at once. If the person selects another input,
+the status shows that input, and the operator selects the configured
+input again only when `active` or `awake` changes from false to true.
+If the person turns the volume knob, the status shows the new volume,
+and `media-operator` steps the next press from that level. The TV's
+remote can change the volume too: while the receiver's System Audio
+Mode is on, the TV sends the volume keys of its remote to the receiver
+over HDMI-CEC. So `status.zones` can show volume changes that `liken`
+did not make. The
 [CEC guide](https://liken.sh/equipment/docs/guides/connect-a-cec-adapter/#let-the-tv-remote-set-the-receivers-volume)
 says when the mode is on.
 
 ## Read what happened to a receiver
 
-Each change of a `Receiver`'s `Reachable`, `SettingsConfirmed`, or
-`InputSelected` condition posts one Kubernetes `Event` with the
-condition's reason and message. A receiver that stops answering posts
-`Unreachable`, a Warning, and posts `Connected` when it answers again.
-A declared setting that the receiver does not confirm after 3 sends
-posts `NotConfirmed`, a Warning. A `Receiver` with a `status.cec`
-posts `SystemAudioModeOn` or `SystemAudioModeOff`, both Normal, each
-time its System Audio Mode changes. A `Receiver` is cluster-scoped, so its
-Events are in the `default` namespace, and `kubectl events` finds them
-only with `-n default` or `-A`:
+When a `Receiver`'s `Reachable`, `SettingsConfirmed`, or `InputSelected`
+condition changes, the operator posts one Kubernetes `Event` with the
+condition's reason and message. The `Event`s are:
+
+* `Unreachable`, a Warning, when the receiver stops answering.
+* `Connected` when it answers again.
+* `NotConfirmed`, a Warning, when the receiver does not confirm a
+  declared setting after 3 sends.
+* `SessionInput`, `OtherInput`, or `NoInputReported`, all Normal, when
+  the receiver's input starts or stops matching the session's input.
+* `SystemAudioModeOn` or `SystemAudioModeOff`, both Normal, each time
+  the System Audio Mode of a `Receiver` with a `status.cec` changes.
+
+A `Receiver` is cluster-scoped, so its `Event`s are in the `default`
+namespace, and `kubectl events` finds them only with `-n default` or
+`-A`:
 
     kubectl describe receiver living-room
     kubectl events -n default --for receiver/living-room
 
-The API server deletes an `Event` one hour after its last change. The
-conditions and the operator's log keep the facts after that.
+The API server deletes an `Event` one hour after its last change. After
+that, the conditions and the operator's log still show what happened.

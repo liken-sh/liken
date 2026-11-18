@@ -1,6 +1,8 @@
-// How the client recovers from a read that failed: a track read that
-// did not answer, a full read with a failed read in it, and an amp that
-// missed polls and may have rebooted.
+// Tests of how the client recovers from failed requests. A full read is
+// a poll that reads every setting family (readsEveryFamily in
+// client.go). A miss is one failed poll, and an outage is pollFailures
+// failed polls in a row, after which the client marks the amp
+// unreachable.
 
 package wiim
 
@@ -16,9 +18,9 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
-// newTrack makes the fake's player report another track.
+// newTrack makes the fake's player report a different track title.
 func newTrack(amp *fakeAmp) {
-	amp.answer(playerCommand, strings.Replace(playerJSON, `"Title":"486176652061204369676172"`, `"Title":"4D6F6E6579"`, 1))
+	amp.answer(playerCommand, strings.Replace(playerJSON, `"Title":"4C616E7465726E20536F6E67"`, `"Title":"4D6F6E6579"`, 1))
 }
 
 func breakCommand(amp *fakeAmp, command string, broken bool) {
@@ -27,9 +29,9 @@ func breakCommand(amp *fakeAmp, command string, broken bool) {
 	amp.broken = map[string]bool{command: broken}
 }
 
-// A track read whose request fails is owed, so the next poll reads the
-// track again, and the poll after the answer does not.
-func TestAFailedTrackReadIsReadAgain(t *testing.T) {
+// When the request for the track's metadata fails, the next poll
+// requests it again. Once a request succeeds, later polls do not.
+func TestAFailedTrackReadIsRetried(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp, client := quietAmp(t)
 		newTrack(amp)
@@ -37,11 +39,11 @@ func TestAFailedTrackReadIsReadAgain(t *testing.T) {
 		client.poll(context.Background())
 
 		breakCommand(amp, metaCommand, false)
-		amp.answer(metaCommand, strings.Replace(metaJSON, `"title":"Have a Cigar"`, `"title":"Money"`, 1))
+		amp.answer(metaCommand, strings.Replace(metaJSON, `"title":"Lantern Song"`, `"title":"Second Song"`, 1))
 		amp.clear()
 		client.poll(context.Background())
 		mustMatch(t, amp.sent(), []string{statusCommand, playerCommand, metaCommand})
-		mustMatch(t, client.Status().NowPlaying.Title, "Money")
+		mustMatch(t, client.Status().NowPlaying.Title, "Second Song")
 
 		amp.clear()
 		client.poll(context.Background())
@@ -49,9 +51,9 @@ func TestAFailedTrackReadIsReadAgain(t *testing.T) {
 	})
 }
 
-// A track read that keeps failing is tried on a bounded number of
-// polls, not on every poll.
-func TestATrackReadThatKeepsFailingStops(t *testing.T) {
+// A track read that keeps failing is retried for trackRetries polls and
+// then stops.
+func TestATrackReadThatKeepsFailingStopsAfterTrackRetries(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp, client := quietAmp(t)
 		newTrack(amp)
@@ -64,16 +66,17 @@ func TestATrackReadThatKeepsFailingStops(t *testing.T) {
 	})
 }
 
-// Any answer to the track read settles it, even one that names another
-// title than the player does, the way line-in, optical, and internet
-// radio answer. Otherwise the track would be read on every poll.
-func TestATrackReadThatAnswersIsSettled(t *testing.T) {
+// Any response to the track read ends the retries, even one with a
+// title other than the one the player reports. Line-in, optical, and
+// internet radio sources respond that way, and without this rule the
+// client would request the track on every poll.
+func TestATrackReadThatRespondsIsNotRetried(t *testing.T) {
 	cases := []struct {
 		name   string
 		answer string
 	}{
 		{"no track", "Failed"},
-		{"another title", strings.Replace(metaJSON, `"title":"Have a Cigar"`, `"title":"unknow"`, 1)},
+		{"another title", strings.Replace(metaJSON, `"title":"Lantern Song"`, `"title":"unknow"`, 1)},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
@@ -91,10 +94,10 @@ func TestATrackReadThatAnswersIsSettled(t *testing.T) {
 	}
 }
 
-// A full read in which a command that answered before fails is done
-// again on the next poll, because that family still holds what it held
-// before.
-func TestAFullReadWithAFailedReadIsDoneAgain(t *testing.T) {
+// When a command that responded before fails during a full read, the
+// next poll does the full read again, because the status still has the
+// failed family's old value.
+func TestAFullReadWithAFailedCommandIsRepeated(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp, client := quietAmp(t)
 		breakCommand(amp, balanceCommand, true)
@@ -109,10 +112,10 @@ func TestAFullReadWithAFailedReadIsDoneAgain(t *testing.T) {
 	})
 }
 
-// A command that has never answered is one the model does not serve,
-// so it does not make every poll a full read: the next full read is the
-// backstop's.
-func TestACommandThatNeverAnswersWaitsForTheBackstop(t *testing.T) {
+// A command that has never responded is one this amp model does not
+// support, so it does not make every poll a full read. The client tries
+// it again at the next full read after settingsResync.
+func TestACommandThatNeverRespondsWaitsForTheNextResync(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp := startFakeAmp(t)
 		amp.answer(shutdownCommand, "0")
@@ -127,8 +130,8 @@ func TestACommandThatNeverAnswersWaitsForTheBackstop(t *testing.T) {
 	})
 }
 
-// An amp the client called unreachable reports no readings, so each
-// gauge leaves the scrape instead of holding its last value.
+// An unreachable amp returns no readings, so each gauge disappears from
+// the metrics scrape instead of keeping its last value.
 func TestAnUnreachableAmpReportsNoReadings(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp, client := quietAmp(t)
@@ -144,11 +147,11 @@ func TestAnUnreachableAmpReportsNoReadings(t *testing.T) {
 	})
 }
 
-// An amp that misses one poll may have rebooted, and a reboot drops
-// its subscriptions, so the first poll it answers renews both at once.
-// An amp that refuses the renewal gets new subscriptions and a read of
-// every family. An amp that takes it holds the subscriptions, and the
-// poll reads only the probe and the player.
+// After a miss the amp may have rebooted, which drops its event
+// subscriptions, so the next poll that succeeds renews both
+// subscriptions. If the amp refuses the renewal, the client subscribes
+// again and does a full read. If the amp accepts it, the poll sends only
+// statusCommand and playerCommand.
 func TestAPollAfterAMissRenewsTheSubscriptions(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -198,10 +201,10 @@ func countOf(commands []string, command string) int {
 	return count
 }
 
-// A command that answered once and then fails on every full read is
-// given a bounded number of full reads, then left to the backstop, so
-// it does not make every poll a full read.
-func TestACommandThatStopsAnsweringWaitsForTheBackstop(t *testing.T) {
+// A command that responded once and then fails on every full read is
+// retried for readRetries full reads. After that it waits for the next
+// full read after settingsResync.
+func TestACommandThatStopsRespondingWaitsForTheNextResync(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp, client := quietAmp(t)
 		breakCommand(amp, balanceCommand, true)
@@ -217,10 +220,11 @@ func TestACommandThatStopsAnsweringWaitsForTheBackstop(t *testing.T) {
 	})
 }
 
-// The amp sends no event it missed while the client could not reach it,
-// and a renewal brings no full state, so the first poll the amp answers
-// after a miss takes the volume from the poll and not from the events.
-func TestAPollAfterAMissTakesTheVolumeFromTheAmp(t *testing.T) {
+// The amp does not resend events that the client missed, and a
+// subscription renewal does not send the current state. So after a miss
+// or an outage the first poll that succeeds sets the volume from the
+// player read, not from the last event.
+func TestAPollAfterAMissSetsTheVolumeFromThePlayerRead(t *testing.T) {
 	cases := []struct {
 		name   string
 		misses int
@@ -254,10 +258,10 @@ func TestAPollAfterAMissTakesTheVolumeFromTheAmp(t *testing.T) {
 	}
 }
 
-// An event that arrives after a miss and before the next answered poll
-// carries only what it moved, here the mute, so the poll still takes
-// the volume the amp reports.
-func TestAnEventAfterAMissLeavesTheVolumeToThePoll(t *testing.T) {
+// An event that arrives after a miss and before the next successful
+// poll has only the field that changed, here the mute. The poll still
+// sets the volume from the player read.
+func TestAnEventAfterAMissDoesNotSetTheVolume(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp, events, client := subscribedAmpWithEvents(t)
 		client.poll(context.Background())
@@ -279,9 +283,10 @@ func TestAnEventAfterAMissLeavesTheVolumeToThePoll(t *testing.T) {
 	})
 }
 
-// An event that arrives while the poll after an outage reads every
-// family is newer than the poll's read of the player, so it stands.
-func TestAnEventDuringThePollAfterAnOutageStands(t *testing.T) {
+// An event that arrives during the full read after an outage is newer
+// than that poll's read of the player, so the event's volume replaces
+// the one the poll read.
+func TestAnEventDuringThePollAfterAnOutageOverridesThePlayerRead(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp, events, client := subscribedAmpWithEvents(t)
 		client.poll(context.Background())
@@ -311,9 +316,9 @@ func TestAnEventDuringThePollAfterAnOutageStands(t *testing.T) {
 	})
 }
 
-// A command left to the backstop gets its retries again after an
-// outage, because an amp that rebooted may answer it once it is up.
-func TestAnOutageGivesASilentCommandItsRetriesAgain(t *testing.T) {
+// After an outage, a failing command that had used up its readRetries
+// gets them again, because an amp that rebooted may respond to it now.
+func TestAnOutageRestoresTheRetriesOfAFailingCommand(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp, client := quietAmp(t)
 		breakCommand(amp, balanceCommand, true)
@@ -339,8 +344,7 @@ func TestAnOutageGivesASilentCommandItsRetriesAgain(t *testing.T) {
 	})
 }
 
-// failOnePoll makes the fake miss the next poll, and answer again
-// after it.
+// failOnePoll makes the fake fail the next poll, then respond again.
 func failOnePoll(amp *fakeAmp, client *Client) {
 	amp.mutex.Lock()
 	amp.failing = http.StatusInternalServerError
@@ -351,9 +355,9 @@ func failOnePoll(amp *fakeAmp, client *Client) {
 	amp.mutex.Unlock()
 }
 
-// A missed poll is not a reboot, so it does not give a failing command
-// its retries again, and the bound on full reads holds.
-func TestASingleMissKeepsTheRetryBound(t *testing.T) {
+// A miss does not show that the amp rebooted, so it does not restore a
+// failing command's readRetries.
+func TestASingleMissDoesNotRestoreRetries(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp, client := quietAmp(t)
 		breakCommand(amp, balanceCommand, true)
@@ -371,8 +375,8 @@ func TestASingleMissKeepsTheRetryBound(t *testing.T) {
 }
 
 // An amp that refuses the renewal after a miss has rebooted, so a
-// command left to the backstop gets its retries again.
-func TestARefusedRenewalGivesASilentCommandItsRetriesAgain(t *testing.T) {
+// failing command that had used up its readRetries gets them again.
+func TestARefusedRenewalRestoresTheRetriesOfAFailingCommand(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp, events, client := subscribedAmpWithEvents(t)
 		client.poll(context.Background())
@@ -394,9 +398,9 @@ func TestARefusedRenewalGivesASilentCommandItsRetriesAgain(t *testing.T) {
 	})
 }
 
-// An event that lands before the poll reads the player is older than
-// that read, so the poll's read stands.
-func TestAnEventBeforeThePlayerReadLeavesThePollsRead(t *testing.T) {
+// An event that arrives before the poll reads the player is older than
+// that read, so the poll's volume replaces the event's.
+func TestAnEventBeforeThePlayerReadDoesNotOverrideThePoll(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp, events, client := subscribedAmpWithEvents(t)
 		client.poll(context.Background())

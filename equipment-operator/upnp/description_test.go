@@ -13,9 +13,9 @@ import (
 	"testing/synctest"
 )
 
-// The descriptions of two LinkPlay devices, cut to the fields the
-// operator reads and the ones around them. The WiiM and the Arylic
-// amplifier answer the same XML shape, with the UPnP device namespace.
+// The descriptions of a WiiM and of an Arylic amplifier, both LinkPlay
+// devices, cut down to the fields the operator reads and a few around
+// them.
 const (
 	wiimAmpDescription = `<?xml version="1.0"?>
 <root xmlns="urn:schemas-upnp-org:device-1-0" xmlns:dlna="urn:schemas-dlna-org:device-1-0">
@@ -40,10 +40,9 @@ const (
 </root>`
 )
 
-// device answers one body with one status code on every connection
-// that its dial opens, the way a device serves its description. Each
-// connection is a net.Pipe, whose reads wait on channels, so a test in
-// a synctest bubble talks to it with no socket.
+// device serves one body with one status code on every connection that
+// its dial opens. The connections are net.Pipe, because a real socket
+// blocks the fake clock of a synctest bubble.
 type device struct {
 	code int
 	body string
@@ -57,8 +56,6 @@ func (d device) dial(_ context.Context, _, _ string) (net.Conn, error) {
 	return client, nil
 }
 
-// answer reads one request and writes the response, then closes the
-// connection, the way a device that keeps no connection open does.
 func (d device) answer(conn net.Conn) {
 	defer conn.Close()
 	if _, err := http.ReadRequest(bufio.NewReader(conn)); err != nil {
@@ -75,8 +72,6 @@ func (d device) answer(conn net.Conn) {
 	_ = response.Write(conn)
 }
 
-// FetchVia opens its connection through the dialer it takes, so the
-// read goes where the caller's own connection to the device goes.
 func TestFetchViaDialsThroughTheDialerItTakes(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -90,10 +85,10 @@ func TestFetchViaDialsThroughTheDialerItTakes(t *testing.T) {
 		got, err := FetchVia(context.Background(), dial, descriptionURL)
 
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("fetching the description: %v", err)
 		}
 		if got.Model != "WiiM Amp" {
-			t.Fatalf("got %+v", got)
+			t.Fatalf("the model is %q, want WiiM Amp", got.Model)
 		}
 		if len(dialed) != 1 || dialed[0] != "tcp 192.0.2.10:49152" {
 			t.Fatalf("dialed %v, want one dial of tcp 192.0.2.10:49152", dialed)
@@ -117,10 +112,10 @@ func TestFetchReadsTheManufacturerAndTheModel(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				got, err := FetchVia(context.Background(), device{http.StatusOK, one.body}.dial, descriptionURL)
 				if err != nil {
-					t.Fatal(err)
+					t.Fatalf("fetching the description: %v", err)
 				}
 				if got != one.want {
-					t.Fatalf("got %+v, want %+v", got, one.want)
+					t.Fatalf("the description is %+v, want %+v", got, one.want)
 				}
 			})
 		})
@@ -137,7 +132,7 @@ func TestFetchFailsWithTheCause(t *testing.T) {
 	}{
 		{"refused status", http.StatusForbidden, "forbidden here", "403 Forbidden: forbidden here"},
 		{"not xml", http.StatusOK, "not a description", "EOF"},
-		{"no model", http.StatusOK, `<root><device><manufacturer>Someone</manufacturer></device></root>`, "names no modelName"},
+		{"no model", http.StatusOK, `<root><device><manufacturer>Someone</manufacturer></device></root>`, "has no modelName"},
 		{"too large", http.StatusOK, "<root>" + strings.Repeat(" ", maxBytes) + "</root>", "larger than 65536 bytes"},
 	}
 	for _, one := range cases {
@@ -146,14 +141,14 @@ func TestFetchFailsWithTheCause(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				_, err := FetchVia(context.Background(), device{one.code, one.body}.dial, descriptionURL)
 				if err == nil || !strings.Contains(err.Error(), one.want) {
-					t.Fatalf("got %v, want an error that contains %q", err, one.want)
+					t.Fatalf("the error is %v, want one that contains %q", err, one.want)
 				}
 			})
 		})
 	}
 }
 
-// refuse is a dial to a port where nothing listens.
+// refuse is a dialer that fails as a connection to a closed port does.
 func refuse(_ context.Context, network, _ string) (net.Conn, error) {
 	return nil, &net.OpError{Op: "dial", Net: network, Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)}
 }
@@ -162,7 +157,7 @@ func TestFetchFailsWhenNothingAnswers(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		if _, err := FetchVia(context.Background(), refuse, descriptionURL); err == nil {
-			t.Fatal("a closed port gave a description")
+			t.Fatal("fetching from a closed port returned a description, want an error")
 		}
 	})
 }

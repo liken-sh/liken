@@ -1,11 +1,9 @@
 package main
 
-// A session that stands while its unit is replaced for a new wiring. A
-// WiiM declared by its UUID alone has no address until discovery finds
-// it, a few seconds after the operator starts, and a Denon's declared
-// address can change. Either one replaces the unit, and the session the
-// old unit held is the same session: the new unit takes it over with
-// its flags and sends nothing for them.
+// A change of a receiver's address replaces its unit: a WiiM declared
+// by its UUID alone gets an address when discovery finds it, and a
+// Denon's declared address can change. The new unit takes over the
+// running session with its flags and sends nothing for them.
 
 import (
 	"testing"
@@ -15,9 +13,9 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/wiim"
 )
 
-// rewired runs the first pass for a Receiver that holds a standing
-// session and a status an earlier operator wrote, then moves its wiring
-// and runs the next pass.
+// rewired runs a pass for a Receiver with a running session and a
+// status that an earlier operator process wrote, changes the Receiver's
+// address with move, and runs a second pass.
 func rewired(t *testing.T, receiver Receiver, move func(*controller, *Receiver)) *logBuffer {
 	t.Helper()
 	api := startFakeAPI(t)
@@ -41,7 +39,7 @@ func rewired(t *testing.T, receiver Receiver, move func(*controller, *Receiver))
 	return log
 }
 
-func TestARewiredUnitKeepsTheSessionThatStands(t *testing.T) {
+func TestARewiredUnitKeepsTheRunningSession(t *testing.T) {
 	cases := []struct {
 		name     string
 		receiver func(*testing.T) Receiver

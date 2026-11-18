@@ -1,8 +1,8 @@
 package cec_test
 
-// The events the bus in memory never sends: the kernel's count of lost
-// messages, and an event this package does not read. A handle that
-// answers one fixed event is the narrowest fake that reaches them.
+// The in-memory bus never sends a lost-messages event or an event that
+// NextEvent ignores, so these tests read from oneEvent, a handle whose
+// every ioctl returns the same event.
 
 import (
 	"testing"
@@ -33,7 +33,7 @@ func TestNextEventReadsEachKind(t *testing.T) {
 		want  cec.Event
 	}{
 		{"lost messages", lost, cec.Event{Lost: 3}},
-		{"a pin event this package does not read", cec.KernelEvent{Event: 3}, cec.Event{}},
+		{"CEC_EVENT_PIN_CEC_LOW, which NextEvent ignores", cec.KernelEvent{Event: 3}, cec.Event{}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -41,7 +41,7 @@ func TestNextEventReadsEachKind(t *testing.T) {
 
 			mustSucceed(t, err)
 			if got != c.want {
-				t.Errorf("got %+v, want %+v", got, c.want)
+				t.Errorf("NextEvent() = %+v, want %+v", got, c.want)
 			}
 		})
 	}

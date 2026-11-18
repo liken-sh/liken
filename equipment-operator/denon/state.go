@@ -1,10 +1,9 @@
 package denon
 
-// The receiver's own state: one entry per zone, the system settings,
-// the tone and Audyssey settings, the audio settings, the HDMI setup,
-// and the channel volumes. The state is in the receiver's units, and the driver
-// translates it into the equipment contract and into the protocol
-// snapshot the status carries.
+// The receiver's state as its protocol lines report it. Zone values
+// stay in the receiver's units, and the driver converts them for the
+// equipment contract. Settings are converted to the units of
+// status.denon as each line is read.
 
 import (
 	"strconv"
@@ -13,16 +12,16 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
-// The zone names beyond the main zone. A line names one with its
-// prefix, and the state records one only once a line has named it.
+// The names of the zones other than the main zone. A line for one of
+// them starts with Z2 or Z3.
 const (
 	zone2 = "zone2"
 	zone3 = "zone3"
 )
 
-// zoneState is one zone's last reported values, in the receiver's own
-// units. seen records that the receiver has named the zone at all, so
-// a single-zone model never reports an empty second zone.
+// zoneState is the last values the receiver reported for one zone, in
+// the receiver's units. seen is true once any line has reported the
+// zone, so a model with one zone never publishes an empty second zone.
 type zoneState struct {
 	Power     equipment.Power
 	Input     string
@@ -35,9 +34,10 @@ type zoneState struct {
 	seen      bool
 }
 
-// denonState is everything one receiver has said. mainFromZM records
-// that the model reports main-zone power through ZM, so the older PW
-// lines stop standing in for it.
+// denonState is everything one receiver has reported. mainFromZM is
+// true once the receiver sends ZMON or ZMOFF. From then on the main
+// zone's power comes from those lines, and PWON and PWSTANDBY change
+// only the system power.
 type denonState struct {
 	Reachable equipment.ConditionStatus
 	Settings  Settings
@@ -45,15 +45,14 @@ type denonState struct {
 	Zone2     zoneState
 	Zone3     zoneState
 
-	// model and manufacturer are what the receiver's UPnP description
-	// names (description.go), empty until the client has read it.
+	// model and manufacturer come from the receiver's UPnP description
+	// (description.go). They are empty until the client has read it.
 	model        string
 	manufacturer string
 
 	mainFromZM bool
 }
 
-// newDenonState is the state before the receiver has said anything.
 func newDenonState() denonState {
 	return denonState{
 		Reachable: equipment.ConditionUnknown,
@@ -64,17 +63,19 @@ func newDenonState() denonState {
 	}
 }
 
-// The field names a folded line can carry. The session cares about
-// volume and mute, and the status writer is poked for every line
-// whether or not it names a field.
+// The names of the fields that a zone's sleep and quick select lines
+// change.
 const (
 	sleepField = "sleep"
 	quickField = "quick"
 )
 
-// applyDenonLine folds one line into the state and answers the zone and
-// field it named. A line this driver does not know is ignored, because
-// a Denon volunteers dozens of settings nothing here reads.
+// applyDenonLine applies one line from the receiver to the state. It
+// returns the new state, the zone of the line, the name of the field it
+// changed, and whether it recognized the line. The zone is empty for a
+// setting of the whole unit. The receiver also sends lines that the
+// driver does not parse, so the caller ignores a line that is not
+// recognized.
 func applyDenonLine(state denonState, line string) (denonState, string, string, bool) {
 	switch {
 	case line == PowerOnCommand:
@@ -138,7 +139,7 @@ func applyDenonLine(state denonState, line string) (denonState, string, string, 
 		state.Main.seen = true
 		return state, equipment.MainZone, quickField, true
 	case strings.HasPrefix(line, SoundModePrefix) && len(line) > 2:
-		// A report can end in spaces, which name no part of the mode.
+		// The receiver pads some sound mode lines with trailing spaces.
 		state.Main.SoundMode = strings.TrimSpace(line[2:])
 		state.Main.seen = true
 		return state, equipment.MainZone, soundModeField, true
@@ -230,9 +231,10 @@ func applyDenonLine(state denonState, line string) (denonState, string, string, 
 	return state, "", "", false
 }
 
-// applyZoneLine folds the body of a Z2 or Z3 line into one zone. The
-// body is the line without its zone prefix, so "ON", "MUOFF", "SLP010",
-// "90", or an input name.
+// applyZoneLine applies the body of a Z2 or Z3 line to one zone. The
+// body is the line without the zone prefix, such as "ON", "MUOFF",
+// "SLP010", "90", or an input name. It rejects CV, PS, HPF, and CS
+// bodies, because the last case would read them as an input name.
 func applyZoneLine(zone zoneState, body string) (zoneState, string, bool) {
 	switch {
 	case body == "ON":
@@ -278,8 +280,11 @@ func applyZoneLine(zone zoneState, body string) (zoneState, string, bool) {
 	return zone, inputField, true
 }
 
-// applyParameterLine folds one PS line, which is where the tone, the
-// Audyssey, and the audio settings arrive.
+// applyParameterLine applies one PS line, which reports a tone,
+// Audyssey, or audio setting. Each word reader accepts only the words
+// that its *Wire function in protocol.go encodes, so a word it does not
+// know leaves the field nil, and the status never holds a value that
+// the driver cannot send back.
 func applyParameterLine(state *denonState, line string) (string, bool) {
 	switch {
 	case strings.HasPrefix(line, "PSMULTEQ:"):
@@ -419,8 +424,8 @@ func applyParameterLine(state *denonState, line string) (string, bool) {
 	return "", false
 }
 
-// The field names the PS lines carry. None of them reaches the
-// equipment contract, which names only the fields a session acts on.
+// The field names of the settings lines. equipmentField in client.go
+// maps none of them to an equipment event.
 const (
 	ecoField            = "eco"
 	dimmerField         = "dimmer"
@@ -450,7 +455,8 @@ const (
 	toneControlField    = "toneControl"
 )
 
-// parseSleep reads a sleep timer body: OFF, or three digits of minutes.
+// parseSleep reads a sleep timer body: OFF, which is 0, or minutes from
+// 0 to 120.
 func parseSleep(body string) (int, bool) {
 	if body == "OFF" {
 		return 0, true
@@ -462,7 +468,8 @@ func parseSleep(body string) (int, bool) {
 	return minutes, true
 }
 
-// parseQuick reads a quick-select line and answers which slot it names.
+// parseQuick reads the quick select number, from 0 to 5, from an
+// MSQUICK line.
 func parseQuick(line string) (int, bool) {
 	slot, err := strconv.Atoi(strings.TrimSpace(line[len("MSQUICK"):]))
 	if err != nil || slot < 0 || slot > 5 {
@@ -471,12 +478,13 @@ func parseQuick(line string) (int, bool) {
 	return slot, true
 }
 
-// parseChannelVolume reads one CV line and answers the channel and its
-// trim in display units.
+// parseChannelVolume reads one CV line and returns the channel name and
+// its trim in dB. The digits are the receiver's volume scale, where 50
+// is 0 dB.
 func parseChannelVolume(line string) (string, float64, bool) {
 	body := line[len("CV"):]
-	channel, digits, held := strings.Cut(body, " ")
-	if !held || channel == "" {
+	channel, digits, found := strings.Cut(body, " ")
+	if !found || channel == "" {
 		return "", 0, false
 	}
 	halves, ok := ParseHalfSteps(strings.TrimSpace(digits))
@@ -486,7 +494,6 @@ func parseChannelVolume(line string) (string, float64, bool) {
 	return channel, float64(halves)/2 - 50, true
 }
 
-// onOffWord reads ON or OFF.
 func onOffWord(word string) (bool, bool) {
 	switch word {
 	case "ON":
@@ -497,7 +504,6 @@ func onOffWord(word string) (bool, bool) {
 	return false, false
 }
 
-// onOffText writes a switch the way the status carries it.
 func onOffText(on bool) string {
 	if on {
 		return "on"
@@ -505,7 +511,6 @@ func onOffText(on bool) string {
 	return "off"
 }
 
-// dimmerWord reads the dimmer setting.
 func dimmerWord(word string) (string, bool) {
 	switch word {
 	case "OFF":
@@ -520,7 +525,6 @@ func dimmerWord(word string) (string, bool) {
 	return "", false
 }
 
-// autoStandbyWord reads the auto-standby timer.
 func autoStandbyWord(word string) (string, bool) {
 	switch word {
 	case "OFF":
@@ -541,7 +545,6 @@ func autoStandbyWord(word string) (string, bool) {
 	return "", false
 }
 
-// inputModeWord reads the audio input mode.
 func inputModeWord(word string) (string, bool) {
 	switch word {
 	case "AUTO":
@@ -556,7 +559,6 @@ func inputModeWord(word string) (string, bool) {
 	return "", false
 }
 
-// videoSelect reads a video-select body, OFF or a source name.
 func videoSelect(body string) string {
 	if body == "OFF" || body == "" {
 		return "off"
@@ -564,8 +566,9 @@ func videoSelect(body string) string {
 	return body
 }
 
-// bluetoothWord reads a BTTX body and answers the mode, the output, or
-// both. The receiver reports them as separate lines.
+// bluetoothWord reads a BTTX body. It returns the transmitter mode or
+// the output, and the other is empty, because the receiver reports them
+// on separate lines.
 func bluetoothWord(body string) (string, string, bool) {
 	switch body {
 	case "ON":
@@ -580,9 +583,6 @@ func bluetoothWord(body string) (string, string, bool) {
 	return "", "", false
 }
 
-// multEqWord reads an Audyssey MultEQ mode. A word the receiver does
-// not send is rejected, so the field stays nil rather than hold a value
-// no builder can re-assert.
 func multEqWord(word string) (string, bool) {
 	switch word {
 	case "AUDYSSEY":
@@ -599,9 +599,6 @@ func multEqWord(word string) (string, bool) {
 	return "", false
 }
 
-// dynamicVolumeWord reads a Dynamic Volume setting. A word the receiver
-// does not send is rejected, so the field stays nil rather than hold a
-// value no builder can re-assert.
 func dynamicVolumeWord(word string) (string, bool) {
 	switch word {
 	case "OFF":
@@ -616,9 +613,6 @@ func dynamicVolumeWord(word string) (string, bool) {
 	return "", false
 }
 
-// restorerWord reads an Audio Restorer setting. A word the receiver
-// does not send is rejected, so the field stays nil rather than hold a
-// value no builder can re-assert.
 func restorerWord(word string) (string, bool) {
 	switch word {
 	case "OFF":
@@ -633,8 +627,6 @@ func restorerWord(word string) (string, bool) {
 	return "", false
 }
 
-// drcWord reads a Dynamic Range Control setting. The receiver sends
-// AUTO as well as the four cut levels, so the word maps it.
 func drcWord(word string) (string, bool) {
 	switch word {
 	case "OFF":
@@ -651,9 +643,6 @@ func drcWord(word string) (string, bool) {
 	return "", false
 }
 
-// dialogEnhancerWord reads a Dialog Enhancer level. A word the
-// receiver does not send is rejected, so the field stays nil rather
-// than hold a value no builder can re-assert.
 func dialogEnhancerWord(word string) (string, bool) {
 	switch word {
 	case "OFF":

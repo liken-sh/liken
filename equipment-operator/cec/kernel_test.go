@@ -1,10 +1,11 @@
 package cec_test
 
-// The layouts and the request numbers must match linux/cec.h exactly,
-// because the kernel copies the argument of each ioctl byte for byte.
-// The wanted values were compiled from /usr/include/linux/cec.h with
-// sizeof, offsetof, and the _IOR/_IOW/_IOWR macros, so a Go field out
-// of place fails here and not on the wire.
+// The struct layouts and request numbers must match linux/cec.h
+// exactly, because the kernel copies each ioctl's argument byte for
+// byte. The expected values were compiled from
+// /usr/include/linux/cec.h with sizeof, offsetof, and the
+// _IOR/_IOW/_IOWR macros, so a misplaced Go field fails here and not on
+// the bus.
 
 import (
 	"testing"
@@ -50,7 +51,7 @@ func TestTheKernelLayoutsMatchTheHeader(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if c.got != c.want {
-				t.Errorf("got %d, want %d", c.got, c.want)
+				t.Errorf("%s is %d, want %d", c.name, c.got, c.want)
 			}
 		})
 	}
@@ -76,7 +77,7 @@ func TestTheRequestNumbersMatchTheHeader(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if c.got != c.want {
-				t.Errorf("got %#x, want %#x", c.got, c.want)
+				t.Errorf("%s is %#x, want %#x", c.name, c.got, c.want)
 			}
 		})
 	}

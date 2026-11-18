@@ -1,10 +1,7 @@
 package main
 
-// The session in status.session. The media operator writes it under
-// its own field manager, and the operator reads it first. A Receiver
-// with no status.session falls back to spec.session, so an older media
-// operator still drives the receiver. The operator's own status apply
-// never states the session, so it never removes it.
+// Tests of where the operator reads a Receiver's session. Receiver.session
+// gives the reasons that status.session comes before spec.session.
 
 import (
 	"encoding/json"
@@ -20,7 +17,7 @@ func inStatus(receiver Receiver) Receiver {
 	return receiver
 }
 
-// A session in either place starts on its input.
+// A session in status.session or in spec.session selects its input.
 func TestASessionInTheStatusOrTheSpecSelectsItsInput(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -50,9 +47,8 @@ func TestASessionInTheStatusOrTheSpecSelectsItsInput(t *testing.T) {
 	}
 }
 
-// status.session wins when both places hold a session, so a media
-// operator that has moved to the status is not undone by the spec
-// session it has not cleared yet.
+// When both status.session and spec.session are set, the operator
+// uses status.session.
 func TestTheStatusSessionWinsOverTheSpecSession(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -73,8 +69,8 @@ func TestTheStatusSessionWinsOverTheSpecSession(t *testing.T) {
 	})
 }
 
-// A session that moves from spec.session to status.session unchanged is
-// the same session: it does not end, and it sends nothing.
+// A session that moves unchanged from spec.session to status.session
+// keeps running, and the operator sends the receiver nothing.
 func TestASessionThatMovesToTheStatusIsNoChange(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -99,9 +95,9 @@ func TestASessionThatMovesToTheStatusIsNoChange(t *testing.T) {
 	})
 }
 
-// statedStatusFields answers each status field the applies stated, once
-// for each apply that stated it.
-func statedStatusFields(t *testing.T, bodies [][]byte) []string {
+// statusFieldsApplied returns the name of each status field that the
+// apply bodies set, once for each apply that set it.
+func statusFieldsApplied(t *testing.T, bodies [][]byte) []string {
 	t.Helper()
 	var stated []string
 	for _, body := range bodies {
@@ -114,9 +110,9 @@ func statedStatusFields(t *testing.T, bodies [][]byte) []string {
 	return stated
 }
 
-// The operator's status apply states no session, so the API server
-// leaves the session the media operator's field manager owns in place.
-func TestTheStatusApplyNeverStatesTheSession(t *testing.T) {
+// The operator's status apply leaves out status.session, so it never
+// overwrites the session that media-operator wrote.
+func TestTheStatusApplyLeavesTheSessionOut(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)
@@ -127,7 +123,7 @@ func TestTheStatusApplyNeverStatesTheSession(t *testing.T) {
 		api.waitForStatus(t, connected)
 
 		api.mutex.Lock()
-		stated := statedStatusFields(t, api.statusBodies)
+		stated := statusFieldsApplied(t, api.statusBodies)
 		api.mutex.Unlock()
 
 		mustMatch(t, slices.Contains(stated, "conditions"), true)

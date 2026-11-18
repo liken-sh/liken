@@ -1,8 +1,7 @@
 package main
 
-// The Deployment's derivation for one CECBus: the merged device list
-// and the four conditions, from the adapters' entries and the pods of
-// the node workload.
+// Tests of the device list and the conditions that deriveCECBus
+// computes from the adapters' entries and the node workload's pods.
 
 import (
 	"testing"
@@ -15,8 +14,8 @@ func logical(address int) *int {
 	return &address
 }
 
-// scannedEntry is an adapter in Control that finished a scan and found
-// the given devices.
+// scannedEntry is the entry of an adapter in Control that finished a
+// scan and found the given devices.
 func scannedEntry(machine string, address int, devices ...CECDevice) CECAdapterStatus {
 	return CECAdapterStatus{
 		Machine: machine, Mode: CECControl, State: AdapterScanned, PhysicalAddress: announced[machine],
@@ -24,12 +23,13 @@ func scannedEntry(machine string, address int, devices ...CECDevice) CECAdapterS
 	}
 }
 
-// announced is the physical address each machine's Display gives its
-// adapter. Every adapter on a bus announces the bus's name, so the
-// address is what tells two adapters apart.
+// announced is the physical address that each machine's Display gives
+// its adapter. Every adapter on a bus announces the same OSD name, so
+// the address is what tells two adapters apart.
 var announced = map[string]string{"node-1": "1.3.0.0", "node-2": "1.4.0.0"}
 
-// adapterSeen is another adapter of the bus as a scan finds it.
+// adapterSeen is the device that a scan finds when it sees another
+// adapter of the bus.
 func adapterSeen(machine string, address int) CECDevice {
 	return CECDevice{LogicalAddress: address, PhysicalAddress: announced[machine], Type: "Playback", OSDName: "den"}
 }
@@ -44,8 +44,8 @@ func busWith(mode CECMode, machines []string, entries ...CECAdapterStatus) *CECB
 	for _, machine := range machines {
 		bus.Spec.Adapters = append(bus.Spec.Adapters, CECBusAdapter{Machine: machine, Display: "acm-0001-receiver"})
 	}
-	// Every entry reports at derivedAt, so a message that names the
-	// time of the last write is the same in every case.
+	// Every entry has the same ReportedAt, so a message that includes
+	// the time of the last write is the same in every case.
 	for index := range entries {
 		if entries[index].ReportedAt == "" {
 			entries[index].ReportedAt = timestamp(derivedAt)
@@ -55,29 +55,27 @@ func busWith(mode CECMode, machines []string, entries ...CECAdapterStatus) *CECB
 	return bus
 }
 
-// podsAt is what the pods show at a time, by machine.
 func podsAt(now time.Time, machines map[string]podState) podLiveness {
 	return podLiveness{machines: machines, now: now}
 }
 
-// The states of one machine's pods, against the entries busWith writes
-// at derivedAt.
+// The pod states below are relative to derivedAt, the ReportedAt that
+// busWith gives every entry.
 var (
-	// ready is a Ready pod.
 	ready = podState{ready: true}
 	// lost is a pod that stopped being Ready a second after the write.
 	lost = podState{since: derivedAt.Add(time.Second)}
-	// starting is a pod that has not been Ready since a second before
-	// the write, as a new pod is when its first entry lands.
+	// starting is a pod that became not Ready a second before the
+	// write, like a new pod when it writes its first entry.
 	starting = podState{since: derivedAt.Add(-time.Second)}
 )
 
-// allReady is a Ready pod of the node workload on each machine the
-// cases name, so only a case about staleness sees a stale entry.
+// allReady has a Ready pod on each machine that the cases use, so only
+// a case about staleness sees a stale entry.
 var allReady = podsAt(derivedAt, map[string]podState{"node-1": ready, "node-2": ready})
 
-// stopped is an entry whose node workload stopped and released the
-// adapter.
+// stopped is the entry that a node workload writes when it stops and
+// releases its adapter.
 func stopped(machine string) CECAdapterStatus {
 	return CECAdapterStatus{Machine: machine, Mode: CECControl, State: AdapterStopped, Message: "the node workload received terminated"}
 }
@@ -138,13 +136,14 @@ func TestTheConditionsSayWhatTheAdaptersDid(t *testing.T) {
 
 			got := conditionOf(conditions, c.kind)
 			if got.Status != c.status || got.Reason != c.reason || got.Message == "" || got.ObservedGeneration != 3 {
-				t.Errorf("%s = %+v, want %s %s", c.kind, got, c.status, c.reason)
+				t.Errorf("condition %s is %+v, want status %s and reason %s", c.kind, got, c.status, c.reason)
 			}
 		})
 	}
 }
 
-// The messages a person reads carry the machine and the source's text.
+// Each condition message names the machine and includes the text of
+// the failure that caused it.
 func TestTheConditionMessagesNameTheAdapterAndTheCause(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -154,13 +153,13 @@ func TestTheConditionMessagesNameTheAdapterAndTheCause(t *testing.T) {
 		message string
 	}{
 		{"a refusal", busWith(CECControl, []string{"node-1"}, CECAdapterStatus{Machine: "node-1", State: AdapterRefused, Message: "CEC_S_MODE: device or resource busy"}),
-			conditionJoined, "the adapter on node-1: CEC_S_MODE: device or resource busy"},
+			conditionJoined, "The adapter on node-1: CEC_S_MODE: device or resource busy"},
 		{"a silent cable", busWith(CECControl, []string{"node-1"}, scannedEntry("node-1", 4)),
-			conditionScanned, "no device answered the polls of the adapter on node-1; the HDMI cable at the adapter's output may not carry the CEC wire"},
+			conditionScanned, "No device answered the polls of the adapter on node-1. The HDMI cable at the adapter's output may not carry the CEC wire"},
 		{"two wires", busWith(CECControl, []string{"node-1", "node-2"}, scannedEntry("node-1", 4, tvDevice), scannedEntry("node-2", 4, tvDevice)),
-			conditionCoherent, `the adapter on node-1 does not see the adapter on node-2 at physical address 1.4.0.0; the two adapters may be on different wires`},
+			conditionCoherent, `The adapter on node-1 does not see the adapter on node-2 at physical address 1.4.0.0. The two adapters may be on different CEC wires`},
 		{"a stopped adapter", busWith(CECControl, []string{"node-1"}, stopped("node-1")),
-			conditionJoined, "the node workload on node-1 stopped and released the adapter: the node workload received terminated"},
+			conditionJoined, "The node workload on node-1 stopped and released the adapter: the node workload received terminated"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -206,8 +205,9 @@ func TestTheDevicesMergeAcrossAdapters(t *testing.T) {
 		{"a device with no address comes last", []CECAdapterStatus{
 			scannedEntry("node-1", 4, CECDevice{LogicalAddress: 1, Type: "Recording"}, receiverDevice),
 		}, []CECDevice{receiverDevice, {LogicalAddress: 1, Type: "Recording"}}},
-		// The System Audio Mode carries the time an adapter read or heard
-		// it, so the newer report wins whichever adapter made it.
+		// The System Audio Mode has the time at which the adapter read or
+		// heard it, so the newer report wins regardless of which adapter
+		// made it.
 		{"the newer System Audio Mode wins", []CECAdapterStatus{
 			scannedEntry("node-1", 4, CECDevice{PhysicalAddress: "1.0.0.0", LogicalAddress: 5, SystemAudioMode: "On", SystemAudioModeAt: "2026-09-26T11:00:00Z"}),
 			scannedEntry("node-2", 8, CECDevice{PhysicalAddress: "1.0.0.0", LogicalAddress: 5, SystemAudioMode: "Off", SystemAudioModeAt: "2026-09-26T11:30:00Z"}),
@@ -234,11 +234,10 @@ func TestTheDevicesMergeAcrossAdapters(t *testing.T) {
 	}
 }
 
-// An entry that is not Stopped describes its adapter while a pod of the
-// node workload on its machine is Ready, and while a pod there starts:
-// one that has not become Ready since the write, until cecStartupGrace
-// after it. A Stopped entry is the node workload's own last word, and
-// wins over what the pods show.
+// An entry that is not Stopped is current while its machine has a
+// Ready pod. A pod that became not Ready before the entry was written
+// is starting, and its entry stays current until cecStartupGrace after
+// the write. A Stopped entry wins over what the pods show.
 func TestAnEntryIsCurrentWhileItsMachinesPodIsReadyOrStarting(t *testing.T) {
 	t.Parallel()
 	one := []string{"node-1"}
@@ -276,13 +275,12 @@ func TestAnEntryIsCurrentWhileItsMachinesPodIsReadyOrStarting(t *testing.T) {
 
 			got := conditionOf(conditions, c.kind)
 			if got.Status != c.status || got.Reason != c.reason {
-				t.Errorf("%s = %+v, want %s %s", c.kind, got, c.status, c.reason)
+				t.Errorf("condition %s is %+v, want status %s and reason %s", c.kind, got, c.status, c.reason)
 			}
 		})
 	}
 }
 
-// The stale verdict says what the pods showed.
 func TestTheStaleMessageSaysWhatThePodsShow(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -291,11 +289,11 @@ func TestTheStaleMessageSaysWhatThePodsShow(t *testing.T) {
 		message string
 	}{
 		{"a pod that lost readiness", podsAt(derivedAt, map[string]podState{"node-1": lost}),
-			"the equipment-operator-cec pod on machine node-1 stopped being Ready at 2026-09-26T12:00:01Z, after its entry was last written at 2026-09-26T12:00:00Z, so the entry may not describe the adapter"},
+			"The equipment-operator-cec pod on machine node-1 stopped being Ready at 2026-09-26T12:00:01Z, after its entry was last written at 2026-09-26T12:00:00Z, so the entry may not describe the adapter"},
 		{"a pod past the grace", podsAt(derivedAt.Add(cecStartupGrace), map[string]podState{"node-1": starting}),
-			"the equipment-operator-cec pod on machine node-1 has not been Ready in the 1m0s since its entry was written at 2026-09-26T12:00:00Z, so the entry may not describe the adapter"},
+			"The equipment-operator-cec pod on machine node-1 has not been Ready in the 1m0s since its entry was written at 2026-09-26T12:00:00Z, so the entry may not describe the adapter"},
 		{"no pod", podsAt(derivedAt, map[string]podState{}),
-			"no equipment-operator-cec pod runs on machine node-1, so its entry, last written at 2026-09-26T12:00:00Z, may not describe the adapter"},
+			"No equipment-operator-cec pod runs on machine node-1, so its entry, last written at 2026-09-26T12:00:00Z, may not describe the adapter"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -306,8 +304,9 @@ func TestTheStaleMessageSaysWhatThePodsShow(t *testing.T) {
 	}
 }
 
-// An entry in a starting pod's grace names the end of the grace, so
-// the loop passes again then. Every other entry names no time.
+// An entry of a starting pod has a recheck time at the end of the
+// grace, so the reconcile loop runs again then. No other entry has a
+// recheck time.
 func TestAStartingPodsEntryNamesTheEndOfItsGrace(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -329,8 +328,8 @@ func TestAStartingPodsEntryNamesTheEndOfItsGrace(t *testing.T) {
 	}
 }
 
-// A stale entry's devices describe the wire as it was, so the merged
-// list leaves them out.
+// The devices of a stale entry describe the wire as it was, so the
+// merged list leaves them out.
 func TestAStaleEntrysDevicesAreLeftOut(t *testing.T) {
 	t.Parallel()
 	bus := busWith(CECControl, []string{"node-1", "node-2"}, scannedEntry("node-1", 4, tvDevice), scannedEntry("node-2", 8, receiverDevice))
@@ -340,9 +339,9 @@ func TestAStaleEntrysDevicesAreLeftOut(t *testing.T) {
 	mustDeepEqual(t, devices, []CECDevice{tvDevice})
 }
 
-// One Ready pod on a machine is enough, as during a rollout that runs
-// the old pod and the new one there for a moment. Of the pods that are
-// not Ready, the latest change of the Ready condition counts.
+// One Ready pod on a machine is enough, because a rollout briefly runs
+// the old pod and the new one on the same machine. When no pod there is
+// Ready, the latest change of a Ready condition counts.
 func TestOneReadyPodOnAMachineIsEnough(t *testing.T) {
 	t.Parallel()
 	pod := func(node string, ready bool, changed time.Time) cecPod {

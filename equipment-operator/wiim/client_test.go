@@ -1,5 +1,5 @@
-// The client against a fake amp that serves TLS on the test network,
-// plus the parsing and the setters.
+// Tests of the client against a fake amp that serves TLS on the test
+// network, and of the parsing and the setters.
 
 package wiim
 
@@ -27,20 +27,20 @@ func mustMatch(t *testing.T, got, want any) {
 func mustSucceed(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("got error %v, want none", err)
 	}
 }
 
-// The canned answers the fake amp serves. The values are invented; the
-// field names and the shapes are what the live amps answer.
+// The canned replies of the fake amp. The values are invented. The
+// field names and the structure are what live amps return.
 const (
 	statusExJSON = `{ "language":"en_us", "DeviceName":"Test Amp", "GroupName":"Test Amp", "ssid":"Test Amp", "group":"0", "firmware":"Linkplay.5.2.1", "build":"release", "project":"WiiM_Amp_4layer", "Release":"20260101", "hardware":"AmlogicA113", "PCB_version":"7", "mcu_ver":"0", "hdmi_ver":"100", "uboot_verinfo":"250928.100906", "uuid":"FF98F2F7AABBCCDDEEFF0011", "MAC":"00:11:22:33:44:55", "BTMAC":"00:11:22:33:44:56", "AP_MAC":"00:11:22:33:44:57", "ETH_MAC":"00:11:22:33:44:58", "temp_uuid":"AABB", "upnp_uuid":"uuid:FF98F2F7-AABB-CCDD-EEFF-0011FF98F2F7", "internet":"1", "date":"2026:09:21", "time":"12:00:00", "tz":"-4.0", "app_timezone_id":"America/New_York", "privacy_mode":"0", "InitialConfiguration":"1", "communication_port":"8819", "cast_enable":1, "preset_key":"12", "mqtt_support":"1", "audiocast":"1", "max_volume":"100", "volume_control":"0", "EQ_support":"Eq10HP_ver_2.0", "EQVersion":"4.3", "security":"https/2.0", "security_version":"3.0", "security_capabilities":{"ver":"1.0","aes_ver":"1.0"}, "apcli0":"0.0.0.0", "eth0":"192.0.2.10", "essid":"54657374", "WifiChannel":"0", "RSSI":"0", "BSSID":"", "wlanSnr":"0", "wlanNoise":"0", "wlanFreq":"0", "wlanDataRate":"0", "temperature_cpu":"32", "temperature_tmp102":"27", "BleRemoteControl":"1", "BleRemoteConnected":"1", "BleRemoteBatterylevel":"100", "BleRemoteRSSI":"-57", "BleRemoteVersion":"0054", "BleRemote_dev_state":"normal" }`
-	playerJSON   = `{"type":"0","ch":"0","mode":"43","loop":"4","eq":"0","vendor":"","status":"play","curpos":"1000","offset_pts":"0","totlen":"2000","Title":"486176652061204369676172","Artist":"50696E6B20466C6F7964","Album":"5769736820596F7520576572652048657265","alarmflag":"0","plicount":"0","plicurr":"0","vol":"31","mute":"0"}`
-	metaJSON     = `{ "metaData": { "album":"Wish You Were Here", "title":"Have a Cigar", "subtitle":"unknown", "artist":"Pink Floyd", "albumArtURI":"https://example.invalid/art.jpg", "sampleRate":"44100", "bitDepth":"24", "bitRate":"1525", "trackId":"abc" } }`
+	playerJSON   = `{"type":"0","ch":"0","mode":"43","loop":"4","eq":"0","vendor":"","status":"play","curpos":"1000","offset_pts":"0","totlen":"2000","Title":"4C616E7465726E20536F6E67","Artist":"54686520517569657420456E67696E6573","Album":"4E6F72746865726E204C696E6573","alarmflag":"0","plicount":"0","plicurr":"0","vol":"31","mute":"0"}`
+	metaJSON     = `{ "metaData": { "album":"Northern Lines", "title":"Lantern Song", "subtitle":"unknown", "artist":"The Quiet Engines", "albumArtURI":"https://example.invalid/art.jpg", "sampleRate":"44100", "bitDepth":"24", "bitRate":"1525", "trackId":"abc" } }`
 )
 
-// fakeAmp answers the commands a live amp answers, with one canned
-// answer each.
+// fakeAmp replies to the commands that a live amp answers, with one
+// canned reply for each.
 type fakeAmp struct {
 	address string
 
@@ -49,8 +49,8 @@ type fakeAmp struct {
 	answers  map[string]string
 	failing  int
 	setter   string
-	// broken names the commands the fake answers with a 500, and onRead
-	// runs before the fake answers each command.
+	// broken is the commands that the fake answers with a 500. onRead
+	// runs before the fake replies to each command.
 	broken map[string]bool
 	onRead func(command string)
 }
@@ -149,8 +149,8 @@ func (f *fakeAmp) sent() []string {
 	return append([]string(nil), f.commands...)
 }
 
-// drainEvents empties the events a poll queued, so a test reads only
-// what the next poll reports.
+// drainEvents discards the queued events, so a test reads only the
+// events of the next poll.
 func drainEvents(events <-chan equipment.Event) {
 	for {
 		select {
@@ -161,14 +161,14 @@ func drainEvents(events <-chan equipment.Event) {
 	}
 }
 
-// One poll fills every family of the snapshot.
-func TestPollFoldsEveryFamily(t *testing.T) {
+// A first poll fills every family of the snapshot.
+func TestAFirstPollReadsEveryFamily(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp := startFakeAmp(t)
 		client := amp.client(nil)
 
 		if !client.poll(context.Background()) {
-			t.Fatal("the poll did not answer")
+			t.Fatal("poll returned false, want true for a device that answers")
 		}
 		status := client.Status()
 
@@ -190,10 +190,10 @@ func TestPollFoldsEveryFamily(t *testing.T) {
 		mustMatch(t, status.Playback.Status, "play")
 		mustMatch(t, status.Playback.Source, "optical")
 		mustMatch(t, status.Playback.Volume, 31)
-		mustMatch(t, status.Playback.Title, "Have a Cigar")
-		mustMatch(t, status.Playback.Artist, "Pink Floyd")
+		mustMatch(t, status.Playback.Title, "Lantern Song")
+		mustMatch(t, status.Playback.Artist, "The Quiet Engines")
 
-		mustMatch(t, status.NowPlaying.Title, "Have a Cigar")
+		mustMatch(t, status.NowPlaying.Title, "Lantern Song")
 		mustMatch(t, status.NowPlaying.SampleRate, 44100)
 		mustMatch(t, status.NowPlaying.BitDepth, 24)
 
@@ -227,9 +227,7 @@ func TestPollFoldsEveryFamily(t *testing.T) {
 	})
 }
 
-// The contract carries one main zone, power always on, and the volume
-// the player reported.
-func TestStateCarriesTheMainZone(t *testing.T) {
+func TestStateHasTheMainZone(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp := startFakeAmp(t)
 		client := amp.client(nil)
@@ -259,8 +257,8 @@ func TestStateBeforeTheDeviceAnswers(t *testing.T) {
 	mustMatch(t, zone.Sleep, equipment.Unknown)
 }
 
-// A device whose uuid does not match the declared identity is not
-// driven, and reports unreachable.
+// A device whose uuid differs from the declared one is not driven and
+// is reported unreachable.
 func TestIdentityMismatchReportsUnreachable(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp := startFakeAmp(t)
@@ -269,13 +267,13 @@ func TestIdentityMismatchReportsUnreachable(t *testing.T) {
 
 		for range pollFailures {
 			if client.poll(context.Background()) {
-				t.Fatal("a mismatched uuid answered as the expected device")
+				t.Fatal("poll returned true for a device with a different uuid, want false")
 			}
 		}
 		mustMatch(t, client.State().Reachable, equipment.ConditionFalse)
 		for _, command := range amp.sent() {
 			if command != statusCommand {
-				t.Fatalf("a mismatched device was sent %q", command)
+				t.Fatalf("the client sent %q to a device with a different uuid, want only %s", command, statusCommand)
 			}
 		}
 	})
@@ -294,8 +292,8 @@ func TestIdentityMatchesNormalizesTheSpellings(t *testing.T) {
 	mustMatch(t, client.identityMatches("anything"), true)
 }
 
-// countingTransport answers every request with an error and counts
-// them, so a test proves a client sent nothing.
+// countingTransport fails every request and records it, so a test can
+// check that a client sent nothing.
 type countingTransport struct {
 	mutex    sync.Mutex
 	requests []string
@@ -308,9 +306,7 @@ func (c *countingTransport) RoundTrip(request *http.Request) (*http.Response, er
 	return nil, fmt.Errorf("the test answers no request")
 }
 
-// A client with no address sends no request and reports unreachable.
-// Go dials an empty host as the local machine, so a request would reach
-// whatever answers on port 443 of the operator's own node.
+// A client with no address sends no request and is unreachable.
 func TestAClientWithNoAddressSendsNothing(t *testing.T) {
 	client := NewClient("", nil)
 	transport := &countingTransport{}
@@ -335,15 +331,13 @@ func TestAFailedPollReportsUnreachable(t *testing.T) {
 
 		for range pollFailures {
 			if client.poll(context.Background()) {
-				t.Fatal("a failing device answered as reachable")
+				t.Fatal("poll returned true for a device that returns 500, want false")
 			}
 		}
 		mustMatch(t, client.State().Reachable, equipment.ConditionFalse)
 	})
 }
 
-// One poll the device misses leaves the last answer standing, and the
-// polls after it call the device unreachable.
 func TestOneMissedPollLeavesTheDeviceReachable(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp := startFakeAmp(t)
@@ -364,9 +358,8 @@ func TestOneMissedPollLeavesTheDeviceReachable(t *testing.T) {
 	})
 }
 
-// A poll the device answers clears the run of misses, so a device that
-// stumbles once does not go unreachable on a later run counted from the
-// stumble.
+// An answered poll resets the count of misses, so earlier misses do not
+// add to a later run of misses.
 func TestAnAnsweredPollClearsTheMisses(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp := startFakeAmp(t)
@@ -383,7 +376,7 @@ func TestAnAnsweredPollClearsTheMisses(t *testing.T) {
 		amp.failing = 0
 		amp.mutex.Unlock()
 		if !client.poll(context.Background()) {
-			t.Fatal("the device answered and the poll reported failure")
+			t.Fatal("poll returned false after the device answered, want true")
 		}
 		mustMatch(t, client.State().Reachable, equipment.ConditionTrue)
 
@@ -397,14 +390,14 @@ func TestAnAnsweredPollClearsTheMisses(t *testing.T) {
 	})
 }
 
-// A source with no track answers "Failed", and the track is cleared.
+// A reply of "Failed" to getMetaInfo clears the track.
 func TestAMissOnNowPlayingClearsTheTrack(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp := startFakeAmp(t)
 		client := amp.client(nil)
 		client.poll(context.Background())
 		if client.Status().NowPlaying == nil {
-			t.Fatal("the first poll did not read a track")
+			t.Fatal("after the first poll NowPlaying is nil, want a track")
 		}
 
 		amp.mutex.Lock()
@@ -416,7 +409,7 @@ func TestAMissOnNowPlayingClearsTheTrack(t *testing.T) {
 	})
 }
 
-// A command the device does not carry leaves its family as it was.
+// A command that the device does not support leaves its family unchanged.
 func TestAnUnknownCommandLeavesItsFamily(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp := startFakeAmp(t)
@@ -431,9 +424,9 @@ func TestAnUnknownCommandLeavesItsFamily(t *testing.T) {
 	})
 }
 
-// A poll that moves nothing still pokes the listener, so the status
-// writer records the observation.
-func TestAPollThatMovedNothingStillReports(t *testing.T) {
+// A poll that changes nothing still sends the listener an event, so the
+// status writer records the poll.
+func TestAPollThatChangesNothingStillSendsAnEvent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp := startFakeAmp(t)
 		events := make(chan equipment.Event, 16)
@@ -446,13 +439,13 @@ func TestAPollThatMovedNothingStillReports(t *testing.T) {
 		case event := <-events:
 			mustMatch(t, event.Zone, equipment.MainZone)
 		case <-time.After(time.Second):
-			t.Fatal("a quiet poll reported nothing")
+			t.Fatal("no event arrived within a second of a poll with no changes, want one")
 		}
 	})
 }
 
-// A hand on the device moves the volume, and the listener hears it as a
-// volume event rather than a reachability change.
+// A volume change made on the device reaches the listener as a volume
+// event, not as a reachability change.
 func TestAChangedVolumeReachesTheListener(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp := startFakeAmp(t)
@@ -470,14 +463,14 @@ func TestAChangedVolumeReachesTheListener(t *testing.T) {
 		case event := <-events:
 			mustMatch(t, event.Field, equipment.EventVolume)
 		case <-time.After(time.Second):
-			t.Fatal("a changed volume reported nothing")
+			t.Fatal("no volume event arrived within a second of a poll that read a new volume, want one")
 		}
 	})
 }
 
-// A setter takes the level it just sent, so a press moves the room
-// before the next poll and two presses in one poll window each count.
-func TestASetterTakesTheLevelItSent(t *testing.T) {
+// A setter stores the volume it sent, so the next press computes from
+// that volume and does not wait for a poll.
+func TestASetterStoresTheVolumeItSent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp := startFakeAmp(t)
 		events := make(chan equipment.Event, 16)
@@ -486,26 +479,26 @@ func TestASetterTakesTheLevelItSent(t *testing.T) {
 		drainEvents(events)
 
 		if err := client.SetVolume(equipment.MainZone, 42); err != nil {
-			t.Fatal(err)
+			t.Fatalf("setting the volume: %v", err)
 		}
 		mustMatch(t, client.State().Zones[equipment.MainZone].Volume, 42)
 		select {
 		case event := <-events:
 			mustMatch(t, event.Field, equipment.EventVolume)
 		case <-time.After(time.Second):
-			t.Fatal("a taken volume reported nothing")
+			t.Fatal("no volume event arrived within a second of SetVolume, want one")
 		}
 
 		if err := client.SetMute(equipment.MainZone, true); err != nil {
-			t.Fatal(err)
+			t.Fatalf("setting the mute: %v", err)
 		}
 		mustMatch(t, client.State().Zones[equipment.MainZone].Mute, true)
 	})
 }
 
-// A setter the device refuses takes nothing, so the held state never
-// claims a level that did not land.
-func TestARefusedSetterTakesNothing(t *testing.T) {
+// A setter that the device refuses stores nothing, so the state never
+// shows a volume that the device did not accept.
+func TestARefusedSetterStoresNothing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp := startFakeAmp(t)
 		client := amp.client(nil)
@@ -516,13 +509,12 @@ func TestARefusedSetterTakesNothing(t *testing.T) {
 		amp.setter = "unknown command"
 		amp.mutex.Unlock()
 		if err := client.SetVolume(equipment.MainZone, 42); err == nil {
-			t.Fatal("the device refused the set and the client reported no error")
+			t.Fatal("SetVolume returned no error after the device refused it, want one")
 		}
 		mustMatch(t, client.State().Zones[equipment.MainZone].Volume, before)
 	})
 }
 
-// Run keeps polling until its context ends.
 func TestRunPollsUntilTheContextEnds(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp := startFakeAmp(t)
@@ -541,8 +533,8 @@ func TestRunPollsUntilTheContextEnds(t *testing.T) {
 	})
 }
 
-// Each setter reaches its own wire command. The sleep timer is read
-// back after its send, because the poll reads it only while it runs.
+// Each setter sends its own command. SetSleep reads the timer back
+// after the send, because a poll reads it only while it runs.
 func TestTheSettersReachTheirWireCommands(t *testing.T) {
 	cases := []struct {
 		name string
@@ -570,7 +562,7 @@ func TestTheSettersReachTheirWireCommands(t *testing.T) {
 	}
 }
 
-// Power on is a no-op, because a WiiM has no standby to leave.
+// Power on sends nothing, because a WiiM has no standby to leave.
 func TestPowerOnSendsNothing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp := startFakeAmp(t)
@@ -580,8 +572,7 @@ func TestPowerOnSendsNothing(t *testing.T) {
 	})
 }
 
-// A WiiM reports no sound mode, so the compare is of the two words.
-func TestAWiimComparesSoundModesByTheirWords(t *testing.T) {
+func TestSameSoundModeComparesTheStrings(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		client := startFakeAmp(t).client(nil)
 		mustMatch(t, client.SameSoundMode("STEREO", "STEREO"), true)
@@ -589,8 +580,8 @@ func TestAWiimComparesSoundModesByTheirWords(t *testing.T) {
 	})
 }
 
-// The setters reject what the device cannot do: an unknown zone, a
-// power-off, a sound mode, an unknown input, and an out-of-range timer.
+// A setter returns an error for an unknown zone, power off, a sound
+// mode, an unknown input, or a sleep time out of range.
 func TestTheSettersRejectWhatTheDeviceCannotDo(t *testing.T) {
 	cases := []struct {
 		name string
@@ -611,7 +602,7 @@ func TestTheSettersRejectWhatTheDeviceCannotDo(t *testing.T) {
 		t.Run(one.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				if err := one.send(startFakeAmp(t).client(nil)); err == nil {
-					t.Fatalf("%s did not error", one.name)
+					t.Fatalf("%s returned no error, want one", one.name)
 				}
 			})
 		})
@@ -656,8 +647,8 @@ func TestCommandURLFillsThePort(t *testing.T) {
 	mustMatch(t, commandURL("192.0.2.1:8443", "getStatusEx"), "https://192.0.2.1:8443/httpapi.asp?command=getStatusEx")
 }
 
-// A field the device sends as a number on one firmware and a string on
-// another reads either way.
+// A field that one firmware sends as a number and another sends as a
+// string parses either way.
 func TestFlexStringReadsEitherShape(t *testing.T) {
 	cases := []struct {
 		name string
@@ -684,22 +675,21 @@ func TestModeForInput(t *testing.T) {
 		mustMatch(t, mode, input)
 	}
 	if _, ok := modeForInput("coaxial"); ok {
-		t.Fatal("an unknown input mapped")
+		t.Fatal("modeForInput(\"coaxial\") mapped, want no mapping")
 	}
 }
 
 func TestAtoiAndAtofRejectNonNumbers(t *testing.T) {
 	if _, ok := atoi("x"); ok {
-		t.Fatal("atoi accepted a word")
+		t.Fatal("atoi(\"x\") parsed, want no number")
 	}
 	if _, ok := atof("x"); ok {
-		t.Fatal("atof accepted a word")
+		t.Fatal("atof(\"x\") parsed, want no number")
 	}
 	mustMatch(t, intOr("x", 7), 7)
 }
 
-// A setter the device refuses carries the device's own words.
-func TestASetterFailureCarriesTheDeviceWords(t *testing.T) {
+func TestARefusedSetterErrorIncludesTheDeviceReply(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp := startFakeAmp(t)
 		amp.mutex.Lock()
@@ -709,12 +699,13 @@ func TestASetterFailureCarriesTheDeviceWords(t *testing.T) {
 
 		err := client.SetVolume(equipment.MainZone, 10)
 		if err == nil || !strings.Contains(err.Error(), "unknown command") {
-			t.Fatalf("a refused setter did not carry the device's words: %v", err)
+			t.Fatalf("SetVolume returned %v, want an error that holds the device reply \"unknown command\"", err)
 		}
 	})
 }
 
-// Run backs off while the device is down, and reports it unreachable.
+// Run keeps polling while the device is down, and the device is
+// unreachable.
 func TestRunBacksOffWhenTheDeviceIsDown(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		client := testClient("127.0.0.1:1", nil)
@@ -726,27 +717,24 @@ func TestRunBacksOffWhenTheDeviceIsDown(t *testing.T) {
 	})
 }
 
-// The survey is not complete until one poll has read every family, so
-// the controller knows the device's own facts are in hand before it
-// applies a declared setting.
-func TestASurveyCompletesAfterOnePoll(t *testing.T) {
+// The event that a poll sends already reports FirstReadDone as true, so a
+// listener that waits for it needs no other event.
+func TestFirstReadDoneIsTrueAfterOnePoll(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp := startFakeAmp(t)
 		var client *Client
-		var surveyedAtEvent []bool
-		client = amp.client(func(equipment.Event) { surveyedAtEvent = append(surveyedAtEvent, client.Surveyed()) })
+		var firstReadDoneAtEvent []bool
+		client = amp.client(func(equipment.Event) { firstReadDoneAtEvent = append(firstReadDoneAtEvent, client.FirstReadDone()) })
 
-		mustMatch(t, client.Surveyed(), false)
+		mustMatch(t, client.FirstReadDone(), false)
 		client.poll(context.Background())
-		mustMatch(t, client.Surveyed(), true)
-		// The poll's own event reports the survey, so a listener that waits
-		// for it needs no other event.
-		mustMatch(t, surveyedAtEvent[len(surveyedAtEvent)-1], true)
+		mustMatch(t, client.FirstReadDone(), true)
+		mustMatch(t, firstReadDoneAtEvent[len(firstReadDoneAtEvent)-1], true)
 	})
 }
 
-// A device that fails a poll is asked again no sooner than a healthy
-// one, and each failure after that doubles the wait up to its bound.
+// A failed poll waits at least pollInterval, and each further failure
+// in a row doubles the wait, up to maxBackoff.
 func TestAFailedPollWaitsAtLeastTheHealthyInterval(t *testing.T) {
 	var waits pollWaits
 	cases := []struct {

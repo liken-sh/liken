@@ -1,15 +1,14 @@
-// Package cectest is a CEC bus in memory, for tests. It answers the
-// kernel's CEC ioctls the way the kernel's CEC core does for the calls
-// this repository makes, so a test drives a real cec.Device through
-// the same ioctl boundary a /dev/cecN node serves. The bus carries
-// scripted peers, such as a TV and a receiver, and any number of
-// adapters.
+// Package cectest is a CEC bus in memory, for tests. It implements the
+// kernel's CEC ioctls for the calls this repository makes, so a test
+// can drive a real cec.Device through the same ioctl boundary that a
+// /dev/cecN node serves. The bus holds scripted peers, such as a TV
+// and a receiver, and any number of adapters.
 //
-// It follows the kernel's documented rules, not every rule: the
-// claim, the modes, the polls, the replies, the answers the kernel
-// gives for its own adapter, and ENODEV after an unplug. The
-// integration tests against the kernel's vivid driver check the same
-// behavior on the real CEC core.
+// It copies only some of the kernel's rules: logical address claims,
+// the modes, polls, replies, the kernel's own replies on behalf of its
+// adapter, and ENODEV after an unplug. The integration tests against
+// the kernel's vivid driver check the same behavior on the real CEC
+// core.
 package cectest
 
 import (
@@ -20,9 +19,9 @@ import (
 )
 
 // A Peer is one scripted device on the bus. It acknowledges polls to
-// its logical address and answers the identity and power questions
-// from its fields. Mute makes it acknowledge polls and answer nothing,
-// the way a TV in deep standby behaves.
+// its logical address and replies to identity and power requests from
+// its fields. With Mute set it still acknowledges polls, but it sends
+// no reply and ignores power commands, like a TV in deep standby.
 type Peer struct {
 	Logical     cec.LogicalAddress
 	Physical    cec.PhysicalAddress
@@ -33,80 +32,83 @@ type Peer struct {
 	Power       cec.PowerStatus
 	Mute        bool
 	// Garbled makes every transmission to the peer fail with a lost
-	// arbitration, the way a disturbed wire fails, so a test shows what
-	// a program does with a failure that is not a NACK.
+	// arbitration, as a disturbed wire does. A test uses it to check
+	// how a program handles a failure that is not a NACK.
 	Garbled bool
-	// Transition is how many power questions the peer answers with the
-	// transition, ToOn or ToStandby, after a command changes its power.
-	// A real TV takes seconds to wake and reports the transition while
-	// it does.
+	// Transition is the number of power status requests that the peer
+	// answers with the transition state, ToOn or ToStandby, after a
+	// command changes its power. A real TV takes seconds to wake and
+	// reports the transition while it does.
 	Transition int
-	// Ignore is how many power commands the peer drops before it obeys
-	// one, the way cec-follower's --ignore-view-on drops a command, so a
-	// test shows what a program does when a command changes nothing.
+	// Ignore is the number of power commands that the peer drops before
+	// it obeys one, like cec-follower's --ignore-view-on. A test uses
+	// it to check how a program handles a command that changes nothing.
 	Ignore int
-	// Lag is how many power questions the peer answers with its old
-	// state after a command changes its power. A real TV answers its
-	// old state for about 2 seconds after Image View On, so a program
-	// that reads the power right after a command reads the past.
+	// Lag is the number of power status requests that the peer answers
+	// with its old state after a command changes its power. A real TV
+	// reports its old state for about 2 seconds after Image View On, so
+	// a program that reads the power right after a command reads the
+	// state from before it.
 	Lag int
-	// Grabs is how many times the peer takes the input for itself after
-	// another device broadcasts Active Source, the way a streaming
-	// player that wakes with the room claims Active Source. GrabAfter is
-	// how long it waits before each claim, so a test shows what a
-	// program does when the claim arrives after its own.
+	// Grabs is the number of times that the peer broadcasts its own
+	// Active Source, GrabAfter later, when another device broadcasts
+	// Active Source. Some streaming players take the TV's input this
+	// way when the TV turns on. A test uses it to check how a program
+	// handles a claim that arrives after its own.
 	Grabs     int
 	GrabAfter time.Duration
-	// Slow is how long the peer takes to answer each question. The
-	// asking transmit waits that long, and the rest of the bus goes on
-	// meanwhile, so a test can act while a question waits.
+	// Slow is how long the peer takes to reply to each request. The
+	// transmit that sent the request waits that long while the rest of
+	// the bus keeps running, so a test can act while a request is
+	// outstanding.
 	Slow time.Duration
 	// SystemAudio makes the peer an audio system that implements System
-	// Audio Control (HDMI-CEC 1.3a, CEC 13.15.2). It answers Give System
-	// Audio Mode Status with AudioMode, takes the volume keys, and
-	// answers System Audio Mode Request the way AudioReply says, after
-	// AudioAfter. AudioInput is the physical address of the last
-	// request, which is the input the request switched the peer to. A
-	// peer without SystemAudio answers every System Audio message with a
-	// Feature Abort, as a device of HDMI 1.3 or earlier does (CEC
-	// 13.15.3).
+	// Audio Control (HDMI-CEC 1.3a, CEC 13.15.2). It replies to Give
+	// System Audio Mode Status with AudioMode, accepts the volume keys,
+	// and handles a System Audio Mode Request as AudioReply sets.
+	// AudioInput is the physical address in the last request, which is
+	// the input that the request switched the peer to. A peer without
+	// SystemAudio replies to every System Audio message with a Feature
+	// Abort, as a device of HDMI 1.3 or earlier does (CEC 13.15.3).
 	SystemAudio bool
 	AudioMode   cec.SystemAudioMode
 	AudioInput  cec.PhysicalAddress
 	AudioReply  AudioReply
 	AudioAfter  time.Duration
 
-	// towards is the state a transition ends in, and remaining is how
-	// many power questions the transition still answers. old is the
-	// state a lagging peer still reports, for lagging more questions.
+	// After a power command, the next lagging power status requests
+	// report old, and the next remaining requests report the transition
+	// state. Then Power becomes towards.
 	towards   cec.PowerStatus
 	remaining int
 	old       cec.PowerStatus
 	lagging   int
 }
 
-// AudioReply is how an audio system peer answers System Audio Mode
-// Request with an operand.
+// AudioReply is how an audio system peer handles a System Audio Mode
+// Request. The peer sends its Set System Audio Mode AudioAfter after
+// the request.
 type AudioReply int
 
 const (
 	// AudioBroadcast turns the mode on and broadcasts Set System Audio
-	// Mode [On], as the audio system does after a TV that takes the
+	// Mode [On], as an audio system does when the TV supports the
 	// feature.
 	AudioBroadcast AudioReply = iota
-	// AudioToTV turns the mode on and directs Set System Audio Mode [On]
-	// to the TV alone, as the audio system's first [On] after a request
-	// from a device other than the TV is. An adapter in Control does not
-	// hear it.
+	// AudioToTV turns the mode on and sends Set System Audio Mode [On]
+	// to the TV only, as an audio system does the first time after a
+	// request from a device other than the TV. Only an adapter in
+	// monitor-all mode receives it.
 	AudioToTV
-	// AudioRefusedByTV directs Set System Audio Mode [On] to the TV, which
-	// answers with a Feature Abort, so the audio system goes no further
-	// and the mode stays as it was.
+	// AudioRefusedByTV sends Set System Audio Mode [On] to the TV and
+	// leaves the mode off, as an audio system does when the TV refuses
+	// the mode with a Feature Abort. The bus sends no Feature Abort for
+	// the TV.
 	AudioRefusedByTV
-	// AudioSilent acknowledges each System Audio message and answers
-	// none, as an audio system with its HDMI control off does.
+	// AudioSilent acknowledges each System Audio message and sends no
+	// reply, as an audio system with HDMI control turned off does.
 	AudioSilent
-	// AudioAbort answers the request with a Feature Abort.
+	// AudioAbort replies to the request with a Feature Abort.
 	AudioAbort
 )
 
@@ -131,24 +133,24 @@ func (b *Bus) Add(peer Peer) {
 	b.peers[peer.Logical] = peer
 }
 
-// Peer answers the peer at a logical address as it stands now, so a
-// test reads the power a command left it in.
+// Peer returns the peer at a logical address in its current state, so
+// a test can read the power state that a command left it in.
 func (b *Bus) Peer(address cec.LogicalAddress) (Peer, bool) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
-	peer, held := b.peers[address]
-	return peer, held
+	peer, found := b.peers[address]
+	return peer, found
 }
 
-// Remove takes the peer at a logical address off the bus.
+// Remove deletes the peer at a logical address from the bus.
 func (b *Bus) Remove(address cec.LogicalAddress) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 	delete(b.peers, address)
 }
 
-// Send puts a message from a peer on the wire. Every adapter whose mode
-// passes the message to it receives it.
+// Send puts a message from a peer on the wire. Every adapter whose
+// mode passes the message to its handle receives it.
 func (b *Bus) Send(message cec.Message) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
@@ -158,16 +160,16 @@ func (b *Bus) Send(message cec.Message) {
 	}
 }
 
-// Sent answers every message the adapters transmitted, in order.
+// Sent returns every message that the adapters transmitted, in order.
 func (b *Bus) Sent() []cec.Message {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 	return append([]cec.Message(nil), b.sent...)
 }
 
-// carry delivers one message to every adapter but its sender, and
-// answers the replies the adapters' kernels sent to it. The caller
-// holds the mutex.
+// carry delivers a message to every adapter except its sender, and
+// returns the replies that the kernel sent on behalf of a receiving
+// adapter. The caller holds the mutex.
 func (b *Bus) carry(message cec.Message, sender *Adapter) []cec.Message {
 	var replies []cec.Message
 	for _, adapter := range b.adapters {
@@ -181,10 +183,10 @@ func (b *Bus) carry(message cec.Message, sender *Adapter) []cec.Message {
 	return replies
 }
 
-// occupied answers whether a peer or an adapter holds a logical
-// address. The caller holds the mutex.
+// occupied reports whether a peer or an adapter other than asker holds
+// a logical address. The caller holds the mutex.
 func (b *Bus) occupied(address cec.LogicalAddress, asker *Adapter) bool {
-	if _, held := b.peers[address]; held {
+	if _, found := b.peers[address]; found {
 		return true
 	}
 	for _, adapter := range b.adapters {
@@ -195,9 +197,9 @@ func (b *Bus) occupied(address cec.LogicalAddress, asker *Adapter) bool {
 	return false
 }
 
-// answer is what a peer replies to one request, and false when it
-// replies nothing or aborts. aborted says that it sends a Feature
-// Abort.
+// answer returns the reply that the peer sends to a request. ok is
+// false when the peer sends no reply. aborted is true when it sends a
+// Feature Abort instead.
 func (p Peer) answer(request cec.Message) (reply cec.Message, aborted bool, ok bool) {
 	if p.Mute {
 		return cec.Message{}, false, false
@@ -219,7 +221,7 @@ func (p Peer) answer(request cec.Message) (reply cec.Message, aborted bool, ok b
 		}
 		return cec.ReportPowerStatus(p.Logical, request.From, reported), false, true
 	case cec.OpImageViewOn, cec.OpTextViewOn, cec.OpStandby:
-		// A command has no answer, and a device that takes it sends no
+		// A command has no reply, and a device that supports it sends no
 		// Feature Abort.
 		return cec.Message{}, false, false
 	}
@@ -233,15 +235,16 @@ func (p Peer) answer(request cec.Message) (reply cec.Message, aborted bool, ok b
 		case opcode == cec.OpSystemAudioModeRequest && p.AudioReply == AudioAbort:
 			return cec.Message{}, true, false
 		default:
-			// The request's answer is the Set System Audio Mode that
-			// requested schedules, and a volume key has none.
+			// The reply to a System Audio Mode Request is the Set System
+			// Audio Mode that requested schedules. A volume key has no
+			// reply.
 			return cec.Message{}, false, false
 		}
 	}
 	return cec.Message{}, true, false
 }
 
-// systemAudio are the System Audio messages an audio system peer takes.
+// systemAudio is the set of opcodes that an audio system peer accepts.
 var systemAudio = map[cec.Opcode]bool{
 	cec.OpGiveSystemAudioModeState: true,
 	cec.OpSystemAudioModeRequest:   true,
@@ -249,43 +252,45 @@ var systemAudio = map[cec.Opcode]bool{
 	cec.OpUserControlReleased:      true,
 }
 
-// requested applies a System Audio Mode Request to an audio system
-// peer and schedules its Set System Audio Mode. A request with a
-// physical address wakes the peer, switches it to that input, and turns
-// the mode on; one with no operand turns the mode off and broadcasts
-// [Off], as CEC 13.15.2 asks. The statement goes out later and on its
-// own goroutine, as a device's own message does. The caller holds the
-// mutex.
+// requested applies a directed System Audio Mode Request to an audio
+// system peer. A request with a physical address turns the peer on,
+// switches it to that input, and turns the mode on, except with
+// AudioRefusedByTV. A request with no operand turns the mode off and
+// broadcasts Set System Audio Mode [Off], as CEC 13.15.2 requires. The
+// peer sends its Set System Audio Mode AudioAfter later from its own
+// goroutine, as a real device sends a message that it originates. A
+// peer with AudioSilent or AudioAbort sends nothing from here. The
+// caller holds the mutex.
 func (b *Bus) requested(message cec.Message) {
-	peer, held := b.peers[message.To]
-	if !held || !peer.SystemAudio || message.IsBroadcast() || peer.AudioReply == AudioSilent || peer.AudioReply == AudioAbort {
+	peer, found := b.peers[message.To]
+	if !found || !peer.SystemAudio || message.IsBroadcast() || peer.AudioReply == AudioSilent || peer.AudioReply == AudioAbort {
 		return
 	}
 	operands := message.Operands()
-	statement := cec.SetSystemAudioMode(peer.Logical, cec.AddressBroadcast, cec.SystemAudioOff)
+	setMode := cec.SetSystemAudioMode(peer.Logical, cec.AddressBroadcast, cec.SystemAudioOff)
 	switch {
 	case len(operands) < 2:
 		peer.AudioMode = cec.SystemAudioOff
 	case peer.AudioReply == AudioRefusedByTV:
 		peer.Power = cec.PowerOn
 		peer.AudioInput = cec.PhysicalAddress(operands[0])<<8 | cec.PhysicalAddress(operands[1])
-		statement = cec.SetSystemAudioMode(peer.Logical, cec.AddressTV, cec.SystemAudioOn)
+		setMode = cec.SetSystemAudioMode(peer.Logical, cec.AddressTV, cec.SystemAudioOn)
 	default:
 		peer.Power, peer.AudioMode = cec.PowerOn, cec.SystemAudioOn
 		peer.AudioInput = cec.PhysicalAddress(operands[0])<<8 | cec.PhysicalAddress(operands[1])
-		statement = cec.SetSystemAudioMode(peer.Logical, cec.AddressBroadcast, cec.SystemAudioOn)
+		setMode = cec.SetSystemAudioMode(peer.Logical, cec.AddressBroadcast, cec.SystemAudioOn)
 		if peer.AudioReply == AudioToTV {
-			statement.To = cec.AddressTV
+			setMode.To = cec.AddressTV
 		}
 	}
 	b.peers[message.To] = peer
-	time.AfterFunc(peer.AudioAfter, func() { b.Send(statement) })
+	time.AfterFunc(peer.AudioAfter, func() { b.Send(setMode) })
 }
 
-// obey applies a power command to the peers it reaches. Image View On
-// and Text View On wake the TV and no other device. Standby puts the
-// peer it is sent to in standby, or every peer when it is a broadcast.
-// The caller holds the mutex.
+// obey changes the peers' state for a message on the wire. Image View
+// On and Text View On turn on the TV and no other device. Standby puts
+// the addressed peer in standby, or every peer when it is broadcast. A
+// Mute peer ignores both. The caller holds the mutex.
 func (b *Bus) obey(message cec.Message) {
 	opcode, _ := message.Opcode()
 	var want cec.PowerStatus
@@ -314,10 +319,9 @@ func (b *Bus) obey(message cec.Message) {
 	}
 }
 
-// grab schedules the Active Source of each peer that takes the input
-// after another device's Active Source. The claim goes out later and
-// on its own goroutine, as a device's own message does. The caller
-// holds the mutex.
+// grab schedules an Active Source broadcast, GrabAfter later, from each
+// peer other than the sender that has Grabs left. The caller holds the
+// mutex.
 func (b *Bus) grab(message cec.Message) {
 	for address, peer := range b.peers {
 		if peer.Grabs == 0 || address == message.From {
@@ -330,7 +334,7 @@ func (b *Bus) grab(message cec.Message) {
 	}
 }
 
-// command is the peer after one power command.
+// command returns the peer after it receives a power command.
 func (p Peer) command(want cec.PowerStatus) Peer {
 	if p.Ignore == 0 && p.Power != want && p.Lag > 0 {
 		p.old, p.lagging = p.Power, p.Lag
@@ -351,9 +355,9 @@ func (p Peer) command(want cec.PowerStatus) Peer {
 	return p
 }
 
-// asked is the peer after it answered one request. A power question
-// counts down the lag first, then a transition, and the last one ends
-// the transition.
+// asked returns the peer after it replies to a request. Each power
+// status request counts down lagging first and then remaining, and the
+// request that ends the transition sets Power to towards.
 func (p Peer) asked(request cec.Message) Peer {
 	opcode, _ := request.Opcode()
 	if opcode != cec.OpGiveDevicePowerStatus {

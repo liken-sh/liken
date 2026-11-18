@@ -1,22 +1,18 @@
-# The docs domain builds the manual served at liken.sh/equipment. The
-# reference pages for the three resources are generated, never edited:
-# crdref, the generator the brand component publishes, renders each
-# one from its CRD in deploy/, so a schema edit is a manual edit.
-# GENERATED lists those pages, and each rule names the generator's
-# sources as inputs, so a change to the generator regenerates them.
+# Builds the manual served at liken.sh/equipment. Do not edit the pages
+# in GENERATED: crdref, from the brand component, writes each one from
+# its CRD in ../deploy.
 HUGO := go tool hugo
 CRDREF := go tool crdref
 
-# A recipe that fails, or a build that is killed during one, leaves its
-# target partly written and newer than its inputs. make deletes that
-# target, so the next build makes it again and does not take it as
-# current.
+# A recipe that fails or is killed can leave a partly written target
+# that is newer than its inputs. make deletes it, so the next build
+# writes it again.
 .DELETE_ON_ERROR:
 
-# crdref comes from brand/ through the replace directive in go.mod, so
-# an edit to its sources never changes go.mod. Each generated page
-# names those sources as inputs, and go.mod for the generator's own
-# dependencies, so an edit to either one regenerates the page.
+# go.mod replaces the crdref module with its source in brand/, so an
+# edit to crdref does not change go.mod. Each generated page depends on
+# crdref's source files and on both go.mod files, so an edit to any of
+# them regenerates the page.
 BRAND := ../../brand
 CRDREF_SOURCES := go.mod $(BRAND)/go.mod \
 	$(filter-out %_test.go,$(wildcard $(BRAND)/crdref/*.go $(BRAND)/linkcheck/*.go))
@@ -28,10 +24,8 @@ GENERATED := $(REFERENCE)/receivers.md $(REFERENCE)/cecbuses.md $(REFERENCE)/tel
 SKILLS := go tool skills
 BASE := https://liken.sh/equipment/
 
-# The generate target builds every generated reference page and
-# nothing else. The test-docs target in ../Makefile runs it with -B,
-# so that every page is regenerated, and fails when one differs from
-# what git has staged.
+# The test-docs target in ../Makefile runs this with -B and fails when
+# a regenerated page differs from the committed one.
 .PHONY: generate
 generate: $(GENERATED)
 
@@ -39,8 +33,8 @@ generate: $(GENERATED)
 build: $(GENERATED)
 	$(HUGO) --destination dist/site
 
-# The site's own test: every internal link resolves before the build.
-# manual_test.go names the links that no content file answers for.
+# manual_test.go fails when a link in the manual points to a page or a
+# heading that does not exist.
 .PHONY: test
 test: $(GENERATED)
 	go test ./...
@@ -54,11 +48,10 @@ $(REFERENCE)/cecbuses.md: ../deploy/cecbuses-crd.yaml $(CRDREF_SOURCES)
 $(REFERENCE)/televisions.md: ../deploy/televisions-crd.yaml $(CRDREF_SOURCES)
 	$(CRDREF) -title Television -weight 16 $< $@
 
-# The skills target emits every guide as an Agent Skill into ../skills,
-# one SKILL.md per guide, with the generator the brand component
-# publishes (its README says what the output holds). The output is
+# Writes each guide as an Agent Skill, one SKILL.md in ../skills, with
+# the skills generator from the brand component. The output is
 # committed, and the test-docs target in ../Makefile fails when it is
-# stale.
+# out of date.
 .PHONY: skills
 skills:
 	$(SKILLS) -base $(BASE) content/docs/guides ../skills

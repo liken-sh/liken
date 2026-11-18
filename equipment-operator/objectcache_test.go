@@ -1,9 +1,9 @@
 package main
 
 // A store's copy can be older than this operator's own last write. These
-// tests hold each store at a snapshot taken before a pass wrote, the way
-// a watch that has not delivered the writes yet holds it, and prove the
-// next pass does not act again on what it already did.
+// tests freeze each store at a snapshot taken before a pass wrote, as a
+// watch that has not delivered the writes yet would leave it, and check
+// that the next pass does not repeat what it already did.
 
 import (
 	"encoding/json"
@@ -14,9 +14,10 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-// snapshot is a synced store that holds one collection of the fake as
-// it is now, with each object's resourceVersion. Later writes to the
-// fake leave the store older than the API server.
+// snapshot returns a synced store with the current contents of one
+// collection of the fake API server, including each object's
+// resourceVersion. Writes to the fake after this call leave the store
+// older than the API server.
 func snapshot(t *testing.T, api *cecAPI, path string) *watchStore {
 	t.Helper()
 	api.mutex.Lock()
@@ -33,12 +34,13 @@ func snapshot(t *testing.T, api *cecAPI, path string) *watchStore {
 	return heldStore(t, true, held...)
 }
 
-// A pass that runs before the watches delivered the earlier passes'
-// writes reads each object it wrote from the API server. The first pass
-// creates the discovered Television, and the second writes its derived
-// status, because the second reads the Television it created though the
-// store does not hold it. The third writes the derived status of no
-// CECBus and no Television again, and creates no Television again.
+// While the stores lag behind the writes, each pass reads the objects it
+// wrote from the API server. The first pass creates the discovered
+// Television. The second pass writes that Television's derived status,
+// because it reads the Television from the API server though the store
+// does not have it yet. The third pass writes no derived status again
+// for the CECBus or the Television, and does not create the Television
+// again.
 func TestAPassDoesNotActOnACopyOlderThanItsOwnWrite(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -63,17 +65,17 @@ func TestAPassDoesNotActOnACopyOlderThanItsOwnWrite(t *testing.T) {
 		mustMatch(t, api.derivedWrites, televisionWrites)
 		mustDeepEqual(t, api.created, []string{"den"})
 		mustDeepEqual(t, log.lines(), []string{
-			`CECBus den reports a TV at 0.0.0.0 named "TV", and no Television names the bus; created Television den`,
+			`CECBus den reports a TV at 0.0.0.0 named "TV", and no Television names the bus, so the operator created Television den`,
 		})
 	})
 }
 
 // A Receiver unit's status write can reach the API server before the
-// watch delivers it. A new unit takes what the old one settled from the
-// stored status, and one that read the store's older copy would send
-// the receiver a setting again. The read after the write answers the
-// API server's copy.
-func TestAReceiverReadAfterItsOwnStatusWriteAnswersTheWrite(t *testing.T) {
+// watch delivers it. A new unit starts from the settled state in the
+// stored status, and a unit that read the store's older copy would send
+// the receiver a setting again. So a read after the write must return
+// the API server's copy.
+func TestAReceiverReadAfterItsOwnStatusWriteReturnsTheWrite(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
@@ -90,10 +92,11 @@ func TestAReceiverReadAfterItsOwnStatusWriteAnswersTheWrite(t *testing.T) {
 	})
 }
 
-// A pass reads a Television from the API server when the store's copy
-// is older than the operator's own write. While the API server refuses
-// that read, the read is an error, and the pass acts on nothing and
-// tries again. Once the API server answers, the read answers the write.
+// When the store's copy of a Television is older than the operator's own
+// write, the pass reads it from the API server. While the API server
+// refuses that read, the read returns an error, so the pass changes
+// nothing and tries again. Once the API server responds, the read
+// returns the written copy.
 func TestARefusedReadOfACopyOlderThanItsOwnWriteIsAnError(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -113,14 +116,15 @@ func TestARefusedReadOfACopyOlderThanItsOwnWriteIsAnError(t *testing.T) {
 	})
 }
 
-// A pass that runs before the Television watch finished its first read
-// lists the Televisions from the API server. The store can then become
-// ready at an older copy, because the watch's first read can come from
-// the API server's watch cache, which runs behind etcd. The next pass
-// must not read that older copy: a node workload that read a session's
-// wake from the list and started it would read the copy from before the
-// wake, and cancel the wake it had just started.
-func TestAListBeforeTheStoreIsReadyIsNeverReadOlder(t *testing.T) {
+// A pass that runs before the Television watch finishes its first list
+// reads the Televisions from the API server. The store can then become
+// ready with an older copy, because the watch's first list can come from
+// the API server's watch cache, which can lag behind etcd. The next
+// pass must not read that older copy. Otherwise a node workload that
+// read a session's wake from the API server and started it would then
+// read the copy from before the wake, and cancel the wake it just
+// started.
+func TestAStoreThatBecomesReadyWithAnOlderCopyIsNotReadAfterAList(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)

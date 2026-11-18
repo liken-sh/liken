@@ -1,57 +1,47 @@
 package cec
 
-// A scan finds every device on the bus and asks each one who it is. An
-// introduction asks one device that announced itself only what the
-// directory does not hold yet.
-// CEC has no list of devices, so the scan polls each logical address:
-// a device acknowledges a poll to its own address, and an address
-// with no device leaves the acknowledge bit unset. Then the scan asks
-// each device that answered for its physical address, its OSD name,
-// its vendor, its CEC version, and its power status. cec-ctl
-// --show-topology does the same. The scan also asks the audio system
-// for System Audio Mode, last of its questions to that device:
-// HDMI-CEC 1.3a, CEC 13.15.2, asks the same of a source that
-// implements the feature when it joins the bus, and the answer is the
-// baseline that the broadcasts of Set System Audio Mode keep current.
+// CEC has no command that lists the devices on the bus. A device
+// acknowledges a poll to its own logical address, and an address with
+// no device leaves the acknowledge bit unset, so a scan polls each
+// address in turn, as cec-ctl --show-topology does.
+//
+// HDMI-CEC 1.3a, CEC 13.15.2, says that a source that implements System
+// Audio Control reads the System Audio Mode when it joins the bus. So
+// the scan reads it from the audio system after its other queries, and
+// the broadcasts of Set System Audio Mode keep it current after that.
 
 import (
 	"time"
 )
 
-// replyTimeout is how long a question waits for its answer. The CEC
-// supplement gives a device one second to answer a request, and the
-// kernel uses the same default.
+// replyTimeout is one second because the CEC supplement allows a
+// device one second to reply, and the kernel's default is the same.
 const replyTimeout = time.Second
 
-// A ScanReport says what one scan found.
+// ScanReport is the result of a Scan.
 type ScanReport struct {
-	// Acked counts the addresses that acknowledged a poll.
+	// Acked is the number of addresses that acknowledged a poll.
 	Acked int
 }
 
-// PowerReader asks the TV its power in place of a scan's or an
-// introduction's own question, and records the answer in the
-// directory. Two power questions to the TV at once each wait for a
-// Report Power Status, and the kernel hands the one answer to one
-// waiter, so a caller that reads the TV's power elsewhere too, such as
-// for a press of a remote's power button, routes every read through
-// one reader that shares a read in flight. An error from the reader
-// ends the scan or the introduction, as a refused transmit does; the
-// node's reader returns one only when the adapter left, and it handles
-// a refused or unanswered question itself, under its own rules for a
-// missed reply. A nil reader sends the question like any other.
+// PowerReader reads the TV's power status and records it in the
+// directory. Scan and Introduce call it in place of sending Give Device
+// Power Status to the TV. When two requests for the TV's power are in
+// flight at once, the kernel delivers the one Report Power Status to
+// only one of them. So a caller that also reads the TV's power
+// elsewhere, such as for a powerAsk, sends every read
+// through one PowerReader that joins a read already in flight. An error
+// from the reader stops the scan or introduction.
 type PowerReader func() error
 
-// asksTVPower answers whether a question is the power question to the
-// TV that a reader takes in place of the scan.
-func asksTVPower(reply Opcode, address LogicalAddress, read PowerReader) bool {
+func usesPowerReader(reply Opcode, address LogicalAddress, read PowerReader) bool {
 	return read != nil && address == AddressTV && reply == OpReportPowerStatus
 }
 
-// questions are the requests a scan sends to each device, the opcode
-// of each answer, and whether the directory already holds the fact the
-// answer states.
-var questions = []struct {
+// queries are the requests that a scan sends to each device. known
+// reports whether the directory already has the fact that the reply
+// gives, so Introduce can skip the request.
+var queries = []struct {
 	build func(from, to LogicalAddress) Message
 	reply Opcode
 	known func(Peer) bool
@@ -63,17 +53,14 @@ var questions = []struct {
 	{GiveDevicePowerStatus, OpReportPowerStatus, func(p Peer) bool { return p.Power != PowerUnknown }},
 }
 
-// Scan polls every logical address but the adapter's own and asks each
-// device that answers for its facts. It records what it learns in the
-// directory, and it forgets a peer whose poll the wire answers with a
-// NACK. A poll that fails another way, by a lost arbitration, a low
-// drive, or an error, keeps what the directory held for the address,
-// because that failure says nothing about the device. A
-// device that does not answer one question keeps what the directory
-// held, because a device in deep standby can acknowledge a poll and
-// still leave a request unanswered. An error means the kernel refused a
-// call, and the scan stops there. tvPower, when it is not nil, asks
-// the TV its power in place of the scan's own question.
+// Scan polls every logical address except own, queries each device
+// that acknowledges, and records the replies in the directory. Only a
+// NACK removes an address from the directory. A poll that loses
+// arbitration or meets a low drive or another error says nothing about
+// whether a device is there, so the entry stays. A device that does not
+// reply to a query also stays, because a device in deep standby can
+// acknowledge a poll and reply to nothing else. An error from a
+// transmit or from tvPower stops the scan. tvPower can be nil.
 func Scan(device *Device, directory *Directory, own LogicalAddress, tvPower PowerReader) (ScanReport, error) {
 	report := ScanReport{}
 	for address := AddressTV; address < AddressUnregistered; address++ {
@@ -93,14 +80,14 @@ func Scan(device *Device, directory *Directory, own LogicalAddress, tvPower Powe
 		}
 		report.Acked++
 		directory.Present(address)
-		for _, question := range questions {
-			if asksTVPower(question.reply, address, tvPower) {
+		for _, query := range queries {
+			if usesPowerReader(query.reply, address, tvPower) {
 				if err := tvPower(); err != nil {
 					return report, err
 				}
 				continue
 			}
-			result, err := device.Transmit(question.build(own, address), question.reply, replyTimeout)
+			result, err := device.Transmit(query.build(own, address), query.reply, replyTimeout)
 			if err != nil {
 				return report, err
 			}
@@ -117,34 +104,30 @@ func Scan(device *Device, directory *Directory, own LogicalAddress, tvPower Powe
 	return report, nil
 }
 
-// Introduce asks one device for each fact the directory does not hold
-// yet, and answers how many questions it sent. A device announces
-// itself with a broadcast, such as the Report Physical Address the
-// kernel sends after a claim, and the broadcast states only some of its
-// facts. So an introduction replaces a new scan of the bus: it sends
-// nothing to the other devices, and nothing to a device whose facts the
-// directory already holds. A NACK means the device left, and the
-// directory forgets it. A question that goes unanswered keeps what the
-// directory held, as in a scan. An error means the kernel refused a
-// call. tvPower, when it is not nil, asks the TV its power in place of
-// the introduction's own question.
+// Introduce queries one device for each fact that the directory does
+// not have yet, and returns the number of queries. It is for a device
+// that announced itself after the scan, such as with the Report
+// Physical Address that the kernel broadcasts after a claim, because
+// that broadcast gives only some of the device's facts. A NACK means
+// the device left, so Introduce removes it from the directory. An error
+// from a transmit or from tvPower stops it. tvPower can be nil.
 func Introduce(device *Device, directory *Directory, own, address LogicalAddress, tvPower PowerReader) (int, error) {
 	asked := 0
 	if address == own || address == AddressUnregistered {
 		return asked, nil
 	}
-	for _, question := range questions {
-		if question.known(directory.Lookup(address)) {
+	for _, query := range queries {
+		if query.known(directory.Lookup(address)) {
 			continue
 		}
 		asked++
-		if asksTVPower(question.reply, address, tvPower) {
+		if usesPowerReader(query.reply, address, tvPower) {
 			if err := tvPower(); err != nil {
 				return asked, err
 			}
 			continue
 		}
-		result, err := device.Transmit(question.build(own, address), question.reply, replyTimeout)
+		result, err := device.Transmit(query.build(own, address), query.reply, replyTimeout)
 		if err != nil {
 			return asked, err
 		}

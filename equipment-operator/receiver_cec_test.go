@@ -1,9 +1,7 @@
 package main
 
-// The Deployment's status.cec on a Receiver: the audio system of a bus
-// as the bus's adapters found it, on the Receiver that is the via of a
-// Display on that bus, and the Event of each change of the System
-// Audio Mode.
+// The tests of a Receiver's status.cec and of the Event for each change
+// of the System Audio Mode.
 
 import (
 	"testing"
@@ -13,8 +11,8 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events"
 )
 
-// audioSystemIn is the receiver of the den bus as an adapter reports
-// it, in a System Audio Mode.
+// audioSystemIn returns the den bus's receiver in the given System
+// Audio Mode.
 func audioSystemIn(mode, at string) CECDevice {
 	device := receiverDevice
 	device.Vendor, device.CECVersion = "0005cd", "1.4"
@@ -22,8 +20,8 @@ func audioSystemIn(mode, at string) CECDevice {
 	return device
 }
 
-// wiredRoom is the den bus with the TV and a receiver in a mode, the
-// Display on node-1, a Television, and the given Receivers.
+// wiredRoom creates the den bus with a TV and a receiver in the given
+// mode, a Display on node-1, a Television, and the given Receivers.
 func wiredRoom(t *testing.T, mode string, receivers ...Receiver) *cecAPI {
 	t.Helper()
 	api := startCECAPI(t)
@@ -36,23 +34,18 @@ func wiredRoom(t *testing.T, mode string, receivers ...Receiver) *cecAPI {
 	return api
 }
 
-// receiverCEC answers the stored status.cec of a Receiver.
 func receiverCEC(api *cecAPI, name string) *ReceiverCECStatus {
 	api.mutex.Lock()
 	defer api.mutex.Unlock()
 	return api.receivers[name].Status.CEC
 }
 
-// cecWritesOf counts the Deployment's status.cec writes.
 func cecWritesOf(api *cecAPI) int {
 	api.mutex.Lock()
 	defer api.mutex.Unlock()
 	return api.receiverCECWrites
 }
 
-// The Receiver that a Display's picture passes through gets the bus's
-// audio system, with each fact as the adapters report it. A Receiver
-// that no Display's picture passes through gets none.
 func TestTheReceiverOnThePathGetsTheAudioSystem(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -68,8 +61,6 @@ func TestTheReceiverOnThePathGetsTheAudioSystem(t *testing.T) {
 	})
 }
 
-// A Receiver that stops being on the path loses status.cec, because
-// the bus's audio system is no longer known to be it.
 func TestAReceiverOffThePathLosesTheAudioSystem(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -83,7 +74,6 @@ func TestAReceiverOffThePathLosesTheAudioSystem(t *testing.T) {
 	})
 }
 
-// A pass that finds the same audio system writes nothing.
 func TestAnUnchangedAudioSystemIsNotWrittenAgain(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -98,10 +88,10 @@ func TestAnUnchangedAudioSystemIsNotWrittenAgain(t *testing.T) {
 	})
 }
 
-// Each change of the System Audio Mode posts a Normal Event on the
-// Receiver, Off as well as On: the receiver turns the mode off before
-// standby, and a person turns it off by picking the TV's speakers, so
-// Off is no fault. A mode first learned posts one too.
+// The Event for Off is Normal, not Warning, because the receiver turns
+// the mode off before it goes to standby, and a person turns it off by
+// choosing the TV's speakers. The first value the operator reads posts
+// an Event too.
 func TestEachModeChangePostsANormalEvent(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

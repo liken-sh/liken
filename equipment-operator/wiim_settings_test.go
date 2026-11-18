@@ -1,7 +1,7 @@
 package main
 
-// The WiiM settings path: the operator sends only the declared fields
-// the device reports at another value.
+// The operator sends only the declared WiiM settings whose value
+// differs from what the device reports.
 
 import (
 	"context"
@@ -18,10 +18,8 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/wiim"
 )
 
-// fakeWiim is a small stateful amp: the reads answer what the setters
-// last set, so a poll reflects a declared setting and the confirm path
-// is exercised. It serves TLS on the test network, because the
-// driver's client speaks HTTPS and skips certificate verification.
+// fakeWiim is a fake amp whose read commands return the values that its
+// setter commands last set. It serves HTTPS, as the client expects.
 type fakeWiim struct {
 	address string
 
@@ -31,9 +29,8 @@ type fakeWiim struct {
 	buttons  bool
 	balance  float64
 	commands []string
-	// unread holds each read command that this model does not carry. The
-	// amp answers it the way a real one answers a command it does not
-	// know.
+	// unread is the read commands that this fake model does not support.
+	// The fake answers them as a real amp answers an unknown command.
 	unread map[string]bool
 }
 
@@ -88,7 +85,8 @@ func (f *fakeWiim) handle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// record appends one setter command. The caller holds the lock.
+// record appends a setter command to commands. The caller holds
+// f.mutex.
 func (f *fakeWiim) record(command string) {
 	f.commands = append(f.commands, command)
 }
@@ -106,13 +104,11 @@ func digit(on bool) string {
 	return "0"
 }
 
-// waitingWiim starts a client, waits until its first poll reaches the
-// device and its first survey of the device's settings ends, and hands
-// back the unit the controller would own. It runs in a synctest bubble,
-// and the first poll has ended when every goroutine in the bubble
-// waits. The unit applies no declared
-// setting before the survey, so a test that waited only for the poll
-// could apply before it and see nothing sent.
+// waitingWiim starts a client in a synctest bubble, waits until its
+// first poll has read every settings family, and returns the client and
+// the receiverUnit that the controller would create for it. The unit
+// applies no declared setting until the client has read the settings,
+// so a test that applied earlier would see nothing sent.
 func waitingWiim(t *testing.T, amp *fakeWiim) (*wiim.Client, *receiverUnit) {
 	t.Helper()
 	client := wiim.NewClient(amp.address, nil)
@@ -129,15 +125,15 @@ func waitingWiim(t *testing.T, amp *fakeWiim) (*wiim.Client, *receiverUnit) {
 		<-done
 	})
 	synctest.Wait()
-	if client.State().Reachable != equipment.ConditionTrue || !client.Surveyed() {
-		t.Fatal("the client never reached the fake amp")
+	if client.State().Reachable != equipment.ConditionTrue || !client.FirstReadDone() {
+		t.Fatal("the client did not reach the fake amp and complete its first full read")
 	}
 	return client, &receiverUnit{name: "studio", driver: client, wiimClient: client, log: newReceiverLog(io.Discard, "studio"), budget: newSendBudget(), settled: newSettledRecord(ReceiverStoredStatus{}, ReceiverSpec{})}
 }
 
-// A restart against a device that already reports every declared value
-// sends nothing: the operator compares the spec with what the device
-// reports, not with a memory it lost in the restart.
+// A device that already reports every declared value receives
+// nothing, even from a new unit with no state, as after an operator
+// restart.
 func TestARestartAgainstASettledWiimSendsNothing(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -154,8 +150,8 @@ func TestARestartAgainstASettledWiimSendsNothing(t *testing.T) {
 	})
 }
 
-// One declared field the device reports at another value sends that
-// field and nothing beside it.
+// When one declared field differs from what the device reports, the
+// operator sends that field and no other.
 func TestOneDifferingWiimFieldSendsOnlyThatField(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -182,9 +178,9 @@ func TestAnUndeclaredWiimSettingSendsNothing(t *testing.T) {
 	})
 }
 
-// A model that carries no read of a field cannot confirm it, so the
-// operator sends a declared value once and does not send it again on the
-// passes that follow.
+// When the model has no read command for a field, the operator cannot
+// confirm the field's value, so it sends the declared value once and
+// not again on later passes.
 func TestAWiimFieldTheModelCannotReadIsSentOnce(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

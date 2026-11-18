@@ -1,12 +1,8 @@
 package main
 
-// The remote's power button in a room with a TV, against the fake API
-// server, a fake Denon, and a fake WiiM: the TV's reported power
-// decides whether the press turns the room on or off, and the press
-// asks the TV for standby or a wake through its status.session. A
-// receiver with no standby stays on and says so. A sleep of the session
-// asks the TV for nothing. cecnode_standby_test.go tests what the node
-// workload sends the TV.
+// Tests of the remote's power button in a room with a TV. A press
+// writes the Television's status.session, and cecnode_standby_test.go
+// tests what the node workload then sends the TV.
 
 import (
 	"context"
@@ -19,9 +15,10 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
-// televisionRoom is the lounge Television, which shows Display
-// acm-0001-receiver and reports a power, and the link a session of
-// Player theater on input GAME uses to reach it.
+// televisionRoom returns a fake API server with the lounge Television,
+// which shows Display acm-0001-receiver and reports power, and the
+// roomEvents through which a session of Player theater on input GAME
+// reaches that Television.
 func televisionRoom(t *testing.T, lines *receiverLog, power string) (*cecAPI, roomEvents) {
 	t.Helper()
 	api := startCECAPI(t)
@@ -36,8 +33,6 @@ func televisionRoom(t *testing.T, lines *receiverLog, power string) (*cecAPI, ro
 	return api, sessions.room(lines, "theater", "GAME", func(input string) string { return monitors[input] })
 }
 
-// loungeSession waits until the lounge Television's session satisfies
-// a check, and answers it.
 func loungeSession(t *testing.T, api *cecAPI, ready func(TelevisionSession) bool) TelevisionSession {
 	t.Helper()
 	television := api.waitForTelevision(t, "lounge", func(television Television) bool {
@@ -46,16 +41,13 @@ func loungeSession(t *testing.T, api *cecAPI, ready func(TelevisionSession) bool
 	return *television.Status.Session
 }
 
-// pressPower starts an idle session in the harness's room and presses
-// the remote's power button once.
 func pressPower(t *testing.T, h *sessionHarness) {
 	t.Helper()
 	powerAsk(h.beginIdle(t, "GAME"), "toggle")
 }
 
-// A TV that is on means the room is on, whatever the receiver reports,
-// so the press asks the TV for standby and puts the receiver in standby
-// when it is on.
+// When the TV is on, a press turns the room off, whatever the receiver
+// reports.
 func TestAPowerPressTurnsARoomWithTheTVOnOff(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -85,8 +77,8 @@ func TestAPowerPressTurnsARoomWithTheTVOnOff(t *testing.T) {
 					mustMatch(t, h.equipment.waitForCommand(t), "PWSTANDBY")
 				}
 				h.refuseCommands(t, quietPeriod, "PWSTANDBY", denon.PowerOnCommand)
-				press := "Receiver theater: status.session.powerAsk asks toggle, and Television lounge reports power On; "
-				mustDeepEqual(t, waitForLines(t, h.log, "asks toggle", 2), []string{
+				press := "Receiver theater: status.session.powerAsk requests toggle, and Television lounge reports power On; "
+				mustDeepEqual(t, waitForLines(t, h.log, "requests toggle", 2), []string{
 					press + "asked Television lounge to go to standby",
 					press + c.receiver,
 				})
@@ -95,8 +87,8 @@ func TestAPowerPressTurnsARoomWithTheTVOnOff(t *testing.T) {
 	}
 }
 
-// A TV in standby means the room is off, whatever the receiver reports,
-// so the press wakes the TV and turns the receiver on when it is not.
+// When the TV is in standby, a press turns the room on, whatever the
+// receiver reports.
 func TestAPowerPressTurnsARoomWithTheTVInStandbyOn(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -134,8 +126,8 @@ func TestAPowerPressTurnsARoomWithTheTVInStandbyOn(t *testing.T) {
 	}
 }
 
-// A TV that does not answer has no power to decide with, so the
-// receiver decides, and the press still reaches the TV.
+// When the TV reports no power, the receiver's power determines what the
+// press does.
 func TestAPowerPressWithATVThatDoesNotAnswerFollowsTheReceiver(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -148,13 +140,13 @@ func TestAPowerPressWithATVThatDoesNotAnswerFollowsTheReceiver(t *testing.T) {
 
 		loungeSession(t, api, func(session TelevisionSession) bool { return session.StandbyAt != "" })
 		mustMatch(t, h.equipment.waitForCommand(t), "PWSTANDBY")
-		mustMatch(t, waitForLines(t, h.log, "asks toggle", 1)[0],
-			"Receiver theater: status.session.powerAsk asks toggle, and the receiver reports power On; asked Television lounge to go to standby")
+		mustMatch(t, waitForLines(t, h.log, "requests toggle", 1)[0],
+			"Receiver theater: status.session.powerAsk requests toggle, and the receiver reports power On; asked Television lounge to go to standby")
 	})
 }
 
-// A session that sleeps asks the TV for nothing: the TV of a living
-// room shows other inputs while the room's player is idle.
+// When a session stops being awake, the TV is not put in standby,
+// because it can be showing another input while the player is idle.
 func TestASessionThatSleepsAsksTheTVForNothing(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -171,9 +163,8 @@ func TestASessionThatSleepsAsksTheTVForNothing(t *testing.T) {
 	})
 }
 
-// A WiiM has no standby. The press still turns the room off: the TV
-// goes to standby, and the WiiM stays on, which its line states as the
-// outcome and not as a failed command.
+// A WiiM has no standby command, so a press puts only the TV in
+// standby, and the log reports that as the outcome, not as a failure.
 func TestAPowerPressInAWiimRoomTurnsTheTVOff(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -189,8 +180,8 @@ func TestAPowerPressInAWiimRoomTurnsTheTVOff(t *testing.T) {
 		powerAsk(held, "toggle")
 
 		loungeSession(t, api, func(session TelevisionSession) bool { return session.StandbyAt != "" })
-		press := "Receiver studio: status.session.powerAsk asks toggle, and Television lounge reports power On; "
-		mustDeepEqual(t, waitForLines(t, log, "asks toggle", 2), []string{
+		press := "Receiver studio: status.session.powerAsk requests toggle, and Television lounge reports power On; "
+		mustDeepEqual(t, waitForLines(t, log, "requests toggle", 2), []string{
 			press + "asked Television lounge to go to standby",
 			press + "sent the receiver nothing, because it has no standby command, so it stays on",
 		})
@@ -199,15 +190,14 @@ func TestAPowerPressInAWiimRoomTurnsTheTVOff(t *testing.T) {
 	})
 }
 
-// fixedDriver is a driver that reports one state and accepts every
-// command, for the tests that only read the state.
+// fixedDriver reports one state and accepts every command.
 type fixedDriver struct {
 	state equipment.State
 }
 
 func (d *fixedDriver) Run(context.Context)               {}
 func (d *fixedDriver) State() equipment.State            { return d.state }
-func (d *fixedDriver) Surveyed() bool                    { return true }
+func (d *fixedDriver) FirstReadDone() bool               { return true }
 func (d *fixedDriver) Address() string                   { return "" }
 func (d *fixedDriver) VolumeResolution() int             { return 1 }
 func (d *fixedDriver) HasStandby() bool                  { return true }
@@ -221,8 +211,8 @@ func (d *fixedDriver) SameSoundMode(declared, reported string) bool {
 	return declared == reported
 }
 
-// unreachableDriver is a receiver the operator cannot reach. It
-// records every power and input command, which a press must not send.
+// unreachableDriver reports a receiver that the operator cannot reach,
+// and records every power and input command it is sent.
 type unreachableDriver struct {
 	fixedDriver
 	sent chan string
@@ -238,9 +228,8 @@ func (d *unreachableDriver) SetInput(_ string, input string) error {
 	return nil
 }
 
-// A receiver the operator cannot reach gets nothing from a press, and
-// the TV still decides the room and turns off or on. With no TV power
-// to decide, the press is dropped.
+// A press sends an unreachable receiver nothing, and the TV's power
+// still determines whether the room turns on or off.
 func TestAPowerPressWithAnUnreachableReceiverStillTogglesTheTV(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -269,8 +258,8 @@ func TestAPowerPressWithAnUnreachableReceiverStillTogglesTheTV(t *testing.T) {
 				powerAsk(held, "toggle")
 
 				loungeSession(t, api, c.ready)
-				press := "Receiver studio: status.session.powerAsk asks toggle, and Television lounge reports power " + c.power + "; "
-				mustDeepEqual(t, waitForLines(t, log, "asks toggle", 2), []string{
+				press := "Receiver studio: status.session.powerAsk requests toggle, and Television lounge reports power " + c.power + "; "
+				mustDeepEqual(t, waitForLines(t, log, "requests toggle", 2), []string{
 					press + c.line,
 					press + "sent the receiver nothing, because the operator cannot reach it",
 				})
@@ -282,8 +271,8 @@ func TestAPowerPressWithAnUnreachableReceiverStillTogglesTheTV(t *testing.T) {
 	}
 }
 
-// With no TV power to decide the room, a press on an unreachable
-// receiver is dropped: nothing reaches the TV or the receiver.
+// When the TV reports no power and the receiver is unreachable, no
+// state determines what the press does, so the press is dropped.
 func TestAPowerPressWithAnUnreachableReceiverAndNoTVPowerIsDropped(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -300,6 +289,6 @@ func TestAPowerPressWithAnUnreachableReceiverAndNoTVPowerIsDropped(t *testing.T)
 		time.Sleep(quietPeriod)
 		mustMatch(t, api.sessionWriteCount(), written)
 		mustMatch(t, len(driver.sent), 0)
-		mustDeepEqual(t, linesWith(log, "asks toggle"), []string(nil))
+		mustDeepEqual(t, linesWith(log, "requests toggle"), []string(nil))
 	})
 }

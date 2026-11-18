@@ -1,13 +1,13 @@
-// The measurements an amp reports that change on their own: its
-// temperatures, its Wi-Fi link, and its remote. They change between two
-// polls with nothing moved at the amp, so the status leaves them out and
-// the operator publishes them as metrics.
+// An amp's temperatures, Wi-Fi link, and remote change on almost every
+// poll, so the operator publishes them as metrics and leaves them out of
+// the status, which it would otherwise write on every poll.
 
 package wiim
 
-// Readings are the latest measurements getStatusEx carried. A nil field
-// is one the amp did not report: a radio reading of an amp on its wired
-// port, or a remote reading while no remote is connected.
+// Readings are the latest measurements from the amp's getStatusEx
+// response. A field is nil when the amp did not report a number for it,
+// such as the Wi-Fi fields while the amp is on its wired port, or the
+// remote's fields while no remote is connected.
 type Readings struct {
 	// TemperatureCPU and TemperatureBoard are the SoC's and the board
 	// sensor's temperatures, in degrees Celsius.
@@ -25,9 +25,9 @@ type Readings struct {
 	RemoteSignal  *int
 }
 
-// readingsFrom takes the measurements out of one getStatusEx answer.
-// The amp reports zeros for the radio while it is on its wired port, so
-// the radio readings are taken only while it is on Wi-Fi.
+// readingsFrom extracts the measurements from one getStatusEx
+// response. The amp reports zeros for the Wi-Fi fields while it is on
+// its wired port, so readingsFrom reads them only when onWiFi is true.
 func readingsFrom(d statusEx, onWiFi bool) Readings {
 	readings := Readings{
 		TemperatureCPU:   reading(d.TemperatureCPU),
@@ -46,8 +46,6 @@ func readingsFrom(d statusEx, onWiFi bool) Readings {
 	return readings
 }
 
-// reading is a number the amp sent as a string, or nil when it is not
-// one.
 func reading(value string) *int {
 	number, ok := atoi(value)
 	if !ok {
@@ -56,8 +54,8 @@ func reading(value string) *int {
 	return &number
 }
 
-// Readings returns the latest measurements, and can run concurrently
-// with Run.
+// Readings returns the latest measurements. It is safe to call while
+// Run is running.
 func (c *Client) Readings() Readings {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()

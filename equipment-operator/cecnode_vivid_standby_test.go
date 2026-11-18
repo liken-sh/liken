@@ -1,9 +1,9 @@
 package main
 
-// The power press that turns the room off, against the kernel's own
-// CEC core through the vivid driver: the node workload wakes the TV the
-// test plays, then sends it Standby once for the press, and the TV
-// reports Standby. cec/AGENTS.md gives the commands that set vivid up.
+// This test runs a standby press against the kernel's CEC core through
+// the vivid driver, with one vivid adapter acting as the TV. The node
+// workload wakes the TV, and for the press it must send exactly one
+// Standby. cec/AGENTS.md has the commands that set up vivid.
 
 import (
 	"os"
@@ -15,13 +15,13 @@ import (
 
 func TestVividAPowerPressPutsTheTVInStandby(t *testing.T) {
 	if os.Getenv(vividTVVariable) != "" {
-		t.Skipf("%s names another player for the TV, and this test plays the TV itself", vividTVVariable)
+		t.Skipf("%s is set, so another program plays the TV, and this test plays the TV itself", vividTVVariable)
 	}
 	guard := cecWakeGuard
 	cecWakeGuard = time.Second
 	t.Cleanup(func() { cecWakeGuard = guard })
 	tv, output, address := vividPair(t, true)
-	heard := playWakingTV(t, tv)
+	received := playWakingTV(t, tv)
 	waitForClaim(t, tv)
 	api := startCECAPI(t)
 	api.putDisplay("acm-0001-receiver", "node-1", address.String())
@@ -47,7 +47,7 @@ func TestVividAPowerPressPutsTheTVInStandby(t *testing.T) {
 	entry, _ := api.entry("den", "node-1")
 	own := cec.LogicalAddress(*entry.LogicalAddress)
 	standbys := 0
-	for _, message := range heard() {
+	for _, message := range received() {
 		if opcode, _ := message.Opcode(); opcode == cec.OpStandby {
 			mustMatch(t, message.String(), cec.PowerCommand(own, false).String())
 			standbys++

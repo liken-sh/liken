@@ -1,8 +1,13 @@
 package main
 
-// The session a Player holds on a receiver: the one-shot power and
-// input that its flags run. The asks in status.session reach the same
-// session (session_asks.go).
+// A session is the operator's state for one Player on one receiver.
+// media-operator writes two flags in status.session: active while a Play
+// runs on the Player, and awake while the Player's screen is awake. When
+// a flag turns on, the session runs its one-shot: it powers the receiver
+// on if it is off and selects the Player's input. The one-shot does not
+// correct the receiver afterward, so a person can still switch the input
+// with the receiver's own remote. session_asks.go handles the other
+// requests in status.session.
 
 import (
 	"context"
@@ -15,69 +20,65 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
-// How long the operator waits for the receiver to answer PWON before it
-// selects the input anyway.
+// sessionPowerWait is how long the one-shot waits for the receiver to
+// report power On before it sends the input anyway.
 const sessionPowerWait = 10 * time.Second
 
-// session is one live session: the Player's input, the flags the media
-// operator wrote, and the waits its one-shots stand on.
 type session struct {
 	receiver string
 	spec     ReceiverSession
 	driver   equipment.Driver
-	// readings counts a timeout this session's own power wait produced.
+	// readings records a command timeout when the power wait runs out.
 	readings *metrics
-	// log is the receiver's log, which the unit shares with the session,
-	// so a command's line waits for the same reports either way.
+	// log is the receiver's log, shared with the unit so that the lines
+	// of both appear in order.
 	log *receiverLog
-	// The session's own context, held because a flip of either flag starts
-	// the one-shots long after the session started, and they stop when it
-	// does.
+	// ctx outlives start, because a flag can turn on and start a one-shot
+	// long after the session started. stop cancels it.
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	// The two flags: whether a Play stands, and whether the room's screen
-	// is awake. They gate the one-shots and nothing else.
 	active atomic.Bool
 	awake  atomic.Bool
 
-	// The gate the input selection waits on, closed when the receiver
-	// reports itself on. It is armed again for each selection, so a second
-	// Play waits for its own power-on.
+	// powered is closed when the receiver reports power On. armPower
+	// replaces it before each input selection, so a later selection waits
+	// for a new power-on report.
 	powerMutex sync.Mutex
 	powered    chan struct{}
 
-	// oneShot serializes the power and input one-shots. A toggle and a
-	// flag flip could otherwise drive the receiver at the same moment,
-	// and a standby landing mid power-on would leave the receiver off
-	// while the flags still say on, with nothing left to re-assert.
+	// oneShot is held by everything that sends the receiver power or
+	// input commands: the one-shot, a power request, and an ensure.
+	// Without it, a standby that arrives during a power-on could leave the
+	// receiver off while the flags are on, and nothing would send power On
+	// again.
 	oneShot sync.Mutex
-	// applyPower records the power the session settled on and writes it
-	// to the spec, wired to the unit that owns the receiver. It is nil in
-	// a test that never toggles.
+	// applyPower writes the power that a power request settled on to the
+	// Receiver spec. It is nil in a test that sends no power request.
 	applyPower func(power equipment.Power)
-	// room hears each wake and each sleep of the room, so the TV of the
-	// room wakes with the receiver. It is nil in a test with no TV.
+	// room is nil in a test with no TV.
 	room roomEvents
 
+	// reached closes when the receiver first reports reachable, which
+	// means the connection is open for commands.
 	reachedOnce sync.Once
 	reached     chan struct{}
 
-	// surveyed closes when the driver has read the receiver's own facts,
-	// which the power and input step compares with before it sends.
-	surveyedOnce sync.Once
-	surveyed     chan struct{}
+	// firstReadDone closes when the driver has finished its first read of the
+	// receiver's state. The one-shot compares against that state.
+	firstReadOnce sync.Once
+	firstReadDone chan struct{}
 
-	// inputSoundMode answers the sound mode a declared input names, read
-	// when the session selects it.
+	// inputSoundMode returns the sound mode declared for an input, or ""
+	// when there is none.
 	inputSoundMode func(input string) string
 }
 
-// newSession builds a session that reads nothing and sends nothing
-// yet. The unit holds it before start, so every line the receiver sends
-// from start on reaches it. A line that reached no session could be the
-// one that says the receiver is reachable, and a session that missed it
-// would never run its one-shot.
+// newSession returns a session that has read and sent nothing. The
+// caller must route the receiver's events to it before it calls start,
+// because start reads the driver's state only once. An event lost after
+// that read could be the one that reports the receiver reachable, and
+// the one-shot would then wait until the session ends.
 func newSession(ctx context.Context, receiver string, spec ReceiverSession, driver equipment.Driver, readings *metrics, log *receiverLog, inputSoundMode func(input string) string, applyPower func(power equipment.Power), room roomEvents) *session {
 	ctx, cancel := context.WithCancel(ctx)
 	if inputSoundMode == nil {
@@ -96,21 +97,19 @@ func newSession(ctx context.Context, receiver string, spec ReceiverSession, driv
 		room:           room,
 		powered:        make(chan struct{}),
 		reached:        make(chan struct{}),
-		surveyed:       make(chan struct{}),
+		firstReadDone:  make(chan struct{}),
 	}
 }
 
-// start reads the receiver's state as it stands and takes the flags. A
-// session that appears while the operator runs is a change a person
-// made, so its flags run the power and input step. A session the
-// operator finds when it starts is not: the last operator already ran
-// the step for those flags, and a person may have changed the receiver
-// since. So adopting stores the flags and runs no step, and only a
-// later flip runs one.
+// start reads the driver's state and applies the flags. When adopting
+// is true, the session existed before this operator process started:
+// the previous process already ran the one-shot for these flags, and a
+// person may have changed the receiver since. So an adopted session only
+// records the flags, and the one-shot waits for the next flag to turn on.
 func (s *session) start(active, awake, adopting bool) {
-	s.mark(s.driver.State())
+	s.releaseWaits(s.driver.State())
 	if !adopting {
-		s.flags(active, awake, true)
+		s.applyFlags(active, awake, true)
 		return
 	}
 	s.active.Store(active)
@@ -120,17 +119,21 @@ func (s *session) start(active, awake, adopting bool) {
 	}
 }
 
-// roomEvents is how a session tells the TV of its room what it did to
-// the receiver. opened reports a session that starts, with whether its
-// flags hold the room awake and the words that name them; the room
-// decides whether the start is a change a person caused. woke reports a
-// wake the session saw happen: a flag that turns on, or the remote's
-// power button that turns the room on. slept reports both flags turning
-// off, and asks the TV for nothing. television answers the TV of the
-// room and the power it reports, empty when the room has none, and
-// standby asks that TV to go to standby: only the remote's power button
-// calls it. show asks that TV to show the session's Display when it is
-// on: only a home press calls it.
+// roomEvents connects a session to the Television in its room.
+//
+//   - opened reports that a session started, whether either of its
+//     flags is true, and the text that describes them. The
+//     implementation decides whether a person caused that start.
+//   - woke reports that a flag turned on or that a power request turned
+//     the room on.
+//   - slept reports that both flags turned off, or that a power request
+//     turned off a room with no TV that reports power. It sends the TV
+//     no command.
+//   - television returns the TV's name and power, both "" when the room
+//     has no TV.
+//   - standby turns the TV off, for a power request (session_power.go).
+//   - show asks a TV that is on to show the session's Display, for a
+//     home press (session_ensure.go).
 type roomEvents interface {
 	opened(awake bool, trigger string)
 	woke(trigger string)
@@ -140,30 +143,27 @@ type roomEvents interface {
 	show(trigger string)
 }
 
-// setFlags takes both flags as the media operator wrote them: active
-// when a Play starts or ends, awake when the room's screen wakes or
-// sleeps. Either one turning on runs the one-shots once, and both
-// turning on in one write runs them once and not twice. A screen that
-// wakes under a standing Play selects the input again, which is what a
-// person who reached for the receiver's own power button needs.
+// setFlags applies the flags that media-operator wrote. Each flag that
+// turns on runs the one-shot, and both turning on in one write run it
+// once. So a screen that wakes during a Play selects the input again,
+// which turns the receiver back on after a person switched it off with
+// its own power button.
 func (s *session) setFlags(active, awake bool) {
-	s.flags(active, awake, false)
+	s.applyFlags(active, awake, false)
 }
 
-// flags is setFlags, with opening for the session's first call. Both
-// flags going off puts the room to sleep for its TV, and sends the
-// receiver nothing.
-func (s *session) flags(active, awake, opening bool) {
+// applyFlags is setFlags, with opening true on the session's first
+// call. When both flags turn off, it tells the room and sends the
+// receiver nothing, because the room may still be playing sound from
+// another source.
+func (s *session) applyFlags(active, awake, opening bool) {
 	before := s.active.Load() || s.awake.Load()
-	played := s.raise(&s.active, active)
-	woke := s.raise(&s.awake, awake)
-	// The room hears the flags here, in the order they change, and not
-	// from the one-shot, which runs later on its own goroutine: a sleep
-	// that follows at once must reach the TV after the wake, or the TV
-	// would wake in a room that is going dark. The TV is reached over
-	// another path than the receiver, so its wake does not wait for the
-	// receiver to answer. The room decides whether the flags a session
-	// starts with are a change a person caused.
+	played := s.storeFlag(&s.active, active)
+	woke := s.storeFlag(&s.awake, awake)
+	// Tell the room here, in the order the flags change, and not from the
+	// one-shot's goroutine. Otherwise a sleep right after a wake could
+	// reach the TV first, and the TV would wake in a dark room. The TV
+	// wake also does not wait for the receiver to respond.
 	words := s.flagWords(played, woke)
 	switch {
 	case s.room == nil:
@@ -179,8 +179,8 @@ func (s *session) flags(active, awake, opening bool) {
 	}
 }
 
-// flagWords names what raised a flag, for the lines of the one-shots
-// it runs.
+// flagWords describes which flags turned on, as text for the log lines
+// of the one-shot they run.
 func (s *session) flagWords(played, woke bool) string {
 	switch {
 	case played && woke:
@@ -191,10 +191,9 @@ func (s *session) flagWords(played, woke bool) string {
 	return fmt.Sprintf("the screen of Player %s woke", s.spec.Player)
 }
 
-// raise stores one flag and answers whether this is the false to true
-// that runs the one-shots. True to false sends nothing, because the
-// room may still be listening.
-func (s *session) raise(flag *atomic.Bool, on bool) bool {
+// storeFlag stores one flag and reports whether it changed from false
+// to true.
+func (s *session) storeFlag(flag *atomic.Bool, on bool) bool {
 	if !on {
 		flag.Store(false)
 		return false
@@ -202,42 +201,39 @@ func (s *session) raise(flag *atomic.Bool, on bool) bool {
 	return flag.CompareAndSwap(false, true)
 }
 
-// stop ends the session's one-shots. It never powers the receiver off,
-// because the room may still be listening to something else.
+// stop ends the session's one-shots and leaves the receiver as it is.
 func (s *session) stop() {
 	s.cancel()
 }
 
-// observe is the session's half of every line the receiver sends: it
-// releases the waits the one-shots stand on.
+// observe receives each event from the driver.
 func (s *session) observe(event equipment.Event) {
-	s.mark(event.State)
+	s.releaseWaits(event.State)
 }
 
-// mainZone reads the zone a session drives out of one state.
+// mainZone returns the main zone of a state. A session drives only the
+// main zone.
 func mainZone(state equipment.State) equipment.ZoneState {
 	zone, _ := state.Zone(equipment.MainZone)
 	return zone
 }
 
-// mark releases the three waits a session stands on: the connection the
-// commands go out over, the survey the power and input step compares
-// with, and the power the input selection follows.
-func (s *session) mark(state equipment.State) {
+// releaseWaits closes reached, firstReadDone, and powered when the state
+// satisfies them.
+func (s *session) releaseWaits(state equipment.State) {
 	if state.Reachable == ConditionTrue {
 		s.reachedOnce.Do(func() { close(s.reached) })
 	}
-	if s.driver.Surveyed() {
-		s.surveyedOnce.Do(func() { close(s.surveyed) })
+	if s.driver.FirstReadDone() {
+		s.firstReadOnce.Do(func() { close(s.firstReadDone) })
 	}
 	main := mainZone(state)
 	if main.Power == equipment.PowerOn {
-		s.notePower()
+		s.markPowered()
 	}
 }
 
-// notePower releases whoever waits for the receiver to come on.
-func (s *session) notePower() {
+func (s *session) markPowered() {
 	s.powerMutex.Lock()
 	defer s.powerMutex.Unlock()
 	select {
@@ -247,9 +243,9 @@ func (s *session) notePower() {
 	}
 }
 
-// armPower answers the gate that closes when the receiver next reports
-// itself on. A selection arms it before it reads the power, so a
-// receiver that answers in between still releases the wait.
+// armPower replaces powered with an open channel and returns it. The
+// one-shot calls it before it reads the receiver's power, so a power-on
+// report that arrives between the two still releases the wait.
 func (s *session) armPower() <-chan struct{} {
 	s.powerMutex.Lock()
 	defer s.powerMutex.Unlock()
@@ -257,29 +253,23 @@ func (s *session) armPower() <-chan struct{} {
 	return s.powered
 }
 
-// selectInput powers the receiver on, waits for it to say so, and
-// selects the input once for whoever asked. The power one-shot is
-// serialized against a toggle, so the two never drive the receiver at
-// the same moment.
 func (s *session) selectInput(ctx context.Context, trigger string) {
 	s.oneShot.Lock()
 	defer s.oneShot.Unlock()
 	s.selectInputLocked(ctx, trigger)
 }
 
-// selectInputLocked is the power-and-input one-shot, called with oneShot
-// held by either a flag flip or a toggle. trigger names what asked for
-// it, for the lines it writes. It waits for the survey, because before
-// it the receiver has reported nothing to compare with, and then it
-// sends only the power, the input, and the sound mode that the receiver
-// reports at another value.
+// selectInputLocked is the one-shot, and the caller holds oneShot.
+// trigger says what started it, for the log lines. It sends only the
+// power, input, and sound mode that differ from what the receiver
+// reports.
+//
+// It first waits for the first full read, with no timeout. The driver drops a
+// command sent before the connection opens, and the one-shot never
+// runs again, so a command sent early would be lost. Until the first full read
+// ends, the driver also has no state to compare with.
 func (s *session) selectInputLocked(ctx context.Context, trigger string) {
-	// A command sent before the connection is open is dropped, and a one-
-	// shot is never re-asserted, so the wait for the survey, which comes
-	// after the connection, is what makes the one-shot land. The session's
-	// own lifetime is the bound: a receiver that never answers has nothing
-	// to select.
-	if !s.waitForSurvey(ctx) {
+	if !s.waitForFirstRead(ctx) {
 		return
 	}
 	powered := s.armPower()
@@ -307,10 +297,10 @@ func (s *session) selectInputLocked(ctx context.Context, trigger string) {
 	s.selectTheInput(trigger)
 }
 
-// waitForSurvey waits until the receiver is reachable and surveyed, and
-// answers false when the session ends first.
-func (s *session) waitForSurvey(ctx context.Context) bool {
-	for _, wait := range []chan struct{}{s.reached, s.surveyed} {
+// waitForFirstRead waits until the receiver is reachable and has finished its first full read. It
+// returns false when the session ends first.
+func (s *session) waitForFirstRead(ctx context.Context) bool {
+	for _, wait := range []chan struct{}{s.reached, s.firstReadDone} {
 		select {
 		case <-ctx.Done():
 			return false
@@ -320,12 +310,12 @@ func (s *session) waitForSurvey(ctx context.Context) bool {
 	return true
 }
 
-// selectTheInput sends the session's input and the sound mode that
-// travels with it, each only when the receiver reports another value.
-// The driver compares the sound mode, because a receiver can report the
-// mode it runs in other words than the command that selects it. The
-// power one-shot and the ensure both reach it, so the mode and the
-// input can never drift apart.
+// selectTheInput sends the session's input and the input's sound mode,
+// each only when the receiver reports a different value. The driver
+// compares sound modes, because a receiver can report a mode in other
+// words than the command that selects it. The one-shot and ensure
+// (session_ensure.go) both call it, so both send the sound mode with
+// the input.
 func (s *session) selectTheInput(trigger string) {
 	state := mainZone(s.driver.State())
 	mode := s.inputSoundMode(s.spec.Input)

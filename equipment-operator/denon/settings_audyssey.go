@@ -1,8 +1,5 @@
 package denon
 
-// AudysseySettings holds the Audyssey room correction settings.
-
-// AudysseySettings holds the Audyssey room correction settings.
 type AudysseySettings struct {
 	Multeq               *string `json:"multeq,omitempty"`
 	DynamicEq            *bool   `json:"dynamicEq,omitempty"`
@@ -11,7 +8,6 @@ type AudysseySettings struct {
 	LoudnessManagement   *bool   `json:"loudnessManagement,omitempty"`
 }
 
-// audysseySettings is the Audyssey family's rows of the id table.
 var audysseySettings = []settingSpec{
 	wordSetting("audyssey.multeq", MultEqCommand,
 		func(s *Settings, v string) { s.Audyssey.Multeq = strPtr(v) },

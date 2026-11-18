@@ -1,13 +1,12 @@
 package main
 
-// The node workload's part of a Television: it reads the TV's power
-// when a command or a power press needs it, and it finds which adapter
-// of a bus sends the bus's commands. The power it reads goes into the
-// adapter's entry with the rest of the devices, and the Deployment
-// copies it into the Television. Between reads, the power follows what
-// the TV and the other devices send on the bus, as cec.Directory
-// states, and no timer asks the TV. cecnode_power.go applies
-// spec.power.
+// The node workload's part of a Television. It reads the TV's power for
+// a powerAsk, and it determines which adapter of a bus sends the bus's
+// commands. The power it reads is written to the adapter's entry in the
+// CECBus, and the Deployment copies it to the Television. Between reads,
+// cec.Directory updates the power from the messages that the TV and the
+// other devices send, so no timer queries the TV. cecnode_power.go
+// applies spec.power.
 
 import (
 	"fmt"
@@ -17,13 +16,10 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/cec"
 )
 
-// readPower reads the TV's power into the directory, and asks the loop
-// to write the entry when the read changed what the directory holds.
-// Each wake of the loop runs a pass, which lists the CECBuses and the
-// Televisions from the API server, so a read that changes nothing does
-// not wake it. An error that means the
-// adapter left ends the node workload; any other error is logged, and
-// the answer is unknown. askPower is the one caller.
+// readPower reads the TV's power into the directory. Marking the entry
+// dirty starts a pass, so readPower marks it only when the directory
+// changed, and a read that changes nothing starts no pass. An error that means the adapter is gone ends the node workload. Any
+// other error is logged, and the power is PowerUnknown.
 func (n *cecNode) readPower(own cec.LogicalAddress) (cec.PowerStatus, error) {
 	before := n.directory.Peers()
 	power, err := cec.ReadPower(n.device, n.directory, own, cec.AddressTV)
@@ -32,7 +28,7 @@ func (n *cecNode) readPower(own cec.LogicalAddress) (cec.PowerStatus, error) {
 		return cec.PowerUnknown, err
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "asking the TV for its power from the adapter on %s: %v\n", n.machine, err)
+		fmt.Fprintf(os.Stderr, "reading the power of the TV through the adapter on %s: %v\n", n.machine, err)
 	}
 	if !slices.Equal(before, n.directory.Peers()) {
 		n.markDirty()
@@ -40,12 +36,12 @@ func (n *cecNode) readPower(own cec.LogicalAddress) (cec.PowerStatus, error) {
 	return power, nil
 }
 
-// commands answers whether this adapter sends the bus's commands, and
-// the logical address it sends them from. The first adapter in
-// spec.adapters that holds a logical address sends them, so the TV
-// gets one command and not one from each adapter. The node workload
-// reads another adapter's state from that adapter's current entry, and
-// its own state from memory, which is newer than its entry.
+// commands returns whether this adapter sends the bus's commands, and
+// the logical address it sends them from. The sender is the first
+// adapter in spec.adapters that is in Control mode and has a logical
+// address, so the TV receives each command once. This adapter's own
+// state is read from memory, which is newer than its entry. Another
+// adapter counts only while its entry is current.
 func (n *cecNode) commands(bus *CECBus) (cec.LogicalAddress, bool) {
 	n.mutex.Lock()
 	control := n.applied.mode == CECControl
@@ -66,32 +62,32 @@ func (n *cecNode) commands(bus *CECBus) (cec.LogicalAddress, bool) {
 	return 0, false
 }
 
-// powerReadMemory is what the node workload holds about the power reads
-// a power press asked for. The node's mutex guards it. listed says the
-// node workload has read the Televisions once, foundAtStart is the
-// request that first read held, and done is the last request the node
-// workload answered or skipped.
-type powerReadMemory struct {
-	listed       bool
+// powerReadState records which power read requests the node workload
+// has handled. The node's mutex guards it.
+type powerReadState struct {
+	// listed is true after the first pass that read the Televisions.
+	listed bool
+	// foundAtStart is the request that the first pass found.
 	foundAtStart commandKey
-	done         commandKey
+	// done is the last request that this adapter read the power for.
+	done commandKey
 }
 
 func powerReadKeyOf(television *Television) commandKey {
 	return commandKey{television.Metadata.UID, "power read " + television.Status.Session.PowerReadAt}
 }
 
-// passPowerRead answers a power press's request for the TV's power. The
-// remote's power button toggles the room, and the TV's power decides
-// whether the room is on. No timer keeps that power current, and a TV
-// that a person turned off with its own remote can send nothing the
-// adapter hears. So the Deployment writes a new status.session.powerReadAt
-// for each press and waits a few seconds for the answer. The adapter
-// that sends the bus's commands asks the TV once and writes the answer
-// in status.powerRead, with an empty power when the TV did not answer.
-// A request that is already in the status when the node workload starts
-// is older than the press's wait, so the node workload sends nothing
-// for it.
+// passPowerRead handles a powerAsk's request for the TV's power. The
+// operator decides from the TV's power whether the room is on, and
+// status.power can be out of date: a TV that a
+// person turned off with its own remote can send nothing that the
+// adapter receives. So for each powerAsk the Deployment writes a new
+// status.session.powerReadAt and waits up to cecPowerReadWait. The
+// adapter that sends the bus's commands reads the TV's power once and
+// writes it to status.powerRead, with an empty power when the TV did
+// not reply. A request that is already in the status when the node
+// workload starts is older than that wait, so the node workload skips
+// it.
 func (n *cecNode) passPowerRead(bus *CECBus, television *Television) {
 	session := sessionOf(television)
 	live := session != nil && session.PowerReadAt != ""
@@ -118,7 +114,7 @@ func (n *cecNode) passPowerRead(bus *CECBus, television *Television) {
 	n.mutex.Lock()
 	n.powerRead.done = key
 	n.mutex.Unlock()
-	power, err := n.askPower(own)
+	power, err := n.readTVPower(own)
 	if err != nil {
 		return
 	}
@@ -127,14 +123,13 @@ func (n *cecNode) passPowerRead(bus *CECBus, television *Television) {
 		answer = power.String()
 	}
 	if err := ApplyTelevisionPowerRead(n.client, television, n.machine, session.PowerReadAt, answer); err != nil {
-		fmt.Fprintf(os.Stderr, "writing the power read of Television %s: %v\n", television.Metadata.Name, err)
+		fmt.Fprintf(os.Stderr, "writing the power reading of Television %s: %v\n", television.Metadata.Name, err)
 	}
 }
 
-// postTelevision posts the Event of a condition the node workload wrote
-// on a Television, when the condition transitioned from the one the
-// Television held. The caller calls it after the API server accepted
-// the write.
+// postTelevision posts the Event for a condition that the node workload
+// wrote on a Television, when the condition is new or its status or
+// reason changed. Call it only after the API server accepted the write.
 func (n *cecNode) postTelevision(television *Television, written Condition) {
 	postTransitions(n.recorder, reference("Television", television.Metadata), television.Status.Conditions, []Condition{written})
 }

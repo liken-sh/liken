@@ -1,13 +1,7 @@
 package main
 
-// The adapter's answers to Request Active Source and Set Stream Path.
-// A TV that boots, and a receiver that wakes with it, ask the bus which
-// source is active, and the active source must answer. A TV whose menu
-// picks an input names its address in Set Stream Path, and the device
-// there must answer. While a Player's session holds the room awake, the
-// adapter that speaks for the session's Display answers with Active
-// Source for that Display. cecnode_wake_test.go holds the wake
-// fixtures.
+// Tests of the adapter's answers to Request Active Source and Set
+// Stream Path. The wake fixtures are in cecnode_wake_test.go.
 
 import (
 	"testing"
@@ -18,13 +12,13 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/cec/cectest"
 )
 
-// askForTheSource puts a Request Active Source from the TV on the wire.
+// askForTheSource sends a broadcast Request Active Source from the TV.
 func askForTheSource(wire *cectest.Bus) {
 	wire.Send(cec.NewMessage(cec.AddressTV, cec.AddressBroadcast, cec.OpRequestActiveSource))
 }
 
 // askedAfterTheWake wakes the room with a session, waits for the wake
-// to end, and then applies the session as it stands after the wake.
+// to end, and then replaces the session with the result of after.
 func askedAfterTheWake(t *testing.T, wire *cectest.Bus, after func(session TelevisionSession) TelevisionSession) *cecAPI {
 	t.Helper()
 	session := wokeNow()
@@ -43,7 +37,7 @@ func TestTheAdapterAnswersARequestForTheActiveSource(t *testing.T) {
 		after  func(session TelevisionSession) TelevisionSession
 		claims []string
 	}{
-		{"a session that holds the room awake",
+		{"an awake session",
 			func(session TelevisionSession) TelevisionSession { return session },
 			[]string{"4->f 82 13 00", "4->f 82 13 00"}},
 		{"a session that went to sleep",
@@ -61,29 +55,27 @@ func TestTheAdapterAnswersARequestForTheActiveSource(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
-				wire := roomWithTV(televisionTV(cec.PowerOn))
+				wire := busWithTV(televisionTV(cec.PowerOn))
 				askedAfterTheWake(t, wire, c.after)
 
 				askForTheSource(wire)
 				time.Sleep(quietPeriod)
 
 				mustDeepEqual(t, claimsOf(wire), c.claims)
-				// The answer is Active Source alone. The asker can be the
-				// receiver while the TV is off, and Image View On would wake a
-				// TV a person turned off.
+				// The answer is Active Source alone, so the wake sent the only
+				// Image View On.
 				mustMatch(t, sentOf(wire, cec.OpImageViewOn), 1)
 			})
 		})
 	}
 }
 
-// A source that claimed the input after the wake's guard is a person's
-// choice, and that source is the active source now. It answers the TV
-// itself, so the adapter sends nothing.
+// After the wake, a source that sends Active Source is the active
+// source, so the adapter leaves the TV's request to it.
 func TestTheAdapterLeavesTheRequestToTheSourceAPersonChose(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerOn))
+		wire := busWithTV(televisionTV(cec.PowerOn))
 		askedAfterTheWake(t, wire, func(session TelevisionSession) TelevisionSession { return session })
 		wire.Send(cec.ActiveSource(8, 0x1500))
 
@@ -94,17 +86,16 @@ func TestTheAdapterLeavesTheRequestToTheSourceAPersonChose(t *testing.T) {
 	})
 }
 
-// A TV that boots slowly asks for the active source before it reports
-// On, which is before the wake sends its own Active Source. The last
-// Active Source the adapter heard is then from an earlier evening, and
-// the wake answers anyway, because it is claiming the input.
+// A TV that boots slowly sends Request Active Source before it reports
+// On, so before the wake sends its own Active Source. The wake answers
+// although the last Active Source on the bus is another source's,
+// because the wake is about to claim the input.
 func TestTheWakeAnswersARequestBeforeItsOwnClaim(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		// The TV stays in its transition past the end of the test, so the
-		// wake's own Active Source never goes out, and the one on the wire is
-		// the answer.
-		wire := roomWithTV(televisionTV(cec.PowerStandby))
+		// The TV stays in its power transition until the test ends, so
+		// the only Active Source that the adapter sends is the answer.
+		wire := busWithTV(televisionTV(cec.PowerStandby))
 		api := controlling(t, wire, lounge(""))
 		api.scanned(t, "node-1")
 		wire.Send(cec.ActiveSource(8, 0x1500))
@@ -122,13 +113,13 @@ func TestTheWakeAnswersARequestBeforeItsOwnClaim(t *testing.T) {
 	})
 }
 
-// The answer is an operation a person notices, so it writes one line
-// that names the session it answers for.
+// An answer writes one log line that names the Television, the Display,
+// and the Player.
 func TestTheAnswerWritesALine(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		wire := roomWithTV(televisionTV(cec.PowerOn))
+		wire := busWithTV(televisionTV(cec.PowerOn))
 		_, device := usbAdapter(wire)
 		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
 		api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
@@ -143,14 +134,13 @@ func TestTheAnswerWritesALine(t *testing.T) {
 		api.waitUntil(t, "the answer", func() bool { return len(linesWith(log, "Request Active Source")) == 2 })
 		mustDeepEqual(t, linesWith(log, "Request Active Source"), []string{
 			`CECBus den: "TV" (logical 0, 0.0.0.0) broadcast Request Active Source`,
-			`Television lounge: "TV" (logical 0, 0.0.0.0) broadcast Request Active Source; the adapter on node-1 answered with Active Source for 1.3.0.0, Display acm-0001-receiver, because Player media/den's session holds the room awake`,
+			`Television lounge: "TV" (logical 0, 0.0.0.0) broadcast Request Active Source; the adapter on node-1 answered with Active Source for 1.3.0.0, Display acm-0001-receiver, because Player media/den's session is awake`,
 		})
 	})
 }
 
-// A TV whose menu picks the Display's input names the Display's address
-// in Set Stream Path, and the adapter answers. An address of another
-// source is that source's to answer.
+// The adapter answers a Set Stream Path for the Display's address, and
+// leaves one for another address to that source.
 func TestTheAdapterAnswersASetStreamPathToTheDisplay(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -167,28 +157,26 @@ func TestTheAdapterAnswersASetStreamPathToTheDisplay(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
-				wire := roomWithTV(televisionTV(cec.PowerOn))
+				wire := busWithTV(televisionTV(cec.PowerOn))
 				askedAfterTheWake(t, wire, func(session TelevisionSession) TelevisionSession { session.Awake = c.awake; return session })
-				// A streaming player's claim after the guard does not stop the
-				// answer: the TV chose the Display by its address.
+				// Another source's Active Source does not stop the answer,
+				// because the TV chose the Display by its address.
 				wire.Send(cec.ActiveSource(8, 0x1500))
 
 				wire.Send(cec.NewMessage(cec.AddressTV, cec.AddressBroadcast, cec.OpSetStreamPath, byte(c.address>>8), byte(c.address)))
 				time.Sleep(quietPeriod)
 
 				mustDeepEqual(t, claimsOf(wire), c.claims)
-				// The TV asked for the Display, so it needs no Image View On.
+				// The TV is on and chose the Display, so no Image View On is sent.
 				mustMatch(t, sentOf(wire, cec.OpImageViewOn), 1)
 			})
 		})
 	}
 }
 
-// A route that moves away from the Display takes the adapter's
-// active-source status with it: a switch that routes another input, a
-// TV that picks another source, and a Standby. The session can stay
-// awake while a person watches another source, so the adapter answers
-// no later request until the route leads to the Display again.
+// When a switch, the TV, or a Standby moves the route away from the
+// Display, the adapter answers no Request Active Source until the route
+// leads to the Display again, although the session stays awake.
 func TestARouteThatMovesAwayEndsTheAnswer(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -219,7 +207,7 @@ func TestARouteThatMovesAwayEndsTheAnswer(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
-				wire := roomWithTV(televisionTV(cec.PowerOn))
+				wire := busWithTV(televisionTV(cec.PowerOn))
 				askedAfterTheWake(t, wire, func(session TelevisionSession) TelevisionSession { return session })
 				wire.Send(c.message)
 

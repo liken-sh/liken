@@ -1,8 +1,7 @@
 package main
 
-// The session's line for each command it sends a receiver: the power
-// and the input a flag or a power ask asks for, and an ensure. The
-// harness is in session_test.go.
+// The log lines that a session writes for the commands it sends a
+// receiver. The harness is in session_test.go.
 
 import (
 	"testing"
@@ -36,7 +35,7 @@ func TestAToggleOnAReceiverThatIsOnIsOneLine(t *testing.T) {
 		powerAsk(held, "toggle")
 
 		mustDeepEqual(t, waitForLines(t, h.log, "toggle", 1), []string{
-			"Receiver theater: status.session.powerAsk asks toggle, and the receiver reports power On; sent power Standby; the receiver reported power Standby after <time>",
+			"Receiver theater: status.session.powerAsk requests toggle, and the receiver reports power On; sent power Standby; the receiver reported power Standby after <time>",
 		})
 	})
 }
@@ -50,14 +49,14 @@ func TestAnEnsureIsOneLine(t *testing.T) {
 		{
 			"after a drift",
 			driftedWhileListening,
-			"Receiver theater: status.session.inputAsk at 2026-10-04T12:15:25.001Z asks ensure; sent input GAME; the receiver reported input GAME after <time>",
+			"Receiver theater: status.session.inputAsk at 2026-10-04T12:15:25.001Z requests ensure; sent input GAME; the receiver reported input GAME after <time>",
 		},
 		{
 			"in standby",
 			func(t *testing.T) (*sessionHarness, *session) {
 				return idleListening(t)
 			},
-			"Receiver theater: status.session.inputAsk at 2026-10-04T12:15:25.001Z asks ensure; sent nothing, because the receiver reports power Standby",
+			"Receiver theater: status.session.inputAsk at 2026-10-04T12:15:25.001Z requests ensure; sent nothing, because the receiver reports power Standby",
 		},
 	}
 	t.Parallel()
@@ -69,7 +68,7 @@ func TestAnEnsureIsOneLine(t *testing.T) {
 
 				held.inputAsk(ensureAsk)
 
-				mustDeepEqual(t, waitForLines(t, h.log, "asks ensure", 1), []string{one.want})
+				mustDeepEqual(t, waitForLines(t, h.log, "requests ensure", 1), []string{one.want})
 			})
 		})
 	}
@@ -83,14 +82,13 @@ func TestAnEnsureForASessionWithNoInputSaysSo(t *testing.T) {
 
 		held.inputAsk(ensureAsk)
 
-		mustDeepEqual(t, linesWith(h.log, "asks ensure"), []string{
-			"Receiver theater: status.session.inputAsk at 2026-10-04T12:15:25.001Z asks ensure; sent nothing, because Player theater's session names no input",
+		mustDeepEqual(t, linesWith(h.log, "requests ensure"), []string{
+			"Receiver theater: status.session.inputAsk at 2026-10-04T12:15:25.001Z requests ensure; sent nothing, because Player theater's session names no input",
 		})
 		h.refuseCommands(t, quietPeriod, denon.PowerOnCommand)
 	})
 }
 
-// Each flag that runs the one-shots names itself in their lines.
 func TestTheOneShotsNameTheFlagThatRanThem(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

@@ -1,16 +1,12 @@
 package main
 
-// The show ask against the fake API server: a home press writes a new
-// status.session.showAt on the TV that shows the session's input, while
-// the session holds the room awake, and writes nothing otherwise.
-
 import (
 	"testing"
 	"testing/synctest"
 	"time"
 )
 
-func TestAShowWritesTheTimeOnTheTelevision(t *testing.T) {
+func TestAShowWritesTheTimeToTheTelevisionSession(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
@@ -19,7 +15,7 @@ func TestAShowWritesTheTimeOnTheTelevision(t *testing.T) {
 		api.showing(waking(held), "acm-0001-receiver")
 		began := time.Now()
 
-		denRoom(api, log).show("status.session.inputAsk at 2026-10-04T12:15:25.001Z asks show")
+		denRoom(api, log).show("status.session.inputAsk at 2026-10-04T12:15:25.001Z requests show")
 
 		television, _ := api.television("lounge")
 		session := television.Status.Session
@@ -28,17 +24,15 @@ func TestAShowWritesTheTimeOnTheTelevision(t *testing.T) {
 		shown, err := time.Parse(time.RFC3339, session.ShowAt)
 		mustSucceed(t, err)
 		if shown.Before(began.Add(-time.Millisecond)) || shown.After(time.Now()) {
-			t.Errorf("showAt %s is not the time of the ask", session.ShowAt)
+			t.Errorf("showAt is %s, want a time between the start of the show and now", session.ShowAt)
 		}
 		mustDeepEqual(t, linesWith(log, "Receiver den"), []string{
-			"Receiver den: status.session.inputAsk at 2026-10-04T12:15:25.001Z asks show; asked Television lounge to show Display acm-0001-receiver",
+			"Receiver den: status.session.inputAsk at 2026-10-04T12:15:25.001Z requests show; asked Television lounge to show Display acm-0001-receiver",
 		})
 	})
 }
 
-// A session that does not hold the room awake asks the TV for nothing:
-// the room is off, or another Player holds it.
-func TestAShowThatWritesNothing(t *testing.T) {
+func TestAShowWritesNothingWhenTheSessionDoesNotHoldTheRoomAwake(t *testing.T) {
 	asleep := wokeNow()
 	asleep.Awake = false
 	other := wokeNow()
@@ -49,11 +43,11 @@ func TestAShowThatWritesNothing(t *testing.T) {
 		line string
 	}{
 		{"a session that is asleep", asleep,
-			"Receiver den: status.session.inputAsk at 2026-10-04T12:15:25.001Z asks show; asked Television lounge for nothing, because Player media/den's session does not hold the room awake"},
+			"Receiver den: status.session.inputAsk at 2026-10-04T12:15:25.001Z requests show; did not ask Television lounge to show the Display, because the Television has no awake session of Player media/den on this Display"},
 		{"another Player's session", other,
-			"Receiver den: status.session.inputAsk at 2026-10-04T12:15:25.001Z asks show; asked Television lounge for nothing, because Player media/den's session does not hold the room awake"},
+			"Receiver den: status.session.inputAsk at 2026-10-04T12:15:25.001Z requests show; did not ask Television lounge to show the Display, because the Television has no awake session of Player media/den on this Display"},
 		{"no session", nil,
-			"Receiver den: status.session.inputAsk at 2026-10-04T12:15:25.001Z asks show; asked Television lounge for nothing, because Player media/den's session does not hold the room awake"},
+			"Receiver den: status.session.inputAsk at 2026-10-04T12:15:25.001Z requests show; did not ask Television lounge to show the Display, because the Television has no awake session of Player media/den on this Display"},
 	}
 	t.Parallel()
 	for _, c := range cases {
@@ -64,7 +58,7 @@ func TestAShowThatWritesNothing(t *testing.T) {
 				log := &logBuffer{}
 				api.showing(waking(c.held), "acm-0001-receiver")
 
-				denRoom(api, log).show("status.session.inputAsk at 2026-10-04T12:15:25.001Z asks show")
+				denRoom(api, log).show("status.session.inputAsk at 2026-10-04T12:15:25.001Z requests show")
 
 				mustMatch(t, api.sessionWriteCount(), 0)
 				mustDeepEqual(t, linesWith(log, "Receiver den"), []string{c.line})

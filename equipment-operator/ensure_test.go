@@ -1,10 +1,10 @@
 package main
 
-// The any-press input ensure. A press on a controller whose mark names
-// this Player makes the media operator write an ensure in
-// status.session.inputAsk, and the operator sends the wire command only
-// when the room has drifted off the player's input. The harness is in
-// session_test.go.
+// Tests of the ensure request. When a person presses a button on a
+// controller that currently drives this Player, media-operator writes
+// status.session.inputAsk with the action ensure. The operator then
+// selects the Player's input only when the receiver is on and reports a
+// different input.
 
 import (
 	"context"
@@ -16,11 +16,12 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
-// ensureAsk is the ask the media operator writes for any press.
+// ensureAsk is the inputAsk that media-operator writes for a press.
 var ensureAsk = ReceiverInputAsk{Action: "ensure", At: askAt(1)}
 
-// driftedWhileListening is a harness whose session stands on GAME with
-// the room on, and a hand on the receiver that moved it to DVD.
+// driftedWhileListening returns a harness whose session has selected
+// GAME on a receiver that is on, after the receiver's own remote
+// changed its input to DVD.
 func driftedWhileListening(t *testing.T) (*sessionHarness, *session) {
 	t.Helper()
 	h, held := idleListening(t)
@@ -32,7 +33,8 @@ func driftedWhileListening(t *testing.T) (*sessionHarness, *session) {
 	return h, held
 }
 
-// A press after the room drifted off the player's input brings it back.
+// A press after the receiver's input drifted away from the Player's
+// selects the Player's input again.
 func TestAnEnsureSelectsTheInputAfterADrift(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -45,8 +47,8 @@ func TestAnEnsureSelectsTheInputAfterADrift(t *testing.T) {
 	})
 }
 
-// A press while the room already shows the player's input sends nothing
-// to the receiver: the check is what keeps every press off the wire.
+// A press while the receiver already shows the Player's input sends
+// the receiver nothing.
 func TestAnEnsureOnTheRightInputSendsNothing(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -61,8 +63,8 @@ func TestAnEnsureOnTheRightInputSendsNothing(t *testing.T) {
 	})
 }
 
-// A press on a dark room turns nothing on. The power key is the one that
-// wakes the equipment, so the input ensure never powers a room on.
+// A press while the receiver is in standby sends nothing, because only
+// the power key turns the receiver on.
 func TestAnEnsureInStandbySendsNothing(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -74,11 +76,11 @@ func TestAnEnsureInStandbySendsNothing(t *testing.T) {
 	})
 }
 
-// The ensure compares the room with what the receiver reported, so it
-// waits for the survey. A receiver that never answers gives it nothing
-// to compare, and the ensure ends with its session, having sent and
-// written nothing.
-func TestAnEnsureTheReceiverNeverAnsweredEndsWithTheSession(t *testing.T) {
+// The ensure waits for the first read of the receiver's state, because
+// it compares the receiver's input with the Player's. When the receiver
+// never answers, the ensure returns when the session ends, and it sends
+// no command and writes no log line.
+func TestAnEnsureEndsWithItsSessionWhenTheReceiverNeverAnswers(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		var group sync.WaitGroup
@@ -91,6 +93,6 @@ func TestAnEnsureTheReceiverNeverAnsweredEndsWithTheSession(t *testing.T) {
 		cancel()
 
 		mustMatch(t, awaitWork(&group, testTimeout), true)
-		mustMatch(t, len(linesWith(log, "asks ensure")), 0)
+		mustMatch(t, len(linesWith(log, "requests ensure")), 0)
 	})
 }

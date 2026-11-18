@@ -1,7 +1,5 @@
-// The WiiM control protocol: the command names, the HTTPS GET that
-// carries them, and the shape of each answer. wiim/AGENTS.md holds the
-// sources for every fact here and records which commands a live Amp
-// answers.
+// The WiiM control protocol. wiim/AGENTS.md lists the source of each
+// command and records which commands a live Amp answers.
 
 package wiim
 
@@ -12,14 +10,13 @@ import (
 	"strings"
 )
 
-// Port is the control port. The API is unauthenticated HTTPS, and the
-// certificate is self-signed, so a client skips verification.
+// Port is the port of the control API. The API needs no authentication
+// and uses HTTPS with a self-signed certificate, so the client does not
+// verify the certificate.
 const Port = "443"
 
-// apiPath is the one path every command goes through.
 const apiPath = "/httpapi.asp"
 
-// The commands this driver reads. Every one is a GET.
 const (
 	statusCommand       = "getStatusEx"
 	playerCommand       = "getPlayerStatus"
@@ -48,7 +45,7 @@ const (
 	buttonsCommand      = "Button_Enable_GET"
 )
 
-// The setters, each a GET with its argument in the command name.
+// A command that changes state is the prefix followed by the argument.
 const (
 	setVolumePrefix   = "setPlayerCmd:vol:"
 	setMutePrefix     = "setPlayerCmd:mute:"
@@ -56,24 +53,22 @@ const (
 	setShutdownPrefix = "setShutdown:"
 )
 
-// The outcomes a command can carry, the label values the root's
-// command counter already counts. They match the Denon driver's, so one
-// metric counts both protocols.
+// The outcomes of a command, as values of the label on the command
+// counter in the root package. They equal the Denon driver's values,
+// so one metric counts the commands of both drivers.
 const (
 	CommandOK      = "ok"
 	CommandFailed  = "failed"
 	CommandTimeout = "timeout"
 )
 
-// commandURL is the full URL for one command. The command carries its
-// arguments with colons and goes on the query string the way the
-// device's own documents spell it.
+// commandURL puts command into the query string without escaping,
+// with its arguments separated by colons, as the device's documents
+// spell it.
 func commandURL(address, command string) string {
 	return "https://" + hostPort(address) + apiPath + "?command=" + command
 }
 
-// hostPort fills in the control port when the declared address names
-// none.
 func hostPort(address string) string {
 	if _, _, err := net.SplitHostPort(address); err == nil {
 		return address
@@ -81,10 +76,10 @@ func hostPort(address string) string {
 	return net.JoinHostPort(address, Port)
 }
 
-// inputForMode maps the player's mode number onto the input name the amp
-// carries. A streaming mode is the network input, because the amp
-// reached it over the network. The community OpenAPI documents the
-// numbers.
+// inputForMode maps the mode number of getPlayerStatus to an input
+// name. Every mode not listed here maps to "wifi", because the other
+// modes are streaming services that the amp plays over the network.
+// cvdlinden/wiim-httpapi's openapi.json lists the numbers.
 func inputForMode(mode int) string {
 	switch mode {
 	case 0:
@@ -105,8 +100,8 @@ func inputForMode(mode int) string {
 	return "wifi"
 }
 
-// modeForInput is the reverse, for a SetInput. An input this driver does
-// not know is an error at the caller.
+// modeForInput returns the switchmode argument for input, and false
+// when the driver does not know the input.
 func modeForInput(input string) (string, bool) {
 	switch input {
 	case "line-in":
@@ -127,16 +122,13 @@ func modeForInput(input string) (string, bool) {
 	return "", false
 }
 
-// NormalizeUUID holds the twelve bytes of the LinkPlay UUID as upper
-// hex, so every spelling of one identity compares equal. mDNS and SSDP
-// spell a sixteen-byte UUID whose first twelve bytes are the identity,
-// and a person may write it with dashes or colons.
+// NormalizeUUID returns the first twelve bytes of a LinkPlay UUID as
+// upper-case hex, so every spelling of one device's identity compares
+// equal. getStatusEx returns the twelve bytes alone, mDNS and SSDP
+// return sixteen bytes that start with the same twelve, and a person
+// can write either with dashes or colons.
 func NormalizeUUID(value string) string { return normalizeUUID(value) }
 
-// normalizeUUID holds the twelve bytes of the LinkPlay UUID as upper
-// hex. getStatusEx spells it bare; mDNS and SSDP spell a sixteen-byte
-// UUID whose first twelve bytes are the same value, so the first
-// twenty-four hex characters are the identity.
 func normalizeUUID(value string) string {
 	cleaned := strings.ToUpper(value)
 	cleaned = strings.NewReplacer("-", "", ":", "", "UUID:", "").Replace(cleaned)
@@ -146,9 +138,8 @@ func normalizeUUID(value string) string {
 	return cleaned[:24]
 }
 
-// decodeHex turns the player's hex-encoded text into a string. The
-// player encodes title, artist, and album as hex bytes; a malformed
-// value reads as empty.
+// decodeHex decodes the hex that getPlayerStatus sends for the title,
+// artist, and album. A value that is not valid hex decodes to "".
 func decodeHex(value string) string {
 	if value == "" {
 		return ""
@@ -160,8 +151,6 @@ func decodeHex(value string) string {
 	return string(raw)
 }
 
-// atoi reads a number the device sent as a string, and reports whether
-// it was one.
 func atoi(value string) (int, bool) {
 	number, err := strconv.Atoi(strings.TrimSpace(value))
 	if err != nil {
@@ -170,7 +159,6 @@ func atoi(value string) (int, bool) {
 	return number, true
 }
 
-// atof reads a decimal the device sent as a string or a bare number.
 func atof(value string) (float64, bool) {
 	number, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
 	if err != nil {
@@ -179,19 +167,17 @@ func atof(value string) (float64, bool) {
 	return number, true
 }
 
-// flexString reads a value the device sends either as a JSON string or
-// as a bare number, and holds it as text. The same field is a string on
-// one firmware and a number on another, and a struct that insists on one
-// shape fails the whole answer over a single field.
+// flexString decodes from a JSON string or a JSON number. Some fields
+// are a string on one firmware and a number on another, and a field of
+// a fixed type would fail the decode of the whole response.
 type flexString string
 
-// UnmarshalJSON reads the value and strips the quotes a string carries.
 func (f *flexString) UnmarshalJSON(data []byte) error {
 	*f = flexString(strings.Trim(strings.TrimSpace(string(data)), `"`))
 	return nil
 }
 
-// statusEx is the device block getStatusEx answers.
+// statusEx is the response of getStatusEx, the device information.
 type statusEx struct {
 	Language             string     `json:"language"`
 	DeviceName           string     `json:"DeviceName"`
@@ -254,8 +240,8 @@ type statusEx struct {
 	BleRemoteState     string `json:"BleRemote_dev_state"`
 }
 
-// playerStatus is the playback block getPlayerStatus and
-// getPlayerStatusEx answer.
+// playerStatus is the response of getPlayerStatus and
+// getPlayerStatusEx, the playback state.
 type playerStatus struct {
 	Type          string `json:"type"`
 	Channel       string `json:"ch"`
@@ -275,7 +261,7 @@ type playerStatus struct {
 	Mute          string `json:"mute"`
 }
 
-// metaInfo is the now-playing block getMetaInfo answers.
+// metaInfo is the response of getMetaInfo, the track now playing.
 type metaInfo struct {
 	MetaData struct {
 		Album       string `json:"album"`
@@ -290,16 +276,17 @@ type metaInfo struct {
 	} `json:"metaData"`
 }
 
-// outputMode is the hardware output getNewAudioOutputHardwareMode
-// answers. The Amp returns a hardware value the published enum does not
-// list, so the number is kept as it came.
+// outputMode is the response of getNewAudioOutputHardwareMode. The Amp
+// returns hardware values that the published enum does not list, so
+// Hardware is the string as the device sent it.
 type outputMode struct {
 	Hardware  string `json:"hardware"`
 	Source    string `json:"source"`
 	AudioCast string `json:"audiocast"`
 }
 
-// outputModeListEntry is one entry getSoundCardModeSupportList answers.
+// outputModeListEntry is one entry of the response of
+// getSoundCardModeSupportList.
 type outputModeListEntry struct {
 	Index     int    `json:"index"`
 	Mode      string `json:"mode"`
@@ -312,8 +299,8 @@ type outputModeListEntry struct {
 	} `json:"soundCard"`
 }
 
-// activeOutput is the block getActiveSoundCardOutputMode answers: the
-// output the device is driving now.
+// activeOutput is the response of getActiveSoundCardOutputMode, the
+// output the device is using.
 type activeOutput struct {
 	Index      string `json:"index"`
 	Mode       string `json:"mode"`
@@ -323,7 +310,7 @@ type activeOutput struct {
 	AudioCast  string `json:"audioCast"`
 }
 
-// subwoofer is the sub block getSubLPF answers.
+// subwoofer is the response of getSubLPF, the subwoofer settings.
 type subwoofer struct {
 	DelayMainSub string  `json:"delay_main_sub"`
 	Plugged      int     `json:"plugged"`
@@ -337,8 +324,8 @@ type subwoofer struct {
 	SubDelay     float64 `json:"sub_delay"`
 }
 
-// perInputVolume is one entry getPlayModeVolumeValue answers: the level
-// the device stores for one input.
+// perInputVolume is one entry of the response of
+// getPlayModeVolumeValue, the volume the device stores for one input.
 type perInputVolume struct {
 	Mode   int    `json:"mode"`
 	Name   string `json:"name"`
@@ -347,7 +334,8 @@ type perInputVolume struct {
 	Active int    `json:"active"`
 }
 
-// powerModeTime is the interval block getPowerModeTime answers.
+// powerModeTime is the response of getPowerModeTime, the intervals
+// before each power mode.
 type powerModeTime struct {
 	IdleInterval       string `json:"idleInterval"`
 	StandbyInterval    string `json:"standbyInterval"`
@@ -356,7 +344,7 @@ type powerModeTime struct {
 	SemiActiveInterval string `json:"semiactiveInterval"`
 }
 
-// staticIPInfo is the block getStaticIpInfo answers.
+// staticIPInfo is the response of getStaticIpInfo.
 type staticIPInfo struct {
 	WlanStaticIP       string `json:"wlanStaticIp"`
 	WlanGateWay        string `json:"wlanGateWay"`
@@ -368,7 +356,7 @@ type staticIPInfo struct {
 	EthStaticIPEnable  int    `json:"ethStaticIpEnable"`
 }
 
-// presetInfo is the block getPresetInfo answers.
+// presetInfo is the response of getPresetInfo, the preset list.
 type presetInfo struct {
 	PresetNum  int `json:"preset_num"`
 	PresetList []struct {
@@ -380,7 +368,7 @@ type presetInfo struct {
 	} `json:"preset_list"`
 }
 
-// alarmClock is one slot getAlarmClock:n answers.
+// alarmClock is the response of getAlarmClock:n, one alarm.
 type alarmClock struct {
 	Enable    string `json:"enable"`
 	Trigger   string `json:"trigger"`
@@ -392,7 +380,8 @@ type alarmClock struct {
 	Path      string `json:"path"`
 }
 
-// btHistory is the block getbthistory answers.
+// btHistory is the response of getbthistory, the Bluetooth device
+// history.
 type btHistory struct {
 	Num        int `json:"num"`
 	ScanStatus int `json:"scan_status"`
@@ -404,33 +393,33 @@ type btHistory struct {
 	} `json:"list"`
 }
 
-// btPairStatus is the block getbtpairstatus answers.
+// btPairStatus is the response of getbtpairstatus.
 type btPairStatus struct {
 	Result int `json:"result"`
 }
 
-// stepAnswer is the block the volume-step reads answer.
+// stepAnswer is the response of get_remote_volume_step and
+// get_button_volume_step.
 type stepAnswer struct {
 	Status           string `json:"status"`
 	RemoteVolumeStep int    `json:"remote_volume_step"`
 	ButtonVolumeStep int    `json:"button_volume_step"`
 }
 
-// eqAnswer is the block EQGetStat answers.
+// eqAnswer is the response of EQGetStat.
 type eqAnswer struct {
 	EQStat string `json:"EQStat"`
 	Status string `json:"status"`
 }
 
-// IsWiiM answers whether a name the device reports, a getStatusEx
-// project or the modelName of its UPnP description, names a WiiM. Other
-// brands build on LinkPlay's platform, advertise the same mDNS service,
-// and answer the same commands, so the API alone does not say whose
-// device it is. The WiiM names seen begin with "WiiM", such as the
-// project WiiM_Amp_4layer and the model WiiM Amp, and another brand's
-// begin with its own name, such as the project ARYLIC_A50TE. The
-// comparison ignores letter case. The manufacturer is no guide, because
-// LinkPlay makes devices that other brands sell.
+// IsWiiM reports whether name, a getStatusEx project or the modelName
+// of the UPnP description, begins with "WiiM" in any letter case. Other
+// brands build on LinkPlay's platform and answer the same commands, so
+// only the name tells a WiiM apart. A WiiM's project is like
+// WiiM_Amp_4layer and its model like WiiM Amp. Another brand's names
+// are not, such as the project ARYLIC_A50TE and the model A50. The
+// manufacturer does not help, because LinkPlay makes devices that other
+// brands sell.
 func IsWiiM(name string) bool {
 	return len(name) >= 4 && strings.EqualFold(name[:4], "wiim")
 }

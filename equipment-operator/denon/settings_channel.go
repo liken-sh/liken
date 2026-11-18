@@ -1,11 +1,9 @@
 package denon
 
-// Channel volumes are a map of trims keyed by channel name.
-
 import "fmt"
 
-// channelCommands answers the wire command for every channel the
-// settings declare.
+// channelCommands returns the wire command for each channel volume in
+// the settings, in map iteration order, which is random.
 func channelCommands(s *Settings) ([]string, error) {
 	if len(s.ChannelVolumes) == 0 {
 		return nil, nil
@@ -14,7 +12,7 @@ func channelCommands(s *Settings) ([]string, error) {
 	for channel, value := range s.ChannelVolumes {
 		command, err := ChannelVolumeCommand(channel, value)
 		if err != nil {
-			return nil, fmt.Errorf("channel %q: %w", channel, err)
+			return nil, fmt.Errorf("building the volume command of channel %q: %w", channel, err)
 		}
 		commands = append(commands, command)
 	}

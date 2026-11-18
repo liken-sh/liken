@@ -1,7 +1,7 @@
 package main
 
-// The node workload on vivid sends the TV nothing after its join scan
-// while nothing happens on the bus.
+// On the kernel's vivid virtual CEC device, no message reaches the TV
+// after the node workload's join scan while nothing changes.
 
 import (
 	"context"
@@ -13,9 +13,8 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/cec"
 )
 
-// playCountingTV plays the TV like playTV, and answers a count of the
-// messages from other devices that reach the TV's handle: the directed
-// ones to the TV and the broadcasts.
+// playCountingTV plays the TV like playTV, and returns a function that
+// counts the messages the TV has received, broadcasts included.
 func playCountingTV(t *testing.T, tv *cec.Device) func() int {
 	t.Helper()
 	claimTV(t, tv)
@@ -46,8 +45,8 @@ func TestVividAnIdleBusHearsNothingAfterTheJoinScan(t *testing.T) {
 	if os.Getenv(vividTVVariable) != "" {
 		t.Skipf("%s names another player for the TV, and this test plays the TV itself", vividTVVariable)
 	}
-	// The kernel's vivid driver runs on the real clock, so the test
-	// shortens the retry, and sees many of them in two seconds.
+	// The vivid driver runs on the real clock, so a short retry interval
+	// lets many retries happen during the two seconds of nudges below.
 	retry := cecAPIRetry
 	cecAPIRetry = 5 * time.Millisecond
 	t.Cleanup(func() { cecAPIRetry = retry })

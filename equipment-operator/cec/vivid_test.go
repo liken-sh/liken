@@ -1,11 +1,10 @@
 package cec_test
 
-// These tests run against the kernel's own CEC core through the vivid
-// driver, which emulates a TV with HDMI inputs and sources on HDMI
-// outputs, each with a real kernel CEC adapter on one shared bus. They
-// skip when no vivid adapter is open to this user, which is the case
-// in CI. AGENTS.md in this directory gives the commands that set vivid
-// up.
+// These tests run against the kernel's CEC core through the vivid
+// driver, which emulates a TV with HDMI inputs and sources with HDMI
+// outputs, each with a kernel CEC adapter, on one bus. The tests skip
+// when this user cannot open a vivid adapter, as in CI. AGENTS.md in
+// this directory has the commands that set vivid up.
 
 import (
 	"context"
@@ -21,9 +20,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// vividBus is the vivid adapters this user can open: the TV's adapter
-// on the capture side, and every output adapter that has a physical
-// address, which means vivid connected it to one of the TV's inputs.
+// vividBus has the vivid adapters this user can open: the TV's adapter
+// on the capture side, and each output adapter that vivid connected to
+// one of the TV's inputs, which is each one with a physical address.
 type vividBus struct {
 	tv      *cec.Device
 	outputs []*cec.Device
@@ -65,19 +64,19 @@ func openVivid(t *testing.T) vividBus {
 	return found
 }
 
-// follow claims an address for a device and answers what a follower
-// owes, until the test ends.
+// follow claims a logical address for device and, until the test ends,
+// sends the reply that cec.Answer returns for each message.
 func follow(t *testing.T, device *cec.Device, claim cec.Claim, power cec.PowerStatus) cec.LogicalAddress {
 	t.Helper()
 	mustSucceed(t, device.Follow())
-	// A run that was interrupted leaves its claim in the kernel, which
-	// refuses a new claim on a configured adapter with EBUSY.
+	// An interrupted earlier run leaves its claim in the kernel, and the
+	// kernel refuses a new claim on a configured adapter with EBUSY.
 	mustSucceed(t, device.Release())
 	mustSucceed(t, device.Claim(claim))
 	held, err := device.Addresses()
 	mustSucceed(t, err)
 	if len(held.Logical) != 1 {
-		t.Fatalf("%s claimed %+v", claim.OSDName, held)
+		t.Fatalf("%s claimed addresses %+v, want one logical address", claim.OSDName, held)
 	}
 	own := held.Logical[0]
 	ctx, cancel := context.WithCancel(context.Background())
@@ -110,20 +109,21 @@ func TestVividAScanFindsTheTVAndAnotherSource(t *testing.T) {
 	peers := directory.Peers()
 	t.Logf("scan acked %d addresses: %+v", report.Acked, peers)
 	if len(peers) != 2 {
-		t.Fatalf("peers = %+v, want the TV and the player", peers)
+		t.Fatalf("the scan found peers %+v, want the TV and the player", peers)
 	}
 	tv, player := peers[0], peers[1]
 	if tv.Logical != 0 || tv.Physical != 0x0000 || tv.OSDName != "TV" || tv.Type != cec.TypeTV ||
 		tv.Version != cec.Version14 || tv.Power != cec.PowerStandby {
-		t.Errorf("tv = %+v", tv)
+		t.Errorf("the TV peer is %+v, want logical 0, physical 0x0000, name TV, type TV, version 1.4, power standby", tv)
 	}
 	if player.Physical != playerAddress || player.OSDName != "player" || player.Type != cec.TypePlayback || player.Power != cec.PowerOn {
-		t.Errorf("player = %+v", player)
+		t.Errorf("the player peer is %+v, want physical %#x, name player, type playback, power on", player, playerAddress)
 	}
 }
 
-// The kernel keeps the address of an adapter on a video port, which is
-// the behavior cectest copies for an adapter with no CapPhysAddr.
+// The kernel refuses to set the physical address of an adapter on a
+// video output. cectest refuses it the same way for an adapter without
+// CapPhysAddr.
 func TestVividAnOutputRefusesAnAddress(t *testing.T) {
 	bus := openVivid(t)
 	mustSucceed(t, bus.outputs[0].Initiate())
@@ -131,14 +131,15 @@ func TestVividAnOutputRefusesAnAddress(t *testing.T) {
 	err := bus.outputs[0].SetPhysicalAddress(0x1300)
 
 	if !errors.Is(err, unix.ENOTTY) {
-		t.Errorf("got %v, want ENOTTY", err)
+		t.Errorf("SetPhysicalAddress returned %v, want ENOTTY", err)
 	}
 }
 
-// A monitor hears a broadcast between two other devices. The kernel
-// allows monitor-all only with CAP_NET_ADMIN, so an unprivileged run
-// proves the refusal and a privileged run proves the monitor.
-func TestVividAMonitorHearsTheBus(t *testing.T) {
+// A monitor receives a broadcast sent between two other devices. The
+// kernel allows monitor-all mode only with CAP_NET_ADMIN, so an
+// unprivileged run tests the refusal and a privileged run tests the
+// monitor.
+func TestVividAMonitorReceivesABroadcastBetweenOtherDevices(t *testing.T) {
 	bus := openVivid(t)
 	follow(t, bus.tv, cec.Claim{Type: cec.TypeTV, OSDName: "TV"}, cec.PowerStandby)
 	player := follow(t, bus.outputs[1], cec.Claim{OSDName: "player"}, cec.PowerOn)
@@ -149,7 +150,7 @@ func TestVividAMonitorHearsTheBus(t *testing.T) {
 		if errors.Is(err, unix.EPERM) {
 			t.Skipf("monitor-all needs CAP_NET_ADMIN: %v", err)
 		}
-		t.Fatal(err)
+		t.Fatalf("turning on monitor-all mode: %v", err)
 	}
 	playerAddress, err := bus.outputs[1].PhysicalAddress()
 	mustSucceed(t, err)
@@ -160,7 +161,7 @@ func TestVividAMonitorHearsTheBus(t *testing.T) {
 		_, _ = bus.outputs[1].Transmit(cec.ActiveSource(player, playerAddress), 0, 0)
 	}()
 
-	heard := func() bool {
+	found := func() bool {
 		for _, peer := range directory.Peers() {
 			if peer.Logical == player && peer.Physical == playerAddress {
 				return true
@@ -170,20 +171,20 @@ func TestVividAMonitorHearsTheBus(t *testing.T) {
 	}
 
 	_ = cec.Read(ctx, listener, func(message cec.Message) {
-		if directory.Observe(message) && heard() {
+		if directory.Observe(message) && found() {
 			cancel()
 		}
 	}, func(cec.Event) {})
 
 	t.Logf("the monitor heard %+v", directory.Peers())
-	if !heard() {
+	if !found() {
 		t.Errorf("the monitor did not hear the player's Active Source")
 	}
 }
 
 // The volume keys reach an audio system through the kernel's CEC core
-// as a press and a release. The second output plays the audio system.
-func TestVividTheAudioSystemHearsTheVolumeKeys(t *testing.T) {
+// as a press and a release. The second output acts as the audio system.
+func TestVividTheAudioSystemReceivesTheVolumeKeys(t *testing.T) {
 	bus := openVivid(t)
 	follow(t, bus.tv, cec.Claim{Type: cec.TypeTV, OSDName: "TV"}, cec.PowerOn)
 	audio := bus.outputs[1]
@@ -193,35 +194,34 @@ func TestVividTheAudioSystemHearsTheVolumeKeys(t *testing.T) {
 	own := follow(t, bus.outputs[0], cec.Claim{OSDName: "node-1", Passthrough: true}, cec.PowerOn)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	var heard []string
+	var received []string
 	go func() {
 		_, _ = cec.PressVolumeKey(bus.outputs[0], own, cec.KeyVolumeDown)
 	}()
 
 	_ = cec.Read(ctx, audio, func(message cec.Message) {
 		if message.From == own {
-			heard = append(heard, fmt.Sprintf("% x", message.Body))
+			received = append(received, fmt.Sprintf("% x", message.Body))
 		}
-		if len(heard) == 2 {
+		if len(received) == 2 {
 			cancel()
 		}
 	}, func(cec.Event) {})
 
-	if strings.Join(heard, ", ") != "44 42, 45" {
-		t.Errorf("the audio system heard %v, want a press of Volume Down and a release", heard)
+	if strings.Join(received, ", ") != "44 42, 45" {
+		t.Errorf("the audio system received %v, want a press of Volume Down and a release", received)
 	}
 }
 
-// lockVivid holds a lock file for the length of one test. The vivid
-// tests of this package and of the other package that has them share
-// one emulated bus, and go test runs the two packages at once, so a
-// test waits here until the other package's test releases the bus.
+// lockVivid holds a file lock for the length of one test, because the
+// vivid tests of this package and of package main share one emulated
+// bus, and go test runs the two packages at the same time.
 func lockVivid(t *testing.T) {
 	t.Helper()
-	// The lock opens read-only, and the file is created only when it is
-	// missing, because the kernel refuses O_CREAT on another user's file
-	// in a sticky directory such as /tmp, and a privileged run of the
-	// monitor test shares the file with an ordinary one.
+	// Create the file only when it is missing, because the kernel refuses
+	// O_CREAT on another user's file in a sticky directory such as /tmp,
+	// and a privileged run of the monitor test shares the file with an
+	// ordinary run.
 	path := filepath.Join(os.TempDir(), "equipment-operator-vivid.lock")
 	file, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {

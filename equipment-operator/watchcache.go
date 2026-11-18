@@ -1,9 +1,5 @@
 package main
 
-// The store of each informer a pass reads, while the informer runs.
-// objectcache.go holds how a pass reads a store and when it reads the
-// API server instead.
-
 import (
 	"sync"
 
@@ -12,23 +8,25 @@ import (
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
-// watchStore holds the store of one running informer. The zero value
-// and a nil pointer hold nothing, so a caller with no watch, such as a
-// test that runs one pass, reads the API server.
+// watchStore records the informer.View of the running informer, so a
+// pass can read the informer's store in place of the API server.
+// objectcache.go explains when a pass reads the store and when it reads
+// the API server. The zero value and a nil pointer have no view, so a
+// caller with no watch, such as a test that runs one pass, reads the
+// API server.
 type watchStore struct {
 	mu   sync.Mutex
 	held informer.View
-	// changes is closed at the next change the informer takes, and
-	// is nil while nothing waits for one.
+	// changes closes at the next change to the store. It is nil while
+	// nobody waits.
 	changes chan struct{}
 }
 
-// hold records the store of an informer that runs, and release forgets
-// it when the informer stops, so no pass reads a store that no watch
-// keeps current.
-//
-// selected says the informer's watch has a selector, so its store holds
-// part of the collection and is not whole (informer.View.Whole).
+// hold records the view of a running informer, and release clears it
+// when the informer stops, so no pass reads a store that nothing keeps
+// current. selected is true when the watch has a field or label
+// selector. The store then has only part of the collection, so the view
+// is not Whole.
 func (w *watchStore) hold(view informer.View, selected bool) {
 	if w == nil {
 		return
@@ -43,8 +41,6 @@ func (w *watchStore) release() {
 	w.hold(informer.View{}, false)
 }
 
-// view answers the store while its informer runs, and the zero view,
-// which holds nothing, when no informer runs.
 func (w *watchStore) view() informer.View {
 	if w == nil {
 		return informer.View{}
@@ -54,11 +50,10 @@ func (w *watchStore) view() informer.View {
 	return w.held
 }
 
-// changed answers a channel that closes at the next change the
-// informer takes into the store. A caller that waits for a state takes
-// the channel before it reads the store, so a change that lands during
-// the read closes the channel it then waits on. A nil pointer answers a
-// nil channel, which never closes.
+// changed returns a channel that closes at the next change to the
+// store. A caller that waits for some state gets the channel before it
+// reads the store, so a change during the read still closes the
+// channel. A nil watchStore returns a nil channel, which never closes.
 func (w *watchStore) changed() <-chan struct{} {
 	if w == nil {
 		return nil
@@ -71,9 +66,9 @@ func (w *watchStore) changed() <-chan struct{} {
 	return w.changes
 }
 
-// announce closes the channel of every caller that waits for a change.
-// The informer calls it after the store takes the change, so a waiter
-// that reads the store then finds the change.
+// announce wakes every caller that waits on changed. client-go calls the
+// event handlers after it updates the store, so a waiter that then
+// reads the store sees the change.
 func (w *watchStore) announce() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -83,8 +78,6 @@ func (w *watchStore) announce() {
 	}
 }
 
-// announcer is the handler that announces each change the informer
-// takes.
 func (w *watchStore) announcer() cache.ResourceEventHandler {
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(any) { w.announce() },

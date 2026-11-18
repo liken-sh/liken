@@ -1,11 +1,11 @@
 package main
 
 // The Deployment's pass over Televisions. It runs at the end of each
-// CECBus pass, because a Television's status comes from the device
-// list and the conditions that pass derives. It creates the
-// Televisions discovery owns, deletes the ones a person's Television
-// replaced, and writes each Television's derived status when it
-// changed.
+// CECBus pass, because a Television's status is derived from the device
+// list and conditions that the CECBus pass computes. It creates a
+// Television for each bus in Control mode whose TV no Television names,
+// deletes a discovered Television when another Television names the
+// same bus, and writes each Television's status when it changed.
 
 import (
 	"fmt"
@@ -14,20 +14,14 @@ import (
 	"slices"
 )
 
-// passTelevisions derives every Television from the buses as the CECBus
-// pass derived them, and live is what the node workload's pods show. A
-// read that fails skips the pass, because a status derived from a
-// partial read would remove facts that are still true, and the pass
-// after cecBusRetry reads again.
-//
-// This pass creates, deletes, and writes the status of Televisions, and
-// compares each status with the one stored. The store can hold the copy
-// from before the pass's last write until the write's own event
-// arrives, and can lack a Television the pass created, so the read
-// replaces such a copy with the API server's and reads the created
-// Television, and a pass does not create a Television again or write a
-// status again (objectcache.go). This loop writes no Display, and of
-// a Receiver it writes status.cec alone (receiver_cec.go).
+// passTelevisions runs the Television pass on the buses that the CECBus
+// pass derived. live reports which of the node workload's pods are
+// running. When a read fails, the pass stops and runs again after
+// cecBusRetry, because a status derived from a partial read would
+// delete facts that are still true. The reads replace a cached copy
+// that is older than this process's last write with the API server's
+// (objectcache.go), so the pass does not create a Television or write
+// a status twice.
 func (c *cecBusController) passTelevisions(buses []CECBus, live podLiveness) {
 	televisions, err := readTelevisions(c.client, c.televisions)
 	if err != nil {
@@ -92,11 +86,8 @@ func (c *cecBusController) passTelevisions(buses []CECBus, live podLiveness) {
 	c.passReceiverCEC(receivers.Items, receiverBuses(televisions.Items, derivedOf), byName)
 }
 
-// createDiscoveredTelevision creates the Television discovery makes for
-// a bus's TV, and logs the creation. A create that lands on a name
-// another writer just took is the API server's conflict, not an error:
-// CreateDiscoveredTelevision reports it as no creation, so this logs
-// nothing for an object it did not make.
+// createDiscoveredTelevision creates the discovered Television for bus,
+// and logs it and posts an Event only when this call created it.
 func (c *cecBusController) createDiscoveredTelevision(bus string, found *CECBus) {
 	created, err := CreateDiscoveredTelevision(c.client, bus)
 	if err != nil {
@@ -107,25 +98,25 @@ func (c *cecBusController) createDiscoveredTelevision(bus string, found *CECBus)
 	if !created {
 		return
 	}
-	message := fmt.Sprintf("CECBus %s reports a TV at %s named %q, and no Television names the bus; created Television %s",
+	message := fmt.Sprintf("CECBus %s reports a TV at %s named %q, and no Television names the bus, so the operator created Television %s",
 		bus, tvOf(found).PhysicalAddress, tvOf(found).OSDName, discoveredTelevisionName(bus))
 	fmt.Fprintln(c.log, message)
 	c.recorder.Normal(reference("CECBus", found.Metadata), reasonTelevisionCreated, message)
 }
 
-// replacedBy says which Television took over the bus of a discovered
-// Television that discovery deletes. discoverTelevisions deletes one
-// only from this list and only when another Television is in charge of
-// its bus, so both lookups find what they look for.
+// replacedBy names the Television that replaces the discovered
+// Television name, for the log line and the Event. Neither lookup can
+// miss, because discoverTelevisions returns a name to delete only when
+// another Television in this list is in charge of its bus.
 func replacedBy(televisions []Television, name string) string {
 	index := slices.IndexFunc(televisions, func(television Television) bool { return television.Metadata.Name == name })
 	bus := televisions[index].bus()
 	return fmt.Sprintf("Television %s names CECBus %s", televisionFor(televisions, bus).Metadata.Name, bus)
 }
 
-// televisionUnchanged answers whether the status already holds what
-// the Deployment derived. Only the Deployment's own fields count: the
-// node workloads' fields and conditions are not its to write.
+// televisionUnchanged reports whether the stored status equals the
+// derived one. It compares only the fields and conditions that the
+// Deployment writes, because the node workloads write the others.
 func televisionUnchanged(status TelevisionStatus, derived televisionDerived) bool {
 	return reflect.DeepEqual(status.CEC, derived.cec) &&
 		status.Power == derived.power &&

@@ -1,12 +1,10 @@
 package main
 
-// Discovery judges each LinkPlay device by its UPnP description before
-// it creates a Receiver. Other brands build on the LinkPlay platform
-// and advertise the same mDNS service, and the mDNS answer names no
-// model. The description does, and every LinkPlay device serves it
-// over plain HTTP. An Arylic amplifier serves its description while it
-// refuses the HTTPS control API to the operator, so the driver's
-// getStatusEx check alone never judges it.
+// Discovery reads the UPnP description of each LinkPlay device before it
+// creates a Receiver, because other brands built on LinkPlay advertise
+// the same mDNS service as a WiiM, and only the description gives the
+// model. The driver's getStatusEx check cannot replace it: an Arylic
+// amplifier refuses the operator's requests to its HTTPS control API.
 
 import (
 	"context"
@@ -16,14 +14,11 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/wiim"
 )
 
-// judge reads the description of each device in one search that has no
-// verdict yet, with one GET each. A description that names a model is
-// the verdict for the operator's lifetime, and a device that is not a
-// WiiM gets one log line. A description that cannot be read is not a
-// verdict: the device gets a Receiver as it would with no description,
-// the getStatusEx check judges it, and the next search that finds it
-// reads the description again. The failure logs once until a read
-// succeeds.
+// judge reads and caches the description of each found device that has
+// none cached. When a read fails, the device is treated as if it had no
+// description, so the getStatusEx check alone determines whether it is a
+// WiiM, and the next search
+// reads it again. Each failure streak is logged once.
 func (d *discovery) judge(ctx context.Context, found []wiim.Device) {
 	for _, device := range found {
 		if device.Description == "" {
@@ -35,7 +30,7 @@ func (d *discovery) judge(ctx context.Context, found []wiim.Device) {
 		description, err := upnp.FetchVia(ctx, d.dial, device.Description)
 		if err != nil {
 			if d.markUnread(device.UUID) {
-				fmt.Fprintf(d.log, "discovery could not read the UPnP description of the LinkPlay device %s at %s, so its getStatusEx project decides whether it is a WiiM: %v\n",
+				fmt.Fprintf(d.log, "discovery read no UPnP description from the LinkPlay device %s at %s, so its getStatusEx project decides whether it is a WiiM: %v\n",
 					device.UUID, device.Address, err)
 			}
 			continue
@@ -51,8 +46,6 @@ func (d *discovery) judge(ctx context.Context, found []wiim.Device) {
 	}
 }
 
-// described answers the description discovery read for one identity,
-// and whether it read one.
 func (d *discovery) described(uuid string) (upnp.Description, bool) {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
@@ -60,9 +53,8 @@ func (d *discovery) described(uuid string) (upnp.Description, bool) {
 	return description, held
 }
 
-// markUnread records a failed read of one device's description, and
-// answers whether it is the first failure since the last read that
-// succeeded.
+// markUnread records a failed read, and reports whether it is the
+// first failure since the last successful read.
 func (d *discovery) markUnread(uuid string) bool {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
@@ -71,11 +63,10 @@ func (d *discovery) markUnread(uuid string) bool {
 	return first
 }
 
-// notWiiM answers why a device is not a WiiM, and an empty string for a
-// WiiM or a device with no verdict. Either check is enough: the model
-// in the description, which discovery reads before it creates a
-// Receiver, or the project in getStatusEx, which the driver reads on
-// every poll and which also covers a Receiver that a person declared.
+// notWiiM returns the reason a device is not a WiiM, or "" when neither
+// the description nor getStatusEx has shown that. The getStatusEx
+// project is needed too, because the driver reads it on every poll, so
+// it also covers a Receiver that a person declared.
 func (d *discovery) notWiiM(uuid string) string {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()

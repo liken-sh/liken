@@ -16,8 +16,8 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/wiim"
 )
 
-// scannedBus is a bus in Control whose adapter on node-1 reported a
-// scan just now that found the given devices.
+// scannedBus is a bus in Control mode whose adapter on node-1 has just
+// reported a scan that found devices.
 func scannedBus(name string, devices ...CECDevice) CECBus {
 	bus := controlBus(name, CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"})
 	entry := scannedEntry("node-1", 4, devices...)
@@ -26,7 +26,6 @@ func scannedBus(name string, devices ...CECDevice) CECBus {
 	return bus
 }
 
-// passes runs the Deployment's pass as many times as asked.
 func passes(t *testing.T, api *cecAPI, count int) {
 	t.Helper()
 	controller := newCECBusController(api.client, testNamespace)
@@ -45,7 +44,7 @@ func TestTheDeploymentDiscoversTheTVOfABusInControl(t *testing.T) {
 
 		television, held := api.television("den")
 		if !held {
-			t.Fatal("no Television for the bus's TV")
+			t.Fatal("no Television named den exists, want one for the TV on the bus")
 		}
 		mustMatch(t, television.Metadata.Labels[discoveredLabel], "cec")
 		mustDeepEqual(t, television.Spec, TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}})
@@ -54,8 +53,8 @@ func TestTheDeploymentDiscoversTheTVOfABusInControl(t *testing.T) {
 	})
 }
 
-// Discovery creates with a create, not an apply, so an object that
-// already has the bus's name is left as it is.
+// Discovery sends a create, not an apply, so a Television that already
+// has the bus's name is left unchanged.
 func TestDiscoveryCreatesAndLeavesAnExistingName(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -68,7 +67,7 @@ func TestDiscoveryCreatesAndLeavesAnExistingName(t *testing.T) {
 		created, err := CreateDiscoveredTelevision(api.client, "den")
 		mustSucceed(t, err)
 		if created {
-			t.Error("the name already existed, so this call created nothing")
+			t.Error("CreateDiscoveredTelevision created a Television named den, want none because one already has that name")
 		}
 		mustDeepEqual(t, api.created, []string{"den"})
 	})
@@ -89,7 +88,7 @@ func TestAPersonAdoptsTheDiscoveredTelevisionUnderItsName(t *testing.T) {
 
 		television, held := api.television("den")
 		if !held || television.Spec.Power != TelevisionOn {
-			t.Fatalf("the adopted Television is %+v (held %v)", television, held)
+			t.Fatalf("the Television den is %+v (exists %v), want it to exist with spec.power On", television, held)
 		}
 		mustMatch(t, television.Metadata.Labels[discoveredLabel], "cec")
 		mustDeepEqual(t, api.deletedTelevisionNames(), []string(nil))
@@ -108,7 +107,7 @@ func TestAPersonsTelevisionTakesOverFromTheDiscoveredOne(t *testing.T) {
 		passes(t, api, 1)
 
 		if !slices.Contains(api.deletedTelevisionNames(), "den") {
-			t.Error("the discovered Television is still there")
+			t.Error("the discovered Television den was not deleted, want it deleted once lounge names the bus")
 		}
 		television, _ := api.television("lounge")
 		mustMatch(t, television.Status.Power, "Standby")
@@ -134,8 +133,8 @@ func TestTheDeploymentWritesWhatTheBusFound(t *testing.T) {
 	})
 }
 
-// A pass that finds nothing changed writes nothing, so a tick of the
-// Deployment's clock costs the API server no write.
+// A pass that finds no change writes nothing, so a pass that an
+// unrelated event woke costs the API server no write.
 func TestAnUnchangedTelevisionIsNotWrittenAgain(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -152,8 +151,9 @@ func TestAnUnchangedTelevisionIsNotWrittenAgain(t *testing.T) {
 	})
 }
 
-// A TV that stops answering loses its power, because a power the TV
-// did not state now would be a guess.
+// When the scan has no power for the TV, the Television's status.power
+// is empty, because the last power the TV reported may no longer be
+// true.
 func TestATVThatStopsAnsweringLosesItsPower(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -174,7 +174,7 @@ func TestATVThatStopsAnsweringLosesItsPower(t *testing.T) {
 }
 
 // The Deployment's loop wakes on a new Television and writes its
-// status with no wait for the clock.
+// status without waiting for a timer.
 func TestTheDeploymentLoopFollowsTheTelevisions(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -195,8 +195,6 @@ func TestTheDeploymentLoopFollowsTheTelevisions(t *testing.T) {
 	})
 }
 
-// runDeploymentLoop runs the Deployment's CECBus loop until the test
-// ends.
 func runDeploymentLoop(t *testing.T, api *cecAPI) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -208,10 +206,9 @@ func runDeploymentLoop(t *testing.T, api *cecAPI) {
 	t.Cleanup(func() { cancel(); <-done })
 }
 
-// A Display that moves to another physical address reaches its
-// Television at once, because the loop watches the Displays. The move
-// wakes no other watch, so the test fails if the loop waits for its
-// clock.
+// A Display's new physical address reaches its Television's
+// status.displays because the loop watches the Displays. Nothing else
+// wakes the loop, so the test fails without that watch.
 func TestTheDeploymentLoopFollowsADisplaysAddress(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -231,8 +228,7 @@ func TestTheDeploymentLoopFollowsADisplaysAddress(t *testing.T) {
 }
 
 // runServe runs the whole Deployment against the fake until the test
-// ends, with no search for devices. Its Receiver loop and its CECBus
-// loop share one Receiver watch.
+// ends, with a WiiM discovery that finds nothing.
 func runServe(t *testing.T, api *cecAPI) {
 	t.Helper()
 	restore := discover
@@ -250,11 +246,12 @@ func runServe(t *testing.T, api *cecAPI) {
 	})
 }
 
-// A Receiver whose spec starts to name a Display's machine appears as
-// the Display's path at once, because the loop watches the Receivers'
-// specs: through a watch of its own when it runs alone, and through
-// the Receiver loop's watch in the Deployment. The edit wakes no other
-// watch, so the test fails if the loop waits for its clock.
+// When a Receiver's spec changes to name a Display's machine, the
+// Display's via in the Television's status names the Receiver, because
+// the loop watches the Receivers' specs: with a watch of its own when
+// it runs alone, and through the Receiver loop's watch in the
+// Deployment. Nothing else wakes the loop, so the test fails without
+// that watch.
 func TestTheDeploymentLoopFollowsAReceiversSpec(t *testing.T) {
 	cases := []struct {
 		name string
@@ -385,15 +382,13 @@ func TestDeleteTelevisionSettlesOnGoneAndReportsARefusal(t *testing.T) {
 				err := DeleteTelevision(testAPIClient(t, api.handler()), "den")
 
 				if (err != nil) != c.wantErr {
-					t.Errorf("got %v, want an error: %v", err, c.wantErr)
+					t.Errorf("DeleteTelevision returned %v, want an error: %v", err, c.wantErr)
 				}
 			})
 		})
 	}
 }
 
-// loggedPasses runs the Deployment's pass as many times as asked, with
-// its log in a buffer.
 func loggedPasses(t *testing.T, api *cecAPI, count int) *logBuffer {
 	t.Helper()
 	controller := newCECBusController(api.client, testNamespace)
@@ -418,7 +413,7 @@ func TestDiscoveryLogsEachTelevisionItCreatesOrDeletes(t *testing.T) {
 		deleted := loggedPasses(t, api, 3)
 
 		mustDeepEqual(t, created.lines(), []string{
-			`CECBus den reports a TV at 0.0.0.0 named "TV", and no Television names the bus; created Television den`,
+			`CECBus den reports a TV at 0.0.0.0 named "TV", and no Television names the bus, so the operator created Television den`,
 		})
 		mustDeepEqual(t, deleted.lines(), []string{
 			"deleted the discovered Television den: Television lounge names CECBus den",
@@ -426,9 +421,8 @@ func TestDiscoveryLogsEachTelevisionItCreatesOrDeletes(t *testing.T) {
 	})
 }
 
-// createDiscoveredTelevision logs a creation only when its create
-// reached the API server as a 201. A 409 means a name another writer
-// already took, which this call did not create, so it gets no line.
+// createDiscoveredTelevision logs nothing when the name already exists,
+// because the API server's 409 means that this call created nothing.
 func TestCreateDiscoveredTelevisionLogsOnlyWhatItCreated(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -438,7 +432,7 @@ func TestCreateDiscoveredTelevisionLogsOnlyWhatItCreated(t *testing.T) {
 		{
 			"a create that lands",
 			false,
-			[]string{`CECBus den reports a TV at 0.0.0.0 named "TV", and no Television names the bus; created Television den`},
+			[]string{`CECBus den reports a TV at 0.0.0.0 named "TV", and no Television names the bus, so the operator created Television den`},
 		},
 		{
 			"a create that finds the name already taken",

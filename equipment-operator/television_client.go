@@ -1,21 +1,24 @@
 package main
 
-// The API calls for Television. Each write is a server-side apply
-// that states only the fields its writer owns. Four writers share one
-// Television: the person who writes the spec; the Deployment, which
-// writes the facts it derives from the CECBus, the Reachable and
-// InCharge conditions, and, under a manager of its own, the session;
-// the node workload that sends the bus's commands, which writes
-// powerGeneration and the PowerApplied condition; and the node workload
-// that speaks for the session's Display, which writes wokeAt and the
-// WakeApplied and SystemAudioApplied conditions under one manager, and
-// standbyAt and the StandbyApplied condition under another. The node
-// workload that sends the bus's commands writes powerRead under a
-// manager of its own, and the node workload that speaks for the
-// session's Display writes screenAsk under another. The conditions are
-// a map keyed by type, so each writer's apply leaves the other writers'
-// conditions in place. Discovery creates its Television with a create,
-// so it writes no spec field after that.
+// The API calls for Television. Several writers share one Television,
+// and each applies only the fields it owns:
+//
+//   - A person writes the spec.
+//   - The Deployment writes the status it derives from the CECBus,
+//     with the Reachable and InCharge conditions, under fieldManager,
+//     and status.session under sessionFieldManager.
+//   - The node workload on each machine writes the results of the
+//     commands it sends: powerGeneration, wokeAt, standbyAt, powerRead,
+//     screenAsk, and their conditions. Each kind of result has its own
+//     field manager with the machine name in it. Each of these applies
+//     sets metadata.uid, so the API server refuses it with a 409 when
+//     the Television was deleted and created again under the same name
+//     and the result belongs to the old object.
+//
+// An apply removes the fields that its manager set before and the body
+// leaves out, so fields that are written at different times need
+// separate managers. status.conditions is a list keyed by type, so each
+// apply leaves the other managers' conditions in place.
 
 import (
 	"context"
@@ -30,18 +33,16 @@ import (
 	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
-// A Television is cluster-scoped, like a Receiver and a CECBus.
 const televisionsPath = "/apis/" + equipmentAPIVersion + "/televisions"
 
 func televisionPath(name string) string {
 	return televisionsPath + "/" + name
 }
 
-// ListTelevisions reads every Television. A cluster without the
-// Television definition answers the list with not found; that is a
-// cluster with no Television, and the CECBus work of both workloads
-// goes on. The empty list has no resourceVersion, so a caller starts no
-// watch on a collection that does not exist.
+// ListTelevisions lists every Television from the API server. When the
+// Television CRD is not installed, the list returns 404, and
+// ListTelevisions returns an empty list so that the caller's CECBus work
+// continues.
 func ListTelevisions(c *Client) (*TelevisionList, error) {
 	list := &TelevisionList{}
 	err := c.RequestJSON(http.MethodGet, televisionsPath, nil, list)
@@ -54,31 +55,29 @@ func ListTelevisions(c *Client) (*TelevisionList, error) {
 	return list, nil
 }
 
-// readTelevisions answers every Television from the watch's store,
-// and lists them from the API server while the store has nothing to
-// give (objectcache.go). A cluster without the Television definition
-// answers the list with not found, which is a cluster with no
-// Television, the way ListTelevisions reads it.
-func readTelevisions(c *Client, held *watchStore) (*TelevisionList, error) {
-	items, err := informer.List[Television](c.Client, informer.Held{View: held.view(), Versions: c.versions.televisions}, televisionsPath, televisionPath)
+// readTelevisions returns every Television from the watch's store, or
+// from a list on the API server until the store is ready
+// (objectcache.go). A 404 from that list returns an empty list, as in
+// ListTelevisions.
+func readTelevisions(c *Client, store *watchStore) (*TelevisionList, error) {
+	items, err := informer.List[Television](c.Client, informer.Held{View: store.view(), Versions: c.versions.televisions}, televisionsPath, televisionPath)
 	if errors.Is(err, apiclient.ErrNotFound) {
 		return &TelevisionList{}, nil
 	}
 	return &TelevisionList{Items: items}, err
 }
 
-// watchTelevisions wakes a loop on every change to a Television, its
-// status included, because each workload acts on status the other
-// writes. restarted is called for each watch opened again after the
-// first. A cluster without the Television definition has no
-// Television, and the watch holds none until the definition arrives.
-func watchTelevisions(ctx context.Context, client *Client, wake chan<- struct{}, restarted func(), held *watchStore) {
-	watchCollection(ctx, client, informer.Source{Resource: televisionResource}, apierrors.IsNotFound, wakeOnEvery(wake), func() { poke(wake) }, restarted, held)
+// watchTelevisions signals wake on every change to a Television,
+// status included, because the Deployment and the node workload each act
+// on status that the other writes. restarted is called each time the
+// watch opens again after the first time. While the Television CRD is
+// not installed, the store stays empty.
+func watchTelevisions(ctx context.Context, client *Client, wake chan<- struct{}, restarted func(), store *watchStore) {
+	watchCollection(ctx, client, informer.Source{Resource: televisionResource}, apierrors.IsNotFound, wakeOnEvery(wake), func() { sendWake(wake) }, restarted, store)
 }
 
-// applyTelevision sends one apply body under one field manager. force
-// settles a conflict in the manager's favour, because each field these
-// bodies state has one writer.
+// applyTelevision sends one apply under manager. force=true is safe
+// because each field that these bodies set has one writer.
 func applyTelevision(c *Client, name, path, manager string, body any) error {
 	encoded, err := json.Marshal(body)
 	if err != nil {
@@ -91,15 +90,15 @@ func applyTelevision(c *Client, name, path, manager string, body any) error {
 	return err
 }
 
-// televisionApply is the identity every apply body carries.
+// televisionApply returns the apiVersion, kind, and metadata that every
+// Television apply body starts with.
 func televisionApply(name string) (string, string, ObjectMeta) {
 	return equipmentAPIVersion, "Television", ObjectMeta{Name: name}
 }
 
-// ApplyTelevisionDerived writes what the Deployment derives. A fact
-// the apply leaves out is removed, because the Deployment owns it: a
-// TV that stops answering loses its power instead of keeping a stale
-// one.
+// ApplyTelevisionDerived writes the status that the Deployment derives
+// from the CECBus. A field that derived leaves empty is removed, so a TV
+// that stops answering does not keep a stale power.
 func ApplyTelevisionDerived(c *Client, name string, derived televisionDerived) error {
 	type status struct {
 		CEC           *TelevisionCECStatus `json:"cec,omitempty"`
@@ -119,14 +118,11 @@ func ApplyTelevisionDerived(c *Client, name string, derived televisionDerived) e
 	return applyTelevision(c, name, televisionPath(name)+"/status", fieldManager, body)
 }
 
-// ApplyTelevisionPower writes what the node workload applied: the
-// generation whose spec.power it applied and the PowerApplied
-// condition. It applies under the machine's field manager, and force
-// moves the two fields to another machine's manager when another
-// adapter sends the bus's commands. The body states the object's uid,
-// so the API server refuses the write with a conflict when the
-// Television was deleted and created again under the same name: the
-// result belongs to the old object.
+// ApplyTelevisionPower records the generation of spec.power that the
+// node workload applied, and the PowerApplied condition, under
+// cecFieldManager. force=true moves these fields from another machine's
+// manager when that machine's adapter no longer sends the bus's
+// commands.
 func ApplyTelevisionPower(c *Client, television *Television, machine string, generation int64, condition Condition) error {
 	type status struct {
 		PowerGeneration int64       `json:"powerGeneration"`
@@ -143,21 +139,15 @@ func ApplyTelevisionPower(c *Client, television *Television, machine string, gen
 	return applyTelevision(c, television.Metadata.Name, televisionPath(television.Metadata.Name)+"/status", cecFieldManager(machine), body)
 }
 
-// cecWakeFieldManager is the field manager of the node workload on one
-// machine for the wake. It is not the machine's power manager, because
-// an apply removes each field its manager owns and does not state, and
-// the power and the wake are written apart, often by two machines.
 func cecWakeFieldManager(machine string) string {
 	return "equipment-operator-wake-" + machine
 }
 
-// ApplyTelevisionWake writes what the node workload's wake did: the
-// status.session.wokeAt it ran, the WakeApplied condition, and the
-// SystemAudioApplied condition of a wake that sent System Audio Mode
-// Request. An apply removes each condition its manager owns and does
-// not state, so a wake that sends no request removes the
-// SystemAudioApplied of an earlier wake. The body states the object's
-// uid for the same reason ApplyTelevisionPower does.
+// ApplyTelevisionWake records the wake that the node workload ran: the
+// status.session.wokeAt it acted on, the WakeApplied condition, and the
+// SystemAudioApplied condition when the wake sent a System Audio Mode
+// Request. A wake that sends no request leaves SystemAudioApplied out of
+// conditions, so the apply removes the condition of an earlier wake.
 func ApplyTelevisionWake(c *Client, television *Television, machine, wokeAt string, conditions ...Condition) error {
 	type status struct {
 		WokeAt     string      `json:"wokeAt"`
@@ -174,18 +164,13 @@ func ApplyTelevisionWake(c *Client, television *Television, machine, wokeAt stri
 	return applyTelevision(c, television.Metadata.Name, televisionPath(television.Metadata.Name)+"/status", cecWakeFieldManager(machine), body)
 }
 
-// cecStandbyFieldManager is the field manager of the node workload on
-// one machine for the standby. It is not the wake's manager, because
-// the wake and the standby are written apart, and an apply removes
-// each field its manager owns and does not state.
 func cecStandbyFieldManager(machine string) string {
 	return "equipment-operator-standby-" + machine
 }
 
-// ApplyTelevisionStandby writes what the node workload's standby did:
-// the status.session.standbyAt it ran and the StandbyApplied condition.
-// The body states the object's uid for the same reason
-// ApplyTelevisionPower does.
+// ApplyTelevisionStandby records the standby that the node workload
+// ran: the status.session.standbyAt it acted on and the StandbyApplied
+// condition.
 func ApplyTelevisionStandby(c *Client, television *Television, machine, standbyAt string, condition Condition) error {
 	type status struct {
 		StandbyAt  string      `json:"standbyAt"`
@@ -202,19 +187,13 @@ func ApplyTelevisionStandby(c *Client, television *Television, machine, standbyA
 	return applyTelevision(c, television.Metadata.Name, televisionPath(television.Metadata.Name)+"/status", cecStandbyFieldManager(machine), body)
 }
 
-// cecPowerReadFieldManager is the field manager of the node workload on
-// one machine for the answer to a power press's read. It is not the
-// machine's power manager, because an apply removes each field its
-// manager owns and does not state, and the answer and the applied
-// generation are written apart.
 func cecPowerReadFieldManager(machine string) string {
 	return "equipment-operator-powerread-" + machine
 }
 
-// ApplyTelevisionPowerRead writes the node workload's answer to one
-// status.session.powerReadAt: the request, and the power the TV
-// reported, empty when it did not answer. The body states the object's
-// uid for the same reason ApplyTelevisionPower does.
+// ApplyTelevisionPowerRead records the result of the power read that
+// status.session.powerReadAt requested. at is that request's time, and
+// power is the state the TV reported, or empty when it did not answer.
 func ApplyTelevisionPowerRead(c *Client, television *Television, machine, at, power string) error {
 	type status struct {
 		PowerRead TelevisionPowerRead `json:"powerRead"`
@@ -230,17 +209,12 @@ func ApplyTelevisionPowerRead(c *Client, television *Television, machine, at, po
 	return applyTelevision(c, television.Metadata.Name, televisionPath(television.Metadata.Name)+"/status", cecPowerReadFieldManager(machine), body)
 }
 
-// cecScreenFieldManager is the field manager of the node workload on
-// one machine for an ask of the session's Player's screen. It is not
-// the wake's manager, because an apply removes each field its manager
-// owns and does not state, and the two are written apart.
 func cecScreenFieldManager(machine string) string {
 	return "equipment-operator-screen-" + machine
 }
 
-// ApplyTelevisionScreenAsk writes one ask of the session's Player's
-// screen. The body states the object's uid for the same reason
-// ApplyTelevisionPower does.
+// ApplyTelevisionScreenAsk records a request, heard on the bus, to wake
+// or sleep the screen of the session's Player.
 func ApplyTelevisionScreenAsk(c *Client, television *Television, machine string, ask TelevisionScreenAsk) error {
 	type status struct {
 		ScreenAsk TelevisionScreenAsk `json:"screenAsk"`
@@ -257,19 +231,15 @@ func ApplyTelevisionScreenAsk(c *Client, television *Television, machine string,
 }
 
 // sessionFieldManager is the Deployment's field manager for
-// status.session. The Deployment's derived status is written under
-// fieldManager, and an apply removes each field its manager owns and
-// does not state, so the session has a manager of its own: a write of
-// the derived status never removes the session, and a write of the
-// session never removes the derived status. The node workloads' fields
-// have managers of their own too. A person's apply of the spec reaches
-// no status field, because the status subresource splits the two.
+// status.session. It is separate from fieldManager, so an apply of the
+// derived status does not remove the session, and an apply of the
+// session does not remove the derived status.
 const sessionFieldManager = "equipment-operator-session"
 
-// ApplyTelevisionSession writes the Deployment's status.session. A nil
-// session removes the field, because the apply then states no field
-// its manager owns. A status write changes no generation, so the node
-// workload's spec.power key does not move.
+// ApplyTelevisionSession writes the Deployment's status.session, and a
+// nil session removes it. A status write does not change
+// metadata.generation, so the node workload does not read it as a new
+// spec.power.
 func ApplyTelevisionSession(c *Client, name string, session *TelevisionSession) error {
 	type status struct {
 		Session *TelevisionSession `json:"session,omitempty"`
@@ -284,14 +254,11 @@ func ApplyTelevisionSession(c *Client, name string, session *TelevisionSession) 
 	return applyTelevision(c, name, televisionPath(name)+"/status", sessionFieldManager, body)
 }
 
-// CreateDiscoveredTelevision creates the Television the Deployment
-// makes for a bus's TV, under the bus's own name. It states the bus
-// and nothing else, so it asks no power of the TV, and it carries the
-// discovered label. It is a create and not an apply: an object that
-// already has the name is left as it is, and the API server's conflict
-// for it is no error. It answers whether this call is the one that
-// created the Television, so a caller that logs a creation logs one
-// only when it happened.
+// CreateDiscoveredTelevision creates the Television for a CECBus's TV,
+// named after the bus, with discoveredLabel and a spec that sets only
+// the bus. It is a create and not an apply, so an existing Television of
+// that name is left unchanged, and the 409 is not an error. It returns
+// true only when this call created the Television.
 func CreateDiscoveredTelevision(c *Client, bus string) (bool, error) {
 	name := discoveredTelevisionName(bus)
 	object := Television{Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: bus}}}
@@ -311,8 +278,6 @@ func CreateDiscoveredTelevision(c *Client, bus string) (bool, error) {
 	return err == nil, err
 }
 
-// DeleteTelevision removes one Television. A name that is already
-// gone is not an error.
 func DeleteTelevision(c *Client, name string) error {
 	return c.versions.televisions.Send(name, func() (string, error) {
 		return "", deleteObject(c, televisionPath(name), "Television "+name)

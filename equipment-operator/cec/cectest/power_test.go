@@ -1,8 +1,8 @@
 package cectest_test
 
-// A scripted TV moves its power the way a TV moves it, so a test of a
-// program that wakes the TV and reads the power back sees what it sees
-// on a wire.
+// The scripted TV changes its power state as a real TV does, so a test
+// that wakes the TV and reads its power back gets the replies of a real
+// bus.
 
 import (
 	"testing"
@@ -11,8 +11,8 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/cec/cectest"
 )
 
-// commanded sends one message from a playback adapter and answers the
-// peer at a logical address afterwards.
+// commanded sends one message from a playback adapter and returns the
+// peer at address afterwards.
 func commanded(t *testing.T, peers []cectest.Peer, message cec.Message, address cec.LogicalAddress) cectest.Peer {
 	t.Helper()
 	bus := cectest.NewBus()
@@ -24,7 +24,7 @@ func commanded(t *testing.T, peers []cectest.Peer, message cec.Message, address 
 	mustSucceed(t, err)
 	peer, held := bus.Peer(address)
 	if !held {
-		t.Fatalf("no peer at %d", address)
+		t.Fatalf("the bus has no peer at logical address %d", address)
 	}
 	return peer
 }
@@ -61,8 +61,8 @@ func TestAPeerObeysThePowerCommands(t *testing.T) {
 	}
 }
 
-// A TV acknowledges a power command and sends no Feature Abort, so a
-// sender reads the result as a command the TV took.
+// A TV acknowledges a power command and does not send Feature Abort,
+// so the sender sees a command that the TV accepted.
 func TestAPowerCommandIsNotAborted(t *testing.T) {
 	bus := cectest.NewBus()
 	bus.Add(cectest.Peer{Logical: 0, Power: cec.PowerStandby})
@@ -72,12 +72,13 @@ func TestAPowerCommandIsNotAborted(t *testing.T) {
 
 	mustSucceed(t, err)
 	if !result.Acked || result.Aborted {
-		t.Errorf("result %+v", result)
+		t.Errorf("the result is %+v, want acked and not aborted", result)
 	}
 }
 
-// A TV in its transition answers the transition for as many power
-// questions as its Transition states, and then the state it moved to.
+// A TV that is changing power state reports the transition status in
+// reply to as many power queries as its Transition field says, and then
+// the state it moved to.
 func TestASlowTVReportsItsTransitionFirst(t *testing.T) {
 	bus := cectest.NewBus()
 	bus.Add(cectest.Peer{Logical: 0, Power: cec.PowerOn, Transition: 2})
@@ -94,13 +95,13 @@ func TestASlowTVReportsItsTransitionFirst(t *testing.T) {
 
 	want := []cec.PowerStatus{cec.PowerToStandby, cec.PowerToStandby, cec.PowerStandby}
 	if len(answers) != 3 || answers[0] != want[0] || answers[1] != want[1] || answers[2] != want[2] {
-		t.Errorf("answers %v, want %v", answers, want)
+		t.Errorf("the power status replies are %v, want %v", answers, want)
 	}
 }
 
-// A TV can answer its old state for a while after a command changes
-// it, as a real TV does for about 2 seconds. Lag is how many power
-// questions it answers so.
+// A TV can report its old power state for a while after a command
+// changes it. Lag is the number of power queries that it answers with
+// the old state.
 func TestALaggingTVReportsItsOldStateFirst(t *testing.T) {
 	bus := cectest.NewBus()
 	bus.Add(cectest.Peer{Logical: 0, Power: cec.PowerStandby, Lag: 2})
@@ -117,6 +118,6 @@ func TestALaggingTVReportsItsOldStateFirst(t *testing.T) {
 
 	want := []cec.PowerStatus{cec.PowerStandby, cec.PowerStandby, cec.PowerOn}
 	if len(answers) != 3 || answers[0] != want[0] || answers[1] != want[1] || answers[2] != want[2] {
-		t.Errorf("answers %v, want %v", answers, want)
+		t.Errorf("the power status replies are %v, want %v", answers, want)
 	}
 }

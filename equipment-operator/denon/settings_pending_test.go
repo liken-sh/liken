@@ -1,6 +1,3 @@
-// Pending: which declared fields the operator sends, from what the
-// receiver reports and what the operator applied before.
-
 package denon
 
 import (
@@ -86,9 +83,9 @@ func TestPendingKeepsOnlyTheFieldsToSend(t *testing.T) {
 	}
 }
 
-// A declared value no command can carry is pending when it would be
-// sent, so ApplySettings reports its error instead of the operator
-// taking it for settled.
+// Pending returns a value that no command can represent, so that
+// ApplySettings reports its error and the field is not treated as
+// settled.
 func TestPendingKeepsAValueNoCommandCanCarry(t *testing.T) {
 	want := Settings{System: SystemSettings{Eco: strPtr("turbo")}}
 
@@ -97,8 +94,8 @@ func TestPendingKeepsAValueNoCommandCanCarry(t *testing.T) {
 	mustMatch(t, *got.System.Eco, "turbo")
 }
 
-// declaredJSON writes settings the way the status and the log carry
-// them, so two values compare by what they hold and not by pointer.
+// declaredJSON encodes settings as JSON, so that two Settings compare by
+// the values their pointers reference and not by pointer identity.
 func declaredJSON(t *testing.T, s Settings) string {
 	t.Helper()
 	raw, err := json.Marshal(s)

@@ -1,7 +1,7 @@
 package main
 
-// The stores a pass reads, and the requests a pass sends with and
-// without them.
+// Tests of when a pass reads an informer's store and when it sends
+// requests to the API server.
 
 import (
 	"context"
@@ -17,7 +17,8 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// heldStore is a store that holds the given objects, synced or not.
+// heldStore returns a watchStore whose store holds the given objects.
+// synced sets whether the informer reports that its first list is done.
 func heldStore(t *testing.T, synced bool, objects ...*unstructured.Unstructured) *watchStore {
 	t.Helper()
 	store := cache.NewStore(cache.MetaNamespaceKeyFunc)
@@ -29,11 +30,11 @@ func heldStore(t *testing.T, synced bool, objects ...*unstructured.Unstructured)
 	return held
 }
 
-// A pass reads a store only while its informer runs and has finished
-// its first read, and lists from the API server otherwise. A copy in
-// the store that does not convert is read from the API server, so the
-// pass leaves out no object.
-func TestAStoreAnswersOnlyWhenItHoldsTheWholeCollection(t *testing.T) {
+// A pass reads from a store only while its informer is running and has
+// finished its first list. Otherwise it lists from the API server. When
+// a stored object does not convert to the Go type, the pass reads that
+// object from the API server instead, so the result has every object.
+func TestAPassReadsAStoreOnlyAfterItsInformerHasListed(t *testing.T) {
 	theater, lounge := asObject(t, receiverAt("uid-1", 1, "")), asObject(t, receiverAt("uid-2", 1, ""))
 	lounge.SetName("lounge")
 	mistyped := asObject(t, receiverAt("uid-3", 1, ""))
@@ -82,8 +83,9 @@ func TestAStoreAnswersOnlyWhenItHoldsTheWholeCollection(t *testing.T) {
 	}
 }
 
-// A read of one object from the store answers the object, or not found,
-// and reads the API server while the store has nothing to give.
+// readDisplay reads from a listed store, and returns ErrNotFound when
+// the store has no Display of that name. It reads from the API server
+// when there is no store or when the stored copy does not convert.
 func TestADisplayIsReadFromTheStore(t *testing.T) {
 	t.Parallel()
 	api := startCECAPI(t)
@@ -120,7 +122,6 @@ func TestADisplayIsReadFromTheStore(t *testing.T) {
 	}
 }
 
-// readCount answers how many reads the fake has answered.
 func (a *cecAPI) readCount() int {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
@@ -131,16 +132,16 @@ func (a *cecAPI) readCount() int {
 	return total
 }
 
-// readCountOf answers how many reads of one path, a list or one
-// object, the fake has answered.
+// readCountOf returns the number of reads the fake has served for one
+// exact path, which is either a list or a single object.
 func (a *cecAPI) readCountOf(path string) int {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
 	return a.reads[path]
 }
 
-// readsUnder answers how many reads of one collection, the list or
-// one of its objects, the fake has answered.
+// readsUnder returns the number of reads the fake has served for a
+// collection path and for the path of any object in it.
 func (a *cecAPI) readsUnder(collection string) int {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
@@ -153,7 +154,8 @@ func (a *cecAPI) readsUnder(collection string) int {
 	return total
 }
 
-// awaitStores waits until every store has finished its first read.
+// awaitStores waits until every store's informer has finished its first
+// list.
 func awaitStores(t *testing.T, stores ...*watchStore) {
 	t.Helper()
 	deadline := time.After(testTimeout)
@@ -164,15 +166,16 @@ func awaitStores(t *testing.T, stores ...*watchStore) {
 			}
 			select {
 			case <-deadline:
-				t.Fatal("a watch did not finish its first read")
+				t.Fatal("a watch did not finish its first list before the timeout")
 			case <-time.After(5 * time.Millisecond):
 			}
 		}
 	}
 }
 
-// startWatches runs watch functions against the fake until the test
-// ends, each into its own store.
+// startWatches runs each watch function against the fake until the
+// test ends. Each fills its own store, and startWatches returns after
+// every store has finished its first list.
 func startWatches(t *testing.T, client *Client, watches map[*watchStore]watchFunc) {
 	t.Helper()
 	for held, watch := range watches {
@@ -183,10 +186,10 @@ func startWatches(t *testing.T, client *Client, watches map[*watchStore]watchFun
 	}
 }
 
-// delivered waits until a store holds the copy of each object the
-// memo noted, which is when the watch has delivered every write. With
-// no watch there is nothing to wait for.
-func delivered(t *testing.T, held *watchStore, versions *memo.Versions) {
+// awaitDelivery waits until the store has the version of every object
+// that versions recorded, which means the watch has delivered all of
+// the operator's writes. It returns at once when there is no store.
+func awaitDelivery(t *testing.T, held *watchStore, versions *memo.Versions) {
 	t.Helper()
 	store := held.view().Store
 	if store == nil {
@@ -206,17 +209,17 @@ func delivered(t *testing.T, held *watchStore, versions *memo.Versions) {
 		}
 		select {
 		case <-deadline:
-			t.Fatal("a watch did not deliver the pass's writes")
+			t.Fatal("a watch did not deliver the pass's writes to its store before the timeout")
 		case <-time.After(5 * time.Millisecond):
 		}
 	}
 }
 
-// The Deployment's CECBus pass reads the CECBuses, the Televisions, the
-// Displays, and the Receivers. With no watch it lists each kind. Once
-// the watches have read, it reads their stores, and a settled pass, one
-// that runs after the watches delivered the last pass's writes, sends
-// the API server no request.
+// The Deployment's CECBus pass reads CECBuses, Televisions, Displays,
+// and Receivers. With no watch, it lists each kind from the API server.
+// After the watches have listed, it reads their stores. A pass that
+// runs after the watches have delivered the previous pass's writes
+// sends the API server no request.
 func TestTheCECBusPassReadsTheStores(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -244,12 +247,12 @@ func TestTheCECBusPassReadsTheStores(t *testing.T) {
 					})
 				}
 				mustSucceed(t, controller.pass())
-				delivered(t, controller.buses, api.client.versions.cecBuses)
-				delivered(t, controller.televisions, api.client.versions.televisions)
-				// The first pass writes the Receiver's status.cec, so the
-				// pass after it reads the Receiver from the store only once
-				// the write's own event has arrived.
-				delivered(t, controller.receivers, api.client.versions.receivers)
+				awaitDelivery(t, controller.buses, api.client.versions.cecBuses)
+				awaitDelivery(t, controller.televisions, api.client.versions.televisions)
+				// The first pass writes the Receiver's status.cec. The next
+				// pass reads the Receiver from the store only after the watch
+				// has delivered that write.
+				awaitDelivery(t, controller.receivers, api.client.versions.receivers)
 				before := map[string]int{}
 				for path := range c.reads {
 					before[path] = api.readsUnder(path)
@@ -271,12 +274,12 @@ func TestTheCECBusPassReadsTheStores(t *testing.T) {
 	}
 }
 
-// runNode runs the node workload for node-1 until the test ends, and
-// answers it once its entry reports the scan and its watches hold
-// their first reads.
+// runNode runs the node workload for node-1 until the test ends. It
+// returns the node after the node has reported its scan in its CECBus
+// entry and its watches have finished their first list.
 func runNode(t *testing.T, api *cecAPI) *cecNode {
 	t.Helper()
-	_, device := usbAdapter(cecRoom())
+	_, device := usbAdapter(fakeCECBus())
 	node, err := newCECNode(api.client, testNamespace, "node-1", device)
 	mustSucceed(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -294,12 +297,13 @@ func runNode(t *testing.T, api *cecAPI) *cecNode {
 	return node
 }
 
-// The node workload in Control reads the CECBuses, the Televisions, and
-// the Display its adapter speaks for from the watches' stores. A pass
-// that a Display's move wakes announces the new address, and lists
-// nothing and reads no Display from the API server. A pass that runs
-// before the watch delivered the node's own entry write reads that
-// CECBus from the API server once, so those reads are not counted.
+// A node workload in Control mode reads CECBuses, Televisions, and the
+// Display of its own adapter from the watches' stores. When the
+// Display's physical address changes, the pass writes the new address
+// into the node's CECBus entry, and sends the API server no list and no
+// Display read. A pass that runs before the watch delivers the node's
+// own write of its entry reads that CECBus from the API server once, so
+// the test counts reads only after startup.
 func TestTheNodePassReadsFromTheStores(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -319,8 +323,8 @@ func TestTheNodePassReadsFromTheStores(t *testing.T) {
 	})
 }
 
-// The node workload watches the Displays of its own machine, by the
-// field selector on status.node, so its store holds no other machine's
+// The node workload watches only the Displays of its own machine, with
+// a field selector on status.node, so its store has no other machine's
 // Display.
 func TestTheNodeWatchesTheDisplaysOfItsMachine(t *testing.T) {
 	t.Parallel()
@@ -338,10 +342,10 @@ func TestTheNodeWatchesTheDisplaysOfItsMachine(t *testing.T) {
 	})
 }
 
-// An API server whose Display definition declares no selectable field
-// on status.node refuses the node workload's Display list. The node
-// workload still starts, and reads the Display it speaks for from the
-// API server.
+// When the Display definition declares no selectable field for
+// status.node, the API server refuses the node workload's Display list.
+// The node workload still starts, and reads its Display from the API
+// server.
 func TestTheNodeStartsWhenTheDisplayListIsRefused(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -349,7 +353,7 @@ func TestTheNodeStartsWhenTheDisplayListIsRefused(t *testing.T) {
 		api.noDisplayNodeField = true
 		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
 		api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
-		_, device := usbAdapter(cecRoom())
+		_, device := usbAdapter(fakeCECBus())
 
 		startNode(t, api, "node-1", device)
 

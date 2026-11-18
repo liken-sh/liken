@@ -1,20 +1,20 @@
 package denon
 
-// HDMISettings holds the receiver's HDMI setup, the Video > HDMI Setup
-// menu. HDMI Audio Out is VSAUDIO, which Denon's protocol documents.
-// The rest is the SSHOS family, which no Denon document lists: the
-// AVR-X1700H answers SSHOS ? with one line per key and a closing
-// SSHOS END. The AVR-X1700H sent no line after it took an SSHOS set
-// command, so the driver sends the family's query after the sets and
-// folds the answer. denon/AGENTS.md records which wire words were
-// measured on the receiver and which come from other sources.
+// The receiver's Video > HDMI Setup menu. HDMI Audio Out is the
+// VSAUDIO command, which Denon's protocol documents list. The other
+// fields are the SSHOS command family, which no Denon document lists.
+// An AVR-X1700H answers "SSHOS ?" with one line per key and then
+// "SSHOS END". It sent no line after an SSHOS set that left the value
+// unchanged, and whether it echoes a change is not known, so the driver
+// queries the family after every set. denon/AGENTS.md records the
+// source of each wire word.
 
 import (
 	"fmt"
 	"strings"
 )
 
-// HDMISettings holds the HDMI setup and the HDMI-CEC switches under it.
+// HDMISettings is the HDMI setup and the HDMI-CEC switches under it.
 type HDMISettings struct {
 	AudioOut          *string `json:"audioOut,omitempty"`
 	PassThrough       *bool   `json:"passThrough,omitempty"`
@@ -27,7 +27,7 @@ type HDMISettings struct {
 	PowerSaving       *bool   `json:"powerSaving,omitempty"`
 }
 
-// hdmiSettings is the HDMI family's rows of the id table.
+// hdmiSettings are the HDMI rows of settingsTable.
 var hdmiSettings = []settingSpec{
 	wordSetting("hdmi.audioOut", HDMIAudioOutCommand,
 		func(s *Settings, v string) { s.HDMI.AudioOut = strPtr(v) },
@@ -58,9 +58,8 @@ var hdmiSettings = []settingSpec{
 		func(s *Settings) *bool { return s.HDMI.PowerSaving }),
 }
 
-// confirmedBy answers whether the receiver reports every declared HDMI
-// field at its declared value, the way Settings.ConfirmedBy judges the
-// other families.
+// confirmedBy is the HDMI part of Settings.ConfirmedBy. A field that w
+// does not declare, or that observed does not report, is not compared.
 func (w HDMISettings) confirmedBy(observed HDMISettings) bool {
 	return sameString(w.AudioOut, observed.AudioOut) &&
 		sameBool(w.PassThrough, observed.PassThrough) &&
@@ -73,8 +72,8 @@ func (w HDMISettings) confirmedBy(observed HDMISettings) bool {
 		sameBool(w.PowerSaving, observed.PowerSaving)
 }
 
-// The wire keys of the HDMI setup. Each set command is the key, a
-// space, and the word; each report is the same line.
+// A set command is the key, a space, and the word, and the receiver
+// reports a value in a line of the same form.
 const (
 	hdmiAudioOutKey          = "VSAUDIO"
 	hdmiPassThroughKey       = "SSHOSPAS"
@@ -86,18 +85,16 @@ const (
 	hdmiPowerOffControlKey   = "SSHOSCONPOF"
 	hdmiPowerSavingKey       = "SSHOSCONPSV"
 
-	// hdmiFamilyEnd closes the receiver's answer to SSHOS ?.
+	// hdmiFamilyEnd is the last line of the reply to "SSHOS ?".
 	hdmiFamilyEnd = "SSHOS END"
 )
 
-// The two read-back queries, one per family.
 const (
 	hdmiAudioOutQuery = "VSAUDIO ?"
 	hdmiSetupQuery    = "SSHOS ?"
 )
 
-// The words each enumerated key carries, from the display value the
-// status reports to the wire word.
+// Each map takes the value that the status reports to its wire word.
 var (
 	hdmiAudioOutWords = map[string]string{"avr": "AMP", "tv": "TV"}
 
@@ -115,75 +112,76 @@ var (
 	}
 )
 
-// hdmiWordCommand builds the set command for one enumerated key, and
-// the error that names the setting and the value when the word is not
-// one the receiver carries.
+// hdmiWordCommand returns an error naming the setting and the value
+// when the value has no wire word.
 func hdmiWordCommand(key, setting string, words map[string]string, value string) (string, error) {
 	word, known := words[value]
 	if !known {
-		return "", fmt.Errorf("%s %q", setting, value)
+		return "", fmt.Errorf("%q is not a value of %s", value, setting)
 	}
 	return key + " " + word, nil
 }
 
-// HDMIAudioOutCommand is the set command for where HDMI audio plays:
-// the receiver's own amplifier, or the TV.
+// HDMIAudioOutCommand returns the set command that plays HDMI audio
+// through the receiver's amplifier ("avr") or the TV ("tv").
 func HDMIAudioOutCommand(value string) (string, error) {
 	return hdmiWordCommand(hdmiAudioOutKey, "HDMI audio out", hdmiAudioOutWords, value)
 }
 
-// HDMIPassThroughCommand is the set command for HDMI Pass Through,
+// HDMIPassThroughCommand returns the set command for HDMI Pass Through,
 // which sends a source to the TV while the receiver is in standby.
 func HDMIPassThroughCommand(on bool) (string, error) {
 	return hdmiPassThroughKey + " " + onOffWire(on), nil
 }
 
-// HDMIPassThroughSourceCommand is the set command for the source that
-// passes through in standby: the last one selected, or one HDMI jack.
+// HDMIPassThroughSourceCommand returns the set command for the source
+// that passes through in standby: "last" for the last one selected, or
+// "hdmi1" to "hdmi7".
 func HDMIPassThroughSourceCommand(value string) (string, error) {
 	return hdmiWordCommand(hdmiPassThroughSourceKey, "pass through source", hdmiPassThroughSourceWords, value)
 }
 
-// HDMIRCSourceSelectCommand is the set command for what a source button
-// on the remote does while the receiver is in standby.
+// HDMIRCSourceSelectCommand returns the set command for what a source
+// button on the remote does while the receiver is in standby.
 func HDMIRCSourceSelectCommand(value string) (string, error) {
 	return hdmiWordCommand(hdmiRCSourceSelectKey, "RC source select", hdmiRCSourceSelectWords, value)
 }
 
-// HDMIControlCommand is the set command for HDMI Control, the
+// HDMIControlCommand returns the set command for HDMI Control, the
 // receiver's HDMI-CEC switch.
 func HDMIControlCommand(on bool) (string, error) {
 	return hdmiControlKey + " " + onOffWire(on), nil
 }
 
-// HDMIARCCommand is the set command for the Audio Return Channel.
+// HDMIARCCommand returns the set command for the Audio Return Channel.
 func HDMIARCCommand(on bool) (string, error) {
 	return hdmiARCKey + " " + onOffWire(on), nil
 }
 
-// HDMITVAudioSwitchingCommand is the set command for TV Audio
-// Switching, which selects the TV input when the TV plays its own
-// sound.
+// HDMITVAudioSwitchingCommand returns the set command for TV Audio
+// Switching, which selects the TV input on the receiver when the TV
+// plays its own sound.
 func HDMITVAudioSwitchingCommand(on bool) (string, error) {
 	return hdmiTVAudioSwitchingKey + " " + onOffWire(on), nil
 }
 
-// HDMIPowerOffControlCommand is the set command for which devices the
-// TV's power off turns off with it.
+// HDMIPowerOffControlCommand returns the set command for which devices
+// turn off when the TV turns off.
 func HDMIPowerOffControlCommand(value string) (string, error) {
 	return hdmiWordCommand(hdmiPowerOffControlKey, "power off control", hdmiPowerOffControlWords, value)
 }
 
-// HDMIPowerSavingCommand is the set command for HDMI Control's power
-// saving.
+// HDMIPowerSavingCommand returns the set command for the power saving
+// switch of HDMI Control.
 func HDMIPowerSavingCommand(on bool) (string, error) {
 	return hdmiPowerSavingKey + " " + onOffWire(on), nil
 }
 
-// applyHDMILine folds one VSAUDIO or SSHOS line into the settings and
-// answers the field it named. A word no builder accepts, and a key this
-// driver does not read, are unknown, so the field stays nil rather than
-// hold a value the operator could never send back.
+// applyHDMILine stores the value of one VSAUDIO or SSHOS line in hdmi
+// and returns hdmiField and true, or "" and false when it does not
+// recognize the line. A word that no command builder produces, and a
+// key the driver does not read, change no field, because the operator
+// could not send such a value back.
 func applyHDMILine(hdmi *HDMISettings, line string) (string, bool) {
 	if line == hdmiFamilyEnd {
 		return hdmiField, true
@@ -215,8 +213,6 @@ func applyHDMILine(hdmi *HDMISettings, line string) (string, bool) {
 	return "", false
 }
 
-// foldHDMIWord stores the display value whose wire word the line
-// carries.
 func foldHDMIWord(field **string, words map[string]string, word string) (string, bool) {
 	for value, wire := range words {
 		if wire == word {
@@ -227,7 +223,6 @@ func foldHDMIWord(field **string, words map[string]string, word string) (string,
 	return "", false
 }
 
-// foldHDMISwitch stores the switch an ON or OFF line carries.
 func foldHDMISwitch(field **bool, word string) (string, bool) {
 	on, ok := onOffWord(word)
 	if !ok {
@@ -237,13 +232,12 @@ func foldHDMISwitch(field **bool, word string) (string, bool) {
 	return hdmiField, true
 }
 
-// hdmiField is the field name every HDMI line carries. None of them
-// reaches the equipment contract.
+// hdmiField is the field name that applyHDMILine returns for every HDMI
+// line. equipmentField maps it to no equipment event.
 const hdmiField = "hdmi"
 
-// hdmiReadBacks answers the queries that read back the HDMI commands
-// among the sent ones, one per family and in a fixed order, because the
-// receiver does not echo them.
+// hdmiReadBacks returns the queries that read back the HDMI commands
+// among sent: at most one "VSAUDIO ?" and then at most one "SSHOS ?".
 func hdmiReadBacks(sent []string) []string {
 	var audioOut, setup bool
 	for _, command := range sent {
@@ -260,7 +254,6 @@ func hdmiReadBacks(sent []string) []string {
 	return queries
 }
 
-// sendReadBacks sends the read-back queries for the sent commands.
 func (d *Client) sendReadBacks(sent []string) error {
 	for _, query := range hdmiReadBacks(sent) {
 		if err := d.send(query); err != nil {

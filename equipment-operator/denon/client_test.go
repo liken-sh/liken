@@ -1,4 +1,4 @@
-// The client that holds one receiver's control connection open.
+// Tests of the client that keeps a receiver's control connection open.
 
 package denon
 
@@ -14,16 +14,16 @@ import (
 )
 
 // clientHarness is the client under test, the fake receiver it talks
-// to, and every event its listener saw.
+// to, and the events that its listener received.
 type clientHarness struct {
 	receiver *fakeReceiver
 	client   *Client
 	events   chan equipment.Event
 }
 
-// startClient runs a client against one address until the test ends,
-// and waits for its goroutines to stop before any earlier cleanup runs.
-// Each configure runs on the client before it starts.
+// startClient runs a client against address until the test ends, and
+// the cleanup waits for the client to stop. Each configure function
+// runs on the client before it starts.
 func startClient(t *testing.T, address string, configure ...func(*Client)) *clientHarness {
 	t.Helper()
 	events := make(chan equipment.Event, 256)
@@ -47,7 +47,7 @@ func startClient(t *testing.T, address string, configure ...func(*Client)) *clie
 		select {
 		case <-stopped:
 		case <-time.After(testTimeout):
-			t.Error("the client did not stop")
+			t.Error("the client did not stop after its context ended")
 		}
 	})
 	return &clientHarness{client: client, events: events}
@@ -61,8 +61,8 @@ func startHarness(t *testing.T) *clientHarness {
 	return harness
 }
 
-// waitForField waits for the next event that names one field, and fails
-// the test instead of hanging when none arrives.
+// waitForField returns the state of the next event for field, and fails
+// the test when none arrives within testTimeout.
 func waitForField(t *testing.T, events <-chan equipment.Event, field string) equipment.State {
 	t.Helper()
 	deadline := time.After(testTimeout)
@@ -73,22 +73,21 @@ func waitForField(t *testing.T, events <-chan equipment.Event, field string) equ
 				return event.State
 			}
 		case <-deadline:
-			t.Fatalf("no %s event arrived", field)
+			t.Fatalf("no %s event arrived within %v", field, testTimeout)
 			return equipment.State{}
 		}
 	}
 }
 
-// drainQueries reads until the client has sent the last of its connect
-// queries, so a test that follows sees only its own command.
+// drainQueries waits until the receiver has read the last connect
+// query, so that the next command the receiver reads is the test's own.
 func drainQueries(t *testing.T, harness *clientHarness) {
 	t.Helper()
 	harness.receiver.waitForCommands(t, Queries[len(Queries)-1])
 }
 
-// A command sent after the writer has stopped is reported, not left in
-// a queue nobody drains. The writer nils out under the send mutex
-// before it stops, so once Run has returned there is no live queue.
+// After Run returns the client has no queue, so send returns an error
+// instead of queuing a command that nothing writes.
 func TestSendAfterTheWriterStopsReportsFailure(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -110,17 +109,17 @@ func TestSendAfterTheWriterStopsReportsFailure(t *testing.T) {
 		live := client.out
 		client.mutex.Unlock()
 		if live != nil {
-			t.Fatal("the writer stopped but the queue is still named")
+			t.Fatal("the client has a send queue after the writer stopped, want none")
 		}
 		if err := client.send("PSBAS 53"); err == nil {
-			t.Fatal("a send after the writer stopped did not error")
+			t.Fatal("send after the writer stopped returned nil, want an error")
 		}
 	})
 }
 
-// connectedState is the state the fake receiver reports once it has
-// answered the queries. The fake never answers a sleep query, so the
-// timer reads as unknown.
+// connectedState is the state that the fake receiver reports after it
+// answers the queries. The fake does not answer a sleep query, so the
+// sleep timer is unknown.
 func connectedState() equipment.State {
 	return equipment.State{
 		Reachable: equipment.ConditionTrue,
@@ -137,7 +136,7 @@ func connectedState() equipment.State {
 	}
 }
 
-func TestTheClientAsksEveryQueryOnConnect(t *testing.T) {
+func TestTheClientSendsEveryQueryOnConnect(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		harness := startHarness(t)
@@ -163,10 +162,10 @@ func TestTheClientReportsWhatTheReceiverSaid(t *testing.T) {
 	})
 }
 
-// The noise arrives behind the sound mode and ahead of the mute the
-// test asks for, so a state that still reads right after the mute is a
-// state the noise left alone.
-func TestTheNoiseLinesChangeNothing(t *testing.T) {
+// The fake receiver sends lines that the client does not recognize
+// after the sound mode and before the mute that the test sets. If the
+// state is right after the mute, those lines changed nothing.
+func TestUnrecognizedLinesChangeNothing(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		harness := startHarness(t)
@@ -206,7 +205,7 @@ func TestTheClientReconnectsAfterTheConnectionDrops(t *testing.T) {
 	})
 }
 
-func TestAKnobTurnReachesTheStateAndTheListener(t *testing.T) {
+func TestAVolumeKnobTurnUpdatesTheStateAndNotifiesTheListener(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		harness := startHarness(t)
@@ -224,18 +223,19 @@ func TestAKnobTurnReachesTheStateAndTheListener(t *testing.T) {
 	})
 }
 
-// mustStaySilent fails the test if any event arrives inside the window.
+// mustStaySilent fails the test if an event arrives within window.
 func mustStaySilent(t *testing.T, events <-chan equipment.Event, window time.Duration) {
 	t.Helper()
 	select {
 	case event := <-events:
-		t.Fatalf("wanted no event, got %+v", event)
+		t.Fatalf("an event arrived: %+v, want none within %v", event, window)
 	case <-time.After(window):
 	}
 }
 
-// The verdict is announced once and not once per retry, so an address
-// that never answers writes one status and not a stream of them.
+// The listener hears about Reachable false once, not once per retry,
+// so an address that never answers produces one status write and not a
+// stream of them.
 func TestAnAddressThatAnswersNothingIsNeverReachable(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -247,7 +247,7 @@ func TestAnAddressThatAnswersNothingIsNeverReachable(t *testing.T) {
 	})
 }
 
-func TestTheHeartbeatKeepsAskingOnAnIdleConnection(t *testing.T) {
+func TestTheClientSendsAHeartbeatQueryOnAnIdleConnection(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		harness := startHarness(t)
@@ -259,7 +259,7 @@ func TestTheHeartbeatKeepsAskingOnAnIdleConnection(t *testing.T) {
 	})
 }
 
-func TestACommandOnADisconnectedClientDropsIt(t *testing.T) {
+func TestACommandOnADisconnectedClientIsNotSent(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		receiver := startFakeReceiver(t)
@@ -272,9 +272,7 @@ func TestACommandOnADisconnectedClientDropsIt(t *testing.T) {
 	})
 }
 
-// The wire carries at most the top of the receiver's own scale, so a
-// count above it is held to the top.
-func TestSetVolumeHoldsTheReceiverToItsOwnScale(t *testing.T) {
+func TestSetVolumeClampsToTheReceiversScale(t *testing.T) {
 	cases := []struct {
 		name   string
 		halves int
@@ -300,25 +298,23 @@ func TestSetVolumeHoldsTheReceiverToItsOwnScale(t *testing.T) {
 	}
 }
 
-// The survey is complete once the connect replies have stopped
-// arriving, so a declared setting is compared against what the receiver
-// reported and not against an empty state. The survey completes on a
-// timer with no line, so the client sends an event for it.
-func TestASurveyCompletesAfterTheConnectReplies(t *testing.T) {
+// No line marks the end of the first full read, so the client sends
+// EventFirstReadDone for it.
+func TestTheFirstFullReadCompletesAfterTheConnectReplies(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		harness := startHarness(t)
 
-		mustMatch(t, harness.client.Surveyed(), false)
+		mustMatch(t, harness.client.FirstReadDone(), false)
 		drainQueries(t, harness)
 
-		waitForField(t, harness.events, equipment.EventSurveyed)
-		mustMatch(t, harness.client.Surveyed(), true)
+		waitForField(t, harness.events, equipment.EventFirstReadDone)
+		mustMatch(t, harness.client.FirstReadDone(), true)
 	})
 }
 
-// peerConn is a connection that reports the TCP address it reached, the
-// way a socket to a receiver does.
+// peerConn wraps a connection so that RemoteAddr returns a TCP address,
+// as the socket to a real receiver does.
 type peerConn struct {
 	net.Conn
 	peer *net.TCPAddr
@@ -326,8 +322,8 @@ type peerConn struct {
 
 func (c peerConn) RemoteAddr() net.Addr { return c.peer }
 
-// A client with no Dial reaches its receiver over TCP. The test runs on
-// the real clock, because it opens a real socket.
+// A client with no Dial connects over TCP. The test uses the real
+// clock, because it opens a real socket.
 func TestAClientWithNoDialDialsOverTCP(t *testing.T) {
 	t.Parallel()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -342,9 +338,8 @@ func TestAClientWithNoDialDialsOverTCP(t *testing.T) {
 	conn.Close()
 }
 
-// The address is the peer the receiver answered from, so a receiver
-// declared by name still reports an address, and it is the address the
-// connection reached rather than the one the declared name resolves to.
+// Address returns the remote address of the connection, which can
+// differ from the address that the declared name resolves to.
 func TestTheAddressIsThePeer(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

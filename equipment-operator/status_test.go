@@ -1,8 +1,5 @@
 package main
 
-// The status the operator reports, built from what the receiver last
-// said.
-
 import (
 	"testing"
 	"time"
@@ -11,13 +8,12 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
-// The moment every status test stamps, and one from before it.
 var (
 	statusNow     = time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
 	statusEarlier = time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 )
 
-// testState is a state whose fields each case overrides.
+// testState returns a reachable state with only a main zone.
 func testState(power equipment.Power, volume, volumeMax int) equipment.State {
 	return equipment.State{
 		Reachable: ConditionTrue,
@@ -33,7 +29,7 @@ func testState(power equipment.Power, volume, volumeMax int) equipment.State {
 	}
 }
 
-func TestBuildReceiverStatusCarriesTheReceiversOwnUnits(t *testing.T) {
+func TestBuildReceiverStatusFormatsPowerAndVolumeInTheReceiversUnits(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name      string
@@ -64,7 +60,7 @@ func TestBuildReceiverStatusCarriesTheReceiversOwnUnits(t *testing.T) {
 	}
 }
 
-func TestBuildReceiverStatusCarriesTheProtocolSnapshot(t *testing.T) {
+func TestBuildReceiverStatusIncludesTheProtocolSnapshot(t *testing.T) {
 	t.Parallel()
 	state := testState(equipment.PowerOn, 100, 139)
 	eco := "auto"
@@ -76,9 +72,7 @@ func TestBuildReceiverStatusCarriesTheProtocolSnapshot(t *testing.T) {
 	mustMatch(t, status.Driver, "denon")
 }
 
-// The model and the maker are what a driver read from the equipment,
-// in the maker's words, whichever driver read them.
-func TestBuildReceiverStatusCarriesTheModel(t *testing.T) {
+func TestBuildReceiverStatusIncludesTheModelAndManufacturer(t *testing.T) {
 	t.Parallel()
 	state := testState(equipment.PowerOn, 100, 139)
 	state.Model, state.Manufacturer = "AVR-X1700H", "Denon"
@@ -89,7 +83,7 @@ func TestBuildReceiverStatusCarriesTheModel(t *testing.T) {
 	mustMatch(t, status.Manufacturer, "Denon")
 }
 
-func TestBuildReceiverStatusCarriesTheMuteFlag(t *testing.T) {
+func TestBuildReceiverStatusIncludesTheMuteFlag(t *testing.T) {
 	t.Parallel()
 	state := testState(equipment.PowerOn, 100, 139)
 	zone := state.Zones[equipment.MainZone]
@@ -99,7 +93,7 @@ func TestBuildReceiverStatusCarriesTheMuteFlag(t *testing.T) {
 	mustMatch(t, buildReceiverStatus(state, nil, nil, "", 2, 1, nil, statusNow).Zones[equipment.MainZone].Mute, true)
 }
 
-func TestReachableNamesEachVerdict(t *testing.T) {
+func TestReachableSetsTheReasonAndTheTransitionTimeForEachStatus(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name     string
@@ -108,18 +102,18 @@ func TestReachableNamesEachVerdict(t *testing.T) {
 		reason   string
 		stamp    time.Time
 	}{
-		{"answered", ConditionTrue, nil, reasonConnected, statusNow},
-		{"silent", ConditionFalse, nil, reasonUnreachable, statusNow},
+		{"receiver responded", ConditionTrue, nil, reasonConnected, statusNow},
+		{"receiver did not respond", ConditionFalse, nil, reasonUnreachable, statusNow},
 		{"not reached yet", ConditionUnknown, nil, reasonConnecting, statusNow},
 		{
-			"verdict unchanged keeps the stamp",
+			"status unchanged keeps the transition time",
 			ConditionTrue,
 			[]Condition{{Type: reachableConditionType, Status: ConditionTrue, LastTransitionTime: statusEarlier}},
 			reasonConnected,
 			statusEarlier,
 		},
 		{
-			"verdict flipped moves the stamp",
+			"status changed moves the transition time",
 			ConditionTrue,
 			[]Condition{{Type: reachableConditionType, Status: ConditionFalse, LastTransitionTime: statusEarlier}},
 			reasonConnected,
@@ -139,37 +133,37 @@ func TestReachableNamesEachVerdict(t *testing.T) {
 	}
 }
 
-func TestSameStatusAnswersWhetherAWriteWouldChangeAnything(t *testing.T) {
+func TestSameStatusIsTrueOnlyWhenAWriteWouldChangeNothing(t *testing.T) {
 	t.Parallel()
-	held := ReceiverStatus{
+	baseline := ReceiverStatus{
 		Zones: map[string]ZoneStatus{
 			equipment.MainZone: {Power: "On", Input: "MPLAY", Volume: "50", VolumeMax: "69.5", SoundMode: "MULTI CH IN"},
 		},
 		Conditions: []Condition{{Type: reachableConditionType, Status: ConditionTrue}},
 	}
-	movedVolume := held
+	movedVolume := baseline
 	movedVolume.Zones = map[string]ZoneStatus{
 		equipment.MainZone: {Power: "On", Input: "MPLAY", Volume: "51", VolumeMax: "69.5", SoundMode: "MULTI CH IN"},
 	}
-	addedZone := held
+	addedZone := baseline
 	addedZone.Zones = map[string]ZoneStatus{
 		equipment.MainZone: {Power: "On", Input: "MPLAY", Volume: "50"},
 		"zone2":            {Power: "On", Input: "PHONO", Volume: "90"},
 	}
-	movedProtocol := held
+	movedProtocol := baseline
 	bass := 3
 	movedProtocol.Denon = &denon.Settings{Tone: denon.ToneSettings{Bass: &bass}}
-	unreached := held
+	unreached := baseline
 	unreached.Conditions = []Condition{{Type: reachableConditionType, Status: ConditionFalse}}
-	noConditions := held
+	noConditions := baseline
 	noConditions.Conditions = nil
-	settledBlock := held
+	settledBlock := baseline
 	settledBlock.SettledSettings = map[string]string{zonesBlock: "0123456789abcdef"}
-	settledPower := held
+	settledPower := baseline
 	settledPower.SettledPower = equipment.PowerOn
-	modelRead := held
+	modelRead := baseline
 	modelRead.Model = "WiiM Amp"
-	manufacturerRead := held
+	manufacturerRead := baseline
 	manufacturerRead.Manufacturer = "Linkplay Technology Inc."
 
 	cases := []struct {
@@ -177,11 +171,11 @@ func TestSameStatusAnswersWhetherAWriteWouldChangeAnything(t *testing.T) {
 		next ReceiverStatus
 		same bool
 	}{
-		{"identical", held, true},
+		{"identical", baseline, true},
 		{"volume moved", movedVolume, false},
 		{"a zone appeared", addedZone, false},
 		{"the protocol snapshot moved", movedProtocol, false},
-		{"verdict moved", unreached, false},
+		{"the condition status changed", unreached, false},
 		{"condition dropped", noConditions, false},
 		{"a block settled", settledBlock, false},
 		{"a power settled", settledPower, false},
@@ -190,7 +184,7 @@ func TestSameStatusAnswersWhetherAWriteWouldChangeAnything(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			mustMatch(t, sameStatus(held, one.next), one.same)
+			mustMatch(t, sameStatus(baseline, one.next), one.same)
 		})
 	}
 }

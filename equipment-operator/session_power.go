@@ -1,8 +1,9 @@
 package main
 
-// The room's power: the toggle the remote's power button asks for, and
-// the on and off a TV remote's deterministic power functions ask for.
-// The ask arrives in status.session.powerAsk (session_asks.go).
+// A power request arrives in status.session.powerAsk, with the action
+// toggle, on, or off. media-operator writes off when a Player's
+// spec.power changes to Off. Other programs that write the session can
+// write toggle and on.
 
 import (
 	"fmt"
@@ -13,43 +14,34 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
-// power runs one power ask from status.session.powerAsk. The remote's
-// power button asks toggle, and the operator answers it the way a power
-// button does: a room that is on goes to standby, and one that is not
-// comes on and selects the session's input. A TV remote's Power Off
-// Function and Power On Function ask off and on: HDMI-CEC 1.3a, CEC
-// 13.13.3, says each puts the device in the state it names and keeps it
-// there when repeated, so an ask for the state the room already holds
-// sends nothing. The room's TV decides whether the room is on, when the
-// room has one that reports its power, because the TV is what a person
-// sees; otherwise the receiver decides. A room that goes off asks its
-// TV for standby and puts the receiver in standby. A room that comes on
-// wakes its TV and turns the receiver on. The spec's power field is
-// updated to match what the receiver did, so the next reconcile sees no
-// change to re-assert. A receiver the operator cannot reach gets
-// nothing, and the TV, when it reports its power, still turns off or
-// on. source names where the ask came from, for the lines it writes.
-// An action other than toggle, on, or off does nothing.
+// power carries out one power request. A toggle turns a room that is
+// on to standby, and turns a room that is off on and selects the
+// session's input. On and off send nothing when the room is already in
+// that state, because HDMI-CEC 1.3a, CEC 13.13.3, defines the Power On
+// and Power Off Functions to leave a device in that state when pressed
+// again.
+//
+// When the room's TV reports its power, the TV's power decides whether
+// the room is on, because the TV is what people see. Otherwise the
+// receiver's power decides. After the receiver changes, `power` writes
+// spec.power to match, so the next reconcile does not undo the change.
 func (s *session) power(action, source string) {
 	if !powerActions[action] {
 		return
 	}
 	s.oneShot.Lock()
 	defer s.oneShot.Unlock()
-	// The power is read under the lock, so the decision is made against
-	// the receiver as it stands after any in-flight one-shot settles, not
-	// a snapshot taken a moment earlier.
+	// Read the state under the lock, so a power or input command that is
+	// still running finishes before `power` chooses the command.
 	state := s.driver.State()
 	receiver := mainZone(state)
 	television, power := "", ""
 	if s.room != nil {
 		television, power = s.room.television()
 	}
-	// A receiver the operator cannot reach has no power to read, and
-	// nothing to command. A TV that reports its power still decides the
-	// room, so the press reaches the TV and skips only the receiver. With
-	// no such TV, nothing decides the room, and the ask is dropped and
-	// never queued.
+	// When the receiver is unreachable, only the TV can act on the
+	// request. With no TV that reports its power, `power` drops the
+	// request.
 	if state.Reachable != equipment.ConditionTrue {
 		if television == "" || power == "" {
 			return
@@ -58,7 +50,7 @@ func (s *session) power(action, source string) {
 		return
 	}
 	on, reports := roomIsOn(receiver, television, power)
-	trigger := source + " asks " + action + ", and " + reports
+	trigger := source + " requests " + action + ", and " + reports
 	switch {
 	case !powerMoves(action, on):
 		s.log.printf("%s; sent nothing, because the room is already %s", trigger, onOff(on))
@@ -75,12 +67,10 @@ func (s *session) power(action, source string) {
 	}
 }
 
-// powerActions are the power asks that move the room's power.
 var powerActions = map[string]bool{"toggle": true, "on": true, "off": true}
 
-// powerMoves answers whether an ask moves a room that is on or off: a
-// toggle always does, and on and off only when the room is not already
-// in the state they name.
+// powerMoves reports whether action changes the power of a room that
+// is on or off.
 func powerMoves(action string, on bool) bool {
 	switch action {
 	case "on":
@@ -91,13 +81,12 @@ func powerMoves(action string, on bool) bool {
 	return true
 }
 
-// toggleTelevisionOnly turns the room's TV off or on for an ask that
-// finds the receiver unreachable, and writes one line that says the
-// receiver got nothing. The spec's power field stays as it is, because
-// the receiver did nothing.
+// toggleTelevisionOnly turns the room's TV on or off while the receiver
+// is unreachable. It does not write spec.power, because the receiver
+// did not change.
 func (s *session) toggleTelevisionOnly(source, action, television, power string) {
 	on, reports := roomIsOn(equipment.ZoneState{}, television, power)
-	trigger := source + " asks " + action + ", and " + reports
+	trigger := source + " requests " + action + ", and " + reports
 	switch {
 	case !powerMoves(action, on):
 		s.log.printf("%s; sent nothing, because the room is already %s", trigger, onOff(on))
@@ -110,11 +99,9 @@ func (s *session) toggleTelevisionOnly(source, action, television, power string)
 	s.log.printf("%s; sent the receiver nothing, because the operator cannot reach it", trigger)
 }
 
-// roomIsOn answers whether a power press finds the room on, and the
-// words that name what decided it. A TV that reports On, or ToOn on
-// its way there, is a room that is on, and a TV in Standby or ToStandby
-// is a room that is off. With no TV, or a TV that does not answer, the
-// receiver's power decides.
+// roomIsOn reports whether the room is on, and returns a phrase for the
+// log that says which device decided. A TV that reports On or ToOn is
+// on, and any other power it reports is off.
 func roomIsOn(receiver equipment.ZoneState, television, power string) (bool, string) {
 	if television != "" && power != "" {
 		on := strings.EqualFold(power, cec.PowerOn.String()) || strings.EqualFold(power, cec.PowerToOn.String())
@@ -123,10 +110,8 @@ func roomIsOn(receiver equipment.ZoneState, television, power string) (bool, str
 	return receiver.Power == equipment.PowerOn, "the receiver reports " + powerWords(receiver, 0)
 }
 
-// turnOff puts the room in standby: its TV, when it has one, and the
-// receiver, when the receiver has a standby. A receiver with no
-// standby, such as a WiiM, stays on, and its line says so as the
-// outcome of the press.
+// turnOff puts the room's TV and the receiver in standby. A receiver
+// with no standby command, such as a WiiM, stays on.
 func (s *session) turnOff(trigger string, receiver equipment.ZoneState, television string) {
 	switch {
 	case s.room == nil:

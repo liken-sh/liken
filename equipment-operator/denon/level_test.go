@@ -1,6 +1,3 @@
-// The arithmetic between the receiver's own half steps and the digits
-// a person reads.
-
 package denon
 
 import (
@@ -8,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestParseHalfStepsReadsTheDigitsTheReceiverSends(t *testing.T) {
+func TestParseHalfStepsConvertsTheDigitsOfAVolumeMessage(t *testing.T) {
 	cases := []struct {
 		digits string
 		halves int
@@ -35,7 +32,7 @@ func TestParseHalfStepsReadsTheDigitsTheReceiverSends(t *testing.T) {
 	}
 }
 
-func TestFormatHalfStepsWritesTheVolumeAPersonReads(t *testing.T) {
+func TestFormatHalfStepsFormatsTheVolumeInTheStatus(t *testing.T) {
 	cases := []struct {
 		halves int
 		want   string
@@ -53,7 +50,7 @@ func TestFormatHalfStepsWritesTheVolumeAPersonReads(t *testing.T) {
 	}
 }
 
-func TestHalfStepDigitsWritesTheDigitsASetCommandCarries(t *testing.T) {
+func TestHalfStepDigitsFormatsTheDigitsOfAVolumeCommand(t *testing.T) {
 	cases := []struct {
 		halves int
 		want   string
@@ -71,9 +68,8 @@ func TestHalfStepDigitsWritesTheDigitsASetCommandCarries(t *testing.T) {
 	}
 }
 
-// Every count the receiver can report survives the trip out to digits
-// and back, which is what makes the set command and the echo
-// comparable.
+// The driver compares the digits of a volume command with the digits
+// of the receiver's echo, which works only when the round trip is exact.
 func TestEveryHalfStepCountSurvivesTheRoundTrip(t *testing.T) {
 	for count := 0; count <= 196; count++ {
 		t.Run(strconv.Itoa(count), func(t *testing.T) {

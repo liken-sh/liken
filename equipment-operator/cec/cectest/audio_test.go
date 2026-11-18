@@ -1,9 +1,9 @@
 package cectest_test
 
-// A scripted audio system answers System Audio Mode Request the way
-// HDMI-CEC 1.3a, CEC 13.15.2, describes, and in the ways a real
-// receiver and TV fail it. A test of the wake shows with it what the
-// wake does with each answer.
+// The scripted audio system answers System Audio Mode Request as
+// HDMI-CEC 1.3a, section CEC 13.15.2, describes. It also fails the
+// request in the ways that a real receiver and TV fail it, so a test of
+// the wake can cover each reply.
 
 import (
 	"slices"
@@ -15,8 +15,8 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/cec/cectest"
 )
 
-// heard reads every message a follower has queued.
-func heard(follower *cec.Device) []string {
+// queuedMessages returns, as text, every message queued for follower.
+func queuedMessages(follower *cec.Device) []string {
 	var messages []string
 	for {
 		message, err := follower.Receive(0)
@@ -27,8 +27,8 @@ func heard(follower *cec.Device) []string {
 	}
 }
 
-// audioSystem is a receiver at logical address 5 that implements
-// System Audio Control, out of the mode.
+// audioSystem returns a receiver at logical address 5 that implements
+// System Audio Control and starts with the mode off.
 func audioSystem(reply cectest.AudioReply) cectest.Peer {
 	return cectest.Peer{Logical: 5, Physical: 0x1000, PrimaryType: 5, Power: cec.PowerStandby,
 		SystemAudio: true, AudioMode: cec.SystemAudioOff, AudioReply: reply, AudioAfter: time.Millisecond}
@@ -69,8 +69,8 @@ func TestAnAudioSystemAnswersARequest(t *testing.T) {
 				time.Sleep(10 * time.Millisecond)
 
 				peer, _ := bus.Peer(5)
-				if got := heard(asker); !slices.Equal(got, c.heard) || peer.AudioMode != c.mode || peer.AudioInput != c.input || peer.Power != c.power {
-					t.Errorf("heard %v; the peer is in %q on %s at %s; want %v, %q, %s, %s",
+				if got := queuedMessages(asker); !slices.Equal(got, c.heard) || peer.AudioMode != c.mode || peer.AudioInput != c.input || peer.Power != c.power {
+					t.Errorf("the asker heard %v and the peer is in %q on %s at %s, want %v and %q on %s at %s",
 						got, peer.AudioMode, peer.AudioInput, peer.Power, c.heard, c.mode, c.input, c.power)
 				}
 			})
@@ -79,8 +79,8 @@ func TestAnAudioSystemAnswersARequest(t *testing.T) {
 }
 
 // The audio system answers Give System Audio Mode Status with its mode,
-// takes the volume keys with no answer, and answers nothing with its
-// HDMI control off. A peer without the feature refuses each of them.
+// accepts volume keys without a reply, and answers nothing when its
+// HDMI control is off. A peer without the feature aborts each of them.
 func TestAnAudioSystemAnswersTheModeAndTakesTheKeys(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -106,14 +106,14 @@ func TestAnAudioSystemAnswersTheModeAndTakesTheKeys(t *testing.T) {
 
 			mustSucceed(t, err)
 			if answer := replyText(result); answer != c.answer || result.Aborted != c.aborted || !result.Acked {
-				t.Errorf("result %+v, answer %q; want %q, aborted %v", result, replyText(result), c.answer, c.aborted)
+				t.Errorf("the result is %+v with answer %q, want answer %q, aborted %v, and acked", result, replyText(result), c.answer, c.aborted)
 			}
 		})
 	}
 }
 
-// replyText is a transmit's reply as the log writes it, and empty for
-// none.
+// replyText returns a transmit's reply in the form the log uses, or an
+// empty string when there is no reply.
 func replyText(result cec.Result) string {
 	if result.Reply == nil {
 		return ""

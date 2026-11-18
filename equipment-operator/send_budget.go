@@ -1,20 +1,19 @@
 package main
 
-// The send budget bounds how often the operator sends one declared
-// field. The operator sends a field on each pass while the receiver
-// reports another value, which drives back a change made at the
-// receiver. A receiver can also take a command and keep reporting the
-// old value, for example a setting its own menu locks. Without a bound
-// the operator would send that command on every pass for as long as the
-// spec stands. The budget allows sendLimit sends of each field at one
-// declared value, then holds the field back and names it in the
-// SettingsConfirmed condition.
+// On each pass, the operator sends every declared field whose value
+// differs from what the receiver reports, which undoes a change made at
+// the receiver. A receiver can accept a command and keep reporting the
+// old value, for example when its own menu locks the setting, and
+// without a limit the operator would send that command on every pass.
+// So the send budget allows sendLimit sends of each field at one
+// declared value. After that the operator stops sending the field and
+// lists it in the SettingsConfirmed condition.
 //
-// A count starts again only when its own field changes: a person
-// declares another value, or the receiver reports the declared value,
-// so the field is no longer pending. An edit of another field does not
-// start it again. metadata.generation would, and every session flag
-// and label edit would then buy a stuck field sendLimit more sends.
+// A field's count restarts only when that field changes: a person
+// declares another value, or the receiver reports the declared value.
+// Restarting every count when metadata.generation changes would give a
+// stuck field sendLimit more sends on each edit of another field, such
+// as a session flag.
 
 import (
 	"encoding/json"
@@ -24,37 +23,37 @@ import (
 	"sync"
 )
 
-// sendLimit is how many times the operator sends one declared field at
-// one declared value.
+// sendLimit is the number of times the operator sends one field at one
+// declared value.
 const sendLimit = 3
 
 // sendBudget counts the sends of each declared field, keyed by the
-// field's path in the spec, and records which fields each family held
-// back on its last pass.
+// field's path in the spec. unsent records, for each family, the fields
+// that the last pass did not send because they reached sendLimit.
 type sendBudget struct {
-	mutex sync.Mutex
-	sends map[string]sendCount
-	held  map[string][]string
+	mutex  sync.Mutex
+	sends  map[string]sendCount
+	unsent map[string][]string
 }
 
-// sendCount is the sends of one field at one declared value, which is
-// held as JSON.
+// sendCount is the number of sends of one field at one declared value.
+// The value is stored as JSON.
 type sendCount struct {
 	value string
 	count int
 }
 
 func newSendBudget() *sendBudget {
-	return &sendBudget{sends: map[string]sendCount{}, held: map[string][]string{}}
+	return &sendBudget{sends: map[string]sendCount{}, unsent: map[string][]string{}}
 }
 
-// spend answers pending without the fields that have had sendLimit
+// spend returns pending without the fields that already had sendLimit
 // sends at their declared value, and counts one send for each field it
-// keeps. family is the path of the block in the spec, such as
+// returns. family is the path of the block in the spec, such as
 // spec.denon.settings or spec.zones.zone2. A field of the family that
-// is not pending loses its count. The fields it holds back replace the
-// family's earlier record, so a field the receiver now reports at the
-// declared value is no longer named.
+// is no longer pending loses its count, and the family's list of unsent
+// fields is replaced, so a field the receiver now reports at the
+// declared value leaves the SettingsConfirmed condition.
 func spend[T any](b *sendBudget, family string, pending T) T {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
@@ -62,7 +61,7 @@ func spend[T any](b *sendBudget, family string, pending T) T {
 	var tree any
 	_ = json.Unmarshal(raw, &tree)
 	counted := map[string]bool{}
-	var held []string
+	var unsent []string
 	for _, leaf := range leaves(tree, nil) {
 		path := family + "." + strings.Join(leaf, ".")
 		value, _ := json.Marshal(leafValue(tree, leaf))
@@ -73,7 +72,7 @@ func spend[T any](b *sendBudget, family string, pending T) T {
 		counted[path] = true
 		if sent.count >= sendLimit {
 			b.sends[path] = sent
-			held = append(held, path)
+			unsent = append(unsent, path)
 			removeLeaf(tree, leaf)
 			continue
 		}
@@ -85,28 +84,29 @@ func spend[T any](b *sendBudget, family string, pending T) T {
 			delete(b.sends, path)
 		}
 	}
-	b.held[family] = held
+	b.unsent[family] = unsent
 	var kept T
 	pruned, _ := json.Marshal(prune(tree))
 	_ = json.Unmarshal(pruned, &kept)
 	return kept
 }
 
-// unconfirmed answers every field the families held back on their last
-// pass, sorted, and nil when there is none.
+// unconfirmed returns the fields that the last pass of each family did
+// not send because they reached sendLimit, sorted. It returns nil when
+// there are none.
 func (b *sendBudget) unconfirmed() []string {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 	var all []string
-	for _, held := range b.held {
-		all = append(all, held...)
+	for _, fields := range b.unsent {
+		all = append(all, fields...)
 	}
 	sort.Strings(all)
 	return slices.Clip(all)
 }
 
-// leaves answers the path to every value in a decoded JSON tree that is
-// not an object.
+// leaves returns the path to every value in a decoded JSON tree that
+// is not an object.
 func leaves(tree any, prefix []string) [][]string {
 	object, isObject := tree.(map[string]any)
 	if !isObject {
@@ -120,7 +120,6 @@ func leaves(tree any, prefix []string) [][]string {
 	return found
 }
 
-// leafValue answers the value at one path of a decoded JSON tree.
 func leafValue(tree any, path []string) any {
 	for _, key := range path {
 		tree = tree.(map[string]any)[key]
@@ -128,7 +127,6 @@ func leafValue(tree any, path []string) any {
 	return tree
 }
 
-// removeLeaf deletes the value at one path from a decoded JSON tree.
 func removeLeaf(tree any, path []string) {
 	for _, key := range path[:len(path)-1] {
 		tree = tree.(map[string]any)[key]

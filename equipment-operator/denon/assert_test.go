@@ -1,7 +1,3 @@
-// The assertion helpers the denon test files share. Each one fails the
-// test with the value it read against the value it wanted, so a failure
-// reads without a debugger.
-
 package denon
 
 import (
@@ -12,30 +8,29 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
-// The bound on every wait in these tests. The tests wait on the fake
-// clock of a synctest bubble, so the bound only decides when a broken
-// program fails.
+// testTimeout limits every wait in these tests. The waits run on the
+// fake clock of a synctest bubble, so a long limit costs no real time.
 const testTimeout = 2 * time.Second
 
 func mustSucceed(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
-		t.Fatalf("wanted no error, got %v", err)
+		t.Fatalf("the call returned error %v, want none", err)
 	}
 }
 
 func mustMatch[T comparable](t *testing.T, got, want T) {
 	t.Helper()
 	if got != want {
-		t.Errorf("got %+v, want %+v", got, want)
+		t.Errorf("the value is %+v, want %+v", got, want)
 	}
 }
 
-// mustMatchState compares two states, which carry a map and so cannot
-// satisfy comparable.
+// mustMatchState uses reflect.DeepEqual because equipment.State
+// contains a map and is not comparable.
 func mustMatchState(t *testing.T, got, want equipment.State) {
 	t.Helper()
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("got %+v, want %+v", got, want)
+		t.Errorf("the value is %+v, want %+v", got, want)
 	}
 }

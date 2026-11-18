@@ -1,5 +1,4 @@
-# The operator that controls a room's equipment: receivers, and the TVs
-# on a CEC bus.
+# The operator that controls A/V receivers and the TVs on a CEC bus.
 [package]
 name = "equipment-operator"
 license = "MIT"
@@ -10,9 +9,9 @@ components = ["kubernetes", "notices", "toolchains"]
 [docs]
 prefix = "equipment"
 
-# gofmt, vet, a tidy check of go.mod, and one run of the tests that
-# checks for races and writes the coverage profile, then the coverage
-# gate on that profile. .testcoverage.yml holds the floor.
+# make test-go runs gofmt, go vet, the go.mod tidy check, and the tests
+# with the race detector, and then checks coverage against
+# .testcoverage.yml.
 [[jobs]]
 name = "go"
 toolchain = "go"
@@ -20,28 +19,23 @@ run = "make test-go"
 timeout = 20
 coverage = ["coverage.out"]
 
-# The link check, the generated skills, and the site build.
 [[jobs]]
 name = "docs"
 toolchain = "hugo"
 module = "docs"
 run = "make test-docs"
 
-# The hooks in .pre-commit-config.yaml: the formatters, the linters,
-# and the hygiene checks. The jobs above run the tests and the
-# coverage gates.
 [[jobs]]
 name = "prek"
 toolchain = "prek"
-# The go job runs the same checks as these hooks.
+# The go job already runs these checks.
 skip = ["gofmt", "go-vet", "go-mod-tidy"]
 
 [outputs]
 deploy = "deploy"
 
-# The image builds from this module's go.mod, which replaces the shared
-# kubernetes module with ../kubernetes, so it takes that directory as a
-# build context.
+# go.mod replaces the shared kubernetes module with ../kubernetes, so
+# the image build needs that directory as a build context.
 [[outputs.images]]
 name = "equipment-operator"
 description = "equipment-operator, which controls a TV over HDMI-CEC and an A/V receiver over the network."

@@ -1,11 +1,12 @@
 package main
 
-// The active source as one adapter knows it: the last Active Source it
-// heard or sent, and the claim a wake makes and guards. CEC has no
-// query for the TV's input, so the last Active Source on the wire is
-// the only report of it the bus gives. A TV that switches to its own
-// apps, or to an input with no CEC, sends nothing, so this is the last
-// CEC source and not what the TV shows.
+// The node workload's record of the active source on its adapter's
+// bus, and the claim of the input that a wake sends and then guards.
+// CEC has no message that asks the TV for its current input, so the
+// last Active Source on the bus is the only evidence of it. A TV can
+// switch to its own apps, or to an input without CEC, without sending
+// Active Source, so the recorded source can differ from what the TV
+// shows.
 
 import (
 	"context"
@@ -15,13 +16,17 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/cec"
 )
 
-// noteSource records the physical address of an Active Source the
-// adapter heard or sent, asks the loop to write the entry when it
-// changed, and wakes a wake that guards its claim. An Active Source for
-// 0.0.0.0 comes from the TV alone, when a person switches it to its own
-// tuner or apps (HDMI-CEC 1.3a, CEC 13.2.2), so it is a person's
-// choice of route. So is the Active Source of the source a person's
-// route leads to, which that source sends to answer the choice.
+// noteSource records the physical address of an Active Source that the
+// adapter received or sent, and moves the route to it. It marks the
+// status entry for writing when the address changed, and signals
+// n.sources so that a wake's guard checks the route.
+//
+// An Active Source for 0.0.0.0 comes only from the TV, when a person
+// switches it to its own tuner or apps (HDMI-CEC 1.3a, CEC 13.2.2), so
+// that route counts as a person's choice. When a person chose a route
+// and the source at that address then sends Active Source, noteSource
+// keeps the route as the person's choice, so the guard does not take
+// that input back.
 func (n *cecNode) noteSource(address cec.PhysicalAddress) {
 	n.mutex.Lock()
 	changed := n.source != address
@@ -35,26 +40,25 @@ func (n *cecNode) noteSource(address cec.PhysicalAddress) {
 	if changed {
 		n.markDirty()
 	}
-	poke(n.sources)
+	sendWake(n.sources)
 }
 
-// currentSource answers the last Active Source the adapter knows.
+// currentSource returns the address of the last Active Source that the
+// adapter received or sent.
 func (n *cecNode) currentSource() cec.PhysicalAddress {
 	n.mutex.Lock()
 	defer n.mutex.Unlock()
 	return n.source
 }
 
-// claimInput sends the TV Image View On and then broadcasts Active
-// Source for a physical address, and records the claim. HDMI-CEC 1.3a,
-// CEC 13.1.2, says a source that needs its output on the screen sends
-// Image View On whenever it sends Active Source, because the source
-// does not know whether the TV is in standby. A TV that shows its own
-// apps also switches on that pair, and not on a bare Active Source. So
-// every claim the adapter makes for a person comes through here: the
-// wake's claims and a home press. An answer to a question the bus
-// asked is Active Source alone (announceSource). It answers the name
-// of the message that failed, with the error.
+// claimInput sends Image View On to the TV and then broadcasts Active
+// Source for physical. HDMI-CEC 1.3a, CEC 13.1.2, says a source that
+// needs the screen sends Image View On with each Active Source, because
+// it cannot know whether the TV is in standby. A TV that shows its own
+// apps switches input on that pair but not on Active Source alone. So a
+// wake and a home press claim the input here, and a reply to another
+// device's request calls announceSource. On a failure it returns the
+// name of the message that failed, with the error.
 func (n *cecNode) claimInput(own cec.LogicalAddress, physical cec.PhysicalAddress) (string, error) {
 	if _, err := n.device.Transmit(cec.ImageViewOn(own, cec.AddressTV), 0, 0); err != nil {
 		return "Image View On", err
@@ -62,10 +66,11 @@ func (n *cecNode) claimInput(own cec.LogicalAddress, physical cec.PhysicalAddres
 	return n.announceSource(own, physical)
 }
 
-// announceSource broadcasts Active Source for a physical address and
-// records it. The kernel does not pass an adapter its own
-// transmission, so the adapter records its own claim, and a wake's
-// guard sees it.
+// announceSource broadcasts Active Source for physical and records it
+// with noteSource. The kernel does not deliver an adapter's own
+// messages back to it, so without this record a wake's guard would not
+// see its own claim. On a failure it returns the name of the message
+// that failed, with the error.
 func (n *cecNode) announceSource(own cec.LogicalAddress, physical cec.PhysicalAddress) (string, error) {
 	if _, err := n.device.Transmit(cec.ActiveSource(own, physical), 0, 0); err != nil {
 		return "Active Source for " + physical.String(), err
@@ -74,41 +79,29 @@ func (n *cecNode) announceSource(own cec.LogicalAddress, physical cec.PhysicalAd
 	return "", nil
 }
 
-// claimSource sends Image View On and Active Source for the adapter's
-// own physical address, and guards the claim for cecWakeGuard: when
-// another source claims the input, the adapter waits cecWakeSettle and
-// sends the pair again, at most cecWakeReclaims times. The claims come from the
-// wake's own budget, so a wake that runs again sends no more of them.
-// An Active Source from another adapter of the bus is a later wake of
-// the bus, so the guard ends at once and claims nothing more. The
-// verdict is what the bus reports when the guard ends: whether the
-// last Active Source is the adapter's own.
+// claimSource claims the input for the adapter's own physical address,
+// then guards the claim for cecWakeGuard. When another source sends
+// Active Source, the adapter waits cecWakeSettle and claims again, up
+// to cecWakeReclaims more times. n.woken.claims counts the sends of
+// each wake, so a wake that runs again does not start the count over.
 //
-// The guard takes the input back only from a bare Active Source of
-// another source device. Plan 09 measured the case it exists for: a
-// streaming player that wakes with the room sends Active Source by
-// itself, and the TV and the receiver follow it. A route that a person
-// moves ends the guard with no claim, because the adapter claims the
-// input for a person and never against one. A person moves the route
-// through the TV's menu, which sends Set Stream Path; through a
-// switch's front panel, which sends Routing Change (HDMI-CEC 1.3a, CEC
-// 13.2.2); through the TV's own tuner or apps, which send Active Source
-// for 0.0.0.0; and through the TV's power button, which sends Standby.
-// Any other move of the route, such as a switch's Routing Information,
-// neither ends the guard nor asks for a claim: only another source's
-// Active Source is a claim to take back. A Set Stream Path from the TV
-// in the cecBootGrace after the first claim is no person's choice
-// either: the TV sends it when it switches by itself as it comes on, or
-// when a streaming player that woke with it asks, so the guard goes on
-// and takes the input back from that player's Active Source.
+// The guard takes the input back from a source that claims it without
+// a person, such as a streaming player that wakes with the room. It
+// never takes the input back from a person. A Set Stream Path from the
+// TV's menu, a Routing Change from a switch's front panel (HDMI-CEC
+// 1.3a, CEC 13.2.2), an Active Source for 0.0.0.0 from the TV's own
+// tuner or apps, and a Standby each end the guard with reasonChosen.
+// guardMove makes the exception for the TV's own Set Stream Path just
+// after the first claim. An Active Source from another adapter on the
+// bus means a later wake there, and ends the guard with
+// reasonSuperseded.
 //
-// A wake that answers the TV's own Set Stream Path for the Display
-// (cecnode_pick.go) sends Active Source alone, in its first claim and in
-// each claim after: the TV is on and already shows the Display's input,
-// so Image View On has nothing to ask of it.
+// When the TV itself just selected the Display (consumeStreamPath), each claim
+// is Active Source alone, because the TV is on and already shows that
+// input.
 func (n *cecNode) claimSource(ctx context.Context, job *wakeJob, own cec.LogicalAddress, physical cec.PhysicalAddress, display string) powerResult {
-	drainPokes(n.sources)
-	claim := claimWords{pair: !n.takePick(physical)}
+	drainWakes(n.sources)
+	claim := claimWords{pair: !n.consumeStreamPath(physical)}
 	sends := 0
 	send := func() *powerResult {
 		n.mutex.Lock()
@@ -134,9 +127,9 @@ func (n *cecNode) claimSource(ctx context.Context, job *wakeJob, own cec.Logical
 		switch {
 		case err != nil && cec.IsGone(err):
 			n.fail(err)
-			return &powerResult{stopped: true, log: fmt.Sprintf("the adapter on %s left while it sent %s: %v", n.machine, failed, err)}
+			return &powerResult{stopped: true, log: fmt.Sprintf("the adapter on %s was removed while it sent %s: %v", n.machine, failed, err)}
 		case err != nil:
-			message := fmt.Sprintf("the adapter on %s could not send %s: %v", n.machine, failed, err)
+			message := fmt.Sprintf("the adapter on %s did not send %s: %v", n.machine, failed, err)
 			return &powerResult{verdict: verdict{ConditionFalse, reasonRefused, message}, log: message}
 		}
 		sends++
@@ -200,28 +193,27 @@ func (n *cecNode) claimSource(ctx context.Context, job *wakeJob, own cec.Logical
 	return sourceVerdict(n.machine, claim, physical, display, n.currentSource(), sends, taken, takenBy, takenAfter)
 }
 
-// guardMovement is what one move of the route means to a wake's guard.
+// guardMovement classifies one change of the route for a wake's guard.
 type guardMovement int
 
 const (
-	// moveNone asks nothing: the route leads to the Display, or moved
-	// by a message that claims nothing.
+	// moveNone needs no action: the route leads to the Display, or the
+	// message that moved it is not a claim.
 	moveNone guardMovement = iota
-	// moveChosen is a person's choice of another source, which ends the
+	// moveChosen is a person's choice of another source. It ends the
 	// guard.
 	moveChosen
-	// moveClaimed is another source's Active Source, which the guard
-	// takes back.
+	// moveClaimed is another source's Active Source. The guard takes
+	// the input back.
 	moveClaimed
 )
 
-// guardMove reads one move of the route, since time after the wake's
-// first claim. A Set Stream Path from the TV in the cecBootGrace is the
-// TV that switches as it comes on, by itself or for a streaming player,
-// so it ends nothing. The player's Active Source that follows keeps the
-// route the TV chose (noteSource), so in that window the holder of the
-// last Active Source decides: another source holds the input, and the
-// guard takes it back.
+// guardMove classifies the current route for a wake's guard. since is
+// the time since the wake's first claim. Within cecBootGrace, a Set
+// Stream Path from the TV comes from the TV switching as it powers on,
+// and noteSource keeps that route when a streaming player then sends
+// Active Source. So in that time the guard ignores the route, and takes
+// the input back when another source sent the last Active Source.
 func guardMove(route routeState, holder, physical cec.PhysicalAddress, since time.Duration) guardMovement {
 	if route.chosen && route.by == cec.OpSetStreamPath && since < cecBootGrace {
 		if holder == physical || holder == cec.InvalidPhysicalAddress {
@@ -238,9 +230,8 @@ func guardMove(route routeState, holder, physical cec.PhysicalAddress, since tim
 	return moveClaimed
 }
 
-// claimWords names what each claim of one wake sends: Image View On
-// and Active Source, or Active Source alone for a wake that answers the
-// TV's Set Stream Path.
+// claimWords is what each claim of one wake sends: Image View On and
+// Active Source, or Active Source alone.
 type claimWords struct {
 	pair bool
 }
@@ -252,22 +243,25 @@ func (c claimWords) String() string {
 	return "Active Source"
 }
 
-// guardView answers the route and the last Active Source as the
-// adapter holds them now, for a guard that a message woke.
+// guardView reads the route and the last Active Source under one lock,
+// so the two agree.
 func (n *cecNode) guardView() (routeState, cec.PhysicalAddress) {
 	n.mutex.Lock()
 	defer n.mutex.Unlock()
 	return n.route, n.source
 }
 
-// chosenVerdict states a guard that a person's choice of route ended.
+// chosenVerdict builds the result for a guard that ended because a
+// person chose another route.
 func chosenVerdict(machine string, claim claimWords, physical cec.PhysicalAddress, display string, sends int, route routeState, after time.Duration) powerResult {
 	message := fmt.Sprintf("the adapter on %s sent %s for %s, Display %s, %s, and %s after %s moved the picture away from the Display, which a person does through the TV or a switch, so the guard ended and the adapter claims nothing more",
 		machine, claim, physical, display, times(sends), route.words, elapsed(after))
 	return powerResult{verdict: verdict{ConditionFalse, reasonChosen, message}, log: message}
 }
 
-// sourceVerdict states what the bus reports at the end of a guard.
+// sourceVerdict builds the result for a guard that ran for the whole
+// cecWakeGuard: reasonConfirmed when the last Active Source on the bus
+// is the adapter's own, and reasonTaken when it is another source's.
 func sourceVerdict(machine string, claim claimWords, physical cec.PhysicalAddress, display string, holder cec.PhysicalAddress, sends, taken int, takenBy cec.PhysicalAddress, takenAfter time.Duration) powerResult {
 	message := fmt.Sprintf("the adapter on %s sent %s for %s, Display %s, %s", machine, claim, physical, display, times(sends))
 	if taken == 0 {

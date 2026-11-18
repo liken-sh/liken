@@ -1,9 +1,8 @@
 package main
 
-// The two session flags against the fake receiver:
-// the session the media operator holds at the idle screen, and the
-// flips a Play and a waking screen make on it. The harness these run on
-// is in session_test.go.
+// These tests change a session's flags the way a Play and a waking
+// screen do: active is true while a Play runs, and awake is true while
+// the screen is awake. session_test.go has the harness.
 
 import (
 	"context"
@@ -18,16 +17,17 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
-// idleListening is a harness whose session stands with both flags
-// false. It has sent the equipment nothing.
+// idleListening returns a session whose flags are both false, which
+// has sent the receiver nothing.
 func idleListening(t *testing.T) (*sessionHarness, *session) {
 	t.Helper()
 	h := newSessionHarness(t)
 	return h, h.beginIdle(t, "GAME")
 }
 
-// A Player at its idle screen holds a session on the receiver, so an
-// idle session must leave a dark room dark.
+// A Player at its idle screen has a session open on the receiver. It
+// must not turn the receiver on or select an input, because nobody is
+// using the room.
 func TestAnIdleSessionSendsNoPowerOrInput(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -52,8 +52,8 @@ func TestAFlipToActivePowersOnThenSelectsTheInput(t *testing.T) {
 	})
 }
 
-// A Play that ends returns the Player to its idle screen. The room may
-// still be listening to something else, so nothing is sent.
+// A Play that ends returns the Player to its idle screen. The receiver
+// may be playing something else by then, so the session sends nothing.
 func TestAFlipOutOfActiveSendsNothing(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -67,7 +67,7 @@ func TestAFlipOutOfActiveSendsNothing(t *testing.T) {
 	})
 }
 
-// A person can select another input between two Plays, so the next Play
+// A person can select another input between two Plays, so each Play
 // selects the input again.
 func TestASecondFlipToActiveSelectsTheInputAgain(t *testing.T) {
 	t.Parallel()
@@ -86,9 +86,8 @@ func TestASecondFlipToActiveSelectsTheInputAgain(t *testing.T) {
 	})
 }
 
-// The screen waking is the second trigger for the same one-shots, so it
-// powers a dark room on and selects the input by itself, with no Play
-// standing.
+// A screen that wakes turns the receiver on and selects the input with
+// no Play running.
 func TestAFlipToAwakePowersOnThenSelectsTheInput(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -102,8 +101,8 @@ func TestAFlipToAwakePowersOnThenSelectsTheInput(t *testing.T) {
 	})
 }
 
-// A person can select another input while the screen sleeps, so the
-// next waking selects the input again.
+// A person can select another input while the screen sleeps, so each
+// waking selects the input again.
 func TestASecondFlipToAwakeSelectsTheInputAgain(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -121,11 +120,10 @@ func TestASecondFlipToAwakeSelectsTheInputAgain(t *testing.T) {
 	})
 }
 
-// The flags are independent, so a screen that wakes under a standing
-// Play selects the input again. A person pressed the receiver's own
-// power button in the middle of a film, and the re-select is what puts
-// the film back on the screen.
-func TestAFlipToAwakeSelectsAgainUnderAStandingPlay(t *testing.T) {
+// A screen that wakes during a Play selects the input again. When a
+// person pressed the receiver's own power button during the Play, this
+// restores the Player's picture.
+func TestAFlipToAwakeDuringAPlaySelectsTheInputAgain(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		h, held := idleListening(t)
@@ -141,11 +139,9 @@ func TestAFlipToAwakeSelectsAgainUnderAStandingPlay(t *testing.T) {
 	})
 }
 
-// playingOnAWokenScreen is a harness whose session starts with both
-// flags on, which is the media operator applying a Play and a waking
-// screen in one write. The receiver is already on, so the input
-// selection is the whole of what the session sends, and the count of
-// them is what the test reads.
+// playingOnAWokenScreen starts a session with both flags on, as when
+// media-operator writes a Play and a waking screen in one write. The
+// receiver is already on, so the session sends only the input.
 func playingOnAWokenScreen(t *testing.T, input string) *sessionHarness {
 	t.Helper()
 	h := newSessionHarness(t)
@@ -154,8 +150,6 @@ func playingOnAWokenScreen(t *testing.T, input string) *sessionHarness {
 	return h
 }
 
-// Two flags on at the start are one start and not two, so the input is
-// selected once.
 func TestASessionThatStartsActiveAndAwakeSelectsOnce(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -167,11 +161,10 @@ func TestASessionThatStartsActiveAndAwakeSelectsOnce(t *testing.T) {
 	})
 }
 
-// A power-on the receiver never confirms is the one wait selectInput
-// gives up on, and giving up is what equipment_commands_total counts
-// as a timeout. readings is wired before the client's Run goroutine
-// starts, and never touched again from this goroutine, because the
-// field carries no lock of its own.
+// When the receiver never reports power On, the session sends the input
+// after sessionPowerWait, and equipment_commands_total counts a timeout.
+// The test sets the client's Dial and Reporter before Run starts,
+// because the client reads those fields without a lock.
 func TestAPowerOnThatNeverAnswersCountsATimeout(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -207,8 +200,6 @@ func TestAPowerOnThatNeverAnswersCountsATimeout(t *testing.T) {
 	})
 }
 
-// A session that ends while it waits for the receiver to report power
-// On sends no input, and its line says the session ended.
 func TestASessionThatEndsDuringThePowerWaitSendsNoInput(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -227,8 +218,6 @@ func TestASessionThatEndsDuringThePowerWaitSendsNoInput(t *testing.T) {
 	})
 }
 
-// An input may name the sound mode it wants, and the session selects it
-// in the same one-shot that selects the input.
 func TestAnInputsSoundModeIsSelectedWithTheInput(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -240,15 +229,13 @@ func TestAnInputsSoundModeIsSelectedWithTheInput(t *testing.T) {
 
 		sent := h.equipment.waitForCommands(t, "MSSTEREO")
 		if !slices.Contains(sent, "SIGAME") {
-			t.Fatalf("the input was not selected before the mode: %v", sent)
+			t.Fatalf("the receiver got %v, want SIGAME to select the input before MSSTEREO", sent)
 		}
 	})
 }
 
-// The power-and-input step compares the room with what the receiver
-// reported, so it waits for the survey. A session that starts active on
-// a receiver that never answers ends with nothing sent and no line
-// written.
+// The session compares itself with the state that the receiver
+// reported, so it sends nothing until the driver reports FirstReadDone.
 func TestAnActiveSessionOnAReceiverThatNeverAnsweredEndsWithNothingSent(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

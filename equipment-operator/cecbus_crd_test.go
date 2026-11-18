@@ -1,7 +1,7 @@
 package main
 
-// The CECBus definition, run through the same validators the API
-// server runs. receiver_test.go holds the helpers.
+// Tests of the CECBus definition, run through the same validators that
+// the API server runs. The helpers are in receiver_test.go.
 
 import (
 	"os"
@@ -51,14 +51,14 @@ func TestTheCECBusDefinitionValidatesExamples(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			errs := validateObject(t, cecBusesCRD, c.bus)
 			if got := len(errs) > 0; got != c.wantErr {
-				t.Errorf("got errors %v, want an error: %v", errs, c.wantErr)
+				t.Errorf("validation errors are %v, want an error: %v", errs, c.wantErr)
 			}
 		})
 	}
 }
 
-// A bus that names no OSD name announces liken, the name the API
-// server writes when the field is absent, so kubectl get shows the name
+// A bus with no osdName announces liken. The API server writes that
+// default when the field is absent, so kubectl get shows the name that
 // the TV lists.
 func TestTheOSDNameDefaultsToLiken(t *testing.T) {
 	t.Parallel()
@@ -88,8 +88,8 @@ func TestTheCECBusDefinitionIdentity(t *testing.T) {
 }
 
 // Server-side apply merges the node workloads' entries only when the
-// list is a map keyed by machine. Without the key, each node's apply
-// would replace the whole list and remove the other nodes' entries.
+// list is a map keyed by machine. Otherwise each node's apply would
+// replace the whole list and remove the other nodes' entries.
 func TestTheAdapterEntriesAreAMapKeyedByMachine(t *testing.T) {
 	t.Parallel()
 	status := loadCRDFrom(t, cecBusesCRD).Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["status"]
@@ -108,12 +108,12 @@ func TestTheExampleCECBusValidates(t *testing.T) {
 	mustSucceed(t, yaml.UnmarshalStrict(raw, &example))
 
 	if errs := validateObject(t, cecBusesCRD, example); len(errs) > 0 {
-		t.Errorf("testdata/cecbus.yaml: %v", errs)
+		t.Errorf("testdata/cecbus.yaml fails validation: %v", errs)
 	}
 }
 
-// A status as the writers write it passes the schema, so no apply is
-// refused for its shape.
+// A status in the shape that the writers produce passes the schema, so
+// the API server does not refuse an apply because of its shape.
 func TestAWrittenStatusValidates(t *testing.T) {
 	t.Parallel()
 	bus := cecBus(map[string]any{"mode": "Control", "adapters": []any{map[string]any{"machine": "node-1", "display": "acm-0001-receiver"}}})
@@ -129,11 +129,11 @@ func TestAWrittenStatusValidates(t *testing.T) {
 		},
 		"conditions": []any{map[string]any{
 			"type": "Joined", "status": "True", "observedGeneration": int64(1), "reason": "Joined",
-			"message": "every adapter holds a logical address", "lastTransitionTime": "2026-09-26T12:00:00Z",
+			"message": "Every adapter has a logical address", "lastTransitionTime": "2026-09-26T12:00:00Z",
 		}},
 	}
 
 	if errs := validateObject(t, cecBusesCRD, bus); len(errs) > 0 {
-		t.Errorf("a written status: %v", errs)
+		t.Errorf("a written status fails validation: %v", errs)
 	}
 }

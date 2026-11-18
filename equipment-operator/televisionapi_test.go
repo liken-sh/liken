@@ -1,19 +1,20 @@
 package main
 
 // The fake API server's Television, Receiver, and Display collections.
-// A status apply keeps each writer's fields apart the way server-side
-// apply does for the fields these writers state: the Deployment's
-// apply replaces cec, power, activeSource, activeDisplay, displays,
-// and its own conditions, the Deployment's session apply replaces
-// session, a node workload's power apply replaces powerGeneration and
-// its own conditions, a node workload's wake apply replaces wokeAt and
-// its own conditions, a node workload's standby apply replaces
-// standbyAt and its own conditions, a node workload's power read
-// apply replaces powerRead, and a node workload's screen apply replaces
-// screenAsk. No apply touches a field another manager owns.
-// The conditions are a map keyed by type, so each apply leaves the
-// other writer's conditions in place, and removes a condition its own
-// manager wrote before and no longer states.
+// A status apply changes only the fields of its own field manager, as
+// server-side apply does:
+//
+//   - The Deployment's apply replaces cec, power, activeSource,
+//     activeDisplay, displays, and its own conditions.
+//   - The Deployment's session apply replaces session.
+//   - A node workload's power apply replaces powerGeneration and its own
+//     conditions.
+//   - A node workload's wake apply replaces wokeAt and its own
+//     conditions.
+//   - A node workload's standby apply replaces standbyAt and its own
+//     conditions.
+//   - A node workload's power read apply replaces powerRead.
+//   - A node workload's screen apply replaces screenAsk.
 
 import (
 	"encoding/json"
@@ -27,8 +28,8 @@ import (
 	"time"
 )
 
-// serveTelevisionAPI answers a request for the collections this file
-// holds, and false for any other request.
+// serveTelevisionAPI returns false for a request outside the collections
+// in this file.
 func (a *cecAPI) serveTelevisionAPI(w http.ResponseWriter, r *http.Request) bool {
 	path := r.URL.Path
 	a.mutex.Lock()
@@ -90,9 +91,8 @@ func (a *cecAPI) refusesDisplayNodeField() bool {
 	return a.noDisplayNodeField
 }
 
-// createTelevision answers a create the way the API server does: a
-// name that exists is a conflict, and a new object gets a uid and
-// generation 1.
+// createTelevision returns a conflict for a name that already exists,
+// as the API server does.
 func (a *cecAPI) createTelevision(w http.ResponseWriter, r *http.Request) {
 	var body Television
 	_ = json.NewDecoder(r.Body).Decode(&body)
@@ -108,8 +108,9 @@ func (a *cecAPI) createTelevision(w http.ResponseWriter, r *http.Request) {
 	a.serveStored(w, televisionsPath, body.Metadata.Name)
 }
 
-// store keeps a new object with a new uid at generation 1. The caller
-// holds the mutex.
+// store saves a new object with a new uid and generation 1, and keeps
+// only the session and displays of its status. The caller holds the
+// mutex.
 func (a *cecAPI) store(television Television) {
 	a.uids++
 	television.Metadata.UID = fmt.Sprintf("uid-%d", a.uids)
@@ -134,13 +135,13 @@ func (a *cecAPI) serveTelevision(w http.ResponseWriter, r *http.Request, rest st
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	manager := r.URL.Query().Get("fieldManager")
 	node := strings.HasPrefix(manager, "equipment-operator-cec-")
-	waking := strings.HasPrefix(manager, "equipment-operator-wake-")
-	standing := strings.HasPrefix(manager, "equipment-operator-standby-")
-	reading := strings.HasPrefix(manager, "equipment-operator-powerread-")
-	screening := strings.HasPrefix(manager, "equipment-operator-screen-")
+	isWake := strings.HasPrefix(manager, "equipment-operator-wake-")
+	isStandby := strings.HasPrefix(manager, "equipment-operator-standby-")
+	isPowerRead := strings.HasPrefix(manager, "equipment-operator-powerread-")
+	isScreen := strings.HasPrefix(manager, "equipment-operator-screen-")
 	if manager == sessionFieldManager {
-		// The fake counts the session writes in flight, and holds each one
-		// for sessionDelay, so a test can see two that overlap.
+		// Each session write waits sessionDelay, so a test can detect two
+		// writes that overlap.
 		a.mutex.Lock()
 		a.sessionInFlight++
 		a.sessionMostAtOnce = max(a.sessionMostAtOnce, a.sessionInFlight)
@@ -167,18 +168,17 @@ func (a *cecAPI) serveTelevision(w http.ResponseWriter, r *http.Request, rest st
 		w.WriteHeader(http.StatusNotFound)
 		return
 	case body.Metadata.UID != "" && body.Metadata.UID != television.Metadata.UID:
-		// An apply that states a uid is a precondition on it.
+		// An apply that includes a uid requires the object to have it.
 		w.WriteHeader(http.StatusConflict)
 		return
-	case waking && a.refusingWakeWrites:
+	case isWake && a.refusingWakeWrites:
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	case manager == sessionFieldManager && a.noSessionWrites:
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	case manager == sessionFieldManager:
-		// A status write is no spec edit, so the generation stays, as on
-		// a real API server.
+		// A status write does not change the generation.
 		a.sessionWrites++
 		television.Status.Session = body.Status.Session
 	case node && a.refusingPowerWrites:
@@ -188,15 +188,15 @@ func (a *cecAPI) serveTelevision(w http.ResponseWriter, r *http.Request, rest st
 		a.powerWrites++
 		television.Status.PowerGeneration = body.Status.PowerGeneration
 		a.applyConditions(television, manager, body.Status.Conditions)
-	case waking:
+	case isWake:
 		a.wakeWrites++
 		television.Status.WokeAt = body.Status.WokeAt
 		a.applyConditions(television, manager, body.Status.Conditions)
-	case reading:
+	case isPowerRead:
 		television.Status.PowerRead = body.Status.PowerRead
-	case screening:
+	case isScreen:
 		television.Status.ScreenAsk = body.Status.ScreenAsk
-	case standing:
+	case isStandby:
 		television.Status.StandbyAt = body.Status.StandbyAt
 		a.applyConditions(television, manager, body.Status.Conditions)
 	default:
@@ -216,9 +216,8 @@ func (a *cecAPI) serveTelevision(w http.ResponseWriter, r *http.Request, rest st
 	a.serveStored(w, televisionsPath, name)
 }
 
-// applyReceiverStatus takes the operator's status apply on a Receiver,
-// and answers the Receiver as it stands. The Deployment's status.cec
-// apply replaces status.cec alone, under a field manager of its own.
+// applyReceiverStatus applies a Receiver's status. An apply from
+// receiverCECFieldManager replaces only status.cec.
 func (a *cecAPI) applyReceiverStatus(w http.ResponseWriter, r *http.Request, name string) {
 	var body Receiver
 	_ = json.NewDecoder(r.Body).Decode(&body)
@@ -240,11 +239,11 @@ func (a *cecAPI) applyReceiverStatus(w http.ResponseWriter, r *http.Request, nam
 	a.serveStored(w, receiversPath, name)
 }
 
-// applyConditions merges one manager's conditions the way server-side
-// apply merges a map list: it removes each condition the manager owns
-// and no longer states, replaces each condition of a type it states,
-// keeps the others, and makes the manager the owner of each type it
-// states, as force does. The caller holds the mutex.
+// applyConditions merges one manager's conditions the way a forced
+// server-side apply merges a list keyed by type. It removes each
+// condition that the manager owns and no longer sends, replaces each
+// type it sends and takes ownership of it, and keeps the rest. The
+// caller holds the mutex.
 func (a *cecAPI) applyConditions(television *Television, manager string, applied []Condition) {
 	name := television.Metadata.Name
 	if a.owners[name] == nil {
@@ -261,8 +260,6 @@ func (a *cecAPI) applyConditions(television *Television, manager string, applied
 	television.Status.Conditions = mergeConditions(kept, applied)
 }
 
-// mergeConditions replaces each condition of the same type and keeps
-// the others, the way server-side apply merges a map list.
 func mergeConditions(held, applied []Condition) []Condition {
 	merged := slices.DeleteFunc(slices.Clone(held), func(condition Condition) bool {
 		return slices.ContainsFunc(applied, func(other Condition) bool { return other.Type == condition.Type })
@@ -277,13 +274,12 @@ func copyTelevision(television *Television) Television {
 	return copied
 }
 
-// putTelevision stores a Television as a person declares it. A new
-// name is a new object with a new uid. An existing object keeps its
-// uid, status, and labels the person does not state, and a changed
-// spec is a new generation, as on a real API server. A status.session
-// the object states is the Deployment's write in the same step, a
-// shortcut for a test that sets a session; a session it does not state
-// stays as it is, as a person's apply of the spec leaves it.
+// putTelevision stores a Television as a person would apply it. An
+// existing object keeps its uid, its status, and the labels that
+// television does not set, and a changed spec increments the
+// generation. A status.session, status.screenAsk, or status.displays in
+// television replaces the stored one, so a test can set them without
+// running the workload that writes them.
 func (a *cecAPI) putTelevision(television Television) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
@@ -315,7 +311,6 @@ func (a *cecAPI) putTelevision(television Television) {
 	a.changed()
 }
 
-// removeTelevision deletes a Television, as a person or a prune does.
 func (a *cecAPI) removeTelevision(name string) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
@@ -323,16 +318,15 @@ func (a *cecAPI) removeTelevision(name string) {
 	a.changed()
 }
 
-// refusePowerWrites makes the node workloads' status writes fail with a
-// 500, or answer again.
+// refusePowerWrites makes the node workloads' power applies fail with a
+// 500. Their wake, standby, power read, and screen applies still
+// succeed.
 func (a *cecAPI) refusePowerWrites(refusing bool) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
 	a.refusingPowerWrites = refusing
 }
 
-// television answers a snapshot of one Television, and false when it
-// does not exist.
 func (a *cecAPI) television(name string) (Television, bool) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
@@ -343,8 +337,8 @@ func (a *cecAPI) television(name string) (Television, bool) {
 	return copyTelevision(television), true
 }
 
-// refuseTelevisions turns the refusal of the Television list on or
-// off.
+// refuseTelevisions makes every GET of Televisions, other than a watch,
+// fail with a 500 while refusing is true.
 func (a *cecAPI) refuseTelevisions(refusing bool) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
@@ -358,8 +352,8 @@ func (a *cecAPI) putReceiver(receiver Receiver) {
 	a.changed()
 }
 
-// editReceiver changes a Receiver's spec, moves its generation the way
-// the API server does, and tells only the watches of the Receivers.
+// editReceiver replaces a Receiver, increments its generation as the
+// API server does, and notifies only the Receiver watches.
 func (a *cecAPI) editReceiver(receiver Receiver) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
@@ -368,8 +362,8 @@ func (a *cecAPI) editReceiver(receiver Receiver) {
 	a.changedIn(receiversPath)
 }
 
-// writes answers how many status writes each writer made to the
-// Televisions.
+// writes returns the number of the Deployment's status applies, not
+// counting session applies, and of the node workloads' power applies.
 func (a *cecAPI) writes() (derived, power int) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
@@ -382,8 +376,8 @@ func (a *cecAPI) deletedTelevisionNames() []string {
 	return slices.Clone(a.deletedTelevisions)
 }
 
-// waitForTelevision waits until one Television satisfies a check, and
-// fails the test with the last one it read otherwise.
+// waitForTelevision waits until the Television satisfies ready, and
+// fails the test after testTimeout.
 func (a *cecAPI) waitForTelevision(t *testing.T, name string, ready func(Television) bool) Television {
 	t.Helper()
 	return a.waitForTelevisionWithin(t, name, testTimeout, ready)
@@ -399,13 +393,13 @@ func (a *cecAPI) waitForTelevisionWithin(t *testing.T, name string, within time.
 			return television
 		}
 		if !awaitMove(moved, deadline) {
-			t.Fatalf("Television %s never held the wanted status; the last was %+v (held %v)", name, television, held)
+			t.Fatalf("Television %s did not reach the wanted status in time. Last read: %+v, found: %v", name, television, held)
 		}
 	}
 }
 
-// refuseWakeWrites makes the node workloads' wake writes fail with a
-// 500, or answer again.
+// refuseWakeWrites makes the node workloads' wake applies fail with a
+// 500.
 func (a *cecAPI) refuseWakeWrites(refusing bool) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()

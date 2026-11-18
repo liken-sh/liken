@@ -1,7 +1,5 @@
 package cec
 
-// The real handle: a file descriptor on /dev/cecN.
-
 import (
 	"fmt"
 	"time"
@@ -10,15 +8,14 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// fileHandle is one open adapter node.
+// fileHandle talks to a real adapter through its /dev/cecN node.
 type fileHandle struct {
 	fd int
 }
 
-// Open opens an adapter node, such as /dev/cec0. The handle is
-// blocking, so a transmit returns after the message is on the wire and
-// a claim returns after the kernel claimed the address. Receive and
-// Wait take their own timeouts, so no read blocks forever.
+// Open opens an adapter node, such as /dev/cec0. It opens the node in
+// blocking mode, so a transmit returns after the message is on the bus
+// and a claim returns after the kernel has claimed the address.
 func Open(path string) (*Device, error) {
 	fd, err := unix.Open(path, unix.O_RDWR|unix.O_CLOEXEC, 0)
 	if err != nil {
@@ -28,9 +25,9 @@ func Open(path string) (*Device, error) {
 }
 
 func (h *fileHandle) Ioctl(request uintptr, argument unsafe.Pointer) error {
-	// The pointer converts to a uintptr inside the call expression,
-	// which is the one form the Go runtime keeps the pointed-to memory
-	// alive and in place for.
+	// The conversion to uintptr must stay inside the Syscall call
+	// expression, because only then does the Go runtime keep the memory
+	// alive and in place during the call.
 	_, _, errno := unix.Syscall(unix.SYS_IOCTL, uintptr(h.fd), request, uintptr(argument))
 	if errno != 0 {
 		return errno
@@ -38,10 +35,10 @@ func (h *fileHandle) Ioctl(request uintptr, argument unsafe.Pointer) error {
 	return nil
 }
 
-// Wait polls the node. The CEC core signals a queued message as
-// readable and a queued event as priority data. A node whose adapter
-// left reports an error and a hang-up, and Wait turns that into
-// ENODEV, the error every other call on the handle returns.
+// Wait polls the node for up to timeout. The kernel's CEC core reports
+// a queued message as POLLIN and a queued event as POLLPRI. When the
+// adapter is removed, poll reports POLLERR or POLLHUP, and Wait returns
+// ENODEV, the error that every other call on a removed adapter returns.
 func (h *fileHandle) Wait(timeout time.Duration) (Readiness, error) {
 	fds := []unix.PollFd{{Fd: int32(h.fd), Events: unix.POLLIN | unix.POLLPRI}}
 	for {
@@ -50,13 +47,13 @@ func (h *fileHandle) Wait(timeout time.Duration) (Readiness, error) {
 			continue
 		}
 		if err != nil {
-			return Readiness{}, fmt.Errorf("poll: %w", err)
+			return Readiness{}, fmt.Errorf("polling the node: %w", err)
 		}
 		break
 	}
 	events := fds[0].Revents
 	if events&(unix.POLLERR|unix.POLLHUP|unix.POLLNVAL) != 0 {
-		return Readiness{}, fmt.Errorf("poll: %w", unix.ENODEV)
+		return Readiness{}, fmt.Errorf("polling the node: %w", unix.ENODEV)
 	}
 	return Readiness{Message: events&unix.POLLIN != 0, Event: events&unix.POLLPRI != 0}, nil
 }

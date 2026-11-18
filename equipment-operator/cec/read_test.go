@@ -9,7 +9,8 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/cec"
 )
 
-// collected gathers what Read passes on, safely across goroutines.
+// collected records the messages and events that Read delivers, and is
+// safe to use from several goroutines.
 type collected struct {
 	mutex    sync.Mutex
 	messages []cec.Message
@@ -34,20 +35,20 @@ func (c *collected) counts() (int, int) {
 	return len(c.messages), len(c.events)
 }
 
-func TestReadPassesOnMessagesAndEventsUntilItsContextEnds(t *testing.T) {
+func TestReadDeliversMessagesAndEventsUntilItsContextEnds(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		bus := room()
 		_, device := joined(t, bus)
 		ctx, cancel := context.WithCancel(t.Context())
-		seen := &collected{}
+		recorded := &collected{}
 		done := make(chan error, 1)
-		go func() { done <- cec.Read(ctx, device, seen.message, seen.event) }()
+		go func() { done <- cec.Read(ctx, device, recorded.message, recorded.event) }()
 
 		bus.Send(cec.ActiveSource(8, 0x1500))
 		synctest.Wait()
-		messages, events := seen.counts()
+		messages, events := recorded.counts()
 		if messages == 0 || events == 0 {
-			t.Fatalf("read passed on %d messages and %d events", messages, events)
+			t.Fatalf("Read delivered %d messages and %d events, want at least one of each", messages, events)
 		}
 		cancel()
 
@@ -57,12 +58,12 @@ func TestReadPassesOnMessagesAndEventsUntilItsContextEnds(t *testing.T) {
 
 func TestReadEndsWhenTheAdapterLeaves(t *testing.T) {
 	adapter, device := joined(t, room())
-	seen := &collected{}
+	recorded := &collected{}
 	adapter.Unplug()
 
-	err := cec.Read(t.Context(), device, seen.message, seen.event)
+	err := cec.Read(t.Context(), device, recorded.message, recorded.event)
 
 	if !cec.IsGone(err) {
-		t.Errorf("read answered %v, want ENODEV", err)
+		t.Errorf("Read returned %v, want an error that cec.IsGone accepts (ENODEV)", err)
 	}
 }

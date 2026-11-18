@@ -1,8 +1,8 @@
 package main
 
-// What the node workload logs: the adapter's logical addresses when the
-// pod opens it, and each change of its entry's state. It logs nothing
-// per scan and nothing per steady report.
+// The node workload logs the adapter's logical addresses when the pod
+// opens it and each change of its entry's state, and nothing for a scan
+// or a report that changes nothing.
 
 import (
 	"bytes"
@@ -18,7 +18,7 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/cec/cectest"
 )
 
-// logBuffer collects log lines safely across goroutines.
+// logBuffer collects log lines from several goroutines.
 type logBuffer struct {
 	mutex sync.Mutex
 	text  bytes.Buffer
@@ -36,8 +36,8 @@ func (b *logBuffer) lines() []string {
 	return strings.Split(strings.TrimSpace(b.text.String()), "\n")
 }
 
-// loggedNode runs a node workload with its log in a buffer until the
-// test ends.
+// loggedNode runs a node workload that writes its log to the returned
+// buffer, until the test ends.
 func loggedNode(t *testing.T, api *cecAPI, device *cec.Device) *logBuffer {
 	t.Helper()
 	node, err := newCECNode(api.client, testNamespace, "node-1", device)
@@ -58,12 +58,12 @@ func TestTheNodeLogsWhatTheAdapterHeldAndEachStateChange(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		wire := cecRoom()
+		wire := fakeCECBus()
 		adapter, device := usbAdapter(wire)
 		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
 		api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
-		// A second handle on the same adapter stands for the previous pod,
-		// which left its claim in the kernel.
+		// A second handle on the same adapter acts as the previous pod,
+		// whose claim the kernel still holds.
 		previous := cec.New(adapter)
 		mustSucceed(t, previous.Follow())
 		mustSucceed(t, previous.SetPhysicalAddress(0x1300))
@@ -77,7 +77,7 @@ func TestTheNodeLogsWhatTheAdapterHeldAndEachStateChange(t *testing.T) {
 		mustMatch(t, api.writesOf("node-1"), before)
 
 		// The first pass can report Joined before the first scan ends, so
-		// the log holds one or two state changes before it settles.
+		// the log has one or two state changes before it stops growing.
 		lines := log.lines()
 		mustMatch(t, lines[0], `the adapter on node-1 (cectest) holds logical address 4 as "node-1" when the pod opens it`)
 		mustMatch(t, lines[1], "the adapter on node-1 moves from none to CECBus den")
@@ -91,7 +91,7 @@ func TestTheNodeLogsAMessageWithTheState(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		_, device := usbAdapter(cecRoom())
+		_, device := usbAdapter(fakeCECBus())
 		api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
 
 		log := loggedNode(t, api, device)
@@ -105,7 +105,7 @@ func TestTheNodeLogsAMessageWithTheState(t *testing.T) {
 	})
 }
 
-// linesWith answers the log lines that contain a text.
+// linesWith returns the log lines that contain text.
 func linesWith(log *logBuffer, text string) []string {
 	var found []string
 	for _, line := range log.lines() {
@@ -116,8 +116,8 @@ func linesWith(log *logBuffer, text string) []string {
 	return found
 }
 
-// Two of a person's buses that name one machine are logged once, not
-// on every pass, and again only when the set changes.
+// When several CECBuses list one machine, the node workload logs them
+// once, and again only when the set of buses changes.
 func TestTwoBusesThatNameOneMachineAreLoggedOnce(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -125,7 +125,7 @@ func TestTwoBusesThatNameOneMachineAreLoggedOnce(t *testing.T) {
 		for _, name := range []string{"study", "den"} {
 			api.putBus(listenBus(name))
 		}
-		_, device := usbAdapter(cecRoom())
+		_, device := usbAdapter(fakeCECBus())
 		log := loggedNode(t, api, device)
 		api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
 
@@ -140,21 +140,22 @@ func TestTwoBusesThatNameOneMachineAreLoggedOnce(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 
 		mustDeepEqual(t, linesWith(log, "CECBuses name machine"), []string{
-			"2 CECBuses name machine node-1: den, study; the adapter follows den, the first by name",
-			"3 CECBuses name machine node-1: attic, den, study; the adapter follows attic, the first by name",
+			"2 CECBuses name machine node-1: den, study, so the adapter follows den, the first by name",
+			"3 CECBuses name machine node-1: attic, den, study, so the adapter follows attic, the first by name",
 		})
 	})
 }
 
-// A bus rename adds the new bus before it prunes the old one. The
-// adapter moves to the new bus, says so, and removes its entry from the
-// old bus, which still exists and still names the machine.
+// A person renames a bus by creating the new one before deleting the
+// old one. living-room sorts before lounge, so the adapter follows the
+// new bus, logs the move, and deletes its entry from the old bus, which
+// still lists the machine.
 func TestAnAdapterThatMovesBusesLeavesTheOldOne(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
 		api.putBus(listenBus("lounge"))
-		_, device := usbAdapter(cecRoom())
+		_, device := usbAdapter(fakeCECBus())
 		log := loggedNode(t, api, device)
 		api.waitForEntry(t, "lounge", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
 
@@ -172,18 +173,19 @@ func TestAnAdapterThatMovesBusesLeavesTheOldOne(t *testing.T) {
 	})
 }
 
-// listenBus is a person's bus in Listen that names node-1.
+// listenBus returns a CECBus in Listen mode that lists node-1.
 func listenBus(name string) CECBus {
 	return CECBus{Metadata: ObjectMeta{Name: name}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-1"}}}}
 }
 
-// The node workload writes one line when it creates the CECBus of an
-// adapter no bus names, and one when a person's bus replaces it.
+// The node workload logs one line when it creates a CECBus for an
+// adapter that no bus lists, and one when it deletes that bus because
+// another bus lists the machine.
 func TestTheNodeLogsTheBusItCreatesAndDeletes(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		_, device := usbAdapter(cecRoom())
+		_, device := usbAdapter(fakeCECBus())
 		log := loggedNode(t, api, device)
 		api.waitForEntry(t, "node-1", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
 
@@ -193,14 +195,15 @@ func TestTheNodeLogsTheBusItCreatesAndDeletes(t *testing.T) {
 		api.nudge()
 
 		mustDeepEqual(t, linesWith(log, "names machine node-1"), []string{
-			"no CECBus names machine node-1; created CECBus node-1 in Listen, which sends nothing on the wire",
+			"no CECBus names machine node-1, so the adapter created CECBus node-1 in Listen, which sends nothing on the wire",
 			"deleted the discovered CECBus node-1: CECBus den names machine node-1",
 		})
 	})
 }
 
-// Each application of a Television's spec.power is one line: what the
-// generation asks, what the adapter sent, and what the TV reported.
+// Each time the node workload applies a Television's spec.power, it
+// logs one line with the requested state, what the adapter sent, and
+// what the TV reported.
 func TestTheNodeLogsEachApplicationOfThePower(t *testing.T) {
 	cases := []struct {
 		name string
@@ -210,17 +213,17 @@ func TestTheNodeLogsEachApplicationOfThePower(t *testing.T) {
 		{
 			"a TV that wakes",
 			televisionTV(cec.PowerStandby),
-			"Television lounge: generation 1 asks On; the adapter on node-1 sent Image View On to the TV once; the TV reported On after <time>",
+			"Television lounge: spec.power at generation 1 is On; the adapter on node-1 sent Image View On to the TV once; the TV reported On after <time>",
 		},
 		{
 			"a TV that is on",
 			televisionTV(cec.PowerOn),
-			"Television lounge: generation 1 asks On; the TV already reported On, so the adapter on node-1 sent no command",
+			"Television lounge: spec.power at generation 1 is On; the TV already reported On, so the adapter on node-1 sent no command",
 		},
 		{
 			"a TV that drops each command",
 			stubbornTV(),
-			"Television lounge: generation 1 asks On; the adapter on node-1 sent Image View On 3 times, and the TV last reported Standby; the application ended after <time>",
+			"Television lounge: spec.power at generation 1 is On; the adapter on node-1 sent Image View On 3 times, and the TV last reported Standby; the application ended after <time>",
 		},
 	}
 	t.Parallel()
@@ -229,7 +232,7 @@ func TestTheNodeLogsEachApplicationOfThePower(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
 				api := startCECAPI(t)
-				_, device := usbAdapter(roomWithTV(one.tv))
+				_, device := usbAdapter(busWithTV(one.tv))
 				api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
 				api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
 				api.putTelevision(lounge(TelevisionOn))
@@ -245,13 +248,14 @@ func TestTheNodeLogsEachApplicationOfThePower(t *testing.T) {
 	}
 }
 
-// A new generation stops the application of the old one. The old one
-// sent a command, so its line says the application stopped.
+// A new generation of the Television stops the application of the
+// previous one, which had already sent a command, so its log line
+// reports that the application stopped.
 func TestTheNodeLogsAnApplicationThatANewGenerationStops(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		wire := roomWithTV(stubbornTV())
+		wire := busWithTV(stubbornTV())
 		_, device := usbAdapter(wire)
 		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
 		api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
@@ -262,7 +266,7 @@ func TestTheNodeLogsAnApplicationThatANewGenerationStops(t *testing.T) {
 		api.putTelevision(lounge(TelevisionStandby))
 
 		mustDeepEqual(t, waitForLines(t, log, "generation 1", 1), []string{
-			"Television lounge: generation 1 asks On; the adapter on node-1 sent Image View On to the TV, and the application stopped after <time>, before the TV reported On",
+			"Television lounge: spec.power at generation 1 is On; the adapter on node-1 sent Image View On to the TV, and the application stopped after <time>, before the TV reported On",
 		})
 	})
 }

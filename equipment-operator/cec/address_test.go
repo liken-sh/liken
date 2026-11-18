@@ -20,24 +20,24 @@ func TestAPhysicalAddressReadsAndWritesTheDottedForm(t *testing.T) {
 		t.Run(c.text, func(t *testing.T) {
 			parsed, err := cec.ParsePhysicalAddress(c.text)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("parsing %q: %v", c.text, err)
 			}
 			if parsed != c.address {
-				t.Errorf("parsed %#x, want %#x", parsed, c.address)
+				t.Errorf("ParsePhysicalAddress(%q) = %#x, want %#x", c.text, parsed, c.address)
 			}
 			if c.address.String() != c.text {
-				t.Errorf("wrote %q, want %q", c.address.String(), c.text)
+				t.Errorf("String() of %#x is %q, want %q", c.address, c.address.String(), c.text)
 			}
 		})
 	}
 }
 
-func TestParsePhysicalAddressRefusesWhatNoDeviceAnnounces(t *testing.T) {
+func TestParsePhysicalAddressReturnsAnErrorForWhatNoDeviceAnnounces(t *testing.T) {
 	cases := []string{"", "1.3.0", "1.3.0.0.0", "1.g.0.0", "1.10.0.0", "f.f.f.f"}
 	for _, text := range cases {
 		t.Run(text, func(t *testing.T) {
 			if _, err := cec.ParsePhysicalAddress(text); err == nil {
-				t.Errorf("%q parsed with no error", text)
+				t.Errorf("ParsePhysicalAddress(%q) returned no error, want one", text)
 			}
 		})
 	}
@@ -62,16 +62,12 @@ func TestALogicalAddressImpliesItsDeviceType(t *testing.T) {
 	for _, c := range cases {
 		t.Run(string(c.kind), func(t *testing.T) {
 			if got := c.address.Type(); got != c.kind {
-				t.Errorf("address %d is %s, want %s", c.address, got, c.kind)
+				t.Errorf("logical address %d has type %s, want %s", c.address, got, c.kind)
 			}
 		})
 	}
 }
 
-// One address is above another when the other is in the subtree below
-// it: a receiver at 1.0.0.0 is above a machine on its input 3 at
-// 1.3.0.0, and a machine straight on the TV's input 2 at 2.0.0.0 is
-// below the TV and not below that receiver.
 func TestAnAddressIsAboveTheAddressesBelowIt(t *testing.T) {
 	cases := []struct {
 		above, below cec.PhysicalAddress
@@ -90,7 +86,7 @@ func TestAnAddressIsAboveTheAddressesBelowIt(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.above.String()+" over "+c.below.String(), func(t *testing.T) {
 			if got := c.above.Above(c.below); got != c.want {
-				t.Errorf("got %v, want %v", got, c.want)
+				t.Errorf("%s.Above(%s) is %v, want %v", c.above, c.below, got, c.want)
 			}
 		})
 	}

@@ -1,22 +1,21 @@
 package main
 
-// The node workload's standby of a Television's session. When a person
-// presses the remote's power button to turn the room off, the
-// Deployment writes the time in the Television's
-// status.session.standbyAt and sets awake to false. The adapter that
-// speaks for the session's Display then sends the TV Standby, at most
-// once for each standbyAt, the way it applies a spec.power of Standby.
-// Before its first command it writes that standbyAt in
-// status.standbyAt as a started mark, so a node workload that restarts
-// during the standby, or after it, sends nothing more for it.
+// This file puts a TV in standby when a status.session.powerAsk on the
+// Receiver turns the room off. The Deployment records the standby as
+// status.session.standbyAt, with awake set to false. The node workload
+// whose adapter speaks for the session's Display then sends the TV
+// Standby, at most once for each standbyAt. Before it sends anything, it
+// copies standbyAt to status.standbyAt, so a node workload that
+// restarts during or after the standby does not send it again.
 //
-// Only a press of the power button writes a standbyAt. A session that
-// goes idle, a screen that sleeps, a session that ends, and an operator
-// that restarts write none, because a TV in a living room shows other
-// inputs, such as a streaming player, while the room's own player is
-// idle. The node workload acts only on a standby it sees arrive: a
-// standbyAt that is already in the status when the node workload
-// starts is what it finds, so it sends nothing for it.
+// Only a powerAsk that turns the room off writes a standbyAt.
+// media-operator writes a powerAsk of off when a Player's spec.power
+// changes to Off. An idle session,
+// a sleeping screen, or an ended session writes none, because a TV often
+// shows another input, such as a streaming player, while the room's
+// player is idle. The node workload also sends nothing for a standbyAt
+// that is already in the status when it starts, because that standby
+// may have been handled before a restart.
 
 import (
 	"context"
@@ -29,10 +28,10 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// standbyMemory is what the node workload holds about its standbys.
-// The node's mutex guards it. The fields mean what the fields of the
-// same names in wakeMemory mean.
-type standbyMemory struct {
+// standbyState is the node workload's state for standbys, guarded by
+// the node's mutex. Each field means what the field of the same name
+// means in wakeState.
+type standbyState struct {
 	job          *standbyJob
 	done         commandKey
 	unwritten    *wakeRecord
@@ -50,8 +49,9 @@ type standbyJob struct {
 	television Television
 	cancel     func()
 	done       chan struct{}
-	// superseded says a new generation of spec.power stopped the
-	// standby, and the pass that stopped it writes its result.
+	// superseded is set when a new generation of spec.power stopped the
+	// standby. The pass that stopped it writes the result instead of the
+	// job.
 	superseded atomic.Bool
 }
 
@@ -60,15 +60,14 @@ func standbyKeyOf(television *Television) commandKey {
 }
 
 // passStandby starts, stops, or skips the standby of the bus's
-// Television. A standby runs when the session is asleep, holds a
-// standbyAt with no started mark in status.standbyAt, and names a
-// Display this adapter speaks for. A session that wakes again removes
-// the standbyAt, which stops a standby in progress, so the newer press
-// wins.
+// Television on each reconcile pass. A standby runs when the session is
+// asleep, has a standbyAt that is not yet in status.standbyAt, and names
+// a Display that this adapter speaks for. A press that wakes the session
+// removes standbyAt, which stops a standby in progress.
 //
-// spec.power goes first, by the rule the wake follows: a standby does
-// not start while a generation of spec.power is not applied yet, and a
-// generation that arrives while a standby runs stops it for good.
+// spec.power comes first, as it does for a wake. A standby waits while
+// a generation of spec.power is not applied yet, and a new generation
+// that arrives during a standby stops it for good.
 func (n *cecNode) passStandby(bus *CECBus, television *Television) {
 	n.writeStandby()
 	session := sessionOf(television)
@@ -106,16 +105,16 @@ func (n *cecNode) passStandby(bus *CECBus, television *Television) {
 	if !wanted || running != nil || done == key || session.StandbyAt == television.Status.StandbyAt {
 		return
 	}
-	asks := standbyWords(television)
+	logPrefix := standbyLogPrefix(television)
 	switch {
 	case key == found:
 		n.mutex.Lock()
 		n.standby.done = key
 		n.mutex.Unlock()
-		fmt.Fprintf(n.log, "%s; the standby was in the status when the node workload started, so the adapter on %s sends nothing for it\n", asks, n.machine)
+		fmt.Fprintf(n.log, "%s; the standby was in the status when the node workload started, so the adapter on %s sends nothing for it\n", logPrefix, n.machine)
 	case n.now().Sub(seenAt) > cecWakeFresh:
 		message := fmt.Sprintf("the adapter on %s first saw the standby %s ago, which is more than %s, so it sent nothing", n.machine, elapsed(n.now().Sub(seenAt)), elapsed(cecWakeFresh))
-		fmt.Fprintf(n.log, "%s; %s\n", asks, message)
+		fmt.Fprintf(n.log, "%s; %s\n", logPrefix, message)
 		n.recordStandby(television, verdict{ConditionFalse, reasonTooLate, message})
 	case powerPending:
 		n.mutex.Lock()
@@ -123,29 +122,27 @@ func (n *cecNode) passStandby(bus *CECBus, television *Television) {
 		n.standby.waiting = key
 		n.mutex.Unlock()
 		if !logged {
-			fmt.Fprintf(n.log, "%s; generation %d of spec.power asks %s and is not applied yet, so the standby waits for it\n",
-				asks, television.Metadata.Generation, television.Spec.Power)
+			fmt.Fprintf(n.log, "%s; spec.power at generation %d is %s and is not applied yet, so the standby waits for it\n",
+				logPrefix, television.Metadata.Generation, television.Spec.Power)
 		}
 	default:
-		// A wake and a standby send the TV opposite commands, so a
-		// standby never runs beside a wake. The session that asks for the
-		// standby is asleep, so the wake pass already stopped its wake;
-		// this stop covers a wake that ends in the same moment.
+		// A wake and a standby send the TV opposite commands, so they must
+		// not run together. The wake pass stops a wake when the session
+		// sleeps, but a wake can still be ending at this moment.
 		n.cancelWake()
 		n.startStandby(*television, own)
 	}
 }
 
-// standbyWords starts every line about one standby.
-func standbyWords(television *Television) string {
+func standbyLogPrefix(television *Television) string {
 	session := television.Status.Session
-	return fmt.Sprintf("Television %s: the remote's power button turned Player %s's room off at %s", television.Metadata.Name, session.Player, session.StandbyAt)
+	return fmt.Sprintf("Television %s: a powerAsk turned Player %s's room off at %s", television.Metadata.Name, session.Player, session.StandbyAt)
 }
 
-// startStandby runs one standby in the mode's work, so a change of mode
-// stops it before the handle leaves Control. A result of an older
-// standby that the API server has not accepted is dropped, because
-// writing it later would move status.standbyAt back to the older one.
+// startStandby runs the standby in modeWork, so a change of mode stops
+// it before the adapter leaves Control. It drops an unwritten result of
+// an older standby, because writing it later would set status.standbyAt
+// back to the older press.
 func (n *cecNode) startStandby(television Television, own cec.LogicalAddress) {
 	ctx, cancel := context.WithCancel(n.modeContext)
 	job := &standbyJob{key: standbyKeyOf(&television), television: television, cancel: cancel, done: make(chan struct{})}
@@ -166,8 +163,8 @@ func (n *cecNode) startStandby(television Television, own cec.LogicalAddress) {
 	})
 }
 
-// cancelStandby stops the standby in progress, if one runs, and waits
-// for it to end and write its result.
+// cancelStandby stops the standby in progress, if there is one, and
+// waits until it has ended and written its result.
 func (n *cecNode) cancelStandby() {
 	n.mutex.Lock()
 	job := n.standby.job
@@ -179,7 +176,6 @@ func (n *cecNode) cancelStandby() {
 	<-job.done
 }
 
-// recordStandby settles a standby and writes its result.
 func (n *cecNode) recordStandby(television *Television, result verdict) {
 	condition := stampCondition(conditionStandbyApplied, result, television.Metadata.Generation, television.Status.Conditions, n.now())
 	n.mutex.Lock()
@@ -190,8 +186,8 @@ func (n *cecNode) recordStandby(television *Television, result verdict) {
 }
 
 // supersedeStandby records a standby that a new generation of
-// spec.power stopped, and writes its one line. A standby that ended on
-// its own before the cancel reached it keeps its own result.
+// spec.power stopped. A standby that ended on its own before the cancel
+// reached it keeps its own result.
 func (n *cecNode) supersedeStandby(job *standbyJob, television *Television) {
 	n.mutex.Lock()
 	ended := n.standby.done == job.key
@@ -199,18 +195,19 @@ func (n *cecNode) supersedeStandby(job *standbyJob, television *Television) {
 	if ended {
 		return
 	}
-	message := fmt.Sprintf("generation %d of spec.power asks %s, so the standby stopped, and the adapter on %s sends nothing more for it",
+	message := fmt.Sprintf("spec.power at generation %d is %s, so the standby stopped, and the adapter on %s sends nothing more for it",
 		television.Metadata.Generation, television.Spec.Power, n.machine)
-	fmt.Fprintf(n.log, "%s; %s\n", standbyWords(&job.television), message)
+	fmt.Fprintf(n.log, "%s; %s\n", standbyLogPrefix(&job.television), message)
 	n.recordStandby(&job.television, verdict{ConditionFalse, reasonSuperseded, message})
 }
 
-// standbyTV writes the started mark, sends the TV Standby the way
-// spec.power does, and records the result. A mark the API server
-// refuses sends nothing, and the next pass tries the standby again,
-// because without the mark a restart would not know it had begun.
+// standbyTV writes status.standbyAt, sends the TV Standby the way
+// spec.power does, and records the result. When the API server refuses
+// the status write, standbyTV sends nothing and a later pass tries
+// again, because without that write a restarted node workload would not
+// know that the standby began.
 func (n *cecNode) standbyTV(ctx context.Context, job *standbyJob, own cec.LogicalAddress) {
-	asks := standbyWords(&job.television)
+	logPrefix := standbyLogPrefix(&job.television)
 	standbyAt := job.television.Status.Session.StandbyAt
 	mark := stampCondition(conditionStandbyApplied, verdict{ConditionUnknown, reasonEnteringStandby,
 		fmt.Sprintf("the adapter on %s started the standby", n.machine)}, job.television.Metadata.Generation, job.television.Status.Conditions, n.now())
@@ -234,13 +231,13 @@ func (n *cecNode) standbyTV(ctx context.Context, job *standbyJob, own cec.Logica
 		}
 		result.verdict = verdict{ConditionFalse, reasonStopped, result.log}
 	}
-	fmt.Fprintf(n.log, "%s; %s\n", asks, result.log)
+	fmt.Fprintf(n.log, "%s; %s\n", logPrefix, result.log)
 	n.recordStandby(&job.television, result.verdict)
 }
 
-// writeStandby writes a result the API server has not accepted yet. A
-// Television that is gone, or that was created again under the same
-// name, refuses the write for good, so the result is dropped.
+// writeStandby writes the unwritten result, if there is one. When the
+// Television was deleted, or deleted and created again with a new UID,
+// the write cannot succeed, so the result is dropped.
 func (n *cecNode) writeStandby() {
 	n.mutex.Lock()
 	record := n.standby.unwritten
@@ -250,7 +247,7 @@ func (n *cecNode) writeStandby() {
 	}
 	err := ApplyTelevisionStandby(n.client, &record.television, n.machine, record.television.Status.Session.StandbyAt, record.condition)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "writing the standby of Television %s: %v\n", record.television.Metadata.Name, err)
+		fmt.Fprintf(os.Stderr, "writing the standby result of Television %s: %v\n", record.television.Metadata.Name, err)
 		n.retryLater()
 	}
 	if err == nil || err == apiclient.ErrNotFound || err == apiclient.ErrConflict {
@@ -260,8 +257,8 @@ func (n *cecNode) writeStandby() {
 			n.standby.unwritten = nil
 		}
 		n.mutex.Unlock()
-		// A pass and the work that made the record can write it at
-		// once, so only the writer that settles it posts its Event.
+		// A pass and the job can both write the same record. Only the
+		// one that clears it posts the Event.
 		if settled && err == nil {
 			n.postTelevision(&record.television, record.condition)
 		}

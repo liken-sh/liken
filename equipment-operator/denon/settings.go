@@ -1,18 +1,16 @@
 package denon
 
-// Settings is the receiver's settings vocabulary, one struct per family
-// the driver parses. Every optional scalar is a pointer: nil means the
-// key is not declared, and a present zero means the key is set to zero.
-// That is what lets ApplySettings apply only the declared fields.
+// Every optional setting is a pointer, so that nil means the field is
+// not declared and a pointer to zero declares zero. ApplySettings sends
+// only the declared fields.
 //
-// The id table maps a stable dotted id to the field it names and the
-// wire command that sets it. A new family is a struct, a file of specs,
-// and a line in the assembly below.
+// settingsTable has one row for each field, with its dotted id and the
+// command that sets it. A new field also needs a line in ConfirmedBy and
+// in deepCopySettings. A test in settings_test.go fails when ConfirmedBy
+// does not compare a field.
 
 import "fmt"
 
-// Settings holds the receiver's settings across the families the driver
-// parses.
 type Settings struct {
 	System         SystemSettings     `json:"system"`
 	Tone           ToneSettings       `json:"tone"`
@@ -22,21 +20,21 @@ type Settings struct {
 	ChannelVolumes map[string]float64 `json:"channelVolumes,omitempty"`
 }
 
-// settingSpec is one row of the id table: a stable dotted id, which an
-// error names, and how to answer the wire command for a declared field.
+// settingSpec is one row of settingsTable. ID appears in error messages.
 type settingSpec struct {
 	ID string
-	// command answers the wire command a declared field carries, the
-	// error a declared value that no command can carry returns, and
-	// whether the settings declare the field at all.
+	// command returns the wire command for the field, an error when the
+	// declared value has no wire command, and whether s declares the
+	// field at all.
 	command func(s *Settings) (string, error, bool)
-	// take copies the field from src into dst when src declares it, so
-	// Pending builds a Settings that holds only the fields to send.
+	// take copies the field from src into dst when src declares it. It
+	// lets Pending build a Settings with only the fields to send.
 	take func(dst, src *Settings)
 }
 
-// settingsTable is the assembled id table. The channel volumes are not
-// here, because their ids name a channel and so cannot be enumerated.
+// settingsTable joins the specs of every family. ChannelVolumes has no
+// row, because its keys are channel names and not a fixed list.
+// ApplySettings sends them with channelCommands.
 var settingsTable = append(append(append(append(append(
 	[]settingSpec{}, systemSettings...),
 	toneSettings...),
@@ -44,24 +42,20 @@ var settingsTable = append(append(append(append(append(
 	audioSettings...),
 	hdmiSettings...)
 
-// sameString is true when the two values hold the same word, or either
-// is nil. A nil on either side is a key the receiver has not reported,
-// so it is skipped rather than judged.
+// sameString returns true when both values are equal or either is nil,
+// because ConfirmedBy does not compare a field that is not declared or
+// that the receiver has not reported.
 func sameString(a, b *string) bool { return a == nil || b == nil || *a == *b }
 
-// sameInt is true when the two values hold the same number, or either
-// is nil, the way sameString treats an unreported key.
+// sameInt is sameString for integers.
 func sameInt(a, b *int) bool { return a == nil || b == nil || *a == *b }
 
-// sameBool is true when the two values hold the same switch, or either
-// is nil, the way sameString treats an unreported key.
+// sameBool is sameString for booleans.
 func sameBool(a, b *bool) bool { return a == nil || b == nil || *a == *b }
 
-// ConfirmedBy answers whether the receiver has reported every field
-// the settings declare at the declared value. A declared field the
-// receiver has not reported is skipped: there is nothing to confirm it
-// against, and blocking on it would retry forever. A field reported at
-// another value is not confirmed, so the operator sends it again.
+// ConfirmedBy returns true when observed reports the declared value of
+// every declared field. It skips a field that observed does not report,
+// because waiting for a value that never arrives would retry forever.
 func (w Settings) ConfirmedBy(observed Settings) bool {
 	if !sameString(w.System.Eco, observed.System.Eco) {
 		return false
@@ -156,16 +150,13 @@ func (w Settings) ConfirmedBy(observed Settings) bool {
 	return true
 }
 
-// The small pointer builders the families share. A pointer field is nil
-// when the receiver has not reported the value, which is how the status
-// tells a key the receiver never declared from one set to zero.
 func strPtr(s string) *string { return &s }
 func intPtr(i int) *int       { return &i }
 func boolPtr(b bool) *bool    { return &b }
 
-// Settings returns every setting the receiver has reported. Every
-// pointer and the channel map are copied, so the returned value never
-// aliases the live state a reader goroutine keeps folding into.
+// Settings returns a copy of every setting the receiver has reported.
+// The copy shares no pointer or map with the client's state, because
+// the goroutine that reads from the receiver keeps updating that state.
 func (d *Client) Settings() Settings {
 	d.mutex.Lock()
 	s := d.state.Settings
@@ -174,9 +165,8 @@ func (d *Client) Settings() Settings {
 	return s
 }
 
-// deepCopySettings copies every pointer pointee and the channel map in
-// place, so a caller mutating a returned Settings cannot change what
-// the next Settings() reads.
+// deepCopySettings replaces every pointer and the channel map of s with
+// copies.
 func deepCopySettings(s *Settings) {
 	copyString := func(p **string) {
 		if *p != nil {
@@ -247,16 +237,18 @@ func deepCopySettings(s *Settings) {
 	}
 }
 
-// ApplySettings sends the wire command for every declared field, and an
-// undeclared field sends nothing. The controller passes it only the
-// fields Pending keeps. A family the receiver does not echo is asked
-// for again after the sets.
+// ApplySettings sends the command of each declared field, then the
+// channel volumes. The caller passes the result of Pending. The receiver
+// does not echo an HDMI command, so after the field commands
+// ApplySettings sends queries that read the HDMI settings back. It
+// stops at the first error, so an earlier command may already have
+// reached the receiver.
 func (d *Client) ApplySettings(want Settings) error {
 	var sent []string
 	for _, spec := range settingsTable {
 		if command, err, declared := spec.command(&want); declared {
 			if err != nil {
-				return fmt.Errorf("setting %s: %w", spec.ID, err)
+				return fmt.Errorf("building the command of setting %s: %w", spec.ID, err)
 			}
 			if err := d.send(command); err != nil {
 				return err
@@ -279,7 +271,8 @@ func (d *Client) ApplySettings(want Settings) error {
 	return nil
 }
 
-// wordSetting builds a table row for a setting that carries a word.
+// wordSetting builds the settingsTable row of a setting whose value is a
+// word.
 func wordSetting(id string, build func(string) (string, error), set func(*Settings, string), get func(*Settings) *string) settingSpec {
 	return settingSpec{
 		ID: id,
@@ -299,8 +292,8 @@ func wordSetting(id string, build func(string) (string, error), set func(*Settin
 	}
 }
 
-// numberSetting builds a table row for a setting that carries an
-// integer.
+// numberSetting builds the settingsTable row of a setting whose value is
+// an integer.
 func numberSetting(id string, build func(int) (string, error), set func(*Settings, int), get func(*Settings) *int) settingSpec {
 	return settingSpec{
 		ID: id,
@@ -320,7 +313,8 @@ func numberSetting(id string, build func(int) (string, error), set func(*Setting
 	}
 }
 
-// boolSetting builds a table row for a setting that carries a switch.
+// boolSetting builds the settingsTable row of a setting whose value is a
+// boolean.
 func boolSetting(id string, build func(bool) (string, error), set func(*Settings, bool), get func(*Settings) *bool) settingSpec {
 	return settingSpec{
 		ID: id,

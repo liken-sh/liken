@@ -1,7 +1,7 @@
 package main
 
-// The Television definition, run through the same validators the API
-// server runs. receiver_test.go holds the helpers.
+// Tests of the Television definition, run through the same validators
+// that the API server runs. The helpers are in receiver_test.go.
 
 import (
 	"os"
@@ -19,8 +19,8 @@ func televisionObject(spec map[string]any) map[string]any {
 	}
 }
 
-// withSession is a Television on the den bus with the status.session
-// the Deployment writes.
+// withSession returns a Television on the den bus with the
+// status.session that the Deployment writes.
 func withSession(session map[string]any) map[string]any {
 	object := televisionObject(map[string]any{"cec": map[string]any{"bus": "den"}})
 	object["status"] = map[string]any{"session": session}
@@ -44,7 +44,7 @@ func TestTheTelevisionDefinitionValidatesExamples(t *testing.T) {
 		{"a cec block with an empty bus", televisionObject(map[string]any{"cec": map[string]any{"bus": ""}}), true},
 		{"a session the operator writes", withSession(map[string]any{
 			"player": "media/den", "display": "acm-0001-receiver", "awake": true, "wokeAt": "2026-09-26T18:04:05.123Z"}), false},
-		{"a session a power press turned off", withSession(map[string]any{
+		{"a session a powerAsk turned off", withSession(map[string]any{
 			"player": "media/den", "display": "acm-0001-receiver", "wokeAt": "2026-09-26T18:04:05.123Z", "standbyAt": "2026-09-26T22:31:10.456Z"}), false},
 		{"a session whose standbyAt is not a time", withSession(map[string]any{
 			"player": "media/den", "display": "acm-0001-receiver", "standbyAt": "later"}), true},
@@ -56,7 +56,7 @@ func TestTheTelevisionDefinitionValidatesExamples(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			errs := validateObject(t, televisionsCRD, c.tv)
 			if got := len(errs) > 0; got != c.wantErr {
-				t.Errorf("got errors %v, want an error: %v", errs, c.wantErr)
+				t.Errorf("validation errors are %v, want an error: %v", errs, c.wantErr)
 			}
 		})
 	}
@@ -85,7 +85,7 @@ func TestTheTelevisionDefinitionIdentity(t *testing.T) {
 
 // Two writers share the conditions: the Deployment owns Reachable and
 // the node workload owns PowerApplied. Server-side apply keeps each
-// writer's entry only when the list is a map keyed by type.
+// writer's entries only when the list is a map keyed by type.
 func TestTheTelevisionConditionsAreAMapKeyedByType(t *testing.T) {
 	t.Parallel()
 	status := loadCRDFrom(t, televisionsCRD).Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["status"]
@@ -104,12 +104,12 @@ func TestTheExampleTelevisionValidates(t *testing.T) {
 	mustSucceed(t, yaml.UnmarshalStrict(raw, &example))
 
 	if errs := validateObject(t, televisionsCRD, example); len(errs) > 0 {
-		t.Errorf("testdata/television.yaml: %v", errs)
+		t.Errorf("testdata/television.yaml fails validation: %v", errs)
 	}
 }
 
-// A status as both writers write it passes the schema, so no apply is
-// refused for its shape.
+// A status in the shape that both writers produce passes the schema, so
+// the API server does not refuse an apply because of its shape.
 func TestAWrittenTelevisionStatusValidates(t *testing.T) {
 	t.Parallel()
 	tv := televisionObject(map[string]any{"cec": map[string]any{"bus": "den"}, "power": "On"})
@@ -128,11 +128,11 @@ func TestAWrittenTelevisionStatusValidates(t *testing.T) {
 		}},
 		"conditions": []any{map[string]any{
 			"type": "Reachable", "status": "True", "observedGeneration": int64(1), "reason": "Answers",
-			"message": "the TV answers Give Device Power Status", "lastTransitionTime": "2026-09-26T12:00:00Z",
+			"message": "The TV replies to Give Device Power Status", "lastTransitionTime": "2026-09-26T12:00:00Z",
 		}},
 	}
 
 	if errs := validateObject(t, televisionsCRD, tv); len(errs) > 0 {
-		t.Errorf("a written status: %v", errs)
+		t.Errorf("a written status fails validation: %v", errs)
 	}
 }

@@ -1,5 +1,5 @@
-// The settings: mapping them from the polled status, applying them to
-// the wire, and confirming them against what the receiver reported.
+// Settings: reading them from the polled status, sending them to the
+// device, and comparing them with what the device reported.
 
 package wiim
 
@@ -10,8 +10,7 @@ import (
 	"time"
 )
 
-// Settings reads the slow-moving settings from the polled status, one
-// pointer per reported value.
+// Settings returns a pointer to each value the poll read.
 func TestSettingsMapsThePolledStatus(t *testing.T) {
 	amp := startFakeAmp(t)
 	client := amp.client(nil)
@@ -24,10 +23,9 @@ func TestSettingsMapsThePolledStatus(t *testing.T) {
 	mustMatch(t, settings.Device.Buttons, boolPtr(false))
 }
 
-// A read that the model answers with no value leaves the snapshot's zero
-// value in place, and the zero value is not the device's setting. So
-// Settings reports no value for that field, in each of the device's words
-// for a read it cannot serve.
+// When a model answers a read with no value, the stored status keeps a
+// zero value that is not the device's setting. So Settings returns nil
+// for that field, for each way a device says it has no value.
 func TestSettingsReportsNoValueForAReadTheModelDoesNotServe(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -53,8 +51,8 @@ func TestSettingsReportsNoValueForAReadTheModelDoesNotServe(t *testing.T) {
 	}
 }
 
-// A model's firmware can gain a read. The field is reported again from
-// the first answer that holds a value.
+// After a firmware update adds a read, Settings returns the field again
+// from the first answer that has a value.
 func TestSettingsReportsAFieldAgainOnceItsReadAnswers(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp := startFakeAmp(t)
@@ -70,8 +68,8 @@ func TestSettingsReportsAFieldAgainOnceItsReadAnswers(t *testing.T) {
 	})
 }
 
-// One request that fails is not the model's answer, so a field whose read
-// answered before stays reported.
+// A request that fails once says nothing about the model, so a field
+// that was read before is still returned.
 func TestSettingsKeepsAFieldWhoseReadFailedOnce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp := startFakeAmp(t)
@@ -86,13 +84,13 @@ func TestSettingsKeepsAFieldWhoseReadFailedOnce(t *testing.T) {
 	})
 }
 
-// controlReads are the reads of the controls family, which a sent light
-// or button switch is read back through.
+// controlReads are the commands that read the controls family, which
+// ApplySettings runs after it sends an LED or button command.
 var controlReads = []string{ledCommand, buttonsCommand, cecCommand}
 
-// ApplySettings sends exactly the declared commands, in the fixed audio
-// then device order, and sends nothing for an undeclared field. Then it
-// reads back the family of each command the amp took.
+// ApplySettings sends one command per field that is set, in a fixed
+// order, and nothing for a nil field. Then it reads back the family of
+// each command the amp accepted.
 func TestApplySettingsSendsDeclaredCommands(t *testing.T) {
 	amp := startFakeAmp(t)
 	client := amp.client(nil)
@@ -125,8 +123,8 @@ func TestApplySettingsSendsDeclaredCommands(t *testing.T) {
 	}
 }
 
-// ApplySettings rejects a balance outside the device's range and an
-// empty device name, and sends nothing on the refusal.
+// ApplySettings returns an error and sends nothing for a balance outside
+// the range or an empty name.
 func TestApplySettingsRejectsWhatTheDeviceCannotDo(t *testing.T) {
 	amp := startFakeAmp(t)
 	client := amp.client(nil)
@@ -145,16 +143,15 @@ func TestApplySettingsRejectsWhatTheDeviceCannotDo(t *testing.T) {
 			amp.commands = nil
 			amp.mutex.Unlock()
 			if err := client.ApplySettings(one.want); err == nil {
-				t.Fatalf("%s did not error", one.name)
+				t.Fatalf("ApplySettings for %s returned no error, want one", one.name)
 			}
 			mustMatch(t, amp.sent(), []string(nil))
 		})
 	}
 }
 
-// ConfirmedBy confirms a field the receiver reports at the declared
-// value, rejects a field reported at another value, and skips a field
-// the settings do not declare.
+// ConfirmedBy is true when each field that is set matches the observed
+// value, false when one differs, and skips a field that is nil.
 func TestConfirmedBy(t *testing.T) {
 	declared := Settings{
 		Audio:  AudioSettings{Balance: floatPtr(0.5)},
@@ -184,22 +181,21 @@ func TestConfirmedBy(t *testing.T) {
 		Device: DeviceSettings{Name: strPtr("Test Amp"), LED: boolPtr(true), Buttons: boolPtr(true)},
 	}), false)
 
-	// A declared balance with nothing else declared confirms against a
-	// receiver that reports every field at another value: the fields
-	// the settings do not declare are skipped.
+	// Only the balance is set, so the other observed values do not
+	// matter.
 	mustMatch(t, Settings{Audio: AudioSettings{Balance: floatPtr(0.5)}}.ConfirmedBy(Settings{
 		Audio:  AudioSettings{Balance: floatPtr(0.5)},
 		Device: DeviceSettings{Name: strPtr("Anything"), LED: boolPtr(true), Buttons: boolPtr(false)},
 	}), true)
-	// A settings with nothing declared confirms against any report.
+	// With no field set, any observed settings confirm.
 	mustMatch(t, Settings{}.ConfirmedBy(Settings{
 		Audio:  AudioSettings{Balance: floatPtr(0.5)},
 		Device: DeviceSettings{Name: strPtr("Anything"), LED: boolPtr(true), Buttons: boolPtr(false)},
 	}), true)
 }
 
-// ApplySettings stops at the first command the receiver refuses, and
-// the refusal is the error it returns.
+// ApplySettings returns the error of the first command the receiver
+// refuses.
 func TestApplySettingsStopsOnAFailedCommand(t *testing.T) {
 	amp := startFakeAmp(t)
 	amp.mutex.Lock()
@@ -219,7 +215,7 @@ func TestApplySettingsStopsOnAFailedCommand(t *testing.T) {
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			if err := client.ApplySettings(one.want); err == nil {
-				t.Fatalf("%s did not error", one.name)
+				t.Fatalf("ApplySettings for %s returned no error, want one", one.name)
 			}
 		})
 	}

@@ -1,8 +1,5 @@
 package main
 
-// The declared zone controls' confirmation: whether the receiver has
-// reported a declared control at the declared value.
-
 import (
 	"reflect"
 	"testing"
@@ -10,9 +7,8 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
-// A declared control the receiver has not reported is skipped, so an
-// empty report confirms. There is nothing to confirm the control
-// against, and blocking on it would retry forever.
+// A declared control that the receiver has not reported is skipped, so
+// an empty report confirms, because waiting for it would retry forever.
 func TestZoneSpecConfirmedBySkipsAnUnreportedControl(t *testing.T) {
 	volume := 40.0
 	spec := ZoneSpec{Power: equipment.PowerOn, Input: "CD", Volume: &volume, Sleep: &sleep}
@@ -23,8 +19,8 @@ func TestZoneSpecConfirmedBySkipsAnUnreportedControl(t *testing.T) {
 	}
 }
 
-// A declared control reported at another value is not confirmed, so the
-// operator sends it again.
+// A volume that the receiver reports at another value is not confirmed,
+// so the operator sends it again.
 func TestZoneSpecConfirmedByRejectsADifferentReportedValue(t *testing.T) {
 	t.Parallel()
 	volume := 40.0
@@ -36,9 +32,9 @@ func TestZoneSpecConfirmedByRejectsADifferentReportedValue(t *testing.T) {
 	}
 }
 
-// A declared control reported at the same value is confirmed. Volume
-// compares in the driver's steps, so a display unit turns into a count
-// first.
+// Controls that the receiver reports at their declared values confirm.
+// Volume compares in the driver's steps, so the declared 40 in the
+// receiver's scale is 80 steps at resolution 2.
 func TestZoneSpecConfirmedByAcceptsAnEqualReportedValue(t *testing.T) {
 	volume := 40.0
 	spec := ZoneSpec{Volume: &volume, Mute: &muted, Sleep: &sleep}
@@ -49,8 +45,8 @@ func TestZoneSpecConfirmedByAcceptsAnEqualReportedValue(t *testing.T) {
 	}
 }
 
-// A different reported power is not confirmed: a declared on is not met
-// by a standby report, whichever word the receiver used for standby.
+// A declared on is not confirmed by a report of standby, whichever word
+// the receiver uses for standby.
 func TestZoneSpecConfirmedByRejectsADifferentPower(t *testing.T) {
 	t.Parallel()
 	spec := ZoneSpec{Power: equipment.PowerOn}
@@ -61,7 +57,6 @@ func TestZoneSpecConfirmedByRejectsADifferentPower(t *testing.T) {
 	}
 }
 
-// A different reported input is not confirmed.
 func TestZoneSpecConfirmedByRejectsADifferentInput(t *testing.T) {
 	t.Parallel()
 	spec := ZoneSpec{Input: "CD"}
@@ -70,7 +65,6 @@ func TestZoneSpecConfirmedByRejectsADifferentInput(t *testing.T) {
 	}
 }
 
-// A different reported mute is not confirmed.
 func TestZoneSpecConfirmedByRejectsADifferentMute(t *testing.T) {
 	spec := ZoneSpec{Mute: &muted}
 	if spec.ConfirmedBy(equipment.ZoneState{Mute: false}, 2) {
@@ -78,7 +72,6 @@ func TestZoneSpecConfirmedByRejectsADifferentMute(t *testing.T) {
 	}
 }
 
-// A different reported sleep is not confirmed.
 func TestZoneSpecConfirmedByRejectsADifferentSleep(t *testing.T) {
 	spec := ZoneSpec{Sleep: &sleep}
 	if spec.ConfirmedBy(equipment.ZoneState{Sleep: sleep + 30}, 2) {
@@ -86,8 +79,8 @@ func TestZoneSpecConfirmedByRejectsADifferentSleep(t *testing.T) {
 	}
 }
 
-// A declared control whose observed counterpart is empty is skipped, so
-// a power that has not reached the report does not fail the block.
+// A power that is missing from the report is skipped and does not fail
+// the zone.
 func TestZoneSpecConfirmedBySkipsAnUnreportedPower(t *testing.T) {
 	t.Parallel()
 	spec := ZoneSpec{Power: equipment.PowerOn}
@@ -96,12 +89,10 @@ func TestZoneSpecConfirmedBySkipsAnUnreportedPower(t *testing.T) {
 	}
 }
 
-// A different value in any one declared control fails the whole block,
-// so a partial apply is never taken for confirmed. The sweep walks the
-// zone spec and changes one field at a time, so a control added to
-// ZoneSpec without a line in ConfirmedBy fails here instead of being
-// taken for confirmed while the receiver holds another value. Each
-// field pairs with the ZoneState field of the same name.
+// A difference in any one declared control fails the zone, so a partly
+// applied spec is never confirmed. The test declares each field of
+// ZoneSpec in turn and changes the ZoneState field of the same name, so
+// a control added to ZoneSpec without a check in ConfirmedBy fails here.
 func TestZoneSpecConfirmedByRejectsADifferenceInAnyDeclaredField(t *testing.T) {
 	t.Parallel()
 	specType := reflect.TypeOf(ZoneSpec{})
@@ -121,9 +112,9 @@ func TestZoneSpecConfirmedByRejectsADifferenceInAnyDeclaredField(t *testing.T) {
 	}
 }
 
-// declareZoneField gives one ZoneSpec field a declared value. A field of
-// a type the sweep cannot fill fails, so a new control type is handled
-// here rather than skipped.
+// declareZoneField sets one ZoneSpec field to a value. A field of a type
+// that it cannot set fails the test, so that a new type of control is
+// not skipped.
 func declareZoneField(t *testing.T, f reflect.Value) {
 	t.Helper()
 	switch f.Kind() {
@@ -147,9 +138,10 @@ func declareZoneField(t *testing.T, f reflect.Value) {
 	}
 }
 
-// changeZoneState moves one observed control off the declared value. The
-// volume and the sleep are compared as counts, and the declared 1 is one
-// step at resolution 1, so the 2 set here differs.
+// changeZoneState sets one ZoneState field to a value that differs from
+// the one declareZoneField declares. At resolution 1 a declared volume
+// of 1 is one step, and sleep compares in minutes, so 2 differs from
+// both.
 func changeZoneState(t *testing.T, f reflect.Value) {
 	t.Helper()
 	switch f.Kind() {

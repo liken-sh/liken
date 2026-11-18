@@ -1,8 +1,7 @@
-// The discovery parsers and the merge, plus the SSDP and mDNS send and
-// read paths against responders in memory. Multicast needs a real LAN
-// and a real device, so each search sends from a packetConn, and a
-// responder answers it with canned packets on the fake clock of a
-// synctest bubble.
+// Tests of the discovery parsers and the merge, and of the SSDP and
+// mDNS searches against in-memory responders. A search sends from a
+// packetConn instead of a multicast socket, and a responder replies
+// with canned packets on the fake clock of a synctest bubble.
 
 package wiim
 
@@ -19,10 +18,10 @@ import (
 	"golang.org/x/net/dns/dnsmessage"
 )
 
-// packetConn is the socket a search opens, in memory. Each packet the
-// search sends goes to respond, on a goroutine of its own, so a
-// responder can wait before it answers, the way a renderer waits up to
-// the MX. A read waits for an answer, the read deadline, or the close.
+// packetConn is an in-memory socket for a search. It passes each packet
+// that the search sends to respond on a new goroutine, so a responder
+// can delay its reply as a renderer does up to the MX. ReadFrom waits
+// for a reply, the read deadline, or Close.
 type packetConn struct {
 	respond func(conn *packetConn, packet []byte, to net.Addr)
 	inbox   chan []byte
@@ -33,8 +32,8 @@ type packetConn struct {
 	deadline time.Time
 }
 
-// usePackets answers every socket a search opens with respond until the
-// test ends.
+// usePackets makes every socket that a search opens a packetConn that
+// calls respond, until the test ends.
 func usePackets(t *testing.T, respond func(conn *packetConn, packet []byte, to net.Addr)) {
 	t.Helper()
 	restore := listenPacket
@@ -44,8 +43,8 @@ func usePackets(t *testing.T, respond func(conn *packetConn, packet []byte, to n
 	t.Cleanup(func() { listenPacket = restore })
 }
 
-// answer queues one packet for the search to read. A socket the search
-// has closed drops it.
+// answer queues a packet for ReadFrom to return. After Close it drops
+// the packet.
 func (c *packetConn) answer(packet []byte) {
 	select {
 	case c.inbox <- packet:
@@ -90,14 +89,14 @@ func (c *packetConn) LocalAddr() net.Addr                  { return &net.UDPAddr
 func (c *packetConn) SetDeadline(deadline time.Time) error { return c.SetReadDeadline(deadline) }
 func (c *packetConn) SetWriteDeadline(time.Time) error     { return nil }
 
-// mdnsDevicePacket builds one mDNS response for an instance named
-// "WiiM Amp". includeA decides whether the A record joins the PTR, SRV,
-// and TXT records, so a test can split the address into its own packet.
+// mdnsDevicePacket builds an mDNS response for an instance named "WiiM
+// Amp". With includeA false the packet has no A record, so a test can
+// send the address in a separate packet.
 func mdnsDevicePacket(t *testing.T, includeA bool) []byte {
 	t.Helper()
 	builder := dnsmessage.NewBuilder(nil, dnsmessage.Header{Response: true})
 	if err := builder.StartAnswers(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("starting the mDNS answers: %v", err)
 	}
 	header := func(name string) dnsmessage.ResourceHeader {
 		return dnsmessage.ResourceHeader{
@@ -110,43 +109,42 @@ func mdnsDevicePacket(t *testing.T, includeA bool) []byte {
 		header(linkplayService),
 		dnsmessage.PTRResource{PTR: dnsmessage.MustNewName("WiiM Amp._linkplay._tcp.local.")},
 	); err != nil {
-		t.Fatal(err)
+		t.Fatalf("packing the mDNS PTR record: %v", err)
 	}
 	if err := builder.SRVResource(
 		header("WiiM Amp._linkplay._tcp.local."),
 		dnsmessage.SRVResource{Port: 49152, Target: dnsmessage.MustNewName("WiiMAmp.local.")},
 	); err != nil {
-		t.Fatal(err)
+		t.Fatalf("packing the mDNS SRV record: %v", err)
 	}
 	if err := builder.TXTResource(
 		header("WiiM Amp._linkplay._tcp.local."),
 		dnsmessage.TXTResource{TXT: []string{"uuid=ff98f2f7-aabb-ccdd-eeff-0011ff98f2f7"}},
 	); err != nil {
-		t.Fatal(err)
+		t.Fatalf("packing the mDNS TXT record: %v", err)
 	}
 	if includeA {
 		if err := builder.AResource(
 			header("WiiMAmp.local."),
 			dnsmessage.AResource{A: [4]byte{192, 0, 2, 10}},
 		); err != nil {
-			t.Fatal(err)
+			t.Fatalf("packing the mDNS A record: %v", err)
 		}
 	}
 	packet, err := builder.Finish()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("finishing the mDNS packet: %v", err)
 	}
 	return packet
 }
 
-// mdnsARecordPacket is a second packet that carries only the A record
-// for the same host, the shape a responder uses when it splits the
-// answer across several packets.
+// mdnsARecordPacket builds a packet with only the A record for the host
+// of mdnsDevicePacket, as a responder sends when it splits its answer.
 func mdnsARecordPacket(t *testing.T) []byte {
 	t.Helper()
 	builder := dnsmessage.NewBuilder(nil, dnsmessage.Header{Response: true})
 	if err := builder.StartAnswers(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("starting the mDNS answers: %v", err)
 	}
 	if err := builder.AResource(
 		dnsmessage.ResourceHeader{
@@ -156,17 +154,17 @@ func mdnsARecordPacket(t *testing.T) []byte {
 		},
 		dnsmessage.AResource{A: [4]byte{192, 0, 2, 10}},
 	); err != nil {
-		t.Fatal(err)
+		t.Fatalf("packing the mDNS A record: %v", err)
 	}
 	packet, err := builder.Finish()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("finishing the mDNS packet: %v", err)
 	}
 	return packet
 }
 
-// The mDNS parser folds a packet with the PTR, SRV, TXT, and A records
-// into one device.
+// parseMDNS turns a packet with PTR, SRV, TXT, and A records into one
+// device.
 func TestParseMDNSBuildsADevice(t *testing.T) {
 	instances := map[string]*mdnsInstance{}
 	parseMDNS(mdnsDevicePacket(t, true), instances)
@@ -179,8 +177,8 @@ func TestParseMDNSBuildsADevice(t *testing.T) {
 	mustMatch(t, devices[0].Description, "http://192.0.2.10:49152/description.xml")
 }
 
-// The mDNS parser assembles an instance whose records arrive in two
-// packets: the identity and the name first, the address later.
+// An instance is not a device until its address arrives in a later
+// packet.
 func TestParseMDNSAssemblesAcrossPackets(t *testing.T) {
 	instances := map[string]*mdnsInstance{}
 	parseMDNS(mdnsDevicePacket(t, false), instances)
@@ -193,17 +191,15 @@ func TestParseMDNSAssemblesAcrossPackets(t *testing.T) {
 	mustMatch(t, devices[0].Address, "192.0.2.10")
 }
 
-// A packet that is not a DNS message folds nothing and cannot panic.
+// parseMDNS ignores a packet that is not a DNS message.
 func TestParseMDNSIgnoresGarbage(t *testing.T) {
 	instances := map[string]*mdnsInstance{}
 	parseMDNS([]byte("not a dns packet"), instances)
 	mustMatch(t, assembleMDNS(instances), []Device{})
 }
 
-// The SSDP parser reads the identity and the address from a response
-// whose header casing and LOCATION path vary. The name is not in the
-// response, so it stays empty.
-func TestParseSSDPReadsEitherHeaderCasing(t *testing.T) {
+// parseSSDP reads a response whose header names are lower-case.
+func TestParseSSDPReadsLowerCaseHeaderNames(t *testing.T) {
 	response := []byte("HTTP/1.1 200 OK\r\n" +
 		"location: http://192.0.2.10:49152/device.xml\r\n" +
 		"usn: uuid:FF98F2F7-AABB-CCDD-EEFF-0011FF98F2F7::urn:schemas-upnp-org:device:MediaRenderer:1\r\n\r\n")
@@ -216,24 +212,24 @@ func TestParseSSDPReadsEitherHeaderCasing(t *testing.T) {
 	mustMatch(t, device.Description, "http://192.0.2.10:49152/device.xml")
 }
 
-// A response without an identity or without an address is not a device.
+// parseSSDP returns false for a response without a USN or a LOCATION.
 func TestParseSSDPRejectsWithoutIdentityOrAddress(t *testing.T) {
 	if _, ok := parseSSDP([]byte("HTTP/1.1 200 OK\r\nLOCATION: http://192.0.2.10/x\r\n\r\n")); ok {
-		t.Fatal("a response without a USN parsed")
+		t.Fatal("parseSSDP accepted a response without a USN, want it refused")
 	}
 	if _, ok := parseSSDP([]byte("HTTP/1.1 200 OK\r\nUSN: uuid:FF98F2F7AABBCCDDEEFF0011\r\n\r\n")); ok {
-		t.Fatal("a response without a LOCATION parsed")
+		t.Fatal("parseSSDP accepted a response without a LOCATION, want it refused")
 	}
 }
 
-// An SSDP MediaRenderer that is not a LinkPlay device answers the same
-// search and must not be taken for a WiiM.
+// parseSSDP returns false for a MediaRenderer that is not a LinkPlay
+// device, because it answers the same search.
 func TestParseSSDPRejectsANonLinkPlayRenderer(t *testing.T) {
 	response := []byte("HTTP/1.1 200 OK\r\n" +
 		"LOCATION: http://192.0.2.20:60006/desc.xml\r\n" +
 		"USN: uuid:508945DC-67F5-1B40-0080-000678F69EB2::urn:schemas-upnp-org:device:MediaRenderer:1\r\n\r\n")
 	if _, ok := parseSSDP(response); ok {
-		t.Fatal("a non-LinkPlay renderer parsed as a WiiM")
+		t.Fatal("parseSSDP accepted a MediaRenderer that is not a LinkPlay device, want it refused")
 	}
 }
 
@@ -256,13 +252,13 @@ func TestIsLinkPlayUUID(t *testing.T) {
 	}
 }
 
-// The merge fills a missing name or address from whichever source
-// carries it, and keeps one device per identity.
+// mergeDevice keeps one device per UUID and fills an empty name or
+// address from the other record.
 func TestMergeFillsMissingFields(t *testing.T) {
 	devices := map[string]Device{}
-	// SSDP finds the identity and the address, but no name.
+	// SSDP returns a UUID and an address, but no name.
 	mergeDevice(devices, Device{UUID: "FF98F2F7AABBCCDDEEFF0011", Address: "192.0.2.11"})
-	// mDNS finds the same identity with a name.
+	// mDNS returns the same UUID with a name.
 	mergeDevice(devices, Device{UUID: "FF98F2F7AABBCCDDEEFF0011", Name: "Amp", Address: "192.0.2.10"})
 
 	got := sorted(devices)
@@ -271,8 +267,8 @@ func TestMergeFillsMissingFields(t *testing.T) {
 	mustMatch(t, got[0].Address, "192.0.2.11")
 }
 
-// The merge keeps the description URL the first source found, and
-// fills it from the other source when the first had none.
+// mergeDevice keeps the first description URL, and sets it from a later
+// record when the first had none.
 func TestMergeFillsTheDescription(t *testing.T) {
 	devices := map[string]Device{}
 	mergeDevice(devices, Device{UUID: "FF98F2F7AABBCCDDEEFF0011", Address: "192.0.2.10"})
@@ -282,14 +278,14 @@ func TestMergeFillsTheDescription(t *testing.T) {
 	mustMatch(t, sorted(devices)[0].Description, "http://192.0.2.10:59152/description.xml")
 }
 
-// A record with no identity never enters the set.
+// mergeDevice ignores a record with no UUID.
 func TestMergeIgnoresAnEmptyIdentity(t *testing.T) {
 	devices := map[string]Device{}
 	mergeDevice(devices, Device{Name: "Amp", Address: "192.0.2.10"})
 	mustMatch(t, devices, map[string]Device{})
 }
 
-// The sort orders devices by identity, not by arrival.
+// sorted orders devices by UUID, not by when they were found.
 func TestSortedOrdersByUUID(t *testing.T) {
 	got := sorted(map[string]Device{
 		"BBB": {UUID: "BBB"},
@@ -299,13 +295,13 @@ func TestSortedOrdersByUUID(t *testing.T) {
 	mustMatch(t, []string{got[0].UUID, got[1].UUID, got[2].UUID}, []string{"AAA", "BBB", "CCC"})
 }
 
-// ssdpResponse is a renderer's answer to the M-SEARCH.
+// ssdpResponse is a renderer's response to the M-SEARCH.
 var ssdpResponse = []byte("HTTP/1.1 200 OK\r\n" +
 	"LOCATION: http://192.0.2.10:49152/device.xml\r\n" +
 	"USN: uuid:ff98f2f7-aabb-ccdd-eeff-0011ff98f2f7::urn:schemas-upnp-org:device:MediaRenderer:1\r\n\r\n")
 
-// The SSDP search sends its M-SEARCH to the SSDP group, and reads the
-// answer of a renderer.
+// searchSSDP sends the M-SEARCH to the SSDP group and reads a renderer's
+// response.
 func TestSearchSSDPReadsAResponder(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		usePackets(t, func(conn *packetConn, _ []byte, to net.Addr) {
@@ -323,9 +319,9 @@ func TestSearchSSDPReadsAResponder(t *testing.T) {
 	})
 }
 
-// A renderer may wait any time up to the MX the M-SEARCH states before
-// it answers, so the read stays open that long. The responder waits
-// almost the whole MX it reads from the request.
+// A renderer can wait up to the MX of the M-SEARCH before it responds,
+// so the search keeps reading that long. The responder waits almost the
+// whole MX from the request.
 func TestSearchSSDPWaitsTheWholeMX(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		usePackets(t, func(conn *packetConn, packet []byte, _ net.Addr) {
@@ -341,8 +337,8 @@ func TestSearchSSDPWaitsTheWholeMX(t *testing.T) {
 	})
 }
 
-// The mDNS browse sends its query to the mDNS group, reads the answer
-// of a responder, and the query it sends is a valid DNS message.
+// browseMDNS sends its query to the mDNS group and reads a responder's
+// answer.
 func TestBrowseMDNSReadsAResponder(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		packet := mdnsDevicePacket(t, true)
@@ -360,11 +356,11 @@ func TestBrowseMDNSReadsAResponder(t *testing.T) {
 		mustMatch(t, got[0].Name, "WiiM Amp")
 		mustMatch(t, got[0].Address, "192.0.2.10")
 
-		// The query the browse sends is a PTR question for the LinkPlay
-		// service with the unicast-response bit set.
+		// The query is a PTR question for the LinkPlay service with the
+		// unicast-response bit set.
 		var message dnsmessage.Message
 		if err := message.Unpack(mdnsQuery()); err != nil {
-			t.Fatal(err)
+			t.Fatalf("unpacking the mDNS query: %v", err)
 		}
 		mustMatch(t, len(message.Questions), 1)
 		mustMatch(t, message.Questions[0].Name.String(), linkplayService)
@@ -373,8 +369,7 @@ func TestBrowseMDNSReadsAResponder(t *testing.T) {
 	})
 }
 
-// Discover returns nothing when nothing answers. Both paths search
-// until the window closes, and return an empty list.
+// Discover returns an empty list when no device responds.
 func TestDiscoverReturnsEmptyWhenNothingAnswers(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		usePackets(t, func(*packetConn, []byte, net.Addr) {})

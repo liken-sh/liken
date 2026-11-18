@@ -1,5 +1,3 @@
-// Pending: which declared fields the operator sends to the device.
-
 package wiim
 
 import (
@@ -55,8 +53,8 @@ func TestPendingKeepsOnlyTheFieldsToSend(t *testing.T) {
 	}
 }
 
-// settingsJSON writes settings the way the log carries them, so two
-// values compare by what they hold and not by pointer.
+// settingsJSON marshals settings so that two values compare by their
+// contents and not by pointer.
 func settingsJSON(t *testing.T, s Settings) string {
 	t.Helper()
 	raw, err := json.Marshal(s)

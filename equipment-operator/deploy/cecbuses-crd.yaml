@@ -1,5 +1,5 @@
-# A CECBus is one HDMI tree, which means one CEC wire, and the USB CEC
-# adapters on the cluster's machines that are connected to it.
+# A CECBus is one HDMI tree, which has one CEC wire, and the USB CEC
+# adapters on the cluster's machines that connect to it.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -17,16 +17,16 @@ spec:
     - name: v1alpha1
       served: true
       storage: true
-      # The status subresource splits spec and status into two write
-      # paths. A person declares the spec. The node workload on each
+      # The status subresource gives spec and status separate write
+      # paths. A person writes the spec. The node workload on each
       # adapter's machine writes that adapter's entry under
       # status.adapters, and the operator's Deployment writes
       # status.devices and the conditions.
       subresources:
         status: {}
-      # The default view says where the adapters are, the name the TV
-      # lists them by, and whether the bus works. kubectl get -o wide adds the columns with priority 1: the
-      # scan, each adapter's state, and the names of the devices found.
+      # The default columns answer whether the bus works. The columns
+      # with priority 1 show only in kubectl get -o wide, because the
+      # lists of adapter states and device names grow with the bus.
       additionalPrinterColumns:
         - name: Mode
           type: string
@@ -61,36 +61,36 @@ spec:
       schema:
         openAPIV3Schema:
           type: object
-          description: "One HDMI tree, which means one CEC wire, and the USB CEC adapters on the cluster's machines that are connected to it. CEC gives a bus no name, so a person names it. The TV lists each adapter in Control by spec.osdName, not by this name. A node workload that holds an adapter no CECBus names creates a CECBus in Listen, named after its machine, with the equipment.liken.sh/discovered label. A person's CECBus that names the same machine takes over, and the node workload deletes the one it created. To adopt a discovered CECBus, create one under a new name that names the same machine. Do not apply one under the discovered name: that conflicts with the node workload, which owns that object's spec."
+          description: "One HDMI tree, which has one CEC wire, and the USB CEC adapters on the cluster's machines that connect to it. CEC gives a bus no name, so you choose the name of the `CECBus`. The TV never shows that name. It lists each adapter by `spec.osdName`. When the node workload finds an adapter on a machine that no `CECBus` lists, it creates a `CECBus` in `Listen`, named after the machine and labeled `equipment.liken.sh/discovered`. To take over a discovered `CECBus`, create your own under a different name that lists the same machine. The node workload then deletes the discovered one. Do not apply your spec under the discovered name. The node workload created that spec under its own field manager, so a server-side apply conflicts, and the object keeps the label, so the node workload deletes it as soon as another `CECBus` lists the machine."
           required: [spec]
           properties:
             spec:
               type: object
-              description: "The mode and the adapters. A person writes every field."
+              description: "The mode, the OSD name, and the adapters of the bus."
               required: [mode, adapters]
-              # An adapter in Control announces its Display's physical
-              # address, so each adapter names a Display before the bus
-              # may enter Control.
+              # An adapter in Control announces the physical address of
+              # its Display, so every adapter needs a display before the
+              # bus can be in Control.
               x-kubernetes-validations:
                 - rule: "self.mode != 'Control' || self.adapters.all(adapter, has(adapter.display))"
-                  message: "a CECBus in Control names a display for every adapter"
+                  message: "a CECBus in Control needs spec.adapters[].display on every adapter"
               properties:
                 mode:
                   type: string
                   enum: [Listen, Control]
-                  description: "The consent a person gives the adapters, because a device on a CEC bus can wake the TV and switch its input. Listen claims no logical address and sends nothing: each adapter opens the bus as a monitor, which needs CAP_NET_ADMIN, and reports the devices it hears. A full device list needs polls, and a poll is a transmission, so the device list in Listen is partial. Control claims a playback logical address with spec.osdName as the OSD name, announces the Display's physical address, answers the TV, and scans the bus once when it joins. After the scan an adapter in Control sends no message on a timer: it answers what the CEC rules require, asks a device that announces itself for its facts once, asks the TV for its power alone when it announces itself with no known power, once for each physical address it announces, reads the TV's power around a command and for a press of the remote's power button, and sends the commands a person causes."
+                  description: "Whether the adapters may send on the bus. A message on a CEC bus can wake the TV and switch its input, so the adapters send nothing until you set `Control`. In `Listen`, each adapter opens the bus as a monitor, which needs CAP_NET_ADMIN, claims no logical address, and lists the devices it hears. Only a poll finds a device that stays silent, and a poll is a transmission, so the list in `Listen` can miss devices. In `Control`, each adapter claims a playback logical address, announces `spec.osdName` and the physical address of its `Display`, replies to the TV, and scans the bus once when it joins. After the scan it sends nothing on a timer. It sends the replies that CEC requires, the commands that a person's request causes, one query to each device that announces itself, and a read of the TV's power status when it needs one: when the TV announces itself with an unknown power status, around a command, and when the remote's power button is pressed."
                 osdName:
                   type: string
                   default: liken
                   minLength: 1
                   maxLength: 14
                   pattern: "^[ -~]+$"
-                  description: "The name every adapter of the bus announces in Control, which the TV lists as the source's name in its input menu. It is 1 to 14 printable ASCII characters, from space to tilde, the limit of the [OSD Name] operand of Set OSD Name in HDMI-CEC 1.3a (CEC Table 26). The default is liken. The kernel takes the name only when it claims a logical address, so a new name makes each adapter release its address and claim it again, and the TV sees the source leave and come back."
+                  description: "The name that every adapter of the bus announces in Control. The TV lists it as the name of the source in its input menu. It is 1 to 14 printable ASCII characters, from space to tilde, because that is the limit of the operand of Set OSD Name in HDMI-CEC 1.3a (CEC Table 26). The default is `liken`. The kernel sets the name only when an adapter claims a logical address, so when you change the name, each adapter releases its address and claims it again, and the source leaves the TV's input menu and comes back."
                 adapters:
                   type: array
                   minItems: 1
                   maxItems: 8
-                  description: "The adapters connected to this wire, one for each machine."
+                  description: "The adapters connected to this wire, one entry for each machine, from 1 to 8 entries."
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [machine]
                   items:
@@ -101,19 +101,19 @@ spec:
                         type: string
                         minLength: 1
                         maxLength: 253
-                        description: "The Machine that carries the adapter. liken publishes the adapter as the machine's -cec device, and the node workload on that machine holds it."
+                        description: "The `Machine` that the adapter is plugged into. `liken` publishes the adapter as the machine's `-cec` device, and the node workload on that machine opens it."
                       display:
                         type: string
                         minLength: 1
                         maxLength: 253
-                        description: "The Display whose physical address the adapter announces in Control. display-operator reads the address from the EDID and publishes it at the Display's status.physicalAddress. The adapter announces this address whether it is connected to a spare input and carries no video, or sits inline in the machine's video path, because either way the address is the place in the tree where this Display's picture enters. An Active Source from the adapter then switches the TV, and any receiver between, to this Display's input."
+                        description: "The `Display` whose physical address the adapter announces in Control. Required in Control. `display-operator` reads the address from the monitor's EDID and publishes it at `status.physicalAddress` of the `Display`. The adapter announces this address even when it is plugged into a spare input and passes no video, because the address is where the picture of this `Display` enters the HDMI tree. So an Active Source message from the adapter switches the TV, and any receiver between them, to the input that shows this `Display`."
             status:
               type: object
-              description: "What the adapters report and what the operator derives from their reports."
+              description: "What the adapters report, and the device list and conditions that the operator derives from those reports."
               properties:
                 adapters:
                   type: array
-                  description: "One entry for each adapter, written by the node workload on that adapter's machine under its own field manager. Only the entries of machines the spec names count."
+                  description: "One entry for each adapter. The node workload on the adapter's machine writes the entry under its own field manager. The operator ignores the entry of a machine that `spec.adapters` does not list."
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [machine]
                   items:
@@ -122,114 +122,114 @@ spec:
                     properties:
                       machine:
                         type: string
-                        description: "The Machine that carries the adapter."
+                        description: "The `Machine` that the adapter is plugged into."
                       mode:
                         type: string
-                        description: "The mode the adapter runs."
+                        description: "The mode that the adapter runs in."
                       state:
                         type: string
-                        description: "Where the adapter is in its work. Listening: the adapter is a monitor. Joining: the adapter is in Control and holds no logical address. Joined: it holds a logical address and has not finished its scan. Scanned: it finished the scan it runs once when it joins. Refused: a call the adapter needs failed, and message gives the kernel's or the API server's text. Stopped: the node workload stopped, cleared the adapter's logical addresses, and left the bus, and message says why."
+                        description: "How far the adapter is through its start-up. `Listening`: the adapter is a monitor. `Joining`: the adapter is in Control and has no logical address yet. `Joined`: it has a logical address and has not finished its scan. `Scanned`: it finished the scan it runs when it joins. `Refused`: a kernel or API server call that the adapter needs failed, and `message` has the error. `Stopped`: the node workload stopped, cleared the adapter's logical addresses, and left the bus, and `message` says why."
                       driver:
                         type: string
-                        description: "The kernel driver of the adapter, such as pulse8-cec."
+                        description: "The kernel driver of the adapter, such as `pulse8-cec`."
                       physicalAddress:
                         type: string
                         description: "The physical address the adapter announces, in the dotted form 1.3.0.0."
                       logicalAddress:
                         type: integer
-                        description: "The logical address the adapter holds. It is absent in Listen and while the adapter holds none."
+                        description: "The logical address that the adapter claimed. It is absent in Listen and until the adapter claims one."
                       osdName:
                         type: string
-                        description: "The OSD name the adapter announces in Control: its bus's name, cut to 14 characters."
+                        description: "The OSD name that the adapter announces in Control. It is `spec.osdName` of the bus."
                       activeSource:
                         type: string
-                        description: "The physical address of the last Active Source the adapter heard or sent, in the dotted form 1.3.0.0. Active Source is a broadcast, so an adapter hears it in Listen and in Control. The kernel does not pass an adapter its own transmission, so the node workload records the Active Source its own adapter sends."
+                        description: "The physical address in the last Active Source message that the adapter heard or sent, in the dotted form 1.3.0.0. Active Source is a broadcast, so an adapter hears it in `Listen` and in `Control`. The kernel does not return an adapter's own messages to it, so the node workload records the Active Source messages that it sends itself."
                       message:
                         type: string
-                        description: "Why the adapter is not where its mode asks, in the words of the call that failed."
+                        description: "Why the adapter is not in the state that its mode needs, as the error text of the call that failed."
                       reportedAt:
                         type: string
                         format: date-time
-                        description: "When the node workload last wrote this entry. It writes the entry only when the entry changes, so this is the time of the last change. The age of the entry does not make it stale: the conditions treat an entry that is not Stopped as stale when no pod of the equipment-operator-cec DaemonSet runs on the entry's machine, when the pod there stopped being Ready after the entry was written, or when a new pod there is still not Ready 60 seconds after its first entry."
+                        description: "When the node workload last wrote this entry. It writes the entry only when the entry changes, so an old time does not mean that the entry is stale. The operator treats an entry that is not `Stopped` as stale when no pod of the `equipment-operator-cec` DaemonSet runs on the entry's machine, when the pod there stopped being Ready after the entry was written, or when a new pod there is still not Ready 60 seconds after the entry was written."
                       devices:
                         type: array
-                        description: "The devices this adapter found. In Control the adapter scans the bus once when it joins: it polls every logical address and asks each device that answers for its facts. After that it sends no question on a timer. It adds a device that it hears arrive, such as by the Report Physical Address a device broadcasts when it joins, and asks that device once for the facts its message left out. It keeps each fact current from the messages the devices send, and it removes a device only when a question to it goes unacknowledged. A device that leaves the bus in silence stays in the list until the adapter joins again. In Listen the adapter reports the devices it hears."
+                        description: "The devices that this adapter found. In `Control` the adapter polls every logical address when it joins, and queries each device that answers. After that it updates the list from the messages that devices send. When a new device broadcasts Report Physical Address, the adapter adds it and queries it once for the facts that message does not include. The adapter removes a device only when the device does not acknowledge a message, so a device that leaves the bus silently stays in the list until the adapter joins again. In `Listen` the adapter lists the devices it hears."
                         items:
                             type: object
                             required: [logicalAddress]
                             properties:
                               physicalAddress:
                                 type: string
-                                description: "The device's place in the HDMI tree, in the dotted form 1.0.0.0. It is absent until the device states it."
+                                description: "The position of the device in the HDMI tree, in the dotted form 1.0.0.0. It is absent until the device reports it."
                               logicalAddress:
                                 type: integer
                                 minimum: 0
                                 maximum: 15
-                                description: "The logical address the device holds. 0 is the TV and 5 is the audio system."
+                                description: "The logical address of the device. 0 is the TV and 5 is the audio system."
                               type:
                                 type: string
-                                description: "The device type the device reports, or the one its logical address implies: TV, Recording, Tuner, Playback, AudioSystem, Switch, Processor, Backup, or Specific."
+                                description: "The device type that the device reports, or the type that its logical address implies. One of `TV`, `Recording`, `Tuner`, `Playback`, `AudioSystem`, `Switch`, `Processor`, `Backup`, or `Specific`."
                               osdName:
                                 type: string
-                                description: "The name the device reports, at most 14 characters."
+                                description: "The OSD name that the device reports, at most 14 characters."
                               vendor:
                                 type: string
-                                description: "The device's IEEE OUI, as six hex digits. A Device Vendor ID of 000000 names no vendor, so it never replaces a vendor the device stated before, and the field is absent until the device states a real one."
+                                description: "The IEEE OUI of the device, as six hex digits. A Device Vendor ID of 000000 means no vendor, so it never replaces a vendor that the device reported before. The field is absent until the device reports a real one."
                               cecVersion:
                                 type: string
-                                description: "The CEC version the device reports: 1.3a, 1.4, or 2.0."
+                                description: "The CEC version that the device reports: `1.3a`, `1.4`, or `2.0`."
                               power:
                                 type: string
-                                description: "The power status the device last reported: On, Standby, ToOn, or ToStandby."
+                                description: "The power status that the device last reported: `On`, `Standby`, `ToOn`, or `ToStandby`."
                               systemAudioMode:
                                 type: string
                                 enum: ["On", "Off"]
-                                description: "The System Audio Mode the audio system last stated, which only the device at logical address 5 states. While it is On, the TV mutes its own speakers and sends its remote's volume keys to the audio system (HDMI-CEC 1.3a, CEC 13.15.2). In Control the adapter asks the audio system once in the scan it runs when it joins, after its other questions to that device, and each broadcast Set System Audio Mode sets it after that, such as the Off the audio system broadcasts before standby. The adapter reads it once more after the System Audio Mode Request of a wake that no broadcast On answered. A directed Set System Audio Mode does not set it, because the audio system directs its first On to the TV and stops there when the TV refuses it. Absent until the audio system states it."
+                                description: "The System Audio Mode that the audio system, the device at logical address 5, last reported. While it is `On`, the TV mutes its own speakers and sends its remote's volume keys to the audio system (HDMI-CEC 1.3a, CEC 13.15.2). In `Control` the adapter reads the mode in its scan. After that, a broadcast Set System Audio Mode, such as the `Off` that an audio system broadcasts before standby, updates it, and so does a System Audio Mode Status. When a wake sends a System Audio Mode Request and no broadcast `On` follows, the adapter reads the mode once more. A Set System Audio Mode sent to one device, such as the TV, does not update it, because the audio system sends its first `On` to the TV alone and goes no further when the TV refuses it. Absent until the audio system reports it."
                               systemAudioModeAt:
                                 type: string
                                 format: date-time
-                                description: "When the adapter last read or heard systemAudioMode."
+                                description: "When the adapter last read or heard `systemAudioMode`."
                 devices:
                   type: array
-                  description: "Every device on the wire, merged from the adapters' reports by physical address, in tree order: the TV first, then each device after the device it is connected to. When two adapters report one fact differently, the adapter first in spec.adapters wins, except for the System Audio Mode, where the adapter that read or heard it last wins."
+                  description: "Every device on the wire, merged from the reports of the adapters by physical address, in tree order: the TV first, then each device after the device it is connected to. When two adapters report one fact differently, the adapter that comes first in `spec.adapters` wins. The exception is the System Audio Mode, where the report with the later `systemAudioModeAt` wins."
                   items:
                     type: object
                     required: [logicalAddress]
                     properties:
                       physicalAddress:
                         type: string
-                        description: "The device's place in the HDMI tree, in the dotted form 1.0.0.0. It is absent until the device states it."
+                        description: "The position of the device in the HDMI tree, in the dotted form 1.0.0.0. It is absent until the device reports it."
                       logicalAddress:
                         type: integer
                         minimum: 0
                         maximum: 15
-                        description: "The logical address the device holds. 0 is the TV and 5 is the audio system."
+                        description: "The logical address of the device. 0 is the TV and 5 is the audio system."
                       type:
                         type: string
-                        description: "The device type the device reports, or the one its logical address implies: TV, Recording, Tuner, Playback, AudioSystem, Switch, Processor, Backup, or Specific."
+                        description: "The device type that the device reports, or the type that its logical address implies. One of `TV`, `Recording`, `Tuner`, `Playback`, `AudioSystem`, `Switch`, `Processor`, `Backup`, or `Specific`."
                       osdName:
                         type: string
-                        description: "The name the device reports, at most 14 characters."
+                        description: "The OSD name that the device reports, at most 14 characters."
                       vendor:
                         type: string
-                        description: "The device's IEEE OUI, as six hex digits. A Device Vendor ID of 000000 names no vendor, so it never replaces a vendor the device stated before, and the field is absent until the device states a real one."
+                        description: "The IEEE OUI of the device, as six hex digits. A Device Vendor ID of 000000 means no vendor, so it never replaces a vendor that the device reported before. The field is absent until the device reports a real one."
                       cecVersion:
                         type: string
-                        description: "The CEC version the device reports: 1.3a, 1.4, or 2.0."
+                        description: "The CEC version that the device reports: `1.3a`, `1.4`, or `2.0`."
                       power:
                         type: string
-                        description: "The power status the device last reported: On, Standby, ToOn, or ToStandby."
+                        description: "The power status that the device last reported: `On`, `Standby`, `ToOn`, or `ToStandby`."
                       systemAudioMode:
                         type: string
                         enum: ["On", "Off"]
-                        description: "The System Audio Mode the audio system last stated, which only the device at logical address 5 states. While it is On, the TV mutes its own speakers and sends its remote's volume keys to the audio system (HDMI-CEC 1.3a, CEC 13.15.2). In Control the adapter asks the audio system once in the scan it runs when it joins, after its other questions to that device, and each broadcast Set System Audio Mode sets it after that, such as the Off the audio system broadcasts before standby. The adapter reads it once more after the System Audio Mode Request of a wake that no broadcast On answered. A directed Set System Audio Mode does not set it, because the audio system directs its first On to the TV and stops there when the TV refuses it. Absent until the audio system states it."
+                        description: "The System Audio Mode that the audio system, the device at logical address 5, last reported. While it is `On`, the TV mutes its own speakers and sends its remote's volume keys to the audio system (HDMI-CEC 1.3a, CEC 13.15.2). In `Control` the adapter reads the mode in its scan. After that, a broadcast Set System Audio Mode, such as the `Off` that an audio system broadcasts before standby, updates it, and so does a System Audio Mode Status. When a wake sends a System Audio Mode Request and no broadcast `On` follows, the adapter reads the mode once more. A Set System Audio Mode sent to one device, such as the TV, does not update it, because the audio system sends its first `On` to the TV alone and goes no further when the TV refuses it. Absent until the audio system reports it."
                       systemAudioModeAt:
                         type: string
                         format: date-time
-                        description: "When an adapter last read or heard systemAudioMode."
+                        description: "When an adapter last read or heard `systemAudioMode`."
                 conditions:
                   type: array
-                  description: "AddressKnown: every adapter in Control announces its Display's physical address. Joined: every adapter in Control holds a logical address. Coherent: the adapters see each other on the bus, each at the physical address it announces, and an adapter that does not is on a different wire than the spec states. Scanned: every adapter in Control finished the scan it runs when it joins, which only Control achieves; a bus where an adapter finds no device says that the HDMI cable at the adapter's output may not carry the CEC wire. An adapter whose entry is stale makes each condition Unknown with the reason Stale, and an adapter whose node workload stopped makes each condition False with the reason Stopped. Coherent compares only adapters that finished a scan, by their physical addresses, because every adapter of a bus announces the same OSD name."
+                  description: "`AddressKnown`: every adapter in `Control` announces the physical address of its Display. `Joined`: every adapter in `Control` holds a logical address. `Coherent`: each adapter sees every other adapter on the bus at the physical address that the other announces. When one does not, the two adapters are probably on different wires. `Coherent` compares only adapters that finished a scan, and matches them by physical address, because every adapter of a bus announces the same OSD name. `Scanned`: every adapter finished the scan it runs when it joins and found at least one device. It is never `True` in `Listen`. An adapter that finds no device may be on an HDMI cable that does not carry the CEC wire. In `Listen`, `AddressKnown` and `Joined` are `False` and `Coherent` is `Unknown`, with the reason `Listening`. In `Control`, when an adapter's entry is stale, each condition is `Unknown` with the reason `Stale`, and when an adapter's node workload stopped, each condition is `False` with the reason `Stopped`."
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   items:

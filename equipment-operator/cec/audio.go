@@ -2,26 +2,25 @@ package cec
 
 // System Audio Control (HDMI-CEC 1.3a, CEC 13.15). While System Audio
 // Mode is on, the TV mutes its own speakers and sends the volume keys
-// of its remote to the audio system at logical address 5. A device asks
-// the audio system for the mode with System Audio Mode Request, which
-// carries the physical address of the source to play: the audio system
-// comes out of standby if necessary, switches to the input for that
-// address, and answers with Set System Audio Mode [On]. The audio
-// system broadcasts Set System Audio Mode [Off] just before standby.
+// of its remote to the audio system at logical address 5. A device
+// turns the mode on with System Audio Mode Request, which carries the
+// physical address of the source to play. The audio system leaves
+// standby if it must, switches to the input for that address, and
+// replies with Set System Audio Mode [On]. Just before it enters
+// standby, it broadcasts Set System Audio Mode [Off].
 //
-// This file holds the messages of the feature, the read of the mode,
-// and the volume keys. CEC Table 25 says that a device that sends
-// System Audio Mode Request shall be able to send User Control Pressed
-// for Volume Up, Volume Down, and Mute, with User Control Released, so
-// the keys are here although the node workload sets the volume over
-// the network and never presses them.
+// PressVolumeKey is here because CEC Table 25 requires a device that
+// sends System Audio Mode Request to be able to send User Control
+// Pressed for Volume Up, Volume Down, and Mute, and User Control
+// Released. Nothing in the operator calls it, because the Receiver's
+// network driver sets the volume.
 
 import "fmt"
 
-// SystemAudioMode is what the audio system last stated about System
-// Audio Mode. The zero value is unknown, because the wire operand of
-// Off is zero and a directory must tell an Off it heard from a mode it
-// never heard.
+// SystemAudioMode is the System Audio Mode that the audio system last
+// reported. Off is 0 on the wire, but the zero value here is unknown, so
+// a Directory can tell a reported Off from a mode that was never
+// reported.
 type SystemAudioMode byte
 
 const (
@@ -30,9 +29,9 @@ const (
 	SystemAudioOn
 )
 
-// audioModeOf reads the [System Audio Status] operand of Set System
-// Audio Mode and System Audio Mode Status: 0 is Off and 1 is On (CEC
-// Table 29). Any other value is unknown.
+// audioModeOf converts the [System Audio Status] operand of Set System
+// Audio Mode and System Audio Mode Status. 0 is Off and 1 is On (CEC
+// Table 26), and any other value is unknown.
 func audioModeOf(operand byte) SystemAudioMode {
 	switch operand {
 	case 0:
@@ -43,7 +42,7 @@ func audioModeOf(operand byte) SystemAudioMode {
 	return SystemAudioUnknown
 }
 
-// operand is the wire value of a known mode.
+// operand returns 0, the wire value of Off, for an unknown mode.
 func (m SystemAudioMode) operand() byte {
 	if m == SystemAudioOn {
 		return 1
@@ -51,8 +50,8 @@ func (m SystemAudioMode) operand() byte {
 	return 0
 }
 
-// String names the mode the way the status reports it, and an unknown
-// mode as empty.
+// String returns the value of a device's status.systemAudioMode in a
+// CECBus, which is empty for an unknown mode.
 func (m SystemAudioMode) String() string {
 	switch m {
 	case SystemAudioOn:
@@ -63,38 +62,37 @@ func (m SystemAudioMode) String() string {
 	return ""
 }
 
-// SystemAudioModeRequest asks the audio system for System Audio Mode
-// with the sound of the source at a physical address. The node
-// workload never sends the request without an operand, because a
-// request with no operand asks the audio system to turn the mode off.
+// SystemAudioModeRequest builds a request that turns System Audio Mode
+// on for the source at address. The address is required, because a
+// System Audio Mode Request with no operand turns the mode off.
 func SystemAudioModeRequest(from LogicalAddress, address PhysicalAddress) Message {
 	return NewMessage(from, AddressAudioSystem, OpSystemAudioModeRequest, byte(address>>8), byte(address))
 }
 
-// GiveSystemAudioModeStatus asks the audio system for the mode. The
-// audio system answers with System Audio Mode Status while it is out of
+// GiveSystemAudioModeStatus builds a request for the audio system's
+// current mode. The audio system replies only while it is out of
 // standby.
 func GiveSystemAudioModeStatus(from LogicalAddress) Message {
 	return NewMessage(from, AddressAudioSystem, OpGiveSystemAudioModeState)
 }
 
-// SetSystemAudioMode is the audio system's statement of the mode, which
-// it broadcasts, or directs to the TV the first time after a request.
+// SetSystemAudioMode builds the message in which the audio system
+// reports its mode. When a device other than the TV starts the mode,
+// the audio system sends the first [On] directly to the TV, and
+// broadcasts the later ones (CEC 13.15.2).
 func SetSystemAudioMode(from, to LogicalAddress, mode SystemAudioMode) Message {
 	return NewMessage(from, to, OpSetSystemAudioMode, mode.operand())
 }
 
-// SystemAudioModeStatus is the audio system's answer to Give System
-// Audio Mode Status.
 func SystemAudioModeStatus(from, to LogicalAddress, mode SystemAudioMode) Message {
 	return NewMessage(from, to, OpSystemAudioModeStatus, mode.operand())
 }
 
-// ReadSystemAudioMode asks the audio system for the mode once, and
-// records the answer in the directory. It answers SystemAudioUnknown
-// when the audio system did not answer or answered with a Feature
-// Abort, with the Result so a caller can say which. An error means the
-// kernel refused the call.
+// ReadSystemAudioMode asks the audio system for its mode once and
+// records the reply in the directory. It returns SystemAudioUnknown
+// when the audio system does not reply or replies with a Feature Abort,
+// and the Result tells which. The error is non-nil only when the kernel
+// refuses the transmit.
 func ReadSystemAudioMode(device *Device, directory *Directory, own LogicalAddress) (SystemAudioMode, Result, error) {
 	result, err := device.Transmit(GiveSystemAudioModeStatus(own), OpSystemAudioModeStatus, replyTimeout)
 	if err != nil || result.Reply == nil {
@@ -118,19 +116,16 @@ const (
 	KeyMute       VolumeKey = 0x43
 )
 
-// PressVolumeKey sends one press of a volume key to the audio system:
-// User Control Pressed, and then User Control Released at once, so the
-// audio system takes one step. HDMI-CEC 1.3a, CEC 13.13.2, says the
-// sender of a press sends the release when the button is released, and
-// that a follower that hears no release for 500 ms treats the button as
-// released. It answers the press's Result, and it sends no release for
-// a press the audio system did not acknowledge. An error means the
-// kernel refused a call.
+// PressVolumeKey sends User Control Pressed to the audio system and
+// then User Control Released at once, so the volume changes by one
+// step. It sends no release when the audio system did not acknowledge
+// the press, and returns the Result of the press. The error is non-nil
+// when key is not a volume key or the kernel refuses a transmit.
 func PressVolumeKey(device *Device, own LogicalAddress, key VolumeKey) (Result, error) {
 	switch key {
 	case KeyVolumeUp, KeyVolumeDown, KeyMute:
 	default:
-		return Result{}, fmt.Errorf("pressing a volume key: 0x%02x is no volume key", byte(key))
+		return Result{}, fmt.Errorf("key 0x%02x is not a volume key, want 0x41, 0x42, or 0x43", byte(key))
 	}
 	pressed, err := device.Transmit(NewMessage(own, AddressAudioSystem, OpUserControlPressed, byte(key)), 0, 0)
 	if err != nil || !pressed.Acked {

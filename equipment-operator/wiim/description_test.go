@@ -1,5 +1,3 @@
-// The model the client reads from the amp's UPnP description.
-
 package wiim
 
 import (
@@ -11,8 +9,8 @@ import (
 	"testing/synctest"
 )
 
-// wiimAmpDescription is the root of a WiiM Amp's description, cut to
-// the fields the client reads and the ones around them.
+// wiimAmpDescription is a WiiM Amp's description, trimmed to the
+// fields around the ones the client reads.
 const wiimAmpDescription = `<?xml version="1.0"?>
 <root xmlns="urn:schemas-upnp-org:device-1-0">
   <device>
@@ -23,8 +21,8 @@ const wiimAmpDescription = `<?xml version="1.0"?>
   </device>
 </root>`
 
-// describedAmp is a fake amp whose UPnP side answers its description
-// with code, and counts the reads.
+// describedAmp returns a fake amp whose UPnP server responds to each
+// description request with the status code and counts the requests.
 func describedAmp(t *testing.T, code int) (*fakeAmp, *Client, *atomic.Int64) {
 	t.Helper()
 	reads := &atomic.Int64{}
@@ -67,8 +65,6 @@ func TestTheClientReadsNoModelBeforeTheAmpAnswers(t *testing.T) {
 	})
 }
 
-// A device that is not a WiiM gets getStatusEx and nothing else, so
-// the client never reads its description.
 func TestTheClientReadsNoModelFromAnotherBrand(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -82,9 +78,6 @@ func TestTheClientReadsNoModelFromAnotherBrand(t *testing.T) {
 	})
 }
 
-// A failed read waits out describeRetryInterval before the next one,
-// so an amp that does not serve its description is not asked on every
-// poll.
 func TestTheClientWaitsBeforeItReadsAFailedDescriptionAgain(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

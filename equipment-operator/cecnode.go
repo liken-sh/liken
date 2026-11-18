@@ -1,11 +1,11 @@
 package main
 
-// The node workload, `equipment-operator-node cec`: one pod on each machine
-// that carries a CEC adapter. The pod holds the DRA claim on the
-// adapter's -cec device, finds the CECBus that names its machine, runs
-// the adapter in the bus's mode, and writes its own entry under that
-// bus's status.adapters. It needs no host network, no message bus, and
-// no receiver credentials. plans/completed/09-cec.md gives the design.
+// The node workload (`equipment-operator-node cec`) runs as one pod on
+// each machine that has a CEC adapter. The pod holds the DRA claim on
+// the adapter's cec device, finds the CECBus that lists its machine,
+// runs the adapter in that bus's mode, and writes its own entry under
+// the bus's status.adapters. It needs no host network, no message bus,
+// and no receiver credentials.
 
 import (
 	"context"
@@ -28,41 +28,42 @@ import (
 // The node workload's environment.
 const (
 	// NODE_NAME is the node the pod runs on. liken names each node after
-	// its Machine, so it is also the machine a CECBus names.
+	// its Machine, so it is also the machine name that a CECBus lists.
 	nodeNameVariable = "NODE_NAME"
-	// CEC_DEVICE names the adapter node, for a run by hand. The pod
-	// leaves it unset and finds the one node its claim delivered.
+	// CEC_DEVICE is the path of the adapter's device node, for running
+	// the workload by hand. In the pod it is unset, and findAdapter
+	// searches /dev.
 	cecDeviceVariable = "CEC_DEVICE"
 )
 
-// cecStopWrite bounds the write of the Stopped entry after the node
-// workload's context ends. The kubelet gives a pod 30 seconds after
-// SIGTERM, and a write that waits out a 429 would otherwise take up to
-// the shared client's limit of ten seconds.
+// cecStopWrite limits the write of the Stopped entry, which happens
+// after the node workload's context has ended. The kubelet kills a pod
+// 30 seconds after SIGTERM, and a write that waits out a 429 could
+// otherwise take up to the shared client's limit of ten seconds.
 const cecStopWrite = 5 * time.Second
 
-// findAdapter answers the one CEC node the pod's claim delivered. The
-// claim is exclusive and names one device, so the container's /dev
-// holds one /dev/cecN.
+// findAdapter returns CEC_DEVICE when it is set, and otherwise the
+// first cec* file in devices. The pod's claim covers one adapter, so
+// the container's /dev has one cec device.
 func findAdapter(devices string) (string, error) {
 	if path := os.Getenv(cecDeviceVariable); path != "" {
 		return path, nil
 	}
 	found, _ := filepath.Glob(filepath.Join(devices, "cec*"))
 	if len(found) == 0 {
-		return "", fmt.Errorf("no CEC adapter in %s: the pod's claim delivered no cec node", devices)
+		return "", fmt.Errorf("no cec* device in %s and %s is unset", devices, cecDeviceVariable)
 	}
 	slices.Sort(found)
 	return found[0], nil
 }
 
-// runCEC is the node workload's main. Every failure ends the process
-// with the error as its last log line. The kubelet restarts the
-// container, and a new container receives the adapter's current node,
-// which is how the pod finds an adapter again after an unplug.
+// runCEC is the node workload's main. Any failure exits the process
+// with the error as the last log line. The kubelet then restarts the
+// container, and the new container gets the adapter's current device
+// node, so the pod finds an adapter again after it was unplugged.
 func runCEC() {
-	// The kubelet stops a pod with SIGTERM. The context ends on it, so the
-	// node workload releases the adapter before the process exits.
+	// The kubelet stops a pod with SIGTERM. Cancelling the context lets
+	// the node workload release the adapter before the process exits.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
 	if err := serveCEC(ctx, "/dev"); err != nil {
@@ -71,19 +72,18 @@ func runCEC() {
 	}
 }
 
-// serveCEC opens the adapter the claim delivered under devices and
-// runs the node workload until ctx ends or the adapter fails.
+// serveCEC opens the claim's adapter under devices and runs the node
+// workload until ctx ends or the adapter fails.
 func serveCEC(ctx context.Context, devices string) error {
 	machine := os.Getenv(nodeNameVariable)
 	if machine == "" {
-		return fmt.Errorf("%s is unset; the DaemonSet must state the node", nodeNameVariable)
+		return fmt.Errorf("%s is unset, and the DaemonSet must set it to the node name", nodeNameVariable)
 	}
-	// The pod's namespace holds the pods of every node workload, which
-	// the pass reads to tell whether another adapter's entry is current
-	// (cecpods.go).
+	// The pass reads the node workload's pods in this namespace to tell
+	// whether another adapter's entry is current (cecpods.go).
 	namespace := os.Getenv(podNamespaceVariable)
 	if namespace == "" {
-		return fmt.Errorf("%s is unset; the DaemonSet must state the pod's namespace", podNamespaceVariable)
+		return fmt.Errorf("%s is unset, and the DaemonSet must set it to the pod's namespace", podNamespaceVariable)
 	}
 	path, err := findAdapter(devices)
 	if err != nil {
@@ -96,7 +96,7 @@ func serveCEC(ctx context.Context, devices string) error {
 	defer device.Close()
 	client, err := InClusterClient(0)
 	if err != nil {
-		return fmt.Errorf("in-cluster config: %w", err)
+		return fmt.Errorf("reading the in-cluster configuration: %w", err)
 	}
 	node, err := newCECNode(client, namespace, machine, device)
 	if err == nil {
@@ -107,21 +107,22 @@ func serveCEC(ctx context.Context, devices string) error {
 		err = node.run(ctx)
 	}
 	if err != nil {
-		return fmt.Errorf("the CEC adapter on %s: %w", machine, err)
+		return fmt.Errorf("running the CEC adapter on %s: %w", machine, err)
 	}
 	return nil
 }
 
-// cecNode is one adapter on one machine.
+// cecNode is the state of one adapter on one machine. The loop's
+// goroutine runs the passes. mutex guards the fields that other
+// goroutines also read or write.
 type cecNode struct {
 	client *Client
-	// recorder posts the Events of the conditions the node workload
-	// writes on a Television. Nil posts none.
+	// recorder posts the Events for the conditions that the node
+	// workload writes on a Television. When nil, it posts none.
 	recorder *events.Recorder
-	// The stores of the watches each pass reads (objectcache.go). The
-	// Display store holds the Displays of this machine; the node
-	// workload writes no Display. The pod store holds the node
-	// workload's pods in namespace (cecpods.go).
+	// Each pass reads the caches of these watches (objectcache.go).
+	// displays has only this machine's Displays, and pods has the node
+	// workload's pods in namespace.
 	buses, televisions, displays, pods *watchStore
 	namespace                          string
 
@@ -130,162 +131,172 @@ type cecNode struct {
 	caps      cec.Caps
 	directory *cec.Directory
 	now       func() time.Time
-	// log takes the lines a person reads to follow the adapter: what it
-	// held when the pod opened it, and each change of the entry's state.
-	log    io.Writer
-	wake   chan struct{}
-	dirty  chan struct{}
+	// log receives the lines that a person reads to follow the adapter,
+	// such as each change of the entry's state. Errors go to stderr.
+	log io.Writer
+	// A watch sends on wake when an object changes, and markDirty sends
+	// on dirty when the entry must be written again. Either starts a
+	// pass at once. retryLater sends on retryRequests, which starts a
+	// pass after cecAPIRetry. Each channel buffers one signal, so
+	// signals that arrive before the loop reads them start one pass.
+	wake          chan struct{}
+	dirty         chan struct{}
+	retryRequests chan struct{}
+	// failed receives the first error that ends the node workload.
 	failed chan error
-	// retryAsk asks the loop for a pass after cecAPIRetry.
-	retryAsk chan struct{}
-	// probes takes each probe's question to the loop, which closes the
-	// channel it receives to answer (cecnode_probe.go).
+	// The readiness probe sends a channel on probes, and the loop closes
+	// it to show that it still runs (cecnode_probe.go).
 	probes chan chan struct{}
 
 	mutex sync.Mutex
-	// bus is the CECBus this adapter reports to, and applied is the
-	// configuration the adapter runs.
+	// bus is the name of the CECBus that this adapter reports to, and
+	// applied is the configuration that the adapter runs.
 	bus     string
 	applied adapterConfig
-	// entry is the report as it stands now, and stored is this
-	// machine's entry in the bus as the last pass read it, or nil when
-	// the bus holds none.
+	// entry is the adapter's current report. stored is this machine's
+	// entry in the bus as the last pass read it, or nil when the bus has
+	// none.
 	entry  CECAdapterStatus
 	stored *CECAdapterStatus
-	// recheck is the end of the earliest grace of another adapter's
-	// entry whose pod is starting, when the loop passes again, and zero
-	// when no entry is in a grace (cecpods.go).
+	// recheck is the earliest end of a grace period of another adapter
+	// whose pod is still starting. The entry of that adapter becomes
+	// stale then with no event to start a pass, so the loop runs one at
+	// recheck. It is zero when no adapter is in a grace period
+	// (cecpods.go).
 	recheck time.Time
-	// resync asks the next pass to read the adapter's addresses from
-	// the kernel, because the kernel reported a state change.
+	// resync is set when the kernel reports a state change of the
+	// adapter, and makes the next pass read the adapter's addresses
+	// again.
 	resync bool
-	// display is the last good read of the Display the adapter speaks
-	// for, and displayNote is why the latest read failed, if it did.
+	// display is the last successful read of this adapter's Display,
+	// and displayNote is the error of the latest read when it failed.
 	display     adapterDisplay
 	displayNote string
-	// retryAt is when a join that failed is tried again, and retryWait
-	// is the wait that set it.
+	// After a failed join, retryAt is when the adapter tries the join
+	// again, and retryWait is the wait that set retryAt.
 	retryAt   time.Time
 	retryWait time.Duration
-	// logged is the state and the message the log last stated.
+	// logged is the entry that logState last wrote to the log.
 	logged CECAdapterStatus
-	// declared is the set of a person's buses that last named the
-	// machine, as the log last stated it.
+	// declared is the list of CECBuses, created by a person, that list
+	// this machine, as the log last reported it.
 	declared string
-	// stopMode ends the work of the mode the adapter runs, the scan,
-	// the introductions, and a power application, and returns once all
-	// of it has stopped. modeContext ends with the mode, and modeWork
-	// counts the work, so a power application that starts later in the
-	// mode stops with it. Only the loop's goroutine starts or stops the
-	// mode's work.
+	// stopMode stops the goroutines of the adapter's current mode, such
+	// as the scan, the queries of new devices, and an application of
+	// spec.power, and returns when all of them have stopped. A goroutine
+	// that the mode starts later runs under modeContext and is counted in
+	// modeWork, so stopMode stops it too. Only the loop's goroutine
+	// starts or stops a mode.
 	stopMode    func()
 	modeContext context.Context
 	modeWork    *sync.WaitGroup
-	// powered is what the node workload holds about its applications of
-	// a Television's spec.power, woken what it holds about its wakes of
-	// a Television's session, and standby what it holds about the
-	// standbys a power press asked of the session.
-	powered powerMemory
-	woken   wakeMemory
-	standby standbyMemory
-	// powerRead is what the node workload holds about the power reads a
-	// power press asked for.
-	powerRead powerReadMemory
-	// shown is what the node workload holds about the home presses it
-	// answered.
-	shown showMemory
-	// arrivals takes each device the adapter heard arrive in Control to
-	// the mode's work, which asks it for its facts. introduced maps each
-	// device the adapter found or introduced to the physical address it
-	// held then. Both belong to the mode, and startMode makes them anew.
+	// These record which requests the node workload has already acted
+	// on, so a pass acts on each request once, and retries a status
+	// write that the API server refused. powered is for a Television's
+	// spec.power, woken for the session's wake, standby for a powerAsk
+	// that turns the room off, powerRead for a powerAsk's read of the
+	// TV's power, and shown for a home press.
+	powered   powerState
+	woken     wakeState
+	standby   standbyState
+	powerRead powerReadState
+	shown     showState
+	// In Control mode, arrived sends on arrivals the logical address of
+	// each device that is new or announced a new physical address, and
+	// the mode's goroutine queries that device with cec.Introduce.
+	// introduced maps each device that the scan found or the goroutine
+	// queried to its physical address at that time. startMode creates
+	// both again for each mode.
 	arrivals   chan cec.LogicalAddress
 	introduced map[cec.LogicalAddress]cec.PhysicalAddress
-	// tvPowerAsk takes one request to ask the TV for its power after it
-	// announced itself with no known power, and holds at most one, so a
-	// burst of announcements queues one question. tvPowerAskedAt is the
-	// physical address the TV announced for the last such question; the
-	// TV is not asked again at that address while its power stays
-	// unknown. Both belong to the mode, and startMode makes them anew.
-	tvPowerAsk     chan struct{}
-	tvPowerAskedAt *cec.PhysicalAddress
-	// tvPowerRead is the read of the TV's power in flight, which every
-	// reader shares; askPower holds the rule.
-	tvPowerRead tvPowerFlight
-	// lastCommand is when the TV was last sent a power command: by this
-	// adapter, or a Standby by another device that the adapter heard,
-	// such as a receiver that turns the TV off with itself. A TV answers
-	// its old state for a while after either.
+	// When the TV announces itself and its power is unknown, the adapter
+	// queues a read of the TV's power on tvPowerReadQueue. The channel buffers
+	// one request, so a burst of announcements queues one read.
+	// tvPowerQueuedAddress is the physical address of the TV's last such
+	// announcement, and the adapter does not queue another read for the
+	// same address while the power stays unknown. startMode creates both
+	// again for each mode.
+	tvPowerReadQueue     chan struct{}
+	tvPowerQueuedAddress *cec.PhysicalAddress
+	// tvPowerRead is the read of the TV's power that is in progress,
+	// which every caller of readTVPower shares.
+	tvPowerRead tvPowerReadCall
+	// lastCommand is when this adapter last sent the TV a power command,
+	// or heard another device, such as a receiver, send the TV Standby.
+	// For a while after a power command, a TV reports its old power
+	// state.
 	lastCommand time.Time
-	// source is the physical address of the last Active Source the
-	// adapter heard or sent, and sources wakes a wake that watches for
-	// another source's claim.
+	// source is the physical address of the last Active Source that the
+	// adapter heard or sent. Each change sends on sources, which the
+	// wake's guard waits on (cecnode_source.go).
 	source  cec.PhysicalAddress
 	sources chan struct{}
-	// route is where the bus's routing messages last sent the TV's
-	// picture (cecnode_answer.go).
+	// route is where the bus's last routing message, such as a Routing
+	// Change or a Set Stream Path, switched the TV's input, and whether
+	// a person chose it (cecnode_answer.go).
 	route routeState
-	// room is the room a Player's session holds awake through this
-	// adapter, and nil when none does. The adapter answers Request
-	// Active Source for it. asleep is the room of a session that stands
-	// on this adapter's Display and sleeps.
-	room   *roomHold
-	asleep *roomHold
-	// picked is the TV's Set Stream Path for a sleeping session's
-	// Display, until the wake it asked for claims the input, and
-	// screenAsk is an ask of the Player's screen the API server has not
-	// accepted yet (cecnode_screen.go).
-	picked    *streamPick
-	screenAsk *screenAskRecord
-	// audioAnswers takes the receiver's answers to a System Audio Mode
-	// Request while one waits, and is nil otherwise
-	// (cecnode_systemaudio.go).
+	// awake is set while a Player's session keeps the TV awake through
+	// this adapter, and the adapter then answers Request Active Source.
+	// asleep is set while the session of this adapter's Display sleeps.
+	// Both are nil otherwise.
+	awake  *displaySession
+	asleep *displaySession
+	// streamPath is the Set Stream Path that the TV sent for the Display of
+	// a sleeping session, kept until the wake that it requested claims
+	// the input. screenAsk is a request for the Player's screen that the
+	// API server has not accepted yet (cecnode_screen.go).
+	streamPath *streamPathRequest
+	screenAsk  *unwrittenScreenAsk
+	// While a caller waits for the receiver's reply to a System Audio
+	// Mode Request, audioAnswers receives the replies. It is nil
+	// otherwise (cecnode_systemaudio.go).
 	audioAnswers chan cec.Message
 }
 
-// newCECNode reads the adapter's capabilities, which every later
-// choice depends on.
+// newCECNode reads the capabilities of an open adapter, which the mode
+// and the join depend on, and returns its node.
 func newCECNode(client *Client, namespace, machine string, device *cec.Device) (*cecNode, error) {
 	caps, err := device.Caps()
 	if err != nil {
 		return nil, err
 	}
 	return &cecNode{
-		client:      client,
-		namespace:   namespace,
-		machine:     machine,
-		device:      device,
-		caps:        caps,
-		directory:   cec.NewDirectory(),
-		now:         time.Now,
-		log:         os.Stderr,
-		wake:        make(chan struct{}, 1),
-		dirty:       make(chan struct{}, 1),
-		retryAsk:    make(chan struct{}, 1),
-		probes:      make(chan chan struct{}),
-		failed:      make(chan error, 1),
-		stopMode:    func() {},
-		buses:       &watchStore{},
-		televisions: &watchStore{},
-		displays:    &watchStore{},
-		pods:        &watchStore{},
-		source:      cec.InvalidPhysicalAddress,
-		sources:     make(chan struct{}, 1),
+		client:        client,
+		namespace:     namespace,
+		machine:       machine,
+		device:        device,
+		caps:          caps,
+		directory:     cec.NewDirectory(),
+		now:           time.Now,
+		log:           os.Stderr,
+		wake:          make(chan struct{}, 1),
+		dirty:         make(chan struct{}, 1),
+		retryRequests: make(chan struct{}, 1),
+		probes:        make(chan chan struct{}),
+		failed:        make(chan error, 1),
+		stopMode:      func() {},
+		buses:         &watchStore{},
+		televisions:   &watchStore{},
+		displays:      &watchStore{},
+		pods:          &watchStore{},
+		source:        cec.InvalidPhysicalAddress,
+		sources:       make(chan struct{}, 1),
 	}, nil
 }
 
-// run reads the adapter and follows the CECBus collection until ctx
-// ends or a call on the adapter fails. Either way it takes the adapter
-// off the bus and writes a Stopped entry before it returns.
+// run serves the adapter until ctx ends or a call on the adapter
+// fails. Before it returns, it releases the adapter's logical addresses
+// and writes a Stopped entry.
 func (n *cecNode) run(ctx context.Context) error {
 	n.logOpened()
 	loop, cancel := context.WithCancel(ctx)
-	// The client's wait after a 429 ends when the loop does, so an
-	// entry write that meets an API server that is not ready holds a
-	// SIGTERM for no more than the request itself. A request already sent
-	// runs to its answer: an entry write cut at the SIGTERM could still
-	// land after the Stopped entry, and a verdict write cut then would be
-	// lost and its CEC command sent again. The client is bound before anything
-	// the loop starts reads it.
+	// When the loop ends, the client stops waiting out a 429, so a
+	// throttled write delays shutdown only by the request itself. A
+	// request already sent is not cancelled. A cancelled entry write
+	// could still reach the API server after the Stopped entry, and a
+	// cancelled write of a result would be lost, so the adapter would
+	// send the CEC command again. This must run before the loop starts
+	// anything that uses the client.
 	n.client = n.client.withWaits(loop)
 	var started sync.WaitGroup
 	started.Go(func() {
@@ -294,8 +305,8 @@ func (n *cecNode) run(ctx context.Context) error {
 		}
 	})
 	err := n.loop(loop, &started)
-	// Nothing the loop started may read the adapter or the API once
-	// run takes the adapter off the bus.
+	// Wait for every goroutine that the loop started, so none uses the
+	// adapter or the API after stop releases the adapter.
 	cancel()
 	n.stopMode()
 	started.Wait()
@@ -309,10 +320,9 @@ func (n *cecNode) run(ctx context.Context) error {
 	return err
 }
 
-// logOpened states the logical addresses the kernel holds for the
-// adapter when the pod opens it, before the pod clears or claims
-// anything. A previous pod that stopped cleanly released the adapter,
-// so this line shows whether it did.
+// logOpened logs the logical addresses that the adapter has when the
+// pod opens it. A previous pod that stopped cleanly released them all,
+// so the line shows whether it did.
 func (n *cecNode) logOpened() {
 	held, err := n.device.Addresses()
 	switch {
@@ -334,9 +344,9 @@ func (n *cecNode) logOpened() {
 	}
 }
 
-// logState states a change of the entry's state or message. A report
-// that changes only the devices or the time logs nothing, so the log
-// stays quiet while the adapter learns the bus and reports.
+// logState logs a change of the entry's state or message. A change of
+// only the devices or the time is not logged, because the device list
+// changes often while the adapter scans the bus.
 func (n *cecNode) logState(bus string, entry CECAdapterStatus) {
 	if entry.State == n.logged.State && entry.Message == n.logged.Message {
 		return
@@ -353,29 +363,24 @@ func (n *cecNode) logState(bus string, entry CECAdapterStatus) {
 	n.logged = entry
 }
 
-// loop is run's body: the first lists, the watches, and the passes.
+// loop starts the watches and then runs a pass for each event until
+// ctx ends or the adapter fails.
 //
-// The node workload follows one rule for every state it keeps current,
-// on the wire and in the API. It subscribes first, then it reads the
-// state once as a baseline, and after that only the subscription's
-// events change what it holds. It subscribes first so that a change
-// during the read is not lost. When a subscription fails, it subscribes
-// again and reads again. On the wire, the subscription is the follower
-// or monitor mode that makes the kernel pass the adapter what it hears,
-// which the handle takes before it claims an address, and the baseline
-// is the scan when the adapter joins; startMode states the rest. In the
-// API, the subscriptions are the watches of CECBuses, Televisions, and
-// Displays, and the baseline is each pass's read of the watches' stores
-// (objectcache.go). The watch of the node workload's pods tells the
-// pass which other adapters' entries are current (cecpods.go).
-// client-go's reflector runs each watch: it resumes a watch that drops
-// from its last version and reads again after a 410, and the watch
-// wakes the loop when its own first read is done (watch.go). No timer
-// re-reads a state, and the entry is written only when it changes. The
-// timers here are clocks: the retry of a join or an API call that
-// failed, and the end of a starting pod's grace (cecpods.go).
+// The node workload subscribes to each source of state before it reads
+// the whole state once, so a change during the read is not lost. After
+// the read it acts only on events. On the CEC bus, the subscription is
+// the follower or monitor mode, in which the kernel passes the handle
+// every message that the adapter hears. The handle enters that mode
+// before it claims an address, and the read is the scan when the
+// adapter joins (see startMode). In the API, the subscriptions are the
+// watches of CECBuses, Televisions, Displays, and the node workload's
+// pods. client-go's reflector runs each watch (watch.go).
+//
+// No timer reads state again. Each timer is a deadline: the retry of a
+// failed join or a failed API call, and the end of a starting pod's
+// grace period (cecpods.go).
 func (n *cecNode) loop(ctx context.Context, started *sync.WaitGroup) error {
-	err := untilAnswered(ctx, func() error {
+	err := retryWhileThrottled(ctx, func() error {
 		_, err := ListCECBuses(n.client)
 		return err
 	})
@@ -386,19 +391,13 @@ func (n *cecNode) loop(ctx context.Context, started *sync.WaitGroup) error {
 		return fmt.Errorf("listing CECBuses: %w", err)
 	}
 	started.Go(func() { watchCECBuses(ctx, n.client, n.wake, nil, n.buses) })
-	// A change of a Television's spec.power or status.session wakes the
-	// loop, because the pass is where the adapter acts on it. A change of
-	// a Display's physical address wakes it too, because the adapter
-	// announces that address. Each watch holds an empty store on a
-	// cluster without its definition, and finds the definition when it
-	// arrives (watchCollection).
-	//
-	// The node workload lists the Televisions once before it watches
-	// them, so an API server that refuses the list, such as for a
-	// missing grant, ends the node workload at its start, as the
-	// CECBus list does. A cluster without the definition answers not
-	// found, which ListTelevisions reads as no Television.
-	err = untilAnswered(ctx, func() error {
+	// The list before each watch makes a refused list, such as one with
+	// a missing RBAC permission, end the node workload at start, where a
+	// person sees it, because the watch retries a refused list. A missing
+	// Television CRD is not a failure: ListTelevisions returns no
+	// Television, and the watch checks for the CRD again every
+	// optionalRecheck (watchCollection).
+	err = retryWhileThrottled(ctx, func() error {
 		_, err := ListTelevisions(n.client)
 		return err
 	})
@@ -410,10 +409,7 @@ func (n *cecNode) loop(ctx context.Context, started *sync.WaitGroup) error {
 	}
 	started.Go(func() { watchTelevisions(ctx, n.client, n.wake, nil, n.televisions) })
 	started.Go(func() { nodeDisplays(n.machine)(ctx, n.client, n.wake, nil, n.displays) })
-	// The pods are listed once before the watch for the same reason as
-	// the Televisions: a missing grant ends the node workload at its
-	// start, where a person sees it.
-	err = untilAnswered(ctx, func() error {
+	err = retryWhileThrottled(ctx, func() error {
 		_, err := readCECPods(n.client, nil, n.namespace, n.now())
 		return err
 	})
@@ -440,9 +436,11 @@ func (n *cecNode) loop(ctx context.Context, started *sync.WaitGroup) error {
 	}
 }
 
-// await waits for the loop's next pass: an event, or the retry clock. A
-// probe's question and a request for a retry are handled here and run
-// no pass. done says the node workload ends, with err as its cause.
+// await blocks until an event or the retry deadline calls for another
+// pass. A probe or a retry request does not start a pass: await
+// answers the probe, starts the retry timer when none runs, and keeps
+// waiting. When done is true, the node workload ends, with err as the
+// cause.
 func (n *cecNode) await(ctx context.Context, retry <-chan time.Time) (bool, error) {
 	for {
 		select {
@@ -456,40 +454,37 @@ func (n *cecNode) await(ctx context.Context, retry <-chan time.Time) (bool, erro
 			return false, nil
 		case <-retry:
 			return false, nil
-		case <-n.retryAsk:
+		case <-n.retryRequests:
 			if retry == nil {
 				retry = time.After(cecAPIRetry)
 			}
 		case answer := <-n.probes:
-			// The probe asks only whether the loop reaches this select,
-			// so the answer reads nothing and runs no pass.
+			// The probe checks only that the loop reaches this select.
 			close(answer)
 		}
 	}
 }
 
-// cecAPIRetry is how long the loop waits before it runs a pass again
-// after an API call failed with no event to follow, such as a list the
-// API server refused or a result it did not accept. It is a variable
-// because the tests on the kernel's vivid driver run on the real
-// clock, and shorten it.
+// cecAPIRetry is how long the loop waits before it runs another pass
+// after an API call failed with no event to follow, such as a write
+// that the API server refused. It is a variable so that the tests on
+// the kernel's vivid driver, which run on the real clock, can shorten
+// it.
 var cecAPIRetry = 10 * time.Second
 
-// retryLater asks the loop for a pass after cecAPIRetry, because an API
-// call failed and no event will follow it. A pass that runs sooner for
-// an event also tries again.
+// retryLater requests a pass after cecAPIRetry. A pass that an event
+// starts sooner also retries the failed call.
 func (n *cecNode) retryLater() {
-	poke(n.retryAsk)
+	sendWake(n.retryRequests)
 }
 
-// retryIn answers how long the loop waits before its next pass when no
-// event arrives, and false when it waits for an event alone: a join
-// that failed is tried again at its retryAt, a result the API server
-// has not accepted after cecAPIRetry, and another adapter's entry in a
-// starting pod's grace at the end of the grace, when that adapter may
-// lose its turn.
+// retryIn returns how long the loop waits for its next pass when no
+// event arrives, or false when only an event can start it. The wait
+// ends at the earliest of: retryAt after a failed join, cecAPIRetry
+// after a status write that the API server refused, and recheck, when
+// a starting pod's entry can become stale.
 func (n *cecNode) retryIn() (time.Duration, bool) {
-	wait, due := n.clockRetry()
+	wait, due := n.joinOrWriteRetry()
 	n.mutex.Lock()
 	recheck := n.recheck
 	n.mutex.Unlock()
@@ -503,8 +498,9 @@ func (n *cecNode) retryIn() (time.Duration, bool) {
 	return until, true
 }
 
-// clockRetry answers the retries of a join and of an API result.
-func (n *cecNode) clockRetry() (time.Duration, bool) {
+// joinOrWriteRetry returns the wait for the retry of a failed join or
+// of a refused status write, or false when neither is pending.
+func (n *cecNode) joinOrWriteRetry() (time.Duration, bool) {
 	n.mutex.Lock()
 	defer n.mutex.Unlock()
 	unwritten := n.powered.unwritten != nil || n.woken.unwritten != nil || n.standby.unwritten != nil || n.screenAsk != nil
@@ -522,14 +518,14 @@ func (n *cecNode) clockRetry() (time.Duration, bool) {
 	return 0, false
 }
 
-// stop takes the adapter off the bus and writes the entry's last
-// state. The kernel keeps a claim after its handle closes, and a
-// Pulse-Eight answers the TV by itself while it holds one, so a pod
-// that stopped without a release would leave the adapter on the bus
-// for a machine no pod serves. An adapter that left fails every call,
-// and the entry still says why the pod stopped. The loop's context has
-// ended by then, so the last write has a context of its own, which
-// cecStopWrite bounds.
+// stop releases the adapter's logical addresses and writes a Stopped
+// entry. The kernel keeps the logical addresses after the handle
+// closes, and a Pulse-Eight adapter's firmware answers the TV by itself
+// while it has one (cec.Device.Release). Without the release, the
+// adapter stays on the bus with no pod to serve it. When the adapter is
+// unplugged, the release fails, and stop still writes the entry with
+// the cause. ctx has already ended, so the write uses its own context,
+// which cecStopWrite limits.
 func (n *cecNode) stop(ctx context.Context, cause string) {
 	n.release()
 	n.mutex.Lock()
@@ -544,13 +540,13 @@ func (n *cecNode) stop(ctx context.Context, cause string) {
 	writing, done := context.WithTimeout(context.WithoutCancel(ctx), cecStopWrite)
 	defer done()
 	if err := ApplyCECAdapterStatus(n.client.withContext(writing), bus, n.machine, &entry); err != nil {
-		fmt.Fprintf(os.Stderr, "writing machine %s's last entry in CECBus %s: %v\n", n.machine, bus, err)
+		fmt.Fprintf(os.Stderr, "writing the last entry of machine %s in CECBus %s: %v\n", n.machine, bus, err)
 	}
 }
 
 // release clears the adapter's logical addresses and leaves the
-// follower or monitor mode. Clearing needs an initiator, so the handle
-// takes that mode first. It answers the first error.
+// follower or monitor mode. Clearing the addresses needs the initiator
+// mode, so release enters it first.
 func (n *cecNode) release() error {
 	for _, call := range []func() error{n.device.Initiate, n.device.Release, n.device.Leave} {
 		if err := call(); err != nil {
@@ -560,13 +556,13 @@ func (n *cecNode) release() error {
 	return nil
 }
 
-// report writes this adapter's entry when it differs from the entry
-// the bus stores, or the bus stores none. The comparison is with the
-// API server's copy and not with the last write, so an entry that a
-// restore or another writer removed or changed is written again. An
-// entry that did not change is not written again: the Deployment reads
-// whether the entry is current from the node workload's pod
-// (cecpods.go), so reportedAt is the time of the last change.
+// report writes this adapter's entry when the bus has none or a
+// different one. It compares with the bus as the last pass read it, not
+// with its own last write, so it writes again an entry that another
+// writer or a restore of the cluster changed or removed. An unchanged
+// entry is not written, so reportedAt is the time of the last change.
+// Whether an entry is current is read from the node workload's pods,
+// not from reportedAt (cecpods.go).
 func (n *cecNode) report() {
 	n.mutex.Lock()
 	bus := n.bus
@@ -593,7 +589,7 @@ func (n *cecNode) report() {
 	stamped := entry
 	stamped.ReportedAt = timestamp(n.now())
 	if err := ApplyCECAdapterStatus(n.client, bus, n.machine, &stamped); err != nil {
-		fmt.Fprintf(os.Stderr, "writing machine %s's entry in CECBus %s: %v\n", n.machine, bus, err)
+		fmt.Fprintf(os.Stderr, "writing the entry of machine %s in CECBus %s: %v\n", n.machine, bus, err)
 		n.retryLater()
 		return
 	}
@@ -602,9 +598,9 @@ func (n *cecNode) report() {
 	n.mutex.Unlock()
 }
 
-// sameEntry answers whether the stored entry holds the report, apart
-// from reportedAt. The two are compared as the API server stores them,
-// in JSON, where an empty list and no list are the same.
+// sameEntry reports whether stored equals entry apart from reportedAt.
+// It compares the JSON encodings, which is how the API server stores
+// them, and in which an empty list and a missing list are the same.
 func sameEntry(stored *CECAdapterStatus, entry CECAdapterStatus) bool {
 	if stored == nil {
 		return false
@@ -616,7 +612,6 @@ func sameEntry(stored *CECAdapterStatus, entry CECAdapterStatus) bool {
 	return string(first) == string(second)
 }
 
-// joinMessages puts two messages in one, and leaves out an empty one.
 func joinMessages(first, second string) string {
 	if second == "" {
 		return first
@@ -624,9 +619,10 @@ func joinMessages(first, second string) string {
 	return first + "; " + second
 }
 
-// fail hands the loop the error that ends the node workload. The read
-// loop, a scan, and an answer can each find the adapter gone at once;
-// the first error ends the loop, and the others are dropped.
+// fail sends the loop the error that ends the node workload. The read
+// goroutine, a scan, and a reply to a device can each find the adapter
+// unplugged at the same time, so fail keeps the first error and drops
+// the rest.
 func (n *cecNode) fail(err error) {
 	select {
 	case n.failed <- err:
@@ -634,22 +630,21 @@ func (n *cecNode) fail(err error) {
 	}
 }
 
-// liveness answers what the node workload's pods show (cecpods.go). A
-// read that fails answers no pods, which judges no other adapter's
-// entry stale, so the adapter can defer to an adapter that is gone
-// until the read works again. The log line says so, and the loop tries
-// again.
+// liveness reads which of the node workload's pods are Ready
+// (cecpods.go). When the read fails, it returns an empty podLiveness,
+// which treats every other adapter's entry as current, so this adapter
+// can defer to an adapter that is gone until a later pass reads the
+// pods.
 func (n *cecNode) liveness() podLiveness {
 	live, err := readCECPods(n.client, n.pods, n.namespace, n.now())
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "listing the equipment-operator-cec pods in %s: %v; until the pods can be read, the adapter on %s counts every other adapter's entry as current\n", n.namespace, err, n.machine)
+		fmt.Fprintf(os.Stderr, "listing the equipment-operator-cec pods in %s: %v. Until the pods can be read, the adapter on %s counts every other adapter's entry as current\n", n.namespace, err, n.machine)
 		n.retryLater()
 		return podLiveness{}
 	}
 	return live
 }
 
-// markDirty asks the loop to write the entry again.
 func (n *cecNode) markDirty() {
-	poke(n.dirty)
+	sendWake(n.dirty)
 }

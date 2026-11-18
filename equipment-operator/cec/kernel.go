@@ -1,25 +1,23 @@
 package cec
 
-// The kernel's CEC API, as linux/cec.h states it. Each type here has
-// the exact memory layout of the kernel struct of the same name,
-// because an ioctl copies the struct byte for byte between this
-// process and the kernel. A field out of place does not fail the
-// call: the kernel reads the wrong bytes and answers something else.
-// kernel_test.go pins every size and every request number against
+// The types and constants of the kernel's CEC API from linux/cec.h.
+// Each type has the same memory layout as the kernel struct it is named
+// for, because an ioctl copies the struct byte for byte between this
+// process and the kernel. A misplaced field does not make the call
+// fail: the kernel reads the wrong bytes and acts on them.
+// kernel_test.go checks each size, offset, and request number against
 // values compiled from the header.
 //
-// The reference is
-// https://docs.kernel.org/userspace-api/media/cec/cec-api.html, which
+// https://docs.kernel.org/userspace-api/media/cec/cec-api.html
 // documents each ioctl and each field.
 
-// The largest CEC message: one header byte, one opcode byte, and at
-// most fourteen operand bytes.
+// maxMessageSize is the largest CEC message: a header byte, an opcode
+// byte, and up to 14 operand bytes.
 const maxMessageSize = 16
 
-// KernelMsg is struct cec_msg, the unit of CEC_TRANSMIT and
-// CEC_RECEIVE. Msg holds the message itself; the other fields tell the
-// kernel how to send it and tell this process what happened on the
-// wire.
+// KernelMsg is struct cec_msg, the argument of CEC_TRANSMIT and
+// CEC_RECEIVE. Msg holds the message bytes. The other fields set how
+// the kernel sends it, and report what happened on the bus.
 type KernelMsg struct {
 	TxTimestamp   uint64
 	RxTimestamp   uint64
@@ -38,7 +36,7 @@ type KernelMsg struct {
 	_             [1]byte
 }
 
-// KernelCaps is struct cec_caps, what CEC_ADAP_G_CAPS reports.
+// KernelCaps is struct cec_caps, the result of CEC_ADAP_G_CAPS.
 type KernelCaps struct {
 	Driver            [32]byte
 	Name              [32]byte
@@ -47,12 +45,13 @@ type KernelCaps struct {
 	Version           uint32
 }
 
-// The number of logical addresses one adapter can hold at most.
+// maxLogicalAddresses is the most logical addresses one adapter can
+// claim.
 const maxLogicalAddresses = 4
 
-// KernelLogAddrs is struct cec_log_addrs, the logical addresses an
+// KernelLogAddrs is struct cec_log_addrs: the logical addresses an
 // adapter claims and the identity it announces with them. The kernel
-// fills LogAddr and LogAddrMask; the caller fills the rest.
+// fills LogAddr and LogAddrMask, and the caller fills the other fields.
 type KernelLogAddrs struct {
 	LogAddr           [maxLogicalAddresses]uint8
 	LogAddrMask       uint16
@@ -68,9 +67,9 @@ type KernelLogAddrs struct {
 	_                 [1]byte
 }
 
-// KernelEvent is struct cec_event. The union at its end holds a state
-// change or a count of lost messages, and Raw is its widest member.
-// StateChange reads the first member out of it.
+// KernelEvent is struct cec_event. Its final union holds a state change
+// or a count of lost messages. Raw is the union's raw member, the
+// widest, so it covers the whole union.
 type KernelEvent struct {
 	Timestamp uint64
 	Event     uint32
@@ -78,12 +77,12 @@ type KernelEvent struct {
 	Raw       [16]uint32
 }
 
-// The ioctl request numbers. An ioctl number packs the direction of
-// the copy in bits 30 and 31, the size of the argument in bits 16 to
-// 29, a type letter in bits 8 to 15, and a number in bits 0 to 7, the
-// same way the kernel's _IOR, _IOW, and _IOWR macros pack them. The
-// CEC API uses the letter 'a'. The size is the size of the struct the
-// request copies, which kernel_test.go checks against the Go types.
+// An ioctl request number packs the copy direction into bits 30 and 31,
+// the size of the argument into bits 16 to 29, a type letter into bits
+// 8 to 15, and a command number into bits 0 to 7. These constants build
+// numbers the way the kernel's _IOR, _IOW, and _IOWR macros do. The CEC
+// API uses the letter 'a'. The size is that of the struct the request
+// copies, which kernel_test.go checks against the Go types.
 const (
 	iocWrite     = 1 << 30
 	iocRead      = 2 << 30
@@ -104,8 +103,8 @@ const (
 	RequestSetMode      uintptr = iocWrite | 4<<16 | iocType | 9
 )
 
-// requestNames names each request in an error, so a failure reads the
-// way the kernel documentation spells the call.
+// requestNames maps each request to the name the kernel documentation
+// uses, for error messages.
 var requestNames = map[uintptr]string{
 	RequestGetCaps:      "CEC_ADAP_G_CAPS",
 	RequestGetPhysAddr:  "CEC_ADAP_G_PHYS_ADDR",
@@ -119,7 +118,8 @@ var requestNames = map[uintptr]string{
 	RequestSetMode:      "CEC_S_MODE",
 }
 
-// The transmit and receive status bits the kernel sets in a KernelMsg.
+// The status bits the kernel sets in TxStatus and RxStatus of a
+// KernelMsg.
 const (
 	TxStatusOK         = 1 << 0
 	TxStatusArbLost    = 1 << 1
@@ -136,9 +136,9 @@ const (
 	RxStatusAborted      = 1 << 3
 )
 
-// The file handle modes CEC_S_MODE sets. The low nibble says whether
-// this handle may send, and the high nibble says which received
-// messages the kernel passes to it.
+// The modes that CEC_S_MODE sets on a file handle. The low nibble
+// chooses whether the handle may send, and the high nibble chooses
+// which received messages the kernel passes to it.
 const (
 	modeNoInitiator   = 0x0
 	modeInitiator     = 0x1
@@ -149,7 +149,7 @@ const (
 	modeMonitorAll    = 0xf << 4
 )
 
-// The adapter capability bits CEC_ADAP_G_CAPS reports.
+// The adapter capability bits that CEC_ADAP_G_CAPS reports.
 const (
 	CapPhysAddr    Capability = 1 << 0
 	CapLogAddrs    Capability = 1 << 1
@@ -159,11 +159,12 @@ const (
 	CapMonitorAll  Capability = 1 << 5
 )
 
-// The flag that also passes the TV remote's buttons to the kernel's
-// input device, which CEC_ADAP_S_LOG_ADDRS reads.
+// logAddrsAllowRCPassthrough is CEC_LOG_ADDRS_FL_ALLOW_RC_PASSTHRU, the
+// flag of KernelLogAddrs that makes the kernel pass the TV remote's
+// key presses to the adapter's input device.
 const logAddrsAllowRCPassthrough = 1 << 1
 
-// The events CEC_DQEVENT reports.
+// The event types that CEC_DQEVENT returns.
 const (
 	EventStateChange = 1
 	EventLostMsgs    = 2

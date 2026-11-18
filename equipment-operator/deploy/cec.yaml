@@ -1,20 +1,14 @@
-# The CEC node workload: one pod on each machine that carries a USB
-# CEC adapter, from the operator's own image. The pod runs the image's
-# node build, /equipment-operator-node, with the argument cec. That
-# build leaves out the leader election that only the Deployment needs
-# (leader_node.go), so each node runs a program of about half the size.
-# The pod holds the adapter, runs it in the mode its CECBus states,
-# and writes its own entry under that CECBus's status. The Deployment
-# in operator.yaml derives the rest of the status. plans/completed/09-cec.md
-# gives the design.
+# The CEC node workload: one pod on each machine that has a USB CEC
+# adapter. The pod claims the adapter, runs it in the mode that the
+# machine's CECBus sets, and writes the machine's entry under that
+# CECBus's status.adapters. The Deployment in operator.yaml writes the
+# rest of the status. The pod runs the node build of the operator's
+# image, which leaves out leader election (leader_node.go).
 ---
-# The adapter claim. A template rather than a plain claim, so each
-# node's pod allocates that node's own adapter. On a node with an
-# adapter the claim matches one device and the pod runs. On a node
-# with none the claim matches zero devices and the pod stays Pending,
-# which is how a DaemonSet runs a pod only where an adapter is. Nobody
-# writes down which machine has the adapter. A node labeled
-# equipment.liken.sh/cec: none gets no pod at all (the affinity below).
+# A template, so that each pod gets its own claim for the adapter on
+# its own node. On a node without an adapter the claim matches no
+# device and the pod stays Pending, so nobody has to list the machines
+# that have one.
 apiVersion: resource.k8s.io/v1
 kind: ResourceClaimTemplate
 metadata:
@@ -27,21 +21,14 @@ spec:
           exactly:
             deviceClassName: cec-adapter
 ---
-# A DaemonSet, one pod per node. The pod needs no host network, no
-# message bus, and no receiver credentials: it speaks to the adapter
-# through its device node and to the API server through its
-# ServiceAccount.
+# maxSurge is 0 because an adapter can be allocated to only one claim
+# at a time. A new pod started before the old one stopped would stay
+# Pending, and the update would never finish.
 #
-# RollingUpdate with maxSurge 0, because the adapter allocates to one
-# claim at a time. A new pod that claimed the same adapter would stay
-# Pending until the old pod released it, and an update that started
-# the new pod first would never finish.
-#
-# maxUnavailable 100%, because each node holds its own adapter and no
-# node's pod stands in for another's. A pod on a node with no adapter
-# stays Pending for good, and the DaemonSet counts it as unavailable
-# for good. With a smaller budget those Pending pods use all of it, and
-# the controller never replaces the running pod on the adapter's node.
+# maxUnavailable is 100% because the DaemonSet counts the Pending pods
+# on nodes with no adapter as unavailable. With a smaller limit, those
+# pods would use up the whole budget, and the controller would never
+# replace the pod on an adapter's node.
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -57,21 +44,18 @@ spec:
       maxUnavailable: 100%
   template:
     metadata:
-      # The Deployment and every pod of this DaemonSet watch the pods
-      # with this label, to tell whether an adapter's entry is current
+      # The Deployment and every pod of this DaemonSet watch pods with
+      # this label to decide whether an adapter's entry is current
       # (cecpods.go).
       labels:
         app: equipment-operator-cec
     spec:
       serviceAccountName: equipment-operator-cec
-      # A node labeled equipment.liken.sh/cec: none gets no pod. The
-      # claim alone leaves a pod on a node with no CEC adapter Pending
-      # for good, so a person marks such a node with that one label.
-      # NotIn also matches a node with no such label, so with no
-      # label the DaemonSet makes a pod on every node, and the claim
-      # decides where it can start. A patch that sets its own node
-      # affinity replaces this list of terms, because the list is
-      # atomic.
+      # A person labels a node `equipment.liken.sh/cec: none` to remove
+      # the Pending pod from a node with no adapter. NotIn also matches
+      # a node without the label, so by default every node gets a pod.
+      # A patch that sets its own node affinity replaces this whole list
+      # of terms, because the list is atomic.
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -80,11 +64,10 @@ spec:
                   - key: equipment.liken.sh/cec
                     operator: NotIn
                     values: ["none"]
-      # A machine that drives a screen carries a NoSchedule taint, such
-      # as media.liken.sh/player, and a TV is connected to exactly such
-      # a machine. The pod tolerates every taint, as liken's other
-      # hardware DaemonSets do, and its claim alone decides where it
-      # runs.
+      # A TV is connected to a machine that drives a screen, and such a
+      # machine has a NoSchedule taint such as `media.liken.sh/player`.
+      # The pod tolerates every taint, so only its claim decides where
+      # it runs.
       tolerations:
         - operator: Exists
       containers:
@@ -92,16 +75,13 @@ spec:
           image: ghcr.io/liken-sh/equipment-operator:latest
           command: ["/equipment-operator-node", "cec"]
           env:
-            # liken names each node after its Machine, and a CECBus
-            # names the Machine that carries an adapter, so the node
-            # name is how the pod finds its own entries.
+            # `liken` names each node after its Machine, and a CECBus
+            # lists its adapters by Machine, so the pod finds its own
+            # CECBus by the node name.
             - name: NODE_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
-            # The namespace holds the pods of every node workload, which
-            # the pod watches to tell whether another adapter's entry is
-            # current.
             - name: POD_NAMESPACE
               valueFrom:
                 fieldRef:
@@ -111,21 +91,17 @@ spec:
           ports:
             - name: probe
               containerPort: 9200
-          # Each probe asks the loop of the node workload to answer, and
-          # the handler waits two seconds for it (cecnode_probe.go). A
-          # pod that lost readiness after its last entry makes the entry
-          # stale, so the Deployment stops counting the adapter's report.
+          # The probe handler waits up to cecProbeWait, 2 seconds, for
+          # the node workload's loop to respond (cecnode_probe.go). When
+          # the pod is not Ready, the Deployment ignores its adapter's
+          # entry.
           #
-          # The readiness probe runs every 20 seconds and fails after 3
-          # misses, so a loop that stops answering makes its entry stale
-          # after about 60 seconds. A pass can block the loop for longer
-          # than a few seconds and still be working: one request to the
-          # API server can take 30 seconds, and a change of mode waits
-          # for a join scan, which gives a silent address several
-          # one-second tries. 60 seconds covers one such request and a
-          # scan. The window is also cecStartupGrace in cecpods.go, the
-          # time a new pod's entry stays current before the pod is
-          # Ready, and a test keeps the two equal.
+          # 20 seconds times 3 failures makes a 60-second window, which
+          # covers a busy loop that is still working: one API server
+          # request can take 30 seconds, and a mode change waits for a
+          # join scan that retries a silent address at 1-second
+          # intervals. cecStartupGrace in cecpods.go must equal this
+          # window, and nodeaffinity_test.go checks that it does.
           readinessProbe:
             httpGet:
               path: /healthz
@@ -133,13 +109,11 @@ spec:
             periodSeconds: 20
             timeoutSeconds: 3
             failureThreshold: 3
-          # The liveness probe restarts the container after 5 misses 30
-          # seconds apart, about 150 seconds. That is clearly longer than
-          # the readiness probe, because a restart does not repair an API
-          # server that answers slowly, and a loop that waits on one
-          # should lose only its readiness. The start of the node
-          # workload lists the API server before the loop answers, and
-          # the window covers that list too.
+          # The liveness window, 150 seconds, is much longer than the
+          # readiness window, because a restart does not fix a slow API
+          # server. A loop that waits for one loses only its readiness.
+          # The window also covers the list that the node workload reads
+          # from the API server at start, before its loop responds.
           livenessProbe:
             httpGet:
               path: /healthz
@@ -148,13 +122,11 @@ spec:
             timeoutSeconds: 3
             failureThreshold: 5
           securityContext:
-            # One capability. The kernel lets a process open a CEC
-            # adapter as a monitor only with CAP_NET_ADMIN, and Listen is
-            # a monitor. Control needs no capability: a pod with none
-            # claimed the adapter, joined the bus, and scanned it in a
-            # drill. A cluster owner who never runs a bus in Listen can
-            # patch the capability out, and the adapter's entry then
-            # reports the kernel's refusal.
+            # Listen mode puts the adapter in the kernel's CEC monitor
+            # mode, which needs CAP_NET_ADMIN. A cluster owner who never
+            # runs a bus in Listen mode can patch the capability out. A
+            # bus in Listen mode then reports the kernel's refusal in
+            # the adapter's entry.
             capabilities:
               drop: ["ALL"]
               add: ["NET_ADMIN"]
@@ -167,8 +139,8 @@ spec:
               memory: 16Mi
             limits:
               memory: 32Mi
-            # The adapter, claimed from liken. The claim delivers
-            # /dev/cecN and no other node.
+            # The claim gives the container the adapter's /dev/cecN and
+            # no other device node.
             claims:
               - name: adapter
       resourceClaims:

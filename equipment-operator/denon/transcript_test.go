@@ -1,6 +1,3 @@
-// The parser against a real receiver: every line an AVR-X1700H on a home
-// cluster sent, folded into the state it should produce.
-
 package denon
 
 import (
@@ -12,8 +9,8 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
-// foldTranscript reads one captured transcript and folds every line
-// that is not a comment.
+// foldTranscript applies, in order, each line that a real receiver sent
+// in a captured transcript, and returns the resulting state.
 func foldTranscript(t *testing.T, path string) denonState {
 	t.Helper()
 	file, err := os.Open(path)

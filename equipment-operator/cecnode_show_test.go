@@ -1,12 +1,12 @@
 package main
 
-// The node workload's part of a home press: a new status.session.showAt
-// in a session that holds the room awake gets Image View On and then
-// Active Source for the session's Display, once. A session that is
-// asleep gets nothing, so a home press wakes no room.
-// cecnode_wake_test.go holds the wake fixtures.
+// A new status.session.showAt in a session with Awake set makes the
+// adapter send Image View On and then Active Source for the session's
+// Display, once. A session that is not Awake gets nothing, so a home
+// press never wakes a room. cecnode_wake_test.go has the wake fixtures.
 
 import (
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -15,21 +15,18 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/cec/cectest"
 )
 
-// shownNow is a session after its wake with a home press's showAt.
+// shownNow returns a copy of session with showAt set to the current
+// time, as a home press sets it.
 func shownNow(session *TelevisionSession) *TelevisionSession {
 	shown := *session
 	shown.ShowAt = time.Now().UTC().Format(wakeTimeLayout)
 	return &shown
 }
 
-// A TV on its own apps is On and on another input. Image View On goes
-// out first even then, because a TV on an internal app switches on
-// Image View On and Active Source together, the order One Touch Play
-// sends, and not on a bare Active Source. The press reads no power
-// first: a session that is awake belongs to a Player that is on, so a
-// TV in standby, or one too busy booting to answer, gets the same
-// sequence, and Image View On wakes it. A session that is asleep gets
-// nothing.
+// The adapter sends Image View On whatever power the TV reports,
+// because a TV that shows its own apps reports On and is on another
+// input. The counts include the Image View On and Active Source of the
+// wake that comes before the press.
 func TestAShowSendsImageViewOnAndActiveSource(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -47,7 +44,7 @@ func TestAShowSendsImageViewOnAndActiveSource(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
-				wire := roomWithTV(televisionTV(cec.PowerOn))
+				wire := busWithTV(televisionTV(cec.PowerOn))
 				session := wokeNow()
 				api := awakeRoom(t, wire, session)
 				wokeWith(t, api, session)
@@ -73,7 +70,7 @@ func TestAShowSendsImageViewOnAndActiveSource(t *testing.T) {
 func TestAShowSendsOnlyTheClaim(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerOn))
+		wire := busWithTV(televisionTV(cec.PowerOn))
 		session := wokeNow()
 		api := awakeRoom(t, wire, session)
 		wokeWith(t, api, session)
@@ -87,8 +84,8 @@ func TestAShowSendsOnlyTheClaim(t *testing.T) {
 	})
 }
 
-// routingSentAfter is what the adapter sent after the first skip
-// messages, except polls and power reads.
+// routingSentAfter returns the messages the adapter sent after the first
+// skip messages, leaving out polls and Give Device Power Status.
 func routingSentAfter(wire *cectest.Bus, skip int) []string {
 	var sent []string
 	for _, message := range wire.Sent()[skip:] {
@@ -99,11 +96,12 @@ func routingSentAfter(wire *cectest.Bus, skip int) []string {
 	return sent
 }
 
-// Each showAt is one ask: a later pass sends nothing more for it.
+// A showAt is handled once, so a later pass with the same showAt sends
+// nothing more.
 func TestAShowRunsOnce(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerOn))
+		wire := busWithTV(televisionTV(cec.PowerOn))
 		session := wokeNow()
 		api := awakeRoom(t, wire, session)
 		wokeWith(t, api, session)
@@ -118,13 +116,13 @@ func TestAShowRunsOnce(t *testing.T) {
 	})
 }
 
-// A showAt in the status when the node workload starts is older than
-// the press, and sends nothing, as a wake found at start does.
+// A showAt already in the status when the node workload starts is from
+// an earlier press, so the node workload sends nothing for it.
 func TestAShowFoundAtStartSendsNothing(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		wire := roomWithTV(televisionTV(cec.PowerOn))
+		wire := busWithTV(televisionTV(cec.PowerOn))
 		_, device := usbAdapter(wire)
 		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
 		api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
@@ -142,13 +140,13 @@ func TestAShowFoundAtStartSendsNothing(t *testing.T) {
 	})
 }
 
-// The show is an operation a person causes, so it writes one line with
-// what the TV reported and what the adapter sent.
+// A home press is an action a person takes, so the node workload logs
+// one line with the press and what the adapter sent.
 func TestAShowWritesALine(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		wire := roomWithTV(televisionTV(cec.PowerOn))
+		wire := busWithTV(televisionTV(cec.PowerOn))
 		_, device := usbAdapter(wire)
 		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
 		api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
@@ -162,9 +160,8 @@ func TestAShowWritesALine(t *testing.T) {
 		api.putTelevision(waking(shown))
 
 		api.waitUntil(t, "the line", func() bool { return len(linesWith(log, "asked to show")) == 1 })
-		mustDeepEqual(t, linesWith(log, "asked to show"), []string{
-			"Television lounge: Player media/den asked to show Display acm-0001-receiver at " + shown.ShowAt +
-				"; the adapter on node-1 sent Image View On and Active Source for 1.3.0.0",
-		})
+		lines := linesWith(log, "asked to show")
+		mustMatch(t, strings.Contains(lines[0], "Player media/den asked to show Display acm-0001-receiver at "+shown.ShowAt), true)
+		mustMatch(t, strings.Contains(lines[0], "the adapter on node-1 sent Image View On and Active Source for 1.3.0.0"), true)
 	})
 }

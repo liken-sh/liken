@@ -1,7 +1,8 @@
 package main
 
-// A cluster can lack the Television or the Display definition, and the
-// watch of such a kind reads it as empty, with no request at each pass.
+// Tests of a cluster that has no CRD for Television or Display. The
+// watch of such a kind has an empty store, and a pass sends no list
+// request for the kind.
 
 import (
 	"context"
@@ -10,17 +11,17 @@ import (
 	"time"
 )
 
-// defineTelevisions installs the Television definition on the fake.
+// defineTelevisions makes the fake API serve the Television definition.
 func (a *cecAPI) defineTelevisions() {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
 	a.noTelevisionDefinition = false
 }
 
-// A node workload on a cluster without the Television definition, or
-// whose Display definition refuses the node's field selector, reads
-// that kind at its start and then from its store. The passes that the
-// CECBus events wake send no more lists of it.
+// A node workload on a cluster with no Television CRD, or whose API
+// server refuses the node's field selector on Displays, lists that kind
+// once at start. The passes that CECBus events start read the kind from
+// the store and send no list request.
 func TestTheNodeListsAnAbsentKindOnlyAtItsStart(t *testing.T) {
 	cases := []struct {
 		name string
@@ -55,9 +56,9 @@ func TestTheNodeListsAnAbsentKindOnlyAtItsStart(t *testing.T) {
 	}
 }
 
-// The Deployment's loop on a cluster without the Television definition
-// reads the Televisions from its store at each pass, and sends no list
-// of them.
+// On a cluster without the Television definition, the Deployment's loop
+// reads Televisions from its store on each pass and sends no list
+// request for them.
 func TestTheLoopListsAnAbsentKindOnlyAtItsStart(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -85,9 +86,9 @@ func TestTheLoopListsAnAbsentKindOnlyAtItsStart(t *testing.T) {
 	})
 }
 
-// A watch of a kind whose definition is absent holds an empty store,
-// holds the kind's objects once the definition arrives, and then
-// follows them, a deletion included.
+// When the CRD of an absent kind is created, the watch's store fills
+// with the kind's objects and then follows their changes, including a
+// deletion.
 func TestAnAbsentKindArrivesInTheStore(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

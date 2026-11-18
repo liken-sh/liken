@@ -1,10 +1,7 @@
 package denon
 
-// SystemSettings is the unit-wide settings. Power is reported but never
-// declared, because the controller owns power and the other settings
-// here are the ones a keyed write can set.
-
-// SystemSettings holds the unit-wide settings.
+// SystemSettings holds the settings of the whole receiver. Power is only
+// reported, and has no settingsTable row, because spec.power sets it.
 type SystemSettings struct {
 	Power                string  `json:"power,omitempty"`
 	Eco                  *string `json:"eco,omitempty"`
@@ -17,7 +14,6 @@ type SystemSettings struct {
 	BluetoothOutput      *string `json:"bluetoothOutput,omitempty"`
 }
 
-// systemSettings is the system family's rows of the id table.
 var systemSettings = []settingSpec{
 	wordSetting("system.eco", EcoCommand,
 		func(s *Settings, v string) { s.System.Eco = strPtr(v) },

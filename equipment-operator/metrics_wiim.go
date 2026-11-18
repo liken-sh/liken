@@ -1,19 +1,18 @@
 package main
 
-// The WiiM readings: the temperatures, the Wi-Fi link, and the remote
-// that an amp reports in getStatusEx. Each one changes between two
-// polls with nothing moved at the amp, so a Receiver's status leaves
-// them out, because a status that changed on every poll would write the
-// Receiver every ten seconds to every watcher. A gauge holds the same
-// fact for a dashboard or an alert at no cost to the API server.
+// Gauges for the readings that a WiiM amp returns in getStatusEx: the
+// temperatures, the Wi-Fi link, and the connected remote. These values
+// change between polls even when nobody touches the amp. So they are
+// gauges and not fields of the Receiver's status, which would then be
+// written on every poll and send an update to every watcher.
 
 import (
 	"github.com/liken-sh/liken/equipment-operator/wiim"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// wiimGauges are the gauges of the readings, each labeled by the
-// Receiver.
+// wiimGauges has one gauge vector for each reading, labeled with the
+// name of the Receiver.
 type wiimGauges struct {
 	temperature   *prometheus.GaugeVec
 	wifiSignal    *prometheus.GaugeVec
@@ -51,9 +50,10 @@ func (g wiimGauges) collectors() []prometheus.Collector {
 	return collectors
 }
 
-// recordWiim puts one amp's readings on the gauges. A reading the amp
-// did not report deletes its series, so a radio reading of an amp that
-// moved to its wired port does not stand at its last value.
+// recordWiim sets the gauges from one amp's readings and deletes the
+// series of each reading the amp did not report. An amp that moves from
+// Wi-Fi to its wired port stops reporting the Wi-Fi readings, and their
+// last values must not stay on the scrape.
 func (m *metrics) recordWiim(receiver string, readings wiim.Readings) {
 	if m == nil {
 		return
@@ -71,8 +71,6 @@ func (m *metrics) recordWiim(receiver string, readings wiim.Readings) {
 	setReading(g.remoteSignal, readings.RemoteSignal, 1, receiver)
 }
 
-// setReading sets one series to value times scale, or deletes it when
-// value is nil.
 func setReading(gauge *prometheus.GaugeVec, value *int, scale float64, labels ...string) {
 	if value == nil {
 		gauge.DeleteLabelValues(labels...)
@@ -81,7 +79,6 @@ func setReading(gauge *prometheus.GaugeVec, value *int, scale float64, labels ..
 	gauge.WithLabelValues(labels...).Set(float64(*value) * scale)
 }
 
-// forget deletes every series of one Receiver.
 func (g wiimGauges) forget(receiver string) {
 	for _, gauge := range g.all() {
 		gauge.DeletePartialMatch(prometheus.Labels{"receiver": receiver})

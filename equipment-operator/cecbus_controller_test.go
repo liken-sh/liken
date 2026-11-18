@@ -1,6 +1,6 @@
 package main
 
-// The Deployment's CECBus loop against the fake API server.
+// Tests of the Deployment's CECBus loop against the fake API server.
 
 import (
 	"context"
@@ -73,8 +73,8 @@ func TestTheLoopFollowsAnAdaptersReport(t *testing.T) {
 	})
 }
 
-// A cluster without the CECBus definition answers the list with an
-// error, and the loop waits and lists again until its context ends.
+// On a cluster without the CECBus definition, the list fails. The loop
+// waits cecBusRetry and lists again until its context ends.
 func TestTheLoopWaitsForTheDefinition(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -88,7 +88,7 @@ func TestTheLoopWaitsForTheDefinition(t *testing.T) {
 	})
 }
 
-func TestDeleteCECBusSettlesOnGoneAndReportsARefusal(t *testing.T) {
+func TestDeleteCECBusTreatsNotFoundAsDeletedAndReturnsARefusal(t *testing.T) {
 	cases := []struct {
 		name    string
 		status  int
@@ -108,15 +108,15 @@ func TestDeleteCECBusSettlesOnGoneAndReportsARefusal(t *testing.T) {
 				err := DeleteCECBus(testAPIClient(t, api.handler()), "node-1")
 
 				if (err != nil) != c.wantErr {
-					t.Errorf("got %v, want an error: %v", err, c.wantErr)
+					t.Errorf("DeleteCECBus returned %v, want an error: %v", err, c.wantErr)
 				}
 			})
 		})
 	}
 }
 
-// A failed list of the buses or of the pods is the pass's error, and a
-// refused write is logged and left for the next pass.
+// A failed list of buses or pods makes the pass return an error. A
+// refused write is logged and left for a later pass.
 func TestAPassReportsAFailedListAndSurvivesARefusedWrite(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -137,15 +137,15 @@ func TestAPassReportsAFailedListAndSurvivesARefusedWrite(t *testing.T) {
 				err := newCECBusController(testAPIClient(t, api.handler()), testNamespace).pass()
 
 				if (err != nil) != c.wantErr {
-					t.Errorf("got %v, want an error: %v", err, c.wantErr)
+					t.Errorf("the pass returned %v, want an error: %v", err, c.wantErr)
 				}
 			})
 		})
 	}
 }
 
-// A refused list of the pods names the Role that grants it, so a person
-// who reads the log knows what to fix.
+// When the API server refuses the pod list, the error names the Role
+// that must grant it, so a person who reads the log knows what to fix.
 func TestARefusedPodListNamesTheRole(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -157,7 +157,7 @@ func TestARefusedPodListNamesTheRole(t *testing.T) {
 		err := newCECBusController(testAPIClient(t, api.handler()), testNamespace).pass()
 
 		if err == nil || !strings.Contains(err.Error(), "the Role equipment-operator-cec-pods must grant get, list, and watch on pods in liken-system") {
-			t.Errorf("got %v", err)
+			t.Errorf("the pass returned %v, want an error that names the Role equipment-operator-cec-pods", err)
 		}
 	})
 }

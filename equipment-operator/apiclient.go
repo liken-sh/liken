@@ -1,11 +1,9 @@
 package main
 
-// The shared apiclient package sends every write, and every read of a
-// kind that a reader also writes. The watches run on client-go's
-// reflector, in the shared informer package, through a dynamic client
-// that this Client builds from the same address and credentials
-// (watch.go), and a pass reads the other kinds from the watches' stores
-// (objectcache.go).
+// The operator's API client, and the API calls for Receiver. Writes and
+// direct reads go through the shared apiclient package. The watches use
+// client-go's reflector, through a dynamic client built from the same
+// address and credentials (watch.go).
 
 import (
 	"context"
@@ -25,52 +23,50 @@ import (
 	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
-// serviceAccountDir is a variable so a test points it at a directory
-// it controls.
+// serviceAccountDir is a variable so a test can point it at its own
+// directory.
 var serviceAccountDir = apiclient.ServiceAccountDir
 
-// Client is the shared client, with what the watches and the memo need
-// beside it.
+// Client is the shared apiclient.Client plus the state of the watches
+// and of the version memo.
 type Client struct {
 	*apiclient.Client
 	*access
 }
 
-// access is what every copy of one Client shares (withContext).
+// access is the state that every copy of one Client shares, including
+// the copies that withContext and withWaits make.
 type access struct {
-	// base and credentials are the address and the credentials
-	// directory the shared client reaches the API server with. The
-	// watches and the Deployment's leader election build their client-go
-	// configuration from the same two (restConfig).
+	// The watches and the Deployment's leader election build their
+	// client-go configuration from these (restConfig).
 	base        string
 	credentials string
 
-	// transport is the round tripper of the HTTP client that NewClient
-	// took, or nil for the default. The watches send their requests
-	// through it too, so they reach the same server as the Client's own
-	// requests, such as a test's fake API server on in-memory
-	// connections.
+	// transport is the HTTP client's round tripper from NewClient, or nil
+	// for the default. The watches send through it, so in a test they
+	// reach the same fake API server as every other request.
 	transport http.RoundTripper
 
-	// dial opens the connections of the watches, or nil for client-go's
-	// own dialer. A test that serves the API server over TLS on its
-	// network in memory hands in that network's dial, because client-go
-	// refuses a Transport beside a CA file.
+	// dial opens the watches' connections, or nil for client-go's own
+	// dialer. A test that serves the API server over TLS on an
+	// in-memory network passes that network's dial, because client-go
+	// refuses a custom Transport together with a CA file.
 	dial dialFunc
 
-	// versions is the memo of each kind this process writes, which each
-	// write notes and each read from a store consults (objectcache.go).
+	// versions records the resourceVersion of each object this process
+	// wrote, so a read does not use a store's copy that is older than
+	// this process's last write (objectcache.go).
 	versions objectVersions
 
-	// The dynamic client of the watches, which watcher builds once.
+	// The dynamic client that the watches share. watcher builds it on
+	// first use.
 	watchOnce   sync.Once
 	watchClient dynamic.Interface
 	watchErr    error
 }
 
-// NewClient builds a client from its three parts. InClusterClient
-// reads them from the pod's environment; a test hands in its fake API
-// server's address and client, and no credentials.
+// NewClient builds a client for the API server at base. A test passes
+// its fake API server's client and no credentials directory.
 func NewClient(base string, httpClient *http.Client, credentials string) *Client {
 	return &Client{
 		Client: apiclient.New(base, httpClient, credentials),
@@ -78,9 +74,9 @@ func NewClient(base string, httpClient *http.Client, credentials string) *Client
 	}
 }
 
-// InClusterClient builds the client from the pod's environment and its
-// ServiceAccount. timeout bounds each request, and zero takes the
-// shared client's default.
+// InClusterClient builds the client from the pod's environment and
+// ServiceAccount. timeout bounds each request, and zero uses the shared
+// client's default.
 func InClusterClient(timeout time.Duration) (*Client, error) {
 	shared, err := apiclient.InCluster(apiclient.InClusterOptions{ServiceAccountDir: serviceAccountDir, Timeout: timeout})
 	if err != nil {
@@ -93,43 +89,38 @@ func InClusterClient(timeout time.Duration) (*Client, error) {
 	}, nil
 }
 
-// withContext answers the client with requests that end when ctx ends,
-// and so does the wait after a 429. A loop that stops then waits on no
-// API server. The copy shares the memo and the watches' client.
+// withContext returns a copy of the client whose requests, and whose
+// waits after a 429, are canceled when ctx ends.
 func (c *Client) withContext(ctx context.Context) *Client {
 	return &Client{Client: c.Client.WithContext(ctx), access: c.access}
 }
 
-// withWaits answers the client with a wait after a 429 that ends when
-// ctx ends, while each request already sent runs to its answer. The
-// Deployment releases its Lease after its last write, and a write that
-// the client cut off could still land after another operator took the
-// Lease, so a Receiver unit ends only its waits (work.go).
+// withWaits returns a copy of the client that stops waiting after a 429
+// when ctx ends, but lets a request already sent run to completion. The
+// Deployment releases its Lease after its last write. A canceled write
+// can still reach the API server, possibly after another replica took
+// the Lease, so the loops that write cancel only their waits.
 func (c *Client) withWaits(ctx context.Context) *Client {
 	return &Client{Client: c.Client.WithWaitContext(ctx), access: c.access}
 }
 
-// startRetry is the shortest wait between two tries of a starting list
-// that met a 429 longer than the client waits.
 const startRetry = time.Second
 
-// untilAnswered makes a starting call until it answers something other
-// than a 429, or ctx ends. The API server answers 429 while it starts
-// the storage of a CRD, and a process that exited on it would restart
-// into the same answer. So an operator's wait for the API server loops
-// on its context, and any other failure, such as a missing grant, is
-// the caller's to report at once. The client bound to ctx has already
-// waited out each 429 up to its limit, so the loop meets only a 429
-// that asked for more than that, and it waits what that 429 asked for,
-// and at least startRetry.
-func untilAnswered(ctx context.Context, call func() error) error {
+// retryWhileThrottled retries call after each 429 until it returns anything
+// else or ctx ends. The API server returns 429 while it sets up the
+// storage for a new CRD, and a process that exited on it would restart
+// into the same 429. Any other error, such as a missing RBAC grant,
+// returns at once. The client has already retried each 429 up to its own
+// limit, so a 429 that reaches this loop asked for a longer wait. The
+// loop waits as long as Retry-After asks, and at least startRetry.
+func retryWhileThrottled(ctx context.Context, call func() error) error {
 	for {
 		err := call()
 		if !errors.Is(err, apiclient.ErrThrottled) {
 			return err
 		}
 		wait := max(startRetry, time.Duration(apiclient.RetryAfterSeconds(err))*time.Second)
-		fmt.Fprintf(os.Stderr, "%v; asking again in %s\n", err, wait)
+		fmt.Fprintf(os.Stderr, "%v, retrying in %s\n", err, wait)
 		select {
 		case <-ctx.Done():
 			return err
@@ -138,25 +129,25 @@ func untilAnswered(ctx context.Context, call func() error) error {
 	}
 }
 
-// An apply is a body the API server reads as a partial object under the
-// caller's field manager. The apply media type is named for YAML and
-// accepts JSON, because YAML is its superset.
+// applyContentType marks a PATCH as a server-side apply. The media type
+// names YAML, and JSON is valid YAML, so the bodies here are JSON.
 const applyContentType = "application/apply-patch+yaml"
 
-// fieldManager names this operator's writes to the API server, so
-// server-side apply gives it the fields it applies and leaves every
-// other writer's fields alone.
+// fieldManager is the default field manager of this operator. The API
+// server records which fields each manager set, and an apply removes the
+// fields that its manager set before and the new body leaves out.
 const fieldManager = "equipment-operator"
 
-// A Receiver is cluster-scoped, so the collection path carries no
-// namespace, the way a StorageClass path carries none.
+// A Receiver is cluster-scoped, so its collection path has no
+// namespace.
 const receiversPath = "/apis/" + equipmentAPIVersion + "/receivers"
 
 func receiverPath(name string) string {
 	return receiversPath + "/" + name
 }
 
-// ListReceivers answers a whole pass with one request.
+// ListReceivers lists every Receiver from the API server, not from the
+// watch's store.
 func ListReceivers(c *Client) (*ReceiverList, error) {
 	list := &ReceiverList{}
 	if err := c.RequestJSON(http.MethodGet, receiversPath, nil, list); err != nil {
@@ -165,22 +156,19 @@ func ListReceivers(c *Client) (*ReceiverList, error) {
 	return list, nil
 }
 
-// readReceivers answers every Receiver from the watch's store, and
-// lists them from the API server while the store has nothing to give
-// (objectcache.go).
-func readReceivers(c *Client, held *watchStore) (*ReceiverList, error) {
-	items, err := informer.List[Receiver](c.Client, informer.Held{View: held.view(), Versions: c.versions.receivers}, receiversPath, receiverPath)
+// readReceivers returns every Receiver from the watch's store, or from
+// a list on the API server until the store is ready (objectcache.go).
+func readReceivers(c *Client, store *watchStore) (*ReceiverList, error) {
+	items, err := informer.List[Receiver](c.Client, informer.Held{View: store.view(), Versions: c.versions.receivers}, receiversPath, receiverPath)
 	return &ReceiverList{Items: items}, err
 }
 
+// GetReceiver reads one Receiver from the API server. A Receiver that
+// does not exist returns apiclient.ErrNotFound.
 func GetReceiver(c *Client, name string) (*Receiver, error) {
 	return apiclient.Get[Receiver](c.Client, receiverPath(name))
 }
 
-// receiverStatusApply is the partial object an apply sends: the
-// identity the API server matches on, and the status this operator
-// owns. It carries no spec, so an apply can never state a field a
-// person declared.
 type receiverStatusApply struct {
 	APIVersion string         `json:"apiVersion"`
 	Kind       string         `json:"kind"`
@@ -188,16 +176,13 @@ type receiverStatusApply struct {
 	Status     ReceiverStatus `json:"status"`
 }
 
-// ApplyReceiverStatus writes the status subresource under this
-// operator's own field manager. Server-side apply keeps the write to
-// the fields the body states, and removes the fields this manager
-// owned and no longer states, so a reading that stops arriving leaves
-// no stale value behind. The media operator writes status.session
-// under its own field manager, and a ReceiverStatus has no session
-// field, so this apply never states the session, never takes it over
-// with force, and never removes it. force settles a conflict in this
-// manager's favour, because no other writer states the fields a
-// ReceiverStatus holds.
+// ApplyReceiverStatus applies status to the Receiver's status
+// subresource. A field that status leaves empty is removed, so a reading
+// that stops arriving does not leave a stale value. media-operator
+// writes status.session under its own field manager, and ReceiverStatus
+// has no session field, so this apply leaves the session alone.
+// force=true is safe because no other writer sets a field of
+// ReceiverStatus.
 func ApplyReceiverStatus(c *Client, name string, status ReceiverStatus) (*Receiver, error) {
 	body, err := json.Marshal(&receiverStatusApply{
 		APIVersion: equipmentAPIVersion,
@@ -211,10 +196,6 @@ func ApplyReceiverStatus(c *Client, name string, status ReceiverStatus) (*Receiv
 	return applyReceiver(c, name, receiverPath(name)+"/status?fieldManager="+fieldManager+"&force=true", body)
 }
 
-// receiverPowerApply is the partial object an apply sends to own the
-// spec.power field: the identity, and the one field this operator
-// manages. It carries no status and no other spec field, so an apply
-// can never overwrite what a person or the media operator declared.
 type receiverPowerApply struct {
 	APIVersion string       `json:"apiVersion"`
 	Kind       string       `json:"kind"`
@@ -222,13 +203,10 @@ type receiverPowerApply struct {
 	Spec       ReceiverSpec `json:"spec"`
 }
 
-// ApplyReceiverPower writes spec.power on the main resource under this
-// operator's own field manager, the way the media operator owns
-// status.session. Server-side apply keeps the write to the field the body
-// states, so a GitOps manifest that does not declare power never
-// touches the value this operator settled on. force settles a conflict
-// in this manager's favour, because nothing else writes a Receiver's
-// power.
+// ApplyReceiverPower applies spec.power, and no other field, to the
+// Receiver itself. A GitOps manifest that does not declare power then
+// leaves this operator's value in place. force=true is safe because no
+// other writer sets a Receiver's power.
 func ApplyReceiverPower(c *Client, name string, power equipment.Power) (*Receiver, error) {
 	body, err := json.Marshal(&receiverPowerApply{
 		APIVersion: equipmentAPIVersion,
@@ -242,8 +220,8 @@ func ApplyReceiverPower(c *Client, name string, power equipment.Power) (*Receive
 	return applyReceiver(c, name, receiverPath(name)+"?fieldManager="+fieldManager+"&force=true", body)
 }
 
-// applyReceiver sends one apply of a Receiver, and answers the copy the
-// API server stored, whose version the memo notes.
+// applyReceiver sends one apply and records the resourceVersion of the
+// returned copy in the memo.
 func applyReceiver(c *Client, name, path string, body []byte) (*Receiver, error) {
 	return memo.Written[Receiver](c.versions.receivers, name, func() (*Receiver, error) {
 		answer := &Receiver{}
@@ -251,16 +229,12 @@ func applyReceiver(c *Client, name, path string, body []byte) (*Receiver, error)
 	})
 }
 
-// discoveredLabel marks a Receiver the discovery loop created for an
-// amp it found, and holds the protocol it was found by. The label is
-// what lets the operator prune its own objects and never a person's:
-// only an object carrying it is one the operator made.
+// discoveredLabel marks an object that the operator created for a
+// device it discovered, and its value says how the device was found.
+// Pruning deletes only objects with this label, so it never deletes an
+// object that a person created.
 const discoveredLabel = "equipment.liken.sh/discovered"
 
-// discoveredReceiverApply is the partial object discovery applies: the
-// identity, the marker label, and the protocol block. It carries no
-// inputs, no session, and no settings, so every field a person later
-// writes stays theirs.
 type discoveredReceiverApply struct {
 	APIVersion string       `json:"apiVersion"`
 	Kind       string       `json:"kind"`
@@ -268,11 +242,10 @@ type discoveredReceiverApply struct {
 	Spec       ReceiverSpec `json:"spec"`
 }
 
-// ApplyDiscoveredReceiver creates, or keeps, the Receiver the discovery
-// loop owns for one amp. It applies under this operator's own field
-// manager, so a person's later writes to the inputs, the session, or
-// the settings are untouched, and the identity block it does state is
-// the one field it owns.
+// ApplyDiscoveredReceiver creates the Receiver for a discovered WiiM
+// amp, or sets its spec.wiim.uuid when the Receiver exists. The apply
+// sets only the label and spec.wiim, so it leaves alone the inputs,
+// session, and settings that a person adds later.
 func ApplyDiscoveredReceiver(c *Client, name, uuid string) (*Receiver, error) {
 	body, err := json.Marshal(&discoveredReceiverApply{
 		APIVersion: equipmentAPIVersion,
@@ -289,18 +262,16 @@ func ApplyDiscoveredReceiver(c *Client, name, uuid string) (*Receiver, error) {
 	return applyReceiver(c, name, receiverPath(name)+"?fieldManager="+fieldManager+"&force=true", body)
 }
 
-// DeleteReceiver removes one Receiver. A Receiver the operator did not
-// create is never named here: discovery deletes only the objects that
-// carry its own marker label. A name that is already gone is not an
-// error, so a prune that races a deletion settles the same way.
+// DeleteReceiver deletes one Receiver. A Receiver that is already gone
+// is not an error, so a prune that races another deletion succeeds.
 func DeleteReceiver(c *Client, name string) error {
 	return c.versions.receivers.Send(name, func() (string, error) {
-		return "", deleteObject(c, receiverPath(name), "receiver "+name)
+		return "", deleteObject(c, receiverPath(name), "Receiver "+name)
 	})
 }
 
-// deleteObject removes one object. A name that is already gone is not
-// an error. what names the object in the error.
+// deleteObject deletes the object at path, and treats a 404 as success.
+// what describes the object in the error message.
 func deleteObject(c *Client, path, what string) error {
 	err := c.RequestJSON(http.MethodDelete, path, nil, nil)
 	if err == nil || err == apiclient.ErrNotFound {

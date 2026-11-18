@@ -1,13 +1,13 @@
-// The receiver's model, read from its UPnP description. Port 23 carries
-// no command that names the model. A receiver of the generation the
-// denonavr library calls AVR-X 2016 serves its AIOS device description
-// over plain HTTP on port 60006, and the root device names the maker
-// and the model. denonavr's const.py names that port and path, and
-// the library reads the manufacturer and the modelName from it. An
-// older receiver serves /description.xml on port 8080 instead, and the
-// client does not read it. The client reads the description once for
-// each connection until one read succeeds, so a receiver that does not
-// serve it costs one GET per connection and never a steady stream.
+// The client reads the receiver's model from its UPnP description,
+// because the ASCII control protocol on port 23 has no command that
+// returns the model. A receiver of the generation that the denonavr
+// library calls AVR-X 2016 serves its AIOS device description over
+// plain HTTP on port 60006, and the root device has the manufacturer
+// and the modelName. denonavr's const.py gives that port and path. An older
+// receiver serves /description.xml on port 8080, which this client does
+// not read. Until one read succeeds, the client tries again on each
+// connection, so a receiver that serves no description costs one GET
+// per connection.
 
 package denon
 
@@ -19,15 +19,15 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/upnp"
 )
 
-// The port and the path of the AIOS description.
+// The port and path of the AIOS device description.
 const (
 	aiosDescriptionPort = "60006"
 	aiosDescriptionPath = "/upnp/desc/aios_device/aios_device.xml"
 )
 
-// describe starts one read of the description when the client has no
-// model and no read is in flight. It runs beside the connection, so a
-// receiver slow to answer the description never delays a command.
+// describe starts a read of the description on its own goroutine when
+// the client has no model yet and no read is running, so a receiver
+// that is slow to serve the description never delays a command.
 func (d *Client) describe(ctx context.Context) {
 	d.mutex.Lock()
 	if d.state.model != "" || d.describing {
@@ -47,7 +47,7 @@ func (d *Client) describe(ctx context.Context) {
 		d.describing = false
 		if err != nil {
 			// A receiver without HEOS serves no description, and its model
-			// stays empty. The next connection asks again.
+			// stays empty.
 			d.mutex.Unlock()
 			return
 		}

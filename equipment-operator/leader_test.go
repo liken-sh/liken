@@ -2,12 +2,8 @@
 
 package main
 
-// These tests cover the operator's own use of kubernetes/election: it
-// acts only while it holds the Lease, it releases the Lease only after
-// its last write, it keeps the Lease when a write can still be in
-// flight, and its writes go through the election's write guard. The
-// package's tests cover the election itself. These tests run in
-// synctest bubbles against the fake Lease server of electiontest.
+// These tests cover how the operator uses kubernetes/election. The
+// election's own tests are in its package.
 
 import (
 	"context"
@@ -33,8 +29,8 @@ func newLeaseServer() *electiontest.Server {
 	return electiontest.New(leaseName, testLeaseNamespace)
 }
 
-// candidate is one operator process under test, with the exit code it
-// would have ended with, or -1.
+// candidate is one operator process under test. exitCode is -1 until
+// the election calls Exit.
 type candidate struct {
 	*leadership
 	exitCode atomic.Int32
@@ -42,14 +38,12 @@ type candidate struct {
 
 func (c *candidate) exited() bool { return c.exitCode.Load() >= 0 }
 
-// newCandidate starts the election of one process of pod, whose writes
-// go to client.
 func newCandidate(t *testing.T, server *electiontest.Server, client *Client, pod string) *candidate {
 	t.Helper()
 	c := &candidate{}
 	c.exitCode.Store(-1)
-	// The lines go to a buffer the test prints when it ends, because
-	// client-go can call back after the test's last assertion.
+	// The report lines are logged at cleanup, because client-go can call
+	// Report after the test returns, and t.Log then panics.
 	var lines sync.Mutex
 	var reported []string
 	l, err := newLeadership(client, server.Config(t), election.Options{
@@ -64,8 +58,8 @@ func newCandidate(t *testing.T, server *electiontest.Server, client *Client, pod
 	mustSucceed(t, err)
 	c.leadership = l
 	c.Run()
-	// The election runs until it ends, and a bubble ends only when every
-	// goroutine in it has.
+	// A synctest bubble ends only when all its goroutines have ended, so
+	// the election must be stopped.
 	t.Cleanup(func() {
 		c.StepDown()
 		lines.Lock()
@@ -78,8 +72,8 @@ func newCandidate(t *testing.T, server *electiontest.Server, client *Client, pod
 }
 
 // leading runs actWhileLeading in the background with an act that
-// holds until the test releases it, and answers the function that ends
-// act and reports what actWhileLeading answered.
+// blocks until the test calls finish. finish returns what
+// actWhileLeading returned.
 func leading(t *testing.T, c *candidate, act func(*Client) error) (finish func() (bool, error)) {
 	t.Helper()
 	release := make(chan struct{})
@@ -106,9 +100,9 @@ func leading(t *testing.T, c *candidate, act func(*Client) error) (finish func()
 	}
 }
 
-// The operator acts only while the Lease names this process, and
-// releases it only after act has returned, so no write of the operator
-// lands once another copy can lead. A shutdown is not a loss.
+// The Lease is released only after act returns, so no write arrives
+// once another copy can lead. A shutdown does not make the election
+// exit the process.
 func TestTheLeaseIsReleasedOnlyAfterTheOperatorStops(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -131,8 +125,7 @@ func TestTheLeaseIsReleasedOnlyAfterTheOperatorStops(t *testing.T) {
 }
 
 // An operator whose writes did not stop in time keeps the Lease, so no
-// other copy leads while a write can still land. The Lease expires
-// after the process exits.
+// other copy leads while a write may still arrive.
 func TestAStillWritingOperatorKeepsTheLease(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -148,9 +141,8 @@ func TestAStillWritingOperatorKeepsTheLease(t *testing.T) {
 	})
 }
 
-// serve returns only after the Event recorder's last write has
-// returned, so actWhileLeading releases the Lease after the Events of
-// the last pass land.
+// serve returns only after the last Event write has returned, so the
+// Lease is released after the Events of the last pass are written.
 func TestServeReturnsAfterTheRecordersLastWrite(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -170,7 +162,7 @@ func TestServeReturnsAfterTheRecordersLastWrite(t *testing.T) {
 		synctest.Wait()
 		select {
 		case err := <-returned:
-			t.Fatalf("serve returned %v while an Event write was in flight", err)
+			t.Fatalf("serve returned %v before the Event write in flight finished, want it to keep running", err)
 		default:
 		}
 		api.releaseEvents()
@@ -180,8 +172,8 @@ func TestServeReturnsAfterTheRecordersLastWrite(t *testing.T) {
 	})
 }
 
-// A shutdown that arrives while the copy waits ends the wait with no
-// Lease, runs nothing, and leaves the holder alone.
+// A shutdown while the copy waits for the Lease does not run act and
+// leaves the current holder's Lease alone.
 func TestAStopWhileWaitingRunsNothing(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -205,11 +197,10 @@ func TestAStopWhileWaitingRunsNothing(t *testing.T) {
 	})
 }
 
-// The client act receives writes while the leader renews its Lease,
-// and refuses every write, sending nothing, once the last renewal is
-// one renewal deadline old. That comes before a waiting copy can take
-// the Lease, so a leader that lost the API server's answers cannot
-// write over a new leader.
+// Once the last renewal is election.RenewDeadline old, the client that
+// act receives refuses every write without sending it. That is before
+// another copy can take the Lease, so a leader that cannot renew does
+// not write over a new leader.
 func TestTheOperatorWritesOnlyWhileItsLeaseIsFresh(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -235,9 +226,9 @@ func TestTheOperatorWritesOnlyWhileItsLeaseIsFresh(t *testing.T) {
 	})
 }
 
-// memoryListener is a listener that no connection reaches. Its Accept
-// waits on a channel, so a bubble's clock moves while the metrics
-// server waits in it.
+// memoryListener never receives a connection. Accept blocks on a
+// channel instead of a socket, because a goroutine blocked on a socket
+// stops the synctest bubble's clock.
 type memoryListener struct {
 	closed chan struct{}
 	once   sync.Once
@@ -256,10 +247,8 @@ func (l *memoryListener) Close() error {
 func (l *memoryListener) Addr() net.Addr { return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 9260} }
 
 // A copy that waits for the Lease binds no port, searches for no
-// device, and sends the API server nothing but its reads of the Lease,
-// which the Lease server answers. So it opens no receiver session
-// either, because a session starts from a pass. Once it takes the
-// Lease, it does all of these, and a shutdown releases the Lease.
+// device, and lists nothing from the API server. Once it takes the
+// Lease it does all of these.
 func TestAWaitingCopyDoesNothingUntilItLeads(t *testing.T) {
 	var searches, binds atomic.Int32
 	restoreDiscover, restoreListen := discover, listen
@@ -301,9 +290,8 @@ func TestAWaitingCopyDoesNothingUntilItLeads(t *testing.T) {
 		mustMatch(t, binds.Load(), 0)
 
 		old.StepDown()
-		// client-go retries the acquire after a jittered wait of up to
-		// (1 + JitterFactor) retry periods, 2.2 of them, so the new copy
-		// has taken the Lease only after that long.
+		// client-go waits up to (1 + JitterFactor) retry periods, which is
+		// 2.2, between tries to take the Lease.
 		time.Sleep(3 * election.RetryPeriod)
 		synctest.Wait()
 		api.mutex.Lock()

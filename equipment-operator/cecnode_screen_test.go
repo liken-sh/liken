@@ -1,10 +1,8 @@
 package main
 
-// The asks the node workload hears on the bus for the Player's screen:
-// the TV's Set Stream Path for a sleeping session's Display asks the
-// screen to wake, and a Standby while the session holds the room awake
-// asks it to sleep. The node workload writes each ask in the
-// Television's status.screenAsk, and the Deployment relays it.
+// Tests of the screen requests that the node workload writes to the
+// Television's status.screenAsk when the TV selects the Display or goes
+// to standby.
 
 import (
 	"testing"
@@ -16,7 +14,7 @@ import (
 )
 
 // sleepingRoom runs the node workload for node-1 on a bus in Control,
-// with a session that stands on node-1's Display and sleeps.
+// with a sleeping session whose Display is on node-1.
 func sleepingRoom(t *testing.T, wire *cectest.Bus) (*cecAPI, *TelevisionSession) {
 	t.Helper()
 	api := controlling(t, wire, lounge(""))
@@ -28,14 +26,14 @@ func sleepingRoom(t *testing.T, wire *cectest.Bus) (*cecAPI, *TelevisionSession)
 	return api, asleep
 }
 
-// pickTheDisplay puts the TV's Set Stream Path for node-1's Display on
-// the wire, which a TV sends when a person picks the input in its menu.
+// pickTheDisplay sends the Set Stream Path that the TV sends when a
+// person selects node-1's Display input in its menu.
 func pickTheDisplay(wire *cectest.Bus) {
 	wire.Send(cec.NewMessage(cec.AddressTV, cec.AddressBroadcast, cec.OpSetStreamPath, 0x13, 0x00))
 }
 
-// screenAsked waits for the Television's status.screenAsk to name a
-// screen.
+// screenAsked waits until the Television's status.screenAsk requests
+// the given screen action.
 func screenAsked(t *testing.T, api *cecAPI, screen string) TelevisionScreenAsk {
 	t.Helper()
 	television := api.waitForTelevision(t, "lounge", func(television Television) bool {
@@ -44,13 +42,13 @@ func screenAsked(t *testing.T, api *cecAPI, screen string) TelevisionScreenAsk {
 	return *television.Status.ScreenAsk
 }
 
-// A person picks the Player's input in the TV's menu while the Player's
-// screen sleeps. The Display has no picture yet, so the adapter sends
-// no Active Source, and asks the Player's screen to wake.
+// A person selects the Player's input in the TV's menu while the
+// screen sleeps. The adapter requests a screen wake and sends no Active
+// Source, because the Display has no picture yet.
 func TestAPickOfASleepingDisplayAsksTheScreenToWake(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerOn))
+		wire := busWithTV(televisionTV(cec.PowerOn))
 		api, _ := sleepingRoom(t, wire)
 
 		pickTheDisplay(wire)
@@ -62,13 +60,13 @@ func TestAPickOfASleepingDisplayAsksTheScreenToWake(t *testing.T) {
 	})
 }
 
-// The session that the pick woke claims the input with Active Source
-// alone: the TV is on and already shows the Display's input, so Image
-// View On asks nothing of it.
+// The wake that follows the TV's selection sends Active Source without
+// Image View On, because the TV is on and already shows the Display's
+// input.
 func TestTheWakeAfterAPickSendsActiveSourceAlone(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerOn))
+		wire := busWithTV(televisionTV(cec.PowerOn))
 		api, _ := sleepingRoom(t, wire)
 		pickTheDisplay(wire)
 		screenAsked(t, api, screenWake)
@@ -79,19 +77,18 @@ func TestTheWakeAfterAPickSendsActiveSourceAlone(t *testing.T) {
 		television := wokeWith(t, api, session)
 		applied := conditionOf(television.Status.Conditions, conditionWakeApplied)
 		mustMatch(t, applied.Reason, reasonConfirmed)
-		mustMatch(t, applied.Message, "the TV already reported On; the adapter on node-1 sent Active Source for 1.3.0.0, Display acm-0001-receiver, once, and no other source claimed the input in the 30 s after; the last Active Source on the bus is 1.3.0.0")
+		mustMatch(t, applied.Message, "The TV already reported On. The adapter on node-1 sent Active Source for 1.3.0.0, Display acm-0001-receiver, once, and no other source claimed the input in the 30 s after. The last Active Source on the bus is 1.3.0.0")
 		mustDeepEqual(t, claimsOf(wire), []string{"4->f 82 13 00"})
 		mustMatch(t, sentOf(wire, cec.OpImageViewOn), 0)
 	})
 }
 
-// A pick counts only while the route still leads to the Display. A
-// person who picks another source before the screen wakes moved on,
-// and the wake that follows claims the input the ordinary way.
+// When a person selects another source before the screen wakes, the
+// wake sends Image View On as well as Active Source.
 func TestAPickThatMovedOnIsForgotten(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerOn))
+		wire := busWithTV(televisionTV(cec.PowerOn))
 		api, _ := sleepingRoom(t, wire)
 		pickTheDisplay(wire)
 		screenAsked(t, api, screenWake)
@@ -105,11 +102,12 @@ func TestAPickThatMovedOnIsForgotten(t *testing.T) {
 	})
 }
 
-// A pick of another source's address asks nothing: that source answers.
+// A Set Stream Path for another device's address requests nothing,
+// because that device handles it.
 func TestAPickOfAnotherSourceAsksNothing(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerOn))
+		wire := busWithTV(televisionTV(cec.PowerOn))
 		api, _ := sleepingRoom(t, wire)
 
 		wire.Send(cec.NewMessage(cec.AddressTV, cec.AddressBroadcast, cec.OpSetStreamPath, 0x15, 0x00))
@@ -120,11 +118,8 @@ func TestAPickOfAnotherSourceAsksNothing(t *testing.T) {
 	})
 }
 
-// A Standby that reaches the room while the session holds it awake
-// asks the Player's screen to sleep, so the room goes dark with the
-// TV. A Standby from the TV counts when it is broadcast or sent to the
-// adapter; one from another device counts only when it is broadcast,
-// which puts the whole system in standby.
+// A Standby while the session is awake requests a screen sleep when it
+// is broadcast, or when the TV addresses it to the adapter.
 func TestAStandbyAsksTheScreenToSleep(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -142,7 +137,7 @@ func TestAStandbyAsksTheScreenToSleep(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
-				wire := roomWithTV(televisionTV(cec.PowerOn))
+				wire := busWithTV(televisionTV(cec.PowerOn))
 				session := wokeNow()
 				api := awakeRoom(t, wire, session)
 				wokeWith(t, api, session)
@@ -157,12 +152,11 @@ func TestAStandbyAsksTheScreenToSleep(t *testing.T) {
 	}
 }
 
-// A Standby while the session already sleeps asks nothing: the screen
-// is dark.
+// A Standby while the session sleeps requests nothing.
 func TestAStandbyInADarkRoomAsksNothing(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerOn))
+		wire := busWithTV(televisionTV(cec.PowerOn))
 		api, _ := sleepingRoom(t, wire)
 
 		wire.Send(cec.Standby(cec.AddressTV, cec.AddressBroadcast))

@@ -33,18 +33,17 @@ func TestAFollowerAnswersWhatTheKernelLeavesToIt(t *testing.T) {
 			got, answers := cec.Answer(c.message, own, cec.PowerOn, true)
 			switch {
 			case c.want == nil && answers:
-				t.Errorf("answered %v, want no answer", got)
+				t.Errorf("the answer is %v, want no answer", got)
 			case c.want != nil && (!answers || got.String() != c.want.String()):
-				t.Errorf("answered %v (%v), want %v", got, answers, *c.want)
+				t.Errorf("the answer is %v (answered %v), want %v", got, answers, *c.want)
 			}
 		})
 	}
 }
 
-// A follower on a bus with no audio system never sends System Audio
-// Mode Request, so it does not support System Audio Control: a directed
-// Set System Audio Mode or System Audio Mode Status gets a Feature
-// Abort, and a broadcast gets nothing (HDMI-CEC 1.3a, CEC 12.3).
+// On a bus with no audio system, a directed Set System Audio Mode or
+// System Audio Mode Status gets a Feature Abort, and a broadcast gets no
+// reply.
 func TestAFollowerWithNoAudioSystemAbortsSystemAudio(t *testing.T) {
 	const own = cec.LogicalAddress(4)
 	cases := []struct {
@@ -64,9 +63,9 @@ func TestAFollowerWithNoAudioSystemAbortsSystemAudio(t *testing.T) {
 			got, answers := cec.Answer(c.message, own, cec.PowerOn, false)
 			switch {
 			case c.want == nil && answers:
-				t.Errorf("answered %v, want no answer", got)
+				t.Errorf("the answer is %v, want no answer", got)
 			case c.want != nil && (!answers || got.String() != c.want.String()):
-				t.Errorf("answered %v (%v), want %v", got, answers, *c.want)
+				t.Errorf("the answer is %v (answered %v), want %v", got, answers, *c.want)
 			}
 		})
 	}

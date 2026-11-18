@@ -1,11 +1,10 @@
 package main
 
-// The unit's session sees every line the receiver sends from the
-// moment it reads the receiver's state. A line that arrived between
-// that read and the moment the unit held the session used to reach no
-// session, and a session that missed the line that said the receiver
-// is reachable never ran its one-shot. Under load, two reconcile tests
-// failed that way about one run in eight.
+// setSession stores a new session on the unit before the session reads
+// the receiver's state, so every event that arrives after the read
+// reaches the session. In the other order, an event between the read and
+// the store would reach no session, and a session that missed the event
+// that reports the receiver reachable would never run its one-shot.
 
 import (
 	"context"
@@ -18,11 +17,11 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
-// staleDriver is a Denon client whose first State read answers a
-// receiver not reached yet, and delivers the receiver's real state to
-// the unit as a line just before it answers. That is the order a busy
-// machine can produce: the line arrives after the session starts to
-// read the state and before the unit holds the session.
+// staleDriver is a Denon client whose first State call sends the
+// receiver's real state to the unit as an event and then returns an
+// empty state, as if the receiver were not reached yet. So the event
+// arrives during the session's first read, which a busy machine can
+// also cause.
 type staleDriver struct {
 	*denon.Client
 	once    sync.Once
@@ -41,7 +40,7 @@ func (d *staleDriver) State() equipment.State {
 	return d.Client.State()
 }
 
-// A unit built by hand around a stale driver, with no status writer,
+// The unit is built by hand with a stale driver and no status writer,
 // so nothing else reads the driver while the test swaps it in.
 func TestALineDuringTheSessionStartReachesTheSession(t *testing.T) {
 	t.Parallel()
@@ -62,7 +61,7 @@ func TestALineDuringTheSessionStartReachesTheSession(t *testing.T) {
 		deadline := time.Now().Add(testTimeout)
 		for real.State().Reachable != equipment.ConditionTrue {
 			if time.Now().After(deadline) {
-				t.Fatal("the client never reached the receiver")
+				t.Fatal("the Denon client is still not reachable after the test timeout")
 			}
 			time.Sleep(time.Millisecond)
 		}

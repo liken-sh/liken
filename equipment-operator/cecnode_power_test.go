@@ -1,10 +1,8 @@
 package main
 
-// The node workload's application of spec.power when it meets a
-// change, a failure, or a restart. The rule under test: the node
-// workload applies each generation of each Television once, sends at
-// most three commands for it, and records it in status.powerGeneration.
-// cecnode_television_test.go holds the fixtures.
+// Tests of how the node workload applies `spec.power` after a change, a
+// failure, or a restart. The fixtures are in
+// `cecnode_television_test.go`.
 
 import (
 	"testing"
@@ -22,13 +20,13 @@ func stubbornTV() cectest.Peer {
 	return tv
 }
 
-// The operator applies each generation once. A person who then turns
-// the TV off with its own remote is not overruled, and a new node
-// workload does not send the command again.
-func TestThePowerIsNotAssertedAgain(t *testing.T) {
+// The node workload applies each generation once. When a person then
+// turns the TV off with its own remote, neither this node workload nor
+// a new one sends the command again.
+func TestAnAppliedGenerationIsNotSentAgain(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerStandby))
+		wire := busWithTV(televisionTV(cec.PowerStandby))
 		api := controlling(t, wire, lounge(TelevisionOn))
 		appliedAt(t, api, "lounge", 1)
 
@@ -46,10 +44,10 @@ func TestThePowerIsNotAssertedAgain(t *testing.T) {
 	})
 }
 
-func TestANewChangeIsApplied(t *testing.T) {
+func TestANewGenerationIsApplied(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerStandby))
+		wire := busWithTV(televisionTV(cec.PowerStandby))
 		api := controlling(t, wire, lounge(TelevisionOn))
 		appliedAt(t, api, "lounge", 1)
 
@@ -62,12 +60,12 @@ func TestANewChangeIsApplied(t *testing.T) {
 	})
 }
 
-// Every spec edit is a new generation, so a person asks for the same
-// value again by removing the field and adding it back.
-func TestAPersonRetriesTheSameValueWithAnEdit(t *testing.T) {
+// Every spec edit is a new generation, so a person can send the same
+// power value again by clearing `spec.power` and setting it back.
+func TestSettingTheSamePowerAgainAfterClearingItSendsTheCommandAgain(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerStandby))
+		wire := busWithTV(televisionTV(cec.PowerStandby))
 		api := controlling(t, wire, lounge(TelevisionOn))
 		appliedAt(t, api, "lounge", 1)
 		wire.Add(televisionTV(cec.PowerStandby))
@@ -82,13 +80,13 @@ func TestAPersonRetriesTheSameValueWithAnEdit(t *testing.T) {
 	})
 }
 
-// A Television deleted and created again under the same name is a new
-// object with a new uid, so its spec.power is applied at once, even at
-// the same generation as the old object's.
-func TestARecreatedTelevisionIsANewObject(t *testing.T) {
+// A `Television` that is deleted and created again under the same name
+// has a new uid, so the node workload applies its `spec.power` even
+// when the generation equals the old object's.
+func TestARecreatedTelevisionIsApplied(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerStandby))
+		wire := busWithTV(televisionTV(cec.PowerStandby))
 		api := controlling(t, wire, lounge(TelevisionOn))
 		appliedAt(t, api, "lounge", 1)
 
@@ -103,13 +101,13 @@ func TestARecreatedTelevisionIsANewObject(t *testing.T) {
 	})
 }
 
-// A result the API server refuses is written again, and the command is
-// never sent again: not on the next pass, and not after a person turns
-// the TV off with its own remote.
-func TestARefusedWriteIsRetriedWithoutTheCommand(t *testing.T) {
+// When the API server refuses the write of a result, the node workload
+// writes it again and never sends the command again, neither on the
+// next pass nor after a person turns the TV off with its own remote.
+func TestARefusedResultWriteIsRetriedWithoutSendingTheCommandAgain(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerStandby))
+		wire := busWithTV(televisionTV(cec.PowerStandby))
 		api := startCECAPI(t)
 		api.refusePowerWrites(true)
 		_, device := usbAdapter(wire)
@@ -117,8 +115,8 @@ func TestARefusedWriteIsRetriedWithoutTheCommand(t *testing.T) {
 		api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
 		api.putTelevision(lounge(TelevisionOn))
 		startNode(t, api, "node-1", device)
-		// The entry shows On once a read confirmed it, and the application
-		// reads every cecPowerReadEvery, so a few of those later it is done.
+		// The application ends within a few reads after the entry shows
+		// the TV on.
 		api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool {
 			return len(entry.Devices) > 0 && entry.Devices[0].LogicalAddress == 0 && entry.Devices[0].Power == "On"
 		})
@@ -138,13 +136,13 @@ func TestARefusedWriteIsRetriedWithoutTheCommand(t *testing.T) {
 	})
 }
 
-// A generation gets at most three commands, whatever happens: a result
-// the API server refuses, and a bus that leaves Control and comes back
+// A generation gets at most cecPowerSends commands, even when the API
+// server refuses the result and the bus leaves Control and returns
 // during the application.
-func TestAGenerationGetsAtMostThreeCommands(t *testing.T) {
+func TestAGenerationGetsAtMostCecPowerSendsCommands(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(stubbornTV())
+		wire := busWithTV(stubbornTV())
 		api := startCECAPI(t)
 		api.refusePowerWrites(true)
 		_, device := usbAdapter(wire)
@@ -168,15 +166,15 @@ func TestAGenerationGetsAtMostThreeCommands(t *testing.T) {
 }
 
 // A new generation during an application cancels it, and the new
-// application sends its command without a read first. Right after a
-// command a TV answers its old state for a while, so a read then would
-// find the TV already in standby, send nothing, and leave it on.
-func TestANewGenerationDuringAnApplicationSendsItsCommand(t *testing.T) {
+// application sends its command without reading the power first. A TV
+// reports its old state for a while after a command, so a read then
+// would find the TV in standby, send nothing, and leave it on.
+func TestANewGenerationDuringAnApplicationSendsItsCommandWithoutReading(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		lagging := televisionTV(cec.PowerStandby)
 		lagging.Lag = 30
-		wire := roomWithTV(lagging)
+		wire := busWithTV(lagging)
 		api := controlling(t, wire, lounge(TelevisionOn))
 		api.waitUntil(t, "the Image View On", func() bool { return sentOf(wire, cec.OpImageViewOn) == 1 })
 
@@ -194,12 +192,12 @@ func TestANewGenerationDuringAnApplicationSendsItsCommand(t *testing.T) {
 	})
 }
 
-// An application the node workload cancels sends nothing more. Here
-// the bus leaves Control during it.
+// A cancelled application sends nothing more. Here the bus leaves
+// Control during the application.
 func TestACancelledApplicationSendsNothing(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(stubbornTV())
+		wire := busWithTV(stubbornTV())
 		api := controlling(t, wire, lounge(TelevisionOn))
 		api.waitUntil(t, "the first Image View On", func() bool { return sentOf(wire, cec.OpImageViewOn) == 1 })
 
@@ -213,13 +211,13 @@ func TestACancelledApplicationSendsNothing(t *testing.T) {
 	})
 }
 
-// An adapter unplugged during an application ends the node workload,
-// and the application writes nothing, so the adapter's next pod
-// applies the generation.
+// An adapter that is unplugged during an application ends the node
+// workload, and the application writes nothing, so the next pod for the
+// adapter applies the generation.
 func TestAnUnplugDuringAnApplicationEndsTheNodeWorkload(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(stubbornTV())
+		wire := busWithTV(stubbornTV())
 		api := startCECAPI(t)
 		adapter, device := usbAdapter(wire)
 		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
@@ -243,13 +241,13 @@ func TestAnUnplugDuringAnApplicationEndsTheNodeWorkload(t *testing.T) {
 	})
 }
 
-// A Television deleted during an application ends the application:
-// the pass finds no Television for the bus, and the TV gets no more
-// commands.
+// When a `Television` is deleted during an application, the next pass
+// finds no `Television` for the bus and ends the application, so the TV
+// gets no more commands.
 func TestATelevisionDeletedDuringAnApplicationEndsIt(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(stubbornTV())
+		wire := busWithTV(stubbornTV())
 		api := controlling(t, wire, lounge(TelevisionOn))
 		api.waitUntil(t, "the first Image View On", func() bool { return sentOf(wire, cec.OpImageViewOn) > 0 })
 
@@ -260,18 +258,19 @@ func TestATelevisionDeletedDuringAnApplicationEndsIt(t *testing.T) {
 
 		mustMatch(t, sentOf(wire, cec.OpImageViewOn), ended)
 		if ended >= cecPowerSends {
-			t.Errorf("the application ran to its bound: %d commands", ended)
+			t.Errorf("the application sent %d commands, want fewer than %d", ended, cecPowerSends)
 		}
 	})
 }
 
-// Of two Televisions on one bus, the node workload applies only the
-// one in charge. When that one is deleted, the other takes over, and
-// its spec.power is applied once, as a new object's is.
-func TestTheTelevisionNotInChargeWaits(t *testing.T) {
+// Of two `Television`s on one bus, the node workload applies only the
+// one that is in charge. When that one is deleted, the other takes
+// over, and the node workload applies its `spec.power` once, as for any
+// new object.
+func TestATelevisionThatIsNotInChargeIsNotApplied(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerStandby))
+		wire := busWithTV(televisionTV(cec.PowerStandby))
 		discovered := discoveredTV("den")
 		discovered.Spec.Power = TelevisionOn
 		api := controlling(t, wire, lounge(""))
@@ -288,13 +287,14 @@ func TestTheTelevisionNotInChargeWaits(t *testing.T) {
 	})
 }
 
-// The Deployment writes status.session, and a status write is no spec
-// edit, so it asks nothing of the TV's power: a TV a person turned off
-// with its own remote stays off.
-func TestASessionWriteAppliesNoPower(t *testing.T) {
+// The `Deployment` writes `status.session`. A status write is not a
+// spec edit, so it does not change the generation or send a power
+// command, and a TV that a person turned off with its own remote stays
+// off.
+func TestASessionWriteSendsNoPowerCommand(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerStandby))
+		wire := busWithTV(televisionTV(cec.PowerStandby))
 		api := controlling(t, wire, lounge(TelevisionOn))
 		appliedAt(t, api, "lounge", 1)
 		wire.Add(televisionTV(cec.PowerStandby))

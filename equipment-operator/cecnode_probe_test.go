@@ -1,7 +1,7 @@
 package main
 
-// The node workload's probe, and the pods it reads to tell whether
-// another adapter's entry is current.
+// The tests of the node workload's probe, and of how the operator uses
+// pod readiness to decide whether another adapter's entry is current.
 
 import (
 	"net/http"
@@ -13,22 +13,19 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/cec"
 )
 
-// probe asks the node workload's probe handler once, the way the
-// kubelet does, and answers the status code.
+// probe calls the probe handler once and returns the status code.
 func probe(node *cecNode) int {
 	recorder := httptest.NewRecorder()
 	node.probeHandler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 	return recorder.Code
 }
 
-// The probe answers while the loop reaches its select, and fails while
-// the loop is blocked, here on an entry write the API server holds. It
-// answers again once the write returns.
-func TestTheProbeAnswersOnlyWhileTheLoopRuns(t *testing.T) {
+// The fake API server holds an entry write open to block the loop.
+func TestTheProbeSucceedsOnlyWhileTheLoopRuns(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		wire := cecRoom()
+		wire := fakeCECBus()
 		_, device := usbAdapter(wire)
 		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
 		api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
@@ -53,12 +50,11 @@ func TestTheProbeAnswersOnlyWhileTheLoopRuns(t *testing.T) {
 	})
 }
 
-// A probe that finds no loop, such as before the loop starts, fails
-// after cecProbeWait and not later.
+// With no loop running, the probe fails after exactly cecProbeWait.
 func TestTheProbeFailsWithinItsWait(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		_, device := usbAdapter(cecRoom())
+		_, device := usbAdapter(fakeCECBus())
 		node, err := newCECNode(startCECAPI(t).client, testNamespace, "node-1", device)
 		mustSucceed(t, err)
 		began := time.Now()
@@ -69,14 +65,13 @@ func TestTheProbeFailsWithinItsWait(t *testing.T) {
 	})
 }
 
-// The probe's listener serves the handler at /healthz, as the kubelet
-// reaches it. The test shares the listener variable with the metrics
-// tests, so it does not run in parallel.
+// The test replaces the package's listen variable, which the metrics
+// tests also replace, so it does not run in parallel.
 func TestTheProbeListenerServesTheHandler(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		kubelet := listenInMemory(t)
 		api := startCECAPI(t)
-		_, device := usbAdapter(cecRoom())
+		_, device := usbAdapter(fakeCECBus())
 		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
 		api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
 		node, err := newCECNode(api.client, testNamespace, "node-1", device)
@@ -96,7 +91,7 @@ func TestTheProbeListenerServesTheHandler(t *testing.T) {
 
 func TestAnEmptyAddressServesNoProbe(t *testing.T) {
 	t.Parallel()
-	_, device := usbAdapter(cecRoom())
+	_, device := usbAdapter(fakeCECBus())
 	node, err := newCECNode(startCECAPI(t).client, testNamespace, "node-1", device)
 	mustSucceed(t, err)
 
@@ -107,14 +102,13 @@ func TestAnEmptyAddressServesNoProbe(t *testing.T) {
 }
 
 // The first adapter of the bus whose pod is Ready sends the bus's
-// commands. While the first adapter's pod is Ready, the second sends
-// nothing; when that pod stops being Ready, the pod watch wakes the
-// second, and it applies spec.power.
+// commands. When that pod stops being Ready, the pod watch wakes the
+// next adapter, and it applies spec.power.
 func TestTheNextAdapterTakesTheCommandsWhenTheFirstPodIsNotReady(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		wire := roomWithTV(televisionTV(cec.PowerStandby))
+		wire := busWithTV(televisionTV(cec.PowerStandby))
 		_, device := usbAdapter(wire)
 		api.putPod("node-1", true)
 		api.putPod("node-2", true)
@@ -135,15 +129,15 @@ func TestTheNextAdapterTakesTheCommandsWhenTheFirstPodIsNotReady(t *testing.T) {
 	})
 }
 
-// A first adapter whose pod is starting keeps the commands while its
-// entry is in the grace, so the two adapters never both send. A pod
-// that is still not Ready when the grace ends gives them up, and the
-// next adapter takes them with no event to wake it.
+// While the first adapter's pod is starting and its entry is newer than
+// cecStartupGrace, the next adapter sends nothing, so two adapters never
+// both send. When the grace ends and the pod is still not Ready, the
+// next adapter sends the commands without waiting for a pod event.
 func TestTheNextAdapterWaitsForAPodThatIsStarting(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		wire := roomWithTV(televisionTV(cec.PowerStandby))
+		wire := busWithTV(televisionTV(cec.PowerStandby))
 		_, device := usbAdapter(wire)
 		api.putPod("node-1", true)
 		api.putPod("node-2", false)

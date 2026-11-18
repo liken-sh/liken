@@ -1,8 +1,5 @@
 package denon
 
-// AudioSettings holds the audio processing settings.
-
-// AudioSettings holds the audio processing settings.
 type AudioSettings struct {
 	DRC                *string `json:"drc,omitempty"`
 	LFE                *int    `json:"lfe,omitempty"`
@@ -17,7 +14,6 @@ type AudioSettings struct {
 	DialogEnhancer     *string `json:"dialogEnhancer,omitempty"`
 }
 
-// audioSettings is the audio family's rows of the id table.
 var audioSettings = []settingSpec{
 	wordSetting("audio.drc", DynamicRangeCommand,
 		func(s *Settings, v string) { s.Audio.DRC = strPtr(v) },

@@ -1,11 +1,11 @@
 package main
 
-// The session's power and input step against a restart and a live
-// flip. An operator that starts finds each session's flags as the last
-// operator left them, and a flag it merely finds is no change a person
-// made, so it adopts the flags and sends nothing. A flip it sees
-// happen runs the step after the survey, and sends only the power, the
-// input, and the sound mode that the receiver reports at another value.
+// A restarted operator finds each session's flags as the previous
+// operator left them. A flag that is already set is not a new change by
+// a person, so the operator adopts it and sends nothing. A flag that
+// changes while the operator runs makes it send, after the first full read, only
+// the power, input, and sound mode that differ from what the receiver
+// reports.
 
 import (
 	"strings"
@@ -17,8 +17,9 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
-// refuseEveryCommand fails the test if the client sends any command in
-// the window. The queries and the heartbeat end in ? and pass.
+// refuseEveryCommand fails the test if the client sends any command
+// within the given time. Queries and the heartbeat end in ? and are
+// allowed.
 func (f *fakeDenon) refuseEveryCommand(t *testing.T, within time.Duration) {
 	t.Helper()
 	deadline := time.After(within)
@@ -26,7 +27,7 @@ func (f *fakeDenon) refuseEveryCommand(t *testing.T, within time.Duration) {
 		select {
 		case command := <-f.commands:
 			if !strings.HasSuffix(command, "?") {
-				t.Fatalf("the client sent %q", command)
+				t.Fatalf("the client sent the command %q, want only queries", command)
 			}
 		case <-deadline:
 			return
@@ -34,9 +35,9 @@ func (f *fakeDenon) refuseEveryCommand(t *testing.T, within time.Duration) {
 	}
 }
 
-// A restart finds a room that plays and is awake. The receiver is in
-// standby, because a person turned it off with its own remote, and the
-// operator leaves it there.
+// A person turned the receiver off with its own remote while the
+// session was playing and awake. After a restart, the operator leaves
+// the receiver in standby.
 func TestARestartAdoptsTheSessionsFlags(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -55,7 +56,7 @@ func TestARestartAdoptsTheSessionsFlags(t *testing.T) {
 
 		mustSucceed(t, operator.pass(t.Context()))
 		api.waitForStatus(t, connected)
-		waitForSurvey(t, operator)
+		waitForFirstRead(t, operator)
 
 		fake.refuseEveryCommand(t, quietPeriod)
 		mustDeepEqual(t, linesWith(log, "session for Player"), []string{
@@ -64,9 +65,6 @@ func TestARestartAdoptsTheSessionsFlags(t *testing.T) {
 	})
 }
 
-// A flip that finds the receiver already on the session's input and
-// sound mode sends nothing, and the line says what the receiver
-// reports.
 func TestAFlipToASettledReceiverSendsNothing(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -86,8 +84,6 @@ func TestAFlipToASettledReceiverSendsNothing(t *testing.T) {
 	})
 }
 
-// A flip that finds the receiver on the session's input in another
-// sound mode sends the sound mode alone.
 func TestAFlipSendsOnlyTheSoundModeThatDiffers(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -109,9 +105,9 @@ func TestAFlipSendsOnlyTheSoundModeThatDiffers(t *testing.T) {
 	})
 }
 
-// A Denon reports the mode it decodes, in other words than the command
-// that selects its family. A flip that finds the receiver on the
-// session's input, in a mode of the declared family, sends nothing.
+// A Denon reports the mode that it is decoding in different words than
+// the command that selects the mode's family, so a reported mode of the
+// declared family must count as a match.
 func TestAFlipSendsNoSoundModeTheReceiverRunsInOtherWords(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -120,7 +116,7 @@ func TestAFlipSendsNoSoundModeTheReceiverRunsInOtherWords(t *testing.T) {
 	}{
 		{"a Dolby report", "dolby digital", "DOLBY AUDIO-DD"},
 		{"a DTS report", "DTS SURROUND", "DTS HD MSTR"},
-		{"a report with spaces at the end", "STEREO", "STEREO  "},
+		{"a report with trailing spaces", "STEREO", "STEREO  "},
 	}
 	t.Parallel()
 	for _, one := range cases {

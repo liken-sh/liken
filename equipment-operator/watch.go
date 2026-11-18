@@ -1,15 +1,11 @@
 package main
 
-// A watch keeps this operator's view of a collection current without a
-// timer. The API server sends each change to the collection as it
-// happens, and a watch with no change to send costs nothing. The shared
-// informer package runs each watch on client-go's reflector, and keeps
-// the copy of the collection that a pass reads (objectcache.go). The
-// operator's own Client (apiclient.go) still sends every write, and
-// every read the stores cannot answer.
-//
-// A handler only wakes the loop, and reads an object only to decide
-// whether the change is one the pass must see.
+// kubernetes/informer runs each watch on client-go's reflector and
+// keeps the copy of the collection that a reconcile pass reads
+// (objectcache.go). The operator's Client (apiclient.go) sends every
+// write, and every read that the informer's store cannot serve. A
+// handler only wakes a loop, and reads an object only to decide whether
+// the loop needs to see the change.
 
 import (
 	"context"
@@ -25,7 +21,7 @@ import (
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
-// The collections this operator watches. Each one is cluster-scoped.
+// The custom resources that the operator watches. Each is cluster-scoped.
 var (
 	receiverResource   = schema.GroupVersionResource{Group: "equipment.liken.sh", Version: "v1alpha1", Resource: "receivers"}
 	cecBusResource     = schema.GroupVersionResource{Group: "equipment.liken.sh", Version: "v1alpha1", Resource: "cecbuses"}
@@ -33,13 +29,12 @@ var (
 	displayResource    = schema.GroupVersionResource{Group: "display.liken.sh", Version: "v1alpha1", Resource: "displays"}
 )
 
-// restConfig answers the client-go configuration that reaches the same
-// API server with the same credentials as the Client's own requests:
-// the ServiceAccount's CA and token in a pod, and in a test the
-// transport of the fake API server, with no credentials.
-// client-go reads the token file again as the kubelet renews it, the
-// way the shared client does. The watches and the Deployment's leader
-// election both use it.
+// restConfig returns a client-go configuration with the same API
+// server and credentials as the Client's own requests: the
+// ServiceAccount's CA and token in a pod, and the fake API server's
+// transport in a test. It names the token file and not the token, so
+// client-go reads the token again after the kubelet renews it. The
+// watches and the Deployment's leader election use it.
 func (c *Client) restConfig() *rest.Config {
 	config := &rest.Config{Host: c.base, Transport: c.transport, Dial: c.dial}
 	if c.credentials != "" {
@@ -49,8 +44,8 @@ func (c *Client) restConfig() *rest.Config {
 	return config
 }
 
-// watcher answers the dynamic client the watches use. The client is
-// built once and shared, so every watch uses one connection pool.
+// watcher returns the dynamic client that the watches use. It is built
+// once, so the watches share its connection pool.
 func (c *Client) watcher() (dynamic.Interface, error) {
 	c.watchOnce.Do(func() {
 		c.watchClient, c.watchErr = dynamic.NewForConfig(c.restConfig())
@@ -58,41 +53,36 @@ func (c *Client) watcher() (dynamic.Interface, error) {
 	return c.watchClient, c.watchErr
 }
 
-// watchCollection keeps one collection current until the context ends,
-// and sends each change to the handler. It returns after the last
-// handler call.
+// watchCollection watches source until ctx ends and sends each change
+// to handler. It returns after the last handler call.
 //
-// synced, when it is not nil, runs once, after the handler has taken
-// every object of the first read. A caller that lists before the
-// informer reads needs it: an object deleted between the two reads is
-// in neither the informer's read nor any event.
+// absent, when not nil, reports the errors that mean the collection
+// does not exist, such as the 404 for a kind whose CRD another operator
+// installs. The store then has an empty collection until the kind
+// exists.
 //
-// restarted, when it is not nil, runs for each watch the API server
-// accepts after the first, and counts it in
-// equipment_watch_restarts_total. The first read is itself a watch
-// when the reflector reads with a streaming list.
+// synced, when not nil, runs once, after the handler has received every
+// object of the first list. A caller that lists the collection before
+// the watch starts uses it to run a pass again, because an object
+// deleted between the two lists is in neither the watch's list nor any
+// event.
 //
-// held, when it is not nil, holds the informer's store while the
-// informer runs, so a pass reads the collection from it
-// (objectcache.go), and tells a caller that waits for a change when
-// the store takes one.
+// restarted, when not nil, runs for each watch that the API server
+// accepts after the first. When the reflector reads its first list as
+// a streaming list, that list is the first watch. The callers pass a
+// function that counts it in equipment_watch_restarts_total.
 //
-// source names the collection, and its namespace and selectors, when
-// they are not empty, narrow the list and the watch to the objects they
-// select.
-//
-// absent, when it is not nil, names the refusals that mean the
-// collection is not there to watch, such as the 404 of a kind whose
-// definition another operator installs. The store then holds an empty
-// collection until the kind arrives.
-func watchCollection(ctx context.Context, client *Client, source informer.Source, absent func(error) bool, handler cache.ResourceEventHandler, synced, restarted func(), held *watchStore) {
+// store, when not nil, receives the informer's store while the informer
+// runs, so a pass reads the collection from it (objectcache.go), and
+// a caller that waits on store.changed is notified of each change.
+func watchCollection(ctx context.Context, client *Client, source informer.Source, absent func(error) bool, handler cache.ResourceEventHandler, synced, restarted func(), store *watchStore) {
 	watcher, err := client.watcher()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "watching %s: %v\n", source, err)
 		return
 	}
-	if held != nil {
-		handler = bothHandlers(handler, held.announcer())
+	if store != nil {
+		handler = bothHandlers(handler, store.announcer())
 	}
 	collection := informer.Start(ctx, watcher, source, informer.Options{
 		Handler:       handler,
@@ -101,21 +91,19 @@ func watchCollection(ctx context.Context, client *Client, source informer.Source
 		Absent:        absent,
 		AbsentRecheck: optionalRecheck,
 	})
-	held.hold(collection.View(), source.FieldSelector != "" || source.LabelSelector != "")
-	defer held.release()
+	store.hold(collection.View(), source.FieldSelector != "" || source.LabelSelector != "")
+	defer store.release()
 	<-collection.Done()
 }
 
 // optionalRecheck is how long the watch of an absent collection waits
-// before it asks the API server again (informer.Options.AbsentRecheck).
+// before it checks the API server again (informer.Options.AbsentRecheck).
 const optionalRecheck = 5 * time.Minute
 
-// wakeOnEvery wakes the loop on every change the informer reports. A
-// loop that reads the whole object, its status included, uses it. The
-// informer reports a read after a gap in the watch as one update for
-// each object it held, so a gap wakes the loop as well.
+// wakeOnEvery wakes the loop on every change that the informer reports,
+// for a loop that reads the whole object, status included.
 func wakeOnEvery(wake chan<- struct{}) cache.ResourceEventHandler {
-	signal := func() { poke(wake) }
+	signal := func() { sendWake(wake) }
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(any) { signal() },
 		UpdateFunc: func(any, any) { signal() },
@@ -123,17 +111,17 @@ func wakeOnEvery(wake chan<- struct{}) cache.ResourceEventHandler {
 	}
 }
 
-// markHandler wakes the loop when a change moves the part of an object
-// that the loop reads, which mark returns. A new object and a removed
-// object always wake it. The informer hands an update both the copy it
-// held and the new copy, so the handler compares their marks and keeps
-// no copy of its own. After a gap in the watch, the informer reports
-// each difference from what it held as an addition, an update, or a
-// deletion, so a change made during the gap reaches the handler too.
+// markHandler wakes the loop for a new or removed object, and for an
+// update that changes mark, the part of the object that the loop reads.
+// The informer passes an update both the old and the new copy, so the
+// handler keeps no copy of its own. After the watch reconnects, the
+// informer reports each difference from its copy as an add, an update,
+// or a delete, so a change made while the watch was down still reaches
+// the handler.
 //
-// An object that does not convert is logged and wakes the loop. The
-// handler cannot tell what changed, and one extra pass costs less than
-// a missed edit.
+// An object that does not convert is logged and wakes the loop, because
+// the handler cannot tell what changed, and an extra pass costs less
+// than a missed edit.
 type markHandler[T any, M comparable] struct {
 	what string
 	wake chan<- struct{}
@@ -148,55 +136,53 @@ func (h markHandler[T, M]) handler() cache.ResourceEventHandler {
 	}
 }
 
-// arrived takes a new or a removed object. Both change what the loop
-// reads, so both wake it. The object is converted only to report one
-// that does not convert.
+// arrived handles a new or a removed object. It converts the object
+// only to log one that does not convert.
 func (h markHandler[T, M]) arrived(object any) {
 	if _, err := informer.Convert[T](object); err != nil {
 		informer.Report(h.what, err)
 	}
-	poke(h.wake)
+	sendWake(h.wake)
 }
 
-// updated takes a change to an object the informer held, and wakes the
-// loop only when the mark moved.
+// updated wakes the loop when an update moved the mark.
 func (h markHandler[T, M]) updated(before, after any) {
 	now, err := informer.Convert[T](after)
 	if err != nil {
 		informer.Report(h.what, err)
-		poke(h.wake)
+		sendWake(h.wake)
 		return
 	}
-	// A held copy that does not convert was logged when it arrived.
-	// Nothing says what it held, so the change counts as a move.
+	// An old copy that does not convert was logged when it arrived. Its
+	// mark cannot be compared, so the update counts as a change.
 	was, err := informer.Convert[T](before)
 	if err != nil || h.mark(was) != h.mark(now) {
-		poke(h.wake)
+		sendWake(h.wake)
 	}
 }
 
-// watchReceivers is the Deployment's one watch of the Receivers, which
-// both of its loops share, so the process holds each Receiver once. It
-// wakes the Receiver loop on every change, its status included,
-// because that pass reads both. It wakes the CECBus loop through
-// specWake only for a change that watchReceiverSpecs would report,
-// because that loop reads a Receiver's spec and not its status. held
-// holds the store for the CECBus loop. specWake may be nil.
-func watchReceivers(ctx context.Context, client *Client, wake, specWake chan<- struct{}, readings *metrics, held *watchStore) {
+// watchReceivers is the Deployment's watch of Receivers. The Receiver
+// loop and the CECBus loop share it, so the process keeps one copy of
+// each Receiver. It wakes the Receiver loop on every change, because
+// that loop reads spec and status. When specWake is not nil, it wakes
+// the CECBus loop through specWake only for a change that
+// watchReceiverSpecs would report, because that loop reads only the
+// spec. store receives the informer's store, which both loops read.
+func watchReceivers(ctx context.Context, client *Client, wake, specWake chan<- struct{}, readings *metrics, store *watchStore) {
 	handler := wakeOnEvery(wake)
-	synced := func() { poke(wake) }
+	synced := func() { sendWake(wake) }
 	if specWake != nil {
 		specs := markHandler[Receiver, specMark]{what: "the Receivers", wake: specWake, mark: receiverSpecMark}
 		handler = bothHandlers(handler, specs.handler())
 		synced = func() {
-			poke(wake)
-			poke(specWake)
+			sendWake(wake)
+			sendWake(specWake)
 		}
 	}
-	watchCollection(ctx, client, informer.Source{Resource: receiverResource}, nil, handler, synced, readings.watchRestarted, held)
+	watchCollection(ctx, client, informer.Source{Resource: receiverResource}, nil, handler, synced, readings.watchRestarted, store)
 }
 
-// bothHandlers sends each change to two handlers, in order.
+// bothHandlers calls first and then second for each change.
 func bothHandlers(first, second cache.ResourceEventHandler) cache.ResourceEventHandler {
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc: func(object any) {

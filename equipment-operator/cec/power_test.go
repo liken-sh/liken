@@ -7,8 +7,8 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/cec/cectest"
 )
 
-// tvPeer answers what the directory holds for the TV, and false when
-// it holds nothing at address 0.
+// tvPeer returns the directory's peer for the TV, and false when the
+// directory has none.
 func tvPeer(directory *cec.Directory) (cec.Peer, bool) {
 	for _, peer := range directory.Peers() {
 		if peer.Logical == cec.AddressTV {
@@ -18,13 +18,6 @@ func tvPeer(directory *cec.Directory) (cec.Peer, bool) {
 	return cec.Peer{}, false
 }
 
-// A read of the TV's power records what the TV answered. A TV that
-// acknowledges and does not answer twice in a row has no power the
-// operator can state, so the second missed reply clears the power the
-// directory held. One missed reply keeps it, because a TV that wakes
-// can miss one question. A NACK means no device holds address 0. A
-// lost arbitration says nothing about the TV, so the directory keeps
-// what it held.
 func TestAPowerReadRecordsWhatTheTVAnswers(t *testing.T) {
 	mute := television
 	mute.Mute = true
@@ -64,14 +57,12 @@ func TestAPowerReadRecordsWhatTheTVAnswers(t *testing.T) {
 
 			peer, present := tvPeer(directory)
 			if power != c.want || present != c.present || (present && peer.Power != c.held) {
-				t.Errorf("read %v; the directory holds %+v (present %v)", power, peer, present)
+				t.Errorf("ReadPower = %v and the directory holds %+v (present %v), want %v, %+v (present %v)", power, peer, present, c.want, c.held, c.present)
 			}
 		})
 	}
 }
 
-// An answer between two missed replies starts the count again, so
-// only two missed replies in a row clear the power.
 func TestAnAnswerResetsTheMissedReplies(t *testing.T) {
 	bus := cectest.NewBus()
 	mute := television
@@ -92,7 +83,7 @@ func TestAnAnswerResetsTheMissedReplies(t *testing.T) {
 	mustSucceed(t, err)
 	peer, _ := tvPeer(directory)
 	if peer.Power != cec.PowerStandby {
-		t.Errorf("the directory holds %+v", peer)
+		t.Errorf("the directory holds %+v after the third read, want Power %v", peer, cec.PowerStandby)
 	}
 }
 
@@ -103,13 +94,10 @@ func TestAPowerReadStopsWhenTheAdapterLeaves(t *testing.T) {
 	_, err := cec.ReadPower(device, cec.NewDirectory(), 4, cec.AddressTV)
 
 	if !cec.IsGone(err) {
-		t.Errorf("read answered %v, want ENODEV", err)
+		t.Errorf("ReadPower returned %v, want an error that IsGone reports (ENODEV)", err)
 	}
 }
 
-// The generic order: Image View On wakes the TV, and Standby to the TV
-// alone puts it in standby and leaves the receiver and the other
-// sources on.
 func TestThePowerCommandForEachState(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -124,14 +112,14 @@ func TestThePowerCommandForEachState(t *testing.T) {
 			message := cec.PowerCommand(4, c.on)
 
 			if message.String() != c.message.String() {
-				t.Errorf("got %v, want %v", message, c.message)
+				t.Errorf("PowerCommand(4, %v) = %v, want %v", c.on, message, c.message)
 			}
 		})
 	}
 }
 
-// Against the bus in memory, the commands move the TV the way a TV
-// moves: through the transition, and then to the state asked for.
+// The fake TV reports the transition state on the first read after a
+// power command, and the requested state on the next.
 func TestTheTVObeysThePowerCommands(t *testing.T) {
 	bus := cectest.NewBus()
 	slow := television
@@ -147,6 +135,6 @@ func TestTheTVObeysThePowerCommands(t *testing.T) {
 	mustSucceed(t, err)
 
 	if first != cec.PowerToOn || second != cec.PowerOn {
-		t.Errorf("read %v and then %v", first, second)
+		t.Errorf("the reads after Image View On return %v and then %v, want %v and then %v", first, second, cec.PowerToOn, cec.PowerOn)
 	}
 }

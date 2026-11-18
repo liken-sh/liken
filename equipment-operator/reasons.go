@@ -1,12 +1,8 @@
 package main
 
-// Every condition this operator reports, every reason a condition or an
-// Event carries, and which reasons post a Warning. The reasons are part
-// of the published interface: a person matches them in
-// `kubectl get -o yaml`, in `kubectl describe`, and in
-// `kubectl events -n default`, and the guides name them. Each
-// condition transition posts one Event with the condition's reason and
-// message (conditions.go).
+// The condition types and reasons are part of the published interface.
+// People match them in `kubectl describe` and `kubectl events`, and the
+// guides name them, so do not rename one.
 
 // The Receiver conditions and their reasons.
 const (
@@ -24,10 +20,10 @@ const (
 	reasonNoInputReported      = "NoInputReported"
 )
 
-// The Events of a change of the System Audio Mode in a Receiver's
-// status.cec. Each is Normal, because the receiver turns the mode off
-// before standby and a person turns it off by picking the TV's
-// speakers, so Off is an ordinary state (receiver_cec.go).
+// The Events for a change of System Audio Mode in a Receiver's
+// status.cec. Both are Normal, because a receiver turns the mode off
+// before it enters standby, and a person turns it off by choosing the
+// TV's speakers.
 const (
 	reasonSystemAudioModeOn  = "SystemAudioModeOn"
 	reasonSystemAudioModeOff = "SystemAudioModeOff"
@@ -54,9 +50,8 @@ const (
 	reasonStopped     = "Stopped"
 )
 
-// The Television conditions and their reasons. The Deployment writes
-// Reachable and InCharge; the node workloads write PowerApplied,
-// WakeApplied, SystemAudioApplied, and StandbyApplied.
+// The Television conditions and their reasons. The operator's Deployment
+// writes Reachable and InCharge, and the node workloads write the others.
 const (
 	conditionReachable          = "Reachable"
 	conditionInCharge           = "InCharge"
@@ -83,20 +78,19 @@ const (
 	reasonEnteringStandby = "EnteringStandby"
 )
 
-// The Events of actions that change no condition. Each is Normal and
-// posted on the CECBus whose TV discovery found, because a deleted
-// Television can hold no Event of its own.
+// The Events for creating and deleting a discovered Television. They are
+// posted on the CECBus where discovery found the TV, because `kubectl
+// describe` cannot show the Events of a Television that is deleted.
 const (
 	reasonTelevisionCreated = "TelevisionCreated"
 	reasonTelevisionDeleted = "TelevisionDeleted"
 )
 
-// warningReasons are the reasons of a verdict that a person may need
-// to act on: equipment that does not answer, an adapter or a cable
-// that fails, and a command the TV did not confirm. Every other reason
-// is an expected state, such as a bus in Listen, a scan that runs, an
-// adapter that a rollout stopped, or a wake that a person's choice
-// ended, and its Event is Normal.
+// warningReasons are the reasons that a person may need to act on, such
+// as equipment that does not answer, a failed adapter or cable, or a
+// command that the TV did not confirm. The Event of any other reason is
+// Normal, because it is an expected state, such as a scan in progress or
+// a wake that a person ended by choosing another source.
 var warningReasons = map[string]bool{
 	reasonUnreachable:  true,
 	reasonNotConfirmed: true,

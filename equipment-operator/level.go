@@ -1,16 +1,18 @@
 package main
 
-// The arithmetic between a figure in a receiver's own scale, such as
-// the level of status.session.volumeAsk, and a driver's smallest steps.
+// Conversions between a value in the units a person reads, such as the
+// level of status.session.volumeAsk, and the integer steps a driver sends
+// and reports.
 
 import (
 	"math"
 	"strconv"
 )
 
-// formatSteps writes a driver's step count the way a person reads it,
-// which is what the status carries. The resolution is the driver's
-// number of steps in one display unit, so two half steps read as one.
+// formatSteps converts a driver's step count to the text that the
+// status shows. resolution is the number of steps in one display unit,
+// so 139 steps at a resolution of 2 is "69.5". A negative step count or
+// a resolution of zero or less returns "".
 func formatSteps(steps, resolution int) string {
 	if steps < 0 || resolution <= 0 {
 		return ""
@@ -18,8 +20,8 @@ func formatSteps(steps, resolution int) string {
 	return strconv.FormatFloat(float64(steps)/float64(resolution), 'f', -1, 64)
 }
 
-// stepsFromScale reads a figure in the driver's own scale as a count of
-// the driver's smallest steps.
+// stepsFromScale converts a value in display units to the nearest whole
+// number of driver steps. A resolution of zero or less returns 0.
 func stepsFromScale(value float64, resolution int) int {
 	if resolution <= 0 {
 		return 0

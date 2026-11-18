@@ -1,10 +1,7 @@
 package main
 
-// A scripted API server for one collection, which the watch tests run
-// client-go's real reflector against. The reflector's own loop is
-// upstream's to test; these tests prove that each change the API
-// server sends reaches this operator's handlers, and wakes the loop
-// only when it should.
+// The watch tests run client-go's reflector against a scripted API
+// server, to check which changes the server sends wake the loop.
 
 import (
 	"context"
@@ -21,24 +18,23 @@ import (
 )
 
 // holdOpen, as the last line of a script, keeps the stream open until
-// the watcher ends the request. Any other script ends the stream after
-// its last line, the way the API server does at timeoutSeconds.
+// the watcher ends the request. A script without it ends the stream
+// after its last line, as the API server does at timeoutSeconds.
 const holdOpen = "hold"
 
-// pause, as a line of a script, holds the stream open until the test
-// calls release, and then plays the rest of the script.
+// pause, as a line of a script, stops the stream until the test calls
+// release.
 const pause = "pause"
 
-// watchServer is an API server for one collection. Each read of the
-// collection answers the next of reads, and the last one again after
-// that. Each watch connection plays the next script of events.
+// watchServer is a fake API server for one collection. Each read of the
+// collection returns the next entry of reads, and the last entry again
+// after that. Each watch connection plays the next script of events.
 //
-// The reflector reads a collection with a streaming list: a watch that
-// asks for the initial events. The server answers it the way the API
-// server does, with one ADDED event for each object and a bookmark
-// that marks the end of the initial events, and then plays the
-// connection's script on the same stream. It answers a plain list too,
-// which the reflector sends when a streaming list fails.
+// The reflector lists with a watch that sets sendInitialEvents. The
+// server responds as the API server does: one ADDED event for each
+// object, a bookmark that ends the initial events, and then the
+// connection's script. It also serves a plain list, which the reflector
+// falls back to when a streaming list fails.
 type watchServer struct {
 	path       string
 	apiVersion string
@@ -65,8 +61,6 @@ func newWatchServer(path, apiVersion, kind string, reads []string, scripts ...[]
 	}
 }
 
-// read answers the objects of the next read, and the version it was
-// made at.
 func (s *watchServer) read(t testing.TB) ([]json.RawMessage, string) {
 	s.mu.Lock()
 	index := min(s.readCount, len(s.reads)-1)
@@ -138,18 +132,14 @@ func (s *watchServer) handler(t testing.TB) http.Handler {
 	})
 }
 
-// initialEventsEnd is the bookmark that closes the initial events of a
-// streaming list.
 func initialEventsEnd(apiVersion, kind, version string) string {
 	return fmt.Sprintf(`{"type":"BOOKMARK","object":{"apiVersion":%q,"kind":%q,"metadata":{"resourceVersion":%q,"annotations":{"k8s.io/initial-events-end":"true"}}}}`,
 		apiVersion, kind, version)
 }
 
-// release lets a paused stream play the rest of its script.
 func (s *watchServer) release() { s.released <- struct{}{} }
 
-// awaitWatches waits until the watcher has opened count more watch
-// connections.
+// awaitWatches waits until the watcher has opened count more watches.
 func (s *watchServer) awaitWatches(t *testing.T, count int) {
 	t.Helper()
 	for range count {
@@ -161,7 +151,6 @@ func (s *watchServer) awaitWatches(t *testing.T, count int) {
 	}
 }
 
-// startWatchServer serves s and answers a Client whose watches reach it.
 func startWatchServer(t *testing.T, s *watchServer) *Client {
 	t.Helper()
 	return testAPIClient(t, s.handler(t))
@@ -170,14 +159,14 @@ func startWatchServer(t *testing.T, s *watchServer) *Client {
 // watchFunc is the shape of each watch this operator runs.
 type watchFunc func(ctx context.Context, client *Client, wake chan<- struct{}, restarted func(), held *watchStore)
 
-// runWatch runs one watch function until the test ends, and waits for
-// it to return before the test's server closes.
+// runWatch runs watch until the test ends, and waits for it to return
+// before the test server closes.
 func runWatch(t *testing.T, client *Client, watch watchFunc, restarted func()) <-chan struct{} {
 	t.Helper()
 	return runHeldWatch(t, client, watch, restarted, nil)
 }
 
-// runHeldWatch is runWatch with the store the watch holds.
+// runHeldWatch is runWatch for a watch that fills a watchStore.
 func runHeldWatch(t *testing.T, client *Client, watch watchFunc, restarted func(), held *watchStore) <-chan struct{} {
 	t.Helper()
 	wake := make(chan struct{}, 1)
@@ -198,41 +187,41 @@ func runHeldWatch(t *testing.T, client *Client, watch watchFunc, restarted func(
 	return wake
 }
 
-// asObject is an object the way the informer hands it to a handler.
+// asObject converts an item to the unstructured object that an
+// informer passes to a handler.
 func asObject[T any](t *testing.T, item T) *unstructured.Unstructured {
 	t.Helper()
 	fields, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&item)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("converting the item to an unstructured object: %v", err)
 	}
 	return &unstructured.Unstructured{Object: fields}
 }
 
-// encodeAll is the JSON array of a read.
 func encodeAll(t *testing.T, items ...any) string {
 	t.Helper()
 	encoded := make([]string, 0, len(items))
 	for _, item := range items {
 		one, err := json.Marshal(item)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("encoding an item: %v", err)
 		}
 		encoded = append(encoded, string(one))
 	}
 	return "[" + strings.Join(encoded, ",") + "]"
 }
 
-// event is one line of a watch script.
 func event(t *testing.T, kind string, object any) string {
 	t.Helper()
 	encoded, err := json.Marshal(map[string]any{"type": kind, "object": object})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("encoding the %s event: %v", kind, err)
 	}
 	return string(encoded)
 }
 
-// watchQuiet is how long a test waits to prove that nothing woke the loop.
+// watchQuiet is how long a test waits before it concludes that nothing
+// woke the loop.
 const watchQuiet = 300 * time.Millisecond
 
 func awaitWake(t *testing.T, wakes <-chan struct{}, within time.Duration) {
@@ -245,8 +234,8 @@ func awaitWake(t *testing.T, wakes <-chan struct{}, within time.Duration) {
 }
 
 // settleWakes reads wakes until none arrives for quiet. A watch wakes
-// the loop at its start, and the test reads those wakes before the
-// events it scripts.
+// the loop when it starts, so a test drains those wakes before it
+// checks the ones its script causes.
 func settleWakes(wakes <-chan struct{}, quiet time.Duration) {
 	for {
 		select {
@@ -257,7 +246,6 @@ func settleWakes(wakes <-chan struct{}, quiet time.Duration) {
 	}
 }
 
-// wokeWithin answers whether a wake arrives within the given time.
 func wokeWithin(wakes <-chan struct{}, within time.Duration) bool {
 	select {
 	case <-wakes:

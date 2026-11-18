@@ -1,12 +1,9 @@
 package main
 
-// The System Audio Mode Request in the wake. When the session's Display
-// passes through a receiver, the wake asks the receiver for System
-// Audio Mode with the Display's physical address, once, after its
-// guard, and SystemAudioApplied states what the receiver answered. A
-// wake whose Display passes through no receiver sends no request.
-// cecnode_wake_test.go holds the wake fixtures, and
-// cecnode_systemaudio_test.go holds the receiver.
+// Tests of the System Audio Mode Request that a wake sends to the
+// receiver between the TV and the session's Display. The wake fixtures
+// are in cecnode_wake_test.go, and the fake receiver is in
+// cecnode_systemaudio_test.go.
 
 import (
 	"testing"
@@ -18,25 +15,23 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events"
 )
 
-// throughReceiver is the session's Display as the Deployment lists it,
-// passing through the den Receiver.
+// throughReceiver is the session's Display, connected through the Receiver
+// named den.
 var throughReceiver = []TelevisionDisplay{
 	{Name: "acm-0001-receiver", PhysicalAddress: "1.3.0.0", Via: &EquipmentRef{Kind: "Receiver", Name: "den"}},
 }
 
-// straightOn is the session's Display straight on the TV.
+// straightOn is the session's Display, connected directly to the TV.
 var straightOn = []TelevisionDisplay{{Name: "acm-0001-receiver", PhysicalAddress: "1.3.0.0"}}
 
-// wakingThrough is the waking Television with the Displays the
-// Deployment lists.
 func wakingThrough(session *TelevisionSession, displays []TelevisionDisplay) Television {
 	television := waking(session)
 	television.Status.Displays = displays
 	return television
 }
 
-// wokeThrough runs the node workload on a wire, wakes the room with the
-// Displays the Deployment lists, and waits for the wake's result.
+// wokeThrough runs the node workload on the wire, wakes the room with
+// the given Displays, and waits for the wake to finish.
 func wokeThrough(t *testing.T, wire *cectest.Bus, displays []TelevisionDisplay) (*cecAPI, Television) {
 	t.Helper()
 	session := wokeNow()
@@ -46,8 +41,8 @@ func wokeThrough(t *testing.T, wire *cectest.Bus, displays []TelevisionDisplay) 
 	return api, wokeWith(t, api, session)
 }
 
-// framesOf answers the messages the adapters sent with one opcode, as
-// the log writes them.
+// framesOf returns the messages with the given opcode that the adapters
+// sent, as strings in the format of the log. Polls are excluded.
 func framesOf(wire *cectest.Bus, opcode cec.Opcode) []string {
 	var frames []string
 	for _, message := range wire.Sent() {
@@ -58,10 +53,12 @@ func framesOf(wire *cectest.Bus, opcode cec.Opcode) []string {
 	return frames
 }
 
-// The request carries the Display's physical address, so the receiver
-// switches to the Display's input. The receiver's answer decides the
-// condition: a broadcast [On] after the request, or, with none in 5
-// seconds, one Give System Audio Mode Status after the scan's own.
+// The request has the Display's physical address, so the receiver
+// switches to the Display's input. A broadcast Set System Audio Mode On
+// after the request confirms it. When none arrives within
+// cecSystemAudioWait, the adapter sends Give System Audio Mode Status
+// again, after the one that the scan sent, and the condition follows
+// that reply.
 func TestTheWakeAsksTheReceiverForSystemAudioMode(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -72,22 +69,22 @@ func TestTheWakeAsksTheReceiverForSystemAudioMode(t *testing.T) {
 		message string
 	}{
 		{"a receiver that broadcasts On", cectest.AudioBroadcast, ConditionTrue, reasonConfirmed, 1,
-			"the adapter on node-1 sent System Audio Mode Request for 1.3.0.0, Display acm-0001-receiver, to Receiver den, and the receiver broadcast Set System Audio Mode On after <time>"},
+			"The adapter on node-1 sent System Audio Mode Request for 1.3.0.0, Display acm-0001-receiver, to Receiver den, and the receiver broadcast Set System Audio Mode On after <time>"},
 		{"a receiver that tells the TV alone", cectest.AudioToTV, ConditionTrue, reasonConfirmed, 2,
-			"the adapter on node-1 sent System Audio Mode Request for 1.3.0.0, Display acm-0001-receiver, to Receiver den, and heard no broadcast Set System Audio Mode On in the 5.0 s after; the receiver answered Give System Audio Mode Status with On"},
+			"The adapter on node-1 sent System Audio Mode Request for 1.3.0.0, Display acm-0001-receiver, to Receiver den, and heard no broadcast Set System Audio Mode On in the 5.0 s after. The receiver answered Give System Audio Mode Status with On"},
 		{"a TV that refuses the mode", cectest.AudioRefusedByTV, ConditionFalse, reasonUnconfirmed, 2,
-			"the adapter on node-1 sent System Audio Mode Request for 1.3.0.0, Display acm-0001-receiver, to Receiver den, and heard no broadcast Set System Audio Mode On in the 5.0 s after; the receiver answered Give System Audio Mode Status with Off; a TV that does not take System Audio Mode refuses the receiver's On, and the receiver stays Off"},
+			"The adapter on node-1 sent System Audio Mode Request for 1.3.0.0, Display acm-0001-receiver, to Receiver den, and heard no broadcast Set System Audio Mode On in the 5.0 s after. The receiver answered Give System Audio Mode Status with Off. A TV that does not take System Audio Mode refuses the receiver's On, and the receiver stays Off"},
 		{"a receiver with HDMI control off", cectest.AudioSilent, ConditionFalse, reasonUnconfirmed, 2,
-			"the adapter on node-1 sent System Audio Mode Request for 1.3.0.0, Display acm-0001-receiver, to Receiver den, and heard no broadcast Set System Audio Mode On in the 5.0 s after; the receiver did not answer Give System Audio Mode Status, which a receiver with its HDMI control off does not answer"},
+			"The adapter on node-1 sent System Audio Mode Request for 1.3.0.0, Display acm-0001-receiver, to Receiver den, and heard no broadcast Set System Audio Mode On in the 5.0 s after. The receiver did not answer Give System Audio Mode Status, which a receiver with its HDMI control off does not answer"},
 		{"a receiver that refuses the request", cectest.AudioAbort, ConditionFalse, reasonRefused, 1,
-			"the adapter on node-1 sent System Audio Mode Request for 1.3.0.0, Display acm-0001-receiver, to Receiver den, and the receiver answered with a Feature Abort after <time>"},
+			"The adapter on node-1 sent System Audio Mode Request for 1.3.0.0, Display acm-0001-receiver, to Receiver den, and the receiver answered with a Feature Abort after <time>"},
 	}
 	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
-				wire := audioRoom(cec.SystemAudioOff, c.reply)
+				wire := busWithAudioSystem(cec.SystemAudioOff, c.reply)
 
 				_, television := wokeThrough(t, wire, throughReceiver)
 
@@ -103,13 +100,13 @@ func TestTheWakeAsksTheReceiverForSystemAudioMode(t *testing.T) {
 	}
 }
 
-// The request goes out after the wake's claim and its guard, so the
-// TV's own traffic as it comes on is over, and the receiver ends on the
-// Display's input.
+// The request goes out after the wake's Active Source and the wake
+// guard. By then the TV has stopped sending its own startup messages,
+// so the receiver stays on the Display's input.
 func TestTheRequestFollowsTheGuard(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := audioRoom(cec.SystemAudioOff, cectest.AudioBroadcast)
+		wire := busWithAudioSystem(cec.SystemAudioOff, cectest.AudioBroadcast)
 
 		wokeThrough(t, wire, throughReceiver)
 
@@ -126,13 +123,13 @@ func TestTheRequestFollowsTheGuard(t *testing.T) {
 	})
 }
 
-// A broadcast [On] that arrives before the request answers the TV's own
-// request as it comes on, and does not count for this one, so the
-// adapter still reads the mode when no [On] follows its request.
+// A broadcast Set System Audio Mode On before the request is the
+// receiver's reply to the TV's own request as it wakes. It does not
+// confirm the adapter's request, so the adapter still reads the mode.
 func TestAnOnBeforeTheRequestDoesNotCount(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := audioRoom(cec.SystemAudioOn, cectest.AudioToTV)
+		wire := busWithAudioSystem(cec.SystemAudioOn, cectest.AudioToTV)
 		session := wokeNow()
 		api := controlling(t, wire, lounge(""))
 		api.scanned(t, "node-1")
@@ -147,13 +144,12 @@ func TestAnOnBeforeTheRequestDoesNotCount(t *testing.T) {
 	})
 }
 
-// A Display straight on the TV has no receiver on its path, so the wake
-// sends no request and the condition is absent, and a wake with no
-// receiver removes the condition of the wake before it.
+// A wake with no receiver between the TV and the Display sends no
+// request, and removes the condition that the previous wake wrote.
 func TestAWakeWithNoReceiverSendsNoRequest(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := audioRoom(cec.SystemAudioOff, cectest.AudioBroadcast)
+		wire := busWithAudioSystem(cec.SystemAudioOff, cectest.AudioBroadcast)
 		api, first := wokeThrough(t, wire, throughReceiver)
 		mustMatch(t, conditionOf(first.Status.Conditions, conditionSystemAudioApplied).Reason, reasonConfirmed)
 
@@ -166,13 +162,13 @@ func TestAWakeWithNoReceiverSendsNoRequest(t *testing.T) {
 	})
 }
 
-// A guard that a person's choice of route ended leaves the input where
-// the person put it, so the wake asks the receiver for nothing: the
-// request would switch the receiver back to the Display.
+// When a person switches the TV to another input during the wake guard,
+// the wake sends no request, because the request would switch the
+// receiver back to the Display.
 func TestAWakeAPersonEndedSendsNoRequest(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := audioRoom(cec.SystemAudioOff, cectest.AudioBroadcast)
+		wire := busWithAudioSystem(cec.SystemAudioOff, cectest.AudioBroadcast)
 		session := wokeNow()
 		api := controlling(t, wire, lounge(""))
 		api.scanned(t, "node-1")
@@ -189,13 +185,10 @@ func TestAWakeAPersonEndedSendsNoRequest(t *testing.T) {
 	})
 }
 
-// Each wake sends the request once: a pass, and a new node workload
-// after the adapter comes back, send nothing more for a wake already
-// run.
 func TestTheRequestGoesOutOncePerWake(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := audioRoom(cec.SystemAudioOff, cectest.AudioBroadcast)
+		wire := busWithAudioSystem(cec.SystemAudioOff, cectest.AudioBroadcast)
 		api, _ := wokeThrough(t, wire, throughReceiver)
 
 		api.nudge()
@@ -205,9 +198,9 @@ func TestTheRequestGoesOutOncePerWake(t *testing.T) {
 	})
 }
 
-// The condition's transition posts one Event, Normal for a mode the
-// receiver confirmed and a Warning for one it refused, beside the
-// wake's own.
+// Each change of SystemAudioApplied posts one Event after the wake's
+// own Events: Normal when the receiver confirmed the mode, and Warning
+// when it refused.
 func TestSystemAudioAppliedPostsItsEvent(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -222,7 +215,7 @@ func TestSystemAudioAppliedPostsItsEvent(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
-				api, _ := wokeThrough(t, audioRoom(cec.SystemAudioOff, c.reply), throughReceiver)
+				api, _ := wokeThrough(t, busWithAudioSystem(cec.SystemAudioOff, c.reply), throughReceiver)
 
 				mustDeepEqual(t, postedAbout(api.events, "Television", "lounge"), []posted{
 					{events.TypeNormal, reasonWaking, 1},
@@ -234,9 +227,8 @@ func TestSystemAudioAppliedPostsItsEvent(t *testing.T) {
 	}
 }
 
-// A request that no device acknowledges is one the adapter could not
-// send, such as when the receiver left the bus after the Deployment
-// listed it as the via.
+// A NACK on the request means the receiver in the Display's via has
+// left the bus.
 func TestARequestNoDeviceAcknowledgesIsRefused(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -247,17 +239,17 @@ func TestARequestNoDeviceAcknowledgesIsRefused(t *testing.T) {
 
 		applied := conditionOf(television.Status.Conditions, conditionSystemAudioApplied)
 		mustMatch(t, applied.Reason, reasonRefused)
-		mustMatch(t, applied.Message, "the adapter on node-1 could not send System Audio Mode Request for 1.3.0.0, Display acm-0001-receiver, to Receiver den: the wire answered NACK MAX_RETRIES")
+		mustMatch(t, applied.Message, "The adapter on node-1 did not send System Audio Mode Request for 1.3.0.0, Display acm-0001-receiver, to Receiver den: the wire answered NACK MAX_RETRIES")
 	})
 }
 
-// A session that sleeps while the adapter waits for the receiver's
-// answer ends the wait: the adapter reads nothing more, and the wake
-// writes no SystemAudioApplied, because it did not learn the answer.
+// When the session goes to sleep while the adapter waits for the
+// receiver's reply, the adapter stops waiting, sends no second read, and
+// writes no SystemAudioApplied condition.
 func TestASessionThatSleepsEndsTheWaitForTheReceiver(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := audioRoom(cec.SystemAudioOff, cectest.AudioToTV)
+		wire := busWithAudioSystem(cec.SystemAudioOff, cectest.AudioToTV)
 		session := wokeNow()
 		api := controlling(t, wire, lounge(""))
 		api.scanned(t, "node-1")

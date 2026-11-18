@@ -1,13 +1,13 @@
 package main
 
-// The Deployment's operator releases its Lease only after the last
-// write of the process that held it: a status write, a command to a
-// receiver, or a message on the media bus. So each goroutine that a
-// receiver unit or a session starts, and that can write, is counted in
-// the group the Receiver loop's context carries. At a shutdown the loop
-// stops every unit and then waits for the group, and serve reports
-// whether it emptied in time (errStillWriting). A process whose writes
-// did not stop leaves the Lease to expire instead of releasing it.
+// The operator must not release its Lease while a write is in flight:
+// a status write, a command to a receiver, or a message on the media
+// bus. Such a write could reach the API server after another copy took
+// the Lease. So every goroutine of a receiver unit or a session that
+// can write is added to a WaitGroup in the context. On shutdown the
+// Receiver loop stops the units and waits for the group. When the group
+// does not empty in time, serve returns errStillWriting, and the Lease
+// expires instead of being released.
 
 import (
 	"context"
@@ -16,19 +16,16 @@ import (
 	"time"
 )
 
-// workKey is the context key of the group.
 type workKey struct{}
 
-// withWork answers a context that carries group, so every goroutine
-// that goWork starts under it, or under a context made from it, is
-// counted in group.
+// withWork returns a context with group. goWork adds every goroutine
+// it starts under that context, or a context derived from it, to group.
 func withWork(ctx context.Context, group *sync.WaitGroup) context.Context {
 	return context.WithValue(ctx, workKey{}, group)
 }
 
-// goWork runs work on its own goroutine, counted in the group ctx
-// carries. A context with no group, such as a test's that runs one
-// pass, counts nothing.
+// goWork runs work on a goroutine in the group of ctx. When ctx has no
+// group, as in a test that runs one pass, goWork still runs work.
 func goWork(ctx context.Context, work func()) {
 	if group, ok := ctx.Value(workKey{}).(*sync.WaitGroup); ok {
 		group.Go(work)
@@ -37,24 +34,21 @@ func goWork(ctx context.Context, work func()) {
 	go work()
 }
 
-// workStopWait bounds the wait for the counted goroutines at a
-// shutdown. Each one ends on its context, and a Receiver unit's wait
-// after a 429 ends with that context too (withWaits). What is left is a
-// goroutine that is sending a request: one sent before the context
-// ended, or one a goroutine sends before it reads that its context
-// ended. Such a request ends within the operator's request timeout,
-// 15 seconds (leaderRequestTimeout), which is longer than this wait. A
-// request that the API server holds past this wait makes serve answer
-// errStillWriting, and the process leaves its Lease to expire.
+// workStopWait is how long shutdown waits for the goroutines of the
+// group. Each one stops when its context ends, including a wait after a
+// 429 response (withWaits). A request that was already sent can still
+// take up to leaderRequestTimeout, which is longer than this wait, and
+// serve then returns errStillWriting.
 const workStopWait = 5 * time.Second
 
-// errStillWriting says that a write can still be in flight, because a
-// goroutine that can write did not stop within workStopWait, or the
-// Event recorder's last write did not return within
-// events.ShutdownTimeout. The process must not release its Lease.
+// errStillWriting means that a goroutine that can write did not stop
+// within workStopWait, or that the Event recorder's last write did not
+// return within events.ShutdownTimeout. The operator then exits without
+// releasing its Lease.
 var errStillWriting = errors.New("a write can still be in flight, so the operator leaves its Lease to expire")
 
-// awaitWork waits for group, and answers false when within ends first.
+// awaitWork waits for group and returns false when it is not empty
+// after within.
 func awaitWork(group *sync.WaitGroup, within time.Duration) bool {
 	done := make(chan struct{})
 	go func() {

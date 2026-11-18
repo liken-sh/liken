@@ -1,10 +1,7 @@
-// Package upnp reads the UPnP device description a piece of equipment
-// serves over plain HTTP. The description names the maker and the
-// model in the maker's own words, which no control protocol this
-// operator speaks reports as plainly. A WiiM serves it beside its
-// MediaRenderer, and so does every other brand built on the LinkPlay
-// platform, so the model is what tells a WiiM from another brand's
-// device before the operator drives it.
+// Package upnp reads the manufacturer and model from the UPnP device
+// description that a device serves over HTTP. None of the control
+// protocols this operator speaks report the model, and the model is how
+// the operator tells a WiiM from another brand's LinkPlay device.
 package upnp
 
 import (
@@ -18,29 +15,24 @@ import (
 	"time"
 )
 
-// Description is the part of a device description the operator reads.
+// Description is the manufacturer and model from a device description.
 type Description struct {
 	Manufacturer string
 	Model        string
 }
 
-// timeout bounds one read. A device on the LAN answers its description
-// in milliseconds, so a read that takes longer is a device that will
-// not answer, and the caller moves on.
+// timeout limits one read. A device on the LAN that answers at all
+// answers in milliseconds.
 const timeout = 2 * time.Second
 
-// maxBytes bounds the body the operator reads. A LinkPlay description
-// is a few kilobytes, so the bound only stops a device that sends
-// without end.
+// maxBytes is far above the few kilobytes of a LinkPlay description, so
+// it only stops a device that sends data without end.
 const maxBytes = 64 << 10
 
-// FetchVia reads the description at one URL with one GET, over a
-// connection that dial opens. A description it cannot read, or one that
-// names no model, is an error that carries the device's own answer, so
-// a log line states why the device was not read. Each caller passes the
-// dialer that reaches its devices, so the read goes where the caller's
-// own connection to the device goes. The client keeps no connection
-// open, because each read is one request.
+// FetchVia reads the description at url with one GET over a connection
+// that dial opens, so the GET takes the same network path as the
+// caller's other traffic to the device. A non-200 error includes the
+// response body, for the log line.
 func FetchVia(ctx context.Context, dial func(ctx context.Context, network, address string) (net.Conn, error), url string) (Description, error) {
 	return fetch(ctx, &http.Client{
 		Timeout:   timeout,
@@ -63,7 +55,7 @@ func fetch(ctx context.Context, client *http.Client, url string) (Description, e
 		return Description{}, err
 	}
 	if response.StatusCode != http.StatusOK {
-		return Description{}, fmt.Errorf("%s: %s", response.Status, strings.TrimSpace(string(body)))
+		return Description{}, fmt.Errorf("the device answered %s: %s", response.Status, strings.TrimSpace(string(body)))
 	}
 	if len(body) > maxBytes {
 		return Description{}, fmt.Errorf("the description is larger than %d bytes", maxBytes)
@@ -71,9 +63,9 @@ func fetch(ctx context.Context, client *http.Client, url string) (Description, e
 	return parse(body)
 }
 
-// document is the shape of a description, cut to the root device's
-// fields. The tags name no namespace, so they match the UPnP device
-// namespace that every description declares.
+// document is the root device of a description. The tags name no
+// namespace, so they match the UPnP device namespace that the
+// description declares.
 type document struct {
 	Device struct {
 		Manufacturer string `xml:"manufacturer"`
@@ -81,7 +73,6 @@ type document struct {
 	} `xml:"device"`
 }
 
-// parse reads the root device's maker and model out of one description.
 func parse(body []byte) (Description, error) {
 	var doc document
 	if err := xml.Unmarshal(body, &doc); err != nil {
@@ -89,7 +80,7 @@ func parse(body []byte) (Description, error) {
 	}
 	model := strings.TrimSpace(doc.Device.ModelName)
 	if model == "" {
-		return Description{}, fmt.Errorf("the description names no modelName")
+		return Description{}, fmt.Errorf("the description has no modelName")
 	}
 	return Description{Manufacturer: strings.TrimSpace(doc.Device.Manufacturer), Model: model}, nil
 }

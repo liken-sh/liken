@@ -1,7 +1,9 @@
-// equipment-operator drives the A/V receivers of a liken cluster and
-// reports what each one says. It reaches each receiver over the
-// network, applies the session a Player holds on it, and applies the
-// asks the media operator writes into that session.
+// equipment-operator controls the A/V receivers and TVs of a liken
+// cluster. It connects to each receiver over the network, reports the
+// receiver's state in the Receiver status, and applies the settings and
+// the session that media-operator writes for a Player. The cec
+// subcommand runs the workload that controls a TV through a CEC
+// adapter.
 package main
 
 import (
@@ -9,60 +11,49 @@ import (
 	"os"
 )
 
-// version is the release this binary was built from. The Dockerfile
-// sets it with -ldflags "-X main.version=...", and a build with no
-// such flag, such as go test, reports dev.
+// version is set by the Dockerfile with -ldflags "-X main.version=...".
+// A build without the flag, such as go test, reports dev.
 var version = "dev"
 
-// The operator's own environment. Each value is one the operator
-// cannot derive, so the Deployment states it and this program reads
-// it here.
+// The environment variables that the Deployment sets for the operator.
 const (
-	// POD_NAMESPACE is the namespace the Deployment runs in, which holds
-	// the Lease its copies compete for (leader.go).
+	// POD_NAMESPACE is the namespace of the leader election Lease
+	// (leader.go).
 	podNamespaceVariable = "POD_NAMESPACE"
 
-	// POD_NAME is the pod's own name, the start of the identity the
-	// operator holds the Lease under.
+	// POD_NAME is the prefix of this replica's identity in the leader
+	// election.
 	podNameVariable = "POD_NAME"
 
-	// EQUIPMENT_METRICS_ADDRESS is where /metrics listens, as host:port.
-	// plans/completed/65-prometheus-metrics.md at the top of the
-	// repository gives every process port 9200, since this operator runs
-	// on the cluster network. An empty value turns the listener off.
+	// EQUIPMENT_METRICS_ADDRESS is the host:port that serves /metrics.
+	// When it is empty, the operator serves no metrics.
 	metricsAddressVariable = "EQUIPMENT_METRICS_ADDRESS"
 
-	// EQUIPMENT_NETWORK_DISCOVERY is on or off, and unset reads as on.
-	// Network discovery searches the LAN for WiiM amps and creates a
-	// Receiver for each one that no Receiver names, and the operator then
-	// drives that amp. A cluster that shares its LAN with amps it must not
-	// drive, such as a test cluster beside a home's own equipment, turns
-	// it off.
+	// EQUIPMENT_NETWORK_DISCOVERY is on or off, and unset means on.
+	// Network discovery finds the WiiM amps on the LAN and creates a
+	// Receiver for each amp whose UUID no Receiver's spec.wiim.uuid
+	// has, so the operator starts to control it. Turn it off when the cluster shares its LAN
+	// with amps that it must not control.
 	networkDiscoveryVariable = "EQUIPMENT_NETWORK_DISCOVERY"
 )
 
-// settings is the whole of the operator's configuration.
+// settings is the operator's configuration, read from the environment.
 type settings struct {
 	namespace      string
 	pod            string
 	metricsAddress string
-	// networkDiscoveryOff is true when the Deployment turned network
-	// discovery off. The zero value is on, the default.
+	// networkDiscoveryOff is false by default, so discovery is on.
 	networkDiscoveryOff bool
-	// dial reaches the receivers and their UPnP descriptions. Nil, which
-	// readSettings leaves, dials over TCP.
-	dial dialFunc
-	// listen opens the listener each WiiM sends its events to. Nil,
-	// which readSettings leaves, listens on TCP.
+	// dial and listen replace the operator's TCP connections to the
+	// receivers and its listener for WiiM events. Only tests set them.
+	dial   dialFunc
 	listen listenFunc
 }
 
-// readSettings takes the configuration from the environment alone.
-// An unset variable reads as empty, and the caller decides what an
-// empty value means, so a missing setting never stops the read. The
-// one value it refuses is a network discovery value other than on or
-// off: a misspelled off would leave discovery on, and the operator
-// would drive the amps the cluster owner meant to leave alone.
+// readSettings reads the configuration from the environment. It
+// returns an error for an EQUIPMENT_NETWORK_DISCOVERY other than on or
+// off, because a misspelled off would leave discovery on and the
+// operator would take control of amps that it was meant to leave alone.
 func readSettings() (settings, error) {
 	config := settings{
 		namespace:      os.Getenv(podNamespaceVariable),
@@ -74,23 +65,21 @@ func readSettings() (settings, error) {
 	case "off":
 		config.networkDiscoveryOff = true
 	default:
-		return settings{}, fmt.Errorf("%s is %q; it takes on or off", networkDiscoveryVariable, value)
+		return settings{}, fmt.Errorf("%s must be \"on\" or \"off\", and is %q", networkDiscoveryVariable, value)
 	}
 	return config, nil
 }
 
-// The image holds two builds of this program, so the two halves stay
-// at one version. operatorBinary is the full build, which the
-// Deployment runs. nodeBinary is the build with the tag node, which
-// the cec DaemonSet runs with the argument cec. It leaves out the
-// leader election that only the Deployment needs (leader_node.go).
+// The image holds two builds of this program. The Deployment runs
+// operatorBinary. The cec DaemonSet runs nodeBinary, built with the node
+// tag, which leaves out leader election (leader_node.go).
 const (
 	operatorBinary = "/equipment-operator"
 	nodeBinary     = "/equipment-operator-node"
 )
 
-// main runs the Deployment's operator, or with the argument cec, the
-// node workload that holds one CEC adapter.
+// main runs the operator, or the node workload for one CEC adapter
+// when the first argument is cec.
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "cec" {
 		runCEC()

@@ -9,39 +9,28 @@ import (
 	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
-// The wire types are hand-written, the way liken and the sibling
-// operators write theirs. The Kubernetes API is HTTPS that serves
-// JSON, and generated types would bring a typed client for every kind
-// that this program does not use. Each type carries only the fields
-// this operator reads or writes; the API server fills in the rest. The
-// watches decode each object into these same types (watch.go).
+// These types are hand-written, because generated types would pull in
+// a typed client for every kind. Each type has only the fields this
+// operator reads or writes, and the watches decode into the same types
+// (watch.go).
 
-// The group this operator serves.
 const equipmentAPIVersion = "equipment.liken.sh/v1alpha1"
 
-// ObjectMeta carries what this operator reads or writes: name for the
-// URL, uid for the identity of one object, and resourceVersion for the
-// conditional write.
 type ObjectMeta struct {
-	Name string `json:"name,omitempty"`
-	// UID tells an object from an earlier one of the same name, which a
-	// delete and a create leave behind.
+	Name            string            `json:"name,omitempty"`
 	UID             string            `json:"uid,omitempty"`
 	ResourceVersion string            `json:"resourceVersion,omitempty"`
 	Generation      int64             `json:"generation,omitempty"`
 	Labels          map[string]string `json:"labels,omitempty"`
 }
 
-// A list's own resourceVersion is the revision of the whole
-// collection. A list that answers none comes from a kind with no
-// definition, and a caller starts no watch on it.
 type ListMeta struct {
 	ResourceVersion string `json:"resourceVersion,omitempty"`
 }
 
-// A Receiver describes an A/V receiver that a liken machine plays
-// through. It is cluster-scoped because the machines connected to it
-// belong to the cluster.
+// A Receiver is an A/V receiver that a liken machine plays through. It
+// is cluster-scoped because the machines connected to it belong to the
+// cluster.
 type Receiver struct {
 	APIVersion string               `json:"apiVersion,omitempty"`
 	Kind       string               `json:"kind,omitempty"`
@@ -50,14 +39,14 @@ type Receiver struct {
 	Status     ReceiverStoredStatus `json:"status,omitempty"`
 }
 
-// session answers the session the operator acts on. The media operator
-// writes status.session under its own field manager, because a status
-// write changes no metadata.generation, and each flag flip would
-// otherwise count as a spec edit. A media operator that writes
-// spec.session instead still drives the receiver: a Receiver whose
-// status holds no session falls back to spec.session. So the two
-// operators can roll in either order, and a session that moves from the
-// spec to the status is the same session and no change.
+// session returns status.session, or spec.session when the status has
+// none. media-operator writes the session into the status, because a
+// status write does not change metadata.generation, and a flag change
+// written to the spec would count as a spec edit. The fallback keeps an
+// older media-operator that writes spec.session working, so the two
+// operators can be upgraded in either order. A session that moves from
+// the spec to the status compares equal, so the operator does not
+// replace it.
 func (r *Receiver) session() *ReceiverSession {
 	if r.Status.Session != nil {
 		return r.Status.Session
@@ -70,32 +59,30 @@ type ReceiverList struct {
 	Items    []Receiver `json:"items"`
 }
 
-// The spec names one protocol block, the inputs that liken machines
-// feed, and the non-main zones.
-// Session is the place an older media operator writes the session;
-// Receiver.session says how the operator reads it.
+// ReceiverSpec has exactly one protocol block, Denon or Wiim, and the
+// API server refuses a Receiver with neither or both. Session is where
+// an older media-operator writes the session (see Receiver.session).
 type ReceiverSpec struct {
 	Denon   *DenonProtocol   `json:"denon,omitempty"`
 	Wiim    *WiimProtocol    `json:"wiim,omitempty"`
 	Volume  *ReceiverVolume  `json:"volume,omitempty"`
 	Inputs  []ReceiverInput  `json:"inputs,omitempty"`
 	Session *ReceiverSession `json:"session,omitempty"`
-	// Zones holds the non-main zones' declared controls. The main zone
-	// is spec.power and spec.session, so a zones map may hold only
-	// zone2 and zone3; a main key would give one zone two writers and
-	// is rejected.
+	// Zones has the declared controls of zone2 and zone3, the only keys
+	// the schema accepts. spec.power and spec.session control the main
+	// zone, so a main key would give it a second writer.
 	Zones map[string]ZoneSpec `json:"zones,omitempty"`
-	// Power is the power state the operator should drive the receiver
-	// to. It is the operator's own field, applied once per change and
-	// never re-asserted, so a GitOps manifest that omits it leaves the
-	// receiver wherever the operator last put it.
+	// Power is the power state the operator sets on the receiver. The
+	// operator sends each new value once and does not send it again, so
+	// a person who turns the receiver on or off by hand is not
+	// overruled, and a GitOps manifest that omits Power leaves the
+	// receiver in the state the operator last set.
 	Power equipment.Power `json:"power,omitempty"`
 }
 
-// ZoneSpec is one non-main zone's declared controls. Every optional
-// field is a pointer, so a control the owner does not declare differs
-// from one set to zero. Volume is in display units, the way
-// spec.volume.max is.
+// ZoneSpec is the declared controls of zone2 or zone3. The optional
+// fields are pointers, so an undeclared control differs from one set
+// to zero. Volume is in the receiver's own scale, like spec.volume.max.
 type ZoneSpec struct {
 	Power  equipment.Power `json:"power,omitempty"`
 	Input  string          `json:"input,omitempty"`
@@ -104,13 +91,11 @@ type ZoneSpec struct {
 	Sleep  *int            `json:"sleep,omitempty"`
 }
 
-// ConfirmedBy answers whether the receiver has reported one declared
-// zone control at the declared value. Volume is compared in the
-// driver's smallest steps, so resolution turns the declared display
-// units into a count before it is compared. A control the receiver has
-// not reported is skipped: there is nothing to confirm it against, and
-// blocking on it would retry forever. A control reported at another
-// value is not confirmed, so the operator sends it again.
+// ConfirmedBy returns whether the receiver reports every declared
+// control of the zone at its declared value. resolution is the number
+// of the driver's volume steps in one unit of the receiver's scale. A
+// control the receiver does not report is skipped, because waiting for
+// it would retry forever.
 func (z ZoneSpec) ConfirmedBy(observed equipment.ZoneState, resolution int) bool {
 	if z.Power != "" && observed.Power != "" {
 		on := z.Power != equipment.PowerStandby && z.Power != equipment.PowerOff
@@ -136,17 +121,14 @@ func (z ZoneSpec) ConfirmedBy(observed equipment.ZoneState, resolution int) bool
 	return true
 }
 
-// Pending answers the declared controls to send for one zone, as a
-// ZoneSpec that holds only those controls. A control the zone reports
-// is sent only while the zone reports another value, so a restart
-// against a receiver that already holds the declared zone sends
-// nothing, and a change made at the receiver is driven back. A control
-// the zone does not report is compared with previous, the zone the
-// operator applied before, so it is sent once when the spec changes it.
-// known says whether the operator has applied any zones since it
-// started; after a restart it has not, and an unreported control waits
-// for the spec to change it. Volume is compared in the driver's
-// smallest steps.
+// Pending returns the declared controls that the operator must send to
+// one zone. A control that the zone reports is pending while the zone
+// reports another value, so a restart sends nothing to a receiver that
+// already matches, and a change made at the receiver is reversed. A
+// control that the zone does not report is pending when the spec
+// changed it since previous, the zone the operator last applied. known
+// is false until the operator has applied zones once since it started,
+// and until then no unreported control is pending.
 func (z ZoneSpec) Pending(observed equipment.ZoneState, reported bool, previous ZoneSpec, known bool, resolution int) ZoneSpec {
 	changed := func(same bool) bool { return known && !same }
 	var pending ZoneSpec
@@ -200,35 +182,32 @@ func (z ZoneSpec) Pending(observed equipment.ZoneState, reported bool, previous 
 	return pending
 }
 
-// How loud the room may get and how far one press moves it, both in the
-// receiver's own scale. A Denon requires max. An absent step is one
-// whole unit of that scale. Indicator names who draws the volume
-// indicator. media-operator reads it and this operator does not.
+// ReceiverVolume is read by media-operator, which turns volume key
+// presses into status.session.volumeAsk. This operator reads none of
+// it. Max and Step are in the receiver's own scale, and an absent Step
+// is one whole unit.
 type ReceiverVolume struct {
 	Max       float64 `json:"max,omitempty"`
 	Step      float64 `json:"step,omitempty"`
 	Indicator string  `json:"indicator,omitempty"`
 }
 
-// The Denon and Marantz control protocol, the address it answers on,
-// and the settings the operator drives it to.
+// DenonProtocol selects the Denon and Marantz control protocol.
 type DenonProtocol struct {
 	Address  string         `json:"address"`
 	Settings denon.Settings `json:"settings,omitempty"`
 }
 
-// The WiiM control protocol. The LinkPlay UUID is the device's identity
-// and the only key the operator trusts: a declared address is a hint,
-// and the driver reads the device's own uuid and compares it before it
-// drives anything. The address is optional because network discovery
-// resolves the UUID to a current address. With no address and no
-// discovered address, which is always the case while network discovery
-// is off (main.go), the driver can reach nothing and reports the
-// receiver unreachable. The driver drives only a device whose
-// getStatusEx project begins with WiiM (wiim.IsWiiM), because other
-// brands build on the same platform and answer the same API. Discovery
-// makes the same check earlier, on the model of the device's UPnP
-// description, so it creates no Receiver for another brand's device
+// WiimProtocol identifies a WiiM by its LinkPlay UUID. Address is
+// optional, because network discovery finds the device's current
+// address from the UUID. When Address is declared, the driver still
+// reads the device's UUID and sends nothing to a device whose UUID
+// differs. With network discovery off (main.go) and no declared
+// address, the driver has no address and reports the receiver
+// unreachable. Other brands build on the LinkPlay platform and answer
+// the same API, so the driver sends nothing to a device whose
+// getStatusEx project does not begin with WiiM (wiim.IsWiiM), and
+// discovery creates no Receiver for a device whose UPnP model does not
 // (discovery_description.go).
 type WiimProtocol struct {
 	UUID     string        `json:"uuid"`
@@ -236,9 +215,10 @@ type WiimProtocol struct {
 	Settings wiim.Settings `json:"settings,omitempty"`
 }
 
-// One input of the receiver, and the machine and monitor id that feed
-// it. SoundMode, when present, is the mode the receiver selects with
-// this input, so a Play brings the picture and the mode together.
+// ReceiverInput is one input of the receiver, with the machine and
+// monitor that feed it. SoundMode, when set, is the sound mode the
+// operator selects with this input, so a Play changes the picture and
+// the mode together.
 type ReceiverInput struct {
 	Name      string `json:"name"`
 	Machine   string `json:"machine"`
@@ -246,13 +226,14 @@ type ReceiverInput struct {
 	SoundMode string `json:"soundMode,omitempty"`
 }
 
-// A session names the Player and the input it uses. Active says that a
-// Play is present. Awake says that the room's screen is awake. The
-// media operator keeps a session while the Player has a screen,
-// including the idle screen. A session with both flags false sends no
-// power or input command to the receiver for its flags. The three asks
-// are events that the media operator writes, and the operator applies
-// each one once, when its At changes (session_asks.go).
+// ReceiverSession is the Player that plays through the receiver and the
+// input it uses. media-operator keeps a session while the Player has a
+// screen, including the idle screen. Active is true while a Play
+// exists, and Awake is true while the room's screen is awake. When both
+// are false, the operator sends the receiver no power or input command
+// for them. VolumeAsk, PowerAsk, and InputAsk are requests that
+// media-operator writes for key presses, and the operator applies each
+// one once, when its At changes (session_asks.go).
 type ReceiverSession struct {
 	Player    string             `json:"player"`
 	Input     string             `json:"input"`
@@ -263,33 +244,33 @@ type ReceiverSession struct {
 	InputAsk  *ReceiverInputAsk  `json:"inputAsk,omitempty"`
 }
 
-// ReceiverVolumeAsk asks for an absolute volume and mute. Level is in
-// the receiver's own scale, the scale of spec.volume.max. At is the
-// moment the ask was made, and a new At is a new ask.
+// ReceiverVolumeAsk requests an absolute volume and mute. Level is in
+// the receiver's own scale, like spec.volume.max.
 type ReceiverVolumeAsk struct {
 	Level float64 `json:"level"`
 	Mute  bool    `json:"mute,omitempty"`
 	At    string  `json:"at"`
 }
 
-// ReceiverPowerAsk asks the room to toggle, to come on, or to go off,
-// with the rules of power (session_power.go).
+// ReceiverPowerAsk has the Action toggle, on, or off, which
+// session_power.go applies to the room.
 type ReceiverPowerAsk struct {
 	Action string `json:"action"`
 	At     string `json:"at"`
 }
 
-// ReceiverInputAsk asks the receiver for the session's input: ensure
-// for any press, and show for a home press, which also asks the TV to
-// show the session's Display (session_ensure.go).
+// ReceiverInputAsk requests the session's input. media-operator writes
+// the Action ensure for any key press, and show for a home press. show
+// also asks the TV to show the session's Display (session_ensure.go).
 type ReceiverInputAsk struct {
 	Action string `json:"action"`
 	At     string `json:"at"`
 }
 
-// withoutFlags removes Active, Awake, and the asks before comparing
-// sessions. A change to any of them updates the existing session. Any
-// other change replaces the session.
+// withoutFlags returns the session without Active, Awake, and the
+// requests. setSession compares sessions with it: a change of only
+// those fields updates the running session, and any other change
+// replaces it.
 func (s ReceiverSession) withoutFlags() ReceiverSession {
 	s.Active = false
 	s.Awake = false
@@ -297,16 +278,14 @@ func (s ReceiverSession) withoutFlags() ReceiverSession {
 	return s
 }
 
-// What the receiver last reported, grouped by zone, the protocol's own
-// typed settings snapshot, and the Reachable condition.
+// ReceiverStatus is the part of the status that this operator applies.
 type ReceiverStatus struct {
-	// Address is the address the operator reached the receiver on. A
-	// receiver declared by name reports its resolved address, and a WiiM
-	// reports the address discovery found.
+	// Address is the address the operator reached the receiver on. It
+	// is the resolved address for a receiver declared by name, and the
+	// discovered address for a WiiM.
 	Address string `json:"address,omitempty"`
-	// Model and Manufacturer name the equipment the way its maker does,
-	// as the driver read them. They are empty until the driver has read
-	// them, and for a driver that has no way to read them.
+	// Model and Manufacturer are empty until the driver reads them, and
+	// always empty for a driver that cannot read them.
 	Model        string                `json:"model,omitempty"`
 	Manufacturer string                `json:"manufacturer,omitempty"`
 	Zones        map[string]ZoneStatus `json:"zones,omitempty"`
@@ -315,37 +294,35 @@ type ReceiverStatus struct {
 	Wiim         *wiim.Status          `json:"wiim,omitempty"`
 	// SettledSettings holds a digest of each declared block the operator
 	// has sent, including the fields the receiver does not report, keyed
-	// by the block's path in the spec. After a restart the operator sends
-	// a block's unreported fields again only when the block's digest
-	// differs from this one. The digest covers the block and nothing
-	// else, so a session flag or a label changes none.
+	// by the block's path in the spec. After a restart the operator
+	// sends a block's unreported fields again only when the block's
+	// digest differs from the stored one. The digest covers only the
+	// block, so a session flag or a label change does not alter it.
 	SettledSettings map[string]string `json:"settledSettings,omitempty"`
-	// SettledPower is the spec.power the operator settled: it sent the
-	// value, found the receiver already at it, or adopted it when it
-	// started. A restart that finds spec.power at this value sends
-	// nothing.
+	// SettledPower is the last spec.power that the operator applied: it
+	// sent the value, found the receiver already at it, or adopted it at
+	// startup. After a restart, the operator sends nothing when
+	// spec.power equals it.
 	SettledPower equipment.Power `json:"settledPower,omitempty"`
 	Conditions   []Condition     `json:"conditions,omitempty"`
 }
 
-// ReceiverStoredStatus is the status as the API server stores it. The
-// operator writes the fields of ReceiverStatus, under its own field
-// manager. The media operator writes Session, under its own field
-// manager. The operator applies a ReceiverStatus, which has no Session
-// field, so its apply never states the session and never removes it.
-// The Deployment's CECBus loop writes CEC the same way, under a field
-// manager of its own.
+// ReceiverStoredStatus is the status as the API server stores it. Each
+// writer uses its own field manager: the operator applies a
+// ReceiverStatus, which has no Session field, so the apply neither sets
+// nor removes the session. media-operator writes Session, and the
+// Deployment's CECBus loop writes CEC.
 //
-// SettingsGeneration and PowerGeneration are the records an earlier
-// operator wrote, keyed on metadata.generation. The operator reads them
-// once, when it starts, and does not write them, so its first status
-// apply removes them. A status that holds SettingsGeneration and no
-// SettledSettings is from that earlier operator, which had sent the
-// declared settings, so the operator adopts the blocks it finds.
+// An earlier version of the operator wrote SettingsGeneration and
+// PowerGeneration. The operator writes neither, so its first status
+// apply removes them. A status with SettingsGeneration and no
+// SettledSettings came from that version, which had already sent the
+// declared settings, so the operator records each declared block as
+// settled (newSettledRecord).
 type ReceiverStoredStatus struct {
 	ReceiverStatus
 	Session *ReceiverSession `json:"session,omitempty"`
-	// CEC is the receiver as the audio system of a CECBus
+	// CEC describes the receiver as the audio system of a CECBus
 	// (receiver_cec.go).
 	CEC                *ReceiverCECStatus `json:"cec,omitempty"`
 	SettingsGeneration int64              `json:"settingsGeneration,omitempty"`
@@ -353,8 +330,8 @@ type ReceiverStoredStatus struct {
 }
 
 // ZoneStatus is one zone in the receiver's own units. Volume and
-// VolumeMax are the counts the driver reports, written the way a person
-// reads them.
+// VolumeMax are the driver's values as strings, formatted for a person
+// to read.
 type ZoneStatus struct {
 	Power     string `json:"power,omitempty"`
 	Input     string `json:"input,omitempty"`
@@ -365,9 +342,8 @@ type ZoneStatus struct {
 	Sleep     int    `json:"sleep,omitempty"`
 }
 
-// ConditionStatus is the three-valued verdict a condition carries. It
-// is the driver contract's own type, so a reachability verdict travels
-// from a driver to the status without a conversion.
+// ConditionStatus is the driver contract's own type, so a driver's
+// reachability result is written to the status without conversion.
 type ConditionStatus = equipment.ConditionStatus
 
 const (
@@ -376,12 +352,6 @@ const (
 	ConditionUnknown = equipment.ConditionUnknown
 )
 
-// Condition is the shared condition type of every liken component,
-// which has the shape of metav1.Condition. Anyone who reads kubectl
-// describe output on a Pod already knows how to read one of these.
-//
-// ObservedGeneration records which metadata.generation the condition
-// judged. Generation counts spec edits, so a reader can tell "Reachable,
-// for the spec as it stands" from "Reachable, but for a spec two edits
-// ago".
+// Condition is the condition type that every liken component shares,
+// in the shape of metav1.Condition.
 type Condition = conditions.Condition

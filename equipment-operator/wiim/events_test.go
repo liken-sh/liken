@@ -1,7 +1,3 @@
-// The UPnP event path: the fake GENA server the client subscribes to,
-// the parse of the real NOTIFY bodies, and the rule that a poll does
-// not undo an event.
-
 package wiim
 
 import (
@@ -17,8 +13,9 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
-// fakeEvents is a device's UPnP event side: it takes a SUBSCRIBE, keeps
-// the callback, and sends NOTIFYs to it on command.
+// fakeEvents is the GENA side of a device. It accepts SUBSCRIBE
+// requests, records each callback URL, and sends a NOTIFY to it when a
+// test calls notify.
 type fakeEvents struct {
 	address string
 
@@ -28,8 +25,8 @@ type fakeEvents struct {
 	refuse              bool
 	noSID               bool
 	closeAfterSubscribe bool
-	// refuseRenewals answers a renewal 412, the way an amp that rebooted
-	// answers a SID it no longer holds.
+	// refuseRenewals makes the fake respond 412 to a renewal, as a
+	// device that rebooted does for a SID it no longer has.
 	refuseRenewals bool
 	renewals       int
 	unsubscribed   []string
@@ -98,8 +95,6 @@ func (f *fakeEvents) handle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// subscribed answers whether the client holds a subscription for one
-// service.
 func (c *Client) subscribed(path string) bool {
 	c.subscriptionsMutex.Lock()
 	defer c.subscriptionsMutex.Unlock()
@@ -107,7 +102,6 @@ func (c *Client) subscribed(path string) bool {
 	return ok && sub != nil && sub.sid != ""
 }
 
-// notify sends one NOTIFY to the callback the client registered.
 func (f *fakeEvents) notify(t *testing.T, path, seq, body string) {
 	t.Helper()
 	f.mutex.Lock()
@@ -118,7 +112,7 @@ func (f *fakeEvents) notify(t *testing.T, path, seq, body string) {
 	}
 	req, err := http.NewRequest("NOTIFY", callback, strings.NewReader(body))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the NOTIFY request: %v", err)
 	}
 	req.Header.Set("SID", sid)
 	req.Header.Set("SEQ", seq)
@@ -127,14 +121,14 @@ func (f *fakeEvents) notify(t *testing.T, path, seq, body string) {
 	device := &http.Client{Transport: &http.Transport{DialContext: testNetwork.dial, DisableKeepAlives: true}}
 	resp, err := device.Do(req)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("sending the NOTIFY request: %v", err)
 	}
 	resp.Body.Close()
 }
 
-// listenerWithEvents builds a client whose UPnP base is the fake, and
-// starts its event side.
-func listenerWithEvents(t *testing.T) (*Client, *fakeEvents, <-chan equipment.Event) {
+// subscribedClient returns a client that has started its callback
+// listener and subscribed to both services of the fake.
+func subscribedClient(t *testing.T) (*Client, *fakeEvents, <-chan equipment.Event) {
 	t.Helper()
 	events := startFakeEvents(t)
 	got := make(chan equipment.Event, 16)
@@ -148,30 +142,30 @@ func listenerWithEvents(t *testing.T) (*Client, *fakeEvents, <-chan equipment.Ev
 	return client, events, got
 }
 
-// envelope wraps a service's own document the way a NOTIFY does, with
-// the inner document escaped into LastChange.
+// envelope wraps a service's document in a NOTIFY body, with the
+// document escaped inside LastChange.
 func envelope(inner string) string {
 	escaped := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(inner)
 	return `<?xml version='1.0' encoding='UTF-8'?><e:propertyset xmlns:e="urn:schemas-upnp-org:event-1-0"><e:property><LastChange>` + escaped + `</LastChange></e:property></e:propertyset>`
 }
 
-// renderControlBody is the document RenderingControl pushes, taken from
-// a live Amp.
+// renderControlBody is a RenderingControl NOTIFY body in the form that
+// a WiiM Amp sends.
 func renderControlBody(volume, mute string) string {
 	return envelope(`<Event xmlns="urn:schemas-upnp-org:metadata-1-0/RCS/"><InstanceID val="0"><Mute channel="Master" val="` + mute + `"/><Volume channel="Master" val="` + volume + `"/></InstanceID></Event>`)
 }
 
-// avTransportBody is the document AVTransport pushes, taken from a live
-// Amp.
+// avTransportBody is an AVTransport NOTIFY body in the form that a WiiM
+// Amp sends.
 func avTransportBody(state string) string {
 	return envelope(`<Event xmlns="urn:schemas-upnp-org:metadata-1-0/AVT/"><InstanceID val="0"><TransportState val="` + state + `"/></InstanceID></Event>`)
 }
 
-// The subscribe takes both services and renews into the next term only
-// when the grant is near its end.
+// The client subscribes to both services, and renews a subscription
+// only when its grant is near its end.
 func TestTheSubscriptionTakesBothServicesOnce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		client, events, _ := listenerWithEvents(t)
+		client, events, _ := subscribedClient(t)
 
 		mustMatch(t, client.subscribed(renderControlPath), true)
 		mustMatch(t, client.subscribed(avTransportPath), true)
@@ -197,11 +191,11 @@ func TestTheSubscriptionTakesBothServicesOnce(t *testing.T) {
 	})
 }
 
-// A volume event moves the equipment state and reaches the listener
-// with no poll.
+// A volume event changes the state and reaches the listener without a
+// poll.
 func TestAVolumeEventMovesTheState(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		client, events, got := listenerWithEvents(t)
+		client, events, got := subscribedClient(t)
 
 		events.notify(t, renderControlPath, "0", renderControlBody("30", "0"))
 
@@ -209,17 +203,17 @@ func TestAVolumeEventMovesTheState(t *testing.T) {
 		case event := <-got:
 			mustMatch(t, event.Field, equipment.EventVolume)
 		case <-time.After(time.Second):
-			t.Fatal("a volume event reported nothing")
+			t.Fatal("no event reached the listener within 1 second of a volume NOTIFY")
 		}
 		mustMatch(t, client.State().Zones[equipment.MainZone].Volume, 30)
 	})
 }
 
-// A change event names only what moved, so the field it leaves out
-// keeps its value.
-func TestAVolumeDeltaLeavesMuteStanding(t *testing.T) {
+// An event lists only the values that changed, so a value it leaves out
+// keeps its earlier value.
+func TestAVolumeEventLeavesMuteUnchanged(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		client, events, _ := listenerWithEvents(t)
+		client, events, _ := subscribedClient(t)
 
 		events.notify(t, renderControlPath, "0", renderControlBody("30", "1"))
 		mustMatch(t, client.State().Zones[equipment.MainZone].Mute, true)
@@ -230,10 +224,9 @@ func TestAVolumeDeltaLeavesMuteStanding(t *testing.T) {
 	})
 }
 
-// A mute event reaches the listener as a mute.
 func TestAMuteEventReachesTheListener(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		_, events, got := listenerWithEvents(t)
+		_, events, got := subscribedClient(t)
 
 		events.notify(t, renderControlPath, "0", renderControlBody("30", "0"))
 		drainEvents(got)
@@ -243,16 +236,16 @@ func TestAMuteEventReachesTheListener(t *testing.T) {
 		case event := <-got:
 			mustMatch(t, event.Field, equipment.EventMute)
 		case <-time.After(time.Second):
-			t.Fatal("a mute event reported nothing")
+			t.Fatal("no event reached the listener within 1 second of a mute NOTIFY")
 		}
 	})
 }
 
-// A transport event writes the play state in the word getPlayerStatus
-// uses, so the snapshot does not name one state two ways.
+// A transport event sets the play state to the word that getPlayerStatus
+// uses for it.
 func TestATransportEventWritesThePlayState(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		client, events, _ := listenerWithEvents(t)
+		client, events, _ := subscribedClient(t)
 
 		events.notify(t, avTransportPath, "0", avTransportBody("PLAYING"))
 		mustMatch(t, client.Status().Playback.Status, "play")
@@ -265,10 +258,11 @@ func TestATransportEventWritesThePlayState(t *testing.T) {
 	})
 }
 
-// A NOTIFY for a SID the client did not take is not its own.
+// The client ignores a NOTIFY whose SID matches none of its
+// subscriptions.
 func TestANotifyForAnotherSubscriptionIsDropped(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		client, events, _ := listenerWithEvents(t)
+		client, events, _ := subscribedClient(t)
 
 		events.notify(t, renderControlPath, "0", renderControlBody("30", "0"))
 		mustMatch(t, client.State().Zones[equipment.MainZone].Volume, 30)
@@ -281,11 +275,12 @@ func TestANotifyForAnotherSubscriptionIsDropped(t *testing.T) {
 	})
 }
 
-// A poll does not undo an event: an event that arrived after the poll
-// read the player keeps its value over the poll's older read.
+// When an event arrives after a poll has read the device but before the
+// poll publishes, the poll does not overwrite the event's value with
+// its older read.
 func TestAPollDoesNotUndoAnEvent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		client, events, _ := listenerWithEvents(t)
+		client, events, _ := subscribedClient(t)
 		mark := client.eventMark()
 		events.notify(t, renderControlPath, "0", renderControlBody("30", "0"))
 		events.notify(t, avTransportPath, "0", avTransportBody("PLAYING"))
@@ -300,11 +295,11 @@ func TestAPollDoesNotUndoAnEvent(t *testing.T) {
 	})
 }
 
-// A poll owns every field that no event wrote after it read the
-// player, because its read is the newer answer.
-func TestAPollOwnsTheFieldsNoLaterEventWrote(t *testing.T) {
+// A poll publishes each field that no event wrote after the poll's
+// mark, because the poll's read is newer.
+func TestAPollPublishesTheFieldsNoLaterEventWrote(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		client, events, _ := listenerWithEvents(t)
+		client, events, _ := subscribedClient(t)
 		events.notify(t, renderControlPath, "0", renderControlBody("30", "0"))
 		mark := client.eventMark()
 		events.notify(t, avTransportPath, "1", avTransportBody("PLAYING"))
@@ -319,8 +314,9 @@ func TestAPollOwnsTheFieldsNoLaterEventWrote(t *testing.T) {
 	})
 }
 
-// A device that refuses the subscription leaves the client on the poll.
-func TestARefusedSubscriptionLeavesThePoll(t *testing.T) {
+// When the device refuses to subscribe, the client has no
+// subscription.
+func TestARefusedSubscriptionLeavesTheClientOnThePoll(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		events := startFakeEvents(t)
 		events.refuse = true
@@ -338,7 +334,6 @@ func TestARefusedSubscriptionLeavesThePoll(t *testing.T) {
 	})
 }
 
-// Stopping the client tells the device the callbacks are done.
 func TestStoppingTheClientUnsubscribes(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		events := startFakeEvents(t)
@@ -358,8 +353,8 @@ func TestStoppingTheClientUnsubscribes(t *testing.T) {
 	})
 }
 
-// A subscription reports both outcomes through the command counter the
-// way every other request does.
+// A SUBSCRIBE reports CommandOK or CommandFailed, as every other
+// request to the device does.
 func TestASubscriptionReportsACommand(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		events := startFakeEvents(t)
@@ -385,9 +380,9 @@ func TestASubscriptionReportsACommand(t *testing.T) {
 	})
 }
 
-// The parse pins the shape a live Amp pushes, including the escaped
-// inner document the envelope carries.
-func TestTheEventParseReadsTheLiveShapes(t *testing.T) {
+// parseEvent reads the bodies that a WiiM Amp sends, with the service's
+// document escaped inside LastChange.
+func TestParseEventReadsWiiMAmpBodies(t *testing.T) {
 	fields, ok := parseEvent(renderControlPath, []byte(renderControlBody("35", "1")))
 	mustMatch(t, ok, true)
 	mustMatch(t, *fields.volume, 35)
@@ -398,11 +393,10 @@ func TestTheEventParseReadsTheLiveShapes(t *testing.T) {
 	mustMatch(t, *fields.status, "play")
 
 	if _, ok := parseEvent(renderControlPath, []byte("not xml")); ok {
-		t.Fatal("a body that is not a propertyset parsed as one")
+		t.Fatal("parseEvent accepted a body that is not a propertyset, want it refused")
 	}
 }
 
-// The timeout header a device sends is "Second-1800".
 func TestTheTimeoutHeaderReads(t *testing.T) {
 	mustMatch(t, timeoutSeconds("Second-1800"), 1800)
 	mustMatch(t, timeoutSeconds("Second-300"), 300)
@@ -410,18 +404,17 @@ func TestTheTimeoutHeaderReads(t *testing.T) {
 	mustMatch(t, timeoutSeconds(""), subscribeSeconds)
 }
 
-// The UPnP base keeps the host and drops the control port.
 func TestTheUPnPBaseKeepsTheHost(t *testing.T) {
 	mustMatch(t, upnpBaseFor("10.0.0.1"), "http://10.0.0.1:"+upnpPort)
 	mustMatch(t, upnpBaseFor("10.0.0.1:443"), "http://10.0.0.1:"+upnpPort)
 	mustMatch(t, upnpBaseFor("amp.local:1234"), fmt.Sprintf("http://amp.local:%s", upnpPort))
 }
 
-// A renewal the device refuses drops the subscription, so the next
-// pass subscribes it again.
+// When the device refuses a renewal, the client drops the subscription
+// and the next manageSubscriptions subscribes again.
 func TestARejectedRenewalDropsTheSubscription(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		client, events, _ := listenerWithEvents(t)
+		client, events, _ := subscribedClient(t)
 
 		events.mutex.Lock()
 		events.refuse = true
@@ -435,7 +428,7 @@ func TestARejectedRenewalDropsTheSubscription(t *testing.T) {
 	})
 }
 
-// A 200 that names no SID is not a subscription.
+// A 200 response with no SID header is not a subscription.
 func TestASubscriptionWithNoSIDIsRefused(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		events := startFakeEvents(t)
@@ -452,14 +445,16 @@ func TestASubscriptionWithNoSIDIsRefused(t *testing.T) {
 	})
 }
 
-// A pass with no event listener reads nothing and reports nothing.
+// Without a callback listener, manageSubscriptions subscribes to
+// nothing.
 func TestManageSubscriptionsWithoutAListener(t *testing.T) {
 	client := testClient("127.0.0.1:1", nil)
 	client.manageSubscriptions(context.Background())
 	mustMatch(t, client.subscribed(renderControlPath), false)
 }
 
-// A grant with no usable number falls back to the default term.
+// recordSubscription uses subscribeSeconds for a grant of zero
+// seconds.
 func TestARecordedSubscriptionTakesTheDefaultTerm(t *testing.T) {
 	client := testClient("127.0.0.1:1", nil)
 	client.recordSubscription(renderControlPath, "uuid:x", 0)
@@ -468,49 +463,50 @@ func TestARecordedSubscriptionTakesTheDefaultTerm(t *testing.T) {
 	client.subscriptionsMutex.Unlock()
 	mustMatch(t, sub.sid, "uuid:x")
 	if !sub.expires.After(time.Now().Add(subscribeSeconds / 2 * time.Second)) {
-		t.Fatal("a grant with no number did not take the default term")
+		t.Fatal("a grant of 0 seconds expires sooner than half of subscribeSeconds, want the default term")
 	}
 }
 
-// A body that is not a propertyset, one with no fields, and one for an
-// unknown service all move nothing.
-func TestAnEventThatCarriesNothingIsIgnored(t *testing.T) {
+// A body that is not a propertyset, a body with no values, and a body
+// from an unknown service change nothing.
+func TestAnEventWithNoValuesIsIgnored(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		client, events, _ := listenerWithEvents(t)
+		client, events, _ := subscribedClient(t)
 
 		events.notify(t, renderControlPath, "0", "not xml")
 		events.notify(t, renderControlPath, "1", envelope(""))
 		mustMatch(t, client.State().Zones[equipment.MainZone].Volume, equipment.Unknown)
 
 		if _, ok := parseEvent("/upnp/event/other", []byte(renderControlBody("30", "0"))); ok {
-			t.Fatal("an event for an unknown service parsed as one")
+			t.Fatal("parseEvent accepted an unknown service path, want it refused")
 		}
 		if _, ok := parseEvent(avTransportPath, []byte(envelope(`<Event xmlns="urn:schemas-upnp-org:metadata-1-0/AVT/"><InstanceID val="0"><TransportStatus val="OK"/></InstanceID></Event>`))); ok {
-			t.Fatal("a transport event with no state parsed as one")
+			t.Fatal("parseEvent accepted a transport event with no TransportState, want it refused")
 		}
 	})
 }
 
-// A volume field for another channel is not the master's.
+// The client ignores a volume for any channel except Master, and a
+// document that is not XML.
 func TestAVolumeFieldForAnotherChannelIsIgnored(t *testing.T) {
 	if _, ok := parseRenderControl(`<Event xmlns="urn:schemas-upnp-org:metadata-1-0/RCS/"><InstanceID val="0"><Volume channel="Zone2" val="10"/></InstanceID></Event>`); ok {
-		t.Fatal("a volume for another channel parsed as the master's")
+		t.Fatal("parseRenderControl accepted a volume of channel Zone2, want only Master")
 	}
 	if _, ok := parseRenderControl("not xml"); ok {
-		t.Fatal("a body that is not a document parsed as one")
+		t.Fatal("parseRenderControl accepted a body that is not XML, want it refused")
 	}
 }
 
-// A transport state the driver does not know keeps the device's word
-// in lower case rather than dropping it.
+// A transport state that the driver does not know becomes the device's
+// word in lower case.
 func TestAnUnknownTransportStateKeepsItsWord(t *testing.T) {
 	mustMatch(t, playbackStatusFor("TRANSITIONING"), "transitioning")
 	mustMatch(t, playbackStatusFor("NO_MEDIA_PRESENT"), "no_media_present")
 }
 
-// The device claims a keep-alive and then closes the connection after
-// it answers a SUBSCRIBE, so the second subscription cannot reuse that
-// connection. Every subscription opens its own.
+// A WiiM closes the connection after it responds to a SUBSCRIBE,
+// although its response says keep-alive. So each subscription must
+// open its own connection.
 func TestASubscriptionOpensItsOwnConnection(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		events := startFakeEvents(t)
@@ -528,15 +524,14 @@ func TestASubscriptionOpensItsOwnConnection(t *testing.T) {
 	})
 }
 
-// The device closes the connection after it answers a SUBSCRIBE, so the
-// subscription client must open its own for every request. Go's
-// transport retries a request on a reused connection that failed, which
-// hides the close in a test but not at the device.
+// TestASubscriptionOpensItsOwnConnection can pass with a reused
+// connection, because Go's transport can retry a request that failed on
+// a reused connection. So this test checks the setting directly.
 func TestTheSubscriptionClientOpensEachConnection(t *testing.T) {
 	client := testClient("127.0.0.1:1", nil)
 	transport, ok := client.upnp.Transport.(*http.Transport)
 	if !ok {
-		t.Fatalf("the subscription client holds %T, not an http.Transport", client.upnp.Transport)
+		t.Fatalf("the subscription client transport is %T, want *http.Transport", client.upnp.Transport)
 	}
 	mustMatch(t, transport.DisableKeepAlives, true)
 }

@@ -1,11 +1,11 @@
 package main
 
-// The asks in status.session: a volume, a power action, and an input
-// action that the media operator writes for a person's press. Each ask
-// carries the moment it was made, and a new moment is a new ask. The
-// operator applies each ask once and never holds the receiver to it,
-// so a person with the receiver's own remote can still change the
-// room, the same contract the session's active and awake flags follow.
+// media-operator writes a volume, a power, or an input request into a
+// Receiver's status.session when a person presses a key. Each request
+// has an `at` timestamp, and a new `at` marks a new request. The
+// operator sends each request once and does not hold the receiver at
+// that value, so a person can still change it with the receiver's own
+// remote. The session's active and awake flags follow the same rule.
 
 import (
 	"context"
@@ -17,25 +17,27 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
-// seenAsks holds the at of the last ask of each kind the unit has
-// read. The unit keeps it, not the session, so a session that a new
-// input replaces does not send the asks it carries over again. Only the
-// pass goroutine reads and writes it.
+// seenAsks records the `at` of the latest request of each kind that the
+// unit has read. It belongs to the unit and not to the session, so a
+// session that replaces another, as for a new input, does not send the
+// requests again. Only the pass goroutine reads and writes it.
 type seenAsks struct {
 	volume, power, input string
 }
 
-// takeAsks applies each ask whose at differs from the last one the unit
-// read. An ask the operator finds in its first pass after a start is
-// recorded and sends nothing: a person can have turned the knob or
-// changed the input since the media operator made it, and the last
-// operator may have applied it already.
+// takeAsks sends each request whose `at` differs from the one the unit
+// last read. On the first pass after the operator starts, adopting is
+// true, and takeAsks records each `at` without sending. A person may
+// have changed the receiver since media-operator wrote the request, and
+// the previous operator process may have sent it already. A power or
+// input request that arrives while the unit has no session is recorded
+// and not sent.
 func (u *receiverUnit) takeAsks(spec *ReceiverSession, adopting bool) {
 	if spec == nil {
 		return
 	}
 	u.mutex.Lock()
-	held := u.session
+	current := u.session
 	u.mutex.Unlock()
 	if ask := spec.VolumeAsk; ask != nil && ask.At != u.seen.volume {
 		u.seen.volume = ask.At
@@ -45,29 +47,29 @@ func (u *receiverUnit) takeAsks(spec *ReceiverSession, adopting bool) {
 	}
 	if ask := spec.PowerAsk; ask != nil && ask.At != u.seen.power {
 		u.seen.power = ask.At
-		if !adopting && held != nil {
+		if !adopting && current != nil {
 			source := "status.session.powerAsk at " + ask.At
-			goWork(held.ctx, func() { held.power(ask.Action, source) })
+			goWork(current.ctx, func() { current.power(ask.Action, source) })
 		}
 	}
 	if ask := spec.InputAsk; ask != nil && ask.At != u.seen.input {
 		u.seen.input = ask.At
-		if !adopting && held != nil {
-			held.inputAsk(*ask)
+		if !adopting && current != nil {
+			current.inputAsk(*ask)
 		}
 	}
 }
 
-// carryAsks takes the asks the unit that a new wiring replaced had
-// read, so the new unit does not send them again.
+// carryAsks copies the requests that the replaced unit had read, so the
+// new unit does not send them again.
 func (u *receiverUnit) carryAsks(replaced *receiverUnit) {
 	u.seen = replaced.seen
 }
 
-// inputAsk runs an ensure or a show (session_ensure.go). An action the
-// session does not know does nothing.
+// inputAsk runs ensure or show (session_ensure.go) for an input request,
+// and ignores any other action.
 func (s *session) inputAsk(ask ReceiverInputAsk) {
-	trigger := fmt.Sprintf("status.session.inputAsk at %s asks %s", ask.At, ask.Action)
+	trigger := fmt.Sprintf("status.session.inputAsk at %s requests %s", ask.At, ask.Action)
 	switch ask.Action {
 	case "ensure":
 		s.ensure(trigger)
@@ -76,27 +78,25 @@ func (s *session) inputAsk(ask ReceiverInputAsk) {
 	}
 }
 
-// pendingVolumeWait is how long a volume ask waits for the receiver to
-// report the volume it was sent before the next ask goes out. A Denon
-// reports within a fraction of a second. A receiver that never reports
-// the volume, such as one whose own limit is below it, releases the
-// next ask after this wait.
+// pendingVolumeWait is the longest that the operator waits for the
+// receiver to report a volume it was sent before it sends the next
+// volume request. The wait needs a limit because a receiver whose own
+// volume limit is below the requested level never reports that level.
 const pendingVolumeWait = time.Second
 
-// volumeAsker holds the newest volume ask the receiver has not been
-// sent. A held key writes an ask for each repeat, and a receiver
-// reports each volume tens of milliseconds after it takes it. A queue
-// would send every step the key passed through, and the receiver would
-// trail the key. So an ask that arrives while another is unsent
-// replaces it, and the receiver goes straight to the newest level.
+// volumeAsker holds the newest volume request that has not been sent.
+// Holding a volume key writes a request for each key repeat. If the
+// operator sent every request, the receiver would step through each
+// level and fall behind the key. So a new request replaces an unsent
+// one, and the receiver goes straight to the newest level.
 type volumeAsker struct {
 	mutex sync.Mutex
 	next  *ReceiverVolumeAsk
-	// replaced counts the asks that the newest one replaced, for its
+	// replaced counts the requests that next replaced, for the log
 	// line.
 	replaced int
-	// wake says that next holds an ask, and reported says that the
-	// receiver reported a volume or a mute.
+	// wake receives a value when next holds a request, and reported
+	// when the receiver reports a volume or a mute.
 	wake     chan struct{}
 	reported chan struct{}
 }
@@ -105,7 +105,7 @@ func newVolumeAsker() *volumeAsker {
 	return &volumeAsker{wake: make(chan struct{}, 1), reported: make(chan struct{}, 1)}
 }
 
-// put makes ask the next one to send.
+// put makes ask the next request to send, in place of any unsent one.
 func (a *volumeAsker) put(ask ReceiverVolumeAsk) {
 	a.mutex.Lock()
 	if a.next != nil {
@@ -113,11 +113,9 @@ func (a *volumeAsker) put(ask ReceiverVolumeAsk) {
 	}
 	a.next = &ask
 	a.mutex.Unlock()
-	poke(a.wake)
+	sendWake(a.wake)
 }
 
-// take answers the next ask and how many asks it replaced, and empties
-// the slot.
 func (a *volumeAsker) take() (*ReceiverVolumeAsk, int) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
@@ -126,11 +124,9 @@ func (a *volumeAsker) take() (*ReceiverVolumeAsk, int) {
 	return ask, replaced
 }
 
-// applyVolumeAsks sends the volume asks one at a time for the life of
-// the unit. Each send waits for the receiver to report the volume and
-// the mute it was sent, or for pendingVolumeWait, before the next one
-// goes out, and the asks that arrive during the wait leave only the
-// newest.
+// applyVolumeAsks sends the volume requests one at a time until ctx
+// ends. After each send it waits in awaitVolume, and of the requests
+// that arrive during the wait it sends only the newest.
 func (u *receiverUnit) applyVolumeAsks(ctx context.Context) {
 	for {
 		select {
@@ -145,21 +141,22 @@ func (u *receiverUnit) applyVolumeAsks(ctx context.Context) {
 	}
 }
 
-// sendVolumeAsk sends one ask as an absolute volume and mute, each only
-// when the receiver reports another value. The level is in the
-// receiver's own scale, and the driver's steps are a whole number of
-// that scale's smallest unit. The media operator holds the level at or
-// below spec.volume.max. The operator holds it at or above zero, and
-// each driver's SetVolume holds it at or below the top of its own scale.
+// sendVolumeAsk sets the receiver to the volume and mute in the
+// request, and sends each one only when the receiver reports a
+// different value. ask.Level is in the receiver's own scale, and
+// stepsFromScale converts it to the nearest whole step of the driver.
+// media-operator keeps the level at or below spec.volume.max,
+// sendVolumeAsk raises a negative level to zero, and each driver's
+// SetVolume lowers a level above the top of its scale to the top.
 func (u *receiverUnit) sendVolumeAsk(ctx context.Context, ask ReceiverVolumeAsk, replaced int) {
 	resolution := u.driver.VolumeResolution()
 	target := max(stepsFromScale(ask.Level, resolution), 0)
-	trigger := fmt.Sprintf("status.session.volumeAsk at %s asks %s and mute %s",
+	trigger := fmt.Sprintf("status.session.volumeAsk at %s requests %s and mute %s",
 		ask.At, volumeWords(equipment.ZoneState{Volume: target}, resolution), onOff(ask.Mute))
 	if replaced > 0 {
-		trigger += fmt.Sprintf(", the newest of %d asks", replaced+1)
+		trigger += fmt.Sprintf(", the newest of %d requests", replaced+1)
 	}
-	drainPokes(u.volumeAsks.reported)
+	drainWakes(u.volumeAsks.reported)
 	reading := mainZone(u.driver.State())
 	var sent []string
 	var words []func(equipment.ZoneState, int) string
@@ -194,10 +191,8 @@ func (u *receiverUnit) sendVolumeAsk(ctx context.Context, ask ReceiverVolumeAsk,
 	u.awaitVolume(ctx, check)
 }
 
-// awaitVolume waits until check passes, which is when the receiver
-// reports what it was sent, or until pendingVolumeWait passes. A
-// receiver whose own limit is below the volume never reports it, and
-// the wait ends on the timer.
+// awaitVolume waits until check passes, which means that the receiver
+// reports what it was sent, or until pendingVolumeWait passes.
 func (u *receiverUnit) awaitVolume(ctx context.Context, check func() (string, bool)) {
 	timer := time.NewTimer(pendingVolumeWait)
 	defer timer.Stop()

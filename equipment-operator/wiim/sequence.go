@@ -1,15 +1,12 @@
-// The order of the writes to the fields that both a poll and an event
-// or a setter write: the volume, the mute, and the play state. A poll
-// reads the player and publishes seconds later, and an event or a
-// setter can write one of these fields in between. So each such write
-// takes a number from one counter. Right before the player read, the
-// poll takes the counter and copies the three fields, and at publish
-// it keeps the held value of a field only when a write after that
-// mark moved it.
-// Every other field takes the poll's read, which is the amp's newest
-// answer, whether or not a subscription is live. An amp sends no event
-// again that the client missed, so a held value with no later write is
-// never trusted over the poll.
+// A poll reads the player over several seconds, and an event or a
+// setter can change the volume, the mute, or the play state while the
+// poll reads. So that the poll does not overwrite the newer value with
+// an older one, each event and setter write takes the next number of
+// c.writes, and the poll records that number before it reads. When the
+// poll publishes, it keeps the client's value of a field only when a
+// write numbered after the poll's mark changed it. Every other field
+// takes the poll's value, because an amp does not resend an event that
+// the client missed.
 
 package wiim
 
@@ -20,22 +17,22 @@ type fieldWrites struct {
 	volume, mute, status uint64
 }
 
-// eventMark answers the number of the last write so far. A poll takes
-// it right before it reads the player.
+// eventMark returns the number of the most recent write.
 func (c *Client) eventMark() uint64 {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	return c.writes
 }
 
-// wrote numbers one write to a field. The caller holds the mutex.
+// wrote gives a write to field the next number. The caller holds
+// c.mutex.
 func (c *Client) wrote(field *uint64) {
 	c.writes++
 	*field = c.writes
 }
 
-// publishSince publishes a poll's state, keeping the held value of
-// each field that a write numbered after mark moved.
+// publishSince publishes a poll's state, keeping the client's current
+// value of each field that a write numbered after mark changed.
 func (c *Client) publishSince(next Status, mark uint64) {
 	c.mutex.Lock()
 	previous := c.state

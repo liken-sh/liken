@@ -1,7 +1,7 @@
 package main
 
-// The handlers of the watches, alone and through client-go's real
-// reflector against the scripted server in watchserver_test.go.
+// Tests of the watch handlers, alone and through client-go's reflector
+// against the scripted server in watchserver_test.go.
 
 import (
 	"context"
@@ -19,8 +19,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// receiverAt is a Receiver at one generation, with a status the
-// operator wrote.
+// receiverAt is a Receiver at one generation, with a status.
 func receiverAt(uid string, generation int64, address string) Receiver {
 	return Receiver{
 		APIVersion: equipmentAPIVersion,
@@ -39,16 +38,15 @@ func displayAt(uid, node, physicalAddress string) Display {
 	return display
 }
 
-// An object converts into the operator's own struct, its embedded
-// status included, and one that does not convert is an error that
-// names it. A tombstone, which the informer hands a handler for an
-// object deleted while the watch was down, converts as the object it
-// holds.
+// An object converts to the operator's struct, embedded status
+// included, and an object that does not convert returns an error that
+// names it. The informer passes a tombstone for an object deleted while
+// the watch was down, and the tombstone converts as the object in it.
 func TestAnObjectThatDoesNotConvertIsAnErrorThatNamesIt(t *testing.T) {
 	good := receiverAt("uid-1", 2, "192.0.2.10")
 	mistyped := asObject(t, good)
 	if err := unstructured.SetNestedField(mistyped.Object, "two", "metadata", "generation"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("setting metadata.generation to a string: %v", err)
 	}
 	cases := []struct {
 		name    string
@@ -74,17 +72,16 @@ func TestAnObjectThatDoesNotConvertIsAnErrorThatNamesIt(t *testing.T) {
 					return
 				}
 				if err == nil || !strings.Contains(err.Error(), c.wantErr) {
-					t.Fatalf("convert error = %v, want one that says %q", err, c.wantErr)
+					t.Fatalf("Convert[Receiver] returned %v, want an error that contains %q", err, c.wantErr)
 				}
 			})
 		})
 	}
 }
 
-// A marked watch wakes the loop for a new object and a removed one, and
-// for an update only when the part the loop reads moved. An object
-// that does not convert wakes it too, because nothing says what
-// changed.
+// A markHandler wakes the loop for a new or removed object, for an
+// update that changes the mark, and for an object that does not
+// convert.
 func TestAMarkedWatchWakesOnlyWhenTheMarkMoves(t *testing.T) {
 	receivers := func(wake chan<- struct{}) cache.ResourceEventHandler {
 		return markHandler[Receiver, specMark]{what: "the Receivers", wake: wake, mark: receiverSpecMark}.handler()
@@ -121,7 +118,7 @@ func TestAMarkedWatchWakesOnlyWhenTheMarkMoves(t *testing.T) {
 		{"a Receiver that does not convert", receivers, func(h cache.ResourceEventHandler) {
 			h.OnUpdate(asObject(t, receiverAt("uid-1", 1, "")), mistyped)
 		}, 1},
-		{"a held copy that did not convert", receivers, func(h cache.ResourceEventHandler) {
+		{"an old copy that did not convert", receivers, func(h cache.ResourceEventHandler) {
 			h.OnUpdate(mistyped, asObject(t, receiverAt("uid-1", 1, "")))
 		}, 1},
 		{"a Display write that keeps its place", displays, func(h cache.ResourceEventHandler) {
@@ -152,10 +149,8 @@ func TestAMarkedWatchWakesOnlyWhenTheMarkMoves(t *testing.T) {
 	}
 }
 
-// Through the reflector: each watch wakes the loop when its first read
-// is done, even a read of an empty collection. The pass can read a
-// collection before the watch does, and an object removed between the
-// two reads is in neither the watch's read nor any event.
+// Through the reflector: each watch wakes the loop when its first list
+// finishes, even for an empty collection (watchCollection's synced).
 func TestEachWatchWakesTheLoopWhenItsFirstReadIsDone(t *testing.T) {
 	const displayAPIVersion = "display.liken.sh/v1alpha1"
 	cases := []struct {
@@ -165,8 +160,8 @@ func TestEachWatchWakesTheLoopWhenItsFirstReadIsDone(t *testing.T) {
 		kind       string
 		watch      watchFunc
 	}{
-		{"the Receivers", receiversPath, equipmentAPIVersion, "Receiver", func(ctx context.Context, client *Client, wake chan<- struct{}, _ func(), held *watchStore) {
-			watchReceivers(ctx, client, wake, nil, testMetrics(t), held)
+		{"the Receivers", receiversPath, equipmentAPIVersion, "Receiver", func(ctx context.Context, client *Client, wake chan<- struct{}, _ func(), store *watchStore) {
+			watchReceivers(ctx, client, wake, nil, testMetrics(t), store)
 		}},
 		{"the Receivers' specs", receiversPath, equipmentAPIVersion, "Receiver", watchReceiverSpecs},
 		{"the CECBuses", cecBusesPath, equipmentAPIVersion, "CECBus", watchCECBuses},
@@ -190,19 +185,18 @@ func TestEachWatchWakesTheLoopWhenItsFirstReadIsDone(t *testing.T) {
 	}
 }
 
-// sharedSpecWake runs the Deployment's shared Receiver watch, and
-// answers its wake of the CECBus loop as the watch's wake.
+// sharedSpecWake runs the Deployment's shared Receiver watch and
+// returns it as a watchFunc whose wake channel is the CECBus loop's.
 func sharedSpecWake(t *testing.T) watchFunc {
-	return func(ctx context.Context, client *Client, wake chan<- struct{}, _ func(), held *watchStore) {
-		watchReceivers(ctx, client, make(chan struct{}, 1), wake, testMetrics(t), held)
+	return func(ctx context.Context, client *Client, wake chan<- struct{}, _ func(), store *watchStore) {
+		watchReceivers(ctx, client, make(chan struct{}, 1), wake, testMetrics(t), store)
 	}
 }
 
-// Through the reflector: a watch that reads only a Receiver's spec
-// wakes the loop for a spec edit and not for a status write, and a
-// watch that reads the whole Receiver wakes it for both. The
-// Deployment's shared watch wakes the CECBus loop as the spec watch
-// does.
+// Through the reflector: the spec watch wakes the loop for a spec edit
+// and not for a status write, and the Receiver loop's watch wakes it for
+// both. The Deployment's shared watch wakes the CECBus loop as the spec
+// watch does.
 func TestAReceiverEventWakesTheLoopThatReadsIt(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -212,8 +206,8 @@ func TestAReceiverEventWakesTheLoopThatReadsIt(t *testing.T) {
 	}{
 		{"a status write, to the spec watch", receiverAt("uid-1", 1, "192.0.2.10"), watchReceiverSpecs, false},
 		{"a spec edit, to the spec watch", receiverAt("uid-1", 2, ""), watchReceiverSpecs, true},
-		{"a status write, to the Receiver loop's watch", receiverAt("uid-1", 1, "192.0.2.10"), func(ctx context.Context, client *Client, wake chan<- struct{}, _ func(), held *watchStore) {
-			watchReceivers(ctx, client, wake, nil, testMetrics(t), held)
+		{"a status write, to the Receiver loop's watch", receiverAt("uid-1", 1, "192.0.2.10"), func(ctx context.Context, client *Client, wake chan<- struct{}, _ func(), store *watchStore) {
+			watchReceivers(ctx, client, wake, nil, testMetrics(t), store)
 		}, true},
 		{"a status write, to the shared watch's CECBus wake", receiverAt("uid-1", 1, "192.0.2.10"), sharedSpecWake(t), false},
 		{"a spec edit, to the shared watch's CECBus wake", receiverAt("uid-1", 2, ""), sharedSpecWake(t), true},
@@ -240,11 +234,11 @@ func TestAReceiverEventWakesTheLoopThatReadsIt(t *testing.T) {
 	}
 }
 
-// Through the reflector: a watch that closes at once makes the
-// reflector read the collection again after its backoff. The informer
-// reports what changed between the two reads, so an edit made while
-// the watch was down wakes the loop, and a status write made in the
-// same time does not.
+// Through the reflector: when a watch closes at once, the reflector
+// lists the collection again after its backoff, and the informer
+// reports the difference between the two lists. So a spec edit made
+// while the watch was down wakes the spec watch's loop, and a status
+// write does not.
 func TestAChangeWhileTheWatchWasDownWakesTheLoopOnlyForAnEdit(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -310,10 +304,9 @@ func TestAWatchThatEndsIsOpenedAgainAndCounted(t *testing.T) {
 	}
 }
 
-// The watches reach the API server the way the Client's own requests
-// do: over TLS that trusts the ServiceAccount's CA, with its token. A
-// CA file that is missing ends the watch at once, with the error in
-// the log.
+// The watches use the Client's credentials: TLS that trusts the
+// ServiceAccount's CA, and its token. When the CA file is missing, the
+// watch returns at once with the error in the log.
 func TestTheWatchesUseTheServiceAccount(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -343,11 +336,10 @@ func TestTheWatchesUseTheServiceAccount(t *testing.T) {
 	})
 }
 
-// A Receiver as the API server sends it converts to the same struct
-// that the Client's own JSON decode gives, so a pass that reads the
-// store acts on what a list would have given it. The API server sends
-// a whole number in a float field as an integer, and the watch decodes
-// it as one.
+// A Receiver from a watch event converts to the same struct as the
+// Client's JSON decode of a list, so a pass that reads the store sees
+// what a list returns. The API server sends a whole number in a float
+// field as an integer, and the watch decodes it as one.
 func TestAReceiverFromTheWatchIsTheReceiverAListGives(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

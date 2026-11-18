@@ -1,9 +1,5 @@
 package main
 
-// The asks in status.session against the fake Denon: each new at sends
-// once, an ask the first pass finds sends nothing, and volume asks that
-// arrive faster than the receiver reports leave only the newest.
-
 import (
 	"fmt"
 	"slices"
@@ -15,22 +11,23 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/denon"
 )
 
-// sessionReceiver is a Denon with an idle session in status.session.
+// sessionReceiver is a Denon Receiver with a session and no requests.
 func sessionReceiver(address string) Receiver {
-	held := testReceiver("theater", address)
-	held.Spec.Volume = &ReceiverVolume{Max: 69.5, Step: 0.5}
-	held.Status.Session = &ReceiverSession{Player: "house/theater", Input: "GAME"}
-	return held
+	receiver := testReceiver("theater", address)
+	receiver.Spec.Volume = &ReceiverVolume{Max: 69.5, Step: 0.5}
+	receiver.Status.Session = &ReceiverSession{Player: "house/theater", Input: "GAME"}
+	return receiver
 }
 
-// askAt is the at of the nth ask, with milliseconds, as the media
-// operator writes it.
+// askAt returns the `at` of the nth request, in the format that
+// media-operator writes.
 func askAt(n int) string {
 	return fmt.Sprintf("2026-10-04T12:15:25.%03dZ", n)
 }
 
-// The ask helpers copy the session, because the fake API encodes the
-// Receiver a test set while the test builds the next one.
+// askingVolume, askingPower, and askingInput copy the session before
+// they change it, because the fake API still serves the Receiver that a
+// test set earlier while the test builds the next one.
 func askingVolume(receiver Receiver, level float64, at string) Receiver {
 	session := *receiver.Status.Session
 	session.VolumeAsk = &ReceiverVolumeAsk{Level: level, At: at}
@@ -52,7 +49,6 @@ func askingInput(receiver Receiver, action, at string) Receiver {
 	return receiver
 }
 
-// passWith sets the one Receiver and runs a pass on it.
 func passWith(t *testing.T, api *fakeAPI, operator *controller, receiver Receiver) {
 	t.Helper()
 	api.setReceivers(receiver)
@@ -75,8 +71,8 @@ func TestANewVolumeAskSendsOnce(t *testing.T) {
 	})
 }
 
-// firstPassAsks are one ask of each kind, each of which sends a command
-// to a receiver that is on and reports another input than GAME.
+// Each request in firstPassAsks would send a command to a receiver that
+// is on and reports an input other than GAME.
 var firstPassAsks = []struct {
 	name string
 	ask  func(Receiver) Receiver
@@ -86,8 +82,8 @@ var firstPassAsks = []struct {
 	{"inputAsk", func(receiver Receiver) Receiver { return askingInput(receiver, "ensure", askAt(1)) }},
 }
 
-// turnedToDVD is a receiver a person turned on and moved to DVD, so
-// every ask in firstPassAsks has a command to send it.
+// turnedToDVD returns a receiver that a person turned on and set to the
+// DVD input with its own remote.
 func turnedToDVD(t *testing.T) *fakeDenon {
 	t.Helper()
 	fake := startFakeDenon(t)
@@ -98,10 +94,9 @@ func turnedToDVD(t *testing.T) *fakeDenon {
 	return fake
 }
 
-// An ask can be older than a turn of the knob, so an ask the operator
-// finds when it starts is recorded and sends nothing, on this pass and
-// on the passes after it.
-func TestAnAskTheFirstPassFindsSendsNothing(t *testing.T) {
+// The operator records a request that it finds on its first pass and
+// never sends it, on that pass or a later one.
+func TestAskFoundOnFirstPassSendsNothing(t *testing.T) {
 	t.Parallel()
 	for _, one := range firstPassAsks {
 		t.Run(one.name, func(t *testing.T) {
@@ -119,9 +114,9 @@ func TestAnAskTheFirstPassFindsSendsNothing(t *testing.T) {
 	}
 }
 
-// The first pass reaches each unit before its driver has connected, so
-// this test hands the rule an ask on a unit that is connected: an ask
-// read while the unit adopts is recorded and sends nothing.
+// On the first pass the driver has not connected yet, so
+// TestAskFoundOnFirstPassSendsNothing does not cover a connected unit.
+// This test gives a connected unit a request while adopting is true.
 func TestAnAskReadWhileAdoptingSendsNothing(t *testing.T) {
 	t.Parallel()
 	for _, one := range firstPassAsks {
@@ -142,25 +137,24 @@ func TestAnAskReadWhileAdoptingSendsNothing(t *testing.T) {
 	}
 }
 
-// volumeCommands keeps the volume sets out of the commands a receiver
-// took, and leaves out the queries.
+// volumeCommands returns the commands that set the volume, without the
+// queries.
 func volumeCommands(commands []string) []string {
 	return slices.DeleteFunc(slices.Clone(commands), func(command string) bool {
 		return !strings.HasPrefix(command, "MV") || strings.HasSuffix(command, "?")
 	})
 }
 
-// holdEchoes makes the receiver apply each volume it is sent and report
-// none of them.
+// holdEchoes makes the fake receiver apply each volume it is sent and
+// not report it.
 func (f *fakeDenon) holdEchoes() {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 	f.holdingEchoes = true
 }
 
-// The receiver reports none of the volumes it takes, so each ask after
-// the first arrives before it answers. The asks that arrive during the
-// wait leave only the newest, and the receiver goes straight to it.
+// The receiver never reports the volumes it applies, so each request
+// after the first arrives while the operator waits for a report.
 func TestVolumeAsksFasterThanTheReceiverSendOnlyTheNewest(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -179,8 +173,9 @@ func TestVolumeAsksFasterThanTheReceiverSendOnlyTheNewest(t *testing.T) {
 	})
 }
 
-// A power ask follows the rules of power: a toggle on a room
-// in standby turns the receiver on and selects the session's input.
+// A power request follows the same rules as spec.power: a toggle while
+// the room is in standby turns the receiver on and selects the
+// session's input.
 func TestAPowerAskTogglesTheRoom(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -195,7 +190,7 @@ func TestAPowerAskTogglesTheRoom(t *testing.T) {
 	})
 }
 
-// An input ask of ensure or show brings a receiver that is on back to
+// An input request of ensure or show sets a receiver that is on back to
 // the session's input.
 func TestAnInputAskEnsuresTheInput(t *testing.T) {
 	t.Parallel()
@@ -215,9 +210,7 @@ func TestAnInputAskEnsuresTheInput(t *testing.T) {
 	}
 }
 
-// A volume ask is absolute, so each part goes out only when the
-// receiver reports another value. The fake receiver starts at volume 50
-// with mute off.
+// The fake receiver starts at volume 50 with mute off.
 func TestAVolumeAskSendsOnlyWhatDiffers(t *testing.T) {
 	cases := []struct {
 		name string
@@ -249,8 +242,8 @@ func TestAVolumeAskSendsOnlyWhatDiffers(t *testing.T) {
 	}
 }
 
-// setCommands drains the commands a receiver took, and leaves out the
-// queries.
+// setCommands returns the commands the fake receiver has received,
+// without the queries, and clears them.
 func setCommands(fake *fakeDenon) []string {
 	var sets []string
 	for {
@@ -265,9 +258,7 @@ func setCommands(fake *fakeDenon) []string {
 	}
 }
 
-// A session that replaces another one, here for a new input, carries
-// the asks of the session before it, and the operator does not send
-// them again.
+// A change of input replaces the session.
 func TestASessionThatReplacesAnotherSendsNoAskAgain(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -285,7 +276,6 @@ func TestASessionThatReplacesAnotherSendsNoAskAgain(t *testing.T) {
 	})
 }
 
-// inputSelectedCondition answers a status's InputSelected condition.
 func inputSelectedCondition(status ReceiverStatus) Condition {
 	for _, condition := range status.Conditions {
 		if condition.Type == inputSelectedConditionType {
@@ -295,8 +285,6 @@ func inputSelectedCondition(status ReceiverStatus) Condition {
 	return Condition{}
 }
 
-// InputSelected follows the input the receiver reports: True on the
-// session's input, and False on any other.
 func TestInputSelectedFollowsTheReportedInput(t *testing.T) {
 	cases := []struct {
 		line   string
@@ -327,8 +315,8 @@ func TestInputSelectedFollowsTheReportedInput(t *testing.T) {
 	}
 }
 
-// A receiver the operator has not reached has no input to compare, so
-// the condition is Unknown and not the verdict of a stale report.
+// Before the operator reaches the receiver there is no input to
+// compare, so InputSelected is Unknown.
 func TestInputSelectedIsUnknownBeforeTheReceiverAnswers(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

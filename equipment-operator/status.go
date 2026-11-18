@@ -1,10 +1,5 @@
 package main
 
-// The status one receiver reports: what it last said, in its own units,
-// the condition that says whether the operator can still reach it, and
-// the condition that names the declared fields the receiver did not
-// confirm.
-
 import (
 	"fmt"
 	"maps"
@@ -17,8 +12,7 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/wiim"
 )
 
-// reachableWords is the reason and the message each verdict carries.
-func reachableWords(status ConditionStatus) (reason, message string) {
+func reachableReasonAndMessage(status ConditionStatus) (reason, message string) {
 	switch status {
 	case ConditionTrue:
 		return reasonConnected, "the receiver answered"
@@ -28,15 +22,16 @@ func reachableWords(status ConditionStatus) (reason, message string) {
 	return reasonConnecting, "the operator has not reached the receiver yet"
 }
 
-// timestamp writes a moment the way the API server holds one.
+// timestamp formats a time as RFC 3339 in UTC, the form the API server
+// stores.
 func timestamp(at time.Time) string {
 	return at.UTC().Format(time.RFC3339)
 }
 
-// reachable builds the condition. It keeps the moment the verdict last
-// changed, so the stamp moves only when the verdict flips.
+// reachable builds the Reachable condition. It keeps the previous
+// lastTransitionTime unless the status changed.
 func reachable(status ConditionStatus, generation int64, previous []Condition, now time.Time) Condition {
-	reason, message := reachableWords(status)
+	reason, message := reachableReasonAndMessage(status)
 	return withTransitionTime(previous, Condition{
 		Type:               reachableConditionType,
 		Status:             status,
@@ -46,10 +41,10 @@ func reachable(status ConditionStatus, generation int64, previous []Condition, n
 	}, now)
 }
 
-// settingsConfirmed builds the condition that names the declared fields
-// the operator stopped sending, because the receiver did not report the
-// declared value after sendLimit sends at that value. It exists
-// only while such a field exists, and it keeps the moment it appeared.
+// settingsConfirmed builds the SettingsConfirmed condition, which lists
+// the fields the operator stopped sending after sendLimit sends. It
+// returns false when there are none, and the status then leaves the
+// condition out.
 func settingsConfirmed(unconfirmed []string, generation int64, previous []Condition, now time.Time) (Condition, bool) {
 	if len(unconfirmed) == 0 {
 		return Condition{}, false
@@ -63,10 +58,9 @@ func settingsConfirmed(unconfirmed []string, generation int64, previous []Condit
 	}, now), true
 }
 
-// buildReceiverStatus is the whole status one receiver's state makes,
-// in the receiver's own units, plus the protocol's own typed snapshot:
-// the Denon settings or the WiiM status, whichever the receiver's
-// protocol block names.
+// buildReceiverStatus builds a receiver's status from its state, in the
+// receiver's own units, with the Denon settings or the WiiM status of
+// the receiver's protocol.
 func buildReceiverStatus(state equipment.State, settings *denon.Settings, wiimStatus *wiim.Status, address string, resolution int, generation int64, previous []Condition, now time.Time) ReceiverStatus {
 	zones := make(map[string]ZoneStatus, len(state.Zones))
 	for name, zone := range state.Zones {
@@ -92,8 +86,7 @@ func buildReceiverStatus(state equipment.State, settings *denon.Settings, wiimSt
 	}
 }
 
-// protocolName is the driver the receiver's protocol block selected,
-// written the way the listing shows it.
+// protocolName returns the value of status.driver.
 func protocolName(settings *denon.Settings, wiimStatus *wiim.Status) string {
 	switch {
 	case wiimStatus != nil:
@@ -104,9 +97,8 @@ func protocolName(settings *denon.Settings, wiimStatus *wiim.Status) string {
 	return ""
 }
 
-// sleepMinutes writes one zone's sleep timer the way the status carries
-// it. A driver that has not reported the timer reads as off, because a
-// zero the receiver never said would read as a real answer.
+// sleepMinutes reports a timer that the driver has not read, a negative
+// value, as 0, which means off.
 func sleepMinutes(minutes int) int {
 	if minutes < 0 {
 		return 0
@@ -114,7 +106,7 @@ func sleepMinutes(minutes int) int {
 	return minutes
 }
 
-// sameStatus answers whether a write would change anything.
+// sameStatus reports whether writing b over a would change nothing.
 func sameStatus(a, b ReceiverStatus) bool {
 	if a.Driver != b.Driver || a.Model != b.Model || a.Manufacturer != b.Manufacturer || a.SettledPower != b.SettledPower || !maps.Equal(a.SettledSettings, b.SettledSettings) || !reflect.DeepEqual(a.Denon, b.Denon) ||
 		!reflect.DeepEqual(a.Wiim, b.Wiim) ||
@@ -122,8 +114,8 @@ func sameStatus(a, b ReceiverStatus) bool {
 		return false
 	}
 	for name, zone := range a.Zones {
-		other, held := b.Zones[name]
-		if !held || zone != other {
+		other, found := b.Zones[name]
+		if !found || zone != other {
 			return false
 		}
 	}

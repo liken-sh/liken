@@ -1,10 +1,8 @@
 package main
 
-// The node workload and a Television: the power that follows the bus,
-// the command that applies each generation of spec.power once, the
-// readback that confirms it, and which adapter of a bus sends it.
-// cecnode_test.go holds the adapter fixtures, and cecnode_power_test.go
-// holds the cases where an application meets a change, a failure, or a
+// Tests of the node workload's handling of a Television. The adapter
+// fixtures are in cecnode_test.go, and cecnode_power_test.go tests an
+// application of spec.power that meets a spec change, a failure, or a
 // restart.
 
 import (
@@ -16,21 +14,20 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/cec/cectest"
 )
 
-// roomWithTV is the room's wire with the TV replaced by one in the
-// given state.
-func roomWithTV(tv cectest.Peer) *cectest.Bus {
-	wire := cecRoom()
+// busWithTV returns the bus of fakeCECBus with tv in place of its TV.
+func busWithTV(tv cectest.Peer) *cectest.Bus {
+	wire := fakeCECBus()
 	wire.Add(tv)
 	return wire
 }
 
-// lounge is a person's Television on the den bus.
+// lounge is a declared Television on the den bus.
 func lounge(power TelevisionPower) Television {
 	return Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}, Power: power}}
 }
 
-// controlling runs the node workload for node-1 on a bus in Control
-// with one Television, until the test ends.
+// controlling runs the node workload for node-1 until the test ends, on
+// a bus in Control mode with one Television.
 func controlling(t *testing.T, wire *cectest.Bus, television Television) *cecAPI {
 	t.Helper()
 	api := startCECAPI(t)
@@ -42,7 +39,8 @@ func controlling(t *testing.T, wire *cectest.Bus, television Television) *cecAPI
 	return api
 }
 
-// sentOf counts the messages on the wire with one opcode.
+// sentOf counts the messages with the opcode sent on the wire, not
+// counting polls.
 func sentOf(wire *cectest.Bus, opcode cec.Opcode) int {
 	count := 0
 	for _, message := range wire.Sent() {
@@ -53,27 +51,27 @@ func sentOf(wire *cectest.Bus, opcode cec.Opcode) int {
 	return count
 }
 
-// mustCommandTheTVAlone fails the test when a power command went to
-// any address but the TV's. A broadcast Standby would put the receiver
-// and every source in standby too.
+// mustCommandTheTVAlone fails the test when a power command went to an
+// address other than the TV's. A broadcast Standby would also put the
+// receiver and every source in standby.
 func mustCommandTheTVAlone(t *testing.T, wire *cectest.Bus) {
 	t.Helper()
 	for _, message := range wire.Sent() {
 		opcode, _ := message.Opcode()
 		if !message.IsPoll() && (opcode == cec.OpImageViewOn || opcode == cec.OpStandby) && message.To != cec.AddressTV {
-			t.Errorf("a power command went to address %d: %v", message.To, message)
+			t.Errorf("a power command went to address %d, want only the TV at address %d: %v", message.To, cec.AddressTV, message)
 		}
 	}
 }
 
-// televisionTV is the room's TV at a power.
+// televisionTV returns the TV of fakeCECBus with the given power.
 func televisionTV(power cec.PowerStatus) cectest.Peer {
 	return cectest.Peer{Logical: 0, Physical: 0x0000, PrimaryType: 0, OSDName: "TV", Vendor: 0x00e091, Version: cec.Version14, Power: power}
 }
 
-// appliedAt waits until the node workload recorded a generation of a
-// Television as applied. An application ends after cecPowerSends
-// windows at the most.
+// appliedAt waits until the node workload records a generation of the
+// Television as applied. An application takes at most cecPowerSends
+// windows.
 func appliedAt(t *testing.T, api *cecAPI, name string, generation int64) Television {
 	t.Helper()
 	return api.waitForTelevisionWithin(t, name, time.Duration(cecPowerSends)*cecPowerWindow+testTimeout, func(television Television) bool {
@@ -89,8 +87,8 @@ func TestTheAdapterAppliesThePowerAndConfirmsIt(t *testing.T) {
 	}
 	ignoring := televisionTV(cec.PowerStandby)
 	ignoring.Ignore = 1
-	// A TV whose transition lasts longer than one window of reads is on
-	// its way, and it gets no second command.
+	// A TV that still reports a transition after one window of reads is
+	// changing state, so the adapter sends no second command.
 	slower := televisionTV(cec.PowerStandby)
 	slower.Transition = 15
 	cases := []struct {
@@ -102,24 +100,24 @@ func TestTheAdapterAppliesThePowerAndConfirmsIt(t *testing.T) {
 		message string
 	}{
 		{"a wake", televisionTV(cec.PowerStandby), TelevisionOn, cec.OpImageViewOn, 1,
-			"the TV reported On after the adapter on node-1 sent Image View On once"},
+			"The TV reported On after the adapter on node-1 sent Image View On once"},
 		{"a standby", televisionTV(cec.PowerOn), TelevisionStandby, cec.OpStandby, 1,
-			"the TV reported Standby after the adapter on node-1 sent Standby once"},
+			"The TV reported Standby after the adapter on node-1 sent Standby once"},
 		{"a TV that reports the transition first", slow(cec.PowerStandby), TelevisionOn, cec.OpImageViewOn, 1,
-			"the TV reported On after the adapter on node-1 sent Image View On once"},
+			"The TV reported On after the adapter on node-1 sent Image View On once"},
 		{"a TV whose transition outlasts a window", slower, TelevisionOn, cec.OpImageViewOn, 1,
-			"the TV reported On after the adapter on node-1 sent Image View On once"},
+			"The TV reported On after the adapter on node-1 sent Image View On once"},
 		{"a TV that drops the first command", ignoring, TelevisionOn, cec.OpImageViewOn, 2,
-			"the TV reported On after the adapter on node-1 sent Image View On 2 times"},
+			"The TV reported On after the adapter on node-1 sent Image View On 2 times"},
 		{"a TV already in the state", televisionTV(cec.PowerOn), TelevisionOn, cec.OpImageViewOn, 0,
-			"the TV already reported On, so the adapter on node-1 sent no command"},
+			"The TV already reported On, so the adapter on node-1 sent no command"},
 	}
 	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
-				wire := roomWithTV(c.tv)
+				wire := busWithTV(c.tv)
 
 				api := controlling(t, wire, lounge(c.power))
 
@@ -141,7 +139,7 @@ func TestATVThatNeverReportsTheStateIsUnconfirmed(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		stubborn := televisionTV(cec.PowerStandby)
 		stubborn.Ignore = 10
-		wire := roomWithTV(stubborn)
+		wire := busWithTV(stubborn)
 
 		api := controlling(t, wire, lounge(TelevisionOn))
 
@@ -149,34 +147,34 @@ func TestATVThatNeverReportsTheStateIsUnconfirmed(t *testing.T) {
 		applied := conditionOf(television.Status.Conditions, conditionPowerApplied)
 		mustMatch(t, applied.Status, ConditionFalse)
 		mustMatch(t, applied.Reason, reasonUnconfirmed)
-		mustMatch(t, applied.Message, "the adapter on node-1 sent Image View On 3 times, and the TV last reported Standby")
+		mustMatch(t, applied.Message, "The adapter on node-1 sent Image View On 3 times, and the TV last reported Standby")
 		mustMatch(t, sentOf(wire, cec.OpImageViewOn), 3)
 	})
 }
 
 // A TV that does not acknowledge the command is unconfirmed, and the
-// message gives the kernel's words for the last transmit.
+// message includes the kernel's status for the last transmit.
 func TestATVThatIsGoneBeforeTheCommandIsUnconfirmed(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := cecRoom()
+		wire := fakeCECBus()
 		wire.Remove(0)
 
 		api := controlling(t, wire, lounge(TelevisionOn))
 
 		television := appliedAt(t, api, "lounge", 1)
 		mustMatch(t, conditionOf(television.Status.Conditions, conditionPowerApplied).Message,
-			"the adapter on node-1 sent Image View On 3 times, and the TV did not answer Give Device Power Status; the TV did not acknowledge the last command: NACK MAX_RETRIES")
+			"The adapter on node-1 sent Image View On 3 times, and the TV did not answer Give Device Power Status. The TV did not acknowledge the last command: NACK MAX_RETRIES")
 	})
 }
 
 // Only the first adapter in spec.adapters that holds a logical address
 // sends the bus's commands, so the TV gets one command and not one from
 // each adapter.
-func TestOneAdapterSendsTheBussCommands(t *testing.T) {
+func TestOnlyOneAdapterSendsTheBusCommands(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerStandby))
+		wire := busWithTV(televisionTV(cec.PowerStandby))
 		api := startCECAPI(t)
 		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
 		api.putDisplay("bnq-0002-monitor", "node-2", "1.4.0.0")
@@ -206,7 +204,7 @@ func TestABusInListenSendsNoPowerCommand(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		wire := roomWithTV(televisionTV(cec.PowerStandby))
+		wire := busWithTV(televisionTV(cec.PowerStandby))
 		_, device := usbAdapter(wire)
 		api.putBus(CECBus{Metadata: ObjectMeta{Name: "den"}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-1"}}}})
 		api.putTelevision(lounge(TelevisionOn))
@@ -216,16 +214,17 @@ func TestABusInListenSendsNoPowerCommand(t *testing.T) {
 		time.Sleep(10 * cecPowerWindow)
 
 		if sent := wire.Sent(); len(sent) != 0 {
-			t.Errorf("a listening adapter sent %v", sent)
+			t.Errorf("a listening adapter sent %v, want no messages", sent)
 		}
 		television, _ := api.television("lounge")
 		mustMatch(t, television.Status.PowerGeneration, int64(0))
 	})
 }
 
-// No timer asks the TV for its power. A TV that a person turns on or
-// off with its own remote shows in the entry through what the TV sends
-// the bus: a broadcast Standby, or a Routing Change of a TV that is on.
+// No timer reads the TV's power. When a person turns the TV on or off
+// with its own remote, the entry changes because of what the TV sends
+// on the bus: a broadcast Standby, or a Routing Change from a TV that is
+// on.
 func TestTheTVsPowerFollowsItsBroadcasts(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -241,7 +240,7 @@ func TestTheTVsPowerFollowsItsBroadcasts(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
-				wire := roomWithTV(televisionTV(c.held))
+				wire := busWithTV(televisionTV(c.held))
 				api := controlling(t, wire, lounge(""))
 				api.scanned(t, "node-1")
 				sent := len(wire.Sent())
@@ -257,14 +256,15 @@ func TestTheTVsPowerFollowsItsBroadcasts(t *testing.T) {
 	}
 }
 
-// A cluster without the Television definition still runs the bus: the
-// node workload reads the missing collection as empty.
+// A cluster without the Television CustomResourceDefinition still runs
+// the bus, because the node workload treats the missing collection as
+// empty.
 func TestTheNodeWorkloadRunsWithoutTheTelevisionDefinition(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
 		api.noTelevisionDefinition = true
-		_, device := usbAdapter(cecRoom())
+		_, device := usbAdapter(fakeCECBus())
 		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
 		api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
 

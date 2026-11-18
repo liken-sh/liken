@@ -1,8 +1,6 @@
 package main
 
-// The node workload in Control: the join, the scan, the answers a
-// follower owes, and what the entry says when the adapter cannot join.
-// cecnode_test.go holds the fixtures.
+// The node workload in Control mode. cecnode_test.go has the fixtures.
 
 import (
 	"slices"
@@ -17,7 +15,7 @@ func TestAControllingAdapterJoinsAndScans(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		wire := cecRoom()
+		wire := fakeCECBus()
 		adapter, device := usbAdapter(wire)
 		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
 		api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
@@ -41,7 +39,7 @@ func TestAControllingAdapterAnswersTheTV(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		wire := cecRoom()
+		wire := fakeCECBus()
 		_, device := usbAdapter(wire)
 		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
 		api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
@@ -51,8 +49,8 @@ func TestAControllingAdapterAnswersTheTV(t *testing.T) {
 		wire.Send(cec.GiveDevicePowerStatus(0, 4))
 		wire.Send(cec.NewMessage(0, 4, cec.OpMenuRequest, 0x02))
 
-		// No Player's session holds the room awake, so the adapter has no
-		// picture and reports Standby.
+		// No Player has a session that keeps the TV on, so the adapter
+		// has no picture to show and reports Standby.
 		want := []string{
 			cec.ReportPowerStatus(4, 0, cec.PowerStandby).String(),
 			cec.FeatureAbort(4, 0, cec.OpMenuRequest, cec.AbortUnrecognizedOpcode).String(),
@@ -85,7 +83,7 @@ func TestAControllingAdapterWaitsForItsDisplaysAddress(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
 				api := startCECAPI(t)
-				wire := cecRoom()
+				wire := fakeCECBus()
 				_, device := usbAdapter(wire)
 				c.display(api)
 				api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
@@ -95,20 +93,21 @@ func TestAControllingAdapterWaitsForItsDisplaysAddress(t *testing.T) {
 				entry := api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterJoining })
 				mustMatch(t, entry.Message, c.message)
 				if entry.LogicalAddress != nil || len(wire.Sent()) != 0 {
-					t.Errorf("an adapter with no address joined: %+v, sent %v", entry, wire.Sent())
+					t.Errorf("the adapter has logical address %v and sent %v, want no address and nothing sent (entry %+v)", entry.LogicalAddress, wire.Sent(), entry)
 				}
 			})
 		})
 	}
 }
 
-// An adapter on a video port keeps its own port's address, and the
-// entry says that it differs from the Display's.
+// An adapter whose driver sets its own physical address, as one on a
+// video port does, keeps that address, and its entry's message reports
+// that it differs from the Display's address.
 func TestAnAdapterThatKeepsItsOwnAddressSaysSo(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		_, device := cecRoom().Adapter(cectest.Options{Physical: 0x2000, Capabilities: cec.CapLogAddrs | cec.CapTransmit})
+		_, device := fakeCECBus().Adapter(cectest.Options{Physical: 0x2000, Capabilities: cec.CapLogAddrs | cec.CapTransmit})
 		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
 		api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
 
@@ -124,7 +123,7 @@ func TestAnAdapterWithNoFreePlaybackAddressSaysSo(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		wire := cecRoom()
+		wire := fakeCECBus()
 		for _, address := range []cec.LogicalAddress{4, 8, 11} {
 			wire.Add(cectest.Peer{Logical: address, Physical: 0x2000, PrimaryType: 4})
 		}
@@ -143,7 +142,7 @@ func TestAModeChangeReconfiguresTheAdapter(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		adapter, device := usbAdapter(cecRoom())
+		adapter, device := usbAdapter(fakeCECBus())
 		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
 		api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
 		startNode(t, api, "node-1", device)
@@ -153,18 +152,18 @@ func TestAModeChangeReconfiguresTheAdapter(t *testing.T) {
 
 		api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterListening })
 		if held := adapter.Logical(); len(held) != 0 {
-			t.Errorf("a listening adapter still holds %v", held)
+			t.Errorf("the listening adapter holds logical addresses %v, want none", held)
 		}
 	})
 }
 
-// When the kernel takes the adapter's addresses away, the node
-// workload configures the adapter again and joins once more.
+// When the kernel clears the adapter's addresses, the node workload
+// configures the adapter again and joins again.
 func TestAnAdapterThatLosesItsAddressJoinsAgain(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		adapter, device := usbAdapter(cecRoom())
+		adapter, device := usbAdapter(fakeCECBus())
 		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
 		api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
 		startNode(t, api, "node-1", device)
@@ -183,7 +182,7 @@ func TestAnAdapterThatLosesItsAddressJoinsAgain(t *testing.T) {
 func TestADisplayNameIsWhatControlNeedsFirst(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		_, device := usbAdapter(cecRoom())
+		_, device := usbAdapter(fakeCECBus())
 		node, err := newCECNode(startCECAPI(t).client, testNamespace, "node-1", device)
 		mustSucceed(t, err)
 
@@ -193,8 +192,8 @@ func TestADisplayNameIsWhatControlNeedsFirst(t *testing.T) {
 	})
 }
 
-// In Control the adapter announces the bus's spec.osdName, which the
-// TV lists as the source's name, and liken for a bus that names none.
+// In Control mode the adapter announces the bus's spec.osdName, which
+// the TV shows as the source name, or liken when the bus sets none.
 func TestAControllingAdapterAnnouncesTheBusesOSDName(t *testing.T) {
 	cases := []struct {
 		osdName string
@@ -209,7 +208,7 @@ func TestAControllingAdapterAnnouncesTheBusesOSDName(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
 				api := startCECAPI(t)
-				_, device := usbAdapter(cecRoom())
+				_, device := usbAdapter(fakeCECBus())
 				api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
 				bus := controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"})
 				bus.Spec.OSDName = c.osdName
@@ -227,14 +226,13 @@ func TestAControllingAdapterAnnouncesTheBusesOSDName(t *testing.T) {
 	}
 }
 
-// A new spec.osdName changes the name the adapter announces. The
-// kernel takes the name only with a claim, so the adapter claims its
-// logical address again under the new name.
+// The kernel accepts a new OSD name only as part of a claim, so a new
+// spec.osdName makes the adapter claim its logical address again.
 func TestANewOSDNameClaimsUnderIt(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		adapter, device := usbAdapter(cecRoom())
+		adapter, device := usbAdapter(fakeCECBus())
 		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
 		api.putBus(controlBus("lounge", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
 		startNode(t, api, "node-1", device)
@@ -250,16 +248,16 @@ func TestANewOSDNameClaimsUnderIt(t *testing.T) {
 		})
 		mustMatch(t, entry.OSDName, "Lounge TV")
 		if adapter.Claims() <= claims {
-			t.Errorf("the adapter announces a new name with no new claim")
+			t.Errorf("the adapter has made %d claims after the rename, want more than the %d before it", adapter.Claims(), claims)
 		}
 	})
 }
 
-// The kernel keeps a claim after the pod that made it stops without a
-// release, such as a pod the kubelet killed. A new pod that finds the
-// claim it would make keeps it, because a release and a claim take the
-// adapter off the bus and back, and the TV sees its source leave. A
-// claim under another name is made again.
+// The kernel keeps a claim after the pod that made it is killed. A new
+// pod keeps a claim identical to the one it would make, because a
+// release and a new claim would take the adapter off the bus and the TV
+// would show the source leaving. A claim that differs in name or
+// passthrough is made again.
 func TestAClaimTheKernelHoldsIsKeptWhenItMatches(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -276,7 +274,7 @@ func TestAClaimTheKernelHoldsIsKeptWhenItMatches(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
 				api := startCECAPI(t)
-				adapter, device := usbAdapter(cecRoom())
+				adapter, device := usbAdapter(fakeCECBus())
 				mustSucceed(t, device.Follow())
 				mustSucceed(t, device.SetPhysicalAddress(0x1300))
 				mustSucceed(t, device.Claim(c.held))

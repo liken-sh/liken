@@ -1,6 +1,6 @@
-# One PodMonitor for the operator pod. The pod runs on no particular
-# node, so the target's own node label is the interesting one for a
-# cross-fleet dashboard, and the relabeling below is what puts it there.
+# Scrapes the Deployment's pod. The cec DaemonSet's pods have no
+# metrics port. The relabeling adds the pod's node name as the label
+# node, because the pod can run on any node.
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:

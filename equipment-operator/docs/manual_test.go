@@ -1,8 +1,7 @@
-// Package docs holds the manual's own tests. The site's internal
-// links resolve at authoring time: brand's linkcheck walks the
-// content tree and checks every link against the headings it
-// targets, so a broken deep link fails `make test` in this
-// repository instead of on the served site.
+// Package docs tests the manual. Its test fails when a link between
+// pages of the manual points to a page or a heading that does not
+// exist, so a broken link shows up in `make test` and not on the
+// published site.
 package docs
 
 import (
@@ -11,9 +10,8 @@ import (
 	"github.com/liken-sh/liken/brand/linkcheck"
 )
 
-// exceptions are the absolute links no content file answers for.
-// Each one is served by the site anyway: the deploy manifests
-// publish through a module mount in hugo.yaml.
+// exceptions are links to files that are not in content/. The site
+// serves them because hugo.yaml mounts ../deploy at static/deploy.
 var exceptions = []string{
 	"/deploy/kustomization.yaml",
 	"/deploy/receivers-crd.yaml",

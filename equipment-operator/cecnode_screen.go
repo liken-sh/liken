@@ -1,25 +1,23 @@
 package main
 
-// The asks the node workload hears on the bus for the Player's screen.
-// A Player's screen wakes and sleeps in media-operator, so the node
-// workload writes each ask in the Television's status.screenAsk.
-// media-operator watches the Television objects and relays each new ask
-// to the Player's screen client, which wakes or sleeps as a press would
-// make it. The session then follows the screen, and the node workload
-// acts on the session as it does for any other wake or sleep.
+// The TV can request that the Player's screen wake or sleep.
+// media-operator controls that screen, so the node workload writes the
+// request to the Television's status.screenAsk. media-operator passes
+// each new request to the Player's screen client, which acts on it as on
+// a key press. The session then wakes or sleeps, and the node workload
+// follows the session as it does for any other wake or sleep.
 //
-// Two messages ask. The TV sends Set Stream Path for the Display when
-// a person picks the Player's input in the TV's source menu, and the
-// Player's session sleeps: HDMI-CEC 1.3a, CEC 13.2.2, says the device
-// at that address comes out of standby and, when it has stable video,
-// broadcasts Active Source. The adapter has no picture until the
-// screen wakes, so it sends nothing yet; the wake that the woken
-// session starts sends Active Source (cecnode_source.go). And the TV
-// sends Standby when a person turns it off, while the session holds the
-// room awake: the room goes dark with the TV, so the Player's screen
-// sleeps too. CEC 13.3.2 allows a device to ignore Standby, and liken
-// follows it because a screen that stays awake behind a TV in standby
-// holds the receiver and the room awake for no one.
+// A Set Stream Path for the Display's address requests a wake. The TV
+// sends it when a person selects the Player's input in the TV's source
+// menu while the session sleeps. HDMI-CEC 1.3a, CEC 13.2.2, says the
+// device at that address leaves standby and broadcasts Active Source
+// once it has stable video. The Display has no picture until the screen
+// wakes, so the adapter sends Active Source in the wake that follows
+// (cecnode_source.go).
+//
+// A Standby while the session is awake requests a sleep. CEC 13.3.2 lets
+// a device ignore Standby, but a screen left awake while the TV is in
+// standby keeps the receiver on with nobody watching.
 
 import (
 	"fmt"
@@ -30,98 +28,92 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// streamPick is the TV's Set Stream Path for the Display that asked a
-// sleeping session's screen to wake, and when the adapter heard it.
-type streamPick struct {
+// streamPathRequest records a Set Stream Path from the TV for the Display
+// of a sleeping session, and the time the adapter received it.
+type streamPathRequest struct {
 	physical cec.PhysicalAddress
 	at       time.Time
 }
 
-// screenAskRecord is one ask the API server has not accepted yet, and
-// the Television it belongs to.
-type screenAskRecord struct {
+// unwrittenScreenAsk is a request that writeScreenAsk has not written yet,
+// and the Television it is for.
+type unwrittenScreenAsk struct {
 	television string
 	ask        TelevisionScreenAsk
 }
 
-// askScreen records an ask of the room's Player's screen, writes its
-// line, and asks the loop for a pass, which writes it. It runs on the
-// read loop, so the write waits for the pass: an API call here would
-// hold every message behind it, and a follower answers within one
-// second (CEC 9.2).
-func (n *cecNode) askScreen(room *roomHold, screen, heard, words string) {
+// queueScreenAsk runs on the CEC read loop, so it only stores the
+// request and wakes the reconcile loop, whose next pass writes it. An API call here
+// would delay every message received after it, and HDMI-CEC 1.3a, CEC
+// 9.2, gives a follower one second to answer.
+func (n *cecNode) queueScreenAsk(room *displaySession, screen, heard, words string) {
 	ask := TelevisionScreenAsk{At: n.now().UTC().Format(wakeTimeLayout), Player: room.player, Screen: screen, Cause: heard}
 	n.mutex.Lock()
-	n.screenAsk = &screenAskRecord{television: room.television, ask: ask}
+	n.screenAsk = &unwrittenScreenAsk{television: room.television, ask: ask}
 	n.mutex.Unlock()
 	fmt.Fprintf(n.log, "Television %s: %s; %s\n", room.television, heard, words)
-	poke(n.wake)
+	sendWake(n.wake)
 }
 
-// pickDisplay answers the TV's Set Stream Path for the Display of a
-// session that sleeps: the adapter records the pick and asks the
-// Player's screen to wake. It sends no Active Source now, because the
-// Display has no picture until the screen wakes.
-func (n *cecNode) pickDisplay(asked string, room *roomHold) {
+// recordStreamPath records a Set Stream Path for the Display of a sleeping
+// session and requests a screen wake.
+func (n *cecNode) recordStreamPath(asked string, room *displaySession) {
 	n.mutex.Lock()
-	n.picked = &streamPick{physical: room.physical, at: n.now()}
+	n.streamPath = &streamPathRequest{physical: room.physical, at: n.now()}
 	n.mutex.Unlock()
-	n.askScreen(room, screenWake, asked, fmt.Sprintf(
+	n.queueScreenAsk(room, screenWake, asked, fmt.Sprintf(
 		"Player %s's session is asleep, so the adapter on %s asked the Player's screen to wake, and sends Active Source for %s when the session wakes",
 		room.player, n.machine, room.physical))
 }
 
-// takePick answers whether the wake about to claim the input answers
-// the TV's own pick of the Display, and forgets the pick. The pick
-// counts only while the route still leads to the Display and for
-// cecWakeFresh after the adapter heard it: a TV that a person turned
-// off since then with its own remote can send nothing the adapter
-// hears, and a wake long after must send Image View On to reach it.
-func (n *cecNode) takePick(physical cec.PhysicalAddress) bool {
+// consumeStreamPath reports whether the wake about to claim the input follows
+// the TV's own selection of the Display, and clears the record. When it
+// returns true, claimSource sends Active Source without Image View On.
+// The selection counts only while the bus route still leads to the
+// Display and for cecWakeFresh after it arrived. Later than that, a
+// person may have turned the TV off with its own remote, and the adapter
+// may have received no message about it, so the wake sends Image View On
+// as well.
+func (n *cecNode) consumeStreamPath(physical cec.PhysicalAddress) bool {
 	n.mutex.Lock()
 	defer n.mutex.Unlock()
-	picked := n.picked
-	n.picked = nil
-	return picked != nil && picked.physical == physical && n.route.address == physical && n.now().Sub(picked.at) <= cecWakeFresh
+	request := n.streamPath
+	n.streamPath = nil
+	return request != nil && request.physical == physical && n.route.address == physical && n.now().Sub(request.at) <= cecWakeFresh
 }
 
-// pickPending answers whether the TV picked the Display and the screen
-// has not woken yet, which the adapter reports as its power moving from
+// streamPathPending reports whether the TV selected the Display and the
+// screen has not woken yet. ownPower reports that time as In transition
 // Standby to On.
-func (n *cecNode) pickPending() bool {
+func (n *cecNode) streamPathPending() bool {
 	n.mutex.Lock()
 	defer n.mutex.Unlock()
-	return n.picked != nil && n.route.address == n.picked.physical && n.now().Sub(n.picked.at) <= cecWakeFresh
+	return n.streamPath != nil && n.route.address == n.streamPath.physical && n.now().Sub(n.streamPath.at) <= cecWakeFresh
 }
 
-// ownPower is the power the adapter reports for itself in Report Power
-// Status (HDMI-CEC 1.3a, CEC 13.14). The machine never sleeps, but a
-// playback device with no picture is in standby to the TV, and a TV
-// that asks the power of its sources, such as for its source list,
-// reads On as a source it can show. So the adapter reports On while a
-// Player's session holds the room awake on its Display, In transition
-// Standby to On from the TV's pick of a sleeping session's Display
-// until the screen wakes, and Standby otherwise.
+// ownPower is the power status that the adapter sends in Report Power
+// Status (HDMI-CEC 1.3a, CEC 13.14). The machine never sleeps, but a TV
+// that queries its sources, for example to build its source list, treats
+// a source that reports On as one with a picture to show. So the adapter
+// reports On only while a Player's session is awake on its Display.
 func (n *cecNode) ownPower() cec.PowerStatus {
 	n.mutex.Lock()
-	awake := n.room != nil
+	awake := n.awake != nil
 	n.mutex.Unlock()
 	switch {
 	case awake:
 		return cec.PowerOn
-	case n.pickPending():
+	case n.streamPathPending():
 		return cec.PowerToOn
 	}
 	return cec.PowerStandby
 }
 
-// sleepOnStandby asks the Player's screen to sleep for a Standby that
-// reaches the room while its session holds the room awake. A Standby
-// from the TV counts when it is broadcast or directed to this adapter.
-// A Standby from any other device counts only when it is broadcast,
-// because a broadcast Standby puts the whole system in standby (CEC
-// 13.3.2), and a directed one from a device that is not the TV asks
-// nothing a person asked of this room.
+// sleepOnStandby requests a screen sleep when a Standby arrives while
+// the session is awake. It acts on a Standby from the TV that is
+// broadcast or addressed to this adapter. From any other device it acts
+// only on a broadcast Standby, because a broadcast Standby puts the
+// whole system in standby (CEC 13.3.2).
 func (n *cecNode) sleepOnStandby(message cec.Message, from cec.Peer, own cec.LogicalAddress) {
 	opcode, _ := message.Opcode()
 	if opcode != cec.OpStandby || message.IsPoll() || message.From == own {
@@ -129,7 +121,7 @@ func (n *cecNode) sleepOnStandby(message cec.Message, from cec.Peer, own cec.Log
 	}
 	reaches := message.IsBroadcast() || (message.To == own && message.From == cec.AddressTV)
 	n.mutex.Lock()
-	room := n.room
+	room := n.awake
 	n.mutex.Unlock()
 	if !reaches || room == nil {
 		return
@@ -139,14 +131,16 @@ func (n *cecNode) sleepOnStandby(message cec.Message, from cec.Peer, own cec.Log
 	if !message.IsBroadcast() {
 		sender = "sent the adapter"
 	}
-	n.askScreen(room, screenSleep, fmt.Sprintf("%s %s %s", heardSender(from), sender, words), fmt.Sprintf(
+	n.queueScreenAsk(room, screenSleep, fmt.Sprintf("%s %s %s", heardSender(from), sender, words), fmt.Sprintf(
 		"the room goes to standby with the TV, so the adapter on %s asked Player %s's screen to sleep",
 		n.machine, room.player))
 }
 
-// writeScreenAsk writes an ask the API server has not accepted yet on
-// the bus's Television. An ask for a Television that is gone, or no
-// longer the bus's, is dropped: the Player it named left the room.
+// writeScreenAsk writes the stored request to the bus's Television. It
+// drops the request when its Television was deleted or is no longer the
+// bus's, and when the apply returns a conflict, which happens when a new
+// object of the same name replaced the Television, because the apply
+// sets metadata.uid. Any other error keeps the request and retries.
 func (n *cecNode) writeScreenAsk(television *Television) {
 	n.mutex.Lock()
 	record := n.screenAsk
@@ -159,7 +153,7 @@ func (n *cecNode) writeScreenAsk(television *Television) {
 		err = ApplyTelevisionScreenAsk(n.client, television, n.machine, record.ask)
 	}
 	if err != nil && err != apiclient.ErrNotFound && err != apiclient.ErrConflict {
-		fmt.Fprintf(os.Stderr, "writing the screen ask of Television %s: %v\n", record.television, err)
+		fmt.Fprintf(os.Stderr, "writing the screen request of Television %s: %v\n", record.television, err)
 		n.retryLater()
 		return
 	}

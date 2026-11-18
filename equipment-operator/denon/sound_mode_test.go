@@ -1,8 +1,5 @@
 package denon
 
-// The sound mode compare: a declared mode against the mode the
-// receiver reports.
-
 import "testing"
 
 func TestSameSoundModeMatchesTheReportForTheDeclaredFamily(t *testing.T) {

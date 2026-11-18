@@ -1,7 +1,6 @@
-// The fake receiver the client tests run against. It holds the state a
-// real AVR holds, answers the five queries the way the AVR-X1700H
-// answered them, echoes every set as an event, and can turn its own
-// knob or drop the connection.
+// The fake receiver that the client tests run against. It keeps the
+// state of a receiver and responds to commands and queries as an
+// AVR-X1700H does.
 
 package denon
 
@@ -14,9 +13,9 @@ import (
 	"time"
 )
 
-// The lines the real receiver volunteered after the queries, which this
-// operator reads none of.
-var noiseLines = []string{"SVOFF", "PSDRC OFF", "PSLFE 00"}
+// The lines that an AVR-X1700H sends after the sound mode, in response
+// to an MS? query.
+var soundModeExtraLines = []string{"SVOFF", "PSDRC OFF", "PSLFE 00"}
 
 type fakeReceiver struct {
 	listening string
@@ -33,15 +32,16 @@ type fakeReceiver struct {
 	conns     []net.Conn
 }
 
-// hdmiKeys are the HDMI setup keys the fake holds, in the order the
-// AVR-X1700H answers SSHOS ?. VSAUDIO is its own query.
+// hdmiKeys are the HDMI setup keys the fake keeps, in the order that
+// an AVR-X1700H responds to SSHOS ?. VSAUDIO is a separate query.
 var hdmiKeys = []string{
 	"SSHOSCONARC", "SSHOSCONPSV", "SSHOSRSS", "SSHOSCON", "SSHOSCONSTS",
 	"SSHOSCONPOF", "SSHOSPAS", "SSHOSTAS",
 }
 
-// houseHDMI is what the AVR-X1700H answered to VSAUDIO ? and SSHOS ?.
-func houseHDMI() map[string]string {
+// avrHDMISettings returns the values that an AVR-X1700H returned for
+// VSAUDIO ? and SSHOS ?.
+func avrHDMISettings() map[string]string {
 	return map[string]string{
 		"VSAUDIO": "AMP", "SSHOSCONARC": "OFF", "SSHOSCONPSV": "OFF",
 		"SSHOSRSS": "POS", "SSHOSCON": "ON", "SSHOSCONSTS": "LAS",
@@ -49,8 +49,6 @@ func houseHDMI() map[string]string {
 	}
 }
 
-// startFakeReceiver listens on the test network and answers until the
-// test ends.
 func startFakeReceiver(t *testing.T) *fakeReceiver {
 	t.Helper()
 	receiver := &fakeReceiver{
@@ -60,7 +58,7 @@ func startFakeReceiver(t *testing.T) *fakeReceiver {
 		volumeMax: 139,
 		input:     "MPLAY",
 		soundMode: "MULTI CH IN",
-		hdmi:      houseHDMI(),
+		hdmi:      avrHDMISettings(),
 	}
 	receiver.listening = testNetwork.listen(t, receiver.serve)
 	t.Cleanup(receiver.dropConnections)
@@ -93,8 +91,8 @@ func (f *fakeReceiver) serve(conn net.Conn) {
 	}
 }
 
-// answer folds one command into the state and sends every line the
-// receiver would send back, to every client at once.
+// answer applies one command to the state and sends the response lines
+// to every connected client, as a receiver does.
 func (f *fakeReceiver) answer(command string) {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
@@ -111,7 +109,7 @@ func (f *fakeReceiver) answer(command string) {
 		f.send("SI" + f.input)
 	case command == "MS?":
 		f.send("MS" + f.soundMode)
-		for _, line := range noiseLines {
+		for _, line := range soundModeExtraLines {
 			f.send(line)
 		}
 	case command == PowerOnCommand, command == powerStandbyCommand:
@@ -138,22 +136,21 @@ func (f *fakeReceiver) answer(command string) {
 		}
 		f.send("SSHOS END")
 	case strings.HasPrefix(command, "VSAUDIO "), strings.HasPrefix(command, "SSHOS"):
-		// The AVR-X1700H sent no line after an HDMI setup command, so
-		// the fake stores the value and reports it only when asked.
+		// An AVR-X1700H sends no line after an HDMI setup command, so
+		// the fake stores the value and reports it only when queried.
 		key, word, held := strings.Cut(command, " ")
 		if held {
 			f.hdmi[key] = word
 		}
 	case isSettingCommand(command):
-		// A set command for a setting is echoed back, which the parser
-		// folds into the state the way a real receiver would.
+		// A receiver echoes a setting command, and the client applies the
+		// echo to its state.
 		f.send(command)
 	}
 }
 
-// settingEchoPrefixes are the prefixes a set command for a setting
-// carries. The fake echoes them so a test can apply a Settings and read
-// it back.
+// settingEchoPrefixes are the prefixes of the setting commands that the
+// fake echoes, so a test can apply a Settings and read it back.
 var settingEchoPrefixes = []string{
 	"ECO", "DIM ", "STBY", "SPPR ", "SD", "SV", "BTTX ", "PSMULTEQ:", "PSDYNEQ ",
 	"PSREFLEV ", "PSDYNVOL ", "PSLOM ", "PSDRC ", "PSLFE ", "PSEFF ", "PSDELAY ",
@@ -161,8 +158,6 @@ var settingEchoPrefixes = []string{
 	"PSBAS ", "PSTRE ", "PSTONE CTRL ", "CV",
 }
 
-// isSettingCommand answers whether one command sets a setting, which is
-// a set prefix and not a query.
 func isSettingCommand(command string) bool {
 	if strings.HasSuffix(command, "?") {
 		return false
@@ -182,8 +177,8 @@ func (f *fakeReceiver) muteLine() string {
 	return MuteOffCommand
 }
 
-// send writes one event to every open connection. The caller holds the
-// lock.
+// send writes one line to every open connection. The caller holds
+// mutex.
 func (f *fakeReceiver) send(line string) {
 	for _, conn := range f.conns {
 		conn.SetWriteDeadline(time.Now().Add(testTimeout))
@@ -191,8 +186,8 @@ func (f *fakeReceiver) send(line string) {
 	}
 }
 
-// turnKnob is a hand on the equipment: the receiver moves its own
-// volume and volunteers the event, with nothing having asked.
+// turnKnob changes the volume on the receiver itself, as when someone
+// turns the knob, and sends the volume line.
 func (f *fakeReceiver) turnKnob(halves int) {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
@@ -200,7 +195,8 @@ func (f *fakeReceiver) turnKnob(halves int) {
 	f.send("MV" + HalfStepDigits(f.volume))
 }
 
-// setMute is the same hand on the mute button.
+// setMute changes the mute state on the receiver itself and sends the
+// mute line.
 func (f *fakeReceiver) setMute(muted bool) {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
@@ -208,8 +204,8 @@ func (f *fakeReceiver) setMute(muted bool) {
 	f.send(f.muteLine())
 }
 
-// dropConnections closes every open connection, the way a router reboot
-// takes the socket with it.
+// dropConnections closes every open connection, as a network outage
+// does.
 func (f *fakeReceiver) dropConnections() {
 	f.mutex.Lock()
 	conns := f.conns
@@ -220,15 +216,11 @@ func (f *fakeReceiver) dropConnections() {
 	}
 }
 
-// waitForCommand reads the next command the client sent, and fails the
-// test rather than hanging when none arrives.
 func (f *fakeReceiver) waitForCommand(t *testing.T) string {
 	t.Helper()
 	return f.waitForCommandWithin(t, testTimeout)
 }
 
-// waitForCommandWithin reads the next command the client sends within
-// the window.
 func (f *fakeReceiver) waitForCommandWithin(t *testing.T, window time.Duration) string {
 	t.Helper()
 	select {
@@ -240,9 +232,8 @@ func (f *fakeReceiver) waitForCommandWithin(t *testing.T, window time.Duration) 
 	}
 }
 
-// waitForCommands reads until it sees the command it wants, and reports
-// what it passed over, so a test names the one command it cares about
-// out of the burst around it.
+// waitForCommands reads commands until it reads want, and returns all
+// that it read, ending with want.
 func (f *fakeReceiver) waitForCommands(t *testing.T, want string) []string {
 	t.Helper()
 	var seen []string
@@ -255,7 +246,7 @@ func (f *fakeReceiver) waitForCommands(t *testing.T, want string) []string {
 				return seen
 			}
 		case <-deadline:
-			t.Fatalf("the client never sent %q; it sent %v", want, seen)
+			t.Fatalf("the client never sent %q, it sent %v", want, seen)
 			return seen
 		}
 	}

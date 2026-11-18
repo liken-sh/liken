@@ -1,16 +1,16 @@
 package main
 
-// Inactive Source. HDMI-CEC 1.3a, CEC 13.2.2, says a source that has no
-// video to present may send the TV Inactive Source with its own
-// physical address, and the TV then shows another source or its own
-// tuner. The adapter sends it when the Player's screen goes dark while
-// the route still leads to the Display, and when the node workload
-// stops while no session holds the room awake, because a TV that
-// still routes the picture to a dark Display shows black until a
-// person picks another input. A room that goes to
-// standby gets Standby from the power press instead (cecnode_standby.go),
-// and a route that a person moved to another source is that source's,
-// so neither sends Inactive Source.
+// HDMI-CEC 1.3a, CEC 13.2.2: a source with no video to show may send the
+// TV Inactive Source with its own physical address, and the TV then
+// switches to another source or to its tuner. Without it, a TV that is
+// still switched to a Display with no picture shows black until a person
+// picks another input.
+//
+// The adapter sends Inactive Source only while the route, the physical
+// address that the TV last switched to, leads to the Display. It sends
+// it when the Player's screen goes dark, and when the node workload
+// stops while no session is awake. A powerAsk that turns the room off
+// sends Standby instead (cecnode_standby.go).
 
 import (
 	"fmt"
@@ -19,10 +19,11 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/cec"
 )
 
-// withdraw sends the TV Inactive Source for the Display's physical
-// address when the route still leads there, and clears the route, so
-// the adapter answers no Request Active Source for a dark Display. why
-// starts the line. It answers an error only when the adapter left.
+// withdraw sends Inactive Source for physical when the route leads to
+// it, and then clears the route, so the adapter does not answer a
+// Request Active Source for a Display with no picture. why starts the
+// log line. withdraw returns an error only when the adapter is gone,
+// and logs any other send failure.
 func (n *cecNode) withdraw(own cec.LogicalAddress, physical cec.PhysicalAddress, why string) error {
 	n.mutex.Lock()
 	route := n.route
@@ -34,21 +35,21 @@ func (n *cecNode) withdraw(own cec.LogicalAddress, physical cec.PhysicalAddress,
 		if cec.IsGone(err) {
 			return err
 		}
-		fmt.Fprintf(os.Stderr, "%s; the adapter on %s could not send Inactive Source for %s: %v\n", why, n.machine, physical, err)
+		fmt.Fprintf(os.Stderr, "%s; the adapter on %s did not send Inactive Source for %s: %v\n", why, n.machine, physical, err)
 		return nil
 	}
 	n.mutex.Lock()
 	n.route = routeState{address: cec.InvalidPhysicalAddress, known: true, words: "Inactive Source for " + physical.String()}
 	n.mutex.Unlock()
-	fmt.Fprintf(n.log, "%s; the adapter on %s sent the TV Inactive Source for %s, because the route still led to the Display\n", why, n.machine, physical)
+	fmt.Fprintf(n.log, "%s; the adapter on %s sent Inactive Source for %s to the TV, because the route still led to the Display\n", why, n.machine, physical)
 	return nil
 }
 
-// darkened answers whether the pass sees the room's screen go dark: the
-// session that held the room awake sleeps now on the same Display, and
-// no power press put the room in standby. A power press writes a new
-// standbyAt with the sleep, and the standby sends the TV Standby.
-func darkened(was, asleep *roomHold, television *Television) bool {
+// darkened reports whether the session that was awake is now asleep on the
+// same Player and Display with no new standby. A powerAsk that turns
+// the room off writes a Status.Session.StandbyAt that differs from
+// Status.StandbyAt, and the standby path sends Standby for it.
+func darkened(was, asleep *displaySession, television *Television) bool {
 	if was == nil || asleep == nil || was.player != asleep.player || was.display != asleep.display {
 		return false
 	}
@@ -57,14 +58,12 @@ func darkened(was, asleep *roomHold, television *Television) bool {
 }
 
 // withdrawOnStop sends Inactive Source when the node workload stops in
-// Control while the route leads to its Display and no Player's session
-// holds the room awake. A session that holds the room awake keeps its
-// picture: the Player plays on through a restart of this pod, so
-// Inactive Source would tell the TV something false, and the TV could
-// switch away from a film.
+// Control mode and no session keeps the TV awake. While a session is
+// awake, the Player keeps playing through a restart of this pod, and
+// Inactive Source could make the TV switch away from the video.
 func (n *cecNode) withdrawOnStop() {
 	n.mutex.Lock()
-	control := n.applied.mode == CECControl && n.entry.LogicalAddress != nil && n.room == nil
+	control := n.applied.mode == CECControl && n.entry.LogicalAddress != nil && n.awake == nil
 	var own cec.LogicalAddress
 	if control {
 		own = cec.LogicalAddress(*n.entry.LogicalAddress)

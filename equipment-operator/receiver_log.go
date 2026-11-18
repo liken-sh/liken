@@ -1,10 +1,11 @@
 package main
 
-// The lines a person reads to follow one receiver: each command the
-// operator sends it, what asked for the command, and what the receiver
-// reported back. A command's line waits for the receiver's report, so
-// one line holds the whole operation. Nothing here logs a poll, a
-// status write, or a line the receiver sends by itself.
+// The log lines that let a person follow one receiver: each command the
+// operator sends, why it sent it, and what the receiver reported
+// afterward. A command's line is held back until the receiver reports
+// the result, so one line covers the whole operation. Polls, status
+// writes, and events that the receiver sends on its own are not logged
+// here.
 
 import (
 	"encoding/json"
@@ -19,23 +20,23 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
-// How long a command's line waits for the receiver to report the
-// result. A Denon echoes a command within a fraction of a second, and a
-// WiiM reports a setting at its next poll, which is ten seconds away at
-// most.
+// receiverConfirmWait is how long a command's line waits for the
+// receiver to report the result. The wiim driver reads some settings,
+// such as the input, only at its next poll, so the wait is longer than
+// wiim's pollInterval.
 const receiverConfirmWait = 15 * time.Second
 
-// receiverLog writes one receiver's lines, each with the Receiver's
-// name first, as the node workload writes each CECBus line.
+// receiverLog writes the lines for one receiver. Each line starts with
+// the Receiver's name, like the lines of a CECBus.
 type receiverLog struct {
 	to   io.Writer
 	name string
 
 	mutex sync.Mutex
-	// pending holds the lines that wait for the receiver's report.
+	// pending holds the commands whose lines wait for a report.
 	pending []*pendingLine
-	// said holds the last value each repeated command logged, so a
-	// command that a pass sends again with the same value logs nothing.
+	// said holds the last value logged under each key, so a command that
+	// every pass sends again with the same value is logged once.
 	said map[string]any
 }
 
@@ -43,7 +44,7 @@ func newReceiverLog(to io.Writer, name string) *receiverLog {
 	return &receiverLog{to: to, name: name, said: map[string]any{}}
 }
 
-// pendingLine is one command's line while it waits. check answers what
+// pendingLine is a command's line while it waits. check returns what
 // the receiver reports now and whether that is the result the command
 // asked for.
 type pendingLine struct {
@@ -57,17 +58,17 @@ func (l *receiverLog) printf(format string, args ...any) {
 	fmt.Fprintf(l.to, "Receiver %s: %s\n", l.name, fmt.Sprintf(format, args...))
 }
 
-// refused writes the line of a command the driver or the receiver
-// refused, with the driver's own error text.
+// refused writes the line for a command that the driver or the receiver
+// refused, with the error text.
 func (l *receiverLog) refused(line string, err error) {
-	l.printf("%s; the command failed: %v", line, err)
+	l.printf("%s; the command was not applied: %v", line, err)
 }
 
-// confirm writes line once check reports the result, or once
-// receiverConfirmWait ends without it. began is when the command went
-// out, so the line states how long the receiver took. The line joins
-// the pending ones before the first check, so a report that arrives
-// between the command and this call still ends it.
+// confirm writes line when check reports the result, or when
+// receiverConfirmWait ends first. began is when the command was sent,
+// so the line can say how long the receiver took. The line is added to
+// pending before the first check, so a report that arrives between the
+// command and this call still completes it.
 func (l *receiverLog) confirm(line string, began time.Time, check func() (string, bool)) {
 	waiting := &pendingLine{line: line, began: began, check: check}
 	l.mutex.Lock()
@@ -78,8 +79,9 @@ func (l *receiverLog) confirm(line string, began time.Time, check func() (string
 }
 
 // observe checks every pending line against what the receiver reports
-// now. The unit calls it for each line the receiver sends. The checks
-// run outside the mutex, because each one reads the driver's state.
+// now. The receiver unit calls it for each event the receiver sends.
+// The checks run outside the mutex because each one reads the driver's
+// state.
 func (l *receiverLog) observe() {
 	l.mutex.Lock()
 	waiting := append([]*pendingLine(nil), l.pending...)
@@ -93,7 +95,8 @@ func (l *receiverLog) observe() {
 	}
 }
 
-// expire writes a line whose report did not arrive in time.
+// expire writes the line of a command whose report did not arrive in
+// time.
 func (l *receiverLog) expire(line *pendingLine) {
 	if !l.take(line) {
 		return
@@ -102,9 +105,9 @@ func (l *receiverLog) expire(line *pendingLine) {
 	l.printf("%s; the receiver did not report it in %s, and it reports %s", line.line, elapsed(receiverConfirmWait), report)
 }
 
-// take removes a pending line and answers whether this call removed
-// it, so a line prints once when a report and the timer arrive
-// together.
+// take removes a pending line and returns whether this call removed it.
+// When a report and the timer arrive together, only one of them gets
+// true, so the line is written once.
 func (l *receiverLog) take(line *pendingLine) bool {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
@@ -117,10 +120,10 @@ func (l *receiverLog) take(line *pendingLine) bool {
 	return false
 }
 
-// fresh answers whether value differs from the last value logged under
+// fresh returns whether value differs from the last value logged under
 // key, and records it. A declared block that the receiver has not
-// confirmed goes out again on every pass, and only the first send of
-// each value is a line.
+// confirmed is sent again on every pass, and only the first send of
+// each value should be logged.
 func (l *receiverLog) fresh(key string, value any) bool {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
@@ -131,9 +134,7 @@ func (l *receiverLog) fresh(key string, value any) bool {
 	return true
 }
 
-// elapsed writes a duration the way a person reads it: milliseconds
-// under a second, tenths of a second under ten seconds, and whole
-// seconds above that.
+// elapsed formats a duration for a log line.
 func elapsed(d time.Duration) string {
 	switch {
 	case d < time.Second:
@@ -144,11 +145,11 @@ func elapsed(d time.Duration) string {
 	return fmt.Sprintf("%d s", int(d.Round(time.Second).Seconds()))
 }
 
-// declared writes a declared block as compact JSON with its empty
-// objects left out, so a line names only the values a person declared.
-// JSON sorts the keys of a map, so one block always reads the same.
-// Each block is a spec type or a bus message that was decoded from
-// JSON, so it always encodes again, and the errors are dropped.
+// declared returns a declared block as compact JSON with its empty
+// objects removed, so a line shows only the values a person set. JSON
+// sorts the keys of a map, so the same block always produces the same
+// text. Each block is a spec type or a bus message that was decoded
+// from JSON, so it always encodes again, and the errors are ignored.
 func declared(block any) string {
 	raw, _ := json.Marshal(block)
 	var tree any
@@ -174,9 +175,9 @@ func prune(tree any) any {
 	return kept
 }
 
-// mainZoneCheck answers a check that reads fields of the main zone: each of
-// words writes one field as a line states it, and the check passes when
-// the fields, joined, equal want.
+// mainZoneCheck returns a check on the main zone. Each function in
+// words formats one field of the zone, and the check passes when the
+// formatted fields, joined with " and ", equal want.
 func mainZoneCheck(driver equipment.Driver, want string, words ...func(equipment.ZoneState, int) string) func() (string, bool) {
 	return func() (string, bool) {
 		zone := mainZone(driver.State())
@@ -189,9 +190,9 @@ func mainZoneCheck(driver equipment.Driver, want string, words ...func(equipment
 	}
 }
 
-// soundModeCheck answers a check that passes when the main zone reports
-// a sound mode the driver matches with mode, which can be other words
-// than mode itself.
+// soundModeCheck returns a check that passes when the main zone reports
+// a sound mode that the driver treats as the same as mode. The driver
+// can name one mode with different words.
 func soundModeCheck(driver equipment.Driver, mode string) func() (string, bool) {
 	return func() (string, bool) {
 		zone := mainZone(driver.State())
@@ -199,7 +200,7 @@ func soundModeCheck(driver equipment.Driver, mode string) func() (string, bool) 
 	}
 }
 
-// The words a line uses for each field of a zone.
+// The functions below format one field of a zone for a line.
 func powerWords(zone equipment.ZoneState, _ int) string {
 	if zone.Power == "" {
 		return "no power"
@@ -221,8 +222,8 @@ func soundModeWords(zone equipment.ZoneState, _ int) string {
 	return "sound mode " + zone.SoundMode
 }
 
-// wordList joins the words of a line's fields: two with and, and three
-// or more with commas and a last and.
+// wordList joins the formatted fields of a line: two with "and", and
+// three or more with commas and a final "and".
 func wordList(words []string) string {
 	if len(words) < 3 {
 		return strings.Join(words, " and ")
@@ -241,7 +242,6 @@ func muteWords(zone equipment.ZoneState, _ int) string {
 	return "mute " + onOff(zone.Mute)
 }
 
-// onOff writes a switch as a line states it.
 func onOff(on bool) string {
 	if on {
 		return "on"
@@ -249,9 +249,9 @@ func onOff(on bool) string {
 	return "off"
 }
 
-// commandedPower is the power a SetPower of on puts a zone at, in the
-// words the driver reports: a Denon reports standby for both standby
-// and off.
+// commandedPower returns the power that the receiver reports after a
+// SetPower with on. It is Standby and never Off when on is false,
+// because the denon driver records a zone that is off as Standby.
 func commandedPower(on bool) equipment.Power {
 	if on {
 		return equipment.PowerOn

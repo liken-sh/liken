@@ -1,6 +1,3 @@
-// The HDMI setup family: the wire lines each field carries, the lines
-// the receiver reports, and the query that reads a set back.
-
 package denon
 
 import (
@@ -55,10 +52,8 @@ func TestTheHDMICommandBuildersWriteTheWireLines(t *testing.T) {
 	}
 }
 
-// Every line the receiver reports for the HDMI setup folds into its
-// field, and the SSHOS END line that closes the answer is known and
-// changes nothing.
-func TestTheHDMILinesFoldIntoTheirFields(t *testing.T) {
+// The SSHOS END line is recognized and sets no field.
+func TestEachHDMILineSetsItsField(t *testing.T) {
 	cases := []struct {
 		line  string
 		check func(HDMISettings) bool
@@ -87,9 +82,6 @@ func TestTheHDMILinesFoldIntoTheirFields(t *testing.T) {
 	}
 }
 
-// A word no builder accepts, or an SSHOS key this driver does not
-// read, leaves the HDMI settings unset rather than hold a value the
-// operator could never send back.
 func TestAnUnknownHDMILineLeavesTheFieldsUnset(t *testing.T) {
 	for _, line := range []string{
 		"VSAUDIO BOTH", "SSHOSPAS MAYBE", "SSHOSCONSTS FRO", "SSHOSRSS NEVER",
@@ -103,8 +95,7 @@ func TestAnUnknownHDMILineLeavesTheFieldsUnset(t *testing.T) {
 	}
 }
 
-// Every word a builder accepts round-trips through the parser, so a
-// value the operator sends is one the status can report.
+// The status must be able to report every value the operator sends.
 func TestEveryHDMIBuilderWordRoundTripsThroughItsParser(t *testing.T) {
 	words := []struct {
 		build  func(string) (string, error)
@@ -132,10 +123,9 @@ func TestEveryHDMIBuilderWordRoundTripsThroughItsParser(t *testing.T) {
 	}
 }
 
-// The receiver takes an HDMI setup command and does not echo it, so
-// the driver asks for the family again after the sets. The fake
-// receiver behaves the same way: it holds the value and reports it only
-// when asked. Each field travels the whole apply path and reads back.
+// The fake receiver stores an HDMI setup value and reports it only when
+// queried, so each field reaches the settings through the driver's
+// read-back query.
 func TestApplySettingsRoundTripsEveryHDMIField(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -181,9 +171,8 @@ func TestApplySettingsRoundTripsEveryHDMIField(t *testing.T) {
 	}
 }
 
-// Several HDMI fields in one apply send one read-back per family, after
-// every set.
-func TestApplySettingsAsksForTheHDMIFamiliesOnce(t *testing.T) {
+// The queries come after all the sets, one for each family.
+func TestApplySettingsQueriesEachHDMIFamilyOnce(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		harness := startHarness(t)
@@ -201,7 +190,6 @@ func TestApplySettingsAsksForTheHDMIFamiliesOnce(t *testing.T) {
 	})
 }
 
-// An apply that sends no HDMI command sends no HDMI read-back.
 func TestAnApplyOutsideTheHDMIFamilySendsNoReadBack(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -215,13 +203,11 @@ func TestAnApplyOutsideTheHDMIFamilySendsNoReadBack(t *testing.T) {
 	})
 }
 
-// A read-back that cannot be delivered is reported, the way a set that
-// cannot be delivered is.
 func TestTheHDMIReadBackOnADisconnectedClientReportsTheFailure(t *testing.T) {
 	client := NewClient("192.0.2.1", nil)
 
 	err := client.sendReadBacks([]string{"SSHOSCON ON"})
 	if err == nil {
-		t.Fatal("a read-back on a disconnected client did not error")
+		t.Fatal("sendReadBacks on a client that never connected returned nil, want an error")
 	}
 }

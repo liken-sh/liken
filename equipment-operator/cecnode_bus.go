@@ -1,8 +1,8 @@
 package main
 
-// Which CECBus the node workload's adapter belongs to: the pass that
-// finds it, the discovery that makes one, and what the adapter does
-// when it leaves one.
+// The pass of the node workload: choose the CECBus for this machine's
+// adapter, create one when none names the machine, and take the adapter
+// off a bus it leaves.
 
 import (
 	"context"
@@ -16,15 +16,14 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// pass finds this machine's bus and brings the adapter to its spec.
-// Only a failure of the adapter itself is returned; an API failure is
-// logged, and the next pass tries again.
+// pass finds this machine's bus and applies the bus's spec to the
+// adapter. It returns only an adapter error. It logs an API error and
+// requests another pass.
 func (n *cecNode) pass(ctx context.Context) error {
-	// The node workload creates and deletes CECBuses and writes status on
-	// both kinds, and it reads what it wrote. A store that has not yet
-	// received a write would make the pass create a CECBus again, or wait
-	// for a spec.power it already applied, so the reads replace such a
-	// copy with the API server's (objectcache.go).
+	// The watch's store can lag behind this workload's own writes, and a
+	// stale read would make the pass create a CECBus that exists, or
+	// apply a spec.power again. So the reads return the API server's copy
+	// of each object this workload wrote (objectcache.go).
 	list, err := readCECBuses(n.client, n.buses)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing CECBuses: %v\n", err)
@@ -40,7 +39,7 @@ func (n *cecNode) pass(ctx context.Context) error {
 		chosen = bus.Metadata.Name
 	}
 	if chosen != previous {
-		fmt.Fprintf(n.log, "the adapter on %s moves from %s to %s\n", n.machine, busWords(previous), busWords(chosen))
+		fmt.Fprintf(n.log, "the adapter on %s moves from %s to %s\n", n.machine, busLogName(previous), busLogName(chosen))
 	}
 	if previous != "" && chosen != previous {
 		n.leave(previous)
@@ -66,13 +65,11 @@ func (n *cecNode) pass(ctx context.Context) error {
 	return nil
 }
 
-// passTelevisions reads the bus's Television once for each of the
-// Television's intents: an ask of the Player's screen the adapter
-// heard, its session's power read, the room its session holds, its
-// spec.power, its session's wake, its session's standby, and a home
-// press's ask to show the session's Display.
-// A list that fails leaves each for the next pass, and cancels nothing,
-// because the Television may still ask for what runs.
+// passTelevisions reads the bus's Television once and runs each
+// handler on it. When the list fails, it only retries the result writes
+// that the API server has not accepted. It cancels no running wake,
+// standby, or power command, because the Television may still ask for
+// it.
 func (n *cecNode) passTelevisions(bus *CECBus) {
 	list, err := readTelevisions(n.client, n.televisions)
 	if err != nil {
@@ -85,24 +82,27 @@ func (n *cecNode) passTelevisions(bus *CECBus) {
 	}
 	television := televisionFor(list.Items, bus.Metadata.Name)
 	n.writeScreenAsk(television)
-	// A power press waits for its read, so the read goes first.
+	// The power command waits for the power read, so the read runs
+	// first.
 	n.passPowerRead(bus, television)
 	n.holdRoom(bus, television)
-	// The wake and standby passes go next: a new generation of
-	// spec.power stops a wake or a standby in progress there, so no
-	// session command follows the power pass's first command.
+	// passWake and passStandby run before passTelevision, so a new
+	// generation of spec.power cancels a wake or standby in progress
+	// before the power command sends anything. No wake or standby command
+	// may follow the first command of the power command.
 	n.passWake(bus, television)
 	n.passStandby(bus, television)
 	n.passShow(bus, television)
 	n.passTelevision(bus, television)
 }
 
-// choose answers the CECBus this machine's adapter belongs to. A
-// person's CECBus that names the machine wins, and the node workload
-// deletes the CECBus it discovered for the machine, as discovery.go
-// does for a WiiM Receiver. With no CECBus naming the machine, the
-// node workload creates one in Listen, named after the machine, and
-// the watch brings it to the next pass.
+// choose returns the CECBus for this machine's adapter, or nil when
+// there is none yet. A declared CECBus that names the machine wins over
+// a discovered one, and choose deletes the discovered CECBus, as
+// discovery.go does for a WiiM Receiver. When no CECBus names the
+// machine, choose creates one named after the machine, in Listen mode,
+// and returns nil. The watch event for the new CECBus starts the next
+// pass.
 func (n *cecNode) choose(list *CECBusList) *CECBus {
 	var declared, discovered []*CECBus
 	taken := map[string]bool{}
@@ -138,12 +138,11 @@ func (n *cecNode) choose(list *CECBusList) *CECBus {
 		fmt.Fprintf(os.Stderr, "a CECBus named %s exists and does not name machine %s, so the adapter makes no CECBus of its own\n", n.machine, n.machine)
 		return nil
 	}
-	// The list reads each bus this workload wrote from the API server
-	// and the rest from the store, which can lack a bus a person created
-	// a moment ago. The create leaves such a bus alone.
+	// The store can lack a CECBus that a person created a moment ago.
+	// The create then returns a conflict and does not overwrite it.
 	err := CreateDiscoveredCECBus(n.client, n.machine, n.machine)
 	if errors.Is(err, apiclient.ErrConflict) {
-		fmt.Fprintf(os.Stderr, "a CECBus named %s exists that the list did not hold yet, so the adapter makes no CECBus of its own; the next pass reads it\n", n.machine)
+		fmt.Fprintf(os.Stderr, "a CECBus named %s exists that the list did not hold yet, so the adapter creates no CECBus of its own, and the next pass reads it\n", n.machine)
 		n.retryLater()
 		return nil
 	}
@@ -152,13 +151,14 @@ func (n *cecNode) choose(list *CECBusList) *CECBus {
 		n.retryLater()
 		return nil
 	}
-	fmt.Fprintf(n.log, "no CECBus names machine %s; created CECBus %s in %s, which sends nothing on the wire\n", n.machine, n.machine, CECListen)
+	fmt.Fprintf(n.log, "no CECBus names machine %s, so the adapter created CECBus %s in %s, which sends nothing on the wire\n", n.machine, n.machine, CECListen)
 	return nil
 }
 
-// leave removes this machine's entry from a bus it no longer belongs
-// to. The adapter keeps what it found, because a person who adopts the
-// discovered bus names the same wire under another name.
+// leave removes this machine's entry from the status of a bus that the
+// adapter left. It does not reset the adapter: when another bus names
+// the machine, pass applies that bus's spec next, and when none does,
+// idle resets the adapter.
 func (n *cecNode) leave(bus string) {
 	if err := ApplyCECAdapterStatus(n.client, bus, n.machine, nil); err != nil && err != apiclient.ErrNotFound {
 		fmt.Fprintf(os.Stderr, "removing machine %s from CECBus %s: %v\n", n.machine, bus, err)
@@ -171,10 +171,8 @@ func (n *cecNode) leave(bus string) {
 }
 
 // idle takes the adapter off the bus while no CECBus names its
-// machine: it stops the mode's work, clears the logical addresses, and
-// leaves the follower or monitor mode. No person has allowed the
-// adapter on any bus then, so it must not answer the TV. Only a
-// failure that means the adapter left is returned.
+// machine, so the adapter does not reply to the TV before a CECBus
+// allows it. It returns an error only when the adapter is gone.
 func (n *cecNode) idle() error {
 	n.mutex.Lock()
 	active := n.applied.mode != ""
@@ -197,18 +195,16 @@ func (n *cecNode) idle() error {
 	return nil
 }
 
-// busWords names a bus in a log line, and an empty name as none.
-func busWords(name string) string {
+func busLogName(name string) string {
 	if name == "" {
 		return "none"
 	}
 	return "CECBus " + name
 }
 
-// logDeclared states that more than one of a person's buses name the
-// machine, which a person has to settle, and which one the adapter
-// follows. The pass runs on every change to any bus, so the line
-// prints only when the set of those buses changes.
+// logDeclared logs which bus the adapter follows when more than one
+// declared bus names the machine. The pass runs on every change to any
+// bus, so it logs only when the set of those buses changes.
 func (n *cecNode) logDeclared(declared []*CECBus) {
 	names := make([]string, 0, len(declared))
 	for _, bus := range declared {
@@ -221,13 +217,11 @@ func (n *cecNode) logDeclared(declared []*CECBus) {
 	}
 	n.declared = set
 	if len(names) > 1 {
-		fmt.Fprintf(n.log, "%d CECBuses name machine %s: %s; the adapter follows %s, the first by name\n",
+		fmt.Fprintf(n.log, "%d CECBuses name machine %s: %s, so the adapter follows %s, the first by name\n",
 			len(names), n.machine, set, declared[0].Metadata.Name)
 	}
 }
 
-// storedEntry answers a machine's entry in the bus, and nil when the
-// bus holds none.
 func storedEntry(bus *CECBus, machine string) *CECAdapterStatus {
 	for index := range bus.Status.Adapters {
 		if bus.Status.Adapters[index].Machine == machine {

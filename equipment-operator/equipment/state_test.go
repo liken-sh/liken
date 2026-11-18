@@ -13,41 +13,38 @@ func TestZoneReadsOneZoneOutOfAState(t *testing.T) {
 		},
 	}
 
-	zone, held := state.Zone(MainZone)
-	if !held {
-		t.Fatal("the main zone is not held")
+	zone, ok := state.Zone(MainZone)
+	if !ok {
+		t.Fatal("Zone(MainZone) reports no zone, want the main zone")
 	}
 	if zone.Power != PowerOn || zone.Volume != 100 {
-		t.Errorf("zone = %+v, want power %q and volume 100", zone, PowerOn)
+		t.Errorf("the main zone is %+v, want power %q and volume 100", zone, PowerOn)
 	}
 }
 
 func TestZoneReportsAZoneTheDriverNeverNamed(t *testing.T) {
 	state := State{Zones: map[string]ZoneState{MainZone: {Power: PowerOn}}}
 
-	if _, held := state.Zone("zone2"); held {
-		t.Error("a zone the driver never named reads as held")
+	if _, ok := state.Zone("zone2"); ok {
+		t.Error("Zone(\"zone2\") reports a zone, want none because the state names only the main zone")
 	}
 }
 
-// A state built with no zone map is the state before a driver has read
-// anything, and reading one zone out of it is not a panic.
+// A driver's State has no zone map before the driver reads anything.
 func TestZoneOnAnEmptyState(t *testing.T) {
 	var state State
 
-	zone, held := state.Zone(MainZone)
-	if held {
-		t.Errorf("an empty state holds %+v", zone)
+	zone, ok := state.Zone(MainZone)
+	if ok {
+		t.Errorf("an empty State has the zone %+v, want none", zone)
 	}
 	if state.Reachable != "" {
-		t.Errorf("an empty state reads reachable as %q", state.Reachable)
+		t.Errorf("an empty State has Reachable %q, want empty", state.Reachable)
 	}
 }
 
-// An object an older operator wrote holds the lowercase form, and the
-// API server keeps it under the new enum, so a power reads case-blind
-// into the one PascalCase form. A word that is no power stays as it is.
-func TestAPowerReadsCaseBlind(t *testing.T) {
+// A stored object can hold a lowercase power.
+func TestAPowerReadsAnyCase(t *testing.T) {
 	cases := []struct {
 		raw  string
 		want Power
@@ -64,10 +61,10 @@ func TestAPowerReadsCaseBlind(t *testing.T) {
 		t.Run(c.raw, func(t *testing.T) {
 			var got Power
 			if err := json.Unmarshal([]byte(c.raw), &got); err != nil {
-				t.Fatal(err)
+				t.Fatalf("unmarshaling %s: %v", c.raw, err)
 			}
 			if got != c.want {
-				t.Errorf("got %q, want %q", got, c.want)
+				t.Errorf("%s reads as %q, want %q", c.raw, got, c.want)
 			}
 		})
 	}

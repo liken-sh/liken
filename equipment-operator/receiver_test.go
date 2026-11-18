@@ -1,9 +1,10 @@
 package main
 
-// These tests run the CRD through the same code the API server runs:
-// the structural schema validator for the shape, and the CEL
-// validator for the rules the schema states. An example that the
-// cluster would refuse fails here instead.
+// These tests validate objects against the CRDs with the same code the
+// API server uses: the structural schema validator for the shape of the
+// object, and the CEL validator for the schema's
+// x-kubernetes-validations rules. An example that the API server would
+// refuse fails here.
 
 import (
 	"os"
@@ -23,7 +24,6 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// The definitions this repository ships.
 const (
 	receiversCRD   = "deploy/receivers-crd.yaml"
 	cecBusesCRD    = "deploy/cecbuses-crd.yaml"
@@ -76,7 +76,7 @@ func TestCRDHasOneServedStorageVersion(t *testing.T) {
 	crd := loadCRD(t)
 
 	if len(crd.Spec.Versions) != 1 {
-		t.Fatalf("got %d versions, want 1", len(crd.Spec.Versions))
+		t.Fatalf("the CRD has %d versions, want 1", len(crd.Spec.Versions))
 	}
 	v := crd.Spec.Versions[0]
 	mustMatch(t, v.Name, "v1alpha1")
@@ -88,8 +88,8 @@ func TestCRDHasOneServedStorageVersion(t *testing.T) {
 	}
 }
 
-// The status subresource is what keeps this operator's writes off a
-// spec a person declared.
+// The status subresource keeps this operator's status writes from
+// changing the spec that a person declared.
 func TestCRDHasAStatusSubresource(t *testing.T) {
 	t.Parallel()
 	crd := loadCRD(t)
@@ -164,9 +164,9 @@ func TestCRDSchema(t *testing.T) {
 
 	t.Run("the spec zones admit only zone2 and zone3", func(t *testing.T) {
 		zones := spec.Properties["zones"]
-		// The zones are declared as explicit properties, not as a free
-		// map, so no key beyond zone2 and zone3 is a valid input and the
-		// driver can serve every zone the schema admits.
+		// The schema lists zone2 and zone3 as properties and does not
+		// allow arbitrary keys, so every zone that validates is a zone
+		// the driver can serve.
 		if zones.AdditionalProperties != nil {
 			t.Errorf("spec.properties.zones has additionalProperties, want explicit zone2 and zone3 properties")
 		}
@@ -178,11 +178,10 @@ func TestCRDSchema(t *testing.T) {
 	})
 }
 
-// The API server runs the whole definition through this before it
-// serves the resource, and that pass is where a CEL rule is compiled
-// and its cost estimated. A rule the estimator refuses is a CRD the
-// cluster refuses whole, and no amount of validating objects against
-// the schema would find it.
+// The API server validates a whole CRD before it serves the resource,
+// and that validation compiles each CEL rule and estimates its cost. It
+// rejects the entire CRD when it rejects one rule, and validating
+// objects against the schema cannot detect that.
 func TestTheAPIServerWouldAcceptTheCRD(t *testing.T) {
 	t.Parallel()
 	for _, path := range []string{receiversCRD, cecBusesCRD, televisionsCRD} {
@@ -192,8 +191,8 @@ func TestTheAPIServerWouldAcceptTheCRD(t *testing.T) {
 
 			internal := &apiextensions.CustomResourceDefinition{}
 			mustSucceed(t, scheme.Convert(loadCRDFrom(t, path), internal, nil))
-			// The API server fills the stored versions in when it creates
-			// the definition; a manifest states none.
+			// The API server sets the stored versions when it creates the
+			// CRD, and a manifest does not include them.
 			internal.Status.StoredVersions = []string{internal.Spec.Versions[0].Name}
 
 			if errs := crdvalidation.ValidateCustomResourceDefinition(t.Context(), internal); len(errs) > 0 {
@@ -203,9 +202,8 @@ func TestTheAPIServerWouldAcceptTheCRD(t *testing.T) {
 	}
 }
 
-// internalSchema converts the CRD's v1 schema into the internal type
-// both validators work against, which is the same conversion the API
-// server does before it serves the resource.
+// internalSchemaFrom converts the CRD's v1 schema into the internal
+// type that both validators take, as the API server does.
 func internalSchemaFrom(t *testing.T, path string) *apiextensions.JSONSchemaProps {
 	t.Helper()
 	crd := loadCRDFrom(t, path)
@@ -220,8 +218,6 @@ func internalSchemaFrom(t *testing.T, path string) *apiextensions.JSONSchemaProp
 	return internal
 }
 
-// schemaValidator builds the validator the API server itself would
-// run a Receiver through.
 func schemaValidator(t *testing.T, path string) validation.SchemaValidator {
 	t.Helper()
 	validator, _, err := validation.NewSchemaValidator(internalSchemaFrom(t, path))
@@ -231,10 +227,9 @@ func schemaValidator(t *testing.T, path string) validation.SchemaValidator {
 	return validator
 }
 
-// celValidator builds the validator that runs the schema's
-// x-kubernetes-validations rules. It is a separate pass from the
-// structural one, the way the API server runs it, so a rule is proved
-// only by calling this.
+// celValidator builds the validator for the schema's
+// x-kubernetes-validations rules. The structural validator does not run
+// them.
 func celValidator(t *testing.T, path string) (*celschema.Validator, *structuralschema.Structural) {
 	t.Helper()
 	structural, err := structuralschema.NewStructural(internalSchemaFrom(t, path))
@@ -243,13 +238,13 @@ func celValidator(t *testing.T, path string) (*celschema.Validator, *structurals
 	}
 	validator := celschema.NewValidator(structural, true, celconfig.PerCallLimit)
 	if validator == nil {
-		t.Fatal("the schema states no x-kubernetes-validations rule")
+		t.Fatal("the schema has no x-kubernetes-validations rule")
 	}
 	return validator, structural
 }
 
-// validateReceiver runs both passes, so a case states one verdict for
-// the whole object the way the API server answers one.
+// validateReceiver returns the errors of structural and CEL validation
+// together, as the API server reports them.
 func validateReceiver(t *testing.T, receiver map[string]any) field.ErrorList {
 	t.Helper()
 	return validateObject(t, receiversCRD, receiver)
@@ -264,8 +259,8 @@ func validateObject(t *testing.T, path string, object map[string]any) field.Erro
 	return append(errs, celErrs...)
 }
 
-// receiver builds an object the cluster accepts, so each case below
-// states the one thing it changes.
+// receiver builds a valid Receiver with the given spec, so each test
+// case changes only the field it tests.
 func receiver(spec map[string]any) map[string]any {
 	return map[string]any{
 		"apiVersion": "equipment.liken.sh/v1alpha1",
@@ -282,9 +277,9 @@ func denonSpec() map[string]any {
 	}
 }
 
-// askingReceiver is a Receiver whose session holds a volume ask and a
-// power ask and an input ask with the actions named.
-func askingReceiver(volumeAsk map[string]any, power, input string) map[string]any {
+// receiverWithRequests builds a Receiver whose spec.session has the
+// given volumeAsk and the given powerAsk and inputAsk actions.
+func receiverWithRequests(volumeAsk map[string]any, power, input string) map[string]any {
 	return receiver(map[string]any{
 		"denon":  map[string]any{"address": "receiver.example"},
 		"volume": map[string]any{"max": 75.0},
@@ -480,31 +475,31 @@ func TestCRDValidatesExamples(t *testing.T) {
 		},
 		{
 			name:     "a session with all three asks",
-			receiver: askingReceiver(map[string]any{"level": 44.5, "mute": true, "at": "2026-10-04T12:15:25.164Z"}, "toggle", "show"),
+			receiver: receiverWithRequests(map[string]any{"level": 44.5, "mute": true, "at": "2026-10-04T12:15:25.164Z"}, "toggle", "show"),
 		},
 		{
 			name:     "a power ask with an action it does not name",
-			receiver: askingReceiver(map[string]any{"level": 44.5, "at": "2026-10-04T12:15:25.164Z"}, "wake", "ensure"),
+			receiver: receiverWithRequests(map[string]any{"level": 44.5, "at": "2026-10-04T12:15:25.164Z"}, "wake", "ensure"),
 			wantErr:  true,
 		},
 		{
 			name:     "an input ask with an action it does not name",
-			receiver: askingReceiver(map[string]any{"level": 44.5, "at": "2026-10-04T12:15:25.164Z"}, "on", "select"),
+			receiver: receiverWithRequests(map[string]any{"level": 44.5, "at": "2026-10-04T12:15:25.164Z"}, "on", "select"),
 			wantErr:  true,
 		},
 		{
 			name:     "a volume ask below zero",
-			receiver: askingReceiver(map[string]any{"level": -1.0, "at": "2026-10-04T12:15:25.164Z"}, "off", "ensure"),
+			receiver: receiverWithRequests(map[string]any{"level": -1.0, "at": "2026-10-04T12:15:25.164Z"}, "off", "ensure"),
 			wantErr:  true,
 		},
 		{
 			name:     "a volume ask with no at",
-			receiver: askingReceiver(map[string]any{"level": 44.5}, "off", "ensure"),
+			receiver: receiverWithRequests(map[string]any{"level": 44.5}, "off", "ensure"),
 			wantErr:  true,
 		},
 		{
 			name:     "a volume ask whose at is not a time",
-			receiver: askingReceiver(map[string]any{"level": 44.5, "at": "now"}, "off", "ensure"),
+			receiver: receiverWithRequests(map[string]any{"level": 44.5, "at": "now"}, "off", "ensure"),
 			wantErr:  true,
 		},
 		{
@@ -554,14 +549,14 @@ func TestCRDValidatesExamples(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			errs := validateReceiver(t, c.receiver)
 			if got := len(errs) > 0; got != c.wantErr {
-				t.Errorf("got errors %v, want an error: %v", errs, c.wantErr)
+				t.Errorf("validation returned errors %v, want an error: %v", errs, c.wantErr)
 			}
 		})
 	}
 }
 
-// The status.cec the Deployment writes passes the schema, and a mode
-// that is not On or Off does not.
+// The status.cec that the Deployment writes validates. A
+// systemAudioMode other than On or Off does not.
 func TestTheReceiversCECStatusValidates(t *testing.T) {
 	t.Parallel()
 	withCEC := func(mode string) map[string]any {
@@ -585,15 +580,14 @@ func TestTheReceiversCECStatusValidates(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			errs := validateReceiver(t, withCEC(c.mode))
 			if got := len(errs) > 0; got != c.wantErr {
-				t.Errorf("got errors %v, want an error: %v", errs, c.wantErr)
+				t.Errorf("validation returned errors %v, want an error: %v", errs, c.wantErr)
 			}
 		})
 	}
 }
 
-// A Receiver with no spec never reaches the one-of rule, because CEL
-// runs only where the field it is written on exists. The root
-// required list is what refuses it.
+// The schema's root required list must include spec, because the
+// one-of CEL rule on spec does not run when spec is absent.
 func TestCRDRefusesAReceiverWithNoSpec(t *testing.T) {
 	t.Parallel()
 	errs := validateReceiver(t, map[string]any{
@@ -607,8 +601,6 @@ func TestCRDRefusesAReceiverWithNoSpec(t *testing.T) {
 	}
 }
 
-// The example is the one a reader copies, so the cluster has to
-// accept it.
 func TestTheExampleReceiverValidates(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile("testdata/receiver.yaml")

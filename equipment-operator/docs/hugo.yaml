@@ -1,51 +1,40 @@
-# The site's configuration. The site is the manual for
-# equipment-operator, served at https://liken.sh/equipment/.
-#
-# The theme is brand/, the brand component at the top of this
-# repository. It provides the page shell, the top nav, the mark,
-# and the stylesheet that every liken site uses, so this site reads
-# as part of the same family as liken.sh.
+# The manual of equipment-operator. The theme is brand/ at the top of
+# this repository, which every `liken` site uses.
 baseURL: https://liken.sh/equipment/
 
-# The generated reference page puts an id on each field's table row,
-# as a raw-HTML span, so a link can land on exactly one field (the
-# crdref generator emits them). Goldmark drops raw HTML unless this
-# is set, and everything this site renders is authored in this
-# repository.
+# crdref writes a raw HTML span with an id on each field's row of the
+# reference pages, so that a link can point to one field. Goldmark drops
+# raw HTML unless this is set. It is safe because all the content of
+# this site is in this repository.
 markup:
   goldmark:
     renderer:
       unsafe: true
 title: equipment-operator
-# Hugo looks for a theme by name under themesDir, and the repository
-# root holds brand/, so the site and the theme it builds with are
-# always the same commit.
+# The repository root holds brand/, so the site builds with the theme
+# from the same commit.
 themesDir: ../..
 theme: brand
 
-# The theme's nav renders a repository entry from this, and the
-# sidebar heads the manual with the project's name, taken from the
-# last segment of this URL.
+# The theme's navigation links to this URL, and the sidebar uses its
+# last segment as the project's name.
 params:
   repository: https://github.com/liken-sh/liken/tree/main/equipment-operator
-  # The site serves the test coverage report at /coverage.html. This
-  # parameter puts the footer link to it on every page.
+  # Adds a footer link on every page to the coverage report, which the
+  # site serves at /coverage.html.
   coverage: true
 
-# No taxonomies and no feeds: the site is a manual, not a blog. The
-# sitemap stays, because it is free and crawlers use it.
+# The site is a manual, so it has no taxonomies or feeds. The sitemap
+# stays for crawlers.
 disableKinds: [taxonomy, term, rss]
 
-# Every page renders twice, once as HTML for people and once as the
-# authored Markdown for agents and scripts. The two files land side
-# by side, so the Markdown twin of / is /index.md. The theme renders
-# the twin, but only when the site declares this format; without it,
-# the site builds as HTML alone (brand/README.md).
+# The theme writes each page as HTML and also as its authored Markdown,
+# for agents and scripts, only when the site declares this output
+# format (brand/README.md).
 outputFormats:
   markdown:
-    # text/markdown is a media type Hugo already has, with the md
-    # suffix. baseName index makes the output index.md, beside
-    # index.html in the same pretty-URL directory.
+    # Hugo defines text/markdown with the md suffix, so the Markdown
+    # version of / is /index.md, next to index.html.
     mediaType: text/markdown
     baseName: index
     isPlainText: true
@@ -55,17 +44,11 @@ outputs:
   section: [html, markdown]
   page: [html, markdown]
 
-# The site serves the repository's deploy/ manifests whole, as raw
-# YAML, at /deploy/<file>.yaml. A reader reads the real manifests in
-# place, `kubectl apply -f` takes the URLs directly, and a
-# Kustomization can name them as resources, so an install needs no
-# clone. The mount publishes the files the repository holds: there is
-# no copy to drift.
-#
-# Declaring any mount replaces every default mount for the site, so
-# the content mount comes back explicitly. The theme's own mounts,
-# which provide the favicon and the brand images, are the theme's and
-# stay as they are.
+# The site serves the files of deploy/ as raw YAML at
+# /deploy/<file>.yaml, so `kubectl apply -f` and a Kustomization can use
+# the URLs, and an install needs no clone. Declaring a mount replaces
+# the site's default mounts, so the content mount is declared again.
+# The theme's own mounts are not affected.
 module:
   mounts:
     - source: content

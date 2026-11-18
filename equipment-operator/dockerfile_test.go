@@ -7,20 +7,18 @@ import (
 	"testing"
 )
 
-// The Dockerfile copies the top-level Go files with one glob and each
-// package directory by name, so a new package builds and tests on a
-// workstation and fails only in the image build. This test reads the
-// tree for every directory that holds Go source of this module and
-// fails when the Dockerfile does not copy it. A directory with its own
-// go.mod, such as docs/, is another module and never reaches the image.
+// The Dockerfile copies each package directory by name, so a new
+// package builds on a workstation and fails in the image build. A
+// directory with its own go.mod, such as docs/, is another module and
+// is not part of the image.
 func TestTheDockerfileCopiesEveryGoPackage(t *testing.T) {
 	dockerfile, err := os.ReadFile("Dockerfile")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the Dockerfile: %v", err)
 	}
 	entries, err := os.ReadDir(".")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("listing the package directory: %v", err)
 	}
 	for _, entry := range entries {
 		if !entry.IsDir() || entry.Name() == "testdata" {
@@ -32,7 +30,7 @@ func TestTheDockerfileCopiesEveryGoPackage(t *testing.T) {
 		}
 		copied := "COPY " + entry.Name() + " ./" + entry.Name() + "\n"
 		if !strings.Contains(string(dockerfile), copied) {
-			t.Errorf("the Dockerfile does not copy the Go package %s/", entry.Name())
+			t.Errorf("the Dockerfile has no COPY line for the Go package %s/", entry.Name())
 		}
 	}
 }

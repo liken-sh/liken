@@ -1,22 +1,15 @@
 package cec
 
-// The directory is what one adapter knows about the other devices on
-// its bus. It learns from two sources: the messages the adapter hears,
-// and the answers to the questions the adapter asks when it joins the
-// bus, when a device announces itself, and before a command. A logical
-// address is the key, because it is the one address every message
-// carries.
-
 import (
 	"slices"
 	"sync"
 	"time"
 )
 
-// A Peer is one other device on the bus, as far as the adapter knows
-// it. A fact the device has not stated yet holds its unknown value:
-// InvalidPhysicalAddress, an empty name, VendorUnknown,
-// VersionUnknown, PowerUnknown, or SystemAudioUnknown.
+// A Peer is one other device on the bus. A fact that the device has not
+// reported has its unknown value: InvalidPhysicalAddress, an empty
+// name, VendorUnknown, VersionUnknown, PowerUnknown, or
+// SystemAudioUnknown.
 type Peer struct {
 	Logical  LogicalAddress
 	Physical PhysicalAddress
@@ -25,16 +18,17 @@ type Peer struct {
 	Type    DeviceType
 	OSDName string
 	Vendor  VendorID
-	// NoVendor says the device answered Device Vendor ID with 000000,
-	// which names no vendor. Vendor stays VendorUnknown, and the
-	// question counts as answered, so no introduction asks it again.
+	// NoVendor is true when the device answered Give Device Vendor ID
+	// with 000000, which names no vendor. Vendor stays VendorUnknown,
+	// and the question counts as answered, so a scan does not ask it
+	// again.
 	NoVendor bool
 	Version  Version
 	Power    PowerStatus
-	// SystemAudioMode is the System Audio Mode the device last stated,
-	// in a broadcast Set System Audio Mode or a System Audio Mode
-	// Status, and SystemAudioModeAt is when the adapter heard or read
-	// it. Only the audio system states the mode.
+	// SystemAudioMode is the mode from the device's last broadcast Set
+	// System Audio Mode or System Audio Mode Status, and
+	// SystemAudioModeAt is when the adapter received it. Only an audio
+	// system sends these messages.
 	SystemAudioMode   SystemAudioMode
 	SystemAudioModeAt time.Time
 }
@@ -50,26 +44,30 @@ func newPeer(address LogicalAddress) *Peer {
 	}
 }
 
-// Directory holds the peers of one adapter. It is safe for the
-// receive loop and a scan to use at once.
+// Directory records the other devices on one adapter's bus, from the
+// messages the adapter receives and the replies to the questions it
+// sends. It is keyed by logical address, because every message carries
+// the sender's logical address. The receive loop and a scan can use it
+// at the same time.
 type Directory struct {
 	mutex sync.Mutex
 	// own is the adapter's own logical address, which is never a peer.
-	// A monitor holds none, so AddressUnregistered stands for it.
+	// A monitor has none, and its own is AddressUnregistered.
 	own   LogicalAddress
 	peers map[LogicalAddress]*Peer
-	// missed counts the power questions each peer acknowledged and did
-	// not answer since its last Report Power Status.
+	// missed counts, for each peer, the Give Device Power Status
+	// messages it acknowledged without answering since its last Report
+	// Power Status.
 	missed map[LogicalAddress]int
 }
 
-// NewDirectory starts an empty directory.
+// NewDirectory returns an empty directory.
 func NewDirectory() *Directory {
 	return &Directory{own: AddressUnregistered, peers: map[LogicalAddress]*Peer{}, missed: map[LogicalAddress]int{}}
 }
 
-// SetOwn records the adapter's own logical address, and forgets any
-// peer the directory held at that address.
+// SetOwn records the adapter's own logical address and removes any peer
+// at that address.
 func (d *Directory) SetOwn(address LogicalAddress) {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
@@ -77,8 +75,9 @@ func (d *Directory) SetOwn(address LogicalAddress) {
 	delete(d.peers, address)
 }
 
-// Reset forgets every peer, which a change of mode or of bus needs,
-// because what the adapter heard before may be another wire.
+// Reset removes every peer. The caller resets the directory when the
+// adapter changes mode or bus, because the peers it has may be devices
+// on another bus.
 func (d *Directory) Reset() {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
@@ -86,8 +85,8 @@ func (d *Directory) Reset() {
 	d.missed = map[LogicalAddress]int{}
 }
 
-// peer finds or adds the peer at an address. The caller holds the
-// mutex.
+// peer returns the peer at an address and adds it when it is absent.
+// The caller holds the mutex.
 func (d *Directory) peer(address LogicalAddress) *Peer {
 	held, found := d.peers[address]
 	if !found {
@@ -97,21 +96,21 @@ func (d *Directory) peer(address LogicalAddress) *Peer {
 	return held
 }
 
-// Observe folds one message into the directory and answers whether it
-// changed anything. A device that sends a message is present, so its
-// address becomes a peer. The unregistered address is no device, and
+// Observe applies one message to the directory and returns whether
+// anything changed. A device that sends a message is present, so its
+// address becomes a peer. The unregistered address is not a device, and
 // the adapter's own messages say nothing about a peer.
 func (d *Directory) Observe(message Message) bool {
 	_, _, changed := d.Hear(message)
 	return changed
 }
 
-// Hear folds one message into the directory like Observe, and also
-// answers the sender as the directory held it before the message and
-// after it. A log line needs both in one step: the facts after the
-// message name the sender, and the power before it shows whether a
-// Report Power Status is news. A sender that is no peer comes back
-// with every fact unknown.
+// Hear applies one message like Observe, and also returns the sender
+// before and after the message, for the log line: after identifies the
+// sender, and before shows whether a Report Power Status changed its
+// power. For a sender that was not a peer, before has every fact
+// unknown. For a message that Observe ignores, both have every fact
+// unknown.
 func (d *Directory) Hear(message Message) (before, after Peer, changed bool) {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
@@ -134,30 +133,31 @@ func (d *Directory) Hear(message Message) (before, after Peer, changed bool) {
 	return before, *peer, !known || *peer != before || inferred
 }
 
-// inferTV reads what a message states about the TV's power beyond what
-// it states about its sender, and answers whether it changed the power
-// the directory held. The TV's power then follows the bus without a
-// question on a timer. A question on a timer is traffic, and a TV can
-// answer traffic by switching its own input. In Control the kernel
-// passes the adapter only broadcasts and the messages to its own
-// address, and it drops a broadcast Report Power Status for a claim
-// that states CEC 1.4, so these messages are most of what the adapter
-// can hear when a person turns the TV on or off with its own remote:
+// inferTV sets the TV's power from messages that imply it, and returns
+// whether the power changed. This keeps the TV's power current without
+// a Give Device Power Status on a timer, because some TVs respond to
+// that traffic by switching their own input. In Control mode the kernel
+// passes the adapter only broadcasts and messages to its own address.
+// The adapter claims its address as a CEC 1.4 device, and for such a
+// claim the kernel drops a broadcast Report Power Status. So when
+// someone turns the TV on or off with its own remote, these messages
+// are most of what the adapter receives:
 //
-//   - A Standby to the TV, or a broadcast Standby, puts the TV in
+//   - A Standby to the TV, or a broadcast Standby, means the TV is in
 //     standby.
-//   - Image View On and Text View On wake the TV. The adapter hears
-//     them only in Listen, because they go to the TV.
-//   - A Routing Change, a Set Stream Path, or a Request Active Source
-//     from the TV comes from a TV that is on: a TV in standby switches
-//     no input and asks for no source.
-//   - An Active Source comes from a TV that shows its own tuner, or
-//     from a source that follows One Touch Play, which wakes the TV
-//     with Image View On first.
+//   - Image View On and Text View On mean the TV is on. The adapter
+//     receives them only in Listen mode, because they are addressed to
+//     the TV.
+//   - A Routing Change, Set Stream Path, or Request Active Source from
+//     the TV means the TV is on, because a TV in standby does not
+//     switch inputs or request a source.
+//   - A broadcast Active Source means the TV is on. It comes from the
+//     TV when it shows its own tuner, or from a source that follows One
+//     Touch Play and sent Image View On first.
 //
-// The directory changes only a TV it holds, because a message about
-// the TV does not show that a TV is on the bus. The caller holds the
-// mutex.
+// The power changes only for a TV already in the directory, because a
+// message about the TV does not show that a TV is on the bus. The
+// caller holds the mutex.
 func (d *Directory) inferTV(message Message) bool {
 	tv, held := d.peers[AddressTV]
 	if !held || message.IsPoll() {
@@ -185,7 +185,7 @@ func (d *Directory) inferTV(message Message) bool {
 	return true
 }
 
-// Holds answers whether the directory holds a peer at an address.
+// Holds returns whether the directory has a peer at an address.
 func (d *Directory) Holds(address LogicalAddress) bool {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
@@ -193,8 +193,8 @@ func (d *Directory) Holds(address LogicalAddress) bool {
 	return held
 }
 
-// Lookup answers the peer at an address, with every fact unknown when
-// the directory does not hold one there.
+// Lookup returns the peer at an address, with every fact unknown when
+// the directory has none there.
 func (d *Directory) Lookup(address LogicalAddress) Peer {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
@@ -204,15 +204,16 @@ func (d *Directory) Lookup(address LogicalAddress) Peer {
 	return *newPeer(address)
 }
 
-// learn reads the one fact a message states about its sender, at the
-// time the adapter heard it.
+// learn applies what a message states about its sender, received at
+// now.
 //
-// Only a broadcast Set System Audio Mode states the mode. The audio
-// system directs its first [On] after a request to the TV, and stops
-// there when the TV answers with a Feature Abort (HDMI-CEC 1.3a, CEC
-// 13.15.2), so a directed [On] that a monitor hears can be a mode that
-// never started. A System Audio Mode Status answers a question, and
-// states the mode whoever asked.
+// A directed Set System Audio Mode does not set the mode. After a
+// System Audio Mode Request, the audio system sends its first [On] to
+// the TV, and stops there when the TV answers with a Feature Abort
+// (HDMI-CEC 1.3a, CEC 13.15.2). So a directed [On] that a monitor
+// receives can be for a mode that never started. A broadcast Set System
+// Audio Mode sets the mode, and so does a System Audio Mode Status,
+// whichever device asked for it.
 func learn(peer *Peer, message Message, now time.Time) {
 	opcode, _ := message.Opcode()
 	operands := message.Operands()
@@ -223,16 +224,14 @@ func learn(peer *Peer, message Message, now time.Time) {
 			peer.Type = kind
 		}
 	case opcode == OpActiveSource && len(operands) >= 2:
-		// Active Source states the sender's own physical address.
 		peer.Physical = PhysicalAddress(operands[0])<<8 | PhysicalAddress(operands[1])
 	case opcode == OpSetOSDName && len(operands) > 0:
 		peer.OSDName = string(operands)
 	case opcode == OpDeviceVendorID && len(operands) >= 3:
-		// A vendor of 000000 is a device that states none. libCEC reads
-		// it as an unknown vendor, and a TV in standby behind an A/V
-		// receiver has stated it between reports of its real vendor. A
-		// vendor read from it would replace the real one and change
-		// back on the next report, so the peer keeps what it held.
+		// A vendor of 000000 names no vendor, and libCEC reads it as
+		// unknown. A TV in standby behind an A/V receiver has sent it
+		// between reports of its real vendor, so a peer with a vendor
+		// keeps it.
 		vendor := VendorID(operands[0])<<16 | VendorID(operands[1])<<8 | VendorID(operands[2])
 		switch {
 		case vendor != vendorZero:
@@ -251,8 +250,8 @@ func learn(peer *Peer, message Message, now time.Time) {
 	}
 }
 
-// Forget removes the peer at an address, which a scan does when a poll
-// finds no device there.
+// Forget removes the peer at an address and returns whether there was
+// one. A scan calls it when a poll finds no device there.
 func (d *Directory) Forget(address LogicalAddress) bool {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
@@ -262,8 +261,8 @@ func (d *Directory) Forget(address LogicalAddress) bool {
 	return held
 }
 
-// Present records a device that acknowledged a poll, and answers
-// whether the directory did not hold it yet.
+// Present records a device that acknowledged a poll, and returns true
+// when the directory did not have it yet.
 func (d *Directory) Present(address LogicalAddress) bool {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
@@ -275,15 +274,15 @@ func (d *Directory) Present(address LogicalAddress) bool {
 	return !held
 }
 
-// missedReplies is how many power questions in a row a device may
-// leave unanswered before its power is unknown. A TV that wakes can
-// miss one question, and forgetting its power then would make its
-// Television flap between reachable and not.
+// missedReplies is how many Give Device Power Status messages in a row
+// a device can leave unanswered before its power becomes unknown. A TV
+// that is waking can miss one, and forgetting its power then would make
+// its Television flap between reachable and not.
 const missedReplies = 2
 
-// Unanswered records a device that acknowledged a power question and
-// did not answer it. The device is present. After missedReplies such
-// questions in a row, its power is unknown.
+// Unanswered records a device that acknowledged a Give Device Power
+// Status without answering it. The device is present, and after
+// missedReplies in a row its power is unknown.
 func (d *Directory) Unanswered(address LogicalAddress) {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
@@ -297,7 +296,7 @@ func (d *Directory) Unanswered(address LogicalAddress) {
 	}
 }
 
-// Peers copies every peer, in the order of their logical addresses.
+// Peers returns a copy of every peer, sorted by logical address.
 func (d *Directory) Peers() []Peer {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()

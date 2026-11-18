@@ -1,6 +1,5 @@
-// The branches of the parser that a transcript does not reach: every
-// alternate word each setting can take, and the lines that name no
-// setting at all.
+// The parser branches that the transcript tests do not reach: each
+// word a setting can take, and lines that carry no setting.
 
 package denon
 
@@ -204,10 +203,10 @@ func TestParseChannelVolumeReadsATrim(t *testing.T) {
 	mustMatch(t, value, 0.5)
 
 	if _, _, ok := parseChannelVolume("CVFL"); ok {
-		t.Error("a channel line with no value was read")
+		t.Error(`parseChannelVolume("CVFL") reads a channel, want no channel because the line has no value`)
 	}
 	if _, _, ok := parseChannelVolume("CVFL FOO"); ok {
-		t.Error("a channel line with no digits was read")
+		t.Error(`parseChannelVolume("CVFL FOO") reads a channel, want no channel because the value has no digits`)
 	}
 }
 
@@ -273,8 +272,8 @@ func TestApplyDenonLineReadsTheThirdZoneAndRejectsBadDigits(t *testing.T) {
 	}
 }
 
-// Every PS setting that carries a word is read through the line, so a
-// word the receiver sends is covered as the receiver sends it.
+// These tests send each word as a whole PS line, the way the receiver
+// sends it.
 func TestApplyDenonLineReadsEveryMultEqWord(t *testing.T) {
 	cases := map[string]string{
 		"PSMULTEQ:FLAT":   "flat",

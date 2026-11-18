@@ -1,16 +1,14 @@
 package denon
 
-// ToneSettings holds the tone control and the two trims in display
-// units, where the wire's 50 is 0dB.
-
-// ToneSettings holds the tone control switch and the two trims.
+// ToneSettings holds the tone control switch and the bass and treble
+// trims. The trims are in dB. The receiver's wire value is the trim plus
+// 50, so a wire value of 50 is 0dB.
 type ToneSettings struct {
 	Control *bool `json:"control,omitempty"`
 	Bass    *int  `json:"bass,omitempty"`
 	Treble  *int  `json:"treble,omitempty"`
 }
 
-// toneSettings is the tone family's rows of the id table.
 var toneSettings = []settingSpec{
 	boolSetting("tone.control", ToneControlCommand,
 		func(s *Settings, v bool) { s.Tone.Control = boolPtr(v) },

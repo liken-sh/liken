@@ -1,11 +1,10 @@
 package main
 
-// The wake's guard against a person's choice. A person who picks
-// another source through the TV or the receiver during the guard gets
-// that source, and the adapter takes nothing back. A bare Active Source
-// from another playback device is the streaming player that wakes with
-// the room, and the guard still takes the input back from it
-// (cecnode_wake_test.go).
+// After the wake's first Active Source, the adapter guards the input.
+// When a person picks another source on the TV or the receiver, the
+// guard ends and the adapter sends no more Active Source. An Active
+// Source from a streaming player that woke with the room is not a
+// person's choice, so the guard takes the input back from the player.
 
 import (
 	"testing"
@@ -38,7 +37,7 @@ func TestAPersonsChoiceEndsTheGuard(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
-				wire := roomWithTV(televisionTV(cec.PowerOn))
+				wire := busWithTV(televisionTV(cec.PowerOn))
 				session := wokeNow()
 				api := awakeRoom(t, wire, session)
 				api.waitUntil(t, "the wake's Active Source", func() bool { return len(claimsOf(wire)) == 1 })
@@ -58,15 +57,14 @@ func TestAPersonsChoiceEndsTheGuard(t *testing.T) {
 	}
 }
 
-// A TV that has just come on can switch to another input by itself, or
-// because a streaming player that woke with it asked, and it sends the
-// same Set Stream Path its menu sends. In the window after the wake's
-// first claim, that Set Stream Path is no person's choice, so the guard
-// goes on and takes the input back from the player's Active Source.
+// A TV that has just come on can switch input by itself, or because a
+// streaming player that woke with it asked, and it sends the same Set
+// Stream Path that its menu sends. So for cecBootGrace after the wake's
+// first Active Source, a Set Stream Path is not a person's choice.
 func TestASetStreamPathWhileTheTVBootsKeepsTheGuard(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerOn))
+		wire := busWithTV(televisionTV(cec.PowerOn))
 		session := wokeNow()
 		api := awakeRoom(t, wire, session)
 		api.waitUntil(t, "the wake's Active Source", func() bool { return len(claimsOf(wire)) == 1 })
@@ -80,12 +78,12 @@ func TestASetStreamPathWhileTheTVBootsKeepsTheGuard(t *testing.T) {
 	})
 }
 
-// A Set Stream Path for the Display itself is no choice of another
-// source. The adapter answers it, and the wake ends Confirmed.
+// The adapter replies to a Set Stream Path for its own Display with
+// Active Source.
 func TestARouteToTheDisplayKeepsTheGuard(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerOn))
+		wire := busWithTV(televisionTV(cec.PowerOn))
 		session := wokeNow()
 		api := awakeRoom(t, wire, session)
 		api.waitUntil(t, "the wake's Active Source", func() bool { return len(claimsOf(wire)) == 1 })
@@ -99,14 +97,13 @@ func TestARouteToTheDisplayKeepsTheGuard(t *testing.T) {
 }
 
 // A switch sends Routing Information when it comes out of standby or
-// answers a Routing Change (HDMI-CEC 1.3a, CEC 13.2.2). It reports the
-// route it holds, which can be from before the room woke, so it is no
-// person's choice: the guard goes on, and a streaming player's claim
-// after it is still taken back.
+// replies to a Routing Change (HDMI-CEC 1.3a, CEC 13.2.2). The route it
+// reports can date from before the room woke, so it is not a person's
+// choice.
 func TestRoutingInformationKeepsTheGuard(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerOn))
+		wire := busWithTV(televisionTV(cec.PowerOn))
 		session := wokeNow()
 		api := awakeRoom(t, wire, session)
 		api.waitUntil(t, "the wake's Active Source", func() bool { return len(claimsOf(wire)) == 1 })
@@ -120,12 +117,12 @@ func TestRoutingInformationKeepsTheGuard(t *testing.T) {
 	})
 }
 
-// A Routing Information that a waking receiver sends does not stop the
-// adapter from answering the TV's Request Active Source during the wake.
+// A Routing Information from a waking receiver does not stop the
+// adapter from replying to the TV's Request Active Source.
 func TestRoutingInformationDuringAWakeKeepsTheAnswer(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerOn))
+		wire := busWithTV(televisionTV(cec.PowerOn))
 		session := wokeNow()
 		api := awakeRoom(t, wire, session)
 		api.waitUntil(t, "the wake's Active Source", func() bool { return len(claimsOf(wire)) == 1 })

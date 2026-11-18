@@ -1,6 +1,7 @@
 package cectest
 
-// One adapter on the bus, and the ioctls it answers.
+// One simulated CEC adapter on a test bus, with the kernel ioctls it
+// implements.
 
 import (
 	"time"
@@ -10,11 +11,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Options describe one adapter. Physical is the address it has before
-// anyone sets one: f.f.f.f for a USB adapter, or the address a video
-// port's EDID gives. Capabilities default to what a Pulse-Eight
-// reports. Monitor says whether the process may take a monitor mode,
-// which the kernel allows only with CAP_NET_ADMIN.
+// Options configure one adapter. Physical is the address the adapter
+// starts with: f.f.f.f for a USB adapter, or the address that a video
+// port's EDID gives. Capabilities defaults to what a Pulse-Eight
+// reports. Monitor allows the process to open a monitor mode, which the
+// kernel allows only with CAP_NET_ADMIN.
 type Options struct {
 	Physical     cec.PhysicalAddress
 	Capabilities cec.Capability
@@ -24,7 +25,7 @@ type Options struct {
 // pulseEight is the capability set a Pulse-Eight adapter reports.
 const pulseEight = cec.CapPhysAddr | cec.CapLogAddrs | cec.CapTransmit | cec.CapPassthrough | cec.CapRC | cec.CapMonitorAll
 
-// Adapter is one adapter's kernel state. Its methods implement
+// Adapter is the kernel's state for one adapter. Its methods implement
 // cec.Handle.
 type Adapter struct {
 	bus     *Bus
@@ -34,9 +35,9 @@ type Adapter struct {
 	physical cec.PhysicalAddress
 	logical  []cec.LogicalAddress
 	osdName  string
-	// requested says that a claim is stored, and requestType is its
-	// kind of logical address, which the kernel claims once the adapter
-	// has a physical address.
+	// requested is true while a claim request is stored, and requestType
+	// is the logical address type it asks for. The kernel claims an
+	// address for it when the adapter has a physical address.
 	requested    bool
 	requestType  uint8
 	requestFlags uint32
@@ -66,8 +67,8 @@ func (b *Bus) Adapter(options Options) (*Adapter, *cec.Device) {
 	return adapter, cec.New(adapter)
 }
 
-// Unplug makes every later call on the adapter fail with ENODEV, the
-// way the kernel answers a handle whose adapter left.
+// Unplug makes every later call on the adapter fail with ENODEV, as the
+// kernel does for a handle whose adapter was removed.
 func (a *Adapter) Unplug() {
 	a.bus.mutex.Lock()
 	a.gone = true
@@ -75,12 +76,11 @@ func (a *Adapter) Unplug() {
 	a.wake()
 }
 
-// Disconnect drops the adapter's physical address and its logical
-// addresses, the way the kernel drops them when an adapter on a video
-// port loses its hotplug signal, and queues the state change. The
-// kernel keeps the claim request, and Connect completes it again. A
-// test uses this to show what a program does after the kernel took its
-// addresses away.
+// Disconnect clears the adapter's physical and logical addresses, as
+// the kernel does when an adapter on a video port loses its hotplug
+// signal, and queues a state change event. The kernel keeps the claim
+// request, and Connect completes it. Tests use it to check what a
+// program does after the kernel takes its addresses away.
 func (a *Adapter) Disconnect() {
 	a.bus.mutex.Lock()
 	defer a.bus.mutex.Unlock()
@@ -89,9 +89,9 @@ func (a *Adapter) Disconnect() {
 	a.stateChanged()
 }
 
-// Connect gives the adapter a physical address the way a video port's
-// driver does when its hotplug signal returns with an EDID, and the
-// kernel completes a stored claim.
+// Connect sets the adapter's physical address, as a video port's driver
+// does when the hotplug signal returns with an EDID, and the kernel
+// completes any stored claim.
 func (a *Adapter) Connect(address cec.PhysicalAddress) {
 	a.bus.mutex.Lock()
 	defer a.bus.mutex.Unlock()
@@ -100,30 +100,31 @@ func (a *Adapter) Connect(address cec.PhysicalAddress) {
 	a.stateChanged()
 }
 
-// Logical answers the logical addresses the adapter holds.
+// Logical returns the logical addresses the adapter has claimed.
 func (a *Adapter) Logical() []cec.LogicalAddress {
 	a.bus.mutex.Lock()
 	defer a.bus.mutex.Unlock()
 	return append([]cec.LogicalAddress(nil), a.logical...)
 }
 
-// Claims counts the claim requests a program made, so a test can tell
-// an adapter that stayed joined from one that joined again.
+// Claims returns how many claim requests the adapter received, so a
+// test can tell an adapter that stayed joined from one that joined
+// again.
 func (a *Adapter) Claims() int {
 	a.bus.mutex.Lock()
 	defer a.bus.mutex.Unlock()
 	return a.claims
 }
 
-// Follows answers whether a handle on the adapter is a follower or a
-// monitor, which is what makes the kernel pass it messages.
+// Follows reports whether a handle on the adapter is a follower or a
+// monitor, which are the modes in which the kernel passes it messages.
 func (a *Adapter) Follows() bool {
 	a.bus.mutex.Lock()
 	defer a.bus.mutex.Unlock()
 	return a.follower() != 0
 }
 
-// Physical answers the address the adapter announces.
+// Physical returns the adapter's physical address.
 func (a *Adapter) Physical() cec.PhysicalAddress {
 	a.bus.mutex.Lock()
 	defer a.bus.mutex.Unlock()
@@ -137,8 +138,8 @@ func (a *Adapter) wake() {
 	}
 }
 
-// holds answers whether the adapter holds an address. The caller holds
-// the bus mutex.
+// holds reports whether the adapter has claimed a logical address. The
+// caller holds the bus mutex.
 func (a *Adapter) holds(address cec.LogicalAddress) bool {
 	for _, held := range a.logical {
 		if held == address {
@@ -151,12 +152,12 @@ func (a *Adapter) holds(address cec.LogicalAddress) bool {
 func (a *Adapter) follower() uint32  { return a.mode & 0xf0 }
 func (a *Adapter) initiator() uint32 { return a.mode & 0x0f }
 
-// hear takes one message off the wire, and answers the reply the
-// kernel sends for it when the message is an identity request to the
-// adapter's own address, which the kernel answers by itself. A
-// monitor-all handle gets every message; a monitor or a follower gets
-// the broadcasts and the messages to its own addresses, except the
-// requests the kernel answered. The caller holds the bus mutex.
+// hear receives one message from the wire, and returns the reply that
+// the kernel sends by itself to an identity request addressed to this
+// adapter. A monitor-all handle queues every message. A monitor or a
+// follower queues broadcasts and messages addressed to the adapter,
+// except the requests the kernel answered. The caller holds the bus
+// mutex.
 func (a *Adapter) hear(message cec.Message) (cec.Message, bool) {
 	if a.gone {
 		return cec.Message{}, false
@@ -179,11 +180,10 @@ func (a *Adapter) hear(message cec.Message) (cec.Message, bool) {
 	return reply, answered
 }
 
-// coreAnswer is the answer the kernel's CEC core gives for its own
-// adapter, and false for a message the core leaves to a follower. The
-// core answers Give Device Vendor ID only for an adapter that states a
-// vendor, and the adapters here state none. The caller holds the bus
-// mutex.
+// coreAnswer returns the reply that the kernel's CEC core sends for the
+// adapter, and false for a message the core passes to a follower. The core answers Give Device Vendor ID only for an adapter
+// that has a vendor ID, and these adapters have none. The caller holds
+// the bus mutex.
 func (a *Adapter) coreAnswer(message cec.Message) (cec.Message, bool) {
 	opcode, _ := message.Opcode()
 	own := message.To
@@ -198,7 +198,7 @@ func (a *Adapter) coreAnswer(message cec.Message) (cec.Message, bool) {
 	return cec.Message{}, false
 }
 
-// Ioctl answers one request.
+// Ioctl handles one ioctl request.
 func (a *Adapter) Ioctl(request uintptr, argument unsafe.Pointer) error {
 	a.bus.mutex.Lock()
 	defer a.bus.mutex.Unlock()
@@ -221,8 +221,8 @@ func (a *Adapter) Ioctl(request uintptr, argument unsafe.Pointer) error {
 	case cec.RequestSetLogAddrs:
 		return a.claim((*cec.KernelLogAddrs)(argument))
 	case cec.RequestGetLogAddrs:
-		// The kernel reports a stored claim whole, with the invalid
-		// address 0xff in each place it has not claimed yet.
+		// The kernel reports a stored claim request with the invalid
+		// address 0xff in each LogAddr entry that it has not claimed yet.
 		held := (*cec.KernelLogAddrs)(argument)
 		*held = cec.KernelLogAddrs{}
 		if a.requested {
@@ -249,8 +249,9 @@ func (a *Adapter) Ioctl(request uintptr, argument unsafe.Pointer) error {
 	return nil
 }
 
-// setPhysical sets the address, as a USB adapter allows and an adapter
-// on a video port refuses. The caller holds the bus mutex.
+// setPhysical sets the physical address. A USB adapter allows this and
+// an adapter on a video port refuses it. The caller holds the bus
+// mutex.
 func (a *Adapter) setPhysical(address cec.PhysicalAddress) error {
 	if !a.options.Capabilities.Has(cec.CapPhysAddr) {
 		return unix.ENOTTY
@@ -267,8 +268,8 @@ func (a *Adapter) setPhysical(address cec.PhysicalAddress) error {
 	return nil
 }
 
-// setMode applies the kernel's rules for CEC_S_MODE. The caller holds
-// the bus mutex.
+// setMode implements CEC_S_MODE with the kernel's rules for which modes
+// are allowed. The caller holds the bus mutex.
 func (a *Adapter) setMode(mode uint32) error {
 	follower := mode & 0xf0
 	monitor := follower == 0xe0 || follower == 0xf0
@@ -284,12 +285,11 @@ func (a *Adapter) setMode(mode uint32) error {
 	return nil
 }
 
-// claim applies CEC_ADAP_S_LOG_ADDRS: an empty request clears the
-// addresses and forgets the stored request. Any other request is
-// stored, and the adapter claims the first address of its type that
-// nothing on the bus holds, at once when it has a physical address and
-// otherwise when it gets one: 0 for a TV, 4, 8, or 11 for a playback
-// device, and 5 for an audio system. The caller holds the bus mutex.
+// claim implements CEC_ADAP_S_LOG_ADDRS. An empty request clears the
+// addresses and the stored request. Any other request is stored, and
+// complete claims the first free address of its type, at once when the
+// adapter has a physical address and otherwise when it gets one. The
+// caller holds the bus mutex.
 func (a *Adapter) claim(request *cec.KernelLogAddrs) error {
 	if a.initiator() == 0 {
 		return unix.EBUSY
@@ -313,9 +313,11 @@ func (a *Adapter) claim(request *cec.KernelLogAddrs) error {
 	return nil
 }
 
-// complete claims the stored request's address when the adapter has a
-// physical address and holds none, and answers whether it claimed one.
-// The caller holds the bus mutex.
+// complete claims an address for the stored request when the adapter
+// has a physical address and no logical address yet, and reports
+// whether it claimed one. The candidates are 0 for a TV, 4, 8, or 11 for
+// a playback device, and 5 for an audio system. The caller holds the
+// bus mutex.
 func (a *Adapter) complete() bool {
 	if !a.requested || a.physical == cec.InvalidPhysicalAddress || len(a.logical) > 0 {
 		return false
@@ -339,8 +341,8 @@ func trimNul(raw []byte) []byte {
 	return raw
 }
 
-// stateChanged queues the event the kernel sends when the adapter's
-// addresses change. The caller holds the bus mutex.
+// stateChanged queues the state change event that the kernel sends
+// when the adapter's addresses change. The caller holds the bus mutex.
 func (a *Adapter) stateChanged() {
 	var mask uint32
 	for _, address := range a.logical {
@@ -352,8 +354,8 @@ func (a *Adapter) stateChanged() {
 	a.wake()
 }
 
-// transmit puts a message on the wire and fills in what happened. The
-// caller holds the bus mutex.
+// transmit puts a message on the wire and fills in the transmit and
+// receive status of the request. The caller holds the bus mutex.
 func (a *Adapter) transmit(raw *cec.KernelMsg) error {
 	if a.initiator() == 0 {
 		return unix.EBUSY
@@ -384,8 +386,8 @@ func (a *Adapter) transmit(raw *cec.KernelMsg) error {
 		reply, aborted, ok := peer.answer(message)
 		a.bus.peers[message.To] = peer.asked(message)
 		if ok && peer.Slow > 0 {
-			// The wire is free while the peer prepares its answer, so
-			// another transmit, a receive, or an ioctl goes on meanwhile.
+			// The bus mutex is released while a slow peer prepares its
+			// answer, so another transmit, receive, or ioctl can run.
 			a.bus.mutex.Unlock()
 			time.Sleep(peer.Slow)
 			a.bus.mutex.Lock()
@@ -396,8 +398,8 @@ func (a *Adapter) transmit(raw *cec.KernelMsg) error {
 			return nil
 		case aborted:
 			// A transmit that waits for no reply returns before the
-			// answer, so the Feature Abort arrives as a received message,
-			// which the kernel passes to a follower.
+			// Feature Abort, so the Feature Abort arrives as a received
+			// message that the kernel passes to a follower.
 			replies = append(replies, cec.FeatureAbort(peer.Logical, message.From, cec.Opcode(message.Body[0]), cec.AbortUnrecognizedOpcode))
 		}
 		if ok {
@@ -405,9 +407,10 @@ func (a *Adapter) transmit(raw *cec.KernelMsg) error {
 		}
 	}
 	for _, reply := range replies {
-		// The kernel hands the awaited reply to the transmit that asked
-		// for it, and every other adapter on the wire hears it too. An
-		// answer the transmit did not wait for reaches the asker too.
+		// The kernel returns the awaited reply in the transmit that
+		// waited for it, and every other adapter on the wire receives it
+		// too. When the transmit waited for no reply, the sender
+		// receives a reply addressed to it as a message.
 		if raw.Reply == 0 && reply.To == message.From {
 			a.hear(reply)
 		}
@@ -426,7 +429,8 @@ func (a *Adapter) transmit(raw *cec.KernelMsg) error {
 	return nil
 }
 
-// receive dequeues the oldest message. The caller holds the bus mutex.
+// receive removes the oldest queued message and returns it. The caller
+// holds the bus mutex.
 func (a *Adapter) receive(raw *cec.KernelMsg) error {
 	if len(a.queue) == 0 {
 		return unix.ETIMEDOUT
@@ -463,7 +467,6 @@ func (a *Adapter) Wait(timeout time.Duration) (cec.Readiness, error) {
 	}
 }
 
-// Close has nothing to release.
 func (a *Adapter) Close() error {
 	return nil
 }

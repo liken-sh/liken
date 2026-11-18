@@ -1,18 +1,14 @@
 package main
 
-// The send budget: how many times one declared field is sent at one
-// declared value.
-
 import (
 	"testing"
 
 	"github.com/liken-sh/liken/equipment-operator/wiim"
 )
 
-// Each pass spends one send of every field it sends. A field that has
-// had its three sends is held back and named as not confirmed, and the
-// fields beside it still go.
-func TestTheSendBudgetHoldsBackAFieldAfterThreeSends(t *testing.T) {
+// After sendLimit sends of a field, spend drops it and unconfirmed lists
+// it, and the other fields are still sent.
+func TestTheSendBudgetStopsSendingAFieldAfterTheSendLimit(t *testing.T) {
 	t.Parallel()
 	budget := newSendBudget()
 	led, buttons := true, false
@@ -27,11 +23,10 @@ func TestTheSendBudgetHoldsBackAFieldAfterThreeSends(t *testing.T) {
 	mustDeepEqual(t, budget.unconfirmed(), []string{"spec.wiim.settings.device.led"})
 }
 
-// A count starts again only when its own field changes: the receiver
-// reports the declared value, so the field is no longer pending, or a
-// person declares another value. A pass that sends the same pending
-// field again keeps the count.
-func TestTheSendBudgetStartsACountAgainWhenItsFieldChanges(t *testing.T) {
+// A field's count restarts when the receiver reports the declared value
+// or a person declares another value, and not on another pass of the
+// same value or a pass of another family.
+func TestTheSendBudgetRestartsTheCountWhenItsFieldChanges(t *testing.T) {
 	t.Parallel()
 	on, off := true, false
 	ledOn := wiim.Settings{Device: wiim.DeviceSettings{LED: &on}}

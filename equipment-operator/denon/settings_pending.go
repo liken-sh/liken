@@ -1,24 +1,21 @@
 package denon
 
-// Pending decides which declared fields the operator sends. A field
-// the receiver reports is compared with it: the operator sends the
-// field only while the receiver reports another value, so a restart
-// against a receiver that already holds the declared settings sends
-// nothing, and a change made at the receiver is driven back. A field
-// the receiver does not report cannot be compared, so it is compared
-// with the value the operator applied before: it is sent once when the
-// spec changes it, and not again. After a restart the operator has
-// applied nothing yet, so it does not send an unreported field until
-// the spec changes that field.
-
-// Pending answers the declared fields to send, as Settings that hold
-// only those fields. observed is what the receiver reports, previous is
-// the settings the operator applied before, and known says whether
-// previous holds anything since the operator started. The fields are
-// compared by the wire command each one carries, which is the same
-// command for the same value. A declared value no command can carry is
-// always pending when it would be sent, so ApplySettings reports its
-// error.
+// Pending returns a Settings with only the declared fields that the
+// operator must send. observed is what the receiver reports, previous is
+// what the operator applied earlier, and known is false when previous
+// does not record what the receiver has, as after a restart.
+//
+// A field that the receiver reports is sent when the declared value
+// differs from the reported one, so a restart sends nothing to a
+// receiver that already has the declared settings, and a change made at
+// the receiver is reverted. A field that the receiver does not report
+// is sent when the declared value differs from previous. When known is
+// false, Pending sends no unreported field.
+//
+// Two values are equal when they produce the same wire command. A
+// declared value that no command can represent is never equal to
+// another, so Pending returns it and ApplySettings reports its error,
+// except for an unreported field while known is false.
 func (w Settings) Pending(observed, previous Settings, known bool) Settings {
 	var pending Settings
 	for _, spec := range settingsTable {

@@ -1,6 +1,7 @@
-// When the client reads each family of the amp: the probe and the
-// player on every poll, and the settings families only when a push
-// cannot have told the client about a change.
+// The tests of which reads each poll sends. Every poll reads
+// getStatusEx and getPlayerStatus. A poll reads the setting families
+// only when the amp may have changed them without an event reaching
+// the client.
 
 package wiim
 
@@ -17,16 +18,15 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
-// quietAmp is a fake amp that has answered its first poll, with no
-// sleep timer running, and has the commands of that poll cleared. A
-// test then reads only what the next poll sends.
+// quietAmp returns a fake amp after its first poll, with no sleep timer
+// running and the commands of that poll cleared.
 func quietAmp(t *testing.T) (*fakeAmp, *Client) {
 	t.Helper()
 	amp := startFakeAmp(t)
 	amp.answers[shutdownCommand] = "0"
 	client := amp.client(nil)
 	if !client.poll(context.Background()) {
-		t.Fatal("the first poll did not answer")
+		t.Fatal("the first poll returned false, want true because getStatusEx reports the declared UUID")
 	}
 	amp.clear()
 	return amp, client
@@ -44,7 +44,7 @@ func (f *fakeAmp) answer(command, body string) {
 	f.answers[command] = body
 }
 
-// settingsReads are the reads of the families that no push carries.
+// settingsReads are the commands that read the setting families.
 var settingsReads = []string{
 	staticIPCommand, outputModeCommand, outputListCommand, activeOutputCommand,
 	balanceCommand, subCommand, spdifCommand, remoteStepCommand, buttonStepCommand,
@@ -53,8 +53,8 @@ var settingsReads = []string{
 	btPairCommand, btHistoryCommand, presetCommand, ledCommand, buttonsCommand, cecCommand,
 }
 
-// holdsEveryRead answers whether the commands hold every settings
-// read and the track.
+// holdsEveryRead reports whether commands include every settings read
+// and the track metadata read.
 func holdsEveryRead(commands []string) bool {
 	for _, command := range append([]string{metaCommand}, settingsReads...) {
 		if !slices.Contains(commands, command) {
@@ -64,10 +64,7 @@ func holdsEveryRead(commands []string) bool {
 	return true
 }
 
-// After the first poll, a poll reads the probe and the player and
-// nothing else, because nothing it would read again has a reason to
-// differ.
-func TestAQuietPollReadsOnlyTheProbeAndThePlayer(t *testing.T) {
+func TestAQuietPollReadsOnlyTheStatusAndThePlayer(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp, client := quietAmp(t)
 
@@ -77,8 +74,6 @@ func TestAQuietPollReadsOnlyTheProbeAndThePlayer(t *testing.T) {
 	})
 }
 
-// The first poll reads every family, because the client holds nothing
-// before it.
 func TestTheFirstPollReadsEveryFamily(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp := startFakeAmp(t)
@@ -89,8 +84,7 @@ func TestTheFirstPollReadsEveryFamily(t *testing.T) {
 	})
 }
 
-// The settings families are read again only once the backstop
-// interval has passed since the last read of them.
+// settingsResync is a backstop for a change that no event reported.
 func TestTheSettingsAreReadAgainAfterTheBackstop(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -114,9 +108,8 @@ func TestTheSettingsAreReadAgainAfterTheBackstop(t *testing.T) {
 	}
 }
 
-// An amp that comes back after the client called it unreachable may
-// have rebooted or changed while it was gone, so the poll that finds it
-// again reads every family.
+// An amp that was unreachable may have rebooted or changed, so the
+// first poll after it returns reads every family.
 func TestAnAmpThatComesBackIsReadAgain(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp, client := quietAmp(t)
@@ -138,22 +131,21 @@ func TestAnAmpThatComesBackIsReadAgain(t *testing.T) {
 	})
 }
 
-// A new track in the player's report reads the track's details once.
 func TestANewTrackReadsTheTrack(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp, client := quietAmp(t)
-		amp.answer(playerCommand, strings.Replace(playerJSON, `"Title":"486176652061204369676172"`, `"Title":"4D6F6E6579"`, 1))
-		amp.answer(metaCommand, strings.Replace(metaJSON, `"title":"Have a Cigar"`, `"title":"Money"`, 1))
+		amp.answer(playerCommand, strings.Replace(playerJSON, `"Title":"4C616E7465726E20536F6E67"`, `"Title":"4D6F6E6579"`, 1))
+		amp.answer(metaCommand, strings.Replace(metaJSON, `"title":"Lantern Song"`, `"title":"Second Song"`, 1))
 
 		client.poll(context.Background())
 
 		mustMatch(t, amp.sent(), []string{statusCommand, playerCommand, metaCommand})
-		mustMatch(t, client.Status().NowPlaying.Title, "Money")
+		mustMatch(t, client.Status().NowPlaying.Title, "Second Song")
 	})
 }
 
-// A running sleep timer counts down on the amp, so each poll reads it
-// while it runs and the zone's minutes follow the amp.
+// No event reports the countdown of a sleep timer, so each poll reads
+// the timer while it runs.
 func TestARunningSleepTimerIsReadOnEachPoll(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp, client := quietAmp(t)
@@ -170,8 +162,8 @@ func TestARunningSleepTimerIsReadOnEachPoll(t *testing.T) {
 	})
 }
 
-// A declared setting the client sends is read back at once, so the
-// operator compares the next pass against the amp's own answer.
+// The client reads a setting back right after it sends it, so the
+// operator's next pass compares the declared value with the amp's.
 func TestASentSettingIsReadBack(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp, client := quietAmp(t)
@@ -185,11 +177,10 @@ func TestASentSettingIsReadBack(t *testing.T) {
 	})
 }
 
-// The amp's clock, its temperatures, the radio's readings, and the
-// track position change on their own between polls. They stay out of
-// the status, so two polls that differ only in them leave it as it
-// was, and the client reports them as readings instead.
-func TestReadingsThatMoveOnTheirOwnStayOutOfTheStatus(t *testing.T) {
+// The amp's clock, temperatures, radio readings, and track position
+// change on every poll. The client returns them from Readings, not
+// Status, so they do not cause a status write.
+func TestReadingsThatChangeOnTheirOwnStayOutOfTheStatus(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp := startFakeAmp(t)
 		amp.answer(statusCommand, wifiStatusEx("12:00:00", "32", "-92", "480"))
@@ -210,9 +201,8 @@ func TestReadingsThatMoveOnTheirOwnStayOutOfTheStatus(t *testing.T) {
 	})
 }
 
-// The status names none of the readings, so a reader of the CRD's
-// status.wiim does not look for them there.
-func TestTheStatusNamesNoReading(t *testing.T) {
+// status.wiim in the CRD does not include the reading fields.
+func TestTheStatusHasNoReadingFields(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp := startFakeAmp(t)
 		amp.answer(statusCommand, wifiStatusEx("12:00:00", "32", "-92", "480"))
@@ -223,13 +213,12 @@ func TestTheStatusNamesNoReading(t *testing.T) {
 		mustSucceed(t, err)
 		for _, key := range []string{`"time":"12:00:00"`, `"date"`, `"temperatureCpu"`, `"temperatureBoard"`, `"rssi"`, `"noise"`, `"snr"`, `"dataRate"`, `"battery"`, `"positionMs"`, `"offsetMs"`, `"sleepSeconds"`} {
 			if strings.Contains(string(body), key) {
-				t.Errorf("the status names %s: %s", key, body)
+				t.Errorf("the status is %s, want no %s", body, key)
 			}
 		}
 	})
 }
 
-// An amp on its wired port reports no radio readings.
 func TestAWiredAmpReportsNoRadioReadings(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp := startFakeAmp(t)
@@ -243,9 +232,8 @@ func TestAWiredAmpReportsNoRadioReadings(t *testing.T) {
 	})
 }
 
-// wifiStatusEx is the fake's getStatusEx for an amp on Wi-Fi, with the
-// clock, the CPU temperature, the noise, and the data rate a test
-// moves.
+// wifiStatusEx returns the fake's getStatusEx response for an amp on
+// Wi-Fi, with the given clock, CPU temperature, noise, and data rate.
 func wifiStatusEx(clock, cpu, noise, rate string) string {
 	return strings.NewReplacer(
 		`"apcli0":"0.0.0.0"`, `"apcli0":"192.0.2.11"`,
@@ -262,17 +250,17 @@ func wifiStatusEx(clock, cpu, noise, rate string) string {
 
 func intPtr(value int) *int { return &value }
 
-// subscribedAmp is a fake amp with a UPnP side that takes the
-// client's subscriptions. Each request to the UPnP side is logged among
-// the amp's commands, so a test reads the order of the two.
+// subscribedAmp returns a fake amp with a UPnP server that accepts the
+// client's subscriptions. The fake logs each UPnP request among the
+// amp's commands, so a test can check the order of both.
 func subscribedAmp(t *testing.T) (*fakeAmp, *Client) {
 	t.Helper()
 	amp, _, client := subscribedAmpWithEvents(t)
 	return amp, client
 }
 
-// subscribedAmpWithEvents is subscribedAmp with the fake's UPnP side,
-// for a test that changes how the UPnP side answers.
+// subscribedAmpWithEvents is subscribedAmp that also returns the fake
+// UPnP server, for a test that changes how that server responds.
 func subscribedAmpWithEvents(t *testing.T) (*fakeAmp, *fakeEvents, *Client) {
 	t.Helper()
 	amp := startFakeAmp(t)
@@ -293,9 +281,9 @@ func subscribedAmpWithEvents(t *testing.T) (*fakeAmp, *fakeEvents, *Client) {
 	return amp, events, client
 }
 
-// The first poll checks the amp's identity, opens the subscriptions,
-// and only then reads the settings, so a change the amp pushes during
-// the read is not lost.
+// The first poll checks the amp's identity and opens the subscriptions
+// before it reads the settings, so an event during the read is not
+// lost.
 func TestTheSubscriptionsOpenBeforeTheSettingsRead(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp, client := subscribedAmp(t)
@@ -308,9 +296,8 @@ func TestTheSubscriptionsOpenBeforeTheSettingsRead(t *testing.T) {
 	})
 }
 
-// A subscription the client opens again may have missed events, so
-// the poll that opens it reads every family. A poll that holds its
-// subscriptions reads only the probe and the player.
+// A subscription that the client opens again may have missed events,
+// so the poll that opens it reads every family.
 func TestANewSubscriptionReadsEveryFamily(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp, client := subscribedAmp(t)
@@ -329,11 +316,10 @@ func TestANewSubscriptionReadsEveryFamily(t *testing.T) {
 	})
 }
 
-// An amp the client called unreachable may only have been cut off, and
-// then it still holds the subscriptions, so the client keeps them and
-// renews them when the amp answers, rather than open two more on the
-// amp. An amp that rebooted refuses the renewal and is subscribed
-// again. Either way the poll reads every family.
+// An amp that only lost its connection still has the subscriptions, so
+// the client renews them instead of opening duplicates. An amp that
+// rebooted refuses the renewal, and the client subscribes again. In
+// both cases the poll reads every family.
 func TestAnAmpThatComesBackKeepsOrReopensItsSubscriptions(t *testing.T) {
 	cases := []struct {
 		name      string

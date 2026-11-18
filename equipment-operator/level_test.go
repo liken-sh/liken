@@ -1,11 +1,8 @@
 package main
 
-// The arithmetic between a figure in a receiver's own scale and a
-// driver's smallest steps.
-
 import "testing"
 
-func TestStepsFromScaleCountsTheDriversSmallestSteps(t *testing.T) {
+func TestStepsFromScaleRoundsToTheNearestStep(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name       string
@@ -26,7 +23,7 @@ func TestStepsFromScaleCountsTheDriversSmallestSteps(t *testing.T) {
 	}
 }
 
-func TestFormatStepsWritesTheDriversScale(t *testing.T) {
+func TestFormatStepsDividesByTheResolution(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name       string

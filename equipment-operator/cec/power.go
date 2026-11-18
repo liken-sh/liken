@@ -1,23 +1,12 @@
 package cec
 
-// The TV's power: the command that asks the TV for a state, and the
-// read that confirms the state. The node workload sends the command
-// once per change of a Television's spec.power and reads the power
-// until the TV reports the state it asked for.
-
-// PowerCommand is the generic message that asks the TV to wake, or to
-// go to standby. Image View On wakes a TV from standby. Standby
-// directed to the TV puts the TV alone in standby, and the receiver
-// and the other sources stay as they are; a broadcast Standby would
-// put every device on the bus in standby.
+// PowerCommand returns Image View On to wake the TV, or Standby to put it
+// in standby. Standby goes to the TV alone, because a broadcast Standby
+// would also put the receiver and the other sources in standby. A TV
+// can switch to the sender's input when Image View On wakes it.
 //
-// Image View On also asks the TV to show a source, and a TV can switch
-// to the sender's input when it wakes. The adapter announces its
-// Display's physical address, so that input is the machine's.
-//
-// The order is generic. A TV brand that needs another order gets a
-// handler here, taken from libCEC's handler for that brand, as
-// AGENTS.md states.
+// Every TV brand gets the same messages. cec/AGENTS.md gives the rule
+// for adding a brand that needs others.
 func PowerCommand(from LogicalAddress, on bool) Message {
 	if on {
 		return ImageViewOn(from, AddressTV)
@@ -25,17 +14,18 @@ func PowerCommand(from LogicalAddress, on bool) Message {
 	return Standby(from, AddressTV)
 }
 
-// ReadPower asks one device for its power status and records what the
-// wire answers in the directory, by the same rules a scan follows. A
-// device that acknowledges and does not answer, or answers with a
-// Feature Abort, has no power this read can state. After two such
-// reads in a row the directory forgets the power it held: a TV in a
-// deep standby can stop answering, and its last answer is then no
-// longer true. One missed reply keeps the power, because a TV that
-// wakes can miss one question. A NACK means
-// no device holds the address. A lost arbitration or a wire error says
-// nothing about the device, so the directory keeps what it held. An
-// error means the kernel refused the call.
+// ReadPower sends Give Device Power Status to one device, records the
+// result in the directory, and returns the power status from the reply,
+// or PowerUnknown when there is none. It returns an error only when the
+// kernel refuses the call.
+//
+// A NACK means no device has the address, so the directory forgets the
+// peer. An acknowledged message with no reply, or with a Feature Abort,
+// counts as a missed reply, and Directory.Unanswered clears the power
+// after missedReplies in a row, because a TV in deep standby can stop
+// replying. A send that ends with neither an acknowledgement nor a
+// NACK, as after a lost arbitration or a wire error, tells nothing
+// about the device, so the directory keeps what it has.
 func ReadPower(device *Device, directory *Directory, own, to LogicalAddress) (PowerStatus, error) {
 	result, err := device.Transmit(GiveDevicePowerStatus(own, to), OpReportPowerStatus, replyTimeout)
 	if err != nil {

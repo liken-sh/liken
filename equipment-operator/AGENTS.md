@@ -133,7 +133,7 @@ receiver's CEC identity in the `Receiver`'s `status.cec`, on the
 
 The bus can also ask for the Player's screen. The TV's Set Stream Path
 for the `Display` of a session that sleeps asks it to wake, and a
-Standby while the session holds the room awake asks it to sleep. The
+Standby while the session is awake asks it to sleep. The
 node workload writes the ask in the `Television`'s `status.screenAsk`
 in `cecnode_screen.go`, and `media-operator` relays each new ask to
 the Player's screen client. The screen then moves the session, and
@@ -141,8 +141,8 @@ the node workload follows the session: a wake that answers the TV's
 pick sends Active Source alone. When the session sleeps with no
 standby, the node workload sends the TV Inactive Source in
 `cecnode_inactive.go`, and it does the same when it stops while no
-session holds the room awake. It reports its own power as On only
-while a session holds the room awake. Every adapter of a bus announces the bus's
+session is awake. It reports its own power as On only while a
+session is awake. Every adapter of a bus announces the bus's
 `spec.osdName`, `liken` by default.
 
 ## Errors include their source's text

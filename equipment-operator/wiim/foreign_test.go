@@ -1,6 +1,3 @@
-// The check that keeps the driver to WiiM devices: other brands build
-// on LinkPlay's platform and answer the same API.
-
 package wiim
 
 import (
@@ -36,8 +33,8 @@ func TestIsWiiMComparesTheNamePrefixWithoutCase(t *testing.T) {
 	}
 }
 
-// arylicAmp is a fake device that answers getStatusEx the way another
-// LinkPlay brand does.
+// arylicAmp is a fake device whose getStatusEx response reports the
+// project of a LinkPlay device of another brand.
 func arylicAmp(t *testing.T) *fakeAmp {
 	amp := startFakeAmp(t)
 	amp.answers[statusCommand] = strings.Replace(statusExJSON, `"project":"WiiM_Amp_4layer"`, `"project":"ARYLIC_A50TE"`, 1)
@@ -64,7 +61,7 @@ func TestPollOfAnotherBrandNamesTheProject(t *testing.T) {
 		client.poll(context.Background())
 
 		mustMatch(t, projects, []string{"ARYLIC_A50TE"})
-		mustMatch(t, client.Surveyed(), false)
+		mustMatch(t, client.FirstReadDone(), false)
 	})
 }
 
@@ -84,7 +81,7 @@ func TestPollOfAWiiMNeverCallsForeign(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp := startFakeAmp(t)
 		client := amp.client(nil)
-		client.Foreign = func(string) { t.Fatal("a WiiM was called foreign") }
+		client.Foreign = func(string) { t.Fatal("poll reported a WiiM as foreign, want no report") }
 		mustMatch(t, client.poll(context.Background()), true)
 	})
 }
@@ -94,8 +91,8 @@ func TestPollOfADeviceWithNoProjectIsNotJudged(t *testing.T) {
 		amp := startFakeAmp(t)
 		amp.answers[statusCommand] = strings.Replace(statusExJSON, `"project":"WiiM_Amp_4layer"`, `"project":""`, 1)
 		client := amp.client(nil)
-		client.Foreign = func(string) { t.Fatal("a device with no project was called foreign") }
+		client.Foreign = func(string) { t.Fatal("poll reported a device with an empty project as foreign, want no report") }
 		mustMatch(t, client.poll(context.Background()), true)
-		mustMatch(t, client.Surveyed(), true)
+		mustMatch(t, client.FirstReadDone(), true)
 	})
 }

@@ -25,7 +25,7 @@ func TestDescribeDecodesEachVisibleMessage(t *testing.T) {
 		{"system audio off", cec.NewMessage(5, 15, cec.OpSetSystemAudioMode, 0), "Set System Audio Mode Off"},
 		{"system audio undefined", cec.NewMessage(5, 15, cec.OpSetSystemAudioMode, 7), "Set System Audio Mode 0x07, which CEC does not define"},
 		{"system audio request", cec.NewMessage(0, 5, cec.OpSystemAudioModeRequest, 0x15, 0x00), "System Audio Mode Request for 1.5.0.0"},
-		{"system audio request for off", cec.NewMessage(0, 5, cec.OpSystemAudioModeRequest), "System Audio Mode Request with no physical address, which asks for Off"},
+		{"system audio request for off", cec.NewMessage(0, 5, cec.OpSystemAudioModeRequest), "System Audio Mode Request with no physical address, which requests Off"},
 		{"power", cec.ReportPowerStatus(0, 8, cec.PowerToOn), "Report Power Status ToOn"},
 		{"power undefined", cec.NewMessage(0, 8, cec.OpReportPowerStatus, 9), "Report Power Status 0x09, which CEC does not define"},
 		{"a key", cec.NewMessage(0, 4, cec.OpUserControlPressed, 0x41), "User Control Pressed Volume Up"},

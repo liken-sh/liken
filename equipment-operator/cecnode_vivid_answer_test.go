@@ -1,10 +1,8 @@
 package main
 
-// The answer to Request Active Source against the kernel's own CEC
-// core, through the vivid driver: after the wake, the TV the test plays
-// asks the bus for the active source, and the node workload answers
-// with Active Source for its Display. cec/AGENTS.md gives the commands
-// that set vivid up.
+// After a wake, the test acts as the TV on a vivid bus and sends Request
+// Active Source, and the node workload must reply with Active Source.
+// cec/AGENTS.md has the commands that set up vivid.
 
 import (
 	"os"
@@ -14,7 +12,7 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/cec"
 )
 
-func TestVividTheAdapterAnswersTheTVsRequest(t *testing.T) {
+func TestVividTheAdapterRepliesToRequestActiveSource(t *testing.T) {
 	if os.Getenv(vividTVVariable) != "" {
 		t.Skipf("%s names another player for the TV, and this test plays the TV itself", vividTVVariable)
 	}

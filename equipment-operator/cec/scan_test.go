@@ -21,7 +21,7 @@ func TestAScanFindsEveryDeviceAndItsFacts(t *testing.T) {
 	}
 	peers := directory.Peers()
 	if report.Acked != 2 || len(peers) != 2 || peers[0] != want[0] || peers[1] != want[1] {
-		t.Errorf("report %+v, peers %+v", report, peers)
+		t.Errorf("the scan acked %d devices and the directory holds %+v, want 2 acked and %+v", report.Acked, peers, want)
 	}
 }
 
@@ -35,13 +35,13 @@ func TestAScanForgetsADeviceThatLeft(t *testing.T) {
 	mustSucceed(t, err)
 	for _, peer := range directory.Peers() {
 		if peer.Logical == 9 {
-			t.Errorf("the directory still holds %+v", peer)
+			t.Errorf("after the scan the directory still holds %+v, want no device at address 9", peer)
 		}
 	}
 }
 
-// A TV in deep standby acknowledges its poll and answers nothing, so it
-// is present with no facts.
+// A TV in deep standby acknowledges its poll and replies to nothing
+// else, so the directory has the TV with no facts.
 func TestAMuteDeviceIsPresentWithNoFacts(t *testing.T) {
 	bus := cectest.NewBus()
 	bus.Add(cectest.Peer{Logical: 0, Mute: true})
@@ -53,7 +53,7 @@ func TestAMuteDeviceIsPresentWithNoFacts(t *testing.T) {
 	mustSucceed(t, err)
 	peers := directory.Peers()
 	if len(peers) != 1 || peers[0].Power != cec.PowerUnknown || peers[0].OSDName != "" {
-		t.Errorf("peers = %+v", peers)
+		t.Errorf("the directory holds %+v, want one device with unknown power and no OSD name", peers)
 	}
 }
 
@@ -64,13 +64,12 @@ func TestAScanStopsWhenTheAdapterLeaves(t *testing.T) {
 	_, err := cec.Scan(device, cec.NewDirectory(), 4, nil)
 
 	if !cec.IsGone(err) {
-		t.Errorf("scan answered %v, want ENODEV", err)
+		t.Errorf("Scan returned %v, want an error that IsGone reports (ENODEV)", err)
 	}
 }
 
-// Only a NACK means that no device holds an address. A poll that loses
-// arbitration or meets a wire error says nothing about the device, so
-// the scan keeps what the last scan found there.
+// A poll that hits a wire error is not a NACK, so the scan keeps what
+// the earlier scan recorded for that device.
 func TestAScanKeepsADeviceItCouldNotReach(t *testing.T) {
 	bus := room()
 	_, device := joined(t, bus)
@@ -87,12 +86,10 @@ func TestAScanKeepsADeviceItCouldNotReach(t *testing.T) {
 	mustSucceed(t, err)
 	peers := directory.Peers()
 	if report.Acked != 1 || len(peers) != 2 || peers[0].OSDName != "TV" {
-		t.Errorf("report %+v, peers %+v", report, peers)
+		t.Errorf("the second scan acked %d devices and the directory holds %+v, want 1 acked and both devices with the TV's OSD name kept", report.Acked, peers)
 	}
 }
 
-// A device that announces itself is asked only for the facts its
-// announcement left out, and only once they are missing.
 func TestAnIntroductionAsksOnlyForMissingFacts(t *testing.T) {
 	bus := room()
 	_, device := joined(t, bus)
@@ -107,18 +104,18 @@ func TestAnIntroductionAsksOnlyForMissingFacts(t *testing.T) {
 
 	want := cec.Peer{Logical: 5, Physical: 0x1000, Type: cec.TypeAudioSystem, OSDName: "AVR", Vendor: 0x0005cd, Version: cec.Version14, Power: cec.PowerOn}
 	if asked != 4 || again != 0 || directory.Lookup(5) != want {
-		t.Errorf("asked %d, then %d; the directory holds %+v", asked, again, directory.Lookup(5))
+		t.Errorf("the first introduction asked %d questions, the second asked %d, and the directory holds %+v, want 4, 0, and %+v", asked, again, directory.Lookup(5), want)
 	}
 	for _, message := range bus.Sent() {
 		if message.To != 5 {
-			t.Errorf("the introduction sent %v to another device", message)
+			t.Errorf("the introduction of address 5 sent %v to another device, want every message to address 5", message)
 		}
 	}
 }
 
-// A device that answers Give Device Vendor ID with 000000 states no
-// vendor, and the answer still counts: the next introduction asks it
-// nothing again, and the vendor reads as unknown.
+// A device that replies to Give Device Vendor ID with 000000 has no
+// vendor. The directory records that, so the next introduction does not
+// ask again, and Vendor stays VendorUnknown.
 func TestAVendorOfZeroIsAskedOnce(t *testing.T) {
 	tv := television
 	tv.Vendor = 0
@@ -135,7 +132,7 @@ func TestAVendorOfZeroIsAskedOnce(t *testing.T) {
 	mustSucceed(t, err)
 
 	if again != 0 || directory.Lookup(0).Vendor != cec.VendorUnknown {
-		t.Errorf("the second introduction asked %d questions and the directory holds %+v", again, directory.Lookup(0))
+		t.Errorf("the second introduction asked %d questions and the directory holds %+v, want 0 questions and VendorUnknown", again, directory.Lookup(0))
 	}
 }
 
@@ -150,7 +147,7 @@ func TestAnIntroductionForgetsADeviceThatLeft(t *testing.T) {
 
 	mustSucceed(t, err)
 	if asked != 1 || len(directory.Peers()) != 0 {
-		t.Errorf("asked %d; the directory holds %+v", asked, directory.Peers())
+		t.Errorf("the introduction asked %d questions and the directory holds %+v, want 1 question and no device", asked, directory.Peers())
 	}
 }
 
@@ -161,7 +158,7 @@ func TestAnIntroductionSkipsNoDevice(t *testing.T) {
 		asked, err := cec.Introduce(device, cec.NewDirectory(), 4, address, nil)
 		mustSucceed(t, err)
 		if asked != 0 {
-			t.Errorf("address %d: asked %d", address, asked)
+			t.Errorf("the introduction of address %d asked %d questions, want 0", address, asked)
 		}
 	}
 }
@@ -175,13 +172,10 @@ func TestAnIntroductionStopsWhenTheAdapterLeaves(t *testing.T) {
 	_, err := cec.Introduce(device, directory, 4, 5, nil)
 
 	if !cec.IsGone(err) {
-		t.Errorf("introduce answered %v, want ENODEV", err)
+		t.Errorf("Introduce returned %v, want an error that IsGone reports (ENODEV)", err)
 	}
 }
 
-// A caller that serializes its reads of the TV's power hands the scan
-// and the introduction a reader, and they ask the TV its power through
-// it, once, and never with a question of their own.
 func TestTheTVsPowerGoesThroughTheReader(t *testing.T) {
 	cases := []struct {
 		name string
@@ -207,11 +201,11 @@ func TestTheTVsPowerGoesThroughTheReader(t *testing.T) {
 			mustSucceed(t, c.ask(device, directory, func() error { reads++; return nil }))
 
 			if reads != 1 {
-				t.Errorf("the reader ran %d times", reads)
+				t.Errorf("the power reader ran %d times, want 1", reads)
 			}
 			for _, message := range bus.Sent() {
 				if opcode, _ := message.Opcode(); message.To == cec.AddressTV && opcode == cec.OpGiveDevicePowerStatus {
-					t.Errorf("the %s sent %v itself", c.name, message)
+					t.Errorf("%s sent %v to the TV, want the power reader to ask instead", c.name, message)
 				}
 			}
 		})

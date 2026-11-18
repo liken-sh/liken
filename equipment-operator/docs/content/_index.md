@@ -15,18 +15,20 @@ button turns the TV and the receiver off.
   reports its power, input, and volume, and controls it while a
   `Player` plays through it. It supports receivers that speak the
   Denon and Marantz control protocol, and WiiM devices.
-* A `Television` is a TV on the HDMI-CEC bus. A USB-CEC adapter on the
-  machine connects to that bus, and the operator declares the adapter
-  as a `CECBus`. The operator finds each TV on the bus, wakes it, and
-  puts it in standby. The TV's own remote can then drive the
-  `Player`.
+* A `Television` is a TV on the HDMI-CEC bus. You connect the bus to
+  the machine with a USB-CEC adapter, and the operator creates a
+  `CECBus` for the adapter. When you set the `CECBus` to `Control`, the
+  operator creates a `Television` for each TV on the bus. It then wakes
+  the TV when the `Player` starts playing, puts the TV in standby when
+  the `Player` turns off, and sends the key presses of the TV's own
+  remote to the `Player`.
 
 Start here:
 
 * [Install the operator](/docs/guides/install/), declare a `Receiver`,
   and put it under a `Player`.
 * [Connect a USB-CEC adapter](/docs/guides/connect-a-cec-adapter/) so
-  that the TV wakes with the room.
+  that the TV wakes when the `Player` plays.
 * Reference: [`Receiver`](/docs/reference/receivers/),
   [`CECBus`](/docs/reference/cecbuses/), and
   [`Television`](/docs/reference/televisions/).

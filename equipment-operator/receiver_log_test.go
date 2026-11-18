@@ -1,7 +1,7 @@
 package main
 
-// How a receiver's log holds a command's line until the receiver
-// reports the result, and the words the lines use.
+// Tests of receiverLog: it holds a command's line until the receiver
+// reports the result, and it formats the values in the lines.
 
 import (
 	"errors"
@@ -12,8 +12,7 @@ import (
 	"time"
 )
 
-// timeless puts one mark in place of each measured duration, because a
-// test cannot fix how long the receiver takes to answer.
+// timeless replaces each measured duration in lines with "<time>".
 func timeless(lines []string) []string {
 	measured := regexp.MustCompile(`after \d+(\.\d)? m?s\b`)
 	cleaned := make([]string, 0, len(lines))
@@ -23,21 +22,21 @@ func timeless(lines []string) []string {
 	return cleaned
 }
 
-// waitForLines waits until the log holds count lines that contain text,
-// and answers them without their durations.
+// waitForLines waits until the log has count lines that contain text,
+// and returns them with the durations replaced.
 func waitForLines(t *testing.T, log *logBuffer, text string, count int) []string {
 	t.Helper()
 	deadline := time.Now().Add(testTimeout)
 	for len(linesWith(log, text)) < count {
 		if time.Now().After(deadline) {
-			t.Fatalf("the log never held %d lines with %q; it holds %q", count, text, log.lines())
+			t.Fatalf("the log holds %q, want %d lines with %q", log.lines(), count, text)
 		}
 		time.Sleep(time.Millisecond)
 	}
 	return timeless(linesWith(log, text))
 }
 
-// switchCheck is a check whose result a test sets.
+// switchCheck returns a check that passes when the test sets confirmed.
 func switchCheck(confirmed *atomic.Bool) func() (string, bool) {
 	return func() (string, bool) {
 		if confirmed.Load() {
@@ -54,7 +53,7 @@ func TestACommandsLineWaitsForTheReportAndPrintsOnce(t *testing.T) {
 		lines := newReceiverLog(log, "den")
 		var confirmed atomic.Bool
 
-		lines.confirm("generation 2 asks power on; sent power on", time.Now(), switchCheck(&confirmed))
+		lines.confirm("generation 2 requests power on; sent power on", time.Now(), switchCheck(&confirmed))
 		lines.observe()
 		mustDeepEqual(t, linesWith(log, "Receiver"), []string(nil))
 
@@ -63,7 +62,7 @@ func TestACommandsLineWaitsForTheReportAndPrintsOnce(t *testing.T) {
 		lines.observe()
 
 		mustDeepEqual(t, timeless(log.lines()), []string{
-			"Receiver den: generation 2 asks power on; sent power on; the receiver reported power on after <time>",
+			"Receiver den: generation 2 requests power on; sent power on; the receiver reported power on after <time>",
 		})
 	})
 }
@@ -75,10 +74,10 @@ func TestACommandTheReceiverAlreadyReportsPrintsAtOnce(t *testing.T) {
 		var confirmed atomic.Bool
 		confirmed.Store(true)
 
-		newReceiverLog(log, "den").confirm("generation 2 asks power on; sent power on", time.Now(), switchCheck(&confirmed))
+		newReceiverLog(log, "den").confirm("generation 2 requests power on; sent power on", time.Now(), switchCheck(&confirmed))
 
 		mustDeepEqual(t, timeless(log.lines()), []string{
-			"Receiver den: generation 2 asks power on; sent power on; the receiver reported power on after <time>",
+			"Receiver den: generation 2 requests power on; sent power on; the receiver reported power on after <time>",
 		})
 	})
 }
@@ -90,14 +89,14 @@ func TestACommandTheReceiverNeverReportsPrintsWhenTheWaitEnds(t *testing.T) {
 		lines := newReceiverLog(log, "den")
 		var confirmed atomic.Bool
 
-		lines.confirm("generation 2 asks power on; sent power on", time.Now(), switchCheck(&confirmed))
+		lines.confirm("generation 2 requests power on; sent power on", time.Now(), switchCheck(&confirmed))
 		time.Sleep(receiverConfirmWait - time.Millisecond)
 		synctest.Wait()
 		mustMatch(t, log.lines()[0], "")
 		time.Sleep(time.Millisecond)
 
 		mustDeepEqual(t, waitForLines(t, log, "Receiver den", 1), []string{
-			"Receiver den: generation 2 asks power on; sent power on; the receiver did not report it in 15 s, and it reports power standby",
+			"Receiver den: generation 2 requests power on; sent power on; the receiver did not report it in 15 s, and it reports power standby",
 		})
 		confirmed.Store(true)
 		lines.observe()
@@ -105,9 +104,9 @@ func TestACommandTheReceiverNeverReportsPrintsWhenTheWaitEnds(t *testing.T) {
 	})
 }
 
-// A report that arrives as the wait ends prints no second line: the
+// A report that arrives as the wait ends prints no second line. The
 // report's check is still reading the receiver when the timer prints
-// the line, and the report then finds the line gone.
+// the line, and the report then finds the line already removed.
 func TestAReportThatMeetsTheEndOfTheWaitPrintsOnce(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -123,7 +122,7 @@ func TestAReportThatMeetsTheEndOfTheWaitPrintsOnce(t *testing.T) {
 			}
 			return "power standby", false
 		}
-		lines.confirm("generation 2 asks power on; sent power on", time.Now(), check)
+		lines.confirm("generation 2 requests power on; sent power on", time.Now(), check)
 		reported := make(chan struct{})
 		go func() {
 			defer close(reported)
@@ -137,7 +136,7 @@ func TestAReportThatMeetsTheEndOfTheWaitPrintsOnce(t *testing.T) {
 		<-reported
 
 		mustDeepEqual(t, log.lines(), []string{
-			"Receiver den: generation 2 asks power on; sent power on; the receiver did not report it in 15 s, and it reports power standby",
+			"Receiver den: generation 2 requests power on; sent power on; the receiver did not report it in 15 s, and it reports power standby",
 		})
 	})
 }
@@ -147,17 +146,17 @@ func TestARefusedCommandStatesTheDriversError(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		log := &logBuffer{}
 
-		newReceiverLog(log, "den").refused("generation 2 asks power off; sent power standby", errors.New(`no connection to send "PWSTANDBY"`))
+		newReceiverLog(log, "den").refused("generation 2 requests power off; sent power standby", errors.New(`the receiver is not connected, so "PWSTANDBY" was not sent`))
 
 		mustDeepEqual(t, log.lines(), []string{
-			`Receiver den: generation 2 asks power off; sent power standby; the command failed: no connection to send "PWSTANDBY"`,
+			`Receiver den: generation 2 requests power off; sent power standby; the command was not applied: the receiver is not connected, so "PWSTANDBY" was not sent`,
 		})
 	})
 }
 
-// A block that a pass sends again with the same value is not a new
-// line; a new value is.
-func TestFreshAnswersOncePerValue(t *testing.T) {
+// A block that a pass sends again with the same value is not logged
+// again, and a new value is.
+func TestFreshIsTrueOnlyForANewValue(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		lines := newReceiverLog(&logBuffer{}, "den")
@@ -178,7 +177,7 @@ func TestFreshAnswersOncePerValue(t *testing.T) {
 	})
 }
 
-func TestElapsedReadsTheWayAPersonDoes(t *testing.T) {
+func TestElapsedFormatsDurationsForALogLine(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		cases := []struct {
@@ -196,7 +195,7 @@ func TestElapsedReadsTheWayAPersonDoes(t *testing.T) {
 	})
 }
 
-func TestDeclaredNamesOnlyTheDeclaredValues(t *testing.T) {
+func TestDeclaredOmitsEmptyObjects(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		volume, mute := 40.0, true

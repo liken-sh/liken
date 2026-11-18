@@ -1,5 +1,3 @@
-// The model the client reads from the receiver's UPnP description.
-
 package denon
 
 import (
@@ -11,8 +9,8 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
-// aiosDescription is the root of a receiver's AIOS description, cut to
-// the fields the client reads and the ones around them.
+// aiosDescription is a receiver's UPnP description, cut down to the
+// fields that the client reads and a few others.
 const aiosDescription = `<?xml version="1.0"?>
 <root xmlns="urn:schemas-upnp-org:device-1-0">
   <device>
@@ -23,8 +21,9 @@ const aiosDescription = `<?xml version="1.0"?>
   </device>
 </root>`
 
-// describedHarness runs a client against a fake receiver whose
-// description answers with code, and counts the reads.
+// describedHarness starts a client against a fake receiver whose
+// description server responds with the status code in code. It returns
+// the count of description requests.
 func describedHarness(t *testing.T, code *atomic.Int64) (*clientHarness, *atomic.Int64) {
 	t.Helper()
 	reads := &atomic.Int64{}
@@ -58,15 +57,13 @@ func TestTheClientReadsTheModelFromTheReceiversDescription(t *testing.T) {
 	})
 }
 
-// A description the receiver did not serve is read again on the next
-// connection.
 func TestTheClientReadsAFailedDescriptionOnTheNextConnection(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		code := &atomic.Int64{}
 		code.Store(http.StatusNotFound)
 		harness, reads := describedHarness(t, code)
-		waitForField(t, harness.events, equipment.EventSurveyed)
+		waitForField(t, harness.events, equipment.EventFirstReadDone)
 		code.Store(http.StatusOK)
 
 		harness.receiver.dropConnections()

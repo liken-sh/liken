@@ -1,9 +1,9 @@
 package cectest_test
 
-// The bus in memory must answer the way the kernel's CEC core answers,
-// or a test that passes against it proves nothing. These cases state
-// the kernel rules it copies. The vivid tests in the cec package check
-// the same rules against the real core.
+// A test that passes against the in-memory bus proves nothing unless
+// the bus behaves like the kernel's CEC core. These tests check the
+// kernel rules that the bus copies. The vivid tests in the cec package
+// check the same rules against the real core.
 
 import (
 	"errors"
@@ -19,12 +19,12 @@ import (
 func mustSucceed(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("a call that should succeed returned: %v", err)
 	}
 }
 
-// playing is an adapter at a physical address that claimed a playback
-// address as a follower.
+// playing returns an adapter at a physical address, with a device that
+// follows and has claimed a playback logical address.
 func playing(t *testing.T, bus *cectest.Bus, address cec.PhysicalAddress, name string) (*cectest.Adapter, *cec.Device) {
 	t.Helper()
 	adapter, device := bus.Adapter(cectest.Options{Physical: address})
@@ -39,18 +39,18 @@ func TestTwoAdaptersClaimTwoAddresses(t *testing.T) {
 	second, _ := playing(t, bus, 0x1400, "node-2")
 
 	if got := first.Logical(); len(got) != 1 || got[0] != 4 {
-		t.Errorf("first holds %v", got)
+		t.Errorf("the first adapter holds logical addresses %v, want [4]", got)
 	}
 	if got := second.Logical(); len(got) != 1 || got[0] != 8 {
-		t.Errorf("second holds %v", got)
+		t.Errorf("the second adapter holds logical addresses %v, want [8]", got)
 	}
 	if first.Physical() != 0x1300 || first.Claims() != 1 {
-		t.Errorf("first announces %v", first.Physical())
+		t.Errorf("the first adapter has physical address %v and %d claims, want 0x1300 and 1", first.Physical(), first.Claims())
 	}
 }
 
-// The kernel answers the identity requests for its own adapter, so one
-// adapter reads another's OSD name with no program answering.
+// The kernel replies to identity requests for its own adapter, so one
+// adapter can read another's OSD name while no program replies.
 func TestTheKernelAnswersForItsOwnAdapter(t *testing.T) {
 	bus := cectest.NewBus()
 	_, asker := playing(t, bus, 0x1300, "node-1")
@@ -70,14 +70,14 @@ func TestTheKernelAnswersForItsOwnAdapter(t *testing.T) {
 
 			mustSucceed(t, err)
 			if result.Reply == nil || result.Reply.String() != c.want {
-				t.Errorf("result %+v, want %s", result, c.want)
+				t.Errorf("the result is %+v, want the reply %s", result, c.want)
 			}
 		})
 	}
 }
 
-// A request the kernel leaves to the follower reaches the follower,
-// and the asker's wait for a reply ends in a timeout.
+// A request that the kernel does not answer reaches the follower, and
+// the sender's wait for a reply times out.
 func TestAFollowerReceivesWhatTheKernelDoesNotAnswer(t *testing.T) {
 	bus := cectest.NewBus()
 	_, asker := playing(t, bus, 0x1300, "node-1")
@@ -89,12 +89,12 @@ func TestAFollowerReceivesWhatTheKernelDoesNotAnswer(t *testing.T) {
 
 	mustSucceed(t, receiveErr)
 	if !result.Acked || result.Reply != nil || received.String() != "4->8 8f" {
-		t.Errorf("result %+v, follower received %v", result, received)
+		t.Errorf("the result is %+v and the follower received %v, want an ack with no reply and 4->8 8f", result, received)
 	}
 }
 
-// A peer's identity request to an adapter gets the kernel's answer on
-// the wire, and a monitor-all adapter hears both.
+// When a peer sends an identity request to an adapter, the kernel's
+// reply goes on the wire, and a monitor-all adapter receives both.
 func TestAMonitorHearsARequestAndItsAnswer(t *testing.T) {
 	bus := cectest.NewBus()
 	playing(t, bus, 0x1300, "node-1")
@@ -108,7 +108,7 @@ func TestAMonitorHearsARequestAndItsAnswer(t *testing.T) {
 	second, err := monitor.Receive(time.Second)
 	mustSucceed(t, err)
 	if first.String() != "0->4 46" || second.String() != "4->0 47 6e 6f 64 65 2d 31" {
-		t.Errorf("heard %v then %v", first, second)
+		t.Errorf("the monitor heard %v then %v, want 0->4 46 then 4->0 47 6e 6f 64 65 2d 31", first, second)
 	}
 }
 
@@ -159,14 +159,15 @@ func TestTheKernelRulesTheBusCopies(t *testing.T) {
 			err := c.call(adapter, device)
 
 			if !errors.Is(err, c.errno) {
-				t.Errorf("got %v, want %v", err, c.errno)
+				t.Errorf("the call returned %v, want %v", err, c.errno)
 			}
 		})
 	}
 }
 
-// With no physical address the kernel stores a claim and holds no
-// logical address, the state of a USB adapter nobody gave an address.
+// With no physical address, the kernel stores a claim and the adapter
+// holds no logical address. A USB adapter is in this state until
+// something sets its physical address.
 func TestAClaimWithNoPhysicalAddressHoldsNothing(t *testing.T) {
 	adapter, device := cectest.NewBus().Adapter(cectest.Options{Physical: cec.InvalidPhysicalAddress})
 	mustSucceed(t, device.Follow())
@@ -174,12 +175,11 @@ func TestAClaimWithNoPhysicalAddressHoldsNothing(t *testing.T) {
 	mustSucceed(t, device.Claim(cec.Claim{OSDName: "node-1"}))
 
 	if got := adapter.Logical(); len(got) != 0 {
-		t.Errorf("holds %v", got)
+		t.Errorf("the adapter holds logical addresses %v, want none", got)
 	}
 	mustSucceed(t, device.Close())
 }
 
-// An unplugged adapter hears nothing more.
 func TestAnUnpluggedAdapterHearsNothing(t *testing.T) {
 	bus := cectest.NewBus()
 	adapter, device := playing(t, bus, 0x1300, "node-1")
@@ -188,15 +188,13 @@ func TestAnUnpluggedAdapterHearsNothing(t *testing.T) {
 	bus.Send(cec.ActiveSource(0, 0x0000))
 
 	if _, err := device.Receive(time.Millisecond); !errors.Is(err, unix.ENODEV) {
-		t.Errorf("receive answered %v", err)
+		t.Errorf("Receive on an unplugged adapter returned %v, want ENODEV", err)
 	}
 	if sent := bus.Sent(); len(sent) != 0 {
-		t.Errorf("sent %v", sent)
+		t.Errorf("the bus sent %v, want no messages", sent)
 	}
 }
 
-// A scripted peer answers each identity and power question from its
-// fields, and aborts a request it does not know.
 func TestAPeerAnswersFromItsFields(t *testing.T) {
 	bus := cectest.NewBus()
 	bus.Add(cectest.Peer{Logical: 0, Physical: 0x0000, PrimaryType: 0, OSDName: "TV", Vendor: 0x00e091, Version: cec.Version14, Power: cec.PowerStandby})
@@ -246,14 +244,14 @@ func TestAPeerThatCannotAnswerDoesNot(t *testing.T) {
 
 			mustSucceed(t, err)
 			if !result.Acked || result.Reply != nil || result.Aborted != c.aborted {
-				t.Errorf("result %+v", result)
+				t.Errorf("the result is %+v, want an ack with no reply and Aborted %t", result, c.aborted)
 			}
 		})
 	}
 }
 
-// A broadcast reaches every follower, and a message without a reply
-// wanted returns once it is on the wire.
+// A broadcast reaches every follower, and a transmit that waits for no
+// reply returns as soon as the message is on the wire.
 func TestABroadcastReachesEveryFollower(t *testing.T) {
 	bus := cectest.NewBus()
 	_, sender := playing(t, bus, 0x1300, "node-1")
@@ -265,14 +263,13 @@ func TestABroadcastReachesEveryFollower(t *testing.T) {
 
 	mustSucceed(t, receiveErr)
 	if !result.Acked || received.String() != "4->f 82 13 00" {
-		t.Errorf("result %+v, received %v", result, received)
+		t.Errorf("the result is %+v and the follower received %v, want an ack and 4->f 82 13 00", result, received)
 	}
 	if sent := bus.Sent(); len(sent) != 1 {
-		t.Errorf("sent %v", sent)
+		t.Errorf("the bus sent %v, want one message", sent)
 	}
 }
 
-// Wait returns empty when nothing arrives before the timeout.
 func TestWaitEndsAtItsTimeout(t *testing.T) {
 	_, device := cectest.NewBus().Adapter(cectest.Options{})
 
@@ -280,12 +277,11 @@ func TestWaitEndsAtItsTimeout(t *testing.T) {
 
 	mustSucceed(t, err)
 	if ready.Message || ready.Event {
-		t.Errorf("ready = %+v", ready)
+		t.Errorf("Wait returned %+v, want no message and no event", ready)
 	}
 }
 
-// A USB adapter takes an address, claims, reports the state change,
-// and clears its claim, the sequence the node workload runs.
+// The node workload runs this sequence of calls on a USB adapter.
 func TestAUSBAdapterRunsTheNodeWorkloadsSequence(t *testing.T) {
 	adapter, device := cectest.NewBus().Adapter(cectest.Options{Physical: cec.InvalidPhysicalAddress})
 
@@ -303,17 +299,17 @@ func TestAUSBAdapterRunsTheNodeWorkloadsSequence(t *testing.T) {
 	mustSucceed(t, device.Release())
 
 	if caps.Driver != "cectest" || physical != 0x1300 || len(held.Logical) != 1 || held.OSDName != "node-1" {
-		t.Errorf("caps %+v, physical %v, held %+v", caps, physical, held)
+		t.Errorf("driver %q, physical address %v, held %+v, want driver cectest, 0x1300, and one address named node-1", caps.Driver, physical, held)
 	}
 	if !event.StateChange || event.Physical != 0x1300 {
-		t.Errorf("event = %+v", event)
+		t.Errorf("the event is %+v, want a state change at physical address 0x1300", event)
 	}
 	if len(adapter.Logical()) != 0 {
-		t.Errorf("a released adapter holds %v", adapter.Logical())
+		t.Errorf("a released adapter holds %v, want no logical addresses", adapter.Logical())
 	}
 	mustSucceed(t, device.Leave())
 	if adapter.Follows() {
-		t.Error("an adapter whose handle left still follows")
+		t.Error("an adapter whose handle left still follows, want it not to follow")
 	}
 }
 
@@ -325,13 +321,13 @@ func TestADisconnectDropsBothAddresses(t *testing.T) {
 	held, err := device.Addresses()
 	mustSucceed(t, err)
 	if len(held.Logical) != 0 || adapter.Physical() != cec.InvalidPhysicalAddress {
-		t.Errorf("held %+v at %v", held, adapter.Physical())
+		t.Errorf("after Disconnect the device holds %+v and the adapter has physical address %v, want no logical addresses and an invalid physical address", held, adapter.Physical())
 	}
 }
 
-// The kernel keeps a claim made while the adapter has no physical
-// address, and completes it once the adapter has one, as an adapter on
-// a video port does when its hotplug signal returns.
+// The kernel stores a claim made while the adapter has no physical
+// address, and completes it when the adapter gets one. An adapter on a
+// video port gets one when its hotplug signal returns.
 func TestAStoredClaimCompletesWhenTheAddressArrives(t *testing.T) {
 	adapter, device := cectest.NewBus().Adapter(cectest.Options{Physical: cec.InvalidPhysicalAddress, Capabilities: cec.CapLogAddrs | cec.CapTransmit})
 	mustSucceed(t, device.Follow())
@@ -342,12 +338,10 @@ func TestAStoredClaimCompletesWhenTheAddressArrives(t *testing.T) {
 	held, err := device.Addresses()
 	mustSucceed(t, err)
 	if len(held.Logical) != 1 || held.Logical[0] != 4 || adapter.Physical() != 0x2000 {
-		t.Errorf("held %+v at %v", held, adapter.Physical())
+		t.Errorf("after Connect the device holds %+v at %v, want logical address 4 at 0x2000", held, adapter.Physical())
 	}
 }
 
-// Release forgets a stored claim, so an address that arrives later
-// claims nothing.
 func TestReleaseForgetsAStoredClaim(t *testing.T) {
 	adapter, device := cectest.NewBus().Adapter(cectest.Options{Physical: cec.InvalidPhysicalAddress})
 	mustSucceed(t, device.Follow())
@@ -357,12 +351,12 @@ func TestReleaseForgetsAStoredClaim(t *testing.T) {
 	adapter.Connect(0x2000)
 
 	if held := adapter.Logical(); len(held) != 0 {
-		t.Errorf("holds %v", held)
+		t.Errorf("after Release and Connect the adapter holds %v, want no logical addresses", held)
 	}
 }
 
-// A garbled peer makes every transmission to it fail with a lost
-// arbitration, and a removed peer leaves its address free.
+// A transmission to a garbled peer fails with a lost arbitration, and
+// a transmission to the address of a removed peer is NACKed.
 func TestAWireErrorIsNotANack(t *testing.T) {
 	bus := cectest.NewBus()
 	bus.Add(cectest.Peer{Logical: 0, Garbled: true})
@@ -376,9 +370,9 @@ func TestAWireErrorIsNotANack(t *testing.T) {
 	mustSucceed(t, err)
 
 	if garbled.Acked || garbled.Nacked || garbled.Status != "ARB_LOST MAX_RETRIES" {
-		t.Errorf("garbled = %+v", garbled)
+		t.Errorf("the transmit to the garbled peer returned %+v, want neither Acked nor Nacked, with status ARB_LOST MAX_RETRIES", garbled)
 	}
 	if removed.Acked || !removed.Nacked {
-		t.Errorf("removed = %+v", removed)
+		t.Errorf("the transmit to the removed peer returned %+v, want Nacked and not Acked", removed)
 	}
 }

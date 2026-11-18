@@ -1,8 +1,9 @@
 package main
 
-// The Deployment's CECBus loop follows the pods of the node workload:
-// an entry is current while its machine's pod is Ready, and the pod
-// watch wakes the loop when that changes, so no clock runs a pass.
+// Tests that the Deployment's CECBus loop follows the pods of the node
+// workload. An entry is current while its machine's pod is Ready, and
+// the pod watch wakes the loop when that changes, so no timer runs a
+// pass.
 
 import (
 	"context"
@@ -14,9 +15,9 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events"
 )
 
-// runEventedLoop runs the Deployment's CECBus loop with a recorder
-// until the test ends, and answers the controller once every store
-// holds its first read.
+// runEventedLoop runs the Deployment's CECBus loop with an Event
+// recorder until the test ends. It returns the controller once every
+// store has its first read.
 func runEventedLoop(t *testing.T, api *cecAPI) *cecBusController {
 	t.Helper()
 	controller := newCECBusController(api.client, testNamespace)
@@ -32,8 +33,8 @@ func runEventedLoop(t *testing.T, api *cecAPI) *cecBusController {
 	return controller
 }
 
-// waitForJoined waits until the den bus's Joined condition has a reason
-// and a message that starts with the given text.
+// waitForJoined waits until the den bus's Joined condition has the
+// reason and a message that starts with message.
 func waitForJoined(t *testing.T, api *cecAPI, reason, message string) {
 	t.Helper()
 	api.waitUntil(t, "Joined to be "+reason+": "+message, func() bool {
@@ -43,11 +44,11 @@ func waitForJoined(t *testing.T, api *cecAPI, reason, message string) {
 	})
 }
 
-// The pod's Ready condition decides whether the entry is current. A
-// pod that stops being Ready, or is deleted, makes the entry stale at
-// once, and a pod that is Ready again makes it current. Each change of
-// a condition's reason posts one Event, and a new message alone posts
-// none.
+// The pod's Ready condition determines whether the entry is current. An
+// entry becomes stale as soon as its pod stops being Ready or is
+// deleted, and current again when the pod is Ready again. Each change
+// of a condition's reason posts one Event, and a change of message
+// alone posts none.
 func TestTheLoopFollowsTheNodeWorkloadsPod(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -60,12 +61,12 @@ func TestTheLoopFollowsTheNodeWorkloadsPod(t *testing.T) {
 
 		api.putPod("node-1", false)
 		waitForJoined(t, api, reasonStale,
-			"the equipment-operator-cec pod on machine node-1 stopped being Ready at 2000-01-01T00:00:01Z, after its entry was last written at 2000-01-01T00:00:00Z, so the entry may not describe the adapter")
+			"The equipment-operator-cec pod on machine node-1 stopped being Ready at 2000-01-01T00:00:01Z, after its entry was last written at 2000-01-01T00:00:00Z, so the entry may not describe the adapter")
 		bus, _ := api.bus("den")
 		mustDeepEqual(t, bus.Status.Devices, []CECDevice(nil))
 
 		api.removePod("node-1")
-		waitForJoined(t, api, reasonStale, "no equipment-operator-cec pod runs on machine node-1")
+		waitForJoined(t, api, reasonStale, "No equipment-operator-cec pod runs on machine node-1")
 
 		api.putPod("node-1", true)
 		waitForJoined(t, api, conditionJoined, "")
@@ -86,8 +87,8 @@ func TestTheLoopFollowsTheNodeWorkloadsPod(t *testing.T) {
 	})
 }
 
-// A Stopped entry is the node workload's own last word, so a Ready pod
-// on the machine does not make it current.
+// A Stopped entry is the node workload's own final write, so a Ready
+// pod on the machine does not make it current.
 func TestAStoppedEntryWinsOverAReadyPod(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -102,7 +103,7 @@ func TestAStoppedEntryWinsOverAReadyPod(t *testing.T) {
 }
 
 // A loop with nothing to do sends the API server nothing, however long
-// it runs: no clock reads the buses again.
+// it runs, because no timer reads the buses again.
 func TestAnIdleLoopSendsNothing(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -133,7 +134,7 @@ func TestAnIdleLoopSendsNothing(t *testing.T) {
 	})
 }
 
-// A status write the API server refuses is tried again after
+// A status write that the API server refuses is retried after
 // cecBusRetry, with no event to wake the loop.
 func TestARefusedCECBusStatusWriteIsTriedAgain(t *testing.T) {
 	t.Parallel()
@@ -159,9 +160,10 @@ func TestARefusedCECBusStatusWriteIsTriedAgain(t *testing.T) {
 
 // A node workload writes its first entry before its pod is Ready. The
 // pod's Ready condition last changed before that write, so the entry is
-// current and posts no Stale. A pod that is still not Ready
-// cecStartupGrace after the write, such as one whose loop hangs at its
-// start, makes the entry stale, with no event to wake the loop.
+// current and no Stale Event is posted. A pod that is still not Ready
+// cecStartupGrace after the write, for example because its loop hangs
+// at startup, makes the entry stale. No event wakes the loop for this,
+// so a timer does.
 func TestAStartingPodsEntryIsCurrentUntilTheGraceEnds(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -178,12 +180,12 @@ func TestAStartingPodsEntryIsCurrentUntilTheGraceEnds(t *testing.T) {
 		time.Sleep(cecStartupGrace / 2)
 
 		waitForJoined(t, api, reasonStale,
-			"the equipment-operator-cec pod on machine node-1 has not been Ready in the 1m0s since its entry was written at 2000-01-01T00:00:01Z, so the entry may not describe the adapter")
+			"The equipment-operator-cec pod on machine node-1 has not been Ready in the 1m0s since its entry was written at 2000-01-01T00:00:01Z, so the entry may not describe the adapter")
 	})
 }
 
-// A starting pod that becomes Ready within the grace never makes its
-// entry stale.
+// A starting pod that becomes Ready within cecStartupGrace never makes
+// its entry stale.
 func TestAPodThatBecomesReadyInTheGracePostsNoStale(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -207,7 +209,7 @@ func mustNotPost(t *testing.T, api *cecAPI, reason string) {
 	t.Helper()
 	for _, event := range postedAbout(api.events, "CECBus", "den") {
 		if event.reason == reason {
-			t.Errorf("the bus received %+v", event)
+			t.Errorf("the bus received %+v, want no Event with reason %q", event, reason)
 		}
 	}
 }

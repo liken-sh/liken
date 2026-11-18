@@ -1,8 +1,5 @@
 package main
 
-// The WiiM readings on the scrape: the values an amp reports that
-// change on their own, and so stay out of the Receiver's status.
-
 import (
 	"testing"
 
@@ -11,8 +8,8 @@ import (
 
 func number(value int) *int { return &value }
 
-// wifiReadings is what an amp on Wi-Fi with its remote connected
-// reports.
+// wifiReadings returns the readings of an amp on Wi-Fi with its remote
+// connected.
 func wifiReadings() wiim.Readings {
 	return wiim.Readings{
 		TemperatureCPU: number(43), TemperatureBoard: number(45),
@@ -38,9 +35,8 @@ func TestWiimReadingsReachTheScrape(t *testing.T) {
 	requireSeries(t, body, `equipment_wiim_remote_signal_dbm{receiver="den"} -61`)
 }
 
-// A reading the amp stops reporting, such as the radio's once the amp
-// moves to its wired port, leaves the scrape rather than stand at its
-// last value.
+// An amp that moves to its wired port stops reporting the Wi-Fi
+// readings, and their series leave the scrape.
 func TestAWiimReadingTheAmpStopsReportingLeavesTheScrape(t *testing.T) {
 	t.Parallel()
 	m := testMetrics(t)

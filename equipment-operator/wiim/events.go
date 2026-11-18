@@ -1,8 +1,9 @@
-// The device's UPnP event path. A WiiM is a UPnP MediaRenderer, and
-// RenderingControl and AVTransport push their state to a callback the
-// client registers. The client subscribes once and renews before the
-// grant expires; a subscription the device refuses leaves the poll as
-// the only path, which is the behavior the driver had before events.
+// A WiiM is a UPnP MediaRenderer. The client subscribes to its
+// RenderingControl and AVTransport services with GENA, and the device
+// sends a NOTIFY request to the client's callback URL when the volume,
+// the mute, or the play state changes. So a change made at the device
+// reaches the client without waiting for a poll. When the device
+// refuses to subscribe, the client has only the poll.
 
 package wiim
 
@@ -20,47 +21,42 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
-// The UPnP MediaRenderer's port and the two services that push. The
-// device serves its description on upnpPort, and these paths are the
-// event URLs the description names.
+// upnpPort is the port of the device's UPnP services. The paths are
+// the event URLs that the device's UPnP description lists for
+// RenderingControl and AVTransport.
 const (
 	upnpPort          = "49152"
 	renderControlPath = "/upnp/event/rendercontrol1"
 	avTransportPath   = "/upnp/event/rendertransport1"
 )
 
-// callbackPath is the one path the device calls back on. The SID on an
-// inbound NOTIFY names the service, so one path carries both.
+// callbackPath receives the NOTIFY requests of every service. The SID
+// header of a NOTIFY identifies the subscription, and so the service.
 const callbackPath = "/events"
 
-// The subscription grant and the margin before it expires at which the
-// client renews. The device answered Second-1801 in the drill, so a
-// grant of 1800 seconds leaves the renewal well inside the term.
+// subscribeSeconds is the subscription length that the client asks
+// for. The first poll within renewBefore of the end renews it.
 const (
 	subscribeSeconds = 1800
 	renewBefore      = 5 * time.Minute
 )
 
-// eventRetryInterval bounds how often a device that has no event path
-// is asked. A refused subscription is retried at this interval and not
-// at the poll interval, so the fallback costs two requests a minute
-// instead of two every ten seconds.
+// eventRetryInterval is how long the client waits after a refused
+// subscription before it subscribes again. Without it, a device that
+// never accepts a subscription would receive a SUBSCRIBE for each
+// service on every poll.
 const eventRetryInterval = time.Minute
 
-// eventPaths is the set the client subscribes to, in a fixed order.
 var eventPaths = []string{renderControlPath, avTransportPath}
 
-// subscription is one GENA subscription the device holds for this
-// client.
 type subscription struct {
 	sid     string
 	expires time.Time
 }
 
-// eventServer is the client's callback listener: the socket the device
-// connects back to, and the address the client advertises for it. The
-// host is the local address the device is reached on, so the device can
-// route to it.
+// eventServer receives NOTIFY requests. Its host is this machine's
+// address on the route to the device, because the device must be able
+// to connect to the callback URL.
 type eventServer struct {
 	listener net.Listener
 	server   *http.Server
@@ -68,14 +64,14 @@ type eventServer struct {
 	port     int
 }
 
-// url is the callback URL the client sends in CALLBACK.
+// url returns the callback URL for the CALLBACK header.
 func (e *eventServer) url() string {
 	return fmt.Sprintf("http://%s%s", net.JoinHostPort(e.host, fmt.Sprintf("%d", e.port)), callbackPath)
 }
 
-// upnpBaseFor answers the device's UPnP base URL, which is its host on
-// the MediaRenderer port. The address carries the control port when it
-// names one, so only the host is kept.
+// upnpBaseFor returns the base URL of the device's UPnP services. The
+// address can include the port of the HTTPS control API, so it keeps
+// only the host and uses upnpPort.
 func upnpBaseFor(address string) string {
 	host := address
 	if h, _, err := net.SplitHostPort(address); err == nil {
@@ -84,24 +80,22 @@ func upnpBaseFor(address string) string {
 	return "http://" + net.JoinHostPort(host, upnpPort)
 }
 
-// startEvents brings up the callback listener. A listener that cannot
-// bind reports once and leaves the client on the poll, because a
-// cluster with no reachable callback still reads every value.
+// startEvents starts the callback listener. When it cannot, it logs
+// why, and the client runs on the poll alone.
 func (c *Client) startEvents(ctx context.Context) {
 	if strings.TrimSpace(c.address) == "" {
-		// The unit is wired before discovery has an address for the amp,
-		// and it is rebuilt once one arrives. There is nothing to
-		// subscribe to yet, and the poll is the only path meanwhile.
+		// Discovery has not found an address yet. When it does, the
+		// operator builds a new client with the address.
 		return
 	}
 	host := localAddress(c.address)
 	if host == "" {
-		c.reportEventLoss("cannot find a local address the device reaches")
+		c.reportEventLoss("no local address of this host reaches the device")
 		return
 	}
 	listener, err := c.Listen("tcp", ":0")
 	if err != nil {
-		c.reportEventLoss("cannot open the callback listener: %v", err)
+		c.reportEventLoss("opening the callback listener: %v", err)
 		return
 	}
 	server := &eventServer{
@@ -122,9 +116,8 @@ func (c *Client) startEvents(ctx context.Context) {
 	}()
 }
 
-// stopEvents closes the callback listener and tells the device the
-// subscriptions are done, so a stopped operator leaves no callback the
-// device keeps sending to.
+// stopEvents unsubscribes and closes the listener, so the device does
+// not keep sending NOTIFY requests to an operator that has stopped.
 func (c *Client) stopEvents() {
 	c.unsubscribe()
 	c.eventsMutex.Lock()
@@ -136,9 +129,9 @@ func (c *Client) stopEvents() {
 	}
 }
 
-// localAddress answers the local address the device reaches this
-// process on, by asking the routing table for the source address it
-// would use for the device. Nothing is sent.
+// localAddress returns the source address that the routing table
+// chooses for a connection to the device. A UDP dial sends no packet,
+// so this only looks up the route.
 func localAddress(address string) string {
 	conn, err := net.Dial("udp", hostPort(address))
 	if err != nil {
@@ -151,13 +144,13 @@ func localAddress(address string) string {
 	return ""
 }
 
-// manageSubscriptions brings each subscription up, and renews one
-// whose grant is near its end. It runs on the poll loop. A pass that
-// finds no subscription waits eventRetryInterval before it tries
-// again, and the poll keeps carrying the evented fields in the
-// meantime. It answers whether it opened a subscription, which is
-// when the poll reads every family, because events may have been
-// missed while none was open.
+// manageSubscriptions subscribes to each service that has no
+// subscription, and renews each subscription within renewBefore of its
+// end. The poll calls it after the device has answered getStatusEx.
+// When a subscribe fails, later polls send no new SUBSCRIBE until
+// eventRetryInterval has passed. It returns true when it opened a
+// subscription, and the poll then reads every family, because the
+// device can have changed while no subscription was open.
 func (c *Client) manageSubscriptions(ctx context.Context) (opened bool) {
 	c.eventsMutex.Lock()
 	server := c.events
@@ -190,12 +183,11 @@ func (c *Client) manageSubscriptions(ctx context.Context) (opened bool) {
 	return opened
 }
 
-// subscribe registers the callback for one service, and answers
-// whether the device took it.
+// subscribe returns whether the device accepted the subscription.
 func (c *Client) subscribe(ctx context.Context, server *eventServer, path string) bool {
 	req, err := http.NewRequestWithContext(ctx, "SUBSCRIBE", c.upnpBase+path, nil)
 	if err != nil {
-		c.reportEventLoss("cannot build the subscription for %s: %v", path, err)
+		c.reportEventLoss("building the subscription request for %s: %v", path, err)
 		c.report(CommandFailed)
 		return false
 	}
@@ -204,7 +196,7 @@ func (c *Client) subscribe(ctx context.Context, server *eventServer, path string
 	req.Header.Set("TIMEOUT", "Second-"+fmt.Sprint(subscribeSeconds))
 	resp, err := c.upnp.Do(req)
 	if err != nil {
-		c.reportEventLoss("the device refused the subscription for %s: %v", path, err)
+		c.reportEventLoss("sending the subscription request for %s: %v", path, err)
 		c.report(CommandFailed)
 		return false
 	}
@@ -212,20 +204,21 @@ func (c *Client) subscribe(ctx context.Context, server *eventServer, path string
 	io.Copy(io.Discard, resp.Body)
 	sid := resp.Header.Get("SID")
 	if resp.StatusCode != http.StatusOK || sid == "" {
-		c.reportEventLoss("the device answered %s to the subscription for %s", resp.Status, path)
+		c.reportEventLoss("the device responded %s with SID %q to the subscription for %s", resp.Status, sid, path)
 		c.report(CommandFailed)
 		return false
 	}
 	c.recordSubscription(path, sid, subscribeSeconds)
 	c.report(CommandOK)
-	c.reportEventsBack()
+	c.clearEventLoss()
 	return true
 }
 
-// renew extends a subscription before its grant ends, and answers
-// whether the amp answered and refused it, which an amp that rebooted
-// does for a SID it no longer holds. A renewal that fails or is refused
-// drops the subscription, and the next pass subscribes it again.
+// renew extends one subscription. It returns true when the device
+// responds with a status other than 200, as a device that rebooted does
+// for a SID it no longer has. When the renewal fails for any reason,
+// renew drops the subscription, and the next manageSubscriptions
+// subscribes again.
 func (c *Client) renew(ctx context.Context, server *eventServer, path string) (refused bool) {
 	c.subscriptionsMutex.Lock()
 	sub := c.subscriptions[path]
@@ -259,7 +252,8 @@ func (c *Client) renew(ctx context.Context, server *eventServer, path string) (r
 	return false
 }
 
-// unsubscribe tells the device to stop sending to the callback.
+// unsubscribe runs at shutdown, so it ignores errors and gives all the
+// UNSUBSCRIBE requests five seconds in total.
 func (c *Client) unsubscribe() {
 	c.subscriptionsMutex.Lock()
 	held := c.subscriptions
@@ -285,7 +279,6 @@ func (c *Client) unsubscribe() {
 	}
 }
 
-// recordSubscription stores a subscription and when its grant ends.
 func (c *Client) recordSubscription(path, sid string, seconds int) {
 	if seconds <= 0 {
 		seconds = subscribeSeconds
@@ -295,18 +288,18 @@ func (c *Client) recordSubscription(path, sid string, seconds int) {
 	c.subscriptionsMutex.Unlock()
 }
 
-// dropSubscription forgets one subscription, so the next pass
-// subscribes it again.
+// dropSubscription forgets one subscription, so the next
+// manageSubscriptions subscribes again.
 func (c *Client) dropSubscription(path string) {
 	c.subscriptionsMutex.Lock()
 	delete(c.subscriptions, path)
 	c.subscriptionsMutex.Unlock()
 }
 
-// renewAll renews every subscription the client holds, whatever its
-// grant, and answers whether the amp refused a renewal. A renewal the
-// amp refuses drops the subscription, and the next manageSubscriptions
-// opens it again.
+// renewAll renews every subscription now, however long it has left,
+// and returns true when the device refused a renewal. The poll calls it
+// when the device answers after missed polls, to find out whether the
+// device rebooted and lost the subscriptions.
 func (c *Client) renewAll(ctx context.Context) (refused bool) {
 	c.eventsMutex.Lock()
 	server := c.events
@@ -322,8 +315,8 @@ func (c *Client) renewAll(ctx context.Context) (refused bool) {
 	return refused
 }
 
-// handleNotify folds one NOTIFY into the state. A NOTIFY for a SID the
-// client did not take is not its own and is dropped.
+// handleNotify ignores a NOTIFY whose SID matches none of the client's
+// subscriptions, and responds 200 to every request.
 func (c *Client) handleNotify(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
@@ -333,13 +326,11 @@ func (c *Client) handleNotify(w http.ResponseWriter, r *http.Request) {
 	sid := r.Header.Get("SID")
 	path := c.pathForSID(sid)
 	if path != "" {
-		c.foldEvent(path, body)
+		c.applyEvent(path, body)
 	}
 	w.WriteHeader(http.StatusOK)
 }
 
-// pathForSID answers the service a SID belongs to, or an empty string
-// when the SID is not one this client took.
 func (c *Client) pathForSID(sid string) string {
 	c.subscriptionsMutex.Lock()
 	defer c.subscriptionsMutex.Unlock()
@@ -351,11 +342,12 @@ func (c *Client) pathForSID(sid string) string {
 	return ""
 }
 
-// foldEvent applies one NOTIFY. The event is the device reporting its
-// own state, so it also clears the run of missed polls. Each field it
-// writes is numbered, so a poll that read the player before the event
-// does not undo it (sequence.go).
-func (c *Client) foldEvent(path string, body []byte) {
+// applyEvent writes the values of one NOTIFY to the state. A NOTIFY
+// shows that the device is reachable, so it also sets reachable and
+// clears the count of missed polls. It records a write number for each
+// field it writes, so a poll that read the device before the event does
+// not overwrite the event's value (sequence.go).
+func (c *Client) applyEvent(path string, body []byte) {
 	fields, ok := parseEvent(path, body)
 	if !ok {
 		return
@@ -381,15 +373,14 @@ func (c *Client) foldEvent(path string, body []byte) {
 	c.announce(previous, next, wasReachable)
 }
 
-// eventFields is what one NOTIFY carried. A nil field was not in the
-// body, because a change event names only what moved.
+// eventFields holds the values in one NOTIFY. A nil field was not in
+// the body, because an event lists only the values that changed.
 type eventFields struct {
 	volume *int
 	mute   *bool
 	status *string
 }
 
-// apply writes the fields the event carried into the snapshot.
 func (f eventFields) apply(s *Status) {
 	if f.volume != nil {
 		s.Playback.Volume = *f.volume
@@ -402,15 +393,16 @@ func (f eventFields) apply(s *Status) {
 	}
 }
 
-// propertyset is the GENA envelope. LastChange holds the service's own
-// document, which the envelope carries escaped.
+// propertyset is the XML envelope of a NOTIFY body. Each LastChange
+// element holds the service's own XML document as escaped text.
 type propertyset struct {
 	Properties []struct {
 		LastChange string `xml:"LastChange"`
 	} `xml:"property"`
 }
 
-// parseEvent reads one NOTIFY body into the fields it moved.
+// parseEvent returns false when the body has no value that the client
+// uses.
 func parseEvent(path string, body []byte) (eventFields, bool) {
 	var set propertyset
 	if xml.Unmarshal(body, &set) != nil {
@@ -431,8 +423,9 @@ func parseEvent(path string, body []byte) (eventFields, bool) {
 	return eventFields{}, false
 }
 
-// renderControlChange is the RenderingControl document. Each field
-// names its channel, and the driver follows the master.
+// renderControlChange is the RenderingControl LastChange document. Each
+// value has a channel attribute, and the driver reads only the Master
+// channel.
 type renderControlChange struct {
 	InstanceID struct {
 		Volume []renderControlField `xml:"Volume"`
@@ -440,14 +433,11 @@ type renderControlChange struct {
 	} `xml:"InstanceID"`
 }
 
-// renderControlField is one channel's value.
 type renderControlField struct {
 	Channel string `xml:"channel,attr"`
 	Val     string `xml:"val,attr"`
 }
 
-// parseRenderControl reads the volume and mute the master channel
-// reports.
 func parseRenderControl(lastChange string) (eventFields, bool) {
 	var change renderControlChange
 	if xml.Unmarshal([]byte(lastChange), &change) != nil {
@@ -472,21 +462,20 @@ func parseRenderControl(lastChange string) (eventFields, bool) {
 	return fields, fields.volume != nil || fields.mute != nil
 }
 
-// avTransportChange is the AVTransport document. The driver reads the
-// transport state; the track comes from the poll's getMetaInfo, which
-// carries the format fields the event's metadata does not.
+// avTransportChange is the AVTransport LastChange document. The driver
+// reads only the transport state from it. The track comes from the
+// poll's getMetaInfo request, because the track metadata in an event
+// has no sample rate, bit depth, or bit rate.
 type avTransportChange struct {
 	InstanceID struct {
 		TransportState avTransportField `xml:"TransportState"`
 	} `xml:"InstanceID"`
 }
 
-// avTransportField is one attribute-valued field.
 type avTransportField struct {
 	Val string `xml:"val,attr"`
 }
 
-// parseAVTransport reads the transport state.
 func parseAVTransport(lastChange string) (eventFields, bool) {
 	var change avTransportChange
 	if xml.Unmarshal([]byte(lastChange), &change) != nil {
@@ -500,9 +489,9 @@ func parseAVTransport(lastChange string) (eventFields, bool) {
 	return fields, true
 }
 
-// playbackStatusFor maps an AVTransport state onto the word
-// getPlayerStatus uses, so the snapshot does not name the same state
-// two ways.
+// playbackStatusFor converts an AVTransport state to the word that
+// getPlayerStatus uses for it, so an event and a poll write the same
+// value for the same state. It returns any other state in lower case.
 func playbackStatusFor(state string) string {
 	switch state {
 	case "PLAYING":
@@ -516,8 +505,8 @@ func playbackStatusFor(state string) string {
 	}
 }
 
-// timeoutSeconds reads a GENA TIMEOUT header, which is "Second-1800",
-// and answers the default when it names no number.
+// timeoutSeconds reads a GENA TIMEOUT header such as "Second-1800". It
+// returns subscribeSeconds when the header has no positive number.
 func timeoutSeconds(header string) int {
 	_, value, ok := strings.Cut(header, "-")
 	if !ok {
@@ -530,9 +519,9 @@ func timeoutSeconds(header string) int {
 	return seconds
 }
 
-// reportEventLoss writes the fallback to the log once per loss, so a
-// device that refuses events does not fill the log at the poll
-// interval.
+// reportEventLoss logs why events are off. It logs only the first
+// failure since the last successful subscribe, so a device that refuses
+// subscriptions does not add a log line on every retry.
 func (c *Client) reportEventLoss(format string, args ...any) {
 	c.eventsMutex.Lock()
 	already := c.eventsLost
@@ -541,11 +530,12 @@ func (c *Client) reportEventLoss(format string, args ...any) {
 	if already {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "wiim: events off for %s: %s\n", c.address, fmt.Sprintf(format, args...))
+	fmt.Fprintf(os.Stderr, "wiim: not receiving events from %s: %s\n", c.address, fmt.Sprintf(format, args...))
 }
 
-// reportEventsBack clears the loss flag once a subscription is taken.
-func (c *Client) reportEventsBack() {
+// clearEventLoss runs after a successful subscribe, so that
+// reportEventLoss logs the next failure.
+func (c *Client) clearEventLoss() {
 	c.eventsMutex.Lock()
 	c.eventsLost = false
 	c.eventsMutex.Unlock()

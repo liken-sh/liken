@@ -19,7 +19,7 @@ func TestCapsReadsTheDriverAndItsCapabilities(t *testing.T) {
 	mustSucceed(t, err)
 	if caps.Driver != "cectest" || caps.Name != "cectest-adapter" || caps.AvailableLogicalAddresses != 1 ||
 		!caps.Capabilities.Has(cec.CapPhysAddr|cec.CapMonitorAll) {
-		t.Errorf("caps = %+v", caps)
+		t.Errorf("Caps() = %+v, want driver cectest, name cectest-adapter, 1 available logical address, and the CapPhysAddr and CapMonitorAll capabilities", caps)
 	}
 }
 
@@ -45,7 +45,7 @@ func TestAClaimCutsTheOSDNameToFourteenBytes(t *testing.T) {
 	held, err := device.Addresses()
 	mustSucceed(t, err)
 	if held.OSDName != "a-machine-name" {
-		t.Errorf("osd name = %q", held.OSDName)
+		t.Errorf("the OSD name is %q, want it cut to \"a-machine-name\"", held.OSDName)
 	}
 }
 
@@ -57,7 +57,7 @@ func TestReleaseClearsTheAddresses(t *testing.T) {
 	held, err := device.Addresses()
 	mustSucceed(t, err)
 	if len(held.Logical) != 0 {
-		t.Errorf("addresses after release = %+v", held)
+		t.Errorf("addresses after Release() = %+v, want none", held)
 	}
 }
 
@@ -68,12 +68,12 @@ func TestSetPhysicalAddressSetsWhatTheAdapterAnnounces(t *testing.T) {
 
 	mustSucceed(t, err)
 	if address != 0x1300 {
-		t.Errorf("physical address = %v", address)
+		t.Errorf("PhysicalAddress() = %v, want 0x1300", address)
 	}
 }
 
-// The errors carry the ioctl's name and the kernel's own text, and
-// errors.Is still finds the errno.
+// Each error names the ioctl and includes the kernel's error text, and
+// errors.Is still matches the errno.
 func TestTheKernelsRefusalsReachTheCaller(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -95,7 +95,7 @@ func TestTheKernelsRefusalsReachTheCaller(t *testing.T) {
 			err := c.call(device)
 
 			if !errors.Is(err, c.errno) || err.Error() != c.text {
-				t.Errorf("got %v, want %q", err, c.text)
+				t.Errorf("the error is %q, want %q wrapping %v", err, c.text, c.errno)
 			}
 		})
 	}
@@ -137,7 +137,7 @@ func TestAPollIsAnsweredByTheAcknowledgeBit(t *testing.T) {
 
 			mustSucceed(t, err)
 			if result.Acked != c.acked || result.Status != c.status || result.Reply != nil {
-				t.Errorf("result = %+v", result)
+				t.Errorf("Transmit(poll) = %+v, want acked %t and status %q with no reply", result, c.acked, c.status)
 			}
 		})
 	}
@@ -150,7 +150,7 @@ func TestARequestWaitsForItsAnswer(t *testing.T) {
 
 	mustSucceed(t, err)
 	if result.Reply == nil || string(result.Reply.Operands()) != "TV" {
-		t.Errorf("result = %+v", result)
+		t.Errorf("Transmit(GiveOSDName) = %+v, want a reply with the operands \"TV\"", result)
 	}
 }
 
@@ -161,7 +161,7 @@ func TestAFeatureAbortIsNoReply(t *testing.T) {
 
 	mustSucceed(t, err)
 	if !result.Acked || !result.Aborted || result.Reply != nil {
-		t.Errorf("result = %+v", result)
+		t.Errorf("Transmit(MenuRequest) = %+v, want acked and aborted with no reply", result)
 	}
 }
 
@@ -171,7 +171,7 @@ func TestAMessageLongerThanCECCarriesIsRefused(t *testing.T) {
 	_, err := device.Transmit(cec.SetOSDName(4, 0, strings.Repeat("x", 15)), 0, 0)
 
 	if err == nil {
-		t.Error("a sixteen-byte body was sent")
+		t.Error("Transmit sent a message with a 16-byte body, want an error")
 	}
 }
 
@@ -184,10 +184,10 @@ func TestReceiveReadsWhatTheBusCarried(t *testing.T) {
 
 	mustSucceed(t, err)
 	if message.String() != cec.ActiveSource(8, 0x1500).String() {
-		t.Errorf("received %v", message)
+		t.Errorf("Receive() = %v, want %v", message, cec.ActiveSource(8, 0x1500))
 	}
 	if _, err := device.Receive(time.Millisecond); !errors.Is(err, cec.ErrNothingReceived) {
-		t.Errorf("an empty queue answered %v", err)
+		t.Errorf("Receive() on an empty queue returned %v, want ErrNothingReceived", err)
 	}
 }
 
@@ -206,7 +206,7 @@ func TestNextEventReadsTheAdaptersNewAddresses(t *testing.T) {
 	}
 
 	if !last.StateChange || last.Physical != 0x1300 || last.LogicalMask != 1<<4 {
-		t.Errorf("last event = %+v", last)
+		t.Errorf("the last event is %+v, want a state change with physical address 0x1300 and logical address 4", last)
 	}
 }
 
@@ -218,7 +218,7 @@ func TestAnUnpluggedAdapterAnswersENODEV(t *testing.T) {
 	_, err := device.Caps()
 	_, waitErr := device.Wait(time.Millisecond)
 	if !cec.IsGone(err) || !cec.IsGone(waitErr) {
-		t.Errorf("caps %v, wait %v; want ENODEV", err, waitErr)
+		t.Errorf("after the adapter was unplugged, Caps() returned %v and Wait() returned %v, want ENODEV from both", err, waitErr)
 	}
 	mustSucceed(t, device.Close())
 }
@@ -242,7 +242,7 @@ func TestAClaimTakesTheAddressOfItsType(t *testing.T) {
 			held, err := device.Addresses()
 			mustSucceed(t, err)
 			if len(held.Logical) != 1 || held.Logical[0] != c.want {
-				t.Errorf("addresses = %+v, want %d", held, c.want)
+				t.Errorf("addresses = %+v, want one logical address, %d", held, c.want)
 			}
 		})
 	}
@@ -253,12 +253,12 @@ func TestAClaimOfATypeThisPackageDoesNotClaimIsRefused(t *testing.T) {
 	mustSucceed(t, device.Initiate())
 
 	if err := device.Claim(cec.Claim{Type: cec.TypeTuner}); err == nil {
-		t.Error("a tuner claim was sent")
+		t.Error("Claim of a tuner returned no error, want a refusal")
 	}
 }
 
-// Leave makes the handle neither an initiator nor a follower, so a
-// message on the bus no longer reaches it.
+// After Leave, a message on the bus no longer reaches the handle, and
+// the handle can no longer send.
 func TestLeaveStopsTheHandleFollowing(t *testing.T) {
 	bus := room()
 	_, device := joined(t, bus)
@@ -268,16 +268,16 @@ func TestLeaveStopsTheHandleFollowing(t *testing.T) {
 
 	bus.Send(cec.ActiveSource(8, 0x1500))
 	if _, err := device.Receive(time.Millisecond); !errors.Is(err, cec.ErrNothingReceived) {
-		t.Errorf("a handle that left received a message: %v", err)
+		t.Errorf("after Leave(), Receive() returned %v, want ErrNothingReceived", err)
 	}
 	if _, err := device.Transmit(cec.Poll(4, 0), 0, 0); !errors.Is(err, unix.EBUSY) {
-		t.Errorf("a handle that left may still send: %v", err)
+		t.Errorf("after Leave(), Transmit() returned %v, want EBUSY", err)
 	}
 }
 
-// A program that starts on an adapter a previous run claimed reads the
-// claim back whole, so it can keep a claim that already says what it
-// would claim.
+// A program that starts on an adapter that a previous run claimed can
+// read the claim's type and passthrough back, and keep the claim when
+// it matches the one the program would make.
 func TestAddressesReadTheClaimsTypeAndPassthrough(t *testing.T) {
 	cases := []struct {
 		name  string

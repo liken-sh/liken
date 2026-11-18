@@ -1,9 +1,5 @@
 package main
 
-// This operator's metrics against a real registry, scraped through the
-// real promhttp handler, the way liken/metrics proves its own layers
-// one and two.
-
 import (
 	"context"
 	"errors"
@@ -27,10 +23,8 @@ func testMetrics(t *testing.T) *metrics {
 	return newMetrics("dev")
 }
 
-// scrape reads a registry the way Prometheus reads it: one HTTP GET
-// that the real handler answers, and the text document that comes back.
-// The handler writes to a recorder, so a test in a synctest bubble
-// scrapes with no socket.
+// scrape calls the handler with a recorder instead of a socket, so it
+// works inside a synctest bubble.
 func scrape(t *testing.T, m *metrics) string {
 	t.Helper()
 	recorder := httptest.NewRecorder()
@@ -39,9 +33,8 @@ func scrape(t *testing.T, m *metrics) string {
 	return recorder.Body.String()
 }
 
-// series returns every sample line in a scrape whose metric name is
-// name. Comment lines are left out, so a test compares numbers and
-// never help text.
+// series returns the sample lines of the metric called name, without
+// the HELP and TYPE lines.
 func series(body, name string) []string {
 	var out []string
 	for _, line := range strings.Split(body, "\n") {
@@ -55,21 +48,16 @@ func series(body, name string) []string {
 	return out
 }
 
-// requireSeries fails the test unless the scrape holds exactly this one
-// sample line.
 func requireSeries(t *testing.T, body, line string) {
 	t.Helper()
 	name, _, _ := strings.Cut(line, " ")
 	name, _, _ = strings.Cut(name, "{")
 	found := series(body, name)
 	if !slices.Contains(found, line) {
-		t.Errorf("the scrape has no %q; it has %q", line, found)
+		t.Errorf("the scrape has no line %q, and has %q", line, found)
 	}
 }
 
-// requireNoSeries fails the test unless the scrape holds no sample for
-// this metric at all, which is what a fact this operator has not
-// observed yet looks like.
 func requireNoSeries(t *testing.T, body, name string) {
 	t.Helper()
 	if found := series(body, name); len(found) != 0 {
@@ -77,11 +65,9 @@ func requireNoSeries(t *testing.T, body, name string) {
 	}
 }
 
-// requireValue reads the one sample whose line starts with prefix
-// (name plus its label set) and fails the test unless its number
-// equals want. A timestamp gauge is large enough that Prometheus
-// writes it in scientific notation, so a test compares the parsed
-// float and never the literal text.
+// requireValue compares the value of the sample whose name and labels
+// are prefix. A timestamp is written in scientific notation, so it
+// compares parsed floats, not text.
 func requireValue(t *testing.T, body, prefix string, want float64) {
 	t.Helper()
 	name, _, _ := strings.Cut(prefix, "{")
@@ -95,7 +81,7 @@ func requireValue(t *testing.T, body, prefix string, want float64) {
 		mustMatch(t, got, want)
 		return
 	}
-	t.Errorf("the scrape has no line starting %q; it has %q", prefix, series(body, name))
+	t.Errorf("the scrape has no line starting %q, and has %q", prefix, series(body, name))
 }
 
 func TestBuildInfoNamesTheComponentAndItsRelease(t *testing.T) {
@@ -116,9 +102,6 @@ func TestTheRuntimeLayerReportsTheProcess(t *testing.T) {
 	}
 }
 
-// Every declared kind and outcome publishes at zero from the first
-// scrape, so Prometheus has an earlier reading to compute a rate
-// against the moment one first moves.
 func TestTheReconcileWatchAndCommandSeriesPublishAtZero(t *testing.T) {
 	t.Parallel()
 	body := scrape(t, testMetrics(t))
@@ -194,10 +177,9 @@ func TestRecordObservationOnAConnectedReceiver(t *testing.T) {
 	requireSeries(t, body, `equipment_receiver_input_info{input="MPLAY",receiver="theater"} 1`)
 }
 
-// A receiver the operator has never reached reports connected and
-// observation_valid at zero, and leaves power, volume, and the input
-// off the scrape entirely: there is no fact yet, and a fabricated zero
-// would read as a receiver on standby with its volume all the way down.
+// A receiver that has never replied has no power, volume, or input
+// series, because a zero would read as standby with the volume at
+// minimum.
 func TestRecordObservationOnAReceiverThatHasNeverAnswered(t *testing.T) {
 	t.Parallel()
 	m := testMetrics(t)
@@ -213,9 +195,6 @@ func TestRecordObservationOnAReceiverThatHasNeverAnswered(t *testing.T) {
 	requireNoSeries(t, body, "equipment_receiver_input_info")
 }
 
-// A dropped connection is a fresh, valid observation that the receiver
-// is gone, not a missing reading, so observation_valid falls with
-// connected and the timestamp holds the last moment either was true.
 func TestADroppedConnectionIsAValidObservationOfDisconnected(t *testing.T) {
 	t.Parallel()
 	m := testMetrics(t)
@@ -224,8 +203,7 @@ func TestADroppedConnectionIsAValidObservationOfDisconnected(t *testing.T) {
 
 	m.recordObservation("theater", poweredOn, 2, firstRead)
 
-	// denon.go's record only flips Reachable on a dropped connection; it
-	// never clears the rest of the state, so power still reads on here.
+	// The Denon client sets only Reachable when the connection drops.
 	dropped := poweredOn
 	dropped.Reachable = ConditionFalse
 	m.recordObservation("theater", dropped, 2, firstRead.Add(time.Minute))
@@ -233,11 +211,9 @@ func TestADroppedConnectionIsAValidObservationOfDisconnected(t *testing.T) {
 	body := scrape(t, m)
 	requireSeries(t, body, `equipment_receiver_connected{receiver="theater"} 0`)
 	requireSeries(t, body, `equipment_observation_valid{source="theater"} 0`)
-	// The timestamp is not observed again on a failed read, so it still
-	// names the last successful one.
 	requireValue(t, body, `equipment_observation_last_success_timestamp_seconds{source="theater"}`, float64(firstRead.Unix()))
-	// A disconnect does not erase what the receiver last said, the same
-	// way status.power holds its last value while Reachable is False.
+	// The power gauge keeps its last value, as status.power does while
+	// Reachable is False.
 	requireSeries(t, body, `equipment_receiver_power{receiver="theater"} 1`)
 }
 
@@ -253,13 +229,10 @@ func TestInputInfoMovesToTheNewInputAndDropsTheOld(t *testing.T) {
 	body := scrape(t, m)
 	requireSeries(t, body, `equipment_receiver_input_info{input="GAME",receiver="theater"} 1`)
 	if slices.Contains(series(body, "equipment_receiver_input_info"), `equipment_receiver_input_info{input="MPLAY",receiver="theater"} 1`) {
-		t.Errorf("the old input is still on the scrape: %q", series(body, "equipment_receiver_input_info"))
+		t.Errorf("the scrape still has the previous input, want none: %q", series(body, "equipment_receiver_input_info"))
 	}
 }
 
-// forgetReceiver takes a Receiver that is gone off every gauge scoped
-// to one, but never off the command counter: a command already sent
-// still happened.
 func TestForgetReceiverRemovesTheReceiverScopedSeries(t *testing.T) {
 	t.Parallel()
 	m := testMetrics(t)
@@ -279,18 +252,15 @@ func TestForgetReceiverRemovesTheReceiverScopedSeries(t *testing.T) {
 	requireSeries(t, body, `equipment_commands_total{status="ok"} 1`)
 }
 
-// reportCommand on a nil *metrics is what a denon.Client a test builds
-// with no metrics wiring calls, and it must never panic.
 func TestReportCommandOnANilMetricsIsANoOp(t *testing.T) {
 	t.Parallel()
 	var m *metrics
 	m.reportCommand(commandOK)
 }
 
-// listenInMemory hands Serve a listener on the test network until the
-// test ends, and answers the HTTP client that reaches it. The listener
-// is a variable that every test shares, so a test that calls it does
-// not run in parallel with another.
+// listenInMemory makes Serve listen on the in-memory test network and
+// returns an HTTP client that dials it. It replaces the package
+// variable listen, so a test that calls it cannot run in parallel.
 func listenInMemory(t *testing.T) *http.Client {
 	t.Helper()
 	restore := listen
@@ -316,7 +286,7 @@ func TestTheListenerServesTheRegistry(t *testing.T) {
 		body, err := io.ReadAll(resp.Body)
 		mustSucceed(t, err)
 		if !strings.Contains(string(body), "liken_build_info") {
-			t.Errorf("the listener served no build info:\n%s", body)
+			t.Errorf("the scrape has no build info:\n%s", body)
 		}
 	})
 }
@@ -326,7 +296,7 @@ func TestAnEmptyAddressServesNoMetrics(t *testing.T) {
 	addr, err := testMetrics(t).Serve(t.Context(), "")
 	mustSucceed(t, err)
 	if addr != nil {
-		t.Errorf("an empty address opened %s", addr)
+		t.Errorf("an empty address opened a listener at %s, want none", addr)
 	}
 }
 
@@ -346,10 +316,8 @@ func TestTheListenerStopsWhenItsContextEnds(t *testing.T) {
 	})
 }
 
-// Send drops a command it cannot queue, and a queued command that
-// reaches the socket counts ok. Both paths go through a real
-// denon.Client and a real fake receiver, because Send and the write
-// loop are what equipment_commands_total actually observes.
+// A command sent before the client connects counts as failed, and each
+// query that the client writes after it connects counts as ok.
 func TestCommandsCountByOutcome(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -382,15 +350,15 @@ func TestCommandsCountByOutcome(t *testing.T) {
 			}
 			select {
 			case <-deadline:
-				t.Fatalf("the connect queries never counted ok: %q", series(scrape(t, m), "equipment_commands_total"))
+				t.Fatalf("equipment_commands_total never counted an ok connect query: %q", series(scrape(t, m), "equipment_commands_total"))
 			case <-time.After(10 * time.Millisecond):
 			}
 		}
 	})
 }
 
-// connectedState is what a receiver reports once it has answered every
-// query: on standby, on the MPLAY input, at half way up.
+// connectedState is a receiver that has replied to every query: on
+// standby, on the MPLAY input, at a volume of 100 half-steps.
 func connectedState() equipment.State {
 	return equipment.State{
 		Reachable: ConditionTrue,
@@ -406,7 +374,6 @@ func connectedState() equipment.State {
 	}
 }
 
-// unreachedState is the state before a receiver has said anything.
 func unreachedState() equipment.State {
 	return equipment.State{
 		Reachable: ConditionUnknown,
@@ -416,7 +383,8 @@ func unreachedState() equipment.State {
 	}
 }
 
-// setZone copies a state with one change to the main zone.
+// setZone applies change to the main zone. Zones is a map, so the
+// change also reaches the state passed in.
 func setZone(state equipment.State, change func(*equipment.ZoneState)) equipment.State {
 	zone := state.Zones[equipment.MainZone]
 	change(&zone)

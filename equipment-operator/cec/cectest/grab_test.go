@@ -1,9 +1,9 @@
 package cectest_test
 
-// A scripted streaming player takes the input for itself after another
-// device's Active Source, the way one did in the first drill when the
-// room woke. A test of a wake shows with it what the wake does when
-// another source takes the input.
+// A Peer with Grabs set plays a streaming player that claims the
+// input: after another device's Active Source, it sends its own, up to
+// Grabs times. Tests of a wake use it to check that the wake takes the
+// input back.
 
 import (
 	"testing"
@@ -14,7 +14,7 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/cec/cectest"
 )
 
-// claimsHeard reads every message a follower has queued, and answers
+// claimsHeard reads every message queued for a follower and returns
 // the Active Source messages in the order they arrived.
 func claimsHeard(t *testing.T, follower *cec.Device) []string {
 	t.Helper()

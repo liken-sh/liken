@@ -1,7 +1,5 @@
 package main
 
-// The session against a fake receiver on the test network.
-
 import (
 	"context"
 	"encoding/json"
@@ -16,11 +14,13 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
-// The window a test watches for a command that must not arrive.
+// quietPeriod is how long a test watches for a command that must not
+// arrive.
 const quietPeriod = 300 * time.Millisecond
 
-// sessionHolder is the receiverUnit's half of the wiring. It replays
-// what arrived while the session was being started.
+// sessionHolder routes the driver's events to a session as
+// receiverUnit does. It keeps the events that arrive before set and
+// replays them to the session.
 type sessionHolder struct {
 	lines  *receiverLog
 	mutex  sync.Mutex
@@ -57,28 +57,22 @@ func (h *sessionHolder) set(started *session) {
 	}
 }
 
-// sessionHarness is a running connection to a fake receiver, ready for
-// a session.
+// sessionHarness is a driver connected to a fake receiver, ready for a
+// session.
 type sessionHarness struct {
 	equipment *fakeDenon
 	denon     *denon.Client
 	holder    *sessionHolder
 	readings  *metrics
-	// log holds the receiver's lines, and lines is the log the session
-	// writes them to.
+	// log is the buffer that lines writes to, and lines is the receiver
+	// log that the session writes its lines to.
 	log        *logBuffer
 	lines      *receiverLog
 	soundModes map[string]string
-	// applyPower records the power a toggle settled on, wired to the API
-	// in a test that asserts the PATCH.
 	applyPower func(power equipment.Power)
-	// room hears the session's wakes and sleeps, in a test that asserts
-	// them.
-	room roomEvents
+	room       roomEvents
 }
 
-// inputSoundMode answers the sound mode an input names, which a test
-// states before the session starts.
 func (h *sessionHarness) inputSoundMode(input string) string {
 	return h.soundModes[input]
 }
@@ -103,7 +97,8 @@ func newSessionHarness(t *testing.T) *sessionHarness {
 	return h
 }
 
-// waitUntil polls the state the operator holds, bounded by testTimeout.
+// waitUntil polls the driver's state until ready returns true, and
+// fails the test after testTimeout.
 func (h *sessionHarness) waitUntil(t *testing.T, ready func(equipment.State) bool) {
 	t.Helper()
 	deadline := time.Now().Add(testTimeout)
@@ -113,7 +108,7 @@ func (h *sessionHarness) waitUntil(t *testing.T, ready func(equipment.State) boo
 		}
 		time.Sleep(time.Millisecond)
 	}
-	t.Fatal("the receiver never reached the state the test was waiting for")
+	t.Fatalf("the receiver did not reach the wanted state within %s", testTimeout)
 }
 
 func (h *sessionHarness) drainCommands() {
@@ -126,15 +121,16 @@ func (h *sessionHarness) drainCommands() {
 	}
 }
 
-// begin starts a session with a Play standing on it, with the connect
-// queries already read, so the next command is the session's own.
+// begin starts a session with a Play running. It first discards the
+// commands the receiver has received, so the next command a test reads
+// is the session's.
 func (h *sessionHarness) begin(t *testing.T, input string) *session {
 	t.Helper()
 	return h.beginSession(t, input, true, false)
 }
 
-// beginIdle starts the session the media operator holds while the
-// Player shows its idle screen.
+// beginIdle starts a session with both flags off, as media-operator
+// writes it while the Player shows its idle screen.
 func (h *sessionHarness) beginIdle(t *testing.T, input string) *session {
 	t.Helper()
 	return h.beginSession(t, input, false, false)
@@ -151,29 +147,29 @@ func (h *sessionHarness) beginSession(t *testing.T, input string, active, awake 
 	return started
 }
 
-// startSession builds a session and starts it the way the unit starts
-// one that appears while the operator runs.
+// startSession starts a session that is not adopted, as the unit does
+// for a session that appears while the operator runs.
 func startSession(ctx context.Context, receiver string, spec ReceiverSession, driver equipment.Driver, log *receiverLog, applyPower func(power equipment.Power), room roomEvents) *session {
 	started := newSession(ctx, receiver, spec, driver, nil, log, nil, applyPower, room)
 	started.start(spec.Active, spec.Awake, false)
 	return started
 }
 
-// powerAsk hands the session one power ask the way the unit does for a
-// new status.session.powerAsk.
+// powerAsk sends the session a power request, as the unit does when
+// status.session.powerAsk changes.
 func powerAsk(held *session, action string) {
 	goWork(held.ctx, func() { held.power(action, "status.session.powerAsk") })
 }
 
-// equipment.PowerOn turns the receiver on before any session stands.
+// powerOn turns the receiver on before a session starts.
 func (h *sessionHarness) powerOn(t *testing.T) {
 	t.Helper()
 	h.denon.SetPower(equipment.MainZone, true)
 	h.waitUntil(t, func(state equipment.State) bool { return mainZone(state).Power == equipment.PowerOn })
 }
 
-// refuseCommands fails the test if any named command goes out within
-// the window.
+// refuseCommands fails the test if the receiver receives any of the
+// unwanted commands within the given time.
 func (h *sessionHarness) refuseCommands(t *testing.T, within time.Duration, unwanted ...string) {
 	t.Helper()
 	refused := map[string]bool{}
@@ -185,7 +181,7 @@ func (h *sessionHarness) refuseCommands(t *testing.T, within time.Duration, unwa
 		select {
 		case command := <-h.equipment.commands:
 			if refused[command] {
-				t.Fatalf("the operator sent %q", command)
+				t.Fatalf("the receiver received the command %q within %s, want none of the refused commands", command, within)
 			}
 		case <-deadline:
 			return
@@ -217,10 +213,10 @@ func TestTheSessionSelectsTheInputOnAReceiverAlreadyOn(t *testing.T) {
 	})
 }
 
-// handOnTheRemote writes one line the way a person's own remote does,
-// with nothing in the cluster having asked. The receiver sends its
-// events to every connection, so the remote's connection reads and
-// drops them until the test ends.
+// handOnTheRemote sends one line to the receiver over a second
+// connection, to stand for a person using the receiver's own remote.
+// The receiver sends its events to every connection, so the second
+// connection reads and discards them until the test ends.
 func handOnTheRemote(t *testing.T, equipment *fakeDenon, line string) {
 	t.Helper()
 	conn, err := testNetwork.dial(t.Context(), "tcp", equipment.address())
@@ -245,8 +241,8 @@ func TestTheSessionSelectsTheInputOnce(t *testing.T) {
 	})
 }
 
-// A standby receiver turns on and selects the input, with its sound
-// mode, when the remote's power button asks for a toggle.
+// A toggle on a standby receiver powers it on and selects the input and
+// its sound mode.
 func TestAToggleOnAStandbyReceiverPowersOnAndSelectsTheInput(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -263,8 +259,8 @@ func TestAToggleOnAStandbyReceiverPowersOnAndSelectsTheInput(t *testing.T) {
 	})
 }
 
-// A receiver that is already on goes to standby on a toggle, and selects
-// no input.
+// A toggle on a receiver that is on sends standby and selects no
+// input.
 func TestAToggleOnAReceiverAlreadyOnGoesToStandby(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -280,8 +276,8 @@ func TestAToggleOnAReceiverAlreadyOnGoesToStandby(t *testing.T) {
 	})
 }
 
-// A second toggle on the receiver the first put to standby turns it back
-// on and selects the input again.
+// A second toggle powers on the receiver that the first toggle put in
+// standby and selects the input again.
 func TestASecondTogglePowersTheReceiverBackOn(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -300,8 +296,9 @@ func TestASecondTogglePowersTheReceiverBackOn(t *testing.T) {
 	})
 }
 
-// An action other than toggle, on, or off leaves the receiver alone.
-func TestAPowerAskWithAnotherActionMovesNothing(t *testing.T) {
+// A power request with an action other than toggle, on, or off sends the
+// receiver nothing.
+func TestAPowerAskWithAnotherActionSendsNothing(t *testing.T) {
 	cases := []struct {
 		name   string
 		action string
@@ -326,8 +323,8 @@ func TestAPowerAskWithAnotherActionMovesNothing(t *testing.T) {
 	}
 }
 
-// A toggle writes the power it settled on back to the spec, so the next
-// reconcile sees no change to re-assert.
+// A toggle writes the receiver's new power to the Receiver spec, so the
+// next reconcile finds no difference to correct.
 func TestAToggleWritesTheSpecsPower(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -350,7 +347,7 @@ func TestAToggleWritesTheSpecsPower(t *testing.T) {
 		mustMatch(t, <-applied, equipment.PowerOn)
 
 		if len(api.requests) != 1 {
-			t.Fatalf("requests = %+v", api.requests)
+			t.Fatalf("the API server received %d requests, want 1: %+v", len(api.requests), api.requests)
 		}
 		sent := api.requests[0]
 		mustMatch(t, sent.Method, http.MethodPatch)

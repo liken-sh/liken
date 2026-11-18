@@ -1,9 +1,9 @@
 package main
 
-// The session path against an API server that is not ready. A new CRD
-// makes the API server answer 429 for a moment, and any other refusal
-// can last longer, so a Television's status.session that the first
-// try could not write is written on a later pass.
+// Tests of a Television's status.session when the API server refuses a
+// request. The API server returns 429 for a short time after a CRD is
+// created, and other refusals can last longer, so a session that the
+// operator could not write is written on a later pass.
 
 import (
 	"context"
@@ -12,9 +12,9 @@ import (
 	"testing/synctest"
 )
 
-// sessionOperator is the Deployment over one Receiver whose idle
-// session's input carries Display acm-0001-receiver, which Television
-// lounge lists.
+// sessionOperator returns a controller with one idle Receiver whose
+// input GAME is on Display acm-0001-receiver, a display that the status
+// of Television lounge lists.
 func sessionOperator(t *testing.T, api *cecAPI) *controller {
 	t.Helper()
 	amp := startFakeDenon(t)
@@ -30,9 +30,12 @@ func sessionOperator(t *testing.T, api *cecAPI) *controller {
 	return operator
 }
 
-// adoptedSession is what the first pass writes for the idle session.
+// adoptedSession is the status.session that the first pass writes for
+// the idle session.
 var adoptedSession = &TelevisionSession{Player: "house/theater", Display: "acm-0001-receiver"}
 
+// A Television list that the API server throttles once does not stop the
+// pass from adopting the session.
 func TestAThrottledTelevisionListStillAdoptsTheSession(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -49,9 +52,8 @@ func TestAThrottledTelevisionListStillAdoptsTheSession(t *testing.T) {
 	})
 }
 
-// A session write the API server refuses is written on the next pass,
-// as the adoption the first pass decided on: the pass that retries it
-// is live, and it still wakes nothing.
+// A session write that the API server refuses is written on the next
+// pass, with the session that the first pass adopted.
 func TestARefusedSessionWriteIsWrittenOnALaterPass(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -72,9 +74,10 @@ func TestARefusedSessionWriteIsWrittenOnALaterPass(t *testing.T) {
 	})
 }
 
-// A stop ends the sessions' requests: a list or a write after stop
-// sends nothing and answers the stop, so a lift whose timer fires at a
-// shutdown writes nothing after the Deployment gave up its Lease.
+// After stop, a list or an apply sends no request and returns the
+// stop's error, context.Canceled. So a timer that clears a Television's
+// session and fires during shutdown writes nothing after the Deployment
+// has given up its Lease.
 func TestNoSessionRequestLeavesAfterStop(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -84,10 +87,10 @@ func TestNoSessionRequestLeavesAfterStop(t *testing.T) {
 		sessions.stop()
 
 		if _, err := sessions.list(); !errors.Is(err, context.Canceled) {
-			t.Errorf("list after stop answered %v, want the stop", err)
+			t.Errorf("list after stop returned %v, want context.Canceled", err)
 		}
 		if err := sessions.apply("lounge", adoptedSession); !errors.Is(err, context.Canceled) {
-			t.Errorf("apply after stop answered %v, want the stop", err)
+			t.Errorf("apply after stop returned %v, want context.Canceled", err)
 		}
 		mustMatch(t, api.sent(), 0)
 	})

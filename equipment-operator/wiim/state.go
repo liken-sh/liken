@@ -1,8 +1,7 @@
-// The WiiM's own state: the strongly typed snapshot the status carries
-// and the translation into the equipment contract. The snapshot is in
-// the device's vocabulary and covers every observable the amps report;
-// the contract is the normalized power, input, mute, and volume every
-// Receiver shares.
+// Status is what a WiiM amp reports, in the device's own terms. The
+// equipment contract is the smaller set of power, input, mute, and
+// volume that every Receiver has, and equipmentState converts a Status
+// to it.
 
 package wiim
 
@@ -10,17 +9,16 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
-// Status is what one WiiM reports that a person or a controller acts
-// on. It is the device's own vocabulary and the shape written under
-// status.wiim. A block the device did not answer stays empty.
+// Status is the shape that the operator writes under status.wiim. A
+// block that the device did not reply to stays empty.
 //
-// A value that changes on its own between two reads is left out: the
-// amp's clock, its temperatures, the Wi-Fi signal, noise, and rate, the
-// remote's battery and signal, the track position, and the seconds left
-// on the sleep timer. Each one would change the status on every poll,
-// and each status write reaches every watcher of every Receiver.
-// Readings carries the measurements to the metrics instead, and the
-// zone's sleep carries the timer in whole minutes.
+// Status leaves out values that change between reads with no action
+// from anyone: the amp's clock, its temperatures, the Wi-Fi signal,
+// noise, and rate, the remote's battery and signal, the track position,
+// and the seconds left on the sleep timer. Each of them would make
+// every poll write the status, and each write wakes every watcher of
+// every Receiver. Readings holds the measurements for the metrics, and
+// the zone's Sleep has the timer in whole minutes.
 type Status struct {
 	Device     DeviceInfo  `json:"device"`
 	Network    Network     `json:"network"`
@@ -34,10 +32,8 @@ type Status struct {
 	Controls   Controls    `json:"controls"`
 }
 
-// DeviceInfo is the identity and the hardware: what the device is,
-// which firmware it runs, and how it is addressed. The UUID is the
-// identity the operator trusts. It is not the discovery Device, which
-// the network search returns; this is the snapshot a poll reads.
+// DeviceInfo is the amp's identity and hardware, from getStatusEx. The
+// operator identifies the amp by UUID.
 type DeviceInfo struct {
 	Name              string       `json:"name,omitempty"`
 	Group             string       `json:"group,omitempty"`
@@ -65,8 +61,7 @@ type DeviceInfo struct {
 	Security          Security     `json:"security"`
 }
 
-// MACs are the device's four hardware addresses. One device carries one
-// each for Wi-Fi, Bluetooth, its access point, and Ethernet.
+// MACs are the device's hardware addresses for each interface.
 type MACs struct {
 	WiFi        string `json:"wifi,omitempty"`
 	Bluetooth   string `json:"bluetooth,omitempty"`
@@ -74,9 +69,8 @@ type MACs struct {
 	Ethernet    string `json:"ethernet,omitempty"`
 }
 
-// Capabilities is what the device reports it can do, as flags and
-// numbers rather than a promise: the operator reads them and acts on
-// none.
+// Capabilities are the features that the device reports, as flags and
+// numbers. The operator records them and does not act on them.
 type Capabilities struct {
 	Cast          bool   `json:"cast"`
 	PresetKeys    int    `json:"presetKeys,omitempty"`
@@ -88,17 +82,17 @@ type Capabilities struct {
 	VolumeControl int    `json:"volumeControl,omitempty"`
 }
 
-// Security is the block getStatusEx reports: what the device can do,
-// not what it requires. The plain HTTPS API answers without a token.
+// Security is the security block of getStatusEx. It lists protocols
+// that the device supports, not ones it requires: the HTTPS API
+// replies to requests that carry no token.
 type Security struct {
 	Protocol string `json:"protocol,omitempty"`
 	Version  string `json:"version,omitempty"`
 	AES      string `json:"aes,omitempty"`
 }
 
-// Network is the device's current address and link, plus the static
-// configuration it holds. The link's signal, noise, and rate are
-// Readings.
+// Network is the device's current address and link, and its static
+// configuration. The link's signal, noise, and rate are in Readings.
 type Network struct {
 	Interface string    `json:"interface,omitempty"`
 	Address   string    `json:"address,omitempty"`
@@ -109,14 +103,13 @@ type Network struct {
 	Static    *StaticIP `json:"static,omitempty"`
 }
 
-// StaticIP is the static configuration the device holds for each
-// interface. An interface on DHCP reports empty values.
+// StaticIP is the static configuration that the device stores for each
+// interface. An interface that uses DHCP reports empty values.
 type StaticIP struct {
 	WiFi     StaticAddress `json:"wifi"`
 	Ethernet StaticAddress `json:"ethernet"`
 }
 
-// StaticAddress is one interface's static configuration.
 type StaticAddress struct {
 	Address string `json:"address,omitempty"`
 	Gateway string `json:"gateway,omitempty"`
@@ -124,9 +117,8 @@ type StaticAddress struct {
 	Enabled bool   `json:"enabled"`
 }
 
-// Playback is the player's own report: what it is doing, what source it
-// is on, and the transport fields. The title fields carry the player's
-// hex-encoded text.
+// Playback is the reply to getPlayerStatus. The device sends the
+// title, artist, and album hex-encoded, and the client decodes them.
 type Playback struct {
 	Status        string `json:"status,omitempty"`
 	Mode          int    `json:"mode"`
@@ -147,9 +139,9 @@ type Playback struct {
 	Album         string `json:"album,omitempty"`
 }
 
-// NowPlaying is the current track as plain JSON. It is absent when the
-// source has no track: the device answers "Failed" to getMetaInfo then,
-// and a stale track would be worse than none.
+// NowPlaying is the current track, from getMetaInfo. It is nil when
+// the read fails or the device replies "Failed", which it does for a
+// source with no track, so the status never shows an earlier track.
 type NowPlaying struct {
 	Title      string `json:"title,omitempty"`
 	Subtitle   string `json:"subtitle,omitempty"`
@@ -162,7 +154,6 @@ type NowPlaying struct {
 	TrackID    string `json:"trackId,omitempty"`
 }
 
-// Audio is the output block and the level controls around it.
 type Audio struct {
 	Output                Output        `json:"output"`
 	Balance               float64       `json:"balance"`
@@ -175,7 +166,6 @@ type Audio struct {
 	SPDIFDelayMS          int           `json:"spdifDelayMs,omitempty"`
 }
 
-// Output is the hardware output the device drives.
 type Output struct {
 	Mode      int          `json:"mode"`
 	Hardware  string       `json:"hardware,omitempty"`
@@ -186,8 +176,8 @@ type Output struct {
 	Available []OutputMode `json:"available,omitempty"`
 }
 
-// OutputMode is one output the device offers, with the formats it
-// accepts on that card.
+// OutputMode is one output that the device offers, with the formats
+// that its card accepts.
 type OutputMode struct {
 	Index       int    `json:"index"`
 	Mode        string `json:"mode,omitempty"`
@@ -197,8 +187,7 @@ type OutputMode struct {
 	SampleRates []int  `json:"sampleRates,omitempty"`
 }
 
-// InputVolume is the level the device stores for one input, and whether
-// that input is the active one.
+// InputVolume is the volume that the device stores for one input.
 type InputVolume struct {
 	Mode   int    `json:"mode"`
 	Name   string `json:"name,omitempty"`
@@ -207,8 +196,9 @@ type InputVolume struct {
 	Active bool   `json:"active"`
 }
 
-// Subwoofer is the crossover and level block the device reports when a
-// subwoofer is configured.
+// Subwoofer is the device's subwoofer settings. It is nil until the
+// device replies to the subwoofer read, and Plugged tells whether a
+// subwoofer is connected.
 type Subwoofer struct {
 	Plugged    bool    `json:"plugged"`
 	OutputMode int     `json:"outputMode"`
@@ -221,23 +211,22 @@ type Subwoofer struct {
 	MixSub     bool    `json:"mixSub"`
 }
 
-// Equalizer is the equalizer's state and its available presets.
 type Equalizer struct {
 	Enabled bool     `json:"enabled"`
 	Preset  int      `json:"preset,omitempty"`
 	Presets []string `json:"presets,omitempty"`
 }
 
-// Timers is the sleep timer, the alarm slots, and the idle intervals
-// the device holds. SleepSeconds counts down while a timer runs, so the
-// status carries it only as the zone's sleep, in whole minutes.
+// Timers are the sleep timer, the alarms, and the idle intervals.
+// SleepSeconds is -1 until the device reports the timer.
 type Timers struct {
 	SleepSeconds int       `json:"-"`
 	Alarms       []Alarm   `json:"alarms,omitempty"`
 	PowerMode    PowerMode `json:"powerMode"`
 }
 
-// Alarm is one of the device's three alarm slots.
+// Alarm is one alarm. The device has at most three, read with
+// getAlarmClock:0 to getAlarmClock:2.
 type Alarm struct {
 	Index     int    `json:"index"`
 	Enabled   bool   `json:"enabled"`
@@ -248,8 +237,8 @@ type Alarm struct {
 	Path      string `json:"path,omitempty"`
 }
 
-// PowerMode is how long the device waits in each state before it moves
-// on, in minutes.
+// PowerMode is how long the device stays in each state before it moves
+// to the next, in minutes.
 type PowerMode struct {
 	Idle       int `json:"idle,omitempty"`
 	Standby    int `json:"standby,omitempty"`
@@ -258,22 +247,20 @@ type PowerMode struct {
 	SemiActive int `json:"semiActive,omitempty"`
 }
 
-// Bluetooth is the pairing state, the paired devices, and the remote.
 type Bluetooth struct {
 	PairStatus int            `json:"pairStatus"`
 	Paired     []PairedDevice `json:"paired,omitempty"`
 	Remote     *BLERemote     `json:"remote,omitempty"`
 }
 
-// PairedDevice is one device the amp has paired with.
 type PairedDevice struct {
 	Name    string `json:"name,omitempty"`
 	Address string `json:"address,omitempty"`
 	Role    string `json:"role,omitempty"`
 }
 
-// BLERemote is the Bluetooth remote the amp ships with. Its battery and
-// signal are Readings.
+// BLERemote is the Bluetooth remote that comes with the amp. Its
+// battery and signal are in Readings.
 type BLERemote struct {
 	Supported bool   `json:"supported"`
 	Connected bool   `json:"connected"`
@@ -281,24 +268,21 @@ type BLERemote struct {
 	State     string `json:"state,omitempty"`
 }
 
-// Preset is one stored preset the device can start.
 type Preset struct {
 	Number int    `json:"number"`
 	Name   string `json:"name,omitempty"`
 	Source string `json:"source,omitempty"`
 }
 
-// Controls is the device's own controls: the status light, the touch
-// buttons, and CEC.
 type Controls struct {
 	LED      bool `json:"led"`
 	Buttons  bool `json:"buttons"`
 	CECPower bool `json:"cecPower"`
 }
 
-// newStatus is the state before the device has answered. A number the
-// device has not reported is unknown, so a zero the device never said
-// does not read as a real answer.
+// newStatus is the state before the device has replied. A number that
+// the device has not reported is equipment.Unknown, so that it does not
+// read as a real zero.
 func newStatus() Status {
 	return Status{
 		Playback: Playback{Volume: equipment.Unknown},
@@ -307,9 +291,8 @@ func newStatus() Status {
 	}
 }
 
-// zone is the contract's main zone built from the snapshot. Power is
-// always on: the API has no standby command, so the device has no
-// state to report but on.
+// zone reports Power as always on, because the API has no standby
+// command and the device reports no other power state.
 func (s Status) zone() equipment.ZoneState {
 	return equipment.ZoneState{
 		Power:           equipment.PowerOn,
@@ -322,8 +305,8 @@ func (s Status) zone() equipment.ZoneState {
 	}
 }
 
-// sleepMinutes writes the sleep timer in whole minutes, rounding up a
-// partial minute, and unknown when the device has not reported one.
+// sleepMinutes rounds a partial minute up, and returns
+// equipment.Unknown when the device has not reported the timer.
 func sleepMinutes(seconds int) int {
 	if seconds < 0 {
 		return equipment.Unknown
@@ -334,8 +317,6 @@ func sleepMinutes(seconds int) int {
 	return (seconds + 59) / 60
 }
 
-// equipmentState maps the snapshot onto the contract: one main zone and
-// the reachability verdict the client holds.
 func (s Status) equipmentState(reachable equipment.ConditionStatus) equipment.State {
 	return equipment.State{
 		Reachable: reachable,

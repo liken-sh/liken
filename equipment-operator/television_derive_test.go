@@ -1,21 +1,18 @@
 package main
 
-// The Deployment's derivation for one Television: the TV's facts, its
-// power, the two conditions the Deployment owns, and the Displays that
-// reach the TV, from the CECBus, the Displays, and the Receivers
-// alone. cecbus_derive_test.go holds the bus fixtures.
+// cecbus_derive_test.go has the bus fixtures.
 
 import (
 	"testing"
 	"time"
 )
 
-// derivedBus is a bus in a mode with the device list and the Scanned
-// condition the Deployment derived for it.
+// derivedBus returns a bus with the device list and Scanned condition
+// that the Deployment would have derived for it.
 func derivedBus(mode CECMode, scanned ConditionStatus, devices ...CECDevice) *CECBus {
 	bus := busWith(mode, []string{"node-1"})
 	bus.Status.Devices = devices
-	bus.Status.Conditions = []Condition{{Type: conditionScanned, Status: scanned, Reason: reasonScanning, Message: "the adapter on node-1 has not finished a scan"}}
+	bus.Status.Conditions = []Condition{{Type: conditionScanned, Status: scanned, Reason: reasonScanning, Message: "The adapter on node-1 has not finished a scan"}}
 	return bus
 }
 
@@ -23,8 +20,8 @@ func tvOn(bus string) *Television {
 	return &Television{Metadata: ObjectMeta{Name: "den", Generation: 2}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: bus}}}
 }
 
-// derive derives the Television tvOn makes, which is in charge of its
-// bus.
+// derive runs deriveTelevision for the Television that tvOn makes, as
+// the one that televisionFor chose for its bus.
 func derive(bus *CECBus, displays []Display, receivers []Receiver) televisionDerived {
 	return deriveTelevision(tvOn("den"), "den", bus, displays, receivers, allReady, derivedAt)
 }
@@ -35,7 +32,7 @@ func TestReachableSaysWhetherTheTVAnswers(t *testing.T) {
 	silent.Power = ""
 	stale := derivedBus(CECControl, ConditionUnknown)
 	stale.Status.Conditions[0].Reason = reasonStale
-	stale.Status.Conditions[0].Message = "the equipment-operator-cec pod on machine node-1 is not Ready, so its entry, last written at 2026-09-26T11:00:00Z, may not describe the adapter"
+	stale.Status.Conditions[0].Message = "The equipment-operator-cec pod on machine node-1 is not Ready, so its entry, last written at 2026-09-26T11:00:00Z, may not describe the adapter"
 	cases := []struct {
 		name    string
 		bus     *CECBus
@@ -44,17 +41,17 @@ func TestReachableSaysWhetherTheTVAnswers(t *testing.T) {
 		message string
 	}{
 		{"a TV that answers", derivedBus(CECControl, ConditionTrue, tvDevice), ConditionTrue, reasonAnswers,
-			"the TV answers Give Device Power Status on CECBus den"},
+			"The TV replies to Give Device Power Status on CECBus den"},
 		{"a TV that does not answer", derivedBus(CECControl, ConditionTrue, silent), ConditionFalse, reasonNoPower,
-			"the TV acknowledges logical address 0 on CECBus den and does not answer Give Device Power Status; a TV in a deep standby or an eco mode can stop answering, and the operator cannot wake it then"},
+			"The TV acknowledges logical address 0 on CECBus den and does not reply to Give Device Power Status. A TV in a deep standby or an eco mode can stop replying, and the operator cannot wake it then"},
 		{"no TV on a scanned bus", derivedBus(CECControl, ConditionTrue, receiverDevice), ConditionFalse, reasonNotFound,
-			"no adapter of CECBus den finds a TV at logical address 0"},
+			"No adapter of CECBus den finds a TV at logical address 0"},
 		{"a bus that has not scanned", derivedBus(CECControl, ConditionUnknown), ConditionUnknown, reasonNotScanned,
-			"CECBus den has not finished a scan: the adapter on node-1 has not finished a scan"},
+			"CECBus den has not finished a scan: The adapter on node-1 has not finished a scan"},
 		{"a bus whose adapter entry is stale", stale, ConditionUnknown, reasonStale,
-			"CECBus den: the equipment-operator-cec pod on machine node-1 is not Ready, so its entry, last written at 2026-09-26T11:00:00Z, may not describe the adapter"},
+			"CECBus den: The equipment-operator-cec pod on machine node-1 is not Ready, so its entry, last written at 2026-09-26T11:00:00Z, may not describe the adapter"},
 		{"a bus in Listen", derivedBus(CECListen, ConditionFalse, tvDevice), ConditionUnknown, reasonListening,
-			"CECBus den is in Listen, so no adapter asks the TV for its power"},
+			"CECBus den is in Listen, so no adapter reads the power of the TV"},
 		{"no bus", nil, ConditionFalse, reasonNoBus, "CECBus den does not exist"},
 	}
 	for _, c := range cases {
@@ -62,14 +59,12 @@ func TestReachableSaysWhetherTheTVAnswers(t *testing.T) {
 			got := derive(c.bus, nil, nil).reachable
 
 			if got.Status != c.status || got.Reason != c.reason || got.Message != c.message || got.ObservedGeneration != 2 {
-				t.Errorf("got %+v", got)
+				t.Errorf("the condition is %+v, want %s %s %q with observed generation 2", got, c.status, c.reason, c.message)
 			}
 		})
 	}
 }
 
-// The TV's facts and power are the TV's entry in the bus's device
-// list. A TV that did not answer its power status has no power.
 func TestTheTVsFactsComeFromTheBus(t *testing.T) {
 	t.Parallel()
 	silent := tvDevice
@@ -97,8 +92,6 @@ func TestTheTVsFactsComeFromTheBus(t *testing.T) {
 	}
 }
 
-// Of two Televisions on one bus, the one not in charge says which one
-// is, and that its own spec.power waits.
 func TestInChargeNamesTheTelevisionThatSpeaksForTheBus(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -109,22 +102,21 @@ func TestInChargeNamesTheTelevisionThatSpeaksForTheBus(t *testing.T) {
 		message string
 	}{
 		{"in charge", "den", ConditionTrue, reasonInCharge,
-			"this Television speaks for the TV on CECBus den"},
+			"This Television represents the TV on CECBus den"},
 		{"another in charge", "lounge", ConditionFalse, reasonAnotherInCharge,
-			"Television lounge speaks for the TV on CECBus den, so the operator applies no spec.power of this Television; when lounge is deleted, this Television speaks for the TV, and the operator applies its spec.power once then"},
+			"Television lounge represents the TV on CECBus den, so the operator does not apply the spec.power of this Television. When lounge is deleted, this Television represents the TV, and the operator applies its spec.power once"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			got := deriveTelevision(tvOn("den"), c.chosen, derivedBus(CECControl, ConditionTrue, tvDevice), nil, nil, allReady, derivedAt).inCharge
 
 			if got.Status != c.status || got.Reason != c.reason || got.Message != c.message {
-				t.Errorf("got %+v", got)
+				t.Errorf("the condition is %+v, want %s %s %q", got, c.status, c.reason, c.message)
 			}
 		})
 	}
 }
 
-// display is a Display on a node at a physical address.
 func display(name, node, address string) Display {
 	found := Display{Metadata: ObjectMeta{Name: name}}
 	found.Status.Node = node
@@ -138,13 +130,6 @@ func wiredReceiver(name, machine, monitor string) Receiver {
 	return Receiver{Metadata: ObjectMeta{Name: name}, Spec: ReceiverSpec{Inputs: []ReceiverInput{{Name: "MPLAY", Machine: machine, Monitor: monitor}}}}
 }
 
-// The Displays are the ones the bus's adapters name, because each
-// adapter announces its own Display's physical address on this wire. A
-// machine's other output can go to another TV, and a physical address
-// does not name its tree, so a Display no adapter names is not listed.
-// via names a Receiver only when the bus has an audio system above the
-// Display in the tree, so a Receiver input that names a Display
-// straight on the TV, such as an optical input, is no path.
 func TestTheDisplaysAreTheOnesTheAdaptersName(t *testing.T) {
 	t.Parallel()
 	control := derivedBus(CECControl, ConditionTrue, tvDevice, receiverDevice)
@@ -196,8 +181,8 @@ func TestTheDisplaysAreTheOnesTheAdaptersName(t *testing.T) {
 	}
 }
 
-// Reachable keeps the moment it last changed, so a status that does
-// not change is not written again.
+// Reachable keeps its last transition time while its status does not
+// change, so that a pass with no change writes no new status.
 func TestReachableKeepsItsTransitionTime(t *testing.T) {
 	t.Parallel()
 	television := tvOn("den")
@@ -209,14 +194,13 @@ func TestReachableKeepsItsTransitionTime(t *testing.T) {
 	mustMatch(t, derived.reachable.LastTransitionTime, earlier)
 }
 
-// discoveredTV is the Television the Deployment made for a bus: the
-// bus's own name and the discovered label.
+// discoveredTV returns the Television that discovery creates for a bus.
 func discoveredTV(bus string) Television {
 	return labeledTV(bus, bus)
 }
 
-// labeledTV is a Television with the discovered label under any name,
-// such as a copy a person made of the discovered YAML.
+// labeledTV returns a Television with the discovered label under any
+// name, such as a copy that a person made of the discovered YAML.
 func labeledTV(name, bus string) Television {
 	return Television{
 		Metadata: ObjectMeta{Name: name, Labels: map[string]string{discoveredLabel: discoveredCECLabelValue}},
@@ -228,10 +212,6 @@ func declaredTV(name, bus string) Television {
 	return Television{Metadata: ObjectMeta{Name: name}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: bus}}}
 }
 
-// Discovery owns only the labeled Television with its bus's name, and
-// deletes it only when another Television names the same bus. A person
-// adopts the discovered Television by applying their own spec to it,
-// and it stays. A labeled Television under another name is a person's.
 func TestDiscoveryMakesATelevisionForATVNobodyDeclared(t *testing.T) {
 	t.Parallel()
 	withTV := []CECBus{*derivedBus(CECControl, ConditionTrue, tvDevice, receiverDevice)}
@@ -268,9 +248,6 @@ func TestDiscoveryMakesATelevisionForATVNobodyDeclared(t *testing.T) {
 	}
 }
 
-// A person's Television speaks for the bus over the discovered one,
-// and of two of a person's, the first by name. A labeled Television
-// under a name other than its bus's is a person's.
 func TestTheTelevisionForABus(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -297,10 +274,6 @@ func TestTheTelevisionForABus(t *testing.T) {
 	}
 }
 
-// The active Display is the Display at the physical address of the
-// last Active Source: first a Display the bus's adapters name, then
-// another Display on a machine the bus names. A source that is no
-// Display, such as a streaming box, names none.
 func TestTheActiveDisplayIsTheDisplayAtTheActiveSource(t *testing.T) {
 	t.Parallel()
 	named := display("acm-0001-receiver", "node-1", "1.3.0.0")

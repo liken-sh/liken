@@ -1,10 +1,5 @@
 package main
 
-// The node workload asks an announcing TV for its power under hard
-// bounds, and every read of the TV's power shares one question on the
-// wire. A question is traffic a TV can answer by switching its input,
-// and two questions at once can each take the other's answer.
-
 import (
 	"testing"
 	"testing/synctest"
@@ -14,8 +9,8 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/cec/cectest"
 )
 
-// powerQuestions counts the Give Device Power Status messages the
-// adapters sent the TV.
+// powerQuestions counts the Give Device Power Status messages that
+// the adapters sent to the TV.
 func powerQuestions(wire *cectest.Bus) int {
 	count := 0
 	for _, message := range sentTo(wire, cec.AddressTV) {
@@ -26,22 +21,21 @@ func powerQuestions(wire *cectest.Bus) int {
 	return count
 }
 
-// settle waits a fixed time for questions that must not come. No
-// message states that the adapter is done, and most messages that
-// would mark the end tell the directory something about the TV.
+// settle advances the bubble's clock so that a read that should not be
+// sent has time to appear. Nothing on the bus marks the end of the
+// adapter's work, so the test cannot wait for an event instead.
 func settle() {
 	time.Sleep(200 * time.Millisecond)
 }
 
-// A TV that the adapter asked once and that answered, then lost its
-// power again, is asked again when it next announces itself. The
-// answer to the adapter's own question is a reply to that question and
-// never reaches the loop that hears the bus, so it must clear the mark
-// too.
+// After the adapter has read the TV's power and the power becomes
+// unknown again, the adapter reads it again when the TV next announces
+// itself. The reply to the adapter's own read does not pass through
+// heard, so readTVPower must call noteTVPower too.
 func TestATVAskedOnceIsAskedAgainAfterItsPowerIsUnknownAgain(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerUnknown))
+		wire := busWithTV(televisionTV(cec.PowerUnknown))
 		api := controlling(t, wire, lounge(""))
 		api.scanned(t, "node-1")
 		wire.Add(televisionTV(cec.PowerStandby))
@@ -60,11 +54,10 @@ func TestATVAskedOnceIsAskedAgainAfterItsPowerIsUnknownAgain(t *testing.T) {
 	})
 }
 
-// A TV that joins after the scan is new to the adapter. Its first
-// message, here its name, queues its introduction, which asks its
-// power among its other facts. Its announcement while the introduction runs queues a
-// power question too, and that question finds the power known and
-// sends nothing.
+// A TV that joins after the scan sends its name, which queues an
+// introduction that reads its power. Its Report Physical Address during
+// the introduction queues a second read, which finds the power known
+// and sends nothing.
 func TestANewTVIsAskedItsPowerOnce(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -87,15 +80,12 @@ func TestANewTVIsAskedItsPowerOnce(t *testing.T) {
 	})
 }
 
-// A press that reads the TV while the adapter already asks it for its
-// power shares that question and its answer. Two questions at once
-// would each wait for a Report Power Status, and the kernel gives the
-// first answer to one of them, so the other would time out and the
-// press would decide from no power.
+// A powerAsk during a read of the TV's power waits for that read
+// and uses its result, so the bus has one Give Device Power Status.
 func TestAPressReadSharesAQuestionInFlight(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerUnknown))
+		wire := busWithTV(televisionTV(cec.PowerUnknown))
 		api := controlling(t, wire, lounge(""))
 		api.scanned(t, "node-1")
 		slow := televisionTV(cec.PowerOn)
@@ -112,17 +102,7 @@ func TestAPressReadSharesAQuestionInFlight(t *testing.T) {
 	})
 }
 
-// The join scan and a TV's introduction ask the TV its power through
-// the same shared read as a press, so a press while either waits on
-// the TV takes their answer and puts no second question on the wire.
-// The TV takes 400 ms to answer each question. An introduction asks
-// three questions before the power, so the press 1.3 s in lands while
-// the introduction's power question waits. A scan asks four, so its
-// power question starts at 1.6 s, after the press's read began, and
-// the scan shares the press's read. Either order puts one question on
-// the wire.
-
-// slowTV is a TV that is on and takes 400 ms to answer each question.
+// slowTV is a TV that is on and takes 400 ms to reply to each request.
 func slowTV() cectest.Peer {
 	tv := televisionTV(cec.PowerOn)
 	tv.Slow = 400 * time.Millisecond
@@ -137,7 +117,11 @@ func roomWithAReceiver() *cectest.Bus {
 }
 
 // pressWhileTheTVAnswers presses 1.3 s in, and checks that the press
-// read On from the one power question on the wire.
+// read On and that one Give Device Power Status was sent. An
+// introduction sends three requests before the power, so its power read
+// runs from 1.2 s and the press shares it. A scan sends four, so its
+// power read starts at 1.6 s, after the press's read began, and the
+// scan shares the press's read.
 func pressWhileTheTVAnswers(t *testing.T, wire *cectest.Bus, api *cecAPI) {
 	t.Helper()
 	time.Sleep(1300 * time.Millisecond)

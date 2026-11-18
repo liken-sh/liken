@@ -1,8 +1,7 @@
-// The network the fake receiver and its description listen on. Each
-// connection is a net.Pipe, whose reads and writes wait on channels,
-// so a test in a synctest bubble that talks to a fake waits on nothing
-// outside the bubble, and its fake clock advances. The client reaches
-// the fakes through its Dial.
+// An in-memory network for the fake receiver and its description
+// server. Each connection is a net.Pipe, whose reads and writes wait on
+// channels, so a test in a synctest bubble never waits on anything
+// outside the bubble and its fake clock keeps advancing.
 
 package denon
 
@@ -19,23 +18,24 @@ import (
 	"testing"
 )
 
-// pipeNetwork hands each dial to an address a fake listens on one end
-// of a new pipe, and the fake the other end. A dial to any other
-// address fails with ECONNREFUSED, the way a closed port on loopback
-// answers.
+// pipeNetwork connects each dial to an address that a fake listens on
+// with a new pipe: the client gets one end and the fake gets the other.
+// A dial to any other address fails with ECONNREFUSED, as a closed port
+// on loopback does.
 type pipeNetwork struct {
 	mutex     sync.Mutex
 	ports     int
 	listeners map[string]func(net.Conn)
 }
 
-// testNetwork is the network every test's fakes listen on. Each fake
-// takes an address of its own, so two tests never reach each other's
+// testNetwork is the network that every test's fakes listen on. Each
+// fake gets its own address, so parallel tests never reach each other's
 // fakes.
 var testNetwork = &pipeNetwork{listeners: map[string]func(net.Conn){}}
 
-// listen takes a new loopback address, and serves each connection to it
-// on a goroutine of its own until the test ends.
+// listen registers serve under a new loopback address and returns the
+// address. serve runs on its own goroutine for each connection. The
+// address is removed when the test ends.
 func (n *pipeNetwork) listen(t *testing.T, serve func(net.Conn)) string {
 	t.Helper()
 	n.mutex.Lock()
@@ -51,7 +51,7 @@ func (n *pipeNetwork) listen(t *testing.T, serve func(net.Conn)) string {
 	return address
 }
 
-// dial is the Dial of a client under test.
+// dial is the Dial function for a client under test.
 func (n *pipeNetwork) dial(_ context.Context, network, address string) (net.Conn, error) {
 	n.mutex.Lock()
 	serve, listening := n.listeners[address]
@@ -65,8 +65,9 @@ func (n *pipeNetwork) dial(_ context.Context, network, address string) (net.Conn
 }
 
 // serveHTTP listens on the test network and answers one request on each
-// connection with the handler, the way the receiver's description
-// server answers a client that keeps no connection open.
+// connection with handler, then closes the connection. The receiver's
+// description server behaves this way for a client that does not keep
+// its connection open.
 func (n *pipeNetwork) serveHTTP(t *testing.T, handler http.Handler) string {
 	t.Helper()
 	return n.listen(t, func(conn net.Conn) {

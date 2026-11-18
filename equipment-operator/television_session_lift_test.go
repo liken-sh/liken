@@ -1,8 +1,9 @@
 package main
 
-// The TV's status.session outlives a Receiver session for a bounded
-// time, the Deployment's session writes go one at a time, and each
-// writer of a Television keeps the others' fields.
+// Tests of how the Deployment writes a Television's status.session.
+// When a Receiver's session ends, the Deployment waits sessionLiftDelay
+// before it removes the session from the TV. The code calls this
+// delayed removal a lift.
 
 import (
 	"sync"
@@ -11,9 +12,9 @@ import (
 	"time"
 )
 
-// A session that the media operator lifts and writes again within the
-// delay keeps the TV's session and its wake, so the TV does not wake
-// unasked when the session returns.
+// When the media operator ends a session and writes it again within
+// sessionLiftDelay, the TV keeps its session and its wokeAt, so the TV
+// does not wake again for a session that never stopped.
 func TestABriefLiftKeepsTheSessionAndWakesNothing(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -33,8 +34,9 @@ func TestABriefLiftKeepsTheSessionAndWakesNothing(t *testing.T) {
 	})
 }
 
-// A session that does not return within the delay is removed from the
-// TV, and a removal the API server refuses is tried again.
+// A session that does not return within sessionLiftDelay is removed
+// from the TV. When the API server refuses the removal, the Deployment
+// retries it. The removal leaves other Televisions' sessions alone.
 func TestALiftRemovesTheSessionAfterTheDelay(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -63,8 +65,8 @@ func TestALiftRemovesTheSessionAfterTheDelay(t *testing.T) {
 	})
 }
 
-// A lift whose list of Televisions the API server refuses removes
-// nothing, and is tried again until the list answers.
+// When the API server refuses the list of Televisions, the lift removes
+// nothing and retries until the list succeeds.
 func TestALiftWhoseListFailsIsTriedAgain(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -86,8 +88,8 @@ func TestALiftWhoseListFailsIsTriedAgain(t *testing.T) {
 	})
 }
 
-// A lift that waits at operator shutdown is dropped: the next operator
-// adopts the session.
+// A lift that is still waiting when the operator shuts down is dropped.
+// The session stays on the TV, and the next operator process adopts it.
 func TestAShutdownDropsAWaitingLift(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -105,17 +107,18 @@ func TestAShutdownDropsAWaitingLift(t *testing.T) {
 	})
 }
 
-// slowSessions makes each session write take a while and counts the
-// writes in flight at once.
+// slowSessions makes each session write take delay, so the fake can
+// record how many writes run at the same time.
 func (a *cecAPI) slowSessions(delay time.Duration) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
 	a.sessionDelay = delay
 }
 
-// Each session write reads the Television and applies what it read, so
-// a sleep and a wake at once could undo each other. The writer takes
-// them one at a time.
+// Each session write reads the Television and then applies what it
+// read with one change. A sleep and a wake that ran at the same time
+// could overwrite each other's change, so the writer runs them one at a
+// time.
 func TestSessionWritesGoOneAtATime(t *testing.T) {
 	t.Parallel()
 	api := startCECAPI(t)
@@ -135,9 +138,10 @@ func TestSessionWritesGoOneAtATime(t *testing.T) {
 	mustMatch(t, api.sessionMostAtOnce, 1)
 }
 
-// The Deployment end to end: a session that starts on a Receiver is
-// adopted and wakes nothing, a Play that starts on it is a wake, and a
-// deleted Receiver lifts the TV's session after the delay.
+// The Deployment end to end. A session already running at the first
+// pass is adopted and does not wake the TV. A Play that starts on the
+// Receiver wakes it. When the Receiver is deleted, the Deployment
+// removes the TV's session after sessionLiftDelay.
 func TestAPlayReachesTheTelevisionAndADeletedReceiverLiftsIt(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -173,7 +177,6 @@ func TestAPlayReachesTheTelevisionAndADeletedReceiverLiftsIt(t *testing.T) {
 	})
 }
 
-// removeReceiver deletes a Receiver, as a person or a prune does.
 func (a *cecAPI) removeReceiver(name string) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
@@ -181,16 +184,12 @@ func (a *cecAPI) removeReceiver(name string) {
 	a.changed()
 }
 
-// Each writer of a Television keeps the others' fields. The fake holds
-// what server-side apply does for these writers: each writer applies
-// under a field manager of its own and states every field it owns in
-// every apply, so an apply replaces exactly that writer's fields and
-// leaves every field another manager owns; the conditions are a map
-// keyed by type, so each writer's conditions merge with the others'. A
-// person's apply of the spec reaches no status field, because the
-// status subresource splits the two paths. This test applies each
-// writer's fields, then every other writer's, and checks that the
-// first writer's fields survive.
+// Each writer of a Television applies under its own field manager and
+// sends every field it owns, so with server-side apply its apply
+// replaces only its own fields. Conditions merge by type. The status
+// subresource keeps a person's apply of the spec off the status. The
+// test applies one writer's fields, then every other writer's, and
+// checks that the first writer's fields are still there.
 func TestTheWritersKeepEachOthersFields(t *testing.T) {
 	session := wokeNow()
 	now := time.Now().UTC().Truncate(time.Second)
@@ -246,8 +245,8 @@ func TestTheWritersKeepEachOthersFields(t *testing.T) {
 	}
 }
 
-// liveSessions is a writer past the operator's first pass, when a
-// session that appears is a change a person caused.
+// liveSessions returns a writer that has finished the operator's first
+// pass, so a session that appears after it is new and not adopted.
 func liveSessions(api *cecAPI, t *testing.T) *televisionSessions {
 	t.Helper()
 	sessions := newTelevisionSessions(api.client)
@@ -256,9 +255,8 @@ func liveSessions(api *cecAPI, t *testing.T) *televisionSessions {
 	return sessions
 }
 
-// While the operator runs, a session that appears awake is a Play
-// that started on a Player with no standing session, and it wakes the
-// TV once. An idle one wakes nothing.
+// After the first pass, a session that appears awake is a Play that
+// started, and it wakes the TV once.
 func TestASessionThatAppearsAwakeWhileRunningWakes(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -280,6 +278,8 @@ func TestASessionThatAppearsAwakeWhileRunningWakes(t *testing.T) {
 	})
 }
 
+// After the first pass, a session that appears idle does not wake the
+// TV.
 func TestASessionThatAppearsIdleWhileRunningWakesNothing(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -294,10 +294,10 @@ func TestASessionThatAppearsIdleWhileRunningWakesNothing(t *testing.T) {
 	})
 }
 
-// A session of the same Player and Display that returns while its lift
-// waits is the same session, not a new one, so it wakes nothing. One
-// that returns on another Display is a change, and wakes.
-func TestASessionReturningWithinItsLiftWakesNothing(t *testing.T) {
+// A session that returns to the same Player and Display before its lift
+// runs is treated as the same session and does not wake the TV. A
+// session that returns on another Display wakes that Display's TV.
+func TestASessionReturningWithinItsLiftWakesOnlyOnAnotherDisplay(t *testing.T) {
 	cases := []struct {
 		name  string
 		input string
@@ -320,7 +320,8 @@ func TestASessionReturningWithinItsLiftWakesNothing(t *testing.T) {
 				monitors := map[string]string{"MPLAY": "acm-0001-receiver", "GAME": "bnq-0002-monitor"}
 				monitor := func(input string) string { return monitors[input] }
 				log := newReceiverLog(&logBuffer{}, "den")
-				// The session stands at the operator's start, so it is adopted.
+				// The session exists at the operator's start, so the
+				// operator adopts it without a wake.
 				sessions.room(log, "media/den", "MPLAY", monitor).opened(true, "a Play started on Player media/den")
 				sessions.markLive()
 				before := api.sessionWriteCount()
@@ -345,12 +346,12 @@ func TestASessionReturningWithinItsLiftWakesNothing(t *testing.T) {
 	}
 }
 
-// The Deployment end to end, by when it observes. A session that stands
-// at its first pass is adopted with no wake. A session that appears
-// awake while it runs, after the last one's lift ran out, wakes the TV
-// once. A new wiring of the Receiver starts a new unit, whose session
-// returns within the lift and wakes nothing.
-func TestTheDeploymentWakesOnlyForAChangeItSees(t *testing.T) {
+// The Deployment end to end. A session that exists at the first pass is
+// adopted with no wake. A session that appears awake after the previous
+// lift ran wakes the TV once. When the Receiver's address changes, the
+// Deployment starts a new unit for it, and that unit's session returns
+// before the lift runs and wakes nothing.
+func TestTheDeploymentWakesOnlyForASessionThatAppearsWhileItRuns(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
@@ -371,7 +372,8 @@ func TestTheDeploymentWakesOnlyForAChangeItSees(t *testing.T) {
 		mustMatch(t, adopted.Status.Session.WokeAt, "")
 		mustMatch(t, adopted.Status.Session.Awake, true)
 
-		// The media operator lifts the session, and the lift runs out.
+		// The media operator ends the session, and the lift delay
+		// passes.
 		idle := testReceiver("theater", amp.address())
 		idle.Spec.Inputs = inputs
 		api.putReceiver(idle)

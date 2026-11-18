@@ -1,11 +1,9 @@
 package main
 
-// The pods of the node workload in the fake API server
-// (cecapi_test.go). Until a test declares a pod, the fake serves one
-// Ready pod on each machine that a CECBus names, the way a cluster
-// whose node workloads all run does. A test of staleness declares the
-// pods itself with putPod, and from then on the fake serves only the
-// declared pods.
+// The node workload's pods in the fake API server (cecapi_test.go).
+// Until a test calls putPod or removePod, the fake serves one Ready pod
+// for each machine that a CECBus lists. After the first call, it serves
+// only the pods that the test put.
 
 import (
 	"net/http"
@@ -14,8 +12,7 @@ import (
 	"time"
 )
 
-// testNamespace is the namespace of both workloads in the tests, as
-// liken-system is in deploy/.
+// testNamespace is the namespace that deploy/ uses.
 const testNamespace = "liken-system"
 
 var fakePodsPath = cecPodsPath(testNamespace)
@@ -24,21 +21,20 @@ func init() {
 	fakeKinds[fakePodsPath] = [2]string{"v1", "Pod"}
 }
 
-// fakePod is one pod of the node workload: the node it runs on,
-// whether it is Ready, and when its Ready condition last changed.
+// fakePod is one pod of the node workload. since is when its Ready
+// condition last changed.
 type fakePod struct {
 	node  string
 	ready bool
 	since time.Time
 }
 
-// podName is the name the fake gives a machine's pod.
 func podName(machine string) string {
 	return "equipment-operator-cec-" + machine
 }
 
-// podObjects answers each pod the fake serves, by name. The caller
-// holds the mutex.
+// podObjects returns the pods the fake serves, by name. The caller
+// holds a.mutex.
 func (a *cecAPI) podObjects() map[string]any {
 	pods := a.pods
 	if !a.podsDeclared {
@@ -50,20 +46,21 @@ func (a *cecAPI) podObjects() map[string]any {
 		}
 	}
 	objects := map[string]any{}
-	for name, held := range pods {
+	for name, declared := range pods {
 		pod := cecPod{Metadata: podMeta{Name: name, Namespace: testNamespace, UID: "uid-" + name}}
-		pod.Spec.NodeName = held.node
+		pod.Spec.NodeName = declared.node
 		status := "False"
-		if held.ready {
+		if declared.ready {
 			status = "True"
 		}
-		pod.Status.Conditions = []podCondition{{Type: "PodScheduled", Status: "True"}, {Type: "Ready", Status: status, LastTransitionTime: timestamp(held.since)}}
+		pod.Status.Conditions = []podCondition{{Type: "PodScheduled", Status: "True"}, {Type: "Ready", Status: status, LastTransitionTime: timestamp(declared.since)}}
 		objects[name] = pod
 	}
 	return objects
 }
 
-// servePodAPI answers the list, the watch, and the read of one pod.
+// servePodAPI serves the list, the watch, and the get of one pod. It
+// returns false for any other request.
 func (a *cecAPI) servePodAPI(w http.ResponseWriter, r *http.Request) bool {
 	path := r.URL.Path
 	switch {
@@ -83,10 +80,10 @@ func (a *cecAPI) servePodAPI(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-// putPod declares the node workload's pod on one machine, Ready or
-// not, and tells the pod watches. The Ready condition's transition
-// time moves only when the pod is new or its readiness changes, the
-// way the kubelet writes it.
+// putPod creates or updates the node workload's pod on one machine and
+// notifies the pod watches. Like the kubelet, it changes the Ready
+// condition's lastTransitionTime only when the pod is new or its
+// readiness changes.
 func (a *cecAPI) putPod(machine string, ready bool) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
@@ -94,48 +91,46 @@ func (a *cecAPI) putPod(machine string, ready bool) {
 		a.pods = map[string]fakePod{}
 	}
 	a.podsDeclared = true
-	held, found := a.pods[podName(machine)]
-	if !found || held.ready != ready {
-		held.since = time.Now()
+	pod, found := a.pods[podName(machine)]
+	if !found || pod.ready != ready {
+		pod.since = time.Now()
 	}
-	held.node, held.ready = machine, ready
-	a.pods[podName(machine)] = held
+	pod.node, pod.ready = machine, ready
+	a.pods[podName(machine)] = pod
 	a.changedIn(fakePodsPath)
 }
 
-// writtenNow stamps an entry with the bubble's clock, as the node
-// workload stamps each write.
+// writtenNow sets the entry's ReportedAt to the bubble's clock time,
+// as the node workload does on each write.
 func writtenNow(entry CECAdapterStatus) CECAdapterStatus {
 	entry.ReportedAt = timestamp(time.Now())
 	return entry
 }
 
-// dropEntry removes one machine's entry from a bus behind the node
-// workload's back, as a restore or another writer can, and tells the
-// watches.
+// dropEntry deletes a machine's entry from a bus, as a writer other
+// than the node workload could, and notifies the watches.
 func (a *cecAPI) dropEntry(bus, machine string) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
-	held := a.buses[bus]
-	held.Status.Adapters = slices.DeleteFunc(held.Status.Adapters, func(entry CECAdapterStatus) bool { return entry.Machine == machine })
+	stored := a.buses[bus]
+	stored.Status.Adapters = slices.DeleteFunc(stored.Status.Adapters, func(entry CECAdapterStatus) bool { return entry.Machine == machine })
 	a.changed()
 }
 
-// alterEntry changes one machine's stored entry behind the node
-// workload's back, and tells the watches.
+// alterEntry applies change to a machine's entry, as a writer other
+// than the node workload could, and notifies the watches.
 func (a *cecAPI) alterEntry(bus, machine string, change func(*CECAdapterStatus)) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
-	held := a.buses[bus]
-	for index := range held.Status.Adapters {
-		if held.Status.Adapters[index].Machine == machine {
-			change(&held.Status.Adapters[index])
+	stored := a.buses[bus]
+	for index := range stored.Status.Adapters {
+		if stored.Status.Adapters[index].Machine == machine {
+			change(&stored.Status.Adapters[index])
 		}
 	}
 	a.changed()
 }
 
-// removePod deletes the node workload's pod on one machine.
 func (a *cecAPI) removePod(machine string) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
@@ -144,8 +139,8 @@ func (a *cecAPI) removePod(machine string) {
 	a.changedIn(fakePodsPath)
 }
 
-// readyPods is the list of the node workload's pods that a canned API
-// server answers: one Ready pod on each machine.
+// readyPods returns a list of one Ready node workload pod for each
+// machine, for tests that serve a canned API response.
 func readyPods(machines ...string) map[string]any {
 	items := []cecPod{}
 	for _, machine := range machines {

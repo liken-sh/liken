@@ -1,12 +1,8 @@
-// Package equipment is the contract between the receiver controller
-// and the protocol driver that reaches one piece of equipment. The
-// controller reads a state in its own units and issues commands in
-// those units. A driver such as denon translates between the state and
-// the wire.
-//
-// The controller imports this package, and a driver imports this
-// package. Neither imports the other, so a new protocol is a new
-// directory and a line in the wiring.
+// Package equipment defines Driver, the interface between the receiver
+// controller and each protocol driver, such as denon or wiim. The
+// controller reads State and sends commands in the units of this
+// package, and the driver converts between those units and its
+// protocol. A driver imports this package and never the controller.
 package equipment
 
 import (
@@ -17,10 +13,9 @@ import (
 	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
-// ConditionStatus is the three-valued verdict a condition carries. It
-// is the status type of the shared conditions package, which the
-// Receiver resource's conditions use, so a driver reports reachability
-// in the words the API already holds.
+// ConditionStatus is the status type of kubernetes/conditions, so a
+// driver reports reachability in the values that the Receiver's
+// conditions show.
 type ConditionStatus = conditions.Status
 
 const (
@@ -29,10 +24,8 @@ const (
 	ConditionUnknown = conditions.Unknown
 )
 
-// Power is what a zone reports, in words every protocol shares. The
-// words are the Kubernetes enum form, PascalCase, the same as a
-// Television's power, so every power the operator reads or writes has
-// one spelling.
+// Power is the power state of a zone. The values are in PascalCase,
+// the same spelling as the API enum for a Television's power.
 type Power string
 
 const (
@@ -41,10 +34,10 @@ const (
 	PowerOff     Power = "Off"
 )
 
-// UnmarshalJSON reads a power case-blind into its one form. An older
-// operator wrote the lowercase form, and the API server keeps a stored
-// value unchanged under a new enum, so an object can still hold it. A
-// word that is no power is kept as it is.
+// UnmarshalJSON reads a power in any case and stores the PascalCase
+// constant, because a stored object can hold a lowercase power, and the
+// API server does not rewrite a stored value when the enum changes. It
+// keeps a value that matches no power as it is.
 func (p *Power) UnmarshalJSON(raw []byte) error {
 	var word string
 	if err := json.Unmarshal(raw, &word); err != nil {
@@ -59,14 +52,14 @@ func (p *Power) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
-// MainZone names the zone a session drives when it names no other. A
-// driver that has one zone calls it main.
+// MainZone is the zone that a session controls when it does not name
+// another zone. A driver with one zone names it main.
 const MainZone = "main"
 
-// ZoneState is one zone's last reported values. Volume and VolumeMax
-// are counts of the driver's smallest step, which VolumeResolution
-// turns into display units. A value the equipment has not reported is
-// unknownVolume.
+// ZoneState is what the device last reported for one zone. Volume and
+// VolumeMax count the driver's smallest steps, and
+// Driver.VolumeResolution gives the number of steps in one display
+// unit. A number that the device has not reported is Unknown.
 type ZoneState struct {
 	Power     Power
 	Input     string
@@ -74,47 +67,46 @@ type ZoneState struct {
 	Mute      bool
 	Volume    int
 	VolumeMax int
-	// VolumeMaxStable says whether VolumeMax is a ceiling a session may
-	// map the bus level against. A Denon reports a limit that moves with
-	// the volume, so it is false and the ceiling must be declared. A WiiM
-	// reports its own fixed 0 to 100 top, so it is true.
+	// VolumeMaxStable is true when VolumeMax is a fixed maximum, as on
+	// a WiiM, whose volume is 0 to 100. A Denon reports a maximum that
+	// changes with the volume, so its driver leaves this false.
 	VolumeMaxStable bool
-	Sleep           int // minutes until standby, -1 unknown, 0 off
+	Sleep           int // minutes until standby, or 0 for off
 }
 
-// Unknown is the value a driver reports for a number it has not read.
+// Unknown is the value of a number that the driver has not read.
 const Unknown = -1
 
-// State is what a driver last read from the equipment.
+// State is everything that a driver has read from the device.
 type State struct {
 	Reachable ConditionStatus
 	Zones     map[string]ZoneState
-	// Model and Manufacturer name the equipment in its maker's words,
-	// such as "WiiM Amp" and "Linkplay Technology Inc.", so a person can
-	// tell which device a Receiver reaches. A driver that has not read
-	// them leaves them empty.
+	// Model and Manufacturer are the names that the device reports,
+	// such as "WiiM Amp" and "Linkplay Technology Inc.". The operator
+	// writes them to status.model and status.manufacturer. They are
+	// empty until the driver reads them.
 	Model        string
 	Manufacturer string
 }
 
-// Zone returns one zone's state and whether the driver has reported it.
+// Zone returns the state of one zone, and false when the driver has not
+// reported that zone.
 func (s State) Zone(name string) (ZoneState, bool) {
-	zone, held := s.Zones[name]
-	return zone, held
+	zone, ok := s.Zones[name]
+	return zone, ok
 }
 
-// Event is one recognized line, the zone and field it named, and the
-// whole state after it. A driver sends an event for each field a
-// listener cares about, and the listener decides what to do with it.
+// Event tells a listener that the driver has read the device. State is
+// the whole state after the read. Field is one of the Event constants
+// when the read was about that value, and is empty for any other read,
+// such as a Denon line for the sleep timer or the end of a WiiM poll.
 type Event struct {
 	Zone  string
 	Field string
 	State State
 }
 
-// The fields an event can name. A driver reports reachability, the
-// zone fields, and the sound mode, and ignores everything else it
-// reads.
+// The values of Event.Field.
 const (
 	EventPower     = "power"
 	EventInput     = "input"
@@ -122,80 +114,80 @@ const (
 	EventMute      = "mute"
 	EventSoundMode = "soundMode"
 	EventReachable = "reachable"
-	// EventSurveyed says that Surveyed has become true. A driver sends it
-	// once, because a survey can complete with no line from the device,
-	// and a listener that waits for the survey would otherwise hear
-	// nothing.
-	EventSurveyed = "surveyed"
-	// EventModel says that the driver has read the equipment's model and
-	// maker, which reach the status and nothing else.
+	// EventFirstReadDone means FirstReadDone has become true. The Denon driver
+	// sends it once. The first full read can finish without a line from the
+	// receiver, so no other Event shows that it finished.
+	EventFirstReadDone = "firstReadDone"
+	// EventModel means the driver has read Model and Manufacturer. The
+	// operator uses them only in the status.
 	EventModel = "model"
 )
 
-// Driver is the one interface a protocol implements. Commands are
-// one-shot and never replayed, because the equipment may have moved
-// while the connection was down. A driver with one zone ignores the
-// zone argument.
+// Driver is the interface that each protocol implements. A command is
+// sent once and is never sent again after a reconnect, because the
+// device may have changed while the connection was down. A driver for a
+// device with one zone ignores the zone argument.
 type Driver interface {
-	// Run keeps the connection open until ctx ends, reconnecting as it
-	// drops. It reports every recognized line through the listener the
-	// driver was built with.
+	// Run keeps the connection to the device open until ctx ends, and
+	// reconnects when it drops. It sends an Event to the listener that
+	// the driver was built with for each change it reads.
 	Run(ctx context.Context)
 
-	// State returns the last reported state and can run concurrently
-	// with Run.
+	// State returns the last state that the driver read. It is safe to
+	// call while Run is running.
 	State() State
 
-	// Address answers the address the driver reached the device on. A
-	// receiver declared by name reports its resolved address, and a
-	// discovered one reports what was found. The status carries it, so a
-	// reader sees where the operator reached the device.
+	// Address returns the address that the driver connects to. For a
+	// receiver declared by name it is the resolved address, and for a
+	// discovered receiver it is the address that discovery found. It
+	// appears in the status, so a person can see where the operator
+	// connects.
 	Address() string
 
-	// Surveyed answers whether the driver has completed its first read
-	// of the device's own facts. The operator applies a declared setting
-	// only after this, because a setting compared against a device that
-	// has not reported yet reads as a difference and sends the whole
-	// block.
-	Surveyed() bool
+	// FirstReadDone returns whether the driver has finished its first read of
+	// the device's settings. The operator applies a declared setting
+	// only after that. Before it, a declared setting differs from the
+	// empty state, and the operator would send all of the settings.
+	FirstReadDone() bool
 
-	// VolumeResolution is the number of the driver's smallest steps in
-	// one display unit. The Denon reports half steps, so it answers 2.
+	// VolumeResolution returns the number of the driver's smallest steps
+	// in one display unit. The Denon reports half steps, so it returns 2.
 	VolumeResolution() int
 
-	// HasStandby answers whether the device has a standby command. A
-	// power press that turns the room off reads it: a device with no
-	// standby stays on, and the press states that as its outcome and
-	// sends the device nothing.
+	// HasStandby returns whether the device has a standby command. When
+	// a powerAsk turns the room off and this is false, the operator
+	// sends the device no command, leaves it on, and logs that.
 	HasStandby() bool
 
-	// SetPower turns one zone on or to standby. An unknown zone is an
-	// error.
+	// SetPower turns one zone on, or puts it in standby. It returns an
+	// error for an unknown zone.
 	SetPower(zone string, on bool) error
 
-	// SetInput selects one input on one zone. An unknown zone is an
-	// error.
+	// SetInput selects an input on one zone. It returns an error for an
+	// unknown zone.
 	SetInput(zone, input string) error
 
-	// SetVolume sets one zone's volume, in the driver's smallest steps.
-	// An unknown zone is an error.
+	// SetVolume sets the volume of one zone, in the driver's smallest
+	// steps. It returns an error for an unknown zone.
 	SetVolume(zone string, volume int) error
 
-	// SetMute sets one zone's mute. An unknown zone is an error.
+	// SetMute mutes or unmutes one zone. It returns an error for an
+	// unknown zone.
 	SetMute(zone string, muted bool) error
 
-	// SetSoundMode selects one zone's sound mode. A protocol that
-	// carries no sound mode on the zone is an error.
+	// SetSoundMode selects the sound mode of one zone. It returns an
+	// error when the protocol has no sound mode for that zone.
 	SetSoundMode(zone, mode string) error
 
-	// SameSoundMode answers whether a zone that reports one sound mode
-	// runs the mode a person declared. A protocol can report a mode in
-	// other words than the command that selects it, and a compare of the
-	// two words would send the command again to a receiver that already
-	// runs the mode.
+	// SameSoundMode returns whether the reported sound mode is the one
+	// that the receiver declaration names. A protocol can report a mode
+	// with different text than the command that selects it, so comparing
+	// the two strings would send the command again to a receiver that
+	// already has the mode.
 	SameSoundMode(declared, reported string) bool
 
-	// SetSleep sets one zone's sleep timer, in minutes, where zero is
-	// off. An unknown zone or an out-of-range value is an error.
+	// SetSleep sets the sleep timer of one zone, in minutes. Zero turns
+	// it off. It returns an error for an unknown zone or a value out of
+	// range.
 	SetSleep(zone string, minutes int) error
 }

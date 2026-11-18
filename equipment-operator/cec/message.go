@@ -1,17 +1,14 @@
 package cec
 
-// The CEC messages this package sends and reads. A CEC message is at
-// most sixteen bytes. The first byte is the header: the sender's
-// logical address in the high four bits and the receiver's in the low
-// four. The second byte is the opcode, and the rest are its operands.
-// A message with a header and no opcode is a poll: a device sends it
-// to find out whether another device answers at an address.
+// A CEC message is at most 16 bytes. The first byte is the header, with
+// the sender's logical address in the high four bits and the
+// receiver's in the low four. The second byte is the opcode, and the
+// rest are its operands.
 //
-// The opcodes and the operand layouts are those of the CEC supplement
-// to the HDMI specification. HDMI 1.3a with its CEC supplement is free
-// from https://www.hdmi.org/spec/index after a form. The kernel's
-// linux/cec.h and linux/cec-funcs.h carry the same values and are the
-// open reference this file follows.
+// The opcodes and operand layouts come from the CEC supplement to the
+// HDMI 1.3a specification, which hdmi.org provides free after a form
+// at https://www.hdmi.org/spec/index. The kernel's linux/cec.h and
+// linux/cec-funcs.h define the same values and are the open reference.
 
 import (
 	"fmt"
@@ -21,21 +18,19 @@ import (
 // Opcode is the second byte of a message.
 type Opcode byte
 
-// The message families this package uses. The comment on each group
-// says which device sends the message and what answers it.
 const (
-	// Feature Abort answers a directed message the receiver does not
-	// support. Abort asks a device for a Feature Abort, which a test
-	// tool uses to check that a device answers at all; the kernel
-	// answers it for its own adapter and does not pass it on.
+	// A device replies with Feature Abort to a directed message it does
+	// not support. A test tool sends Abort to check that a device
+	// replies at all. The kernel replies to Abort for its own adapter
+	// and does not pass it on.
 	OpFeatureAbort Opcode = 0x00
 	OpAbort        Opcode = 0xff
 
-	// The one-touch play family. Image View On asks the TV to leave
-	// standby and show a source. Active Source is a broadcast that
-	// says which physical address the TV and the switches between
-	// select. Request Active Source asks the current source to
-	// broadcast Active Source again.
+	// One-touch play. Image View On asks the TV to leave standby and
+	// show a source. Active Source is a broadcast that tells the TV and
+	// any switches between which physical address is selected. Request
+	// Active Source asks the current source to broadcast Active Source
+	// again.
 	OpImageViewOn         Opcode = 0x04
 	OpTextViewOn          Opcode = 0x0d
 	OpActiveSource        Opcode = 0x82
@@ -46,10 +41,9 @@ const (
 	OpSetStreamPath       Opcode = 0x86
 	OpStandby             Opcode = 0x36
 
-	// The identity family. Each Give message asks one device for one
-	// fact, and the device answers with the matching report. Report
-	// Physical Address and Device Vendor ID are broadcasts, so every
-	// device on the bus hears the answer.
+	// Device identity. Each Give or Get message asks one device for one
+	// fact, and the device replies with the matching report. Report
+	// Physical Address and Device Vendor ID are broadcasts.
 	OpGivePhysicalAddress Opcode = 0x83
 	OpReportPhysicalAddr  Opcode = 0x84
 	OpGiveOSDName         Opcode = 0x46
@@ -59,30 +53,29 @@ const (
 	OpGetCECVersion       Opcode = 0x9f
 	OpCECVersion          Opcode = 0x9e
 
-	// The power family. The kernel does not answer Give Device Power
-	// Status for its own adapter, so a program that follows the
-	// adapter answers it.
+	// Power status. The kernel does not reply to Give Device Power
+	// Status for its own adapter, so the program that owns the adapter
+	// must reply.
 	OpGiveDevicePowerStatus Opcode = 0x8f
 	OpReportPowerStatus     Opcode = 0x90
 
-	// The remote-control family. The TV sends the buttons of its own
-	// remote to the active source, and the kernel turns them into key
-	// events on the adapter's input device.
+	// Remote control. The TV sends its remote's button presses to the
+	// active source, and the kernel turns them into key events on the
+	// adapter's input device.
 	OpUserControlPressed  Opcode = 0x44
 	OpUserControlReleased Opcode = 0x45
 
-	// The system audio family. A device asks the audio system for
-	// System Audio Mode with System Audio Mode Request, and the audio
-	// system turns the mode on or off with Set System Audio Mode. Give
-	// System Audio Mode Status asks the audio system for the mode, and
-	// System Audio Mode Status answers it. In the mode, the TV mutes its
-	// own speakers and sends its remote's volume keys to the audio
-	// system. audio.go holds the messages of the feature.
+	// System audio. A device sends System Audio Mode Request to ask the
+	// audio system to turn the mode on, and the audio system turns it
+	// on or off with Set System Audio Mode. While the mode is on, the TV
+	// mutes its own speakers and sends its remote's volume keys to the
+	// audio system. audio.go builds these messages.
 	OpSystemAudioModeRequest Opcode = 0x70
 
-	// The answers from other families that can arrive at a follower
-	// after a request. A follower must not answer an answer with a
-	// Feature Abort.
+	// Other opcodes that a follower receives. The replies and
+	// notifications among them are in answers in follower.go, because a
+	// follower must not send Feature Abort for a reply. The rest are
+	// requests that a follower does not support.
 	OpDeckStatus               Opcode = 0x1b
 	OpTunerDeviceStatus        Opcode = 0x07
 	OpMenuStatus               Opcode = 0x8e
@@ -106,11 +99,12 @@ const (
 	OpGiveSystemAudioModeState Opcode = 0x7d
 )
 
-// The Feature Abort reason this package sends.
+// AbortUnrecognizedOpcode is the Feature Abort reason this package
+// sends.
 const AbortUnrecognizedOpcode byte = 0
 
-// A Message is one CEC frame. Body holds the opcode and the operands;
-// an empty Body is a poll.
+// A Message is one CEC frame. Body holds the opcode and the operands.
+// An empty Body is a poll.
 type Message struct {
 	From LogicalAddress
 	To   LogicalAddress
@@ -122,24 +116,22 @@ func NewMessage(from, to LogicalAddress, opcode Opcode, operands ...byte) Messag
 	return Message{From: from, To: to, Body: append([]byte{byte(opcode)}, operands...)}
 }
 
-// Poll builds the message that asks whether a device answers at an
-// address. The answer is the acknowledge bit, not a reply.
+// Poll builds a message with no opcode, which finds out whether a
+// device is present at an address. A present device acknowledges the
+// frame at the bus level and sends no reply message.
 func Poll(from, to LogicalAddress) Message {
 	return Message{From: from, To: to}
 }
 
-// IsPoll answers whether the message has no opcode.
 func (m Message) IsPoll() bool {
 	return len(m.Body) == 0
 }
 
-// IsBroadcast answers whether every device on the bus receives the
-// message.
 func (m Message) IsBroadcast() bool {
 	return m.To == AddressBroadcast
 }
 
-// Opcode is the message's opcode, and false for a poll.
+// Opcode returns false for a poll.
 func (m Message) Opcode() (Opcode, bool) {
 	if m.IsPoll() {
 		return 0, false
@@ -147,7 +139,6 @@ func (m Message) Opcode() (Opcode, bool) {
 	return Opcode(m.Body[0]), true
 }
 
-// Operands are the bytes after the opcode.
 func (m Message) Operands() []byte {
 	if len(m.Body) < 2 {
 		return nil
@@ -155,8 +146,7 @@ func (m Message) Operands() []byte {
 	return m.Body[1:]
 }
 
-// String writes the message the way a log line reads it: the two
-// addresses and the bytes in hex.
+// String formats the message for a log line, in hex.
 func (m Message) String() string {
 	var text strings.Builder
 	fmt.Fprintf(&text, "%x->%x", uint8(m.From), uint8(m.To))
@@ -165,9 +155,6 @@ func (m Message) String() string {
 	}
 	return text.String()
 }
-
-// The messages this package builds, one function each, so a caller
-// never writes an opcode byte by hand.
 
 func GivePhysicalAddress(from, to LogicalAddress) Message {
 	return NewMessage(from, to, OpGivePhysicalAddress)
@@ -218,8 +205,8 @@ func ActiveSource(from LogicalAddress, address PhysicalAddress) Message {
 }
 
 // InactiveSource tells the TV that the source at an address has no
-// picture to show. It is directed to the TV (HDMI-CEC 1.3a, CEC Table
-// 8).
+// picture to show. It is sent to the TV only (HDMI-CEC 1.3a, CEC
+// Table 8).
 func InactiveSource(from LogicalAddress, address PhysicalAddress) Message {
 	return NewMessage(from, AddressTV, OpInactiveSource, byte(address>>8), byte(address))
 }
@@ -228,8 +215,8 @@ func ImageViewOn(from, to LogicalAddress) Message {
 	return NewMessage(from, to, OpImageViewOn)
 }
 
-// Standby is directed to one device, or broadcast to put every device
-// on the bus in standby.
+// Standby puts one device in standby, or every device on the bus when
+// to is the broadcast address.
 func Standby(from, to LogicalAddress) Message {
 	return NewMessage(from, to, OpStandby)
 }
@@ -242,13 +229,13 @@ const (
 	PowerStandby   PowerStatus = 1
 	PowerToOn      PowerStatus = 2
 	PowerToStandby PowerStatus = 3
-	// PowerUnknown is no operand value. It marks a device that has not
-	// reported its power.
+	// PowerUnknown is not a CEC operand value. It marks a device that
+	// has not reported its power.
 	PowerUnknown PowerStatus = 0xff
 )
 
-// String names the power the way the status reports it. A device in
-// the two transitions reports ToOn or ToStandby.
+// String returns the name that the CECBus and Television status write
+// for the power state, or an empty string for any other value.
 func (p PowerStatus) String() string {
 	switch p {
 	case PowerOn:
@@ -273,8 +260,8 @@ const (
 	VersionUnknown Version = 0
 )
 
-// String names the version the way the HDMI specification numbers it.
-// A value this package does not know reads as empty.
+// String returns the version number, or an empty string for a value
+// this package does not define.
 func (v Version) String() string {
 	switch v {
 	case Version13a:
@@ -291,15 +278,15 @@ func (v Version) String() string {
 type VendorID uint32
 
 // VendorUnknown marks a device that has not reported a vendor. It is
-// the value the kernel uses for an adapter with none.
+// the kernel's value for an adapter with no vendor ID.
 const VendorUnknown VendorID = vendorIDNone
 
-// vendorZero is the vendor a Device Vendor ID of 000000 states, which
-// names no vendor (learn in directory.go).
+// vendorZero is the vendor ID 000000, which a device can report but
+// which belongs to no vendor (see directory.go).
 const vendorZero VendorID = 0
 
-// String writes the OUI as six lowercase hex digits, the way the IEEE
-// registry lists it without separators.
+// String formats the OUI as six lowercase hex digits, or an empty
+// string for VendorUnknown.
 func (v VendorID) String() string {
 	if v == VendorUnknown {
 		return ""

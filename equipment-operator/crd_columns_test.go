@@ -1,9 +1,9 @@
 package main
 
-// The columns kubectl get prints for each resource. The default view
-// answers whether the equipment is reachable and what it does now, and
-// Age stays its last column. The wide view, kubectl get -o wide, adds
-// the facts a person reads when a default column looks wrong.
+// The default columns of kubectl get show whether the equipment is
+// reachable and what it is doing, with Age last. The columns that
+// kubectl get -o wide adds help a person find out why a default column
+// looks wrong.
 
 import (
 	"testing"
@@ -11,8 +11,8 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 )
 
-// column is one printer column as a test states it: its name, its path,
-// and its priority, where 1 is the wide view.
+// column is one printer column. Priority 1 means only kubectl get -o
+// wide prints it.
 type column struct {
 	name, path string
 	priority   int32

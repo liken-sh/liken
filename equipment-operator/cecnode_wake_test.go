@@ -1,12 +1,8 @@
 package main
 
-// The node workload's wake of a Television's session: the TV wakes,
-// the session's Display becomes the active source, a source that takes
-// the input during the guard gets it taken back a bounded number of
-// times, and each wake runs at most once. The node workload acts only
-// on a wake it sees arrive, so each test starts the node workload
-// first and then wakes the room. cecnode_television_test.go holds the
-// TV fixtures.
+// The node workload acts only on a wake that arrives while it runs, so
+// each test starts the node workload first and then wakes the room.
+// cecnode_television_test.go has the TV fixtures.
 
 import (
 	"strings"
@@ -18,8 +14,8 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/cec/cectest"
 )
 
-// wokeNow is the session a Receiver's session writes when it wakes the
-// room on node-1's Display.
+// wokeNow returns the session status that the Deployment writes when a
+// Receiver's session wakes the room on node-1's Display.
 func wokeNow() *TelevisionSession {
 	return wokeAt(time.Now())
 }
@@ -28,24 +24,24 @@ func wokeAt(when time.Time) *TelevisionSession {
 	return &TelevisionSession{Player: "media/den", Display: "acm-0001-receiver", Awake: true, WokeAt: when.UTC().Format(wakeTimeLayout)}
 }
 
-// waking is the den bus's Television with the session the Deployment
-// writes in its status.
+// waking returns the Television lounge with session in its status.
 func waking(session *TelevisionSession) Television {
 	television := lounge("")
 	television.Status.Session = session
 	return television
 }
 
-// wakeLive writes a session's wake after the node workload has read
-// the Televisions once, which is a wake the node workload sees arrive.
+// wakeLive writes a session's wake after the node workload has listed
+// the Televisions once, so the wake arrives while the node workload
+// runs.
 func wakeLive(t *testing.T, api *cecAPI, session *TelevisionSession) {
 	t.Helper()
 	api.scanned(t, "node-1")
 	api.putTelevision(waking(session))
 }
 
-// awakeRoom runs the node workload for node-1 on a bus in Control and
-// then wakes the room with a session.
+// awakeRoom starts the node workload for node-1 on a bus in Control,
+// then wakes the room with session.
 func awakeRoom(t *testing.T, wire *cectest.Bus, session *TelevisionSession) *cecAPI {
 	t.Helper()
 	api := controlling(t, wire, lounge(""))
@@ -53,8 +49,9 @@ func awakeRoom(t *testing.T, wire *cectest.Bus, session *TelevisionSession) *cec
 	return api
 }
 
-// startedAt answers the status a wake's started mark leaves: the wake
-// is named, and the condition says it began.
+// startedAt waits until the Television has the started mark of a wake:
+// status.wokeAt is the session's wokeAt, and WakeApplied has the reason
+// Waking.
 func startedAt(t *testing.T, api *cecAPI, session *TelevisionSession) Television {
 	t.Helper()
 	return api.waitForTelevision(t, "lounge", func(television Television) bool {
@@ -62,17 +59,17 @@ func startedAt(t *testing.T, api *cecAPI, session *TelevisionSession) Television
 	})
 }
 
-// streamer is a streaming player on the receiver's input 5 that claims
-// Active Source after another device's claim, as many times as grabs.
+// streamer returns a streaming player at 1.5.0.0. Each time another
+// device sends Active Source, the player sends its own after the delay
+// after, up to grabs times.
 func streamer(grabs int, after time.Duration) cectest.Peer {
 	return cectest.Peer{Logical: 8, Physical: 0x1500, PrimaryType: 4, OSDName: "Player", Power: cec.PowerOn, Grabs: grabs, GrabAfter: after}
 }
 
-// wokeWith waits until the node workload recorded the result of a
-// session's wake. A wake starts within cecWakeFresh of when the node
-// workload saw it, or records that it is too late, and ends at the end
-// of its guard, or after its System Audio Mode Request and the read
-// that can follow it.
+// wokeWith waits until the node workload has written the result of a
+// session's wake, and returns the Television. The wait covers the
+// longest wake: cecWakeFresh before it starts, the guard, and the
+// System Audio Mode Request after the guard.
 func wokeWith(t *testing.T, api *cecAPI, session *TelevisionSession) Television {
 	t.Helper()
 	return api.waitForTelevisionWithin(t, "lounge", cecWakeFresh+cecWakeGuard+cecSystemAudioWait+testTimeout, func(television Television) bool {
@@ -80,8 +77,8 @@ func wokeWith(t *testing.T, api *cecAPI, session *TelevisionSession) Television 
 	})
 }
 
-// claimsOf answers the Active Source messages the adapters sent, in
-// order, as the log writes them.
+// claimsOf returns the Active Source messages that the adapters sent,
+// in order, in the form the log uses.
 func claimsOf(wire *cectest.Bus) []string {
 	var claims []string
 	for _, message := range wire.Sent() {
@@ -100,16 +97,16 @@ func TestTheWakeWakesTheTVAndShowsTheDisplay(t *testing.T) {
 		message string
 	}{
 		{"a TV in standby", televisionTV(cec.PowerStandby), 2,
-			"the TV reported On after the adapter on node-1 sent Image View On once; the adapter on node-1 sent Image View On and Active Source for 1.3.0.0, Display acm-0001-receiver, once, and no other source claimed the input in the 30 s after; the last Active Source on the bus is 1.3.0.0"},
+			"The TV reported On after the adapter on node-1 sent Image View On once. The adapter on node-1 sent Image View On and Active Source for 1.3.0.0, Display acm-0001-receiver, once, and no other source claimed the input in the 30 s after. The last Active Source on the bus is 1.3.0.0"},
 		{"a TV that is on", televisionTV(cec.PowerOn), 1,
-			"the TV already reported On; the adapter on node-1 sent Image View On and Active Source for 1.3.0.0, Display acm-0001-receiver, once, and no other source claimed the input in the 30 s after; the last Active Source on the bus is 1.3.0.0"},
+			"The TV already reported On. The adapter on node-1 sent Image View On and Active Source for 1.3.0.0, Display acm-0001-receiver, once, and no other source claimed the input in the 30 s after. The last Active Source on the bus is 1.3.0.0"},
 	}
 	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
-				wire := roomWithTV(c.tv)
+				wire := busWithTV(c.tv)
 				session := wokeNow()
 
 				api := awakeRoom(t, wire, session)
@@ -131,7 +128,8 @@ func TestTheWakeWakesTheTVAndShowsTheDisplay(t *testing.T) {
 
 // A streaming player that wakes with the room claims Active Source for
 // itself. The adapter takes the input back during the guard, at most
-// twice, and the status states what the bus reports at the end.
+// cecWakeReclaims times, and the status reports which source holds the
+// input at the end.
 func TestTheWakeTakesTheInputBackFromAPlayer(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -142,16 +140,16 @@ func TestTheWakeTakesTheInputBackFromAPlayer(t *testing.T) {
 		message string
 	}{
 		{"a player that claims once", 1, []string{"4->f 82 13 00", "4->f 82 13 00"}, ConditionTrue, reasonConfirmed,
-			"the TV already reported On; the adapter on node-1 sent Image View On and Active Source for 1.3.0.0, Display acm-0001-receiver, 2 times, because the source at 1.5.0.0 claimed the input once, first after <time>; the last Active Source on the bus is 1.3.0.0"},
+			"The TV already reported On. The adapter on node-1 sent Image View On and Active Source for 1.3.0.0, Display acm-0001-receiver, 2 times, because the source at 1.5.0.0 claimed the input once, first after <time>. The last Active Source on the bus is 1.3.0.0"},
 		{"a player that always claims", 10, []string{"4->f 82 13 00", "4->f 82 13 00", "4->f 82 13 00"}, ConditionFalse, reasonTaken,
-			"the TV already reported On; the adapter on node-1 sent Image View On and Active Source for 1.3.0.0, Display acm-0001-receiver, 3 times, because the source at 1.5.0.0 claimed the input 3 times, first after <time>; the source at 1.5.0.0 holds the input, and the adapter sends the pair at most 3 times for one wake"},
+			"The TV already reported On. The adapter on node-1 sent Image View On and Active Source for 1.3.0.0, Display acm-0001-receiver, 3 times, because the source at 1.5.0.0 claimed the input 3 times, first after <time>. The source at 1.5.0.0 holds the input, and the adapter sends the pair at most 3 times for one wake"},
 	}
 	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
-				wire := roomWithTV(televisionTV(cec.PowerOn))
+				wire := busWithTV(televisionTV(cec.PowerOn))
 				wire.Add(streamer(c.grabs, 5*time.Millisecond))
 				session := wokeNow()
 
@@ -168,12 +166,12 @@ func TestTheWakeTakesTheInputBackFromAPlayer(t *testing.T) {
 	}
 }
 
-// A claim after the guard is a person's, or a source the person chose,
-// and the adapter leaves it alone.
-func TestAClaimAfterTheGuardStands(t *testing.T) {
+// A claim after the guard comes from a person or from a source the
+// person chose, so the adapter leaves it alone.
+func TestAClaimAfterTheGuardIsLeftAlone(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerOn))
+		wire := busWithTV(televisionTV(cec.PowerOn))
 		wire.Add(streamer(1, 2*cecWakeGuard))
 		session := wokeNow()
 
@@ -189,12 +187,12 @@ func TestAClaimAfterTheGuardStands(t *testing.T) {
 	})
 }
 
-// A session that goes to sleep during the guard ends it: the room is
-// off, and the adapter claims nothing in it.
+// A session that goes to sleep during the guard ends the guard,
+// because the room is off and the adapter claims nothing in it.
 func TestASessionThatSleepsEndsTheGuard(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerOn))
+		wire := busWithTV(televisionTV(cec.PowerOn))
 		wire.Add(streamer(1, 300*time.Millisecond))
 		session := wokeNow()
 		api := awakeRoom(t, wire, session)
@@ -211,12 +209,13 @@ func TestASessionThatSleepsEndsTheGuard(t *testing.T) {
 	})
 }
 
-// Each wake runs once. A pass, and a new node workload after the
-// adapter comes back, send nothing for a wake already run.
+// Each wake runs once. Neither a later pass nor a new node workload,
+// started after the adapter comes back, sends anything for a wake that
+// already ran.
 func TestAWakeRunsOnce(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerStandby))
+		wire := busWithTV(televisionTV(cec.PowerStandby))
 		session := wokeNow()
 		api := startCECAPI(t)
 		adapter, device := usbAdapter(wire)
@@ -239,12 +238,13 @@ func TestAWakeRunsOnce(t *testing.T) {
 	})
 }
 
-// A session that wakes the room again while it is awake, such as with
-// the remote's power button, is a new wokeAt, and the TV wakes again.
+// A session that wakes the room again while it is awake, for example
+// from the remote's power button, has a new wokeAt, so the TV wakes
+// again.
 func TestANewWakeWakesAgain(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerStandby))
+		wire := busWithTV(televisionTV(cec.PowerStandby))
 		first := wokeNow()
 		api := awakeRoom(t, wire, first)
 		wokeWith(t, api, first)
@@ -259,8 +259,8 @@ func TestANewWakeWakesAgain(t *testing.T) {
 	})
 }
 
-// What a session asks that sends nothing: a session that is asleep,
-// and one that never woke.
+// A session that is asleep, and a session with no wokeAt, send
+// nothing.
 func TestAWakeThatSendsNothing(t *testing.T) {
 	asleep := wokeNow()
 	asleep.Awake = false
@@ -278,7 +278,7 @@ func TestAWakeThatSendsNothing(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
-				wire := roomWithTV(televisionTV(cec.PowerStandby))
+				wire := busWithTV(televisionTV(cec.PowerStandby))
 
 				api := awakeRoom(t, wire, c.session)
 				api.nudge()
@@ -293,15 +293,15 @@ func TestAWakeThatSendsNothing(t *testing.T) {
 	}
 }
 
-// A wake that is in the status when the node workload starts is what
-// the node workload finds, not a change it sees arrive, so it sends
-// nothing, records nothing, and says so once. An operator restart must
-// not wake the room.
+// A wake that is already in the status when the node workload starts
+// did not arrive while the node workload ran. The node workload sends
+// nothing for it, records nothing, and logs that once, so a restart
+// never wakes the room.
 func TestAWakeFoundAtStartSendsNothing(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		wire := roomWithTV(televisionTV(cec.PowerStandby))
+		wire := busWithTV(televisionTV(cec.PowerStandby))
 		_, device := usbAdapter(wire)
 		session := wokeNow()
 		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
@@ -324,13 +324,13 @@ func TestAWakeFoundAtStartSendsNothing(t *testing.T) {
 	})
 }
 
-// The node workload measures a wake's age on its own clock, from when it
-// first saw the wake, and never from the Deployment's time in wokeAt,
-// because the two machines' clocks can differ.
+// The node workload measures a wake's age on its own clock, from when
+// it first saw the wake, and never from the time that the Deployment
+// wrote in wokeAt, because the two machines' clocks can differ.
 func TestAWakeIsTimedOnTheNodesClock(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerStandby))
+		wire := busWithTV(televisionTV(cec.PowerStandby))
 		session := wokeAt(time.Now().Add(-time.Hour))
 
 		api := awakeRoom(t, wire, session)
@@ -340,13 +340,13 @@ func TestAWakeIsTimedOnTheNodesClock(t *testing.T) {
 	})
 }
 
-// A wake that waits longer than the bound, here behind a spec.power
-// whose status write the API server refuses, sends nothing and is
-// recorded, so no later pass runs it.
+// A wake that waits longer than cecWakeFresh sends nothing and is
+// recorded, so no later pass runs it. Here it waits because the API
+// server refuses the status write that applies spec.power.
 func TestAWakeThatWaitsTooLongSendsNothing(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerOn))
+		wire := busWithTV(televisionTV(cec.PowerOn))
 		api := controlling(t, wire, lounge(""))
 		api.scanned(t, "node-1")
 		api.refusePowerWrites(true)
@@ -361,19 +361,20 @@ func TestAWakeThatWaitsTooLongSendsNothing(t *testing.T) {
 		woken := wokeWith(t, api, session)
 		applied := conditionOf(woken.Status.Conditions, conditionWakeApplied)
 		mustMatch(t, applied.Reason, reasonTooLate)
-		mustMatch(t, applied.Message, "the adapter on node-1 first saw the wake 121 s ago, which is more than 120 s, so it sent nothing")
+		mustMatch(t, applied.Message, "The adapter on node-1 first saw the wake 121 s ago, which is more than 120 s, so it sent nothing")
 		mustMatch(t, sentOf(wire, cec.OpImageViewOn), 0)
 		mustMatch(t, len(claimsOf(wire)), 0)
 	})
 }
 
-// A session that goes to sleep while the TV wakes stops the wake. Its
-// line says the wake stopped, and the status records it as Stopped.
+// A session that goes to sleep while the TV wakes stops the wake. The
+// log line says the wake stopped, and the status records the reason
+// Stopped.
 func TestTheNodeLogsAWakeThatStops(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		wire := roomWithTV(stubbornTV())
+		wire := busWithTV(stubbornTV())
 		_, device := usbAdapter(wire)
 		session := wokeNow()
 		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
@@ -394,18 +395,18 @@ func TestTheNodeLogsAWakeThatStops(t *testing.T) {
 		television := wokeWith(t, api, session)
 		applied := conditionOf(television.Status.Conditions, conditionWakeApplied)
 		mustMatch(t, applied.Reason, reasonStopped)
-		mustMatch(t, timeless([]string{applied.Message})[0], stopped)
+		mustMatch(t, timeless([]string{applied.Message})[0], "The adapter on node-1 sent Image View On to the TV, and the wake stopped after <time>")
 		mustMatch(t, len(claimsOf(wire)), 0)
 	})
 }
 
 // The adapter that speaks for the session's Display runs the wake, and
-// the other adapter of the bus sends nothing for it, so the Active
-// Source states that Display's address.
+// the other adapter on the bus sends nothing for it, so the Active
+// Source carries that Display's address.
 func TestTheDisplaysAdapterRunsTheWake(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerStandby))
+		wire := busWithTV(televisionTV(cec.PowerStandby))
 		api := startCECAPI(t)
 		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
 		api.putDisplay("bnq-0002-monitor", "node-2", "1.4.0.0")
@@ -435,14 +436,14 @@ func TestTheDisplaysAdapterRunsTheWake(t *testing.T) {
 	})
 }
 
-// The last Active Source on the bus reaches the adapter's entry and the
-// Television's status, whether the adapter sent it or heard it, and in
-// Listen too. The Television also names the Display at that address,
-// and names none for a source that is no Display.
+// The last Active Source on the bus appears in the adapter's entry and
+// in the Television's status, whether the adapter sent it or received
+// it, and in Listen mode too. The Television also names the Display
+// at that address, and names none for a source that is not a Display.
 func TestTheActiveSourceReachesTheTelevision(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerOn))
+		wire := busWithTV(televisionTV(cec.PowerOn))
 		session := wokeNow()
 		api := awakeRoom(t, wire, session)
 		wokeWith(t, api, session)
@@ -466,7 +467,7 @@ func TestAListeningAdapterReportsTheActiveSource(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		wire := cecRoom()
+		wire := fakeCECBus()
 		_, device := usbAdapter(wire)
 		api.putBus(CECBus{Metadata: ObjectMeta{Name: "den"}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-1"}}}})
 		startNode(t, api, "node-1", device)
@@ -478,13 +479,13 @@ func TestAListeningAdapterReportsTheActiveSource(t *testing.T) {
 	})
 }
 
-// Each wake is two lines, one when it starts and one when it ends, and
-// the passes and reads after it are quiet.
+// A wake logs two lines, one when it starts and one when it ends. Later
+// passes and reads log nothing.
 func TestTheNodeLogsEachWakeOnce(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		wire := roomWithTV(televisionTV(cec.PowerStandby))
+		wire := busWithTV(televisionTV(cec.PowerStandby))
 		wire.Add(streamer(1, 5*time.Millisecond))
 		_, device := usbAdapter(wire)
 		session := wokeNow()
@@ -512,7 +513,7 @@ func TestTheNodeLogsEachWakeOnce(t *testing.T) {
 func TestASleepDuringTheSettleClaimsNothingMore(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerOn))
+		wire := busWithTV(televisionTV(cec.PowerOn))
 		wire.Add(streamer(1, 5*time.Millisecond))
 		session := wokeNow()
 		api := awakeRoom(t, wire, session)
@@ -527,12 +528,13 @@ func TestASleepDuringTheSettleClaimsNothingMore(t *testing.T) {
 	})
 }
 
-// spec.power goes first. A new generation of spec.power during a wake
-// stops the wake for good, with one line, and the power is applied.
+// spec.power takes priority. A new generation of spec.power during a
+// wake stops the wake for good and logs one line, and the power is
+// applied.
 func TestANewPowerGenerationSupersedesAWake(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerOn))
+		wire := busWithTV(televisionTV(cec.PowerOn))
 		wire.Add(streamer(1, time.Second))
 		session := wokeNow()
 		api := startCECAPI(t)
@@ -548,7 +550,7 @@ func TestANewPowerGenerationSupersedesAWake(t *testing.T) {
 		television := wokeWith(t, api, session)
 		applied := conditionOf(television.Status.Conditions, conditionWakeApplied)
 		mustMatch(t, applied.Reason, reasonSuperseded)
-		mustMatch(t, applied.Message, "generation 2 of spec.power asks Standby, so the wake stopped, and the adapter on node-1 sends nothing more for it")
+		mustMatch(t, applied.Message, "spec.power at generation 2 is Standby, so the wake stopped, and the adapter on node-1 sends nothing more for it")
 		appliedAt(t, api, "lounge", 2)
 		time.Sleep(cecWakeGuard)
 		mustMatch(t, len(claimsOf(wire)), 1)
@@ -558,27 +560,27 @@ func TestANewPowerGenerationSupersedesAWake(t *testing.T) {
 			"Television lounge: Player media/den's session woke the room at " + session.WokeAt + "; the adapter on node-1 starts the wake",
 			"Television lounge: Player media/den's session woke the room at " + session.WokeAt + "; " + applied.Message,
 		})
-		// No Active Source follows the first Standby.
+		// The wake sends no Active Source after the Standby.
 		standby := false
 		for _, message := range wire.Sent() {
 			opcode, _ := message.Opcode()
 			standby = standby || opcode == cec.OpStandby
 			if standby && opcode == cec.OpActiveSource {
-				t.Errorf("Active Source %v went out after the Standby", message)
+				t.Errorf("the wire carries Active Source %v after Standby, want none", message)
 			}
 		}
 	})
 }
 
 // A wake that arrives while spec.power is not applied yet waits for
-// it, and says so once: every power command goes out before the
+// it and logs that once. Every power command goes out before the
 // wake's first command.
 func TestAWakeWaitsForAPendingPower(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		slow := televisionTV(cec.PowerOn)
 		slow.Transition = 20
-		wire := roomWithTV(slow)
+		wire := busWithTV(slow)
 		api := startCECAPI(t)
 		_, device := usbAdapter(wire)
 		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
@@ -606,18 +608,19 @@ func TestAWakeWaitsForAPendingPower(t *testing.T) {
 		mustMatch(t, peer.Power, cec.PowerOn)
 		mustDeepEqual(t, linesWith(log, "waits for it"), []string{
 			"Television lounge: Player media/den's session woke the room at " + session.WokeAt +
-				"; generation 2 of spec.power asks Standby and is not applied yet, so the wake waits for it",
+				"; spec.power at generation 2 is Standby and is not applied yet, so the wake waits for it",
 		})
 	})
 }
 
-// A wake stopped by a change of mode records that it stopped, and the
-// bus's return to Control does not run it again: its started mark names
-// the wake, so its Image View On and Active Source go out once.
+// A wake stopped by a change of mode records that it stopped. When the
+// bus returns to Control, the wake does not run again, because its
+// started mark names it, so its Image View On and Active Source go out
+// once.
 func TestAStoppedWakeDoesNotRunAgain(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerStandby))
+		wire := busWithTV(televisionTV(cec.PowerStandby))
 		session := wokeNow()
 		api := awakeRoom(t, wire, session)
 		api.waitUntil(t, "the first Active Source", func() bool { return len(claimsOf(wire)) == 1 })
@@ -637,12 +640,12 @@ func TestAStoppedWakeDoesNotRunAgain(t *testing.T) {
 	})
 }
 
-// A started mark the API server refuses sends nothing, and the wake
-// runs once the server takes the mark.
+// When the API server refuses the started mark, the wake sends
+// nothing. It runs once the server accepts the mark.
 func TestAWakeWaitsForItsStartedMark(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerStandby))
+		wire := busWithTV(televisionTV(cec.PowerStandby))
 		api := controlling(t, wire, lounge(""))
 		api.refuseWakeWrites(true)
 		session := wokeNow()
@@ -660,15 +663,15 @@ func TestAWakeWaitsForItsStartedMark(t *testing.T) {
 	})
 }
 
-// A Standby another device sent the TV is a recent command. The TV can
-// still answer On for a while after it, so the wake sends Image View On
-// without trusting that read.
-func TestAWakeAfterAHeardStandbySendsImageViewOn(t *testing.T) {
+// After another device broadcasts Standby, the TV can still report On
+// for a while, so the wake sends Image View On without trusting that
+// power read.
+func TestAWakeAfterAStandbyFromAnotherDeviceSendsImageViewOn(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		lagging := televisionTV(cec.PowerOn)
 		lagging.Lag = 3
-		wire := roomWithTV(lagging)
+		wire := busWithTV(lagging)
 		api := controlling(t, wire, lounge(""))
 		api.scanned(t, "node-1")
 
@@ -680,7 +683,7 @@ func TestAWakeAfterAHeardStandbySendsImageViewOn(t *testing.T) {
 		television := wokeWith(t, api, session)
 		applied := conditionOf(television.Status.Conditions, conditionWakeApplied)
 		mustMatch(t, applied.Status, ConditionTrue)
-		mustMatch(t, strings.HasPrefix(applied.Message, "the TV reported On after the adapter on node-1 sent Image View On once;"), true)
+		mustMatch(t, strings.HasPrefix(applied.Message, "The TV reported On after the adapter on node-1 sent Image View On once. "), true)
 		mustMatch(t, sentOf(wire, cec.OpImageViewOn), 2)
 		peer, _ := wire.Peer(0)
 		mustMatch(t, peer.Power, cec.PowerOn)
@@ -692,7 +695,7 @@ func TestAWakeAfterAHeardStandbySendsImageViewOn(t *testing.T) {
 func TestTheWakeConfirmsThePowerAtTheEndOfTheGuard(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerOn))
+		wire := busWithTV(televisionTV(cec.PowerOn))
 		session := wokeNow()
 		api := awakeRoom(t, wire, session)
 		api.waitUntil(t, "the first Active Source", func() bool { return len(claimsOf(wire)) == 1 })
@@ -702,18 +705,19 @@ func TestTheWakeConfirmsThePowerAtTheEndOfTheGuard(t *testing.T) {
 		television := wokeWith(t, api, session)
 		applied := conditionOf(television.Status.Conditions, conditionWakeApplied)
 		mustMatch(t, applied.Reason, reasonUnconfirmed)
-		if !strings.HasSuffix(applied.Message, "; at the end of the guard the TV reported Standby") {
-			t.Errorf("the message does not end with the last power read: %s", applied.Message)
+		if !strings.HasSuffix(applied.Message, ". At the end of the guard the TV reported Standby") {
+			t.Errorf("the message is %q, want it to end with \". At the end of the guard the TV reported Standby\"", applied.Message)
 		}
 	})
 }
 
-// An Active Source from another adapter of the bus is a later wake of
-// the bus, so the guard ends at once and claims nothing more.
+// An Active Source from another adapter on the bus is a later wake on
+// that bus, so the guard ends at once and the adapter claims nothing
+// more.
 func TestAnotherAdaptersClaimEndsTheGuard(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		wire := roomWithTV(televisionTV(cec.PowerOn))
+		wire := busWithTV(televisionTV(cec.PowerOn))
 		api := startCECAPI(t)
 		_, device := usbAdapter(wire)
 		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
@@ -733,7 +737,7 @@ func TestAnotherAdaptersClaimEndsTheGuard(t *testing.T) {
 		applied := conditionOf(television.Status.Conditions, conditionWakeApplied)
 		mustMatch(t, applied.Reason, reasonSuperseded)
 		mustMatch(t, timeless([]string{applied.Message})[0],
-			"the TV already reported On; the adapter on node-1 sent Image View On and Active Source for 1.3.0.0, Display acm-0001-receiver, once, and the adapter on node-2 sent Active Source for 1.4.0.0 after <time>, so the guard ended")
+			"The TV already reported On. The adapter on node-1 sent Image View On and Active Source for 1.3.0.0, Display acm-0001-receiver, once, and the adapter on node-2 sent Active Source for 1.4.0.0 after <time>, so the guard ended")
 		mustMatch(t, len(claimsOf(wire)), 1)
 	})
 }

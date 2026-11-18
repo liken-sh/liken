@@ -1,18 +1,17 @@
 package main
 
-// The lines the node workload writes for what it hears on the bus. A
-// device that wakes the TV, changes its input, or moves the sound to
-// the receiver does it with a message every device can hear, and the
-// line names the device that sent it. Without the line, a person whose
-// TV changes input sees only the result and not which device did it.
+// Log lines for the messages that the node workload receives on the
+// CEC bus. When another device wakes the TV, changes its input, or moves
+// its sound to the receiver, a person sees only the result. The line
+// names the device that sent the message.
 //
-// In Listen the monitor receives every message on the bus. In Control
-// the adapter is a follower, and the kernel passes a follower only the
-// broadcasts and the messages to its own address. Image View On, Text
-// View On, Inactive Source, and System Audio Mode Request go to the TV
-// or the audio system, so an adapter in Control writes no line for
-// them. The kernel also drops a broadcast Report Power Status for a
-// claim that states a CEC version before 2.0, and the claim states 1.4.
+// In Listen the adapter is a monitor and receives every message on the
+// bus. In Control the adapter is a follower, and the kernel delivers to
+// a follower only broadcasts and messages addressed to it. Image View
+// On, Text View On, Inactive Source, and System Audio Mode Request are
+// addressed to the TV or the audio system, so in Control they write no
+// line. The kernel also drops a broadcast Report Power Status when the
+// adapter claims a CEC version before 2.0, and this adapter claims 1.4.
 
 import (
 	"fmt"
@@ -21,24 +20,21 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/cec"
 )
 
-// logHeard writes one line for a message a person notices, whoever
-// sent it. before and after are the sender as the directory held it
-// before and after the message. own is the adapter's logical address
-// in Control, and AddressUnregistered in Listen, where the adapter
-// holds none.
+// logHeard writes a log line for a message that a person would want to
+// see. before and after are the sender's directory entry before and
+// after the message was applied. own is the adapter's logical address
+// in Control, and AddressUnregistered in Listen, where it has none.
 //
-// Two messages repeat without news. A device reports its power each
-// time a device asks, and many devices ask on a timer, so a Report
-// Power Status writes a line only when it changes the power the
-// directory held. The directory also sets the TV's power from the
-// messages that change it, such as a broadcast Standby, so a report
-// that confirms such a change writes no line either. User Control Pressed writes a line only when
-// the TV passes a press of its remote to this adapter; a press sent to
-// another device is that device's business.
+// Report Power Status writes a line only when it changes the sender's
+// power in the directory, because devices report their power whenever
+// they are asked, and many ask on a timer. User Control Pressed writes
+// a line only when it is addressed to this adapter, because a press
+// sent to another device is for that device.
 //
-// The adapter's own messages never arrive here: the kernel does not
-// pass a follower the messages it sent, and a monitor in Listen sends
-// nothing. The lines for its commands are in cecnode_power.go.
+// The adapter's own messages do not arrive here, because the kernel
+// does not deliver a follower's messages back to it, and a monitor
+// sends none. cecnode_power.go writes the lines for the adapter's
+// commands.
 func (n *cecNode) logHeard(bus string, message cec.Message, before, after cec.Peer, own cec.LogicalAddress) {
 	words, visible := cec.Describe(message)
 	if !visible {
@@ -52,13 +48,14 @@ func (n *cecNode) logHeard(bus string, message cec.Message, before, after cec.Pe
 	}
 	line := fmt.Sprintf("CECBus %s: %s broadcast %s", bus, heardSender(after), words)
 	if !message.IsBroadcast() {
-		line = fmt.Sprintf("CECBus %s: %s sent %s to %s", bus, heardSender(after), words, heardReceiver(n.directory.Lookup(message.To), own))
+		line = fmt.Sprintf("CECBus %s: %s sent %s to %s", bus, heardSender(after), words, describeReceiver(n.directory.Lookup(message.To), own))
 	}
 	fmt.Fprintln(n.log, line)
 }
 
-// heardSender names a device with every fact the directory holds for it,
-// and says which facts it does not hold yet.
+// heardSender describes the sender of a message: its name or type, its
+// logical address, its physical address when known, and which of the
+// name and the physical address the directory does not have yet.
 func heardSender(peer cec.Peer) string {
 	facts := []string{fmt.Sprintf("logical %d", peer.Logical)}
 	var unknown []string
@@ -73,30 +70,31 @@ func heardSender(peer cec.Peer) string {
 	if len(unknown) > 0 {
 		facts = append(facts, strings.Join(unknown, " and ")+" not known yet")
 	}
-	return fmt.Sprintf("%s (%s)", heardName(peer), strings.Join(facts, ", "))
+	return fmt.Sprintf("%s (%s)", deviceName(peer), strings.Join(facts, ", "))
 }
 
-// heardReceiver names the device a directed message went to, with its
-// logical address alone, because the sender's facts already make the
-// line long.
-func heardReceiver(peer cec.Peer, own cec.LogicalAddress) string {
+// describeReceiver describes the device that a directed message is
+// addressed to. It gives only the logical address, because the sender's
+// description already makes the line long.
+func describeReceiver(peer cec.Peer, own cec.LogicalAddress) string {
 	if own != cec.AddressUnregistered && peer.Logical == own {
 		return fmt.Sprintf("this adapter (logical %d)", own)
 	}
-	return fmt.Sprintf("%s (logical %d)", heardName(peer), peer.Logical)
+	return fmt.Sprintf("%s (logical %d)", deviceName(peer), peer.Logical)
 }
 
-// heardName is the device's OSD name when it stated one, and its type
-// until then.
-func heardName(peer cec.Peer) string {
+// deviceName returns the device's OSD name when it has reported one,
+// and otherwise a description of its type.
+func deviceName(peer cec.Peer) string {
 	if peer.OSDName != "" {
 		return fmt.Sprintf("%q", peer.OSDName)
 	}
 	return typeNames[peer.Type]
 }
 
-// typeNames are the words for a device whose name is not known yet.
-// The TV and the audio system exist at most once on a bus.
+// typeNames describes each device type, for a device whose OSD name is
+// not known. A bus has at most one TV and one audio system, so those
+// two read as "the TV" and "the audio system".
 var typeNames = map[cec.DeviceType]string{
 	cec.TypeTV:           "the TV",
 	cec.TypeAudioSystem:  "the audio system",

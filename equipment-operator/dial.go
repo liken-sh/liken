@@ -5,18 +5,17 @@ import (
 	"net"
 )
 
-// dialFunc opens one connection, the way net.Dialer.DialContext does.
-// The operator reaches each Denon receiver, each WiiM, and each UPnP
-// description through one, so a test hands in a dialFunc that connects
-// to its fakes in memory.
+// dialFunc has the signature of net.Dialer.DialContext. The operator
+// opens its connections to the receivers, to the UPnP description of
+// each device it discovers, and for its API watches through a dialFunc.
+// A test passes one that connects to its fakes in memory.
 type dialFunc func(ctx context.Context, network, address string) (net.Conn, error)
 
-// listenFunc opens one listener, the way net.Listen does. Each WiiM
-// sends its events to a listener that the operator opens through one,
-// so a test hands in a listenFunc whose listener is in memory.
+// listenFunc has the signature of net.Listen. The operator opens the
+// listener for WiiM events through a listenFunc, and a test passes one
+// that listens in memory.
 type listenFunc func(network, address string) (net.Listener, error)
 
-// dialTCP is the dialFunc of a running operator.
 func dialTCP(ctx context.Context, network, address string) (net.Conn, error) {
 	return (&net.Dialer{}).DialContext(ctx, network, address)
 }

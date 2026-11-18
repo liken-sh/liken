@@ -1,10 +1,7 @@
 package main
 
-// The operator sends only the declared fields the receiver does not
-// already hold: a restart against a settled receiver sends nothing, one
-// differing field sends that field, a change at the receiver is driven
-// back, and a field the receiver never reports is sent once per spec
-// change.
+// Tests that a pass sends only the declared fields that the receiver
+// does not already have.
 
 import (
 	"maps"
@@ -16,25 +13,22 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/denon"
 )
 
-// settledOperator starts a controller for the receiver, waits for the
-// survey, has the receiver report the lines the test names, and waits
-// until the operator has folded them.
-func settledOperator(t *testing.T, fake *fakeDenon, receiver Receiver, reports []string, folded func(*controller) bool) (*fakeAPI, *controller) {
+// settledOperator starts a controller for the receiver, waits for its
+// first read of the receiver's state, makes the fake receiver send the
+// report lines, and waits until readBack returns true.
+func settledOperator(t *testing.T, fake *fakeDenon, receiver Receiver, reports []string, readBack func(*controller) bool) (*fakeAPI, *controller) {
 	t.Helper()
 	api := startFakeAPI(t)
 	api.setReceivers(receiver)
 	operator := startController(t, api)
 	mustSucceed(t, operator.pass(t.Context()))
 	api.waitForStatus(t, connected)
-	waitForSurvey(t, operator)
+	waitForFirstRead(t, operator)
 	fake.volunteer(reports...)
-	waitFor(t, func() bool { return folded(operator) })
+	waitFor(t, func() bool { return readBack(operator) })
 	return api, operator
 }
 
-// The settings and zones the tests declare, and the lines a receiver
-// that already holds them reports. The fake reports PSDRC OFF and
-// PSLFE 00 by itself after MS?.
 func settledReceiver(fake *fakeDenon) Receiver {
 	receiver := testReceiver("theater", fake.address())
 	drc, lfe, control, volume := "off", 0, true, 40.0
@@ -46,11 +40,14 @@ func settledReceiver(fake *fakeDenon) Receiver {
 	return receiver
 }
 
+// settledReports are the lines that a receiver at the values of
+// settledReceiver sends. The fake sends PSDRC OFF and PSLFE 00 by itself
+// after MS?, so they are not listed.
 var settledReports = []string{"SSHOSCON ON", "Z2PHONO", "Z240"}
 
-// settledFolded answers whether the operator has read every declared
-// value back from the receiver.
-func settledFolded(operator *controller) bool {
+// settledReadBack reports whether the operator has read every declared
+// value of settledReceiver back from the receiver.
+func settledReadBack(operator *controller) bool {
 	unit := operator.units["theater"]
 	s := unit.denonClient.Settings()
 	zone, reported := unit.driver.State().Zone("zone2")
@@ -62,7 +59,7 @@ func TestARestartAgainstASettledReceiverSendsNothing(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		fake := startFakeDenon(t)
-		_, operator := settledOperator(t, fake, settledReceiver(fake), settledReports, settledFolded)
+		_, operator := settledOperator(t, fake, settledReceiver(fake), settledReports, settledReadBack)
 
 		mustSucceed(t, operator.pass(t.Context()))
 		mustSucceed(t, operator.pass(t.Context()))
@@ -97,7 +94,7 @@ func TestOneDifferingFieldSendsOnlyThatField(t *testing.T) {
 				sent := fake.waitForCommands(t, one.want)
 				for _, command := range sent[:len(sent)-1] {
 					if !strings.HasSuffix(command, "?") && (isDenonSetting(command) || strings.HasPrefix(command, "Z2")) {
-						t.Fatalf("the operator sent %q beside %q", command, one.want)
+						t.Fatalf("the operator sent %q before the setting command %q, want no other setting or zone command", command, one.want)
 					}
 				}
 			})
@@ -105,13 +102,11 @@ func TestOneDifferingFieldSendsOnlyThatField(t *testing.T) {
 	}
 }
 
-// A change a person makes at the receiver differs from the spec, so
-// the next pass sends the declared value back.
 func TestAChangeAtTheReceiverIsDrivenBack(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		fake := startFakeDenon(t)
-		_, operator := settledOperator(t, fake, settledReceiver(fake), settledReports, settledFolded)
+		_, operator := settledOperator(t, fake, settledReceiver(fake), settledReports, settledReadBack)
 		mustSucceed(t, operator.pass(t.Context()))
 		fake.refuseAnySet(t, quietPeriod)
 
@@ -128,7 +123,7 @@ func TestAChangeAtTheReceiverIsDrivenBack(t *testing.T) {
 }
 
 // unreportedReceiver declares a setting, a channel volume, and a zone
-// control the fake receiver never reports.
+// control that the fake receiver never reports.
 func unreportedReceiver(fake *fakeDenon) Receiver {
 	receiver := testReceiver("theater", fake.address())
 	eco, sleep := "on", 30
@@ -140,8 +135,8 @@ func unreportedReceiver(fake *fakeDenon) Receiver {
 	return receiver
 }
 
-// recordedBlocks is the status.settledSettings an operator writes after
-// it sent a Receiver's declared blocks.
+// recordedBlocks is the status.settledSettings that the operator writes
+// after it has sent the Receiver's declared blocks.
 func recordedBlocks(receiver Receiver) map[string]string {
 	return map[string]string{
 		denonSettingsBlock: digest(receiver.Spec.Denon.Settings),
@@ -149,13 +144,10 @@ func recordedBlocks(receiver Receiver) map[string]string {
 	}
 }
 
-// A field the receiver never reports cannot be compared, so after a
-// restart the operator sends it only when its block differs from the
-// block status.settledSettings records: a new Receiver and a block
-// edited while the operator was down send it once. A restart with the
-// recorded blocks sends nothing, whatever metadata.generation says, and
-// so does an upgrade that finds the earlier operator's
-// status.settingsGeneration and no status.settledSettings.
+// After a restart, the operator sends a field that the receiver never
+// reports only when the field's block differs from its digest in
+// status.settledSettings. So a new Receiver, or a block edited while the
+// operator was down, sends the field once.
 func TestAnUnreportedFieldIsSentOnlyForABlockTheStatusDoesNotRecord(t *testing.T) {
 	edited := func(receiver *Receiver) {
 		receiver.Status.SettledSettings = map[string]string{
@@ -194,6 +186,10 @@ func TestAnUnreportedFieldIsSentOnlyForABlockTheStatusDoesNotRecord(t *testing.T
 	}
 }
 
+// A restart with the recorded blocks sends nothing, whatever
+// metadata.generation is. So does a status that has
+// status.settingsGeneration and no status.settledSettings, as an older
+// operator wrote it.
 func TestARestartSendsNoUnreportedFieldTheStatusRecords(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -227,9 +223,9 @@ func TestARestartSendsNoUnreportedFieldTheStatusRecords(t *testing.T) {
 	}
 }
 
-// While the operator runs, a spec change that changes an unreported
-// field sends that field once, and a spec change that leaves it alone
-// does not send it.
+// While the operator runs, a spec change sends an unreported field once
+// when it changes that field, and not when it leaves the field as it
+// was.
 func TestAnUnreportedFieldIsSentOncePerSpecChange(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -261,12 +257,11 @@ func TestAnUnreportedFieldIsSentOncePerSpecChange(t *testing.T) {
 	})
 }
 
-// A field the receiver takes but never reports at the declared value is
-// sent three times at that value, then the operator stops and the
-// status names the field as not confirmed. A new metadata.generation
-// that leaves the field alone does not start the count again. A report
-// of the declared value does, so a later change at the receiver is
-// driven back.
+// A field that the receiver never reports at the declared value is sent
+// sendLimit times, and then the SettingsConfirmed condition lists it as
+// not confirmed. A new metadata.generation that leaves the field as it
+// was does not reset the count. A report of the declared value resets
+// it, so a later change at the receiver is reverted.
 func TestAFieldTheReceiverNeverConfirmsStopsAfterThreeSends(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -292,7 +287,7 @@ func TestAFieldTheReceiverNeverConfirmsStopsAfterThreeSends(t *testing.T) {
 			Status:             ConditionFalse,
 			ObservedGeneration: receiver.Metadata.Generation,
 			Reason:             reasonNotConfirmed,
-			Message:            "the receiver did not report the declared value after 3 sends: spec.denon.settings.hdmi.arc",
+			Message:            "The receiver did not report the declared value after 3 sends: spec.denon.settings.hdmi.arc",
 			LastTransitionTime: statusNow,
 		})
 
@@ -312,8 +307,7 @@ func TestAFieldTheReceiverNeverConfirmsStopsAfterThreeSends(t *testing.T) {
 	})
 }
 
-// A zone control the zone never reports at the declared value stops
-// after three sends the same way.
+// A zone control also stops after sendLimit sends.
 func TestAZoneControlTheReceiverNeverConfirmsStopsAfterThreeSends(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -335,19 +329,19 @@ func TestAZoneControlTheReceiverNeverConfirmsStopsAfterThreeSends(t *testing.T) 
 		fake.refuseAnySet(t, quietPeriod)
 
 		status := api.waitForStatus(t, func(status ReceiverStatus) bool { return len(status.Conditions) == 2 })
-		mustMatch(t, status.Conditions[1].Message, "the receiver did not report the declared value after 3 sends: spec.zones.zone2.volume")
+		mustMatch(t, status.Conditions[1].Message, "The receiver did not report the declared value after 3 sends: spec.zones.zone2.volume")
 	})
 }
 
-// waitFor polls the check until it passes, and fails the test instead
-// of hanging when it never does.
+// waitFor polls check until it returns true, and fails the test after
+// testTimeout.
 func waitFor(t *testing.T, check func() bool) {
 	t.Helper()
 	deadline := time.After(testTimeout)
 	for !check() {
 		select {
 		case <-deadline:
-			t.Fatal("the condition never held")
+			t.Fatal("the condition was still false after the test timeout")
 		case <-time.After(10 * time.Millisecond):
 		}
 	}

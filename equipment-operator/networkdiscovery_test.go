@@ -1,11 +1,5 @@
 package main
 
-// The EQUIPMENT_NETWORK_DISCOVERY setting, run through serve the way
-// the Deployment runs it. A search here is a stub that counts its calls
-// and finds one amp, so a test that turns discovery off proves the
-// operator never searched, and a test that leaves it on proves the
-// operator searched and created the amp's Receiver.
-
 import (
 	"context"
 	"slices"
@@ -18,8 +12,8 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/wiim"
 )
 
-// countedDiscovery replaces the search with one that finds one amp
-// until the test ends, and answers the number of searches that ran.
+// countedDiscovery replaces the search with a stub that returns found
+// until the test ends. It returns the number of searches that ran.
 func countedDiscovery(t *testing.T, found wiim.Device) *atomic.Int64 {
 	t.Helper()
 	searches := &atomic.Int64{}
@@ -32,10 +26,10 @@ func countedDiscovery(t *testing.T, found wiim.Device) *atomic.Int64 {
 	return searches
 }
 
-// runServeUntil runs serve with one configuration until ready answers
-// true, and then stops it and waits for it to return. serve returns
-// only after every goroutine it started has stopped, discovery
-// included, so what the test reads after this is final.
+// runServeUntil runs serve with config until ready returns, then stops
+// serve and waits for it to return. serve returns only after every
+// goroutine it started has stopped, discovery included, so what the
+// test reads afterward is final.
 func runServeUntil(t *testing.T, api *fakeAPI, config settings, ready func()) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
@@ -49,14 +43,15 @@ func runServeUntil(t *testing.T, api *fakeAPI, config settings, ready func()) {
 	select {
 	case <-stopped:
 	case <-time.After(testTimeout):
-		t.Fatal("serve did not stop")
+		t.Fatal("serve was still running after its context was canceled")
 	}
 }
 
-// With discovery off, the operator runs no search and creates no
-// Receiver, and a Receiver a person declared still reaches its
-// receiver. With discovery on, the same operator searches and creates
-// a Receiver for the amp no Receiver names.
+// The test runs serve the way the Deployment runs it. With discovery
+// off, the operator runs no search and creates no Receiver, and a
+// Receiver that a person declared still connects to its receiver. With
+// discovery on, the operator searches and creates a Receiver for the
+// amp that no Receiver declares.
 func TestNetworkDiscoveryOffSearchesForNothing(t *testing.T) {
 	amp := wiim.Device{UUID: firstUUID, Address: "192.0.2.1"}
 	created := discoveredName(amp.UUID)
@@ -65,9 +60,9 @@ func TestNetworkDiscoveryOffSearchesForNothing(t *testing.T) {
 		off      bool
 		searched bool
 		created  bool
-		// settled waits until the operator has done what the case
-		// expects of it: reached the declared receiver, and with
-		// discovery on, created the amp's Receiver as well.
+		// settled waits until the operator has connected to the declared
+		// receiver and, with discovery on, has also created the amp's
+		// Receiver.
 		settled func(*testing.T, *fakeAPI)
 	}{
 		{name: "on", off: false, searched: true, created: true, settled: func(t *testing.T, api *fakeAPI) {
@@ -96,22 +91,23 @@ func TestNetworkDiscoveryOffSearchesForNothing(t *testing.T) {
 	}
 }
 
-// waitForApply waits until the operator has applied the named Receiver.
+// waitForApply waits until the operator has applied the Receiver
+// called name.
 func waitForApply(t *testing.T, api *fakeAPI, name string) {
 	t.Helper()
 	deadline := time.After(testTimeout)
 	for !slices.Contains(api.appliedReceivers(), name) {
 		select {
 		case <-deadline:
-			t.Fatalf("the operator never applied Receiver %s; it applied %v", name, api.appliedReceivers())
+			t.Fatalf("the applied Receivers are %v, want Receiver %s among them", api.appliedReceivers(), name)
 		case <-time.After(time.Millisecond):
 		}
 	}
 }
 
-// The operator states at the start of its loop that discovery is off,
-// and names the setting, so the reason no Receiver appears is in the
-// log.
+// At the start of its loop, the operator logs one line that says
+// discovery is off and names the setting, so the log shows why no
+// Receiver appears.
 func TestNetworkDiscoveryOffWritesOneLine(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		searches := countedDiscovery(t, wiim.Device{UUID: firstUUID, Address: "192.0.2.1"})
@@ -139,7 +135,7 @@ func TestNetworkDiscoveryOffWritesOneLine(t *testing.T) {
 		select {
 		case <-stopped:
 		case <-time.After(testTimeout):
-			t.Fatal("the loop did not stop")
+			t.Fatal("the loop was still running after its context was canceled")
 		}
 
 		lines := log.lines()

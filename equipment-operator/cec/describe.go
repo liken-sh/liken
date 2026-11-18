@@ -1,16 +1,16 @@
 package cec
 
-// The words for the messages a person notices on the bus: a TV that
-// wakes or goes to standby, an input that changes, the sound that moves
-// to the receiver, and a button on the TV's remote. A log line names
-// each one, so a person can find which device changed the TV's input.
-// The operand layouts are those of linux/cec-funcs.h.
+// Describe turns the CEC messages that change what a person sees or
+// hears into text for a log line, so that a person can find which device
+// woke the TV, put it in standby, changed its input, moved the sound to
+// the receiver, or sent a remote's button press. The operand layouts are
+// those of linux/cec-funcs.h.
 
 import "fmt"
 
-// visible names each message that changes what a person sees or hears.
-// Every other message, such as a poll or an identity question, is
-// traffic between devices.
+// visible maps each opcode that Describe reports to its name. Describe
+// does not report other messages, such as a poll or a request for a
+// device's name, because they change nothing a person sees or hears.
 var visible = map[Opcode]string{
 	OpActiveSource:           "Active Source",
 	OpInactiveSource:         "Inactive Source",
@@ -27,11 +27,11 @@ var visible = map[Opcode]string{
 	OpUserControlPressed:     "User Control Pressed",
 }
 
-// Describe writes a visible message as a person reads it: the
-// message's name and its operands decoded. It answers false for a
-// message that is not visible. A message with fewer operand bytes than
-// its layout needs is named with the bytes it has, because the monitor
-// passes such a message on and the kernel drops it for a follower.
+// Describe returns the name of a visible message followed by its decoded
+// operands, and false for any other message. A message can have fewer
+// operand bytes than its opcode needs, because a monitor handle receives
+// every message on the bus, including one that the kernel drops before a
+// follower receives it. Describe then prints the raw bytes.
 func Describe(message Message) (string, bool) {
 	opcode, found := message.Opcode()
 	name := visible[opcode]
@@ -53,7 +53,7 @@ func Describe(message Message) (string, bool) {
 		// The request with no physical address asks the audio system to
 		// turn System Audio Mode off.
 		if len(operands) < 2 {
-			return name + " with no physical address, which asks for Off", true
+			return name + " with no physical address, which requests Off", true
 		}
 		return fmt.Sprintf("%s for %s", name, physicalAt(operands, 0)), true
 	case OpReportPowerStatus:
@@ -68,7 +68,8 @@ func Describe(message Message) (string, bool) {
 	return name, true
 }
 
-// operandBytes is the fewest operand bytes a visible message needs.
+// operandBytes returns the smallest number of operand bytes that the
+// layout of a visible message needs.
 func operandBytes(opcode Opcode) int {
 	switch opcode {
 	case OpActiveSource, OpInactiveSource, OpRoutingInformation, OpSetStreamPath:
@@ -81,13 +82,14 @@ func operandBytes(opcode Opcode) int {
 	return 0
 }
 
-// physicalAt reads the physical address in two operand bytes, high byte
-// first.
+// physicalAt reads the physical address from the two operand bytes that
+// start at index at, high byte first.
 func physicalAt(operands []byte, at int) PhysicalAddress {
 	return PhysicalAddress(operands[at])<<8 | PhysicalAddress(operands[at+1])
 }
 
-// audioMode names the operand of Set System Audio Mode.
+// audioMode returns the name of the status operand of Set System Audio
+// Mode.
 func audioMode(status byte) string {
 	if mode := audioModeOf(status); mode != SystemAudioUnknown {
 		return mode.String()
@@ -95,8 +97,8 @@ func audioMode(status byte) string {
 	return fmt.Sprintf("0x%02x, which CEC does not define", status)
 }
 
-// keyNames are the UI command codes of User Control Pressed, from the
-// CEC_OP_UI_CMD_ values in linux/cec.h.
+// keyNames maps the UI command codes of User Control Pressed to names.
+// The codes are the CEC_OP_UI_CMD_ values in linux/cec.h.
 var keyNames = map[byte]string{
 	0x00: "Select", 0x01: "Up", 0x02: "Down", 0x03: "Left", 0x04: "Right",
 	0x05: "Right Up", 0x06: "Right Down", 0x07: "Left Up", 0x08: "Left Down",
@@ -131,8 +133,8 @@ var keyNames = map[byte]string{
 	0x75: "F5", 0x76: "Data",
 }
 
-// keyName names a UI command, and gives the code of one linux/cec.h
-// does not list.
+// keyName returns the name of a UI command code, or the hex code when
+// linux/cec.h does not list it.
 func keyName(code byte) string {
 	if name, found := keyNames[code]; found {
 		return name

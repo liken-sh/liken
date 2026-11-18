@@ -1,7 +1,7 @@
 package main
 
-// The Event that each condition transition posts, against the fake of
-// the events collection, on the fake clock of a synctest bubble.
+// Tests that each condition transition posts an Event, against the fake
+// Events API and the fake clock of a synctest bubble.
 
 import (
 	"io"
@@ -13,22 +13,23 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events/eventstest"
 )
 
-// testRecorder posts Events through a test's fake API server until the
-// test ends.
+// testRecorder returns a Recorder that posts Events to the test's fake
+// API server until the test ends.
 func testRecorder(t *testing.T, client *Client) *events.Recorder {
 	t.Helper()
 	return events.New(t.Context(), client.Client, "equipment-operator", events.Options{Instance: "equipment-operator-0", Log: io.Discard})
 }
 
-// posted is the part of an Event a test asserts: its type, its reason,
-// and how many times it was posted.
+// posted is the part of an Event that the tests compare: its type, its
+// reason, and its count.
 type posted struct {
 	kind, reason string
 	count        int32
 }
 
-// postedAbout answers what the fake holds about one object, once every
-// goroutine of the bubble, the recorder's among them, is idle.
+// postedAbout returns the Events the fake has for one object. It first
+// waits until every goroutine in the synctest bubble, including the
+// recorder's, is idle, so all pending Events have been posted.
 func postedAbout(recorded *eventstest.Events, kind, name string) []posted {
 	synctest.Wait()
 	var out []posted
@@ -38,7 +39,7 @@ func postedAbout(recorded *eventstest.Events, kind, name string) []posted {
 	return out
 }
 
-func held(kind string, status ConditionStatus, reason string) Condition {
+func conditionWith(kind string, status ConditionStatus, reason string) Condition {
 	return Condition{Type: kind, Status: status, Reason: reason, Message: "a message"}
 }
 
@@ -50,25 +51,25 @@ func TestEachConditionTransitionPostsOneEvent(t *testing.T) {
 		written  Condition
 		want     []posted
 	}{
-		{"a new condition", nil, held(reachableConditionType, ConditionUnknown, reasonConnecting),
+		{"a new condition", nil, conditionWith(reachableConditionType, ConditionUnknown, reasonConnecting),
 			[]posted{{events.TypeNormal, reasonConnecting, 1}}},
-		{"a receiver that stops answering", []Condition{held(reachableConditionType, ConditionTrue, reasonConnected)},
-			held(reachableConditionType, ConditionFalse, reasonUnreachable), []posted{{events.TypeWarning, reasonUnreachable, 1}}},
-		{"a new message alone", []Condition{held(reachableConditionType, ConditionTrue, reasonConnected)},
+		{"a receiver that stops answering", []Condition{conditionWith(reachableConditionType, ConditionTrue, reasonConnected)},
+			conditionWith(reachableConditionType, ConditionFalse, reasonUnreachable), []posted{{events.TypeWarning, reasonUnreachable, 1}}},
+		{"a new message alone", []Condition{conditionWith(reachableConditionType, ConditionTrue, reasonConnected)},
 			Condition{Type: reachableConditionType, Status: ConditionTrue, Reason: reasonConnected, Message: "another"}, nil},
-		{"an input the receiver cannot report", []Condition{held(inputSelectedConditionType, ConditionTrue, reasonSessionInput)},
-			held(inputSelectedConditionType, ConditionUnknown, reasonUnreachable), []posted{{events.TypeNormal, reasonUnreachable, 1}}},
-		{"a bus in Listen", nil, held(conditionScanned, ConditionFalse, reasonListening),
+		{"an input the receiver cannot report", []Condition{conditionWith(inputSelectedConditionType, ConditionTrue, reasonSessionInput)},
+			conditionWith(inputSelectedConditionType, ConditionUnknown, reasonUnreachable), []posted{{events.TypeNormal, reasonUnreachable, 1}}},
+		{"a bus in Listen", nil, conditionWith(conditionScanned, ConditionFalse, reasonListening),
 			[]posted{{events.TypeNormal, reasonListening, 1}}},
-		{"a bus whose polls nobody answers", []Condition{held(conditionScanned, ConditionUnknown, reasonScanning)},
-			held(conditionScanned, ConditionFalse, reasonNoAnswer), []posted{{events.TypeWarning, reasonNoAnswer, 1}}},
-		{"an adapter gone stale", []Condition{held(conditionJoined, ConditionTrue, "Joined")},
-			held(conditionJoined, ConditionUnknown, reasonStale), []posted{{events.TypeWarning, reasonStale, 1}}},
-		{"a power the TV did not confirm", nil, held(conditionPowerApplied, ConditionFalse, reasonUnconfirmed),
+		{"a bus whose polls nobody answers", []Condition{conditionWith(conditionScanned, ConditionUnknown, reasonScanning)},
+			conditionWith(conditionScanned, ConditionFalse, reasonNoAnswer), []posted{{events.TypeWarning, reasonNoAnswer, 1}}},
+		{"an adapter gone stale", []Condition{conditionWith(conditionJoined, ConditionTrue, "Joined")},
+			conditionWith(conditionJoined, ConditionUnknown, reasonStale), []posted{{events.TypeWarning, reasonStale, 1}}},
+		{"a power the TV did not confirm", nil, conditionWith(conditionPowerApplied, ConditionFalse, reasonUnconfirmed),
 			[]posted{{events.TypeWarning, reasonUnconfirmed, 1}}},
-		{"a wake a new power ended", []Condition{held(conditionWakeApplied, ConditionUnknown, reasonWaking)},
-			held(conditionWakeApplied, ConditionFalse, reasonSuperseded), []posted{{events.TypeNormal, reasonSuperseded, 1}}},
-		{"another Television in charge", nil, held(conditionInCharge, ConditionFalse, reasonAnotherInCharge),
+		{"a wake a new power ended", []Condition{conditionWith(conditionWakeApplied, ConditionUnknown, reasonWaking)},
+			conditionWith(conditionWakeApplied, ConditionFalse, reasonSuperseded), []posted{{events.TypeNormal, reasonSuperseded, 1}}},
+		{"another Television in charge", nil, conditionWith(conditionInCharge, ConditionFalse, reasonAnotherInCharge),
 			[]posted{{events.TypeNormal, reasonAnotherInCharge, 1}}},
 	}
 	for _, one := range cases {
@@ -86,8 +87,8 @@ func TestEachConditionTransitionPostsOneEvent(t *testing.T) {
 	}
 }
 
-// A cluster-scoped object's Events go in default, where the API server
-// takes them.
+// An Event about a cluster-scoped object is posted in the `default`
+// namespace.
 func TestAnEventAboutATelevisionGoesInDefault(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -95,7 +96,7 @@ func TestAnEventAboutATelevisionGoesInDefault(t *testing.T) {
 		client := testAPIClient(t, recorded.Around(http.NotFoundHandler()))
 
 		postTransitions(testRecorder(t, client), reference("Television", ObjectMeta{Name: "lounge"}), nil,
-			[]Condition{held(conditionReachable, ConditionTrue, reasonAnswers)})
+			[]Condition{conditionWith(conditionReachable, ConditionTrue, reasonAnswers)})
 		synctest.Wait()
 
 		list := recorded.List()
@@ -104,4 +105,21 @@ func TestAnEventAboutATelevisionGoesInDefault(t *testing.T) {
 		mustMatch(t, list[0].InvolvedObject.APIVersion, equipmentAPIVersion)
 		mustMatch(t, list[0].Message, "a message")
 	})
+}
+
+func TestSentencesStartsEachFragmentWithACapitalLetter(t *testing.T) {
+	cases := []struct {
+		name, message, want string
+	}{
+		{"one fragment", "the TV already reported On", "The TV already reported On"},
+		{"two fragments", "the TV already reported On; the adapter on node-1 sent Active Source", "The TV already reported On. The adapter on node-1 sent Active Source"},
+		{"a field path first", "spec.power at generation 2 is On; the wake stopped", "spec.power at generation 2 is On. The wake stopped"},
+		{"a sentence already", "Every adapter scanned the bus", "Every adapter scanned the bus"},
+		{"no message", "", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			mustMatch(t, sentences(c.message), c.want)
+		})
+	}
 }

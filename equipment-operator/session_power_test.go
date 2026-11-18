@@ -1,11 +1,7 @@
 package main
 
-// The explicit power asks. A TV remote's Power On Function and Power Off
-// Function (HDMI-CEC 1.3a, CEC 13.13.3) name the state they want, and a
-// second press leaves the room in that state. The media operator asks
-// on for the first and off for the second, and the session turns the
-// room on or off only when it is not in that state already.
-// session_test.go holds the toggle.
+// The tests of the on and off power requests. session_test.go has the
+// tests of the toggle.
 
 import (
 	"testing"
@@ -14,9 +10,9 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/denon"
 )
 
-// askPower starts an idle session, with the receiver on or in standby,
-// and hands it one power ask.
-func askPower(t *testing.T, on bool, ask string) *sessionHarness {
+// readTVPower starts an idle session with the receiver on or in standby,
+// and sends it one power request.
+func readTVPower(t *testing.T, on bool, ask string) *sessionHarness {
 	t.Helper()
 	h := newSessionHarness(t)
 	if on {
@@ -29,7 +25,7 @@ func askPower(t *testing.T, on bool, ask string) *sessionHarness {
 func TestAnOffAskTurnsAnOnRoomOff(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		h := askPower(t, true, "off")
+		h := readTVPower(t, true, "off")
 
 		mustMatch(t, h.equipment.waitForCommand(t), "PWSTANDBY")
 		h.refuseCommands(t, quietPeriod, "SIGAME")
@@ -39,16 +35,14 @@ func TestAnOffAskTurnsAnOnRoomOff(t *testing.T) {
 func TestAnOnAskTurnsAnOffRoomOn(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		h := askPower(t, false, "on")
+		h := readTVPower(t, false, "on")
 
 		mustMatch(t, h.equipment.waitForCommand(t), denon.PowerOnCommand)
 		mustMatch(t, h.equipment.waitForCommand(t), "SIGAME")
 	})
 }
 
-// A room already in the state the ask names stays in it, and the line
-// says why the session sent nothing.
-func TestAnAskForTheStateTheRoomHoldsSendsNothing(t *testing.T) {
+func TestARequestForTheCurrentStateSendsNothing(t *testing.T) {
 	cases := []struct {
 		name string
 		on   bool
@@ -56,18 +50,18 @@ func TestAnAskForTheStateTheRoomHoldsSendsNothing(t *testing.T) {
 		line string
 	}{
 		{"off in a room that is off", false, "off",
-			"Receiver theater: status.session.powerAsk asks off, and the receiver reports power Standby; sent nothing, because the room is already off"},
+			"Receiver theater: status.session.powerAsk requests off, and the receiver reports power Standby; sent nothing, because the room is already off"},
 		{"on in a room that is on", true, "on",
-			"Receiver theater: status.session.powerAsk asks on, and the receiver reports power On; sent nothing, because the room is already on"},
+			"Receiver theater: status.session.powerAsk requests on, and the receiver reports power On; sent nothing, because the room is already on"},
 	}
 	t.Parallel()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
-				h := askPower(t, c.on, c.ask)
+				h := readTVPower(t, c.on, c.ask)
 
-				mustDeepEqual(t, waitForLines(t, h.log, "status.session.powerAsk asks", 1), []string{c.line})
+				mustDeepEqual(t, waitForLines(t, h.log, "status.session.powerAsk requests", 1), []string{c.line})
 				h.refuseCommands(t, quietPeriod, denon.PowerOnCommand, "PWSTANDBY", "SIGAME")
 			})
 		})

@@ -108,7 +108,7 @@ only when no follower exists. The node workload is a follower, so
 `Answer` owes a Feature Abort for each directed request it does not
 support, and it answers Give Device Power Status, which the kernel
 never answers, with the power its caller states. The node workload
-states On only while a Player's session holds the room awake on its
+states On only while a Player's session is awake on its
 `Display`, because to the TV a playback device with no picture is in
 standby (HDMI-CEC 1.3a, CEC 13.14). `cec-compliance --test-core --test-power-status
 --test-system-information --test-device-osd-transfer` passes against

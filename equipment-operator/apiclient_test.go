@@ -1,9 +1,5 @@
 package main
 
-// These tests run the client against a small HTTP server that
-// answers the way the API server answers, so the paths, the methods,
-// and the two named errors are proved without a cluster.
-
 import (
 	"encoding/json"
 	"io"
@@ -21,15 +17,14 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
-// The credentials are empty, so the client sends no bearer token and
-// reads nothing from disk.
+// testAPIClient returns a client for handler. It has no credentials,
+// so it sends no bearer token and reads nothing from disk.
 func testAPIClient(t *testing.T, handler http.Handler) *Client {
 	t.Helper()
 	server := apiservertest.Start(t, handler)
 	return NewClient(apiservertest.Host, server.Client(), "")
 }
 
-// One recorded request: what the client sent, where, and how.
 type recordedRequest struct {
 	Method      string
 	Path        string
@@ -38,12 +33,11 @@ type recordedRequest struct {
 	Body        []byte
 }
 
-// A server that answers one canned object per path and records every
-// request it received. A test reads requests after the call it made
-// has returned. A caller whose context ends can return while the
-// server still takes its request, so a test of such a caller reads
-// the requests through sent, which takes the lock the handler writes
-// under.
+// cannedAPI responds to each "METHOD path" with its canned status or
+// object, or 404, and records every request. A test reads requests
+// directly after its call returns. A caller whose context ends can
+// return before the handler records its request, so a test of such a
+// caller reads the count through sent, under the lock.
 type cannedAPI struct {
 	answers  map[string]any
 	statuses map[string]int
@@ -64,12 +58,12 @@ func (c *cannedAPI) handler() http.Handler {
 		})
 		c.mutex.Unlock()
 		key := r.Method + " " + r.URL.Path
-		if status, held := c.statuses[key]; held {
+		if status, found := c.statuses[key]; found {
 			w.WriteHeader(status)
 			return
 		}
-		answer, held := c.answers[key]
-		if !held {
+		answer, found := c.answers[key]
+		if !found {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -77,15 +71,12 @@ func (c *cannedAPI) handler() http.Handler {
 	})
 }
 
-// sent answers how many requests the server has taken.
 func (c *cannedAPI) sent() int {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	return len(c.requests)
 }
 
-// A Receiver is cluster-scoped, so the collection path carries no
-// namespace.
 func TestListReceiversReadsTheClusterScopedCollection(t *testing.T) {
 	t.Parallel()
 	api := &cannedAPI{answers: map[string]any{
@@ -106,7 +97,7 @@ func TestListReceiversReadsTheClusterScopedCollection(t *testing.T) {
 
 	mustMatch(t, list.Metadata.ResourceVersion, "77")
 	if len(list.Items) != 1 {
-		t.Fatalf("items = %+v", list.Items)
+		t.Fatalf("the list holds %+v, want one Receiver", list.Items)
 	}
 	mustMatch(t, list.Items[0].Metadata.Name, "theater")
 	mustMatch(t, list.Items[0].Spec.Denon.Address, "receiver.example")
@@ -139,9 +130,6 @@ func TestGetReceiverReadsOneObjectByName(t *testing.T) {
 	mustMatch(t, api.requests[0].Path, "/apis/equipment.liken.sh/v1alpha1/receivers/theater")
 }
 
-// The status write is a server-side apply on the status subresource:
-// the apply media type, this operator's field manager, and a body
-// that carries no spec.
 func TestApplyReceiverStatusPatchesTheStatusSubresource(t *testing.T) {
 	t.Parallel()
 	api := &cannedAPI{answers: map[string]any{
@@ -165,7 +153,7 @@ func TestApplyReceiverStatusPatchesTheStatusSubresource(t *testing.T) {
 	mustMatch(t, written.Status.Zones["main"].Power, "On")
 
 	if len(api.requests) != 1 {
-		t.Fatalf("requests = %+v", api.requests)
+		t.Fatalf("the client sent %+v, want one request", api.requests)
 	}
 	sent := api.requests[0]
 	mustMatch(t, sent.Method, http.MethodPatch)
@@ -176,16 +164,13 @@ func TestApplyReceiverStatusPatchesTheStatusSubresource(t *testing.T) {
 
 	body := map[string]any{}
 	mustSucceed(t, json.Unmarshal(sent.Body, &body))
-	if _, held := body["spec"]; held {
-		t.Errorf("the apply body carries a spec: %s", sent.Body)
+	if _, found := body["spec"]; found {
+		t.Errorf("the status apply body is %s, want no spec", sent.Body)
 	}
 	mustMatch(t, body["apiVersion"], any(equipmentAPIVersion))
 	mustMatch(t, body["kind"], any("Receiver"))
 }
 
-// The power write is a server-side apply on the main resource: the
-// apply media type, this operator's field manager, and a body that
-// carries the one spec field this operator owns and nothing else.
 func TestApplyReceiverPowerPatchesTheMainResource(t *testing.T) {
 	t.Parallel()
 	api := &cannedAPI{answers: map[string]any{
@@ -200,7 +185,7 @@ func TestApplyReceiverPowerPatchesTheMainResource(t *testing.T) {
 	mustMatch(t, written.Spec.Power, equipment.PowerOn)
 
 	if len(api.requests) != 1 {
-		t.Fatalf("requests = %+v", api.requests)
+		t.Fatalf("the client sent %+v, want one request", api.requests)
 	}
 	sent := api.requests[0]
 	mustMatch(t, sent.Method, http.MethodPatch)
@@ -213,16 +198,16 @@ func TestApplyReceiverPowerPatchesTheMainResource(t *testing.T) {
 	mustSucceed(t, json.Unmarshal(sent.Body, &body))
 	mustMatch(t, body["apiVersion"], any(equipmentAPIVersion))
 	mustMatch(t, body["kind"], any("Receiver"))
-	if _, held := body["status"]; held {
-		t.Errorf("the apply body carries a status: %s", sent.Body)
+	if _, found := body["status"]; found {
+		t.Errorf("the spec apply body is %s, want no status", sent.Body)
 	}
 	spec, _ := body["spec"].(map[string]any)
 	mustMatch(t, spec["power"], any("On"))
 }
 
-// An absent object and a losing write are answers, not failures; the
-// callers act on both.
-func TestTheClientNamesTheTwoOrdinaryAnswers(t *testing.T) {
+// A 404 and a 409 return the named errors apiclient.ErrNotFound and
+// apiclient.ErrConflict, because callers handle both as normal results.
+func TestTheClientReturnsNamedErrorsFor404And409(t *testing.T) {
 	t.Parallel()
 	api := &cannedAPI{statuses: map[string]int{
 		"GET /apis/equipment.liken.sh/v1alpha1/receivers/theater":          http.StatusNotFound,
@@ -230,22 +215,22 @@ func TestTheClientNamesTheTwoOrdinaryAnswers(t *testing.T) {
 	}}
 	client := testAPIClient(t, api.handler())
 
-	t.Run("absent", func(t *testing.T) {
+	t.Run("404 returns ErrNotFound", func(t *testing.T) {
 		if _, err := GetReceiver(client, "theater"); err != apiclient.ErrNotFound {
-			t.Fatalf("err = %v, want %v", err, apiclient.ErrNotFound)
+			t.Fatalf("the error is %v, want %v", err, apiclient.ErrNotFound)
 		}
 	})
-	t.Run("taken", func(t *testing.T) {
+	t.Run("409 returns ErrConflict", func(t *testing.T) {
 		_, err := ApplyReceiverStatus(client, "theater", ReceiverStatus{})
 		if err != apiclient.ErrConflict {
-			t.Fatalf("err = %v, want %v", err, apiclient.ErrConflict)
+			t.Fatalf("the error is %v, want %v", err, apiclient.ErrConflict)
 		}
 	})
 }
 
-// Any other failing status carries the server's own message, so a
-// broken deployment says what the API server said.
-func TestAServerErrorCarriesTheServersMessage(t *testing.T) {
+// Any other failing status returns an error that is neither named
+// error, so callers treat it as a failure.
+func TestOtherFailingStatusesReturnAnUnnamedError(t *testing.T) {
 	t.Parallel()
 	api := &cannedAPI{statuses: map[string]int{
 		"GET /apis/equipment.liken.sh/v1alpha1/receivers": http.StatusInternalServerError,
@@ -254,13 +239,13 @@ func TestAServerErrorCarriesTheServersMessage(t *testing.T) {
 	_, err := ListReceivers(testAPIClient(t, api.handler()))
 	mustFail(t, err)
 	if err == apiclient.ErrNotFound || err == apiclient.ErrConflict {
-		t.Fatalf("err = %v", err)
+		t.Fatalf("the error is %v, want one that is neither ErrNotFound nor ErrConflict", err)
 	}
 }
 
-// A client built with a credentials directory reads the token from disk
-// on every request and sends it as a bearer token, because the kubelet
-// refreshes that file as each token nears expiry.
+// A client with a credentials directory reads the token file on every
+// request and sends it as a bearer token, because the kubelet rewrites
+// the file as each token nears expiry.
 func TestTheClientSendsTheServiceAccountTokenOnEveryRequest(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -285,8 +270,9 @@ func TestTheClientSendsTheServiceAccountTokenOnEveryRequest(t *testing.T) {
 	})
 }
 
-// A service account directory the test controls, holding whatever CA
-// file the case wants.
+// useServiceAccountDir points serviceAccountDir at a new directory that
+// holds ca.crt with caPEM, or no ca.crt when caPEM is nil. It restores
+// the variable when the test ends.
 func useServiceAccountDir(t *testing.T, caPEM []byte) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -299,9 +285,6 @@ func useServiceAccountDir(t *testing.T, caPEM []byte) string {
 	return dir
 }
 
-// The five values a pod holds are the whole of an in-cluster config: the
-// two environment variables name the server, and the mounted CA and token are
-// what the client trusts and sends.
 func TestInClusterClientReadsThePodsOwnConfig(t *testing.T) {
 	t.Setenv("KUBERNETES_SERVICE_HOST", "10.43.0.1")
 	t.Setenv("KUBERNETES_SERVICE_PORT", "443")
@@ -313,8 +296,9 @@ func TestInClusterClientReadsThePodsOwnConfig(t *testing.T) {
 	mustMatch(t, client.credentials, dir)
 }
 
-// Every config a pod cannot supply fails at startup rather than at the
-// first request, so a misconfigured deployment says what is missing.
+// A config that the pod cannot supply fails when the client is built,
+// not at the first request, so a misconfigured deployment reports what
+// is missing.
 func TestInClusterClientRefusesAConfigItCannotBuild(t *testing.T) {
 	cases := []struct {
 		name  string

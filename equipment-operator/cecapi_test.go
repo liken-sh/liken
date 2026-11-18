@@ -1,13 +1,14 @@
 package main
 
-// A fake API server for the CECBus and Television tests. This file
-// holds the CECBus and Display objects, and televisionapi_test.go adds
-// the Televisions and the Receivers. It applies each write the way
-// server-side apply does for the fields these writers state: a node
-// workload's apply replaces its own machine's entry under
-// status.adapters, and the Deployment's apply replaces the devices and
-// the conditions. A watch gets one event for each change, so a loop
-// under test wakes the way it wakes on a cluster.
+// cecAPI is a fake API server for the CECBus and Television tests. This
+// file serves CECBuses and Displays, televisionapi_test.go serves
+// Televisions and Receivers, and cecpodapi_test.go serves the node
+// workload's pods.
+//
+// A status write replaces only the fields that its field manager writes,
+// as server-side apply does. A node workload's write replaces that
+// machine's entry in status.adapters, and the Deployment's write
+// replaces status.devices and status.conditions.
 
 import (
 	"encoding/json"
@@ -32,107 +33,108 @@ type cecAPI struct {
 	displays    map[string]*Display
 	televisions map[string]*Television
 	receivers   map[string]Receiver
-	// pods holds the node workload's pods a test declared, by name, and
-	// podsDeclared says a test declared them (cecpodapi_test.go).
+	// pods are the node workload's pods that a test declared, by name.
+	// podsDeclared is true when a test declared any (cecpodapi_test.go).
 	pods         map[string]fakePod
 	podsDeclared bool
-	// owners names the field manager of each condition of each
-	// Television, by name and type, so an apply removes the conditions
-	// its manager owns and no longer states.
+	// owners maps each Television name and condition type to the field
+	// manager that last wrote the condition. applyConditions reads it.
 	owners map[string]map[string]string
-	// deletedTelevisions names each Television a writer deleted, and the
-	// two counts are the Television status writes of the Deployment and
-	// of the node workloads.
+	// deletedTelevisions lists the Televisions that a client deleted.
+	// derivedWrites counts the Deployment's Television status writes,
+	// and powerWrites counts the node workloads' Television status
+	// writes.
 	deletedTelevisions []string
 	derivedWrites      int
-	// noDisplayNodeField refuses a Display list or watch by status.node,
-	// the way an API server does whose Display definition declares no
-	// such selectable field.
+	powerWrites        int
+	// noDisplayNodeField makes a Display list or watch with a status.node
+	// field selector fail, as it does on an API server whose Display
+	// definition declares no such selectable field.
 	noDisplayNodeField bool
 	// busWrites counts the Deployment's CECBus status writes.
 	busWrites     int
-	powerWrites   int
 	wakeWrites    int
 	sessionWrites int
 	// receiverCECWrites counts the Deployment's status.cec writes on a
 	// Receiver.
 	receiverCECWrites int
 	version           int
-	// moved closes at each change of an object, and a new channel takes
-	// its place, so a test that waits for an object's state wakes at each
-	// change and not on a timer.
+	// moved is closed and replaced at each change, so a test that waits
+	// for a state checks again at each change instead of polling.
 	moved    chan struct{}
 	watchers []*fakeWatcher
 	deleted  []string
 	client   *Client
-	// events holds the Events the operator posts.
-	events *eventstest.Events
-	// refusing makes every list and every status write fail with a
-	// 500, the way an API server answers while it is unhealthy.
-	// refusingTelevisions does the same for the Television list alone.
+	events   *eventstest.Events
+	// refusing makes every CECBus list and every status write fail with
+	// a 500. refusingTelevisions does the same for the Television list
+	// only.
 	refusing            bool
 	refusingTelevisions bool
-	// refusingPowerWrites refuses the node workloads' Television status
-	// writes, and noTelevisionDefinition answers every Television path
-	// with not found, the way a cluster without the definition does.
+	// refusingPowerWrites fails the node workloads' Television status
+	// writes with a 500. noTelevisionDefinition returns 404 for every
+	// Television path, as a cluster without the Television CRD does.
 	refusingPowerWrites    bool
 	noTelevisionDefinition bool
-	// noSessionWrites refuses the Deployment's status.session writes.
+	// noSessionWrites fails the Deployment's status.session writes with a
+	// 500.
 	noSessionWrites bool
-	// throttledTelevisionLists counts the Television lists still to
-	// answer with 429, the way the API server answers while a new CRD's
-	// storage starts.
+	// throttledTelevisionLists is how many more Television lists fail
+	// with a 429, as they do while the API server initializes the storage
+	// of a new CRD.
 	throttledTelevisionLists int
-	// refusingWakeWrites refuses the node workloads' wake writes.
+	// refusingWakeWrites fails the node workloads' wake writes with a
+	// 500.
 	refusingWakeWrites bool
-	// sessionDelay holds each session write, and sessionInFlight and
-	// sessionMostAtOnce count the session writes that overlap.
+	// sessionDelay delays each session write. sessionInFlight is the
+	// number of session writes in progress, and sessionMostAtOnce is the
+	// largest that number has been.
 	sessionDelay      time.Duration
 	sessionInFlight   int
 	sessionMostAtOnce int
-	// uids numbers the Televisions the fake creates, and created names
-	// each one a writer created with a POST.
+	// uids numbers the uids of the Televisions that the fake creates, and
+	// created lists the names of the Televisions that a client created
+	// with a POST.
 	uids    int
 	created []string
-	// entryWrites counts the status writes of each node workload's
-	// field manager.
+	// entryWrites counts the status writes of each node workload, by
+	// machine.
 	entryWrites map[string]int
-	// throttlingEntries answers every node workload's status write with
-	// a 429 that asks for a five-second wait, the way an API server that
-	// is not ready answers, and entryThrottles counts those answers.
+	// throttlingEntries makes every node workload's CECBus status write
+	// fail with a 429 and a Retry-After of 5 seconds. entryThrottles
+	// counts those responses.
 	throttlingEntries bool
 	entryThrottles    int
-	// holdingEntries, while it is not nil, holds each node workload's
-	// entry write that is not a Stopped entry until the channel closes,
-	// and heldEntry receives one value as each such write arrives, the
-	// way an API server that is slow to answer holds a write.
+	// While holdingEntries is not nil, a node workload's CECBus status
+	// write blocks until holdingEntries is closed, unless its entry is
+	// Stopped. Each blocked write first sends a value on heldEntry, and
+	// waits for the test to receive it. holds counts the blocked writes
+	// that have not finished. When stoppedEntry is not nil, each write of
+	// a Stopped entry sends a value on it, or drops the value when no one
+	// is receiving.
 	holdingEntries chan struct{}
 	heldEntry      chan struct{}
-	// holds counts the held entry writes that have not finished, and
-	// stoppedEntry, while it is not nil, receives one value when a
-	// Stopped entry arrives.
-	holds        sync.WaitGroup
-	stoppedEntry chan struct{}
-	// createdUnseen names a CECBus that a read of the one object answers
-	// 404 for, the way a bus a person creates a moment after the read
-	// looks to the reader.
+	holds          sync.WaitGroup
+	stoppedEntry   chan struct{}
+	// A GET of the CECBus named createdUnseen returns 404 even when the
+	// bus exists, as when another client creates the bus just after the
+	// GET.
 	createdUnseen string
-	// reads counts each GET that is not a watch, a list or a read of
-	// one object, by path, and watches counts the watches by path.
+	// reads counts the GET requests that are not watches, by path.
+	// watches counts the watch requests, by path.
 	reads   map[string]int
 	watches map[string]int
-	// stamps holds each object's content, by its path, when its
-	// resourceVersion last moved, and that version. An object keeps its
-	// version while its content stays, as on a real API server.
-	stamps map[string]stamp
+	// versions maps an object's path to its JSON content and the
+	// resourceVersion at which that content last changed, so an object
+	// keeps its resourceVersion until its content changes, as on a real
+	// API server.
+	versions map[string]contentVersion
 }
 
-// stamp is one object's content and the version it took.
-type stamp struct {
+type contentVersion struct {
 	content, version string
 }
 
-// refuse turns the refusals on or off.
 func (a *cecAPI) refuse(refusing bool) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
@@ -150,28 +152,27 @@ func startCECAPI(t *testing.T) *cecAPI {
 	return api
 }
 
-// fakeWatcher is one open watch, the collection it watches, and the
-// copy of each object it last sent, which is what the informer on the
-// far end holds.
+// fakeWatcher is one open watch. sent holds the objects that the watch
+// has sent, which is the client's view of the collection.
 type fakeWatcher struct {
 	path string
-	// node is the machine a field selector on status.node names, or
-	// empty for a watch of the whole collection.
+	// node is the machine in the status.node field selector, or empty
+	// for a watch of the whole collection.
 	node   string
 	sent   map[string]map[string]any
 	events chan string
 }
 
-// nodeOf answers the machine a request's field selector on status.node
-// names, or empty.
+// nodeOf returns the machine in the request's status.node field
+// selector, or "" when there is none.
 func nodeOf(r *http.Request) string {
 	node, _ := strings.CutPrefix(r.URL.Query().Get("fieldSelector"), "status.node=")
 	return node
 }
 
-// selectedIn answers the objects of one collection a watch or a list
-// selects: every object, or the objects whose status.node is node. The
-// caller holds the mutex.
+// selectedIn returns the objects of one collection that a watch or a
+// list selects: all of them, or the ones with status.node equal to
+// node. The caller holds the mutex.
 func (a *cecAPI) selectedIn(path, node string) map[string]map[string]any {
 	objects := a.collection(path)
 	if node == "" {
@@ -186,8 +187,8 @@ func (a *cecAPI) selectedIn(path, node string) map[string]map[string]any {
 	return objects
 }
 
-// changed bumps the version and sends every watch the change in its
-// collection. The caller holds the mutex.
+// changed increments the version and sends each watch the changes in
+// its collection. The caller holds the mutex.
 func (a *cecAPI) changed() {
 	a.version++
 	a.move()
@@ -196,8 +197,8 @@ func (a *cecAPI) changed() {
 	}
 }
 
-// changedIn bumps the version and sends the change to the watches of
-// one collection alone, the way the API server does. The caller holds
+// changedIn increments the version and sends the changes only to the
+// watches of one collection, as the API server does. The caller holds
 // the mutex.
 func (a *cecAPI) changedIn(path string) {
 	a.version++
@@ -209,15 +210,14 @@ func (a *cecAPI) changedIn(path string) {
 	}
 }
 
-// move wakes each wait on the fake's objects. The caller holds the
-// mutex.
+// move closes the moved channel, which ends each wait for a change,
+// and replaces it. The caller holds the mutex.
 func (a *cecAPI) move() {
 	close(a.movement())
 	a.moved = make(chan struct{})
 }
 
-// movement answers the channel that closes at the next change. The
-// caller holds the mutex.
+// movement is nextMove for a caller that holds the mutex.
 func (a *cecAPI) movement() chan struct{} {
 	if a.moved == nil {
 		a.moved = make(chan struct{})
@@ -225,17 +225,17 @@ func (a *cecAPI) movement() chan struct{} {
 	return a.moved
 }
 
-// nextMove answers the channel that closes at the next change. A wait
-// takes it before it reads the state, so a change between the read and
-// the wait still wakes it.
+// nextMove returns the channel that closes at the next change. A wait
+// gets the channel before it reads the state, so a change that happens
+// between the read and the wait still ends the wait.
 func (a *cecAPI) nextMove() <-chan struct{} {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
 	return a.movement()
 }
 
-// awaitMove waits for the next change, and answers false when the
-// deadline comes first.
+// awaitMove waits for moved to close. It returns false when the
+// deadline fires first.
 func awaitMove(moved <-chan struct{}, deadline <-chan time.Time) bool {
 	select {
 	case <-moved:
@@ -245,14 +245,15 @@ func awaitMove(moved <-chan struct{}, deadline <-chan time.Time) bool {
 	}
 }
 
-// send tells one watch what its collection holds now: an ADDED event
-// for each new object, a DELETED event for each object that is gone,
-// and a MODIFIED event for every other object, changed or not, so each
-// change wakes a loop that wakes on every event, the way an unrelated
-// edit of an object it holds does. The events go out oldest version
-// first, and a bookmark at the collection's version ends them, so the
-// reflector resumes from the newest version. The caller holds the
-// mutex.
+// send brings one watch up to date with its collection. It sends ADDED
+// for each object that the watch has not sent and MODIFIED for every
+// other object, changed or not, in resourceVersion order. Then it sends
+// DELETED for each sent object that no longer exists, and last a
+// bookmark at the collection's version, so the reflector resumes from
+// the newest version. The MODIFIED events for unchanged objects make a
+// loop that reacts to any event run a pass, as a change to another
+// object of the collection does on a cluster. An event that does not
+// fit in the watch's buffer is dropped. The caller holds the mutex.
 func (a *cecAPI) send(watcher *fakeWatcher) {
 	now := a.selectedIn(watcher.path, watcher.node)
 	var events []string
@@ -262,13 +263,13 @@ func (a *cecAPI) send(watcher *fakeWatcher) {
 	})
 	for _, name := range names {
 		kind := "MODIFIED"
-		if _, held := watcher.sent[name]; !held {
+		if _, sent := watcher.sent[name]; !sent {
 			kind = "ADDED"
 		}
 		events = append(events, watchEvent(kind, now[name]))
 	}
 	for _, name := range sortedKeys(watcher.sent) {
-		if _, held := now[name]; !held {
+		if _, exists := now[name]; !exists {
 			events = append(events, watchEvent("DELETED", watcher.sent[name]))
 		}
 	}
@@ -282,7 +283,8 @@ func (a *cecAPI) send(watcher *fakeWatcher) {
 	}
 }
 
-// fakeKinds names the kind the fake serves at each collection path.
+// fakeKinds maps each collection path to the apiVersion and kind of its
+// objects.
 var fakeKinds = map[string][2]string{
 	cecBusesPath:    {equipmentAPIVersion, "CECBus"},
 	televisionsPath: {equipmentAPIVersion, "Television"},
@@ -290,8 +292,10 @@ var fakeKinds = map[string][2]string{
 	displaysPath:    {"display.liken.sh/v1alpha1", "Display"},
 }
 
-// collection answers each object of one collection by name, as a watch
-// event carries it. The caller holds the mutex.
+// collection returns the objects of one collection by name, in the JSON
+// form that a watch event carries. Each object's resourceVersion is
+// the version at which its content last changed. The caller holds the
+// mutex.
 func (a *cecAPI) collection(path string) map[string]map[string]any {
 	objects := map[string]any{}
 	switch path {
@@ -330,19 +334,18 @@ func (a *cecAPI) collection(path string) map[string]map[string]any {
 		one["apiVersion"], one["kind"] = kind[0], kind[1]
 		content, _ := json.Marshal(one)
 		key := path + "/" + name
-		if a.stamps == nil {
-			a.stamps = map[string]stamp{}
+		if a.versions == nil {
+			a.versions = map[string]contentVersion{}
 		}
-		if a.stamps[key].content != string(content) {
-			a.stamps[key] = stamp{content: string(content), version: fmt.Sprint(a.version)}
+		if a.versions[key].content != string(content) {
+			a.versions[key] = contentVersion{content: string(content), version: fmt.Sprint(a.version)}
 		}
-		meta["resourceVersion"] = a.stamps[key].version
+		meta["resourceVersion"] = a.versions[key].version
 		fields[name] = one
 	}
 	return fields
 }
 
-// versionOf answers an object's resourceVersion as a number.
 func versionOf(object map[string]any) int {
 	meta, _ := object["metadata"].(map[string]any)
 	version, _ := meta["resourceVersion"].(string)
@@ -350,15 +353,16 @@ func versionOf(object map[string]any) int {
 	return number
 }
 
-// stored answers one object as the API server returns it, with its
-// resourceVersion, or nil when the collection does not hold it. The
+// stored returns one object as the API server returns it, with its
+// resourceVersion, or nil when the collection has no such object. The
 // caller holds the mutex.
 func (a *cecAPI) stored(path, name string) map[string]any {
 	return a.collection(path)[name]
 }
 
-// serveStored answers a read of one object, or a write, with the
-// object as it stands. The caller holds the mutex.
+// serveStored responds to a read or a write of one object with the
+// object's current state, or with 404 when it does not exist. The
+// caller holds the mutex.
 func (a *cecAPI) serveStored(w http.ResponseWriter, path, name string) {
 	object := a.stored(path, name)
 	if object == nil {
@@ -373,9 +377,10 @@ func watchEvent(kind string, object map[string]any) string {
 	return string(encoded)
 }
 
-// bookmark is a bookmark at the collection's version. The last one of
-// a streaming list marks the end of its initial events. The caller
-// holds the mutex.
+// bookmark returns a BOOKMARK event with the collection's version. When
+// initialEventsEnd is true, it carries the k8s.io/initial-events-end
+// annotation that ends the initial events of a streaming list. The
+// caller holds the mutex.
 func (a *cecAPI) bookmark(path string, initialEventsEnd bool) string {
 	kind := fakeKinds[path]
 	meta := map[string]any{"resourceVersion": fmt.Sprint(a.version)}
@@ -438,8 +443,8 @@ func (a *cecAPI) handle(w http.ResponseWriter, r *http.Request) {
 func (a *cecAPI) serveDisplay(w http.ResponseWriter, name string) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
-	display, held := a.displays[name]
-	if !held {
+	display, found := a.displays[name]
+	if !found {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -452,10 +457,10 @@ func (a *cecAPI) serveList(w http.ResponseWriter) {
 	a.serveCollection(w, cecBusesPath, "")
 }
 
-// serveCollection answers a list the way the API server does: each item
-// carries its own resourceVersion, and the list carries the
-// collection's. A client that notes the versions it read then compares
-// them with the watch's copies. The caller holds the mutex.
+// serveCollection responds to a list as the API server does. Each item
+// has its own resourceVersion and the list has the collection's, so a
+// client can compare the versions it listed with the versions that a
+// watch sends. The caller holds the mutex.
 func (a *cecAPI) serveCollection(w http.ResponseWriter, path, node string) {
 	selected := a.selectedIn(path, node)
 	items := make([]map[string]any, 0, len(selected))
@@ -471,12 +476,11 @@ func (a *cecAPI) serveCollection(w http.ResponseWriter, path, node string) {
 	})
 }
 
-// serveWatch answers a watch the way the API server does. A streaming
-// list, the read client-go's reflector sends first, gets an ADDED event
-// for each object and a bookmark that ends the initial events. A watch
-// that resumes from the current version gets what changes after it,
-// and one that resumes from an older version gets a 410, which makes
-// the reflector read the collection again.
+// serveWatch responds to a watch as the API server does. A streaming
+// list, with sendInitialEvents=true, gets an ADDED event for each object
+// and then a bookmark that ends the initial events. A watch from the
+// current version gets the changes after it. A watch from any other
+// version gets a 410, and the reflector lists the collection again.
 func (a *cecAPI) serveWatch(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	watcher := &fakeWatcher{path: r.URL.Path, node: nodeOf(r), events: make(chan string, 1024)}
@@ -524,21 +528,21 @@ func (a *cecAPI) serveWatch(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// forget drops a watch whose connection ended.
+// forget removes a watch whose connection has closed.
 func (a *cecAPI) forget(watcher *fakeWatcher) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
 	a.watchers = slices.DeleteFunc(a.watchers, func(one *fakeWatcher) bool { return one == watcher })
 }
 
-// create answers a POST the way the API server does: a name that exists
-// answers 409 and changes nothing.
+// create responds to a POST as the API server does. A name that
+// already exists gets a 409, and nothing changes.
 func (a *cecAPI) create(w http.ResponseWriter, r *http.Request) {
 	var body CECBus
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
-	if _, held := a.buses[body.Metadata.Name]; held {
+	if _, exists := a.buses[body.Metadata.Name]; exists {
 		w.WriteHeader(http.StatusConflict)
 		return
 	}
@@ -553,8 +557,8 @@ func (a *cecAPI) applySpec(w http.ResponseWriter, r *http.Request, name string) 
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
-	bus, held := a.buses[name]
-	if !held {
+	bus, found := a.buses[name]
+	if !found {
 		bus = &CECBus{Metadata: ObjectMeta{Name: name, Generation: 1}}
 		a.buses[name] = bus
 	}
@@ -586,8 +590,8 @@ func (a *cecAPI) applyStatus(w http.ResponseWriter, r *http.Request, name string
 	}
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
-	bus, held := a.buses[name]
-	if !held {
+	bus, found := a.buses[name]
+	if !found {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -623,8 +627,8 @@ func (a *cecAPI) delete(w http.ResponseWriter, name string) {
 	_, _ = io.WriteString(w, "{}")
 }
 
-// copyBus is a deep copy through JSON, so a test reads a snapshot the
-// handler cannot change under it.
+// copyBus returns a deep copy of a bus, made through JSON, so that a
+// test reads a snapshot that the handlers cannot change.
 func copyBus(bus *CECBus) CECBus {
 	raw, _ := json.Marshal(bus)
 	var copied CECBus
@@ -632,7 +636,8 @@ func copyBus(bus *CECBus) CECBus {
 	return copied
 }
 
-// putBus stores a bus as a person or a test declares it.
+// putBus stores a bus as a user would create it, with generation 1
+// when it sets none.
 func (a *cecAPI) putBus(bus CECBus) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
@@ -643,14 +648,15 @@ func (a *cecAPI) putBus(bus CECBus) {
 	a.changed()
 }
 
-// writesOf counts one machine's entry writes.
+// writesOf returns the number of status writes from one machine's node
+// workload.
 func (a *cecAPI) writesOf(machine string) int {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
 	return a.entryWrites[machine]
 }
 
-// removeDisplay deletes a Display, so a read of it answers not found.
+// removeDisplay deletes a Display, so that a read of it returns 404.
 func (a *cecAPI) removeDisplay(name string) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
@@ -658,16 +664,16 @@ func (a *cecAPI) removeDisplay(name string) {
 	a.changed()
 }
 
-// nudge wakes every watch with no change, the way an unrelated edit
-// does, so the loop under test runs a pass.
+// nudge sends every watch its objects again with no change, so the
+// loop under test runs a pass.
 func (a *cecAPI) nudge() {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
 	a.changed()
 }
 
-// moveDisplay gives a Display a new physical address, and tells only
-// the watches of the Displays.
+// moveDisplay changes a Display's physical address and sends the change
+// only to the watches of Displays.
 func (a *cecAPI) moveDisplay(name, physicalAddress string) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
@@ -685,12 +691,13 @@ func (a *cecAPI) putDisplay(name, node, physicalAddress string) {
 	a.changed()
 }
 
-// bus answers a snapshot of one bus, and false when it does not exist.
+// bus returns a snapshot of one bus, and false when the bus does not
+// exist.
 func (a *cecAPI) bus(name string) (CECBus, bool) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
-	bus, held := a.buses[name]
-	if !held {
+	bus, found := a.buses[name]
+	if !found {
 		return CECBus{}, false
 	}
 	return copyBus(bus), true
@@ -702,13 +709,14 @@ func (a *cecAPI) deletedNames() []string {
 	return slices.Clone(a.deleted)
 }
 
-// entry answers one machine's entry in one bus.
+// entry returns one machine's entry in the status of one bus, and false
+// when the bus or the entry does not exist.
 func (a *cecAPI) entry(bus, machine string) (CECAdapterStatus, bool) {
-	held, found := a.bus(bus)
+	snapshot, found := a.bus(bus)
 	if !found {
 		return CECAdapterStatus{}, false
 	}
-	for _, entry := range held.Status.Adapters {
+	for _, entry := range snapshot.Status.Adapters {
 		if entry.Machine == machine {
 			return entry, true
 		}
@@ -716,20 +724,19 @@ func (a *cecAPI) entry(bus, machine string) (CECAdapterStatus, bool) {
 	return CECAdapterStatus{}, false
 }
 
-// waitForEntry waits until one machine's entry in one bus satisfies a
-// check, and fails the test with the last entry it read otherwise.
+// waitForEntry waits until ready returns true for one machine's entry
+// in one bus. It fails the test, with the last entry it read, when that
+// does not happen within testTimeout.
 func (a *cecAPI) waitForEntry(t *testing.T, bus, machine string, ready func(CECAdapterStatus) bool) CECAdapterStatus {
 	t.Helper()
 	return a.waitForEntryWithin(t, bus, machine, testTimeout, ready)
 }
 
-// scanned waits until a machine's adapter on the den bus has finished
-// its join scan, and then until every goroutine in the test's bubble
-// waits. The node workload then holds a whole copy of each collection
-// it watches, so a change the test makes next reaches it as a watch
-// event. Before that, the node workload reads a collection with a
-// list, and the list can be newer than the first copy the watch hands
-// it. It answers the entry.
+// scanned waits until the machine's entry on the den bus is Scanned,
+// then until every other goroutine in the synctest bubble is blocked,
+// and returns the entry. By then the node workload has finished listing
+// the collections it watches, so a change that the test makes next
+// reaches it as a watch event and not during a list.
 func (a *cecAPI) scanned(t *testing.T, machine string) CECAdapterStatus {
 	t.Helper()
 	entry := a.waitForEntry(t, "den", machine, func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
@@ -737,9 +744,9 @@ func (a *cecAPI) scanned(t *testing.T, machine string) CECAdapterStatus {
 	return entry
 }
 
-// vividScanTime bounds a scan on the kernel's vivid driver, which
-// sends each message at the speed of a real CEC wire, so a scan takes
-// a few seconds.
+// vividScanTime is the longest that a test waits for a scan on the
+// kernel's vivid driver. The driver sends each message at the speed of
+// a real CEC bus, so a scan takes seconds.
 const vividScanTime = 20 * time.Second
 
 func (a *cecAPI) waitForEntryWithin(t *testing.T, bus, machine string, within time.Duration, ready func(CECAdapterStatus) bool) CECAdapterStatus {
@@ -747,23 +754,24 @@ func (a *cecAPI) waitForEntryWithin(t *testing.T, bus, machine string, within ti
 	deadline := time.After(within)
 	for {
 		moved := a.nextMove()
-		entry, held := a.entry(bus, machine)
-		if held && ready(entry) {
+		entry, found := a.entry(bus, machine)
+		if found && ready(entry) {
 			return entry
 		}
 		if !awaitMove(moved, deadline) {
-			t.Fatalf("CECBus %s never held the wanted entry for %s; the last was %+v (held %v)", bus, machine, entry, held)
+			t.Fatalf("the CECBus %s has no wanted entry for %s within %v, the last entry is %+v (found %v)", bus, machine, within, entry, found)
 		}
 	}
 }
 
-// waitUntil waits for a condition on the fake's state.
+// waitUntil polls ready every 5 milliseconds and fails the test with
+// what when ready is still false after testTimeout.
 func (a *cecAPI) waitUntil(t *testing.T, what string, ready func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(testTimeout)
 	for !ready() {
 		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
+			t.Fatalf("%s did not happen within %v", what, testTimeout)
 		}
 		time.Sleep(5 * time.Millisecond)
 	}

@@ -1,7 +1,5 @@
 package main
 
-// The discovery loop against a fake API server and a fixed found set.
-
 import (
 	"context"
 	"encoding/json"
@@ -17,17 +15,17 @@ import (
 	"github.com/liken-sh/liken/equipment-operator/wiim"
 )
 
-// mustDeepEqual is the slice and struct comparison the generic
-// mustMatch cannot express.
+// mustDeepEqual compares slices and structs, which mustMatch cannot
+// because it requires comparable values.
 func mustDeepEqual(t *testing.T, got, want any) {
 	t.Helper()
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("got %#v, want %#v", got, want)
+		t.Fatalf("the value is %#v, want %#v", got, want)
 	}
 }
 
-// discoveryAPI answers the collection a test sets and records the
-// Receivers the operator applied and deleted.
+// discoveryAPI serves the Receiver list that a test sets and records
+// the names of the Receivers that the operator applied and deleted.
 type discoveryAPI struct {
 	mutex   sync.Mutex
 	list    ReceiverList
@@ -71,8 +69,8 @@ func (a *discoveryAPI) deletedNames() []string {
 	return append([]string(nil), a.deleted...)
 }
 
-// The two identities the tests use. They are invented, and the second
-// is spelled the way mDNS spells a sixteen-byte UUID.
+// The UUIDs are invented. secondSpell is secondUUID as mDNS spells it:
+// sixteen bytes, hyphenated, with the LinkPlay suffix FF98F2F7.
 const (
 	firstUUID   = "FF98F2F78136CE45A780D8A1"
 	secondUUID  = "FF98F2F7702D05D4ADE453C4"
@@ -102,26 +100,25 @@ func TestDiscoveryCreatesUnclaimedAndDefersToAPerson(t *testing.T) {
 		{UUID: firstUUID, Address: "192.0.2.1"},
 		{UUID: secondUUID, Address: "192.0.2.2"},
 	}
-	held := newDiscovery(client, func() {})
-	held.store(found)
-	if err := held.reconcile(); err != nil {
-		t.Fatal(err)
+	finder := newDiscovery(client, func() {})
+	finder.store(found)
+	if err := finder.reconcile(); err != nil {
+		t.Fatalf("reconciling the discovered Receivers: %v", err)
 	}
 
-	// The person's Receiver already names the first amp, so only the
-	// second gets an object, named by its identity.
+	// A person's Receiver already names the first amp.
 	mustDeepEqual(t, api.appliedNames(), []string{strings.ToLower(secondUUID)})
 	mustDeepEqual(t, api.deletedNames(), []string(nil))
 }
 
 func TestDiscoveryAddressNormalizesTheIdentity(t *testing.T) {
 	t.Parallel()
-	held := newDiscovery(nil, func() {})
-	held.store([]wiim.Device{{UUID: firstUUID, Address: "192.0.2.1"}})
+	finder := newDiscovery(nil, func() {})
+	finder.store([]wiim.Device{{UUID: firstUUID, Address: "192.0.2.1"}})
 
-	mustMatch(t, held.address(firstUUID), "192.0.2.1")
-	mustMatch(t, held.address("ff98f2f7-8136-ce45-a780-d8a1ff98f2f7"), "192.0.2.1")
-	mustMatch(t, held.address(secondUUID), "")
+	mustMatch(t, finder.address(firstUUID), "192.0.2.1")
+	mustMatch(t, finder.address("ff98f2f7-8136-ce45-a780-d8a1ff98f2f7"), "192.0.2.1")
+	mustMatch(t, finder.address(secondUUID), "")
 }
 
 func TestDiscoveredNameIsTheLowercasedIdentity(t *testing.T) {
@@ -129,9 +126,8 @@ func TestDiscoveredNameIsTheLowercasedIdentity(t *testing.T) {
 	mustMatch(t, discoveredName("FF98F2F78136CE45A780D8A1"), "ff98f2f78136ce45a780d8a1")
 }
 
-// run searches once at its start and again at each interval, and stops
-// with its context. The test stubs the search, a package variable, so
-// it runs alone.
+// The test replaces the package variable discover, so it cannot run in
+// parallel.
 func TestDiscoveryRunStopsWithItsContext(t *testing.T) {
 	restore := discover
 	t.Cleanup(func() { discover = restore })
@@ -143,11 +139,11 @@ func TestDiscoveryRunStopsWithItsContext(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api, client := startDiscoveryAPI(t)
 		api.list = receiversWith()
-		held := newDiscovery(client, func() {})
+		finder := newDiscovery(client, func() {})
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
 		go func() {
-			held.run(ctx)
+			finder.run(ctx)
 			close(done)
 		}()
 
@@ -162,16 +158,14 @@ func TestDiscoveryRunStopsWithItsContext(t *testing.T) {
 	})
 }
 
-// firstSpellOf spells one identity the way mDNS does, so a test proves
-// the two spellings compare equal.
-func firstSpellOf(uuid string) string {
+// mdnsSpelling returns uuid as mDNS spells it: sixteen bytes,
+// hyphenated, with the LinkPlay suffix FF98F2F7.
+func mdnsSpelling(uuid string) string {
 	return strings.ToLower(uuid[:8]) + "-" + strings.ToLower(uuid[8:12]) + "-" +
 		strings.ToLower(uuid[12:16]) + "-" + strings.ToLower(uuid[16:20]) + "-" +
 		strings.ToLower(uuid[20:]) + "ff98f2f7"
 }
 
-// Discovery writes one line for each Receiver it creates or deletes,
-// and none for an amp whose Receiver stands.
 func TestDiscoveryLogsEachReceiverItCreatesOrDeletes(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -184,10 +178,10 @@ func TestDiscoveryLogsEachReceiverItCreatesOrDeletes(t *testing.T) {
 			"an amp no Receiver names",
 			nil,
 			[]wiim.Device{{UUID: secondUUID, Address: "192.0.2.2"}},
-			[]string{"discovery found the WiiM " + secondUUID + " at 192.0.2.2, which no Receiver names; created Receiver " + strings.ToLower(secondUUID)},
+			[]string{"discovery found the WiiM " + secondUUID + " at 192.0.2.2, and no Receiver declares it, so discovery created Receiver " + strings.ToLower(secondUUID)},
 		},
 		{
-			"a person's Receiver that takes over",
+			"a person's Receiver that names the amp",
 			[]Receiver{discoveredReceiver(strings.ToLower(firstUUID), firstUUID), wiimReceiver("studio", firstUUID)},
 			[]wiim.Device{{UUID: firstUUID, Address: "192.0.2.1"}},
 			[]string{"deleted the discovered Receiver " + strings.ToLower(firstUUID) + ": Receiver studio names the WiiM " + firstUUID},
@@ -199,7 +193,7 @@ func TestDiscoveryLogsEachReceiverItCreatesOrDeletes(t *testing.T) {
 			[]string{"deleted the discovered Receiver " + strings.ToLower(secondUUID) + ": the WiiM " + secondUUID + " missed 3 searches in a row over 60 s"},
 		},
 		{
-			"an amp whose Receiver stands",
+			"an amp whose Receiver stays",
 			[]Receiver{discoveredReceiver(strings.ToLower(firstUUID), firstUUID)},
 			[]wiim.Device{{UUID: firstUUID, Address: "192.0.2.1"}},
 			[]string{""},
@@ -209,23 +203,23 @@ func TestDiscoveryLogsEachReceiverItCreatesOrDeletes(t *testing.T) {
 		t.Run(one.name, func(t *testing.T) {
 			api, client := startDiscoveryAPI(t)
 			api.list = receiversWith(one.list...)
-			held := newDiscovery(client, func() {})
-			held.now = searchClock()
+			finder := newDiscovery(client, func() {})
+			finder.now = searchClock()
 			log := &logBuffer{}
-			held.log = log
+			finder.log = log
 			for range discoveryMisses {
-				held.store(one.found)
+				finder.store(one.found)
 			}
 
-			mustSucceed(t, held.reconcile())
+			mustSucceed(t, finder.reconcile())
 
 			mustDeepEqual(t, log.lines(), one.want)
 		})
 	}
 }
 
-// searchClock answers a time 30 s later on each call, as the searches
-// of a running operator are.
+// searchClock returns a clock that advances 30 s on each call, as
+// between the searches of a running operator.
 func searchClock() func() time.Time {
 	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	return func() time.Time {
@@ -234,11 +228,7 @@ func searchClock() func() time.Time {
 	}
 }
 
-// Each case runs the full searches in order and reconciles after each
-// one, as a running operator does. The operator's own Receiver for the
-// amp stands until discoveryMisses searches in a row miss the amp. The
-// count starts with the operator, so a start that has not heard from the
-// amp yet is no evidence either way.
+// Each case reconciles after each search, as a running operator does.
 func TestDiscoveryDeletesItsOwnOnlyAfterTheAmpMissesEnoughSearches(t *testing.T) {
 	t.Parallel()
 	amp := []wiim.Device{{UUID: firstUUID, Address: "192.0.2.1"}}
@@ -251,7 +241,7 @@ func TestDiscoveryDeletesItsOwnOnlyAfterTheAmpMissesEnoughSearches(t *testing.T)
 		{"a start whose first search misses", [][]wiim.Device{nil}, nil},
 		{"a start whose first two searches miss", [][]wiim.Device{nil, nil}, nil},
 		{"a start whose searches never find the amp", [][]wiim.Device{nil, nil, nil}, []string{strings.ToLower(firstUUID)}},
-		{"an amp that stands", [][]wiim.Device{amp, amp, amp}, nil},
+		{"an amp that every search finds", [][]wiim.Device{amp, amp, amp}, nil},
 		{"an amp missed twice", [][]wiim.Device{amp, nil, nil}, nil},
 		{"an amp that is gone", [][]wiim.Device{amp, nil, nil, nil}, []string{strings.ToLower(firstUUID)}},
 		{"an amp that returns after a start", [][]wiim.Device{nil, nil, amp, nil, nil}, nil},
@@ -261,14 +251,14 @@ func TestDiscoveryDeletesItsOwnOnlyAfterTheAmpMissesEnoughSearches(t *testing.T)
 		t.Run(one.name, func(t *testing.T) {
 			api, client := startDiscoveryAPI(t)
 			api.list = receiversWith(discoveredReceiver(strings.ToLower(firstUUID), firstUUID))
-			held := newDiscovery(client, func() {})
-			held.now = searchClock()
-			held.log = &logBuffer{}
+			finder := newDiscovery(client, func() {})
+			finder.now = searchClock()
+			finder.log = &logBuffer{}
 
-			mustSucceed(t, held.reconcile())
+			mustSucceed(t, finder.reconcile())
 			for _, found := range one.searches {
-				held.store(found)
-				mustSucceed(t, held.reconcile())
+				finder.store(found)
+				mustSucceed(t, finder.reconcile())
 			}
 
 			mustDeepEqual(t, api.deletedNames(), one.deleted)
@@ -277,8 +267,6 @@ func TestDiscoveryDeletesItsOwnOnlyAfterTheAmpMissesEnoughSearches(t *testing.T)
 	}
 }
 
-// A person's Receiver that names the amp replaces the operator's copy at
-// once, whatever the searches have found.
 func TestDiscoveryPrunesItsOwnWhenAPersonTakesOver(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -294,15 +282,15 @@ func TestDiscoveryPrunesItsOwnWhenAPersonTakesOver(t *testing.T) {
 			api, client := startDiscoveryAPI(t)
 			api.list = receiversWith(
 				discoveredReceiver(strings.ToLower(firstUUID), firstUUID),
-				wiimReceiver("studio", firstSpellOf(firstUUID)),
+				wiimReceiver("studio", mdnsSpelling(firstUUID)),
 			)
-			held := newDiscovery(client, func() {})
-			held.log = &logBuffer{}
+			finder := newDiscovery(client, func() {})
+			finder.log = &logBuffer{}
 			for _, found := range one.searches {
-				held.store(found)
+				finder.store(found)
 			}
 
-			mustSucceed(t, held.reconcile())
+			mustSucceed(t, finder.reconcile())
 
 			mustDeepEqual(t, api.deletedNames(), []string{strings.ToLower(firstUUID)})
 			mustDeepEqual(t, api.appliedNames(), []string(nil))
@@ -310,19 +298,15 @@ func TestDiscoveryPrunesItsOwnWhenAPersonTakesOver(t *testing.T) {
 	}
 }
 
-// One missed search is multicast, not an amp that left, so the address
-// stands through it.
 func TestDiscoveryKeepsTheAddressThroughAMissedSearch(t *testing.T) {
 	t.Parallel()
-	held := newDiscovery(nil, func() {})
-	held.store([]wiim.Device{{UUID: firstUUID, Address: "192.0.2.1"}})
-	held.store(nil)
+	finder := newDiscovery(nil, func() {})
+	finder.store([]wiim.Device{{UUID: firstUUID, Address: "192.0.2.1"}})
+	finder.store(nil)
 
-	mustMatch(t, held.address(firstUUID), "192.0.2.1")
+	mustMatch(t, finder.address(firstUUID), "192.0.2.1")
 }
 
-// A search its context cut short did not run its full window, so it
-// does not count as a miss.
 func TestDiscoveryCountsOnlyFullSearches(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -339,8 +323,8 @@ func TestDiscoveryCountsOnlyFullSearches(t *testing.T) {
 			restore := discover
 			t.Cleanup(func() { discover = restore })
 			discover = func(context.Context, time.Duration) []wiim.Device { return nil }
-			held := newDiscovery(client, func() {})
-			held.log = &logBuffer{}
+			finder := newDiscovery(client, func() {})
+			finder.log = &logBuffer{}
 			ctx, cancel := context.WithCancel(context.Background())
 			t.Cleanup(cancel)
 			if one.cut {
@@ -348,7 +332,7 @@ func TestDiscoveryCountsOnlyFullSearches(t *testing.T) {
 			}
 
 			for range discoveryMisses {
-				held.once(ctx)
+				finder.once(ctx)
 			}
 
 			mustDeepEqual(t, api.deletedNames(), one.deleted)
@@ -356,8 +340,6 @@ func TestDiscoveryCountsOnlyFullSearches(t *testing.T) {
 	}
 }
 
-// The Receiver loop reads only the addresses from discovery, so a
-// search wakes it only when an address appeared, moved, or went.
 func TestDiscoveryWakesTheLoopOnlyWhenAnAddressMoves(t *testing.T) {
 	here := wiim.Device{UUID: firstUUID, Address: "192.0.2.1"}
 	there := wiim.Device{UUID: firstUUID, Address: "192.0.2.2"}
@@ -385,11 +367,11 @@ func TestDiscoveryWakesTheLoopOnlyWhenAnAddressMoves(t *testing.T) {
 				return found
 			}
 			var wakes atomic.Int64
-			held := newDiscovery(client, func() { wakes.Add(1) })
-			held.log = &logBuffer{}
+			finder := newDiscovery(client, func() { wakes.Add(1) })
+			finder.log = &logBuffer{}
 
 			for range one.searches {
-				held.once(t.Context())
+				finder.once(t.Context())
 			}
 
 			mustMatch(t, wakes.Load(), one.wakes)

@@ -1,32 +1,33 @@
 package denon
 
-// A Denon names a sound mode two ways. The command selects a family,
-// such as MSMOVIE or MSDOLBY DIGITAL, and the receiver then reports the
-// mode it decodes for the signal it receives, such as MSDOLBY AUDIO-DD
-// or MSDTS HD MSTR. So the report after MSDOLBY DIGITAL is rarely the
-// word DOLBY DIGITAL. A compare of the two words finds a difference
-// where the receiver already runs the declared family, and a session
-// would send the command again on every wake. A report can also hold a
-// run of spaces, such as DOLBY AUDIO - DD+   + DSUR, and a person can
-// write the declared mode in lowercase.
+// A Denon command such as MSMOVIE or MSDOLBY DIGITAL selects a family
+// of sound modes, and the receiver then reports the mode it decodes for
+// the incoming signal, such as MSDOLBY AUDIO-DD or MSDTS HD MSTR. If
+// the operator compared the declared word with the reported word, it
+// would find a difference while the receiver already runs the declared
+// family, and send the command again each time the session checks the
+// mode. A report can also contain runs of spaces, and a person can
+// declare the mode in lowercase.
 //
-// soundModeFamilies holds, for each command family, the modes the
-// receiver reports while it runs that family, other than the family's
-// own word. It is the SOUND_MODE_MAPPING table of ol-iver/denonavr
-// (https://github.com/ol-iver/denonavr/blob/main/denonavr/const.py),
-// which Home Assistant uses, with each run of spaces collapsed to one.
-// That table is Copyright (c) 2016 Oliver Götz, under the MIT license,
-// whose notice is at https://github.com/ol-iver/denonavr/blob/main/LICENSE.
-// Two changes come from the same source: the AUTO and STANDARD rows are
-// left out, because they hold placeholder words and not reported modes,
-// and MULTI CH IN and MULTI CH IN 7.1 are in both the Dolby and the DTS
-// family, because the protocol specification lists them in both.
+// soundModeFamilies maps each command family to the modes that the
+// receiver reports while it runs that family, not counting the
+// family's own word. It is the SOUND_MODE_MAPPING table of
+// ol-iver/denonavr, which Home Assistant uses, with each run of spaces
+// collapsed to one space:
+// https://github.com/ol-iver/denonavr/blob/main/denonavr/const.py
+// That table is Copyright (c) 2016 Oliver Götz, under the MIT license:
+// https://github.com/ol-iver/denonavr/blob/main/LICENSE
+// This table differs from the original in two ways. The AUTO and
+// STANDARD rows are left out, because they contain placeholder words
+// and not reported modes. MULTI CH IN and MULTI CH IN 7.1 are in both
+// the Dolby and the DTS family, because the protocol specification
+// lists them in both.
 //
-// Each reported mode belongs to the families the table names, and to no
-// other. The table lists DOLBY SURROUND under DOLBY DIGITAL only, for
-// example, so a declared MOVIE does not match a report of DOLBY
-// SURROUND, even on a model that selects Dolby Surround for MSMOVIE,
-// and the session sends MSMOVIE again on a wake.
+// A reported mode matches only the families that the table lists it
+// under. The table lists DOLBY SURROUND under DOLBY DIGITAL only, so a
+// model that selects Dolby Surround for MSMOVIE never matches a
+// declared MOVIE, and the session sends MSMOVIE again each time it
+// checks the mode.
 
 import "strings"
 
@@ -251,7 +252,7 @@ var soundModeFamilies = map[string][]string{
 	"ALL ZONE STEREO": nil,
 }
 
-// soundModeFamilyOf maps each reported mode to the families that report
+// soundModeFamilyOf maps each reported mode to the families that list
 // it.
 var soundModeFamilyOf = func() map[string][]string {
 	families := map[string][]string{}
@@ -263,18 +264,17 @@ var soundModeFamilyOf = func() map[string][]string {
 	return families
 }()
 
-// normalSoundMode writes a mode the way the table holds it: in capital
-// letters, with no space at either end and one space between words.
+// normalSoundMode converts a mode to the table's form: upper case, with
+// one space between words and none at the ends.
 func normalSoundMode(mode string) string {
 	return strings.Join(strings.Fields(strings.ToUpper(mode)), " ")
 }
 
-// SameSoundMode answers whether the receiver, when it reports one mode,
-// runs the mode a person declared. The two match when they are the same
-// word after normalSoundMode, or when the declared mode is a command
-// family and the table lists the reported mode in that family. A
-// declared mode that is not a family matches only its own word, because
-// no command selects it and nothing says which reports it covers.
+// SameSoundMode reports whether the receiver runs the declared mode:
+// the two are equal after normalSoundMode, or the declared mode is a
+// family that lists the reported mode. A declared mode that is not a
+// family matches only itself, because the table lists no reports for
+// it.
 func SameSoundMode(declared, reported string) bool {
 	declared, reported = normalSoundMode(declared), normalSoundMode(reported)
 	if declared == reported {

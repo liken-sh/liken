@@ -1,7 +1,5 @@
-// The WiiM's slow-moving settings: the strongly typed family the
-// operator declares in the Receiver spec and the commands that move
-// them. The settings stay in WiiM's own vocabulary, so nothing here is
-// shared with another protocol.
+// The WiiM settings that change rarely: the typed fields that the
+// Receiver spec declares, and the commands that set them on the device.
 
 package wiim
 
@@ -11,55 +9,44 @@ import (
 	"strconv"
 )
 
-// Settings is the device's slow-moving settings, one family per block.
-// Every optional scalar is a pointer: nil means the key is not
-// declared, and a present zero means the key is set to zero. That is
-// what lets ApplySettings apply only the declared fields.
+// Settings holds the device settings that change rarely. Each field is
+// a pointer, so nil means not set and is different from a zero value.
 type Settings struct {
 	Audio  AudioSettings  `json:"audio"`
 	Device DeviceSettings `json:"device"`
 }
 
-// AudioSettings is the output block's level controls.
 type AudioSettings struct {
 	Balance *float64 `json:"balance,omitempty"`
 }
 
-// DeviceSettings is the device's own switches: the human label, the
-// status light, and the touch buttons.
 type DeviceSettings struct {
 	Name    *string `json:"name,omitempty"`
 	LED     *bool   `json:"led,omitempty"`
 	Buttons *bool   `json:"buttons,omitempty"`
 }
 
-// The small pointer builders the settings share. A pointer field is nil
-// when the device has not reported the value, which is how the status
-// tells a key the device never declared from one set to zero.
+// strPtr, boolPtr, and floatPtr return a pointer to a copy of a value,
+// for the pointer fields of Settings.
 func strPtr(s string) *string     { return &s }
 func boolPtr(b bool) *bool        { return &b }
 func floatPtr(f float64) *float64 { return &f }
 
-// sameString is true when the two values hold the same word, or either
-// is nil. A nil on either side is a key the receiver has not reported,
-// so it is skipped rather than judged.
+// sameString is true when the two values are equal or either is nil. A
+// nil value is a field with nothing to compare, so it counts as equal.
 func sameString(a, b *string) bool { return a == nil || b == nil || *a == *b }
 
-// sameBool is true when the two values hold the same switch, or either
-// is nil, the way sameString treats an unreported key.
+// sameBool is sameString for bool values.
 func sameBool(a, b *bool) bool { return a == nil || b == nil || *a == *b }
 
-// sameNumber is true when the two values hold the same number, or
-// either is nil, the way sameString treats an unreported key. The
-// comparison is exact, because the device echoes the value it was set
-// to.
+// sameNumber is sameString for float64 values. The comparison is
+// exact, because the device returns the value that was sent to it.
 func sameNumber(a, b *float64) bool { return a == nil || b == nil || *a == *b }
 
-// ConfirmedBy answers whether the receiver has reported every field
-// the settings declare at the declared value. A declared field the
-// receiver has not reported is skipped: there is nothing to confirm it
-// against, and blocking on it would retry forever. A field reported at
-// another value is not confirmed, so the operator sends it again.
+// ConfirmedBy reports whether every field set in w has the same value in
+// observed, the settings the receiver reported. It skips a field that
+// observed does not set, because the receiver cannot confirm that field
+// and a wait for it would never end.
 func (w Settings) ConfirmedBy(observed Settings) bool {
 	if !sameNumber(w.Audio.Balance, observed.Audio.Balance) {
 		return false
@@ -76,15 +63,14 @@ func (w Settings) ConfirmedBy(observed Settings) bool {
 	return true
 }
 
-// Pending answers the declared fields to send, as Settings that hold
-// only those fields. A field the device reports is sent only while the
-// device reports another value, so a restart against a device that
-// already holds the declared settings sends nothing, and a change made
-// at the device is driven back. A field the device does not report is
-// compared with previous, the settings the operator applied before, so
-// it is sent once when the spec changes it. known says whether previous
-// holds anything since the operator started; after a restart it does
-// not, and an unreported field waits for the spec to change it.
+// Pending returns the fields of w that must be sent. A field that the
+// device reports is sent while the device's value differs, so a restart
+// sends nothing to a device that already has the declared values, and a
+// change made at the device is reverted. A field that the device does
+// not report is sent when it differs from previous, the settings the
+// operator last applied, and only when known is true. The controller
+// sets known to false when it has applied nothing since it started and
+// status.settledSettings records that it already sent this block.
 func (w Settings) Pending(observed, previous Settings, known bool) Settings {
 	var pending Settings
 	if isPending(w.Audio.Balance, observed.Audio.Balance, previous.Audio.Balance, known) {
@@ -102,9 +88,7 @@ func (w Settings) Pending(observed, previous Settings, known bool) Settings {
 	return pending
 }
 
-// isPending answers whether one declared field is sent: a reported
-// field that differs, or an unreported field the spec changed since
-// the operator last applied it.
+// isPending applies the rule of Pending to one field.
 func isPending[T comparable](want, observed, previous *T, known bool) bool {
 	switch {
 	case want == nil:
@@ -115,27 +99,26 @@ func isPending[T comparable](want, observed, previous *T, known bool) bool {
 	return known && (previous == nil || *previous != *want)
 }
 
-// setBalanceCommand builds the wire command for a declared balance. The
-// value runs from -1.0, full left, to 1.0, full right. A value outside
-// that range is an error that names it.
+// setBalanceCommand returns the command that sets the balance, from -1.0
+// (full left) to 1.0 (full right). It returns an error for a value
+// outside that range.
 func setBalanceCommand(value float64) (string, error) {
 	if value < -1 || value > 1 {
-		return "", fmt.Errorf("balance %.3f is outside -1.0 to 1.0", value)
+		return "", fmt.Errorf("the balance is %.3f, and it must be from -1.0 to 1.0", value)
 	}
 	return "setChannelBalance:" + strconv.FormatFloat(value, 'f', -1, 64), nil
 }
 
-// nameCommand builds the wire command for a declared device name. An
-// empty name is an error, because an empty label names nothing.
+// nameCommand returns the command that sets the device name. It returns
+// an error for an empty name.
 func nameCommand(value string) (string, error) {
 	if value == "" {
-		return "", fmt.Errorf("a device name cannot be empty")
+		return "", fmt.Errorf("the device name must not be empty")
 	}
 	return "setDeviceName:" + value, nil
 }
 
-// switchCommand builds the wire command for a declared switch, prefix
-// followed by 1 for on or 0 for off.
+// switchCommand returns prefix followed by 1 for on or 0 for off.
 func switchCommand(prefix string, value bool) string {
 	digit := "0"
 	if value {
@@ -144,17 +127,13 @@ func switchCommand(prefix string, value bool) string {
 	return prefix + digit
 }
 
-// Settings returns every setting the receiver has reported, read from
-// the stored status. Each pointer is copied, so the returned value
-// never aliases the live state a poll keeps folding into.
+// Settings returns the settings from the last poll, as copies.
 //
-// A field whose read the device answered with no value is nil, so the
-// controller takes it for a field the device does not report and sends a
-// declared value once. Without that, the snapshot's zero value would
-// stand for the device's setting: a model with no read of the status
-// light would report it off, and the operator would send a declared
-// "on" again on every pass. The name comes from the read a poll cannot
-// miss, so it is always reported.
+// A field is nil when the device answered its read with no value, as a
+// model with no read for the status light does. Without that, the zero
+// value in c.state would read as "off", and the controller would send a
+// declared "on" on every pass. The name is always set, because every
+// poll reads it.
 func (c *Client) Settings() Settings {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
@@ -171,28 +150,22 @@ func (c *Client) Settings() Settings {
 	return settings
 }
 
-// ApplySettings sends the wire command for every declared field, in a
-// fixed order: audio before device, and name before led before buttons.
-// An undeclared field sends nothing, and the controller passes it only
-// the fields Pending keeps. A
-// command the receiver refuses stops the apply at that field, and the
-// first error is the one returned.
-//
-// Then it reads back the family of each field the amp took, because
-// the poll reads the settings families only at its backstop interval.
-// The controller's next compare then reads the amp's answer to the
-// send, not the value from before it.
+// ApplySettings sends the command for each field set in want, in the
+// order balance, name, LED, buttons. It stops at the first command the
+// receiver refuses and returns that error. Then it reads back the family
+// of each command the receiver accepted, so the controller's next
+// comparison sees the new values.
 func (c *Client) ApplySettings(want Settings) error {
-	var took family
-	err := c.sendSettings(want, &took)
-	c.readBack(context.Background(), took)
+	var accepted family
+	err := c.sendSettings(want, &accepted)
+	c.readBack(context.Background(), accepted)
 	return err
 }
 
-// sendSettings sends the wire command for every declared field, and
-// stops at the first that the receiver refuses. took gains the family
-// of each command the amp took.
-func (c *Client) sendSettings(want Settings, took *family) error {
+// sendSettings sends the command for each field set in want, stops at
+// the first error, and adds the family of each accepted command to
+// accepted.
+func (c *Client) sendSettings(want Settings, accepted *family) error {
 	if want.Audio.Balance != nil {
 		command, err := setBalanceCommand(*want.Audio.Balance)
 		if err != nil {
@@ -201,7 +174,7 @@ func (c *Client) sendSettings(want Settings, took *family) error {
 		if err := c.send(context.Background(), command); err != nil {
 			return err
 		}
-		*took |= familyBalance
+		*accepted |= familyBalance
 	}
 	if want.Device.Name != nil {
 		command, err := nameCommand(*want.Device.Name)
@@ -211,19 +184,19 @@ func (c *Client) sendSettings(want Settings, took *family) error {
 		if err := c.send(context.Background(), command); err != nil {
 			return err
 		}
-		*took |= familyName
+		*accepted |= familyName
 	}
 	if want.Device.LED != nil {
 		if err := c.send(context.Background(), switchCommand("LED_SWITCH_SET:", *want.Device.LED)); err != nil {
 			return err
 		}
-		*took |= familyControls
+		*accepted |= familyControls
 	}
 	if want.Device.Buttons != nil {
 		if err := c.send(context.Background(), switchCommand("Button_Enable_SET:", *want.Device.Buttons)); err != nil {
 			return err
 		}
-		*took |= familyControls
+		*accepted |= familyControls
 	}
 	return nil
 }

@@ -1,7 +1,7 @@
 package main
 
-// The controller's protocol branch: which block selects the driver, and
-// which snapshot the status carries.
+// Tests of the controller's choice of protocol: which spec block
+// selects the driver, and which protocol's snapshot the status gets.
 
 import (
 	"testing"
@@ -34,8 +34,8 @@ func TestStartDriverBuildsTheDeclaredProtocol(t *testing.T) {
 	}
 }
 
-// Each protocol reports only its own snapshot, so a status never
-// carries the other protocol's block.
+// Each protocol reports only its own snapshot, so a status never has
+// the other protocol's block.
 func TestProtocolSnapshotsAreNilForTheOtherProtocol(t *testing.T) {
 	t.Parallel()
 	wiimUnit := &receiverUnit{wiimClient: wiim.NewClient("192.0.2.1", nil)}
@@ -51,16 +51,17 @@ func TestProtocolSnapshotsAreNilForTheOtherProtocol(t *testing.T) {
 	mustMatch(t, denonUnit.wiimStatus(), (*wiim.Status)(nil))
 }
 
-// A declared settings block reaches only a Denon: the WiiM unit takes
-// the same call as a no-op rather than panic on a nil client.
+// Settings apply only to a Denon receiver, so for a WiiM receiver
+// setSettings must do nothing, and not panic on the nil Denon client.
 func TestSetSettingsIsANoOpForAWiimReceiver(t *testing.T) {
 	t.Parallel()
 	unit := &receiverUnit{}
 	unit.setSettings(denon.Settings{})
 }
 
-// A WiiM's typed snapshot moves into status.wiim, and a change to it
-// makes the next write differ.
+// A WiiM receiver's address is the one in its spec when it sets one.
+// Otherwise it is the address of the discovered device with the same
+// UUID, compared without regard to case or dashes.
 func TestResolvedAddressPrefersTheDeclaredOne(t *testing.T) {
 	t.Parallel()
 	c := &controller{discovery: newDiscovery(nil, func() {})}
@@ -71,6 +72,8 @@ func TestResolvedAddressPrefersTheDeclaredOne(t *testing.T) {
 	mustMatch(t, c.resolvedAddress(&ReceiverSpec{}), "")
 }
 
+// A WiiM receiver's snapshot is written to status.wiim, and a change to
+// it makes the next status write differ.
 func TestWiimStatusTravelsIntoTheStatus(t *testing.T) {
 	t.Parallel()
 	unit := &receiverUnit{wiimClient: wiim.NewClient("192.0.2.1", nil)}

@@ -1,6 +1,3 @@
-// The settings vocabulary: the wire commands each field carries, the
-// apply path.
-
 package denon
 
 import (
@@ -126,9 +123,8 @@ func TestTheCommandBuildersWriteTheWireLines(t *testing.T) {
 	}
 }
 
-// A declared field the receiver has not reported is skipped, so the
-// declared settings confirm against an empty report. There is nothing
-// to confirm the field against, and blocking on it would retry forever.
+// A declared field that the receiver has not reported does not block
+// confirmation, because nothing could confirm it.
 func TestConfirmedBySkipsAnUnreportedField(t *testing.T) {
 	eco := "on"
 	want := Settings{System: SystemSettings{Eco: &eco}}
@@ -138,8 +134,6 @@ func TestConfirmedBySkipsAnUnreportedField(t *testing.T) {
 	}
 }
 
-// A declared field reported at another value is not confirmed, so the
-// operator sends it again.
 func TestConfirmedByRejectsADifferentReportedValue(t *testing.T) {
 	eco, observed := "on", "off"
 	want := Settings{System: SystemSettings{Eco: &eco}}
@@ -150,7 +144,6 @@ func TestConfirmedByRejectsADifferentReportedValue(t *testing.T) {
 	}
 }
 
-// A declared field reported at the same value is confirmed.
 func TestConfirmedByAcceptsAnEqualReportedValue(t *testing.T) {
 	eco := "on"
 	want := Settings{System: SystemSettings{Eco: &eco}}
@@ -161,15 +154,10 @@ func TestConfirmedByAcceptsAnEqualReportedValue(t *testing.T) {
 	}
 }
 
-// A different value in any one declared field fails the whole block, so
-// a partial apply is never taken for confirmed. The sweep walks the
-// settings structs and changes one field at a time, so a field added to
-// a family without a line in ConfirmedBy fails here instead of being
-// taken for confirmed while the receiver holds another value. It covers
-// every pointer field and the
-// channel volumes, and skips a plain scalar: SystemSettings.Power is
-// reported but the controller owns it, and a declared field is always a
-// pointer.
+// The test changes one field at a time through reflection, so a field
+// that ConfirmedBy does not compare fails here. It covers every pointer
+// field and ChannelVolumes, and skips SystemSettings.Power, which is
+// never declared.
 func TestConfirmedByRejectsADifferenceInAnyDeclaredField(t *testing.T) {
 	want := Settings{}
 	declareEveryField(t, reflect.ValueOf(&want).Elem())
@@ -187,9 +175,8 @@ func TestConfirmedByRejectsADifferenceInAnyDeclaredField(t *testing.T) {
 	}
 }
 
-// declaredFieldPaths answers the path to every field ConfirmedBy must
-// compare: every pointer field, and the channel volume map. It recurses
-// through the family structs.
+// declaredFieldPaths returns the index path of every pointer and map
+// field, inside the family structs too.
 func declaredFieldPaths(v reflect.Value) [][]int {
 	var paths [][]int
 	for i := 0; i < v.NumField(); i++ {
@@ -206,10 +193,9 @@ func declaredFieldPaths(v reflect.Value) [][]int {
 	return paths
 }
 
-// declareEveryField gives every pointer field a value and adds one
-// channel volume, so the sweep has a value to change in each field. A
-// field of a type the sweep cannot fill fails, so a new family type is
-// handled here rather than skipped.
+// declareEveryField sets every pointer field and one channel volume. It
+// fails on a field type it cannot fill, so that a new type is not
+// skipped without notice.
 func declareEveryField(t *testing.T, v reflect.Value) {
 	t.Helper()
 	for i := 0; i < v.NumField(); i++ {
@@ -237,7 +223,8 @@ func declareEveryField(t *testing.T, v reflect.Value) {
 	}
 }
 
-// changeField moves one declared field off the value the sweep set.
+// changeField changes one field from the value that declareEveryField
+// set.
 func changeField(v reflect.Value, path []int) {
 	for _, i := range path[:len(path)-1] {
 		v = v.Field(i)
@@ -258,8 +245,6 @@ func changeField(v reflect.Value, path []int) {
 	}
 }
 
-// fieldPathName names the field a path points at, for the failure
-// message.
 func fieldPathName(v reflect.Value, path []int) string {
 	names := make([]string, 0, len(path))
 	t := v.Type()
@@ -270,8 +255,6 @@ func fieldPathName(v reflect.Value, path []int) string {
 	return strings.Join(names, ".")
 }
 
-// A declared channel the receiver has not reported is skipped, and a
-// channel reported at the same trim confirms.
 func TestConfirmedByHandlesTheChannelVolumes(t *testing.T) {
 	want := Settings{ChannelVolumes: map[string]float64{"FL": 0.5}}
 	if !want.ConfirmedBy(Settings{}) {
@@ -317,19 +300,17 @@ func TestApplySettingsSendsNothingForUndeclaredFields(t *testing.T) {
 	})
 }
 
-// mustStaySilentCommands fails the test if any command arrives inside
-// the window.
 func mustStaySilentCommands(t *testing.T, commands <-chan string, window time.Duration) {
 	t.Helper()
 	select {
 	case command := <-commands:
-		t.Fatalf("wanted no command, got %q", command)
+		t.Fatalf("the command is %q, want none", command)
 	case <-time.After(window):
 	}
 }
 
-// A declared setting reaches the receiver, echoes back, and folds into
-// the state the next Settings() reads.
+// The fake receiver echoes each command, and Settings then returns the
+// echoed value.
 func TestApplySettingsRoundTripsThroughTheReceiver(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -362,8 +343,6 @@ func TestApplySettingsRoundTripsThroughTheReceiver(t *testing.T) {
 	})
 }
 
-// ApplySettings must not report success for a declared field no command
-// can carry; it errors naming the setting id and the value instead.
 func TestApplySettingsErrorsWhenADeclaredFieldCannotBeEncoded(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -375,16 +354,16 @@ func TestApplySettingsErrorsWhenADeclaredFieldCannotBeEncoded(t *testing.T) {
 			t.Fatal("a declared field no command can carry did not error")
 		}
 		if !strings.Contains(err.Error(), "system.eco") {
-			t.Errorf("the error does not name the id: %v", err)
+			t.Errorf("the error is %q, want it to name system.eco", err)
 		}
 		if !strings.Contains(err.Error(), "turbo") {
-			t.Errorf("the error does not name the value: %v", err)
+			t.Errorf("the error is %q, want it to name turbo", err)
 		}
 	})
 }
 
-// waitForSettings polls the client's settings until the check passes,
-// and fails the test instead of hanging when it never does.
+// waitForSettings polls Settings until check passes, and fails the test
+// at testTimeout.
 func waitForSettings(t *testing.T, client *Client, check func(Settings) bool) Settings {
 	t.Helper()
 	deadline := time.After(testTimeout)
@@ -402,9 +381,8 @@ func waitForSettings(t *testing.T, client *Client, check func(Settings) bool) Se
 	}
 }
 
-// Every word a builder accepts must round-trip through the parser's
-// word function, so a value the operator sends is one the status can
-// re-assert.
+// Every word that a command builder accepts parses back to the same
+// word, so the status reports a value in the form the spec declares it.
 func TestEveryBuilderWordRoundTripsThroughItsParser(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -449,8 +427,8 @@ func TestEveryBuilderWordRoundTripsThroughItsParser(t *testing.T) {
 	}
 }
 
-// A word the receiver sends that no builder accepts leaves its field
-// nil rather than hold a value the operator could never send back.
+// A word that no command builder accepts leaves its field nil, so the
+// status never reports a value that the operator could not send back.
 func TestAnUnknownWordLeavesItsFieldUnset(t *testing.T) {
 	cases := []struct {
 		line string
@@ -471,17 +449,14 @@ func TestAnUnknownWordLeavesItsFieldUnset(t *testing.T) {
 	}
 }
 
-// Mutating a returned Settings must not change the next Settings():
-// every pointer and the channel map are deep-copied.
 func TestSettingsDoesNotAliasTheLiveState(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		harness := startHarness(t)
 		drainQueries(t, harness)
 
-		// The fake reports SVOFF, PSDRC OFF, and PSLFE 00, so these are
-		// live pointers a shallow copy would share. Wait until they have
-		// folded, since they arrive after the queries the test drains.
+		// The fake reports SVOFF, PSDRC OFF, and PSLFE 00 after the
+		// queries that drainQueries reads, so wait until they are set.
 		waitForSettings(t, harness.client, func(s Settings) bool {
 			return s.System.VideoSelect != nil && s.Audio.DRC != nil && s.Audio.LFE != nil
 		})
@@ -509,9 +484,8 @@ func TestApplySettingsOnADisconnectedClientReportsTheFailure(t *testing.T) {
 	}
 }
 
-// Every field without a round-trip test travels the apply path: it
-// reaches the wire, the receiver echoes it, and the folded state reads
-// it back, all against the receiver rather than the code's own builder.
+// Each case writes out the expected command instead of calling the
+// command builder, so a wrong builder fails here.
 func TestApplySettingsRoundTripsEveryRemainingField(t *testing.T) {
 	cases := []struct {
 		name    string
