@@ -1,25 +1,28 @@
 #!/usr/bin/env bash
-# Drill 03. Two pods in two namespaces read one repository. A push to
-# the forge reaches both inside pull. With the forge stopped, a volume
-# with offline: allowStale publishes the node's copy and one with
-# offline: refuse stays refused. The forge's return clears both.
+# Drill 03. Two pods in two namespaces mount one repository inline.
+#
+# A push to the forge reaches both pods within the pull interval. With
+# the forge stopped, a volume with offline: allowStale mounts the node's
+# copy, and a volume with offline: refuse fails to mount until the
+# forge returns.
 set -euo pipefail
 
 LAB="$(cd "$(dirname "$0")/.." && pwd)"
 KUBECTL="$LAB/kubectl"
 
-# The forge is on the host. The guest reaches it at the user-mode
-# network's gateway.
+# The forge runs on the host. The guest reaches it at the gateway
+# address of QEMU's user-mode network.
 GUEST_FORGE="git://10.0.2.2:9418/hello.git"
 HOST_FORGE="$LAB/forge/hello.git"
 
-# The reader image is one the lab already pulled, so no drill waits on
-# a registry.
+# An image that the lab has already pulled, so the drill does not wait
+# on a registry.
 IMAGE="${IMAGE:-debian:sid-slim}"
 DRIVER_NAMESPACE="${DRIVER_NAMESPACE:-liken-system}"
 PULL="${PULL:-15s}"
 
-# Every wait in this drill has a deadline, in seconds.
+# The deadline of each wait, in seconds, and the timeout of each kubectl
+# request.
 READY_DEADLINE="${READY_DEADLINE:-240}"
 REACH_DEADLINE="${REACH_DEADLINE:-180}"
 EVENT_DEADLINE="${EVENT_DEADLINE:-180}"
@@ -32,8 +35,8 @@ kube() {
 	"$KUBECTL" --request-timeout="$CALL_TIMEOUT" "$@"
 }
 
-# cleanup leaves the cluster and the host as the drill found them,
-# however the drill ends.
+# Runs on exit, whether the drill passes or fails, and starts the forge
+# again in case the drill stopped it.
 cleanup() {
 	local status=$?
 	for namespace in "${NAMESPACES[@]}"; do
@@ -45,8 +48,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# reader makes a pod in its own namespace with one inline volume of the
-# repository.
+# Creates a namespace with a pod that mounts the repository as an
+# inline CSI volume.
 reader() {
 	local namespace="$1" offline="$2"
 	kube create namespace "$namespace" >/dev/null
@@ -80,15 +83,14 @@ spec:
 YAML
 }
 
-# greeting is what the pod reads out of the mounted checkout, or nothing.
+# Prints the greeting that the pod reads from the mounted checkout, or
+# nothing when it cannot read one.
 greeting() {
 	local namespace="$1"
 	kube exec -n "$namespace" reader -- \
 		sh -c 'sed -n "s/^greeting: //p" /hello/greeting.yaml' 2>/dev/null || true
 }
 
-# wait_for_greeting waits until the pod reads the greeting, or fails on
-# the deadline.
 wait_for_greeting() {
 	local namespace="$1" want="$2" deadline
 	deadline=$(($(date +%s) + REACH_DEADLINE))
@@ -104,8 +106,6 @@ wait_for_greeting() {
 	return 1
 }
 
-# wait_for_event waits until the pod's events carry the reason, or fails
-# on the deadline.
 wait_for_event() {
 	local namespace="$1" pattern="$2" deadline
 	deadline=$(($(date +%s) + EVENT_DEADLINE))
@@ -168,7 +168,7 @@ make -C "$LAB" forge
 kube wait -n drill-03-refuse --for=condition=Ready pod/reader --timeout="${READY_DEADLINE}s"
 wait_for_greeting drill-03-refuse goodbye
 
-# kubectl top needs a metrics server. A lab without one still passes.
+# kubectl top needs a metrics server. The drill passes without one.
 echo "drill 03: the plugin's memory"
 kube top pod -n "$DRIVER_NAMESPACE" -l app=git-csi-driver-node ||
 	echo "drill 03: no metrics server in this lab"

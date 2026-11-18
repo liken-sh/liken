@@ -52,16 +52,16 @@ func TestParseCredentialsReadsTheSecret(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			parsed, err := parseCredentials(c.secrets)
 			if err != nil {
-				t.Fatalf("parseCredentials: %v", err)
+				t.Fatalf("parsing the credentials: %v", err)
 			}
 			switch {
 			case c.want == nil && parsed != nil:
-				t.Fatalf("parseCredentials answered %+v, want none", *parsed)
+				t.Fatalf("parseCredentials returned %+v, want none", *parsed)
 			case c.want == nil:
 			case parsed == nil:
-				t.Fatalf("parseCredentials answered none, want %+v", *c.want)
+				t.Fatalf("parseCredentials returned none, want %+v", *c.want)
 			case *parsed != *c.want:
-				t.Errorf("parseCredentials answered %+v, want %+v", *parsed, *c.want)
+				t.Errorf("parseCredentials returned %+v, want %+v", *parsed, *c.want)
 			}
 		})
 	}
@@ -70,11 +70,11 @@ func TestParseCredentialsReadsTheSecret(t *testing.T) {
 func TestParseCredentialsRefusesASecretWithNoCredential(t *testing.T) {
 	_, err := parseCredentials(map[string]string{"password": "hunter2"})
 	if got := status.Code(err); got != codes.InvalidArgument {
-		t.Fatalf("parseCredentials answered %v, want %v", got, codes.InvalidArgument)
+		t.Fatalf("parseCredentials returned the code %v, want %v", got, codes.InvalidArgument)
 	}
-	want := "nodePublishSecretRef: the Secret carries no ssh-privatekey and no token"
+	want := "nodePublishSecretRef: the Secret has neither ssh-privatekey nor token"
 	if got := status.Convert(err).Message(); got != want {
-		t.Errorf("parseCredentials said %q, want %q", got, want)
+		t.Errorf("parseCredentials message is %q, want %q", got, want)
 	}
 }
 
@@ -83,43 +83,43 @@ func TestUseWritesNothingWithoutASecret(t *testing.T) {
 	var none *credentials
 	env, remove, err := none.use(dir)
 	if err != nil {
-		t.Fatalf("use: %v", err)
+		t.Fatalf("writing the credential files: %v", err)
 	}
 	remove()
 	if len(env) != 0 {
-		t.Errorf("use answered %v, want no environment", env)
+		t.Errorf("use returned the environment %v, want none", env)
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("reading %s: %v", dir, err)
 	}
 	if len(entries) != 0 {
-		t.Errorf("use wrote %v", entries)
+		t.Errorf("use wrote %v, want no files", entries)
 	}
 }
 
 func TestUseWritesThePrivateKeyForTheCallAlone(t *testing.T) {
 	dir := t.TempDir()
-	holder := &credentials{privateKey: "KEY", knownHosts: "HOSTS", username: defaultUsername}
-	env, remove, err := holder.use(dir)
+	supplied := &credentials{privateKey: "KEY", knownHosts: "HOSTS", username: defaultUsername}
+	env, remove, err := supplied.use(dir)
 	if err != nil {
-		t.Fatalf("use: %v", err)
+		t.Fatalf("writing the credential files: %v", err)
 	}
 
 	key := filepath.Join(dir, privateKeyFile)
 	info, err := os.Stat(key)
 	if err != nil {
-		t.Fatalf("the key is not there: %v", err)
+		t.Fatalf("reading the key file: %v", err)
 	}
 	if info.Mode().Perm() != 0o600 {
 		t.Errorf("the key is %v, want 0600", info.Mode().Perm())
 	}
 	if content, err := os.ReadFile(key); err != nil || string(content) != "KEY\n" {
-		t.Errorf("the key holds %q (%v), want %q", content, err, "KEY\n")
+		t.Errorf("the key has %q (%v), want %q", content, err, "KEY\n")
 	}
 	hosts := filepath.Join(dir, knownHostsFile)
 	if content, err := os.ReadFile(hosts); err != nil || string(content) != "HOSTS" {
-		t.Errorf("the hosts file holds %q (%v), want %q", content, err, "HOSTS")
+		t.Errorf("the hosts file has %q (%v), want %q", content, err, "HOSTS")
 	}
 
 	command := environmentValue(env, "GIT_SSH_COMMAND")
@@ -132,16 +132,16 @@ func TestUseWritesThePrivateKeyForTheCallAlone(t *testing.T) {
 	remove()
 	for _, path := range []string{key, hosts} {
 		if _, err := os.Stat(path); err == nil {
-			t.Errorf("%s outlived the call", path)
+			t.Errorf("%s remains after the call, want it removed", path)
 		}
 	}
 }
 
-func TestUseAcceptsANewHostWhenTheSecretNamesNone(t *testing.T) {
-	holder := &credentials{privateKey: "KEY", username: defaultUsername}
-	env, remove, err := holder.use(t.TempDir())
+func TestUseAcceptsANewHostWhenTheSecretHasNoKnownHosts(t *testing.T) {
+	supplied := &credentials{privateKey: "KEY", username: defaultUsername}
+	env, remove, err := supplied.use(t.TempDir())
 	if err != nil {
-		t.Fatalf("use: %v", err)
+		t.Fatalf("writing the credential files: %v", err)
 	}
 	defer remove()
 	if command := environmentValue(env, "GIT_SSH_COMMAND"); !strings.Contains(command, "StrictHostKeyChecking=accept-new") {
@@ -151,16 +151,16 @@ func TestUseAcceptsANewHostWhenTheSecretNamesNone(t *testing.T) {
 
 func TestUseWritesACredentialHelperForAToken(t *testing.T) {
 	dir := t.TempDir()
-	holder := &credentials{token: "TOKEN", username: "reader"}
-	env, remove, err := holder.use(dir)
+	supplied := &credentials{token: "TOKEN", username: "reader"}
+	env, remove, err := supplied.use(dir)
 	if err != nil {
-		t.Fatalf("use: %v", err)
+		t.Fatalf("writing the credential files: %v", err)
 	}
 
 	helper := filepath.Join(dir, helperFile)
 	info, err := os.Stat(helper)
 	if err != nil {
-		t.Fatalf("the helper is not there: %v", err)
+		t.Fatalf("reading the helper file: %v", err)
 	}
 	if info.Mode().Perm() != 0o700 {
 		t.Errorf("the helper is %v, want 0700", info.Mode().Perm())
@@ -169,19 +169,19 @@ func TestUseWritesACredentialHelperForAToken(t *testing.T) {
 		t.Errorf("the environment names %q as the helper, want %q", got, helper)
 	}
 
-	answer, err := exec.Command(helper, "get").Output()
+	response, err := exec.Command(helper, "get").Output()
 	if err != nil {
 		t.Fatalf("running the helper: %v", err)
 	}
-	if got := string(answer); got != "username=reader\npassword=TOKEN\n" {
-		t.Errorf("the helper answered %q", got)
+	if got := string(response); got != "username=reader\npassword=TOKEN\n" {
+		t.Errorf("the helper printed %q, want the username and the token", got)
 	}
 
-	// git itself has to read the helper out of the environment, not only
-	// the test.
+	// Check that git itself reads the helper from the environment, and not
+	// only the test code.
 	output, err := runGit(t.Context(), dir, env, "config", "--get", "credential.helper")
 	if err != nil {
-		t.Fatalf("runGit: %v", err)
+		t.Fatalf("running git with the helper: %v", err)
 	}
 	if got := trimLine(output.stdout); got != helper {
 		t.Errorf("git read the helper as %q, want %q", got, helper)
@@ -189,27 +189,27 @@ func TestUseWritesACredentialHelperForAToken(t *testing.T) {
 
 	remove()
 	if _, err := os.Stat(helper); err == nil {
-		t.Error("the helper outlived the call")
+		t.Error("the helper remains after the call, want it removed")
 	}
 }
 
 func TestUseReportsFilesItCannotWrite(t *testing.T) {
 	gone := filepath.Join(t.TempDir(), "gone")
 	for _, c := range []struct {
-		name   string
-		holder *credentials
+		name     string
+		supplied *credentials
 	}{
-		{name: "a private key", holder: &credentials{privateKey: "KEY"}},
-		{name: "a token", holder: &credentials{token: "TOKEN", username: "reader"}},
+		{name: "a private key", supplied: &credentials{privateKey: "KEY"}},
+		{name: "a token", supplied: &credentials{token: "TOKEN", username: "reader"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			env, remove, err := c.holder.use(gone)
+			env, remove, err := c.supplied.use(gone)
 			if err == nil {
-				t.Fatal("use answered no error under a directory that is not there")
+				t.Fatal("use returned no error under a directory that is not there, want one")
 			}
 			remove()
 			if env != nil {
-				t.Errorf("use answered %v, want no environment", env)
+				t.Errorf("use returned the environment %v, want none", env)
 			}
 		})
 	}
@@ -220,27 +220,27 @@ func TestUseRemovesTheKeyWhenTheHostsFileFails(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, knownHostsFile), 0o755); err != nil {
 		t.Fatalf("making the directory in the way: %v", err)
 	}
-	holder := &credentials{privateKey: "KEY"}
-	if _, _, err := holder.use(dir); err == nil {
-		t.Fatal("use answered no error with a directory where the hosts file goes")
+	supplied := &credentials{privateKey: "KEY"}
+	if _, _, err := supplied.use(dir); err == nil {
+		t.Fatal("use returned no error with a directory where the hosts file goes, want one")
 	}
 	if _, err := os.Stat(filepath.Join(dir, privateKeyFile)); err == nil {
-		t.Error("the key stayed after the call failed")
+		t.Error("the key remains after the call returned an error, want it removed")
 	}
 }
 
-func TestQuoteCarriesAQuoteThroughAShell(t *testing.T) {
+func TestQuoteKeepsAQuoteThroughAShell(t *testing.T) {
 	if got := quote("it's"); got != `'it'\''s'` {
-		t.Errorf("quote answered %q", got)
+		t.Errorf("quote(%q) = %q, want %q", "it's", got, `'it'\''s'`)
 	}
 }
 
 func TestEndWithNewlineAddsOneOnlyWhenItIsMissing(t *testing.T) {
 	if got := endWithNewline("KEY\n"); got != "KEY\n" {
-		t.Errorf("endWithNewline answered %q", got)
+		t.Errorf("endWithNewline(%q) = %q, want %q", "KEY\n", got, "KEY\n")
 	}
 	if got := endWithNewline("KEY"); got != "KEY\n" {
-		t.Errorf("endWithNewline answered %q", got)
+		t.Errorf("endWithNewline(%q) = %q, want %q", "KEY", got, "KEY\n")
 	}
 }
 
@@ -258,27 +258,27 @@ func environmentValue(env []string, name string) string {
 // it skips the SSH tests and says why.
 const sshdPath = "/usr/sbin/sshd"
 
-// sshdOrSkip starts an sshd of the test's own on a free port, serving
-// the user who runs the test, and returns the port and the credentials
-// that reach it.
+// sshdOrSkip starts an sshd on a free port that accepts the user who
+// runs the test. It returns the port and the credentials that
+// authenticate to it.
 func sshdOrSkip(t *testing.T, dir string) (int, *credentials) {
 	t.Helper()
 	if _, err := os.Stat(sshdPath); err != nil {
-		t.Skipf("the ssh path is not drilled here: %s is not on this machine", sshdPath)
+		t.Skipf("sshd did not start, so the ssh test is skipped: %s is not on this machine", sshdPath)
 	}
 	if _, err := exec.LookPath("ssh-keygen"); err != nil {
-		t.Skip("the ssh path is not drilled here: ssh-keygen is not on this machine")
+		t.Skip("sshd did not start, so the ssh test is skipped: ssh-keygen is not on this machine")
 	}
 	who, err := user.Current()
 	if err != nil {
-		t.Skipf("the ssh path is not drilled here: %v", err)
+		t.Skipf("sshd did not start, so the ssh test is skipped: %v", err)
 	}
 
 	for _, name := range []string{"host_key", "user_key"} {
 		keygen := exec.Command("ssh-keygen", "-q", "-t", "ed25519", "-N", "",
 			"-f", filepath.Join(dir, name))
 		if out, err := keygen.CombinedOutput(); err != nil {
-			t.Skipf("the ssh path is not drilled here: ssh-keygen: %v: %s", err, out)
+			t.Skipf("sshd did not start, so the ssh test is skipped: ssh-keygen: %v: %s", err, out)
 		}
 	}
 	port := freePort(t)
@@ -292,28 +292,29 @@ func sshdOrSkip(t *testing.T, dir string) (int, *credentials) {
 		"PasswordAuthentication no",
 		"KbdInteractiveAuthentication no",
 		"AllowUsers " + who.Username,
-		// VERBOSE is the level of the line that says sshd listens.
+		// VERBOSE makes sshd log the line that says it is listening.
 		"LogLevel VERBOSE",
 		"",
 	}, "\n")
 	writeFiles(t, dir, map[string]string{"sshd_config": config})
 
-	// sshd runs in the foreground and logs to its stderr, so the test
-	// holds the process itself and reads the line that says it listens.
+	// sshd runs in the foreground and logs to stderr, so the test starts
+	// the process itself and reads its stderr for the line that says it is
+	// listening.
 	daemon := exec.Command(sshdPath, "-D", "-e", "-f", filepath.Join(dir, "sshd_config"))
-	said, err := daemon.StderrPipe()
+	stderr, err := daemon.StderrPipe()
 	if err != nil {
-		t.Fatalf("taking sshd's stderr: %v", err)
+		t.Fatalf("opening the stderr pipe of sshd: %v", err)
 	}
 	if err := daemon.Start(); err != nil {
-		t.Skipf("the ssh path is not drilled here: sshd: %v", err)
+		t.Skipf("sshd did not start, so the ssh test is skipped: sshd: %v", err)
 	}
 	t.Cleanup(func() {
 		_ = daemon.Process.Kill()
 		_ = daemon.Wait()
 	})
-	if out, listening := sshdListens(daemon, said); !listening {
-		t.Skipf("the ssh path is not drilled here: sshd: %s", out)
+	if out, listening := sshdListens(daemon, stderr); !listening {
+		t.Skipf("sshd did not start, so the ssh test is skipped: sshd: %s", out)
 	}
 
 	key, err := os.ReadFile(filepath.Join(dir, "user_key"))
@@ -335,28 +336,30 @@ func freePort(t *testing.T) int {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("taking a port: %v", err)
+		t.Fatalf("choosing a port for sshd: %v", err)
 	}
 	defer listener.Close()
 	return listener.Addr().(*net.TCPAddr).Port
 }
 
-// sshdTimeout bounds the wait for sshd to listen. It is not a wait:
-// the wait returns at the line that says sshd listens.
+// sshdTimeout kills sshd when it has not logged that it is listening by
+// then. A test continues as soon as the line appears and does not wait
+// for the timeout.
 const sshdTimeout = 30 * time.Second
 
-// sshdListens reads sshd's log until the line that says it listens,
-// and answers false with what sshd said when it ends first. The rest
-// of the log is read and dropped, so sshd never blocks on a full pipe.
-func sshdListens(daemon *exec.Cmd, said io.Reader) (string, bool) {
+// sshdListens reads sshd's log until the line that says it is
+// listening. It returns false and the log so far when sshd exits first.
+// It reads and discards the rest of the log, so sshd never blocks on a
+// full pipe.
+func sshdListens(daemon *exec.Cmd, stderr io.Reader) (string, bool) {
 	bound := time.AfterFunc(sshdTimeout, func() { _ = daemon.Process.Kill() })
 	defer bound.Stop()
-	lines := bufio.NewScanner(said)
+	lines := bufio.NewScanner(stderr)
 	out := []string{}
 	for lines.Scan() {
 		out = append(out, lines.Text())
 		if strings.Contains(lines.Text(), "Server listening on") {
-			go func() { _, _ = io.Copy(io.Discard, said) }()
+			go func() { _, _ = io.Copy(io.Discard, stderr) }()
 			return "", true
 		}
 	}
@@ -365,30 +368,30 @@ func sshdListens(daemon *exec.Cmd, said io.Reader) (string, bool) {
 
 func TestAPrivateKeyFetchesOverSSH(t *testing.T) {
 	dir := t.TempDir()
-	port, holder := sshdOrSkip(t, dir)
+	port, supplied := sshdOrSkip(t, dir)
 
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 	who, err := user.Current()
 	if err != nil {
-		t.Fatalf("user.Current: %v", err)
+		t.Fatalf("reading the current user: %v", err)
 	}
 	url := fmt.Sprintf("ssh://%s@127.0.0.1:%d%s", who.Username, port, source)
 
 	_, repo := storeWith(t, url)
 	if err := repo.create(t.Context()); err != nil {
-		t.Fatalf("create: %v", err)
+		t.Fatalf("creating the repository: %v", err)
 	}
-	env, remove, err := holder.use(dir)
+	env, remove, err := supplied.use(dir)
 	if err != nil {
-		t.Fatalf("use: %v", err)
+		t.Fatalf("writing the credential files: %v", err)
 	}
 	defer remove()
 
 	if err := repo.fetch(t.Context(), env, "main", 0); err != nil {
-		t.Fatalf("fetch over ssh: %v", err)
+		t.Fatalf("fetching over ssh: %v", err)
 	}
 	if _, err := repo.resolve(t.Context(), "main"); err != nil {
-		t.Errorf("resolve after a fetch over ssh: %v", err)
+		t.Errorf("resolving the ref after a fetch over ssh: %v", err)
 	}
 }
 
@@ -399,16 +402,16 @@ func TestAFetchOverSSHFailsWithoutTheKey(t *testing.T) {
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 	who, err := user.Current()
 	if err != nil {
-		t.Fatalf("user.Current: %v", err)
+		t.Fatalf("reading the current user: %v", err)
 	}
 	url := fmt.Sprintf("ssh://%s@127.0.0.1:%d%s", who.Username, port, source)
 
 	_, repo := storeWith(t, url)
 	if err := repo.create(t.Context()); err != nil {
-		t.Fatalf("create: %v", err)
+		t.Fatalf("creating the repository: %v", err)
 	}
 	err = repo.fetch(t.Context(), nil, "main", 0)
 	if err == nil || !strings.Contains(err.Error(), "Host key verification failed") {
-		t.Errorf("a fetch with no credentials answered %v, want ssh's refusal in it", err)
+		t.Errorf("a fetch with no credentials returned %v, want the host key refusal of ssh in it", err)
 	}
 }

@@ -1,7 +1,8 @@
 package main
 
-// verify.go checks a push against the Secret the path names. Each forge
-// signs its request differently, so the request header selects the check.
+// verify.go checks a webhook push request against the Secret that the
+// request path names. Forges sign requests in different ways, so the
+// header that is present selects the check.
 
 import (
 	"crypto/hmac"
@@ -12,8 +13,8 @@ import (
 	"strings"
 )
 
-// The header each forge signs with. GitLab sends the configured string
-// itself. The other three send an HMAC of the body.
+// The signature header of each forge. GitLab sends the configured
+// secret itself, and the others send an HMAC-SHA256 of the body.
 const (
 	githubSignatureHeader  = "X-Hub-Signature-256"
 	gitlabTokenHeader      = "X-Gitlab-Token"
@@ -21,7 +22,7 @@ const (
 	forgejoSignatureHeader = "X-Forgejo-Signature"
 )
 
-// The forge name used in log lines.
+// The forge names that verify returns for log lines.
 const (
 	forgeGitHub  = "github"
 	forgeGitLab  = "gitlab"
@@ -29,12 +30,11 @@ const (
 	forgeForgejo = "forgejo"
 )
 
-// githubPrefix is what GitHub writes before the hex digest.
 const githubPrefix = "sha256="
 
-// verify names the forge whose header the request contains, and reports
-// whether the request verified against the secret. A request with none
-// of the four headers names no forge and verifies against nothing.
+// verify returns the forge whose header the request has, and whether
+// the request passed that forge's check. A request with none of these
+// headers returns an empty forge and false.
 func verify(header http.Header, body []byte, secret string) (string, bool) {
 	switch {
 	case header.Get(githubSignatureHeader) != "":
@@ -51,16 +51,16 @@ func verify(header http.Header, body []byte, secret string) (string, bool) {
 	return "", false
 }
 
-// signedBody compares the hex HMAC-SHA256 of the body in constant time,
-// so the time an answer takes says nothing about the secret.
+// signedBody compares the signature with the hex HMAC-SHA256 of the
+// body in constant time, so the response time does not leak the
+// expected signature.
 func signedBody(signature string, body []byte, secret string) bool {
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write(body)
 	return hmac.Equal([]byte(signature), []byte(hex.EncodeToString(mac.Sum(nil))))
 }
 
-// sameString compares two strings in constant time, which is what
-// GitLab's plain token needs.
+// sameString compares GitLab's token with the secret in constant time.
 func sameString(sent, secret string) bool {
 	return subtle.ConstantTimeCompare([]byte(sent), []byte(secret)) == 1
 }

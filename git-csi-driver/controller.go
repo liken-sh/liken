@@ -1,7 +1,8 @@
 package main
 
-// controller.go implements the CSI Controller service, which validates a
-// class and answers the delete of a volume. It changes no volume itself.
+// controller.go implements the CSI Controller service. It checks the
+// parameters of a new VolumeAttributesClass and accepts DeleteVolume. It
+// does not create or change a volume.
 
 import (
 	"context"
@@ -14,43 +15,39 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-// controller is the CSI Controller service. Validating a class reads
-// nothing but the class, so this service holds no state. The webhook
-// listener beside it holds the client and the Secret cache.
+// controller keeps no state, because it checks only the parameters in
+// each request. The webhook in the same process has the cluster client
+// and the Secret cache.
 type controller struct {
 	csi.UnimplementedControllerServer
 }
 
-// clusterClient reads the controller's own credentials from the pod it
-// runs in. A controller that finds no cluster still validates a class
-// and says once that it serves no webhook, because the sidecar does
-// not need the webhook.
+// clusterClient builds the webhook's client from the configuration that
+// load returns. When there is no cluster, it logs a warning and returns
+// nil, and the webhook then cannot read Secrets. The CSI Controller
+// service does not use this client.
 func clusterClient(logger *slog.Logger, load func() (*rest.Config, error)) kubernetes.Interface {
 	config, err := load()
 	if err != nil {
-		logger.Warn("no webhook", "reason", err)
+		logger.Warn("The webhook has no cluster client and cannot read Secrets", "error", err)
 		return nil
 	}
 	client, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		logger.Warn("no webhook", "reason", err)
+		logger.Warn("The webhook has no cluster client and cannot read Secrets", "error", err)
 		return nil
 	}
 	return client
 }
 
-// controllerNode exists because the external-resizer sidecar calls
-// NodeGetCapabilities on the controller's socket to check whether the
-// plugin expands volumes. A socket without a Node service returns
-// Unimplemented, which the sidecar treats as a failure and exits on.
-// This Node service declares no capability, so nothing expands and the
-// controller claims no node of its own.
+// controllerNode serves the Node service on the controller's socket,
+// because the external-resizer sidecar calls NodeGetCapabilities there
+// and exits when the call returns Unimplemented. It declares no
+// capability.
 type controllerNode struct {
 	csi.UnimplementedNodeServer
 }
 
-// NodeGetCapabilities declares no capability. The controller expands no
-// volume and stages nothing on the node where it runs.
 func (controllerNode) NodeGetCapabilities(
 	context.Context, *csi.NodeGetCapabilitiesRequest,
 ) (*csi.NodeGetCapabilitiesResponse, error) {
@@ -60,14 +57,14 @@ func (controllerNode) NodeGetCapabilities(
 func (controllerNode) NodeGetInfo(
 	context.Context, *csi.NodeGetInfoRequest,
 ) (*csi.NodeGetInfoResponse, error) {
-	return nil, unimplemented("NodeGetInfo", "the controller plugin holds no node's volumes")
+	return nil, unimplemented("NodeGetInfo", "the controller plugin mounts no volumes")
 }
 
-// ControllerGetCapabilities declares MODIFY_VOLUME, for a class
-// change, and CREATE_DELETE_VOLUME, because csi-provisioner deletes a
-// released PersistentVolume of the Delete reclaim policy only for a
-// driver that declares it. The driver attaches nothing, and CreateVolume
-// refuses every call.
+// ControllerGetCapabilities declares MODIFY_VOLUME, for a change of
+// VolumeAttributesClass, and CREATE_DELETE_VOLUME, because csi-provisioner
+// deletes a released PersistentVolume whose reclaim policy is Delete
+// only for a driver that declares it. CreateVolume still refuses every
+// call.
 func (c *controller) ControllerGetCapabilities(
 	context.Context, *csi.ControllerGetCapabilitiesRequest,
 ) (*csi.ControllerGetCapabilitiesResponse, error) {
@@ -75,20 +72,19 @@ func (c *controller) ControllerGetCapabilities(
 		csi.ControllerServiceCapability_RPC_MODIFY_VOLUME,
 		csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME,
 	}
-	answer := &csi.ControllerGetCapabilitiesResponse{}
-	for _, one := range declared {
-		answer.Capabilities = append(answer.Capabilities, &csi.ControllerServiceCapability{
+	response := &csi.ControllerGetCapabilitiesResponse{}
+	for _, capability := range declared {
+		response.Capabilities = append(response.Capabilities, &csi.ControllerServiceCapability{
 			Type: &csi.ControllerServiceCapability_Rpc{
-				Rpc: &csi.ControllerServiceCapability_RPC{Type: one},
+				Rpc: &csi.ControllerServiceCapability_RPC{Type: capability},
 			},
 		})
 	}
-	return answer, nil
+	return response, nil
 }
 
-// ControllerModifyVolume validates the class and changes nothing
-// itself, because the node plugin reads the class the claim ends up
-// with.
+// ControllerModifyVolume checks the new class's parameters and changes
+// nothing, because each node plugin reads the class from the claim.
 func (c *controller) ControllerModifyVolume(
 	_ context.Context, request *csi.ControllerModifyVolumeRequest,
 ) (*csi.ControllerModifyVolumeResponse, error) {
@@ -98,28 +94,26 @@ func (c *controller) ControllerModifyVolume(
 	return &csi.ControllerModifyVolumeResponse{}, nil
 }
 
-// CreateVolume refuses, because a person writes each PersistentVolume
-// with the repository it mounts. csi-provisioner calls it only for a
-// claim whose StorageClass names this driver, and posts the refusal on
-// that claim.
+// CreateVolume refuses every call, because a person writes each
+// PersistentVolume with the repository it mounts. csi-provisioner calls
+// it only for a claim whose StorageClass uses this driver, and posts the
+// error as an Event on that claim.
 func (c *controller) CreateVolume(
 	context.Context, *csi.CreateVolumeRequest,
 ) (*csi.CreateVolumeResponse, error) {
 	return nil, unimplemented("CreateVolume",
-		"never; a person writes each PersistentVolume of the driver")
+		"a person writes each PersistentVolume of the driver, so the controller creates none")
 }
 
-// DeleteVolume answers success for every volume, and removes nothing
-// here. The data of a git volume is the work tree on each node that
-// staged it, and each node plugin removes its own when it reads that
-// the PersistentVolume is deleted. The remote repository is never the
-// volume's to delete. csi-provisioner deletes the PersistentVolume once
-// this call answers.
+// DeleteVolume succeeds and deletes nothing, so that csi-provisioner
+// then deletes the PersistentVolume. Each node plugin removes its own
+// work tree when its watch receives the PersistentVolume's deletion.
+// The driver never deletes the remote repository.
 func (c *controller) DeleteVolume(
 	_ context.Context, request *csi.DeleteVolumeRequest,
 ) (*csi.DeleteVolumeResponse, error) {
 	if request.GetVolumeId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "volume_id: the call names no volume")
+		return nil, status.Error(codes.InvalidArgument, "volume_id is empty")
 	}
 	return &csi.DeleteVolumeResponse{}, nil
 }
@@ -127,66 +121,66 @@ func (c *controller) DeleteVolume(
 func (c *controller) ControllerPublishVolume(
 	context.Context, *csi.ControllerPublishVolumeRequest,
 ) (*csi.ControllerPublishVolumeResponse, error) {
-	return nil, unimplemented("ControllerPublishVolume", "never; there is no attach step")
+	return nil, unimplemented("ControllerPublishVolume", "the driver has no attach step")
 }
 
 func (c *controller) ControllerUnpublishVolume(
 	context.Context, *csi.ControllerUnpublishVolumeRequest,
 ) (*csi.ControllerUnpublishVolumeResponse, error) {
-	return nil, unimplemented("ControllerUnpublishVolume", "never; there is no attach step")
+	return nil, unimplemented("ControllerUnpublishVolume", "the driver has no attach step")
 }
 
 func (c *controller) ValidateVolumeCapabilities(
 	context.Context, *csi.ValidateVolumeCapabilitiesRequest,
 ) (*csi.ValidateVolumeCapabilitiesResponse, error) {
 	return nil, unimplemented("ValidateVolumeCapabilities",
-		"never; the node plugin refuses a mode it cannot serve at stage")
+		"the node plugin refuses a mode it cannot serve when it stages the volume")
 }
 
 func (c *controller) ListVolumes(
 	context.Context, *csi.ListVolumesRequest,
 ) (*csi.ListVolumesResponse, error) {
-	return nil, unimplemented("ListVolumes", "never; the controller holds no volume")
+	return nil, unimplemented("ListVolumes", "the controller keeps no volume")
 }
 
 func (c *controller) GetCapacity(
 	context.Context, *csi.GetCapacityRequest,
 ) (*csi.GetCapacityResponse, error) {
-	return nil, unimplemented("GetCapacity", "never; a git volume has no capacity")
+	return nil, unimplemented("GetCapacity", "a git volume has no capacity")
 }
 
 func (c *controller) CreateSnapshot(
 	context.Context, *csi.CreateSnapshotRequest,
 ) (*csi.CreateSnapshotResponse, error) {
-	return nil, unimplemented("CreateSnapshot", "never; the repository is the history")
+	return nil, unimplemented("CreateSnapshot", "git keeps the history in the repository, so the driver takes no snapshots")
 }
 
 func (c *controller) DeleteSnapshot(
 	context.Context, *csi.DeleteSnapshotRequest,
 ) (*csi.DeleteSnapshotResponse, error) {
-	return nil, unimplemented("DeleteSnapshot", "never; the repository is the history")
+	return nil, unimplemented("DeleteSnapshot", "git keeps the history in the repository, so the driver takes no snapshots")
 }
 
 func (c *controller) ListSnapshots(
 	context.Context, *csi.ListSnapshotsRequest,
 ) (*csi.ListSnapshotsResponse, error) {
-	return nil, unimplemented("ListSnapshots", "never; the repository is the history")
+	return nil, unimplemented("ListSnapshots", "git keeps the history in the repository, so the driver takes no snapshots")
 }
 
 func (c *controller) GetSnapshot(
 	context.Context, *csi.GetSnapshotRequest,
 ) (*csi.GetSnapshotResponse, error) {
-	return nil, unimplemented("GetSnapshot", "never; the repository is the history")
+	return nil, unimplemented("GetSnapshot", "git keeps the history in the repository, so the driver takes no snapshots")
 }
 
 func (c *controller) ControllerExpandVolume(
 	context.Context, *csi.ControllerExpandVolumeRequest,
 ) (*csi.ControllerExpandVolumeResponse, error) {
-	return nil, unimplemented("ControllerExpandVolume", "never; git volumes have no size")
+	return nil, unimplemented("ControllerExpandVolume", "a git volume has no size")
 }
 
 func (c *controller) ControllerGetVolume(
 	context.Context, *csi.ControllerGetVolumeRequest,
 ) (*csi.ControllerGetVolumeResponse, error) {
-	return nil, unimplemented("ControllerGetVolume", "never; the controller holds no volume")
+	return nil, unimplemented("ControllerGetVolume", "the controller keeps no volume")
 }

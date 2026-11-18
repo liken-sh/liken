@@ -1,8 +1,7 @@
 package main
 
-// metrics.go defines the gauges the node plugin exports and the
-// listener that serves them. Every fact the driver reports reaches the
-// Events, the driver's log, and these numbers.
+// metrics.go defines the Prometheus metrics of the controller and node
+// plugins, and the HTTP listener that serves them.
 
 import (
 	"context"
@@ -16,39 +15,33 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// metricsDeadline bounds a request's headers and the listener's stop.
+// metricsDeadline is how long a client may take to send its request
+// headers to the metrics listener.
 const metricsDeadline = 30 * time.Second
 
-// metricsComponent is this repository's name in liken's shared
-// Prometheus contract, milestone 65 of the liken repository. Every
-// process the driver runs reports the same name, so a panel that reads
-// every component in the cluster finds this one under one label value.
+// metricsComponent is the value of the component label on
+// liken_build_info. Every liken component reports that metric, so a
+// dashboard can list the releases of all of them with one query.
 const metricsComponent = "git-csi-driver"
 
-// callBuckets bound the histograms the driver keeps of its own work: a
-// CSI call the kubelet answers in a moment, and a fetch that can run to
-// gitDeadline. One scale covers both, because a slow call and a slow
-// fetch are the same question on the same graph.
+// callBuckets are the histogram buckets, in seconds, for CSI calls and
+// for fetches, so both can share a graph. They run from a fast CSI call
+// up to gitDeadline, the longest a fetch can take.
 var callBuckets = []float64{.01, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60}
 
-// metrics is the registry the listener serves and the gauges the driver
-// updates for each volume.
+// metrics is the registry that the listener serves, and the metrics that
+// the driver updates as it works. Most are per volume.
 type metrics struct {
 	registry *prometheus.Registry
 
-	// Layer 1 of liken's contract: the release this process runs, read
-	// on every component's own graph with the same name.
 	buildInfo *prometheus.GaugeVec
-	// Layer 2: the CSI calls are this driver's reconcile loop, so kind
-	// is the call's own name, the way the kubelet names it. A watch
-	// the API closes and the node reopens is counted here too, though
-	// only the node plugin ever watches anything.
-	callDuration  *prometheus.HistogramVec
-	callErrors    *prometheus.CounterVec
+	// A CSI call does the work that a reconcile does in the other liken
+	// components, so it is reported under the same metric names, with
+	// the call's name, such as NodePublishVolume, as kind.
+	callDuration *prometheus.HistogramVec
+	callErrors   *prometheus.CounterVec
+	// Only the node plugin registers these. See registerNodeFacts.
 	watchRestarts *prometheus.CounterVec
-	// Layer 3, plan 13: the forge behind a fetch, and the store's own
-	// growth. Only the node plugin fetches or holds a store, so only
-	// its registry reports nonzero values for these metrics.
 	volumes       *volumesCollector
 	fetchDuration *prometheus.HistogramVec
 	fetchFailures *prometheus.CounterVec
@@ -56,84 +49,65 @@ type metrics struct {
 
 	armed   *prometheus.GaugeVec
 	pending *prometheus.GaugeVec
-	// What an armed volume adds: the commits the remote does not
-	// hold, when a push last worked, how many failed, and how many files
-	// the size guard left out.
+	// Push state of an armed volume: commits the remote does not have,
+	// the time of the last successful push, failed pushes, and files
+	// left out of the last commit because of the size limit.
 	unpushed     *prometheus.GaugeVec
 	lastPush     *prometheus.GaugeVec
 	pushFailures *prometheus.CounterVec
 	skipped      *prometheus.GaugeVec
-	// What a diverged volume adds: the side branch it pushes to
-	// instead of its ref.
+	// Whether the volume pushes to a side branch instead of its ref.
 	diverged *prometheus.GaugeVec
-	// What every volume reports, including read-only volumes:
-	// whether the volume's report says something is wrong with it.
+	// Whether the health report of the volume shows a problem. Every
+	// volume has one, including read-only volumes.
 	abnormal *prometheus.GaugeVec
-	// The pulls a demand started, per volume.
+	// Pulls that a pull-on-demand request started, per volume.
 	demandedPulls *prometheus.CounterVec
-	// What the controller's webhook listener answered, and the
-	// PersistentVolumes a verified push marked. The controller alone
-	// registers these two.
+	// Only the controller registers these. See registerWebhook.
 	webhookRequests *prometheus.CounterVec
 	webhookMarks    prometheus.Counter
 }
 
-// metricLabels name the claim a person would look up.
+// metricLabels identify the claim of a volume.
 var metricLabels = []string{"namespace", "claim"}
 
-// webhookLabels name what the listener answered: accepted,
+// webhookLabels label a webhook request by its result: accepted,
 // unauthenticated, malformed, or failed.
 var webhookLabels = []string{"result"}
 
-// healthLabels name the volume a person would look up: the
-// namespace that holds it, and the CSI volume id, which is the one name
-// a read-only volume has.
+// healthLabels identify a volume by its namespace and its CSI volume id.
+// A read-only volume has no claim of its own, so the volume id is the
+// only name it has.
 var healthLabels = []string{"namespace", "volume"}
 
-// buildInfoLabels name the release, in the shape every component in
-// the cluster uses.
 var buildInfoLabels = []string{"component", "version"}
 
-// callLabels name the CSI operation a call or a fetch failure belongs
-// to. The watch restarts take the same label, holding the kind of
-// resource the watch reads instead of a call's name.
+// callLabels name the CSI call that a measurement belongs to. For
+// watchRestarts, kind holds the resource kind that the watch reads.
 var callLabels = []string{"kind"}
 
-// repoLabels name the repository a fetch or a mount belongs to, by the
-// short name the store already gives it. store.go says why that name
-// carries no URL and no credential.
+// repoLabels label a fetch or a mount with the short name that the
+// store gives its repository. store.go says why that name has no URL and
+// no credential.
 var repoLabels = []string{"repo"}
 
 func newMetrics() *metrics {
-	readings := &metrics{
+	registry := &metrics{
 		registry: prometheus.NewRegistry(),
-		// Layer 1: one gauge, the same name every component in the
-		// cluster reports, so a release shows on one graph everywhere.
 		buildInfo: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{Name: "liken_build_info", Help: "The release this process runs. Always 1."}, buildInfoLabels),
-		// Layer 2: the CSI calls are this driver's reconcile loop. A
-		// call that changes nothing still counts as one duration
-		// reading, the way milestone 65 counts a reconcile that changes
-		// nothing as one run.
 		callDuration: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{Name: "git_csi_reconcile_duration_seconds",
 				Help: "Time until a CSI call returns a response.", Buckets: callBuckets}, callLabels),
 		callErrors: prometheus.NewCounterVec(
 			prometheus.CounterOpts{Name: "git_csi_reconcile_errors_total",
-				Help: "CSI calls that answered an error."}, callLabels),
-		// Every watch the node opens again after one ended is one
-		// restart, by the kind it watches. client-go's reflector asks
-		// the API server to close each watch after 5 to 10 minutes, so
-		// a healthy watch restarts 6 to 12 times an hour. A rate well
-		// above that is a watch that fails. Only the node plugin watches
-		// PersistentVolumes and claims, so only its registry moves this
-		// past zero.
+				Help: "CSI calls that returned an error."}, callLabels),
+		// client-go's reflector asks the API server to close each
+		// watch after 5 to 10 minutes, so a healthy watch restarts 6
+		// to 12 times an hour. A higher rate means that watches fail.
 		watchRestarts: prometheus.NewCounterVec(
 			prometheus.CounterOpts{Name: "git_csi_watch_restarts_total",
 				Help: "Watches the driver opened again after one ended."}, callLabels),
-		// Layer 3, plan 13: what the plan's table asks for. volumes is
-		// wired to the node's own map of what is mounted in
-		// registerNodeFacts, once a node exists to read.
 		fetchDuration: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{Name: "git_csi_fetch_duration_seconds",
 				Help: "How long a fetch from the forge took.", Buckets: callBuckets}, repoLabels),
@@ -142,89 +116,68 @@ func newMetrics() *metrics {
 				Help: "Fetches from the forge that failed."}, repoLabels),
 		storeBytes: prometheus.NewGauge(
 			prometheus.GaugeOpts{Name: "git_csi_store_bytes",
-				Help: "Bytes the store's bare repositories and work trees hold on this node."}),
-		// One when a class of this driver arms the volume, zero when none
-		// does.
+				Help: "Bytes that the bare repositories and work trees of the store use on this node."}),
 		armed: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{Name: "git_csi_armed", Help: "One when a class of the driver arms the volume, zero when none does."}, metricLabels),
-		// How many paths the last scan found that the driver has not
-		// committed.
 		pending: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{Name: "git_csi_pending_paths", Help: "Paths the last scan found that the driver has not committed."}, metricLabels),
-		// Commits the work tree holds that the remote does not.
 		unpushed: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{Name: "git_csi_unpushed_commits", Help: "Commits the work tree holds that the remote does not."}, metricLabels),
-		// When a push to the remote last worked.
+			prometheus.GaugeOpts{Name: "git_csi_unpushed_commits", Help: "Commits in the work tree that the remote does not have."}, metricLabels),
 		lastPush: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{Name: "git_csi_last_push_timestamp_seconds", Help: "When a push to the remote last worked, in seconds since the epoch."}, metricLabels),
-		// Pushes that failed since the driver started.
 		pushFailures: prometheus.NewCounterVec(
 			prometheus.CounterOpts{Name: "git_csi_push_failures_total", Help: "Pushes to the remote that failed."}, metricLabels),
-		// Files the last commit left out, over the size guard.
 		skipped: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{Name: "git_csi_skipped_files", Help: "Files the last commit left out, over commit.maxFileSize."}, metricLabels),
-		// One while the volume pushes to its side branch, zero
-		// while it pushes to its ref.
 		diverged: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{Name: "git_csi_diverged", Help: "One while the volume pushes to its side branch, zero while it pushes to its ref."}, metricLabels),
-		// One while the volume's report says something is wrong
-		// with it, zero while it says nothing is.
 		abnormal: prometheus.NewGaugeVec(
-			prometheus.GaugeOpts{Name: "git_csi_volume_abnormal", Help: "One while the volume's report says something is wrong with it, zero while it says nothing is."}, healthLabels),
-		// Pulls a demand on the volume's PersistentVolume started. A
-		// counter, because it never goes down.
+			prometheus.GaugeOpts{Name: "git_csi_volume_abnormal", Help: "One while the health report of the volume shows a problem, zero while it shows none."}, healthLabels),
 		demandedPulls: prometheus.NewCounterVec(
-			prometheus.CounterOpts{Name: "git_csi_demanded_pulls_total", Help: "Pulls a demand on the volume's PersistentVolume started."}, healthLabels),
-		// The webhook requests the controller answered, by what it
-		// answered.
+			prometheus.CounterOpts{Name: "git_csi_demanded_pulls_total", Help: "Pulls that the pull annotation on the volume's PersistentVolume started."}, healthLabels),
 		webhookRequests: prometheus.NewCounterVec(
-			prometheus.CounterOpts{Name: "git_csi_webhook_requests_total", Help: "Webhook requests the controller answered, by what it answered."}, webhookLabels),
-		// The PersistentVolumes a verified push marked.
+			prometheus.CounterOpts{Name: "git_csi_webhook_requests_total", Help: "Webhook requests that the controller received, by result."}, webhookLabels),
 		webhookMarks: prometheus.NewCounter(
-			prometheus.CounterOpts{Name: "git_csi_webhook_marked_total", Help: "PersistentVolumes a verified push marked."}),
+			prometheus.CounterOpts{Name: "git_csi_webhook_marked_total", Help: "PersistentVolumes that a verified push annotated for a pull."}),
 	}
-	readings.registry.MustRegister(
-		// Layer 1 is the runtime's own numbers beside the build info.
+	registry.registry.MustRegister(
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
-		// Layers 1 and 2 answer for every CSI call either plugin
-		// serves, so both the controller and the node register them.
-		readings.buildInfo, readings.callDuration, readings.callErrors,
-		readings.armed, readings.pending,
-		readings.unpushed, readings.lastPush, readings.pushFailures, readings.skipped,
-		readings.diverged, readings.abnormal, readings.demandedPulls)
-	return readings
+		// The controller registers the per-volume gauges too, but
+		// only the node plugin sets them, because the controller
+		// mounts no volume.
+		registry.buildInfo, registry.callDuration, registry.callErrors,
+		registry.armed, registry.pending,
+		registry.unpushed, registry.lastPush, registry.pushFailures, registry.skipped,
+		registry.diverged, registry.abnormal, registry.demandedPulls)
+	return registry
 }
 
-// registerWebhook puts the listener's two counters on the registry. A
-// node plugin answers no webhook, so its registry carries neither.
+// registerWebhook registers the webhook counters. Only the controller
+// serves the webhook, so only the controller calls it.
 func (m *metrics) registerWebhook() {
 	m.registry.MustRegister(m.webhookRequests, m.webhookMarks)
 }
 
-// registerNodeFacts puts plan 13's layer 3 on the registry, and the
-// watch restart counter beside it: the facts only the node plugin has,
-// because only it fetches, holds a store, or watches
-// PersistentVolumes and claims. byRepo answers what volumesByRepo reads live off
-// the node, so git_csi_volumes never drifts from its own accounting of
-// what is mounted.
+// registerNodeFacts registers the metrics of the node plugin, which is
+// the only plugin that fetches, keeps a store, and watches
+// PersistentVolumes and claims. byRepo returns the number of mounted
+// volumes for each repository.
 func (m *metrics) registerNodeFacts(byRepo func() map[string]float64) {
 	m.volumes = newVolumesCollector(byRepo)
 	m.registry.MustRegister(m.watchRestarts, m.fetchDuration, m.fetchFailures,
 		m.storeBytes, m.volumes)
 }
 
-// reportBuildInfo sets liken_build_info to 1 under this process's
-// version, the moment it is known: the Dockerfile's -ldflags, or dev
-// for a build outside it.
+// reportBuildInfo sets liken_build_info to 1 for this process's version.
+// The Dockerfile sets the version with -ldflags. A build without it
+// reports dev.
 func (m *metrics) reportBuildInfo(version string) {
 	m.buildInfo.WithLabelValues(metricsComponent, version).Set(1)
 }
 
-// observeCall records one CSI call's duration under the operation's own
-// name, and counts it again on git_csi_reconcile_errors_total when it
-// answered one. The CSI calls are this driver's reconcile loop, so a
-// call that changes nothing still counts as one duration reading.
+// observeCall records the duration of one CSI call, and counts the call
+// in git_csi_reconcile_errors_total when it returned an error.
 func (m *metrics) observeCall(kind string, duration time.Duration, failed bool) {
 	m.callDuration.WithLabelValues(kind).Observe(duration.Seconds())
 	if failed {
@@ -232,8 +185,6 @@ func (m *metrics) observeCall(kind string, duration time.Duration, failed bool) 
 	}
 }
 
-// watchRestarted counts one watch the driver opened again after one
-// ended.
 func (m *metrics) watchRestarted(kind string) {
 	if m == nil {
 		return
@@ -241,10 +192,9 @@ func (m *metrics) watchRestarted(kind string) {
 	m.watchRestarts.WithLabelValues(kind).Inc()
 }
 
-// timeFetch runs one git fetch and records how long it took under the
-// repository's short name. A fetch that answers an error also counts on
-// git_csi_fetch_failures_total, so a forge that is slow and a forge that
-// is down read differently on the graph.
+// timeFetch runs one git fetch and records its duration. A failed fetch
+// is also counted in git_csi_fetch_failures_total, so a graph can tell a
+// slow forge from a forge that is down.
 func (m *metrics) timeFetch(repo string, run func() error) error {
 	start := time.Now()
 	err := run()
@@ -258,22 +208,19 @@ func (m *metrics) timeFetch(repo string, run func() error) error {
 	return err
 }
 
-// setStoreBytes records the store's size, in the store's own bytes and
-// not a share of the filesystem it lives on. sweep.go says why the
-// measurement runs on the sweep's own timer instead of the scrape's.
+// setStoreBytes records the bytes that the store itself uses, not the
+// size of the filesystem that holds it. sweep.go says why the sweep
+// measures it and not each scrape.
 func (m *metrics) setStoreBytes(bytes int64) {
 	m.storeBytes.Set(float64(bytes))
 }
 
-// volumesCollector reports git_csi_volumes{repo} from the node's own map
-// of what is mounted, read fresh at every scrape rather than kept on a
-// gauge of its own. A gauge a publish sets and an unpublish clears would
-// drift the moment either one took a path the other did not expect; a
-// map the node already keeps for NodeGetVolumeStats cannot.
+// volumesCollector reports git_csi_volumes by counting the node's map of
+// mounted volumes on each scrape. A gauge that publish incremented and
+// unpublish decremented would drift whenever either returned early on an
+// error.
 type volumesCollector struct {
-	desc *prometheus.Desc
-	// byRepo counts the volumes the node holds, keyed by the
-	// repository each one follows.
+	desc   *prometheus.Desc
 	byRepo func() map[string]float64
 }
 
@@ -296,102 +243,97 @@ func (c *volumesCollector) Collect(collected chan<- prometheus.Metric) {
 	}
 }
 
-// record puts the volume's state on the gauges. A volume whose claim
-// the driver has not found has no labels, so it reports nothing yet.
-func (m *metrics) record(held *volume) {
-	claim, armed, pending := held.reading()
+// record sets the gauges of a volume. The gauges are labeled by claim,
+// so record does nothing until the driver has found the volume's claim.
+func (m *metrics) record(vol *volume) {
+	claim, armed, pending := vol.gaugeValues()
 	if m == nil || claim.name == "" {
 		return
 	}
 	m.armed.WithLabelValues(claim.namespace, claim.name).Set(gauge(armed))
 	m.pending.WithLabelValues(claim.namespace, claim.name).Set(float64(pending))
 
-	unpushed, lastPush, skipped := held.pushing()
+	unpushed, lastPush, skipped := vol.pushing()
 	m.unpushed.WithLabelValues(claim.namespace, claim.name).Set(float64(unpushed))
 	m.skipped.WithLabelValues(claim.namespace, claim.name).Set(float64(skipped))
-	m.diverged.WithLabelValues(claim.namespace, claim.name).Set(gauge(held.divergedFrom() != ""))
-	// A volume that has never pushed reports no time, because zero
-	// would read as a push in 1970.
+	m.diverged.WithLabelValues(claim.namespace, claim.name).Set(gauge(vol.sideBranch() != ""))
+	// A volume that has never pushed gets no series, because a value of
+	// zero would read as a push in 1970.
 	if !lastPush.IsZero() {
 		m.lastPush.WithLabelValues(claim.namespace, claim.name).
 			Set(float64(lastPush.Unix()))
 	}
 }
 
-// health puts the volume's report on the gauge. A volume whose
-// namespace the driver has not found has no labels, so it reports
-// nothing yet, the way the claim-labeled gauges do.
-func (m *metrics) health(held *volume, abnormal bool) {
-	namespace := held.namespace()
+// health sets git_csi_volume_abnormal for a volume. It does nothing
+// until the driver has found the volume's namespace.
+func (m *metrics) health(vol *volume, abnormal bool) {
+	namespace := vol.namespace()
 	if m == nil || namespace == "" {
 		return
 	}
-	m.abnormal.WithLabelValues(namespace, held.id).Set(gauge(abnormal))
+	m.abnormal.WithLabelValues(namespace, vol.id).Set(gauge(abnormal))
 }
 
-// noteHealth records the volume's health on the gauge and writes
-// one line the moment it turns, at Warn when the report says something
-// is wrong and at Info when it says nothing is. The Events carry the
-// same facts, so nothing here posts one.
-func (n *node) noteHealth(ctx context.Context, held *volume) {
-	abnormal, message, moved := held.takeHealth()
-	n.readings.health(held, abnormal)
+// recordHealth sets the health gauge of the volume. When the health has
+// changed, it logs once, at Warn when the volume became abnormal and at
+// Info when it became normal. It posts no Event.
+func (n *node) recordHealth(ctx context.Context, vol *volume) {
+	abnormal, message, moved := vol.healthChange()
+	n.metrics.health(vol, abnormal)
 	if !moved {
 		return
 	}
 	if abnormal {
-		n.logger.WarnContext(ctx, "the volume is abnormal",
-			"volume", held.id, "report", message)
+		n.logger.WarnContext(ctx, "The volume became abnormal",
+			"volume", vol.id, "report", message)
 		return
 	}
-	n.logger.InfoContext(ctx, "the volume is normal",
-		"volume", held.id, "report", message)
+	n.logger.InfoContext(ctx, "The volume became normal",
+		"volume", vol.id, "report", message)
 }
 
-// demanded counts one pull a demand started, under the labels
-// git_csi_volume_abnormal takes.
-func (m *metrics) demanded(held *volume) {
-	namespace := held.namespace()
+// demanded counts one pull that a pull-on-demand request started. It
+// uses the labels of git_csi_volume_abnormal.
+func (m *metrics) demanded(vol *volume) {
+	namespace := vol.namespace()
 	if m == nil || namespace == "" {
 		return
 	}
-	m.demandedPulls.WithLabelValues(namespace, held.id).Inc()
+	m.demandedPulls.WithLabelValues(namespace, vol.id).Inc()
 }
 
-// webhookAnswered counts one request by what the listener answered.
-func (m *metrics) webhookAnswered(result string) {
+func (m *metrics) countWebhookRequest(result string) {
 	m.webhookRequests.WithLabelValues(result).Inc()
 }
 
-// webhookMarked counts the PersistentVolumes one verified push marked,
-// which is zero when the push matched nothing.
+// webhookMarked adds the number of PersistentVolumes that one verified
+// push marked, which is zero when the push matched no volume.
 func (m *metrics) webhookMarked(count int) {
 	m.webhookMarks.Add(float64(count))
 }
 
-// pushFailed counts one failure, which is the only reading a
-// volume reports that never goes down.
-func (m *metrics) pushFailed(held *volume) {
-	claim, _, _ := held.reading()
+func (m *metrics) pushFailed(vol *volume) {
+	claim, _, _ := vol.gaugeValues()
 	if m == nil || claim.name == "" {
 		return
 	}
 	m.pushFailures.WithLabelValues(claim.namespace, claim.name).Inc()
 }
 
-// forget takes a volume off the gauges, so a claim that is gone stops
+// forget deletes the series of a volume, so a volume that is gone stops
 // being reported.
-func (m *metrics) forget(held *volume) {
+func (m *metrics) forget(vol *volume) {
 	if m == nil {
 		return
 	}
-	// The health gauge is labeled by the volume, so it goes
-	// whether or not the driver ever found a claim for it.
-	if namespace := held.namespace(); namespace != "" {
-		m.abnormal.DeleteLabelValues(namespace, held.id)
-		m.demandedPulls.DeleteLabelValues(namespace, held.id)
+	// These series are labeled by volume id, so they can exist for a
+	// volume that has no claim.
+	if namespace := vol.namespace(); namespace != "" {
+		m.abnormal.DeleteLabelValues(namespace, vol.id)
+		m.demandedPulls.DeleteLabelValues(namespace, vol.id)
 	}
-	claim, _, _ := held.reading()
+	claim, _, _ := vol.gaugeValues()
 	if claim.name == "" {
 		return
 	}
@@ -404,7 +346,6 @@ func (m *metrics) forget(held *volume) {
 	m.diverged.DeleteLabelValues(claim.namespace, claim.name)
 }
 
-// gauge carries a state as one or zero.
 func gauge(state bool) float64 {
 	if state {
 		return 1
@@ -412,8 +353,9 @@ func gauge(state bool) float64 {
 	return 0
 }
 
-// listen opens the address --metrics names. An empty address serves no
-// metrics, which is what a driver under test does.
+// listen opens the TCP listener for the address in --metrics. For an
+// empty address it returns no listener, which tests use to serve no
+// metrics.
 func (m *metrics) listen(address string) (net.Listener, error) {
 	if address == "" {
 		return nil, nil
@@ -421,17 +363,15 @@ func (m *metrics) listen(address string) (net.Listener, error) {
 	return net.Listen("tcp", address)
 }
 
-// handler serves the registry at /metrics and nothing else.
 func (m *metrics) handler() http.Handler {
 	served := http.NewServeMux()
 	served.Handle("/metrics", promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{}))
 	return served
 }
 
-// serveMetrics answers on the listener until the run ends.
-func serveMetrics(ctx context.Context, listener net.Listener, readings *metrics, logger *slog.Logger) {
+func serveMetrics(ctx context.Context, listener net.Listener, registry *metrics, logger *slog.Logger) {
 	serving := &http.Server{
-		Handler:           readings.handler(),
+		Handler:           registry.handler(),
 		ReadHeaderTimeout: metricsDeadline,
 	}
 	go func() {
@@ -439,6 +379,6 @@ func serveMetrics(ctx context.Context, listener net.Listener, readings *metrics,
 		_ = serving.Close()
 	}()
 	if err := serving.Serve(listener); err != nil && ctx.Err() == nil {
-		logger.WarnContext(ctx, "the metrics listener stopped", "error", err)
+		logger.WarnContext(ctx, "The metrics listener stopped", "error", err)
 	}
 }

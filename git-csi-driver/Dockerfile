@@ -1,75 +1,62 @@
-# The image is a closure on scratch. The driver runs git and ssh and
-# reads one CA bundle, and git-closure.sh collects those and the files
-# they open into a tree the final stage copies whole. What the driver
-# never runs is not in the image.
+# The final image is built from scratch. The driver runs git and ssh and
+# reads a CA bundle, so git-closure.sh copies those programs and the
+# files they load into one tree, and the last stage copies that tree.
+# Nothing else from Debian is in the image.
 
 FROM golang AS build
-# proxy.golang.org sometimes drops a module download partway through
-# the stream. With the default comma, `go` tries the origin only when
-# the proxy answers 404 or 410, so a dropped stream fails the build.
-# With a pipe, `go` fetches the module from its origin after any proxy
-# error, with the git that this image includes. `GOSUMDB` keeps its
-# default, so the checksum database still verifies a module that `go`
-# fetched from its origin.
+# proxy.golang.org sometimes drops a module download partway through.
+# With the default comma, `go` falls back to the origin only when the
+# proxy returns 404 or 410, so a dropped download fails the build. With
+# a pipe, `go` falls back after any proxy error, using the git in this
+# builder image. `GOSUMDB` keeps its default, so the checksum database
+# still verifies a module fetched from its origin.
 ENV GOPROXY="https://proxy.golang.org|direct"
 WORKDIR /src
-# The module files come first, so a source edit reuses the cached
-# download layer.
 COPY go.mod go.sum ./
-# go.mod replaces the shared kubernetes module with ../kubernetes, and
-# the build takes that directory as a second build context named
-# kubernetes. It lands at /kubernetes, the same place relative to /src
-# that kubernetes/ has relative to this component. Its module file
-# comes first for the same reason as this module's.
+# go.mod replaces the liken kubernetes module with ../kubernetes. The
+# build receives that directory as a second build context named
+# kubernetes and copies it to /kubernetes, so ../kubernetes from /src
+# resolves as it does in the repository.
 COPY --from=kubernetes go.mod go.sum /kubernetes/
 RUN go mod download
 COPY --from=kubernetes . /kubernetes/
 COPY *.go ./
-# The version reaches the binary through -ldflags, so a running driver
-# names the release it was built from.
+# -ldflags below sets main.version, so the driver can report the
+# release it was built from.
 ARG VERSION=dev
-# CGO_ENABLED=0 with -trimpath is liken's own build discipline: a
-# static binary with no paths from the build machine in it.
-#
-# -s -w drops the symbol table and the DWARF data, which are a large
-# part of the binary, and every node that runs the driver pulls the
-# binary. To see that part, build the package once with -ldflags
-# "-s -w" and once without, and compare the sizes of the two files.
-# The driver reports its version through --version and its log, and a
-# panic's stack trace keeps its function names without the symbol
-# table, so nothing this project reads is lost.
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /git-csi-driver .
-# The license files of the Go standard library and of each module that
-# the binary links. notices/go.sh says why the image needs them.
+# notices/go.sh collects the license notices of the Go standard library
+# and of each module the binary links, and explains why the image needs
+# them.
 COPY --from=notices go.sh /
 RUN CGO_ENABLED=0 sh /go.sh /notices .
 
-# The closure installs from the same Debian image and the same
-# snapshot date as the base images. snapshot.sh and closure.sh, the
-# closure library, come from the vulkan directory, the build context
-# named builder, and SNAPSHOT is vulkan's version.
+# This stage installs from the same Debian image and the same snapshot
+# date as the base images. snapshot.sh and closure.sh come from the
+# `vulkan` directory, passed as the build context named builder, and
+# SNAPSHOT is vulkan's version.
 FROM debian AS closure
 ARG SNAPSHOT
 COPY --from=builder snapshot.sh snapshot.sha256 closure.sh /
-# git is the program the driver runs. openssh-client is the transport a
-# deploy key uses.
+# The driver runs git. openssh-client is the transport for a deploy key.
 RUN sh /snapshot.sh "$SNAPSHOT" \
     && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
         git \
         openssh-client \
     && rm -rf /var/lib/apt/lists/*
-# The closure script sources closure.sh, which also writes the
-# copyright file of each Debian package that the closure took files
-# from, the list of those packages and their sources, and the dpkg
-# record of each package that syft and Trivy read.
+# git-closure.sh sources closure.sh. Besides copying the files, it
+# writes the copyright file of each Debian package it took files from,
+# the list of those packages and their sources, and a dpkg record for
+# each package, which syft and Trivy read.
 COPY git-closure.sh /
 RUN sh /git-closure.sh /out
 
 FROM scratch
 COPY --from=closure /out /
-# The CA bundle that verifies an HTTPS forge is the one that the trust
-# component pins for every image of liken, with its notice.
+# The CA bundle that verifies an HTTPS forge comes from the `trust`
+# component, which pins one bundle for every liken image, with its
+# notice.
 COPY --from=trust / /
 
 COPY --from=build /git-csi-driver /git-csi-driver

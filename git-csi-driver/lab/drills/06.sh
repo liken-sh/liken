@@ -1,36 +1,38 @@
 #!/usr/bin/env bash
-# Drill 06. Divergence and restore against the host forge: a
-# conflicting push on the forge sends the volume to its side branch, a
-# merge on the forge heals it at the next stage, and a volume made again
-# on a guest installed from nothing returns the tree with its modes and
-# its empty directory.
+# Drill 06. Divergence and restore against the host forge. A
+# conflicting push to the forge makes the driver push the volume to its
+# side branch. After a person merges that branch on the forge, the next
+# stage puts the volume back on its ref and deletes the side branch,
+# which the driver reports as GitVolumeHealed. The same volume on a
+# newly installed guest restores the tree with its file modes and its
+# empty directory.
 set -euo pipefail
 
 LAB="$(cd "$(dirname "$0")/.." && pwd)"
 KUBECTL="$LAB/kubectl"
 
-# The forge is on the host, and the guest reaches it at the
-# user-mode network's gateway.
+# The forge is a git daemon on the host. 10.0.2.2 is the host as a QEMU
+# guest sees it on user-mode networking.
 GUEST_FORGE="git://10.0.2.2:9418/hello.git"
 FORGE="$LAB/forge/hello.git"
 
-# The writer image is one the lab already pulled, so no drill
-# waits on a registry.
+# The writer image is already in the lab's image store, so the drill
+# does not wait on a registry.
 IMAGE="${IMAGE:-debian:sid-slim}"
 DRIVER_NAMESPACE="${DRIVER_NAMESPACE:-liken-system}"
 NAMESPACE=drill-06
-# The store on the node keeps a work tree per handle, and the forge is
-# reseeded on every run, so a handle carries a run's own stamp. A handle
-# reused across runs would find the last run's tree and push against a
-# history the forge no longer holds.
+# The node's store keeps a work tree for each volume handle, and
+# `make repo` creates the forge's repository again on every run. A
+# handle from an earlier run would find that run's tree and push commits
+# the new repository does not have, so each handle includes the run's
+# start time.
 RUN="$(date +%s)"
 HANDLE="drill-06-$RUN"
 CLASS=drill-06
-# The side branch the driver takes is the ref and the volume's
-# handle, which is what plan 06 names.
+# The driver names a volume's side branch <ref>.<volume handle>.
 SIDE="main.$HANDLE"
 
-# Every wait in this drill has a deadline, in seconds.
+# Every wait in this drill gives up after a deadline in seconds.
 READY_DEADLINE="${READY_DEADLINE:-240}"
 ARMED_DEADLINE="${ARMED_DEADLINE:-180}"
 PUSH_DEADLINE="${PUSH_DEADLINE:-180}"
@@ -43,8 +45,6 @@ kube() {
 	"$KUBECTL" --request-timeout="$CALL_TIMEOUT" "$@"
 }
 
-# Cleanup leaves the cluster as the drill found it, however the
-# drill ends.
 cleanup() {
 	local status=$?
 	kube delete namespace "$NAMESPACE" --ignore-not-found --wait=false >/dev/null 2>&1 || true
@@ -55,13 +55,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Driver_log is what the node plugin wrote about this volume.
 driver_log() {
 	kube logs -n "$DRIVER_NAMESPACE" -l app=git-csi-driver-node -c driver --tail=400 2>/dev/null || true
 }
 
-# The driver's own metrics, read through the API server's pod
-# proxy, because the DaemonSet publishes the port and no Service.
+# driver_metrics reads the driver's metrics through the API server's pod
+# proxy, because the DaemonSet has no Service for the metrics port.
 driver_metrics() {
 	local pod
 	pod="$(kube get pods -n "$DRIVER_NAMESPACE" -l app=git-csi-driver-node \
@@ -70,8 +69,6 @@ driver_metrics() {
 	kube get --raw "/api/v1/namespaces/$DRIVER_NAMESPACE/pods/$pod:9808/proxy/metrics" 2>/dev/null || true
 }
 
-# Wait_for_metric waits until the driver's own gauges carry the
-# pattern, or fails on the deadline.
 wait_for_metric() {
 	local pattern="$1" deadline="$2" what="$3"
 	local limit
@@ -89,8 +86,6 @@ wait_for_metric() {
 	return 1
 }
 
-# Wait_for_event waits until the namespace's events carry the
-# pattern, or fails on the deadline.
 wait_for_event() {
 	local pattern="$1" deadline
 	deadline=$(($(date +%s) + EVENT_DEADLINE))
@@ -106,15 +101,15 @@ wait_for_event() {
 	return 1
 }
 
-# Wait_for_content waits until the branch on the host forge holds the
-# text in the file, which is the whole proof that a push landed.
+# wait_for_content waits until the file on the forge's branch has a line
+# equal to the text, which shows that the push arrived.
 wait_for_content() {
 	local branch="$1" path="$2" want="$3" deadline="$4"
 	local limit
 	limit=$(($(date +%s) + deadline))
 	while [ "$(date +%s)" -lt "$limit" ]; do
 		if git -C "$FORGE" show "$branch:$path" 2>/dev/null | grep -qxF "$want"; then
-			echo "drill 06: $branch holds $want in $path"
+			echo "drill 06: $branch has $want in $path"
 			return 0
 		fi
 		sleep 3
@@ -125,8 +120,8 @@ wait_for_content() {
 	return 1
 }
 
-# Wait_for_branch waits until the host forge holds the branch, or holds
-# it no longer when the second argument is "gone".
+# wait_for_branch waits until the branch is on the forge when the second
+# argument is "there", or until it is not when the argument is "gone".
 wait_for_branch() {
 	local branch="$1" state="$2" deadline="$3"
 	local limit found
@@ -139,7 +134,7 @@ wait_for_branch() {
 		fi
 		if { [ "$state" = "gone" ] && [ "$found" = "no" ]; } ||
 			{ [ "$state" = "there" ] && [ "$found" = "yes" ]; }; then
-			echo "drill 06: the forge holds $branch: $found"
+			echo "drill 06: the forge has $branch: $found"
 			return 0
 		fi
 		sleep 3
@@ -150,15 +145,15 @@ wait_for_branch() {
 	return 1
 }
 
-# Forge_clone is a working copy of the host forge, which is where a
-# person on the forge commits and merges.
+# forge_clone clones the forge, so the drill can commit and merge as a
+# person would.
 forge_clone() {
 	rm -rf "$LAB/guests/drill-06-clone"
 	git clone --quiet "$FORGE" "$LAB/guests/drill-06-clone"
 }
 
-# Class writes the policy the claim names. The quiesce is short, so the
-# drill waits seconds for a commit and not minutes.
+# class creates the VolumeAttributesClass that the claim names. Its
+# push.quiesce is short, so a commit happens within seconds.
 class() {
 	kube apply -f - >/dev/null <<YAML
 apiVersion: storage.k8s.io/v1
@@ -174,8 +169,8 @@ parameters:
 YAML
 }
 
-# Volume writes a PersistentVolume against the host forge, and a claim on
-# it that names the class.
+# volume creates a PersistentVolume on the host forge's repository and a
+# claim that binds it and names the class.
 volume() {
 	kube apply -f - >/dev/null <<YAML
 apiVersion: v1
@@ -186,7 +181,8 @@ spec:
   capacity: {storage: 1Gi}
   accessModes: [ReadWriteOncePod]
   persistentVolumeReclaimPolicy: Retain
-  # VolumeAttributesClassName must match the claim's, or the binder refuses the pair
+  # The binder binds a claim to a volume only when both set the same
+  # volumeAttributesClassName.
   volumeAttributesClassName: $CLASS
   csi:
     driver: git.liken.sh
@@ -209,8 +205,8 @@ spec:
 YAML
 }
 
-# Writer holds the volume open, so a drill can write into the tree with
-# kubectl exec.
+# writer runs a pod that mounts the claim and sleeps, so the drill can
+# write into the volume with kubectl exec.
 writer() {
 	kube apply -n "$NAMESPACE" -f - >/dev/null <<YAML
 apiVersion: v1
@@ -271,21 +267,21 @@ echo "drill 06: the pod writes again and the driver's push is rejected"
 kube exec -n "$NAMESPACE" writer -- sh -c 'cd /config && echo pod-two > one.yaml'
 kube delete -n "$NAMESPACE" pod/writer --timeout="${READY_DEADLINE}s"
 
-echo "drill 06: the volume takes its side branch"
+echo "drill 06: the volume diverges to its side branch"
 wait_for_branch "$SIDE" there "$PUSH_DEADLINE"
 wait_for_content "$SIDE" one.yaml pod-two "$PUSH_DEADLINE"
 if git -C "$FORGE" show main:one.yaml | grep -qxF pod-two; then
-	echo "drill 06: main holds the pod's work, and the rejection must have kept it off" >&2
+	echo "drill 06: main has the pod's work, which the rejected push should have kept off main" >&2
 	exit 1
 fi
-echo "drill 06: main still holds the forge's change"
+echo "drill 06: main still has the forge's change"
 wait_for_event "GitVolumeDiverged" || true
 
 echo "drill 06: the volume is diverged in all three places"
 writer
 wait_for_metric "git_csi_diverged\{claim=\"config\",namespace=\"$NAMESPACE\"\} 1" \
 	"$PUSH_DEADLINE" "the volume diverged"
-driver_log | grep -E "diverged" | tail -n 5
+driver_log | grep -iE "diverged" | tail -n 5
 
 echo "drill 06: a person merges the side branch on the forge"
 forge_clone
@@ -301,19 +297,19 @@ forge_clone
 )
 git -C "$FORGE" log --oneline -3 main
 
-echo "drill 06: the next stage heals the volume"
+echo "drill 06: the next stage returns the volume to main"
 kube delete -n "$NAMESPACE" pod/writer --timeout="${READY_DEADLINE}s"
 writer
 wait_for_branch "$SIDE" gone "$HEAL_DEADLINE"
 wait_for_metric "git_csi_diverged\{claim=\"config\",namespace=\"$NAMESPACE\"\} 0" \
-	"$HEAL_DEADLINE" "the volume healed"
+	"$HEAL_DEADLINE" "the volume on main again"
 wait_for_event "GitVolumeHealed" || true
 found="$(kube exec -n "$NAMESPACE" writer -- cat /config/one.yaml | tr -d '[:space:]')"
 if [ "$found" != "pod-two" ]; then
-	echo "drill 06: the healed tree holds $found in one.yaml, want pod-two" >&2
+	echo "drill 06: the tree on main has $found in one.yaml, want pod-two" >&2
 	exit 1
 fi
-echo "drill 06: the healed tree is on main and holds the merged work"
+echo "drill 06: the tree is on main and has the merged work"
 
 echo "drill 06: the pod writes on main again"
 kube exec -n "$NAMESPACE" writer -- sh -c 'cd /config && echo pod-three > three.yaml'
@@ -325,8 +321,8 @@ git -C "$FORGE" show refs/git-csi/metadata:metadata
 echo "drill 06: a guest installed from nothing"
 kube delete -n "$NAMESPACE" pod/writer --timeout="${READY_DEADLINE}s"
 make -C "$LAB" stop
-# Clean removes guests/ alone, so the forge and its history stay
-# on the host and the restore has something to restore from.
+# This cleans guests/ only, so the forge and its history stay on the
+# host for the restore to read.
 make -C "$LAB" clean
 timeout "$INSTALL_DEADLINE" make -C "$LAB" install
 make -C "$LAB" run
@@ -343,10 +339,10 @@ volume
 writer
 kube exec -n "$NAMESPACE" writer -- ls -la /config
 
-echo "drill 06: the restored tree holds what the last push carried"
+echo "drill 06: the restored tree has what the last push sent"
 found="$(kube exec -n "$NAMESPACE" writer -- cat /config/three.yaml | tr -d '[:space:]')"
 if [ "$found" != "pod-three" ]; then
-	echo "drill 06: the restored tree holds $found in three.yaml, want pod-three" >&2
+	echo "drill 06: the restored tree has $found in three.yaml, want pod-three" >&2
 	exit 1
 fi
 found="$(kube exec -n "$NAMESPACE" writer -- stat -c '%a' /config/secret.yaml | tr -d '[:space:]')"
@@ -358,6 +354,6 @@ if ! kube exec -n "$NAMESPACE" writer -- test -d /config/storage; then
 	echo "drill 06: the empty directory did not return to the restored volume" >&2
 	exit 1
 fi
-echo "drill 06: the restored tree holds secret.yaml at 600 and the empty directory"
+echo "drill 06: the restored tree has secret.yaml at 600 and the empty directory"
 
 echo "drill 06: passed"

@@ -6,11 +6,11 @@ title: git-csi-driver
 
 `git-csi-driver` mounts a git repository as a Kubernetes volume on a
 [`liken`](https://liken.sh/docs/) cluster. The pod sees a plain
-directory. A read-only volume follows its branch or tag as it moves.
-On a writeable volume, the driver commits what the application writes
-and pushes it to the repository.
+directory. The driver pulls new commits of the branch or tag into a
+read-only volume. On a writeable volume, it commits what the
+application writes and pushes it to the repository.
 
-It fits two kinds of use:
+The driver fits these uses:
 
 - **Data that a repository already holds**, such as a tree of YAML, a
   set of templates, or a static site. Any pod in any namespace can
@@ -19,9 +19,9 @@ It fits two kinds of use:
 - **Application configuration.** Many self-hosted applications keep
   their configuration as text files in one directory and edit it from
   their own user interface. On this driver that directory is a
-  repository, so every change has history. A new claim on the same
-  repository starts from the last configuration that the driver
-  pushed, so you can restore it.
+  repository, so every change has history. To restore the
+  configuration, create a new claim on the same repository, and the
+  application starts from the last push.
 
 Start here:
 
@@ -31,7 +31,7 @@ Start here:
 * [Give many applications one repository](/docs/guides/one-repository-many-apps/),
   one directory each.
 
-The driver defines no custom resources. A `PersistentVolume` names the
+The driver defines no custom resources. A `PersistentVolume` sets the
 repository, a `VolumeAttributesClass` sets when the driver commits and
 pushes, and a `PersistentVolumeClaim` binds the two. A read-only
 volume needs no class, and an inline one needs only the `csi` block in

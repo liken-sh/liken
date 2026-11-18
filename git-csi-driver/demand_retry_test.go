@@ -12,35 +12,34 @@ import (
 
 func TestAVolumeUnstagedWhileItsDemandWaitsLeavesNoSeries(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, _ := testNode(t, io.Discard)
-		answering.demandMin = 300 * time.Millisecond
+		n, _ := testNode(t, io.Discard)
+		n.demandMin = 300 * time.Millisecond
 		url := fileURL(repositoryWithACommit(t, map[string]string{"a.txt": "one"}))
-		// A second volume of the same URL keeps the loop running after the
-		// unstage.
-		keeper := demandedVolume(t, answering, "keeper", url, "on-demand")
-		claimedVolume(t, answering, "franchises")
-		staged, _ := stagedReadOnly(t, answering, "franchises", url, map[string]string{"pull": "on-demand"})
+		// A second volume with the same URL keeps the loop running after
+		// the unstage.
+		keeper := demandedVolume(t, n, "keeper", url, "on-demand")
+		claimedVolume(t, n, "franchises")
+		staged, _ := stagedReadOnly(t, n, "franchises", url, map[string]string{"pull": "on-demand"})
 
-		// The first demand pulls at once. The next ones wait out the
-		// interval, and the unstage comes while they wait.
-		answering.demands.read(t.Context(), annotated(csiVolume("keeper", driverName), demandAt(0)))
+		// The first demand pulls immediately. The later demands wait for
+		// --demand-min-interval, and the unstage happens while they wait.
+		n.demands.read(t.Context(), annotated(csiVolume("keeper", driverName), demandAt(0)))
 		waitForCondition(t, keeper, ", pulled ")
-		answering.demands.read(t.Context(), annotated(csiVolume("franchises", driverName), demandAt(time.Second)))
-		answering.demands.read(t.Context(), annotated(csiVolume("keeper", driverName), demandAt(time.Second)))
-		if _, err := answering.NodeUnstageVolume(t.Context(), &csi.NodeUnstageVolumeRequest{
+		n.demands.read(t.Context(), annotated(csiVolume("franchises", driverName), demandAt(time.Second)))
+		n.demands.read(t.Context(), annotated(csiVolume("keeper", driverName), demandAt(time.Second)))
+		if _, err := n.NodeUnstageVolume(t.Context(), &csi.NodeUnstageVolumeRequest{
 			VolumeId: "franchises", StagingTargetPath: staged.StagingTargetPath,
 		}); err != nil {
-			t.Fatalf("NodeUnstageVolume: %v", err)
+			t.Fatalf("unstaging the volume: %v", err)
 		}
-		// Two intervals pass, so every demand that waited has had its
-		// pass.
-		time.Sleep(2 * answering.demandMin)
+		// Two intervals pass, so every waiting demand has had its pass.
+		time.Sleep(2 * n.demandMin)
 		synctest.Wait()
 
-		if counted, found := demandedOf(t, answering.readings, "home", "franchises"); found {
-			t.Errorf("git_csi_demanded_pulls_total reads %v for the unstaged volume, want no series", counted)
+		if count, found := demandedOf(t, n.metrics, "home", "franchises"); found {
+			t.Errorf("git_csi_demanded_pulls_total reads %v for the unstaged volume, want no series", count)
 		}
-		if abnormal, found := abnormalOf(t, answering.readings, "home", "franchises"); found {
+		if abnormal, found := abnormalOf(t, n.metrics, "home", "franchises"); found {
 			t.Errorf("git_csi_volume_abnormal reads %v for the unstaged volume, want no series", abnormal)
 		}
 	})
@@ -48,22 +47,22 @@ func TestAVolumeUnstagedWhileItsDemandWaitsLeavesNoSeries(t *testing.T) {
 
 func TestARetryIsNotCountedAsADemandedPull(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, _ := testNode(t, io.Discard)
-		answering.demandMin = 20 * time.Millisecond
+		n, _ := testNode(t, io.Discard)
+		n.demandMin = 20 * time.Millisecond
 		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-		demandedVolume(t, answering, "franchises", fileURL(source), "on-demand")
+		demandedVolume(t, n, "franchises", fileURL(source), "on-demand")
 		if err := os.Rename(source, source+".away"); err != nil {
 			t.Fatalf("moving the remote away: %v", err)
 		}
 
-		answering.demands.read(t.Context(), annotated(csiVolume("franchises", driverName), demandAt(0)))
-		// The fetch fails, and the loop fetches again several times inside
-		// the pause.
+		n.demands.read(t.Context(), annotated(csiVolume("franchises", driverName), demandAt(0)))
+		// The fetch fails, and the loop retries several times during
+		// this sleep.
 		time.Sleep(500 * time.Millisecond)
 		synctest.Wait()
 
-		if counted, _ := demandedOf(t, answering.readings, "home", "franchises"); counted != 1 {
-			t.Errorf("one demand counted %v demanded pulls, want 1", counted)
+		if count, _ := demandedOf(t, n.metrics, "home", "franchises"); count != 1 {
+			t.Errorf("one demand counted %v demanded pulls, want 1", count)
 		}
 	})
 }
@@ -85,11 +84,10 @@ func TestTheRetryWaitIsSpreadAboveTheFloor(t *testing.T) {
 				}
 				waits[wait] = true
 			}
-			// Nodes that fail together retry at different times, so a
-			// remote that comes back is not fetched by every node at
-			// once.
+			// The waits have to vary, so nodes that failed together do
+			// not all retry at the same moment.
 			if len(waits) < 2 {
-				t.Errorf("50 waits took %d values, want them spread", len(waits))
+				t.Errorf("50 waits had %d distinct values, want them spread", len(waits))
 			}
 		})
 	}
@@ -107,8 +105,8 @@ func TestEveryRetryWaitsAtLeastTheDemandIntervalAndAtMostFiveMinutes(t *testing.
 	}
 }
 
-// detachedLoop is a loop that holds none of the volumes a test hands
-// it, the state after an unstage took them off.
+// detachedLoop returns a follower with no volumes, which is the state
+// after an unstage removed them.
 func detachedLoop() *follower {
 	return &follower{
 		node:     &node{},
@@ -121,17 +119,17 @@ func detachedLoop() *follower {
 func TestAVolumeOffTheLoopIsNeitherDemandedNorWantedAgain(t *testing.T) {
 	for _, c := range []struct {
 		name string
-		act  func(loop *follower, held *volume)
+		act  func(loop *follower, vol *volume)
 	}{
-		{name: "a demand after the unstage", act: func(loop *follower, held *volume) { loop.demand(held) }},
-		{name: "a failed fetch that ended after the unstage", act: func(loop *follower, held *volume) { loop.wantAgain(held) }},
+		{name: "a demand after the unstage", act: func(loop *follower, vol *volume) { loop.demand(vol) }},
+		{name: "a failed fetch that ended after the unstage", act: func(loop *follower, vol *volume) { loop.wantAgain(vol) }},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			loop := detachedLoop()
 			c.act(loop, &volume{id: "franchises"})
 
 			if len(loop.wanted) != 0 || len(loop.demanded) != 0 {
-				t.Errorf("the loop wants %d volumes and holds %d wakes, want none",
+				t.Errorf("the loop follows %d volumes and has %d wakes, want none",
 					len(loop.wanted), len(loop.demanded))
 			}
 		})

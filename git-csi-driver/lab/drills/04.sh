@@ -1,31 +1,35 @@
 #!/usr/bin/env bash
-# Drill 04. A writeable volume against the host forge: the pod
-# writes three files, the driver reports them pending and unarmed, a
-# claim with ReadWriteOnce is refused, the files survive the pod, and a
-# class arms the volume.
+# Drill 04. A writeable volume of a repository on the host's forge.
+#
+# A pod writes three files. The driver reports them as pending, and
+# reports the volume as unarmed because its claim names no
+# VolumeAttributesClass of the driver. A volume with ReadWriteOnce fails
+# to mount. The files survive when the pod is deleted and created
+# again. Then a VolumeAttributesClass on the claim arms the volume.
 set -euo pipefail
 
 LAB="$(cd "$(dirname "$0")/.." && pwd)"
 KUBECTL="$LAB/kubectl"
 
-# The forge is on the host, and the guest reaches it at the
-# user-mode network's gateway.
+# The forge runs on the host. The guest reaches it at the gateway
+# address of QEMU's user-mode network.
 GUEST_FORGE="git://10.0.2.2:9418/hello.git"
 
-# The writer image is one the lab already pulled, so no drill
-# waits on a registry.
+# An image that the lab has already pulled, so the drill does not wait
+# on a registry.
 IMAGE="${IMAGE:-debian:sid-slim}"
 DRIVER_NAMESPACE="${DRIVER_NAMESPACE:-liken-system}"
 NAMESPACE=drill-04
-# The store on the node keeps a work tree per handle, and the forge is
-# reseeded on every run, so a handle carries a run's own stamp. A handle
-# reused across runs would find the last run's tree and push against a
-# history the forge no longer holds.
+# The node's store keeps one work tree for each volume handle, and each
+# run creates the forge's repository again. A handle from an earlier
+# run would find that run's tree and push onto a history that the forge
+# no longer has, so every run uses a new handle.
 RUN="$(date +%s)"
 HANDLE="drill-04-$RUN"
 CLASS=drill-04
 
-# Every wait in this drill has a deadline, in seconds.
+# The deadline of each wait, in seconds, and the timeout of each kubectl
+# request.
 READY_DEADLINE="${READY_DEADLINE:-240}"
 PENDING_DEADLINE="${PENDING_DEADLINE:-180}"
 EVENT_DEADLINE="${EVENT_DEADLINE:-180}"
@@ -36,8 +40,7 @@ kube() {
 	"$KUBECTL" --request-timeout="$CALL_TIMEOUT" "$@"
 }
 
-# Cleanup leaves the cluster as the drill found it, however the
-# drill ends.
+# Runs on exit, whether the drill passes or fails.
 cleanup() {
 	local status=$?
 	kube delete namespace "$NAMESPACE" --ignore-not-found --wait=false >/dev/null 2>&1 || true
@@ -47,13 +50,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Driver_log is what the node plugin wrote about this volume.
+# Prints the last 200 log lines of the driver's node pod.
 driver_log() {
 	kube logs -n "$DRIVER_NAMESPACE" -l app=git-csi-driver-node -c driver --tail=200 2>/dev/null || true
 }
 
-# The driver's own metrics, read through the API server's pod
-# proxy, because the DaemonSet publishes the port and no Service.
+# Reads the metrics of the driver's node pod through the API server's
+# pod proxy, because the node DaemonSet has no Service.
 driver_metrics() {
 	local pod
 	pod="$(kube get pods -n "$DRIVER_NAMESPACE" -l app=git-csi-driver-node \
@@ -62,8 +65,6 @@ driver_metrics() {
 	kube get --raw "/api/v1/namespaces/$DRIVER_NAMESPACE/pods/$pod:9808/proxy/metrics" 2>/dev/null || true
 }
 
-# Wait_for_metric waits until the driver's own gauges carry the
-# pattern, or fails on the deadline.
 wait_for_metric() {
 	local pattern="$1" deadline="$2" what="$3"
 	local limit
@@ -81,8 +82,6 @@ wait_for_metric() {
 	return 1
 }
 
-# Wait_for_event waits until the namespace's events carry the
-# pattern, or fails on the deadline.
 wait_for_event() {
 	local pattern="$1" deadline
 	deadline=$(($(date +%s) + EVENT_DEADLINE))
@@ -98,7 +97,6 @@ wait_for_event() {
 	return 1
 }
 
-# Wait_for_log waits until the driver's log carries the pattern.
 wait_for_log() {
 	local pattern="$1" deadline="$2" what="$3"
 	local limit
@@ -152,7 +150,7 @@ spec:
   storageClassName: ""
 YAML
 
-# The writer holds the volume open and writes three files into it.
+# Creates the pod that mounts the claim config.
 writer() {
 	kube apply -n "$NAMESPACE" -f - >/dev/null <<YAML
 apiVersion: v1
@@ -185,7 +183,7 @@ kube exec -n "$NAMESPACE" writer -- sh -c \
 kube exec -n "$NAMESPACE" writer -- ls -1 /config
 
 echo "drill 04: the driver reports three paths pending, and unarmed"
-wait_for_log 'the tree holds work' "$PENDING_DEADLINE" "the work in the tree"
+wait_for_log 'The volume tree has pending paths' "$PENDING_DEADLINE" "the work in the tree"
 wait_for_metric "git_csi_pending_paths\{claim=\"config\",namespace=\"$NAMESPACE\"\} 3" \
 	"$PENDING_DEADLINE" "three paths pending"
 wait_for_metric "git_csi_armed\{claim=\"config\",namespace=\"$NAMESPACE\"\} 0" \
@@ -266,8 +264,8 @@ fi
 echo "drill 04: the three files survived the pod"
 
 echo "drill 04: a class arms the volume"
-# The API server requires one parameter on a class, so the class
-# names the quiesce plan 05 reads.
+# The API server requires a VolumeAttributesClass to have at least one
+# parameter, so this one sets push.quiesce, which the driver reads.
 kube apply -f - >/dev/null <<YAML
 apiVersion: storage.k8s.io/v1
 kind: VolumeAttributesClass

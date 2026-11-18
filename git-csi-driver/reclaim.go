@@ -1,25 +1,22 @@
 package main
 
-// reclaim.go keeps or removes a writeable volume's work tree when its
-// PersistentVolume is deleted, by the PersistentVolume's reclaim
-// policy. Kubernetes gives the policy the same meaning for every
-// volume: Retain keeps the data after the PersistentVolume is deleted,
-// and Delete removes it. The data of a git volume is its work trees,
-// one on each node that staged it, and never the remote repository.
+// reclaim.go applies a writeable volume's reclaim policy to the work
+// tree on each node when its PersistentVolume is deleted. Delete
+// removes the tree and Retain keeps it. The remote repository is never
+// changed.
 //
-// csi-provisioner, the upstream sidecar beside the controller, deletes
-// a released PersistentVolume of the Delete policy after DeleteVolume
-// answers. Each node plugin watches PersistentVolumes already, and
-// removes its own work tree when the watch reports the delete. A node
-// plugin that was down during the delete finds the tree at its next
-// start: no PersistentVolume carries the handle any more. The
-// PersistentVolume is gone by then, so the node records the policy in
-// the volume's directory at each stage and at each change the watch
-// reports, and reads the policy back from that file.
+// csi-provisioner deletes a released PersistentVolume with the Delete
+// policy after DeleteVolume returns. Each node plugin watches
+// PersistentVolumes and removes its own tree when the watch reports the
+// delete. A node plugin that was down at the delete removes the tree
+// when it starts, because no PersistentVolume has that handle any more.
+// A deleted PersistentVolume cannot be read, so the node copies the
+// policy into a file in the volume's directory at each stage and at
+// each update the watch reports.
 //
 // A Retain tree stays until a person removes it or a new
-// PersistentVolume with the same handle stages it again, and its next
-// stage pushes any commit the last unstage could not.
+// PersistentVolume with the same handle stages it. The next push of
+// that volume sends any commit that the last unstage could not push.
 
 import (
 	"context"
@@ -30,19 +27,17 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// policyFileName is the file in a volume's directory that records the
-// reclaim policy of the PersistentVolume that carries the volume.
+// policyFileName is the file in a volume's directory that holds the
+// reclaim policy of the volume's PersistentVolume.
 const policyFileName = "reclaim-policy"
 
-// policyFile is where the volume's directory records its reclaim
-// policy.
 func (s *store) policyFile(id string) string {
 	return filepath.Join(s.volumeDir(id), policyFileName)
 }
 
-// recordedPolicy is the policy the volume's directory records, and
-// empty where it records none. A tree that no stage recorded a policy
-// for answers empty, and empty keeps the tree.
+// recordedPolicy returns the policy in the volume's policy file, or an
+// empty policy when there is no file. reclaim removes a tree only for
+// Delete, so a tree with no policy file is kept.
 func (s *store) recordedPolicy(id string) corev1.PersistentVolumeReclaimPolicy {
 	content, err := os.ReadFile(s.policyFile(id))
 	if err != nil {
@@ -51,54 +46,54 @@ func (s *store) recordedPolicy(id string) corev1.PersistentVolumeReclaimPolicy {
 	return corev1.PersistentVolumeReclaimPolicy(trimLine(string(content)))
 }
 
-// oneElement reports whether a volume handle names one directory in
-// the store. The kubelet stages no other handle, and a handle the watch
-// reads comes from any PersistentVolume of the driver, which a person
-// writes.
-func oneElement(handle string) bool {
+// isDirectoryName reports whether a volume handle is a single path
+// element, so that it cannot point outside the store's volumes
+// directory. The watch reads handles from every PersistentVolume of
+// this driver, including ones a person wrote by hand.
+func isDirectoryName(handle string) bool {
 	return handle != "" && handle != "." && handle != ".." &&
 		!strings.ContainsRune(handle, filepath.Separator)
 }
 
-// notePolicy records the reclaim policy of a PersistentVolume of the
-// driver, when this node holds a work tree for its handle. A policy the
-// file already records is not written again, because the watch reports
-// every status write on the PersistentVolume too.
-func (n *node) notePolicy(ctx context.Context, held *corev1.PersistentVolume) {
-	source := held.Spec.CSI
-	if source == nil || source.Driver != driverName || !oneElement(source.VolumeHandle) {
+// recordReclaimPolicy writes the reclaim policy of a PersistentVolume of this
+// driver to the policy file, when this node has a work tree for its
+// handle. It skips the write when the file already has that policy,
+// because the watch also reports each status update.
+func (n *node) recordReclaimPolicy(ctx context.Context, pv *corev1.PersistentVolume) {
+	source := pv.Spec.CSI
+	if source == nil || source.Driver != driverName || !isDirectoryName(source.VolumeHandle) {
 		return
 	}
 	id := source.VolumeHandle
 	if !n.store.tree(id).exists() {
 		return
 	}
-	policy := held.Spec.PersistentVolumeReclaimPolicy
+	policy := pv.Spec.PersistentVolumeReclaimPolicy
 	if n.store.recordedPolicy(id) == policy {
 		return
 	}
 	if err := os.WriteFile(n.store.policyFile(id), []byte(string(policy)+"\n"), 0o600); err != nil {
-		n.logger.WarnContext(ctx, "the reclaim policy was not recorded",
+		n.logger.WarnContext(ctx, "The reclaim policy file was not written",
 			"volume", id, "policy", policy, "error", err)
 	}
 }
 
-// notePolicyOf records the policy of the PersistentVolume that carries
-// the handle, as the watch holds it.
-func (n *node) notePolicyOf(ctx context.Context, id string) {
-	if held, found := n.demands.heldVolume(id); found {
-		n.notePolicy(ctx, held)
+// recordReclaimPolicyOf runs recordReclaimPolicy on the watch's cached PersistentVolume
+// for the handle.
+func (n *node) recordReclaimPolicyOf(ctx context.Context, id string) {
+	if pv, found := n.demands.cachedVolume(id); found {
+		n.recordReclaimPolicy(ctx, pv)
 	}
 }
 
-// reclaim removes the work tree of a volume when this node holds no
-// stage of it, no PersistentVolume carries its handle, and the last
-// policy the node recorded for it is Delete. A commit in the tree that
-// no push sent goes with it, as Delete means for every volume, and the
-// log says so. The log names the side branch of a diverged tree too,
-// because its commits are on the remote but not on the followed ref.
+// reclaim removes the work tree of a volume when this node has not
+// staged or published it, no PersistentVolume has its handle, and the
+// recorded policy is Delete. Unpushed commits are lost with the tree.
+// The log line reports whether there were any, and whether the volume
+// had moved to a side branch, whose commits are on the remote but not
+// on the followed ref.
 func (n *node) reclaim(ctx context.Context, id string) {
-	if !oneElement(id) || n.holds(id) || n.demands.carried(id) {
+	if !isDirectoryName(id) || n.usesVolume(id) || n.demands.hasVolume(id) {
 		return
 	}
 	if n.store.recordedPolicy(id) != corev1.PersistentVolumeReclaimDelete {
@@ -108,21 +103,20 @@ func (n *node) reclaim(ctx context.Context, id string) {
 	unpushed := work.refCommit(ctx, "HEAD") != work.refCommit(ctx, pushedRef)
 	diverged := work.divergedBranch(ctx)
 	if err := os.RemoveAll(work.directory); err != nil {
-		n.logger.WarnContext(ctx, "the work tree stayed", "volume", id, "error", err)
+		n.logger.WarnContext(ctx, "The work tree was not removed", "volume", id, "error", err)
 		return
 	}
-	n.logger.InfoContext(ctx, "removed the work tree", "volume", id,
+	n.logger.InfoContext(ctx, "Removed the work tree", "volume", id,
 		"reason", "its PersistentVolume was deleted with the Delete reclaim policy",
 		"unpushed", unpushed, "diverged", diverged)
-	// The tree was the last to name its repository, or one of several,
-	// so the walk removes or collects the repository now and not up to
-	// an hour later.
+	// The tree may have been the last user of its bare repository, so
+	// sweep now instead of at the next periodic sweep.
 	n.sweepStore(ctx)
 }
 
-// reclaimAll reclaims every volume directory in the store, which is
-// how a node plugin that was down during a delete removes the tree it
-// missed.
+// reclaimAll runs reclaim on every volume directory in the store, to
+// remove the trees whose PersistentVolumes were deleted while the node
+// plugin was down.
 func (n *node) reclaimAll(ctx context.Context) {
 	entries, err := os.ReadDir(filepath.Join(n.store.root, "volumes"))
 	if err != nil {
@@ -133,9 +127,8 @@ func (n *node) reclaimAll(ctx context.Context) {
 	}
 }
 
-// holds reports the volumes this node has staged or published, which
-// stay whatever their PersistentVolume does.
-func (n *node) holds(id string) bool {
+// usesVolume reports whether this node has staged or published the volume.
+func (n *node) usesVolume(id string) bool {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	_, staged := n.staged[id]

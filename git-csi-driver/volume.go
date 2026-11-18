@@ -1,7 +1,7 @@
 package main
 
-// volume.go defines one volume this node has and the state the driver
-// reports about it.
+// volume.go keeps the state of each volume on this node and builds the
+// health message that the gauges and the log report.
 
 import (
 	"fmt"
@@ -11,12 +11,10 @@ import (
 	"time"
 )
 
-// volumeKind is what the kubelet asked this node for.
-//
-// There are three kinds. An inline volume belongs to one pod and gets no
-// stage call. A read-only claim is staged once on the node, and many
-// pods publish from that one tree. A writeable volume is staged once
-// and one pod writes it.
+// An inline volume belongs to one pod and gets no stage call. A
+// read-only claim is staged once on the node, and every pod on the node
+// that uses it publishes the same tree. A writeable volume is staged
+// once, and one pod writes to it.
 type volumeKind int
 
 const (
@@ -25,110 +23,102 @@ const (
 	writeableVolume
 )
 
-// volume is one volume this node holds. It records the commit its tree
-// references, the faults that stand since the last good fetch or push,
-// the uncommitted writes, and the claim and class that determine
-// whether commits are allowed.
+// volume is the driver's state for one volume on this node. mu guards
+// the fields after it.
 type volume struct {
 	id         string
 	attributes *attributes
 	// credentials is read through credential(), because a republish
-	// replaces it while the loops run.
+	// replaces it while the fetch and push loops run.
 	credentials *credentials
 	directory   string
 	tree        string
 	target      string
-	// A writeable volume has a git directory. Both staged kinds have a
-	// staging path. An inline volume has neither.
-	kind    volumeKind
+	kind        volumeKind
+	// work is set only on a writeable volume. staging is set on a
+	// writeable volume and on a read-only claim. An inline volume has
+	// neither.
 	work    *workTree
 	staging string
-	// The volume context the record carries. It stays on the volume so
-	// an unpublish can write the record again, because the unpublish
-	// call carries no attributes.
+	// context is the volume context that the volume's record stores. It
+	// is kept here because an unpublish rewrites the record and the
+	// unpublish call has no volume context.
 	context map[string]string
 
 	mu     sync.Mutex
 	commit string
-	// The three faults a volume reports until a success ends them: a
-	// fetch that failed, a push that failed, and an upstream that moved
-	// while the tree held uncommitted writes. Each has a field of its
-	// own, so the first fault of one kind posts its Event while a fault
-	// of another kind stands.
+	// faults.go records these faults until a success clears them.
 	fetchFault    string
 	pushFault     string
 	upstreamMoved string
-	// The pod the kubelet named at publish. A stage call names no pod.
+	// pod is the pod of the last publish. A stage call names no pod.
 	pod podReference
-	// Every target a read-only claim is bound at on this node, and the
-	// pod that asked for each one. Many pods publish one staged tree,
-	// and an Event about the tree goes to all of them.
+	// targets maps each target that a read-only claim is bound at on
+	// this node to the pod that requested it. An Event about the tree
+	// goes to every one of those pods.
 	targets map[string]podReference
-	// What the pod wrote and the driver has not committed, and the claim
-	// and class that say whether it may.
+	// pending is the paths that the pod changed and the driver has not
+	// committed. The driver commits them only while armed, which is
+	// true when the claim's class resolved to rules.
 	pending []change
 	claim   claimReference
 	class   string
 	armed   bool
-	// The rules the class resolved to, and the reason a class this
-	// driver cannot read arms nothing.
 	rules   *policy
+	// invalid is the reason that the driver could not read the class.
 	invalid string
-	// When a demand last named this volume, and when a pull last ran
-	// for it.
+	// lastDemand is when a demand last named this volume, and lastPull
+	// is when the fetch loop last ran for it.
 	lastDemand time.Time
 	lastPull   time.Time
-	// answered is the latest demand time a fetch of this volume on
-	// this node answers, and taken is the time of the last demand the
-	// node acted on. demand.go says how they move.
-	answered time.Time
-	taken    time.Time
-	// What the size guard left out, what the remote does not hold
-	// yet, and when a push last worked.
+	// satisfiedUntil is the latest demand time that a fetch of this
+	// volume on this node has satisfied. actedDemand is the time of the
+	// last demand the node acted on. acceptDemand describes how they
+	// change.
+	satisfiedUntil time.Time
+	actedDemand    time.Time
+	// skipped is the paths that commits leave out because they are
+	// larger than commit.maxFileSize. unpushed is the number of commits
+	// the remote does not have, and oldest is when the oldest of them
+	// was made.
 	skipped  []change
 	unpushed int
 	oldest   time.Time
 	lastPush time.Time
-	// The side branch every push goes to while the tree and
-	// upstream have both moved, and whether the remote holds the ref at
-	// all.
+	// diverged is the side branch that pushes go to while both the tree
+	// and upstream have new commits. refDeleted is true when the last
+	// fetch found no ref on the remote.
 	diverged   string
 	refDeleted bool
-	// What report() last said, so the gauge and the log carry a
-	// volume's health at the moment it turns and never on every poll.
+	// abnormal is the value that healthChange last returned.
 	abnormal bool
 	// credentialLost marks a resumed volume that had a credential and
-	// waits for a republish to return it. noPublishSecret records that
-	// the volume said its PersistentVolume names no publish Secret.
-	// republish.go says how both move.
+	// waits for a republish to supply it again. noPublishSecret records
+	// that the volume's PersistentVolume names no publish Secret.
+	// republish.go describes how both change.
 	credentialLost  bool
 	noPublishSecret bool
 }
 
-// reportDiverged records the side branch the volume pushes to.
 func (v *volume) reportDiverged(branch string) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.diverged = branch
 }
 
-// reportHealed records that the volume has returned to its configured ref.
-func (v *volume) reportHealed() {
+func (v *volume) reportReturnedToRef() {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.diverged = ""
 }
 
-// divergedFrom is the side branch, and the empty string on a
-// volume that pushes to its ref.
-func (v *volume) divergedFrom() string {
+// sideBranch returns an empty string when the volume pushes to its ref.
+func (v *volume) sideBranch() string {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	return v.diverged
 }
 
-// reportRefDeleted records a fetch that found the remote holds
-// the ref no longer, and the commit the tree keeps.
 func (v *volume) reportRefDeleted(commit string) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -136,16 +126,15 @@ func (v *volume) reportRefDeleted(commit string) {
 	v.refDeleted = true
 }
 
-// refIsDeleted reports the ref the remote no longer holds, which
-// is what stops every push.
+// refIsDeleted reports whether the last fetch found no ref on the
+// remote. While it is true, the driver pushes nothing, because a push
+// would create the ref again.
 func (v *volume) refIsDeleted() bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	return v.refDeleted
 }
 
-// authorEnv is the class's author where a class arms the volume,
-// and the driver's own where none does.
 func (v *volume) authorEnv() []string {
 	if rules := v.policyNow(); rules != nil {
 		return rules.author()
@@ -153,8 +142,8 @@ func (v *volume) authorEnv() []string {
 	return defaultPolicy().author()
 }
 
-// setPod records the pod a publish named, so an Event from a loop that
-// started at stage reaches it.
+// setPod records the pod named in a publish. The loops start at stage,
+// before a publish names a pod, and their Events go to this pod.
 func (v *volume) setPod(pod podReference) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -167,15 +156,13 @@ func (v *volume) podRef() podReference {
 	return v.pod
 }
 
-// writeable reports the one kind the driver commits and pushes for.
+// writeable reports whether the driver commits and pushes the volume.
 func (v *volume) writeable() bool {
 	return v.kind == writeableVolume
 }
 
-// bind records one more target and the pod that asked for it.
-//
-// The pod is kept per target, because every pod that publishes the
-// volume takes its Events.
+// bind records a target of a read-only claim and the pod that requested
+// it, and makes that pod the volume's pod.
 func (v *volume) bind(target string, pod podReference) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -183,15 +170,14 @@ func (v *volume) bind(target string, pod podReference) {
 	v.pod = pod
 }
 
-// boundAt reports whether the volume is already bound at the target.
 func (v *volume) boundAt(target string) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	_, standing := v.targets[target]
-	return standing
+	_, bound := v.targets[target]
+	return bound
 }
 
-// unbind takes one target away and answers how many are left.
+// unbind returns how many targets remain.
 func (v *volume) unbind(target string) int {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -199,8 +185,8 @@ func (v *volume) unbind(target string) int {
 	return len(v.targets)
 }
 
-// boundTargets is every target the volume is bound at, in order, which
-// is what the record carries.
+// boundTargets returns the targets sorted, as the volume's record
+// stores them.
 func (v *volume) boundTargets() []string {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -212,10 +198,6 @@ func (v *volume) boundTargets() []string {
 	return bound
 }
 
-// boundPods is every pod the volume is published to on this node.
-//
-// An Event about a read-only claim goes to all of them, because each one
-// reads the tree the Event is about.
 func (v *volume) boundPods() []podReference {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -226,25 +208,23 @@ func (v *volume) boundPods() []podReference {
 	return pods
 }
 
-// setClaim records the claim the volume handle is bound to, which
-// labels the gauge and takes the volume's Events.
 func (v *volume) setClaim(claim claimReference) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.claim = claim
 }
 
-// claimNow is that claim, and the empty one where the driver has not
-// found it.
+// claimNow returns an empty claimReference until the driver finds the
+// claim.
 func (v *volume) claimNow() claimReference {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	return v.claim
 }
 
-// reportPending records what the last scan found and reports whether
-// the set went from empty to not empty, which is the one moment an
-// Event is worth posting.
+// reportPending records the paths that the last scan found, and returns
+// true when the set was empty before. The driver posts an Event only
+// then.
 func (v *volume) reportPending(found []change) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -253,10 +233,9 @@ func (v *volume) reportPending(found []change) bool {
 	return first
 }
 
-// reportArmed records the claim, the class, and the rules it resolved
-// to, and reports whether the volume moved between armed and unarmed. A
-// class the driver cannot read arms nothing and leaves its reason in
-// invalid.
+// reportArmed records the claim, the class, and the rules that the
+// class resolved to, and returns true when armed changed. A class that
+// the driver cannot read gives nil rules and the reason in invalid.
 func (v *volume) reportArmed(
 	claim claimReference, class string, rules *policy, invalid string,
 ) bool {
@@ -272,19 +251,18 @@ func (v *volume) reportArmed(
 	return changed
 }
 
-// policyNow is the rules in force, and nil on an unarmed volume,
-// so a loop that started before the class reads what the class says now.
+// policyNow returns the current rules, or nil on an unarmed volume. The
+// loops call it on every pass instead of keeping a copy, so a change to
+// the class applies to a loop that is already running.
 func (v *volume) policyNow() *policy {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	return v.rules
 }
 
-// namespace is where a person looks the volume up.
-//
-// A staged volume of either kind is named by its claim. An inline volume
-// is named by the pod that mounts it, which is the only namespace an
-// inline volume has.
+// namespace returns the namespace that labels the volume's gauges: the
+// claim's namespace, or the pod's for an inline volume, which has no
+// claim. It is empty until the driver has found either.
 func (v *volume) namespace() string {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -294,27 +272,27 @@ func (v *volume) namespace() string {
 	return v.claim.namespace
 }
 
-// reading is what the gauges carry: the claim that labels them, whether
-// the volume is armed, and how many paths are pending.
-func (v *volume) reading() (claimReference, bool, int) {
+// gaugeValues returns what the gauges report: the claim that labels them,
+// whether the volume is armed, and the number of pending paths.
+func (v *volume) gaugeValues() (claimReference, bool, int) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	return v.claim, v.armed, len(v.pending)
 }
 
-// reportSkipped records what the size guard left out and answers
-// the paths the last pass did not already hold, which is what an Event
-// is worth posting for.
+// reportSkipped records the paths that commits left out for their size,
+// and returns the ones that the previous call did not have. The driver
+// posts an Event only for those.
 func (v *volume) reportSkipped(found []change) []change {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	standing := map[string]bool{}
+	already := map[string]bool{}
 	for _, one := range v.skipped {
-		standing[one.path] = true
+		already[one.path] = true
 	}
 	fresh := []change{}
 	for _, one := range found {
-		if !standing[one.path] {
+		if !already[one.path] {
 			fresh = append(fresh, one)
 		}
 	}
@@ -322,8 +300,6 @@ func (v *volume) reportSkipped(found []change) []change {
 	return fresh
 }
 
-// reportUnpushed records what the work tree holds that the remote
-// does not, and when the oldest of those commits was made.
 func (v *volume) reportUnpushed(count int, oldest time.Time) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -331,10 +307,9 @@ func (v *volume) reportUnpushed(count int, oldest time.Time) {
 	v.oldest = oldest
 }
 
-// reportPushed records a push that worked, which leaves nothing
-// unpushed and ends the push failure before it. The remote now holds
-// the tree's commits on top of upstream, so upstream has not moved
-// past the tree either.
+// reportPushed records a successful push and clears pushFault. It also
+// clears upstreamMoved, because the remote now has the tree's commits on
+// top of upstream.
 func (v *volume) reportPushed(at time.Time) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -345,55 +320,58 @@ func (v *volume) reportPushed(at time.Time) {
 	v.upstreamMoved = ""
 }
 
-// pushing is what the push gauges carry.
+// pushing returns the values of the push gauges: the number of
+// unpushed commits, the time of the last successful push, and the
+// number of skipped paths.
 func (v *volume) pushing() (int, time.Time, int) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	return v.unpushed, v.lastPush, len(v.skipped)
 }
 
-// overdue reports whether the oldest unpushed commit has outlived
-// push.maxLatency. The caller holds the lock.
+// overdue reports whether the oldest unpushed commit is older than
+// push.maxLatency. The caller holds v.mu.
 func (v *volume) overdue(now time.Time) bool {
 	return v.unpushed > 0 && v.rules != nil && v.rules.maxLatency != 0 &&
 		!v.oldest.IsZero() && now.Sub(v.oldest) > v.rules.maxLatency
 }
 
-// report is the one source of the volume's health, which the
-// gauge and the log carry. standingReport gives the order.
-func (v *volume) report() (bool, string) {
+// health returns whether the volume is abnormal, and the health
+// message.
+func (v *volume) health() (bool, string) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	return v.reportNow()
+	return v.healthLocked()
 }
 
-// takeHealth is the report and whether the abnormal flag moved
-// since the last call, which is the one moment the log says so.
-func (v *volume) takeHealth() (bool, string, bool) {
+// healthChange returns the same values as health, and also whether
+// abnormal changed since the previous call. The log writes a line only
+// when it changed.
+func (v *volume) healthChange() (bool, string, bool) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	abnormal, message := v.reportNow()
-	moved := abnormal != v.abnormal
+	abnormal, message := v.healthLocked()
+	changed := abnormal != v.abnormal
 	v.abnormal = abnormal
-	return abnormal, message, moved
+	return abnormal, message, changed
 }
 
-// reportNow is the report itself, read under the lock the two
-// callers above hold, so a health reading and the flag it moves come
-// from one look at the volume.
+// healthLocked builds the health message. The caller holds v.mu.
 //
-// Every report ends with the last demand and the last pull, so the
-// line that says a pull failed also says when it was asked for.
-func (v *volume) reportNow() (bool, string) {
-	abnormal, message := v.standingReport()
-	return abnormal, message + v.pulling()
+// Every message ends with the times of the last demand and the last
+// pull, so a message about a failed pull also shows when the pull was
+// requested.
+func (v *volume) healthLocked() (bool, string) {
+	abnormal, message := v.healthMessage()
+	return abnormal, message + v.demandAndPullTimes()
 }
 
-// standingReport is what the volume's state says. A missing
-// credential comes first, then a failure, then a class the driver
-// cannot read, then work the driver may not commit or has not pushed,
-// then the commit the tree stands on.
-func (v *volume) standingReport() (bool, string) {
+// healthMessage reports the first problem in this order: a missing
+// credential, a recorded fault, a deleted ref, a side branch, a class
+// the driver cannot read, skipped paths, an overdue push, or pending
+// paths on an unarmed writeable volume. With no problem, it reports
+// the ref and the commit that the tree is at.
+func (v *volume) healthMessage() (bool, string) {
 	if waiting, lost := v.credentialReport(); lost {
 		return true, waiting
 	}
@@ -401,7 +379,7 @@ func (v *volume) standingReport() (bool, string) {
 	case v.fault() != "":
 		return true, v.fault()
 	case v.refDeleted:
-		return true, fmt.Sprintf("RefDeleted: the remote holds no %s", v.attributes.ref)
+		return true, fmt.Sprintf("RefDeleted: the remote has no ref %s", v.attributes.ref)
 	case v.diverged != "":
 		return true, fmt.Sprintf("Diverged: the tree pushes to %s, not %s",
 			v.diverged, v.attributes.ref)
@@ -413,7 +391,7 @@ func (v *volume) standingReport() (bool, string) {
 		return true, fmt.Sprintf("%d unpushed commits, the oldest older than %s",
 			v.unpushed, v.rules.maxLatency)
 	case v.kind == writeableVolume && !v.armed && len(v.pending) > 0:
-		return true, fmt.Sprintf("unarmed: %d paths pending, no class on claim %s/%s",
+		return true, fmt.Sprintf("Unarmed: %d paths pending, and the claim %s/%s sets no class",
 			len(v.pending), v.claim.namespace, v.claim.name)
 	case len(v.pending) > 0:
 		return false, fmt.Sprintf("%s at %s, %d paths pending",
@@ -422,74 +400,72 @@ func (v *volume) standingReport() (bool, string) {
 	return false, fmt.Sprintf("%s at %s", v.attributes.ref, short(v.commit))
 }
 
-// reportDemanded records when a demand named this volume.
 func (v *volume) reportDemanded(at time.Time) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.lastDemand = at
 }
 
-// reportPulled records when a pass of the loop last ran for this
-// volume, whether a timer or a demand started it.
+// reportPulled records when the fetch loop last ran for this volume,
+// whether a timer or a demand started it.
 func (v *volume) reportPulled(at time.Time) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.lastPull = at
 }
 
-// answerDemandsBefore records that a fetch of this volume starts at
-// the time, so it answers every demand stamped before it, less the skew
-// demand.go allows for the writer's clock.
-func (v *volume) answerDemandsBefore(start time.Time) {
+// satisfyDemandsBefore records that a fetch started at start. demandSkew
+// describes which demands that fetch satisfies.
+func (v *volume) satisfyDemandsBefore(start time.Time) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	if answers := start.Add(-demandSkew); answers.After(v.answered) {
-		v.answered = answers
+	if satisfied := start.Add(-demandSkew); satisfied.After(v.satisfiedUntil) {
+		v.satisfiedUntil = satisfied
 	}
 }
 
-// takeDemand reports whether a demand stamped at the time is later than
-// what the volume's fetches answer, and records what the pull it starts
-// will answer.
+// acceptDemand returns true when no earlier fetch satisfied a demand
+// stamped at the given time, and the caller then starts a fetch.
 //
-// The pull starts after now, so it answers every demand stamped before
-// now, less the skew, and no later one. A record at the demand's own
-// time would drop a second demand from a writer whose clock runs
-// behind, and a record in the future would drop a later demand from a
-// writer whose clock is right. The exact time of the last demand is
-// kept apart, so a read of the same value again, from a list or a
-// resumed watch, pulls nothing.
-func (v *volume) takeDemand(at, now time.Time) bool {
+// The fetch starts after now, so acceptDemand moves satisfiedUntil to
+// now minus demandSkew, the bound that satisfyDemandsBefore records for
+// a fetch that starts now. The demand's own time is not a safe bound,
+// because it comes from the writer's clock: a demand written later by a
+// writer whose clock is further behind would have an earlier time and
+// start no fetch. actedDemand records the demand's exact time, so the
+// same demand read again from a list or a resumed watch starts no
+// fetch.
+func (v *volume) acceptDemand(at, now time.Time) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	if at.Equal(v.taken) || !at.After(v.answered) {
+	if at.Equal(v.actedDemand) || !at.After(v.satisfiedUntil) {
 		return false
 	}
-	v.taken = at
-	if answers := now.Add(-demandSkew); answers.After(v.answered) {
-		v.answered = answers
+	v.actedDemand = at
+	if satisfied := now.Add(-demandSkew); satisfied.After(v.satisfiedUntil) {
+		v.satisfiedUntil = satisfied
 	}
 	return true
 }
 
-// pulling is the two times the report carries, and nothing for a
-// volume that nothing has demanded or pulled yet.
-func (v *volume) pulling() string {
-	said := ""
+// demandAndPullTimes returns the times that end every health message.
+// A time that was never recorded is left out.
+func (v *volume) demandAndPullTimes() string {
+	times := ""
 	if !v.lastDemand.IsZero() {
-		said += ", demanded " + v.lastDemand.UTC().Format(time.RFC3339)
+		times += ", demanded " + v.lastDemand.UTC().Format(time.RFC3339)
 	}
 	if !v.lastPull.IsZero() {
-		said += ", pulled " + v.lastPull.UTC().Format(time.RFC3339)
+		times += ", pulled " + v.lastPull.UTC().Format(time.RFC3339)
 	}
-	return said
+	return times
 }
 
-// reportCommit records that the tree holds commit and that the fetch
-// before it worked. A resolved commit means the fetch reached the ref,
-// so a deleted ref is reported no longer, and the tree holds what
-// upstream holds. It reports whether a fetch failure stood until now,
-// which is when the recovery is worth an Event.
+// reportCommit records that a successful fetch brought the tree to
+// commit. That fetch found the ref and the tree matches upstream, so it
+// clears fetchFault, upstreamMoved, and refDeleted. It returns true when
+// a fetch fault was recorded, because the driver posts a recovery Event
+// only then.
 func (v *volume) reportCommit(commit string) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -501,8 +477,8 @@ func (v *volume) reportCommit(commit string) bool {
 	return recovered
 }
 
-// skippedMessage names every path the size guard left out, so a
-// person reads which files the commit does not carry.
+// skippedMessage lists every skipped path, so a person can see which
+// files the commits do not include.
 func skippedMessage(skipped []change) string {
 	paths := make([]string, 0, len(skipped))
 	for _, one := range skipped {
@@ -512,9 +488,9 @@ func skippedMessage(skipped []change) string {
 		len(skipped), maxFileSizeParameter, strings.Join(paths, ", "))
 }
 
-// condition is the commit the tree holds and the fault the volume
-// reports first, which is empty when nothing is wrong.
-func (v *volume) condition() (string, string) {
+// commitAndFault returns the commit the tree is at and the first recorded
+// failure, which is empty when there is none.
+func (v *volume) commitAndFault() (string, string) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	return v.commit, v.fault()

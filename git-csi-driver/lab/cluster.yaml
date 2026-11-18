@@ -1,18 +1,17 @@
 # The lab's Cluster: one leader, the public release channel, and no
-# GitOps engine. Manifests reach the lab with kubectl from the host.
+# GitOps engine, so you apply manifests with kubectl from the host.
 
 apiVersion: liken.sh/v1alpha1
 kind: Cluster
 metadata:
   name: lab
 spec:
-  # One leader, so k3s keeps its state in sqlite.
+  # With one leader, k3s keeps its state in SQLite.
   leaders: [node-1]
 
-  # First contact is node-1's address on the cluster segment. This lab
-  # uses 10.30.0.0/24, where liken's dev cluster uses 10.10.0.0/24 and
-  # its GitOps lab uses 10.20.0.0/24, so an address in a log names its
-  # lab.
+  # node-1's address. This lab uses 10.30.0.0/24, liken's dev cluster
+  # 10.10.0.0/24, and its GitOps lab 10.20.0.0/24, so the subnet of an
+  # address in a log shows which lab it came from.
   endpoint: https://10.30.0.1:6443
 
   network:
@@ -25,13 +24,12 @@ spec:
   time:
     upstreams: [time.cloudflare.com, time.nist.gov]
 
-  # The Go runtime settings that hold k3s inside the 1 GiB envelope,
-  # from liken's dev cluster.
+  # Keeps k3s within 1 GiB of memory, as in liken's dev cluster.
   runtime:
     k3s:
       goMemoryLimit: "25%"
       goGC: 50
 
   releases:
-    # The public channel, the same one a person installs from.
+    # The public release channel that people install from.
     source: https://releases.liken.sh

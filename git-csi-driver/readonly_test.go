@@ -15,8 +15,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// readOnlyStage is the stage call the kubelet makes for a claim whose
-// access mode is ReadOnlyMany.
+// readOnlyStage returns the NodeStageVolume request that the kubelet
+// sends for a claim with the ReadOnlyMany access mode.
 func readOnlyStage(t testing.TB, id, url string, extra map[string]string) *csi.NodeStageVolumeRequest {
 	t.Helper()
 	request := stageRequest(t, id, url, extra)
@@ -25,8 +25,8 @@ func readOnlyStage(t testing.TB, id, url string, extra map[string]string) *csi.N
 	return request
 }
 
-// readOnlyPublish is the publish call one pod makes for a staged
-// read-only claim, at a target of its own.
+// readOnlyPublish returns the NodePublishVolume request that one pod
+// causes for a staged read-only claim, with a target path of its own.
 func readOnlyPublish(
 	t testing.TB, staged *csi.NodeStageVolumeRequest, pod string,
 ) *csi.NodePublishVolumeRequest {
@@ -38,91 +38,91 @@ func readOnlyPublish(
 	return request
 }
 
-// stagedReadOnly stages one read-only claim and answers the stage call
-// and what the node holds for it.
+// stagedReadOnly stages one read-only claim and returns the stage
+// request and the volume the node recorded for it.
 func stagedReadOnly(
-	t *testing.T, answering *node, id, url string, extra map[string]string,
+	t *testing.T, n *node, id, url string, extra map[string]string,
 ) (*csi.NodeStageVolumeRequest, *volume) {
 	t.Helper()
 	staged := readOnlyStage(t, id, url, extra)
-	if _, err := answering.NodeStageVolume(t.Context(), staged); err != nil {
+	if _, err := n.NodeStageVolume(t.Context(), staged); err != nil {
 		t.Fatalf("NodeStageVolume: %v", err)
 	}
-	answering.mu.Lock()
-	defer answering.mu.Unlock()
-	return staged, answering.staged[id]
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return staged, n.staged[id]
 }
 
-// publishedTo publishes a staged read-only claim under one more pod.
+// publishedTo publishes a staged read-only claim for one more pod.
 func publishedTo(
-	t *testing.T, answering *node, staged *csi.NodeStageVolumeRequest, pod string,
+	t *testing.T, n *node, staged *csi.NodeStageVolumeRequest, pod string,
 ) *csi.NodePublishVolumeRequest {
 	t.Helper()
 	request := readOnlyPublish(t, staged, pod)
-	if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
+	if _, err := n.NodePublishVolume(t.Context(), request); err != nil {
 		t.Fatalf("NodePublishVolume for %s: %v", pod, err)
 	}
 	return request
 }
 
 func TestAReadOnlyStagePlacesTheTreeAndFollowsIt(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
+	n, _ := testNode(t, io.Discard)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	_, held := stagedReadOnly(t, answering, "franchises", fileURL(source),
+	_, vol := stagedReadOnly(t, n, "franchises", fileURL(source),
 		map[string]string{"pull": "1h", "depth": "1", "offline": "allowStale"})
 
-	if held.kind != readOnlyClaim {
-		t.Fatalf("the volume is %v, want a read-only claim", held.kind)
+	if vol.kind != readOnlyClaim {
+		t.Fatalf("the volume is %v, want a read-only claim", vol.kind)
 	}
-	if got := readTree(t, held.tree); !sameTree(got, map[string]string{"a.txt": "one"}) {
-		t.Errorf("the tree holds %v, want the commit", got)
+	if got := readTree(t, vol.tree); !sameTree(got, map[string]string{"a.txt": "one"}) {
+		t.Errorf("the tree has %v, want the commit", got)
 	}
-	if _, err := os.Stat(filepath.Join(held.directory, "git")); err == nil {
+	if _, err := os.Stat(filepath.Join(vol.directory, "git")); err == nil {
 		t.Error("a read-only claim made a git directory")
 	}
-	answering.mu.Lock()
-	defer answering.mu.Unlock()
-	if len(answering.watchers) != 0 || len(answering.armings) != 0 {
-		t.Errorf("the node holds %d watches and %d arming loops, want none of either",
-			len(answering.watchers), len(answering.armings))
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if len(n.watchers) != 0 || len(n.armingCancels) != 0 {
+		t.Errorf("the node has %d watches and %d arming loops, want none of either",
+			len(n.watchers), len(n.armingCancels))
 	}
-	if len(answering.followers) != 1 {
-		t.Errorf("the node holds %d fetch loops, want 1", len(answering.followers))
+	if len(n.followers) != 1 {
+		t.Errorf("the node has %d fetch loops, want 1", len(n.followers))
 	}
 }
 
-func TestAReadOnlyStageTakesTheAttributesAnInlineVolumeTakes(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
+func TestAReadOnlyStageAcceptsTheAttributesOfAnInlineVolume(t *testing.T) {
+	n, _ := testNode(t, io.Discard)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	_, held := stagedReadOnly(t, answering, "franchises", fileURL(source),
+	_, vol := stagedReadOnly(t, n, "franchises", fileURL(source),
 		map[string]string{"pull": "never", "offline": "allowStale"})
 
-	if held.attributes.pull.follows() || held.attributes.offline != offlineAllowStale {
-		t.Errorf("the volume is %+v, want pull never and offline allowStale", held.attributes)
+	if vol.attributes.pull.follows() || vol.attributes.offline != offlineAllowStale {
+		t.Errorf("the volume is %+v, want pull never and offline allowStale", vol.attributes)
 	}
-	answering.mu.Lock()
-	defer answering.mu.Unlock()
-	if len(answering.followers) != 0 {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if len(n.followers) != 0 {
 		t.Errorf("a volume with pull never joined %d fetch loops, want none",
-			len(answering.followers))
+			len(n.followers))
 	}
 }
 
 func TestAReadOnlyStageRefusesAForgeItCannotReach(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, _ := testNode(t, io.Discard)
-		boundVolume(t, answering, "franchises", "")
+		n, _ := testNode(t, io.Discard)
+		boundVolume(t, n, "franchises", "")
 		staged := readOnlyStage(t, "franchises",
 			fileURL(filepath.Join(t.TempDir(), "gone")), map[string]string{"pull": "never"})
 
-		_, err := answering.NodeStageVolume(t.Context(), staged)
+		_, err := n.NodeStageVolume(t.Context(), staged)
 		if got := status.Code(err); got != codes.Unavailable {
-			t.Fatalf("NodeStageVolume answered %v, want %v", got, codes.Unavailable)
+			t.Fatalf("NodeStageVolume returned %v, want %v", got, codes.Unavailable)
 		}
-		if _, err := os.Stat(answering.store.volumeDir("franchises")); err == nil {
+		if _, err := os.Stat(n.store.volumeDir("franchises")); err == nil {
 			t.Error("a refused stage left the volume's directory behind")
 		}
-		posted := eventsOf(t, answering)
+		posted := eventsOf(t, n)
 		if len(posted) != 1 || posted[0].Reason != reasonRefused ||
 			posted[0].InvolvedObject.Kind != "PersistentVolumeClaim" {
 			t.Errorf("the refused stage posted %v, want one refusal on the claim", posted)
@@ -131,20 +131,20 @@ func TestAReadOnlyStageRefusesAForgeItCannotReach(t *testing.T) {
 }
 
 func TestAReadOnlyClaimBindsEveryPodOnTheNode(t *testing.T) {
-	answering, calls := testNode(t, io.Discard)
+	n, calls := testNode(t, io.Discard)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	staged, held := stagedReadOnly(t, answering, "franchises", fileURL(source),
+	staged, vol := stagedReadOnly(t, n, "franchises", fileURL(source),
 		map[string]string{"pull": "never"})
 
-	first := publishedTo(t, answering, staged, "reader-a")
-	second := publishedTo(t, answering, staged, "reader-b")
+	first := publishedTo(t, n, staged, "reader-a")
+	second := publishedTo(t, n, staged, "reader-b")
 	want := []string{first.TargetPath, second.TargetPath}
-	if got := held.boundTargets(); !sameStrings(got, want) {
+	if got := vol.boundTargets(); !sameStrings(got, want) {
 		t.Errorf("the volume is bound at %v, want %v", got, want)
 	}
 	for _, mount := range calls.mounts {
-		if mount.source != held.tree {
-			t.Errorf("the driver bound %s, want the staged tree %s", mount.source, held.tree)
+		if mount.source != vol.tree {
+			t.Errorf("the driver bound %s, want the staged tree %s", mount.source, vol.tree)
 		}
 	}
 	if calls.mounts[1].flags&unix.MS_RDONLY == 0 {
@@ -152,119 +152,119 @@ func TestAReadOnlyClaimBindsEveryPodOnTheNode(t *testing.T) {
 	}
 
 	binds := len(calls.mounts)
-	if _, err := answering.NodePublishVolume(t.Context(), first); err != nil {
+	if _, err := n.NodePublishVolume(t.Context(), first); err != nil {
 		t.Fatalf("a repeated NodePublishVolume: %v", err)
 	}
-	if len(calls.mounts) != binds || len(held.boundTargets()) != 2 {
+	if len(calls.mounts) != binds || len(vol.boundTargets()) != 2 {
 		t.Errorf("a repeated publish made %d mounts and left %d targets, want 0 and 2",
-			len(calls.mounts)-binds, len(held.boundTargets()))
+			len(calls.mounts)-binds, len(vol.boundTargets()))
 	}
 }
 
 func TestAReadOnlyClaimKeepsItsOtherTargetsAtAnUnpublish(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
+	n, _ := testNode(t, io.Discard)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	staged, held := stagedReadOnly(t, answering, "franchises", fileURL(source),
+	staged, vol := stagedReadOnly(t, n, "franchises", fileURL(source),
 		map[string]string{"pull": "1h"})
-	first := publishedTo(t, answering, staged, "reader-a")
-	second := publishedTo(t, answering, staged, "reader-b")
+	first := publishedTo(t, n, staged, "reader-a")
+	second := publishedTo(t, n, staged, "reader-b")
 
-	unpublish(t, answering, "franchises", first.TargetPath)
-	if got := held.boundTargets(); !sameStrings(got, []string{second.TargetPath}) {
+	unpublish(t, n, "franchises", first.TargetPath)
+	if got := vol.boundTargets(); !sameStrings(got, []string{second.TargetPath}) {
 		t.Errorf("the volume is bound at %v, want %s", got, second.TargetPath)
 	}
-	if got := recordOf(t, answering, "franchises").Targets; !sameStrings(got, []string{second.TargetPath}) {
-		t.Errorf("the record carries %v, want %s", got, second.TargetPath)
+	if got := recordOf(t, n, "franchises").Targets; !sameStrings(got, []string{second.TargetPath}) {
+		t.Errorf("the record has %v, want %s", got, second.TargetPath)
 	}
-	answering.mu.Lock()
-	_, standing := answering.volumes["franchises"]
-	answering.mu.Unlock()
-	if !standing {
+	n.mu.Lock()
+	_, published := n.volumes["franchises"]
+	n.mu.Unlock()
+	if !published {
 		t.Error("the volume left the node while a pod still reads it")
 	}
 
-	unpublish(t, answering, "franchises", second.TargetPath)
-	answering.mu.Lock()
-	_, standing = answering.volumes["franchises"]
-	_, held2 := answering.staged["franchises"]
-	loops := len(answering.followers)
-	answering.mu.Unlock()
-	if standing || !held2 {
+	unpublish(t, n, "franchises", second.TargetPath)
+	n.mu.Lock()
+	_, published = n.volumes["franchises"]
+	_, isStaged := n.staged["franchises"]
+	loops := len(n.followers)
+	n.mu.Unlock()
+	if published || !isStaged {
 		t.Errorf("after the last unpublish the volume is published: %v, staged: %v, want false and true",
-			standing, held2)
+			published, isStaged)
 	}
 	if loops != 1 {
-		t.Errorf("the node holds %d fetch loops after the last unpublish, want 1", loops)
+		t.Errorf("the node has %d fetch loops after the last unpublish, want 1", loops)
 	}
-	if _, err := os.Stat(held.tree); err != nil {
+	if _, err := os.Stat(vol.tree); err != nil {
 		t.Errorf("the staged tree went with the last unpublish: %v", err)
 	}
 }
 
-func TestTheUnstageOfAReadOnlyClaimTakesTheTreeAway(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
+func TestTheUnstageOfAReadOnlyClaimRemovesTheTree(t *testing.T) {
+	n, _ := testNode(t, io.Discard)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	staged, held := stagedReadOnly(t, answering, "franchises", fileURL(source),
+	staged, vol := stagedReadOnly(t, n, "franchises", fileURL(source),
 		map[string]string{"pull": "1h"})
-	request := publishedTo(t, answering, staged, "reader-a")
-	unpublish(t, answering, "franchises", request.TargetPath)
+	request := publishedTo(t, n, staged, "reader-a")
+	unpublish(t, n, "franchises", request.TargetPath)
 
-	if _, err := answering.NodeUnstageVolume(t.Context(), &csi.NodeUnstageVolumeRequest{
+	if _, err := n.NodeUnstageVolume(t.Context(), &csi.NodeUnstageVolumeRequest{
 		VolumeId: "franchises", StagingTargetPath: staged.StagingTargetPath,
 	}); err != nil {
 		t.Fatalf("NodeUnstageVolume: %v", err)
 	}
-	if _, err := os.Stat(held.directory); err == nil {
+	if _, err := os.Stat(vol.directory); err == nil {
 		t.Error("the volume's directory stayed after the unstage")
 	}
-	answering.mu.Lock()
-	defer answering.mu.Unlock()
-	if len(answering.staged) != 0 || len(answering.followers) != 0 {
-		t.Errorf("the node holds %d staged volumes and %d fetch loops, want none of either",
-			len(answering.staged), len(answering.followers))
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if len(n.staged) != 0 || len(n.followers) != 0 {
+		t.Errorf("the node has %d staged volumes and %d fetch loops, want none of either",
+			len(n.staged), len(n.followers))
 	}
 }
 
 func TestAnUnstageReportsTheDirectoryItCannotRemove(t *testing.T) {
 	logs := &logbook{}
-	answering, _ := testNode(t, logs)
+	n, _ := testNode(t, logs)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	staged, _ := stagedReadOnly(t, answering, "franchises", fileURL(source),
+	staged, _ := stagedReadOnly(t, n, "franchises", fileURL(source),
 		map[string]string{"pull": "never"})
-	readOnlyDir(t, filepath.Join(answering.store.root, "volumes"))
+	readOnlyDir(t, filepath.Join(n.store.root, "volumes"))
 
-	if _, err := answering.NodeUnstageVolume(t.Context(), &csi.NodeUnstageVolumeRequest{
+	if _, err := n.NodeUnstageVolume(t.Context(), &csi.NodeUnstageVolumeRequest{
 		VolumeId: "franchises", StagingTargetPath: staged.StagingTargetPath,
 	}); err != nil {
 		t.Fatalf("NodeUnstageVolume: %v", err)
 	}
-	if !strings.Contains(logs.String(), "the volume's directory stayed") {
-		t.Errorf("the log is %q, want the directory it could not remove in it", logs)
+	if !strings.Contains(logs.String(), "The volume directory was not removed") {
+		t.Errorf("the log is %q, want it to report the volume directory that was not removed", logs)
 	}
 }
 
 func TestAReadOnlyClaimReportsOnEveryPodAndOnTheClaim(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, _ := testNode(t, io.Discard)
-		boundVolume(t, answering, "franchises", "")
+		n, _ := testNode(t, io.Discard)
+		boundVolume(t, n, "franchises", "")
 		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 		url := fileURL(source)
-		staged, held := stagedReadOnly(t, answering, "franchises", url, map[string]string{"pull": "1h"})
-		publishedTo(t, answering, staged, "reader-a")
-		publishedTo(t, answering, staged, "reader-b")
+		staged, vol := stagedReadOnly(t, n, "franchises", url, map[string]string{"pull": "1h"})
+		publishedTo(t, n, staged, "reader-a")
+		publishedTo(t, n, staged, "reader-b")
 
 		if err := os.RemoveAll(source); err != nil {
 			t.Fatalf("removing the forge: %v", err)
 		}
-		// The node's own loop, because a loop records the health only of a
-		// volume it holds.
-		answering.mu.Lock()
-		loop := answering.loopOf(held)
-		answering.mu.Unlock()
-		loop.refresh(t.Context(), held)
+		// Refresh the loop that the node created, because a loop records
+		// health only for the volumes it has.
+		n.mu.Lock()
+		loop := n.loopOf(vol)
+		n.mu.Unlock()
+		loop.refresh(t.Context(), vol)
 
 		pods, claims := 0, 0
-		for _, posted := range eventsOf(t, answering) {
+		for _, posted := range eventsOf(t, n) {
 			if posted.Reason != reasonFailed {
 				continue
 			}
@@ -278,7 +278,7 @@ func TestAReadOnlyClaimReportsOnEveryPodAndOnTheClaim(t *testing.T) {
 		if pods != 2 || claims != 1 {
 			t.Errorf("the failed fetch reached %d pods and %d claims, want 2 and 1", pods, claims)
 		}
-		abnormal, found := abnormalOf(t, answering.readings, "home", "franchises")
+		abnormal, found := abnormalOf(t, n.metrics, "home", "franchises")
 		if !found || abnormal != 1 {
 			t.Errorf("git_csi_volume_abnormal reads %v (found: %v), want 1 under the claim's namespace",
 				abnormal, found)
@@ -288,18 +288,18 @@ func TestAReadOnlyClaimReportsOnEveryPodAndOnTheClaim(t *testing.T) {
 
 func TestAStaleReadOnlyStageReportsOnTheClaim(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, _ := testNode(t, io.Discard)
-		boundVolume(t, answering, "franchises", "")
+		n, _ := testNode(t, io.Discard)
+		boundVolume(t, n, "franchises", "")
 		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 		url := fileURL(source)
-		stagedReadOnly(t, answering, "first", url, map[string]string{"pull": "never"})
+		stagedReadOnly(t, n, "first", url, map[string]string{"pull": "never"})
 		if err := os.RemoveAll(source); err != nil {
 			t.Fatalf("removing the forge: %v", err)
 		}
 
-		stagedReadOnly(t, answering, "franchises", url,
+		stagedReadOnly(t, n, "franchises", url,
 			map[string]string{"pull": "never", "offline": "allowStale"})
-		posted := eventsOf(t, answering)
+		posted := eventsOf(t, n)
 		if len(posted) != 1 || posted[0].Reason != reasonStale ||
 			posted[0].InvolvedObject.Kind != "PersistentVolumeClaim" {
 			t.Errorf("the stale stage posted %v, want one stale event on the claim", posted)
@@ -310,11 +310,11 @@ func TestAStaleReadOnlyStageReportsOnTheClaim(t *testing.T) {
 func TestAReadOnlyPublishReportsWhatItCannotBind(t *testing.T) {
 	for _, c := range []struct {
 		name  string
-		stand func(t *testing.T, calls *recordedMounts, request *csi.NodePublishVolumeRequest)
+		setup func(t *testing.T, calls *recordedMounts, request *csi.NodePublishVolumeRequest)
 	}{
 		{
 			name: "a target path under a file",
-			stand: func(t *testing.T, _ *recordedMounts, request *csi.NodePublishVolumeRequest) {
+			setup: func(t *testing.T, _ *recordedMounts, request *csi.NodePublishVolumeRequest) {
 				file := filepath.Join(t.TempDir(), "file")
 				writeFiles(t, filepath.Dir(file), map[string]string{"file": ""})
 				request.TargetPath = filepath.Join(file, "mount")
@@ -322,13 +322,13 @@ func TestAReadOnlyPublishReportsWhatItCannotBind(t *testing.T) {
 		},
 		{
 			name: "a mount that stays",
-			stand: func(_ *testing.T, calls *recordedMounts, _ *csi.NodePublishVolumeRequest) {
+			setup: func(_ *testing.T, calls *recordedMounts, _ *csi.NodePublishVolumeRequest) {
 				calls.unmountErr = unix.EPERM
 			},
 		},
 		{
 			name: "a bind it cannot make",
-			stand: func(_ *testing.T, calls *recordedMounts, _ *csi.NodePublishVolumeRequest) {
+			setup: func(_ *testing.T, calls *recordedMounts, _ *csi.NodePublishVolumeRequest) {
 				calls.failAt = 1
 				calls.mountErr = unix.EPERM
 			},
@@ -336,20 +336,20 @@ func TestAReadOnlyPublishReportsWhatItCannotBind(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				answering, calls := testNode(t, io.Discard)
-				boundVolume(t, answering, "franchises", "")
+				n, calls := testNode(t, io.Discard)
+				boundVolume(t, n, "franchises", "")
 				source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-				staged, _ := stagedReadOnly(t, answering, "franchises", fileURL(source),
+				staged, _ := stagedReadOnly(t, n, "franchises", fileURL(source),
 					map[string]string{"pull": "never"})
 				request := readOnlyPublish(t, staged, "reader-a")
-				c.stand(t, calls, request)
+				c.setup(t, calls, request)
 
-				_, err := answering.NodePublishVolume(t.Context(), request)
+				_, err := n.NodePublishVolume(t.Context(), request)
 				if got := status.Code(err); got != codes.Internal {
-					t.Fatalf("NodePublishVolume answered %v, want %v", got, codes.Internal)
+					t.Fatalf("NodePublishVolume returned %v, want %v", got, codes.Internal)
 				}
 				claimed := false
-				for _, posted := range eventsOf(t, answering) {
+				for _, posted := range eventsOf(t, n) {
 					if posted.Reason == reasonRefused &&
 						posted.InvolvedObject.Kind == "PersistentVolumeClaim" {
 						claimed = true
@@ -357,31 +357,28 @@ func TestAReadOnlyPublishReportsWhatItCannotBind(t *testing.T) {
 				}
 				if !claimed {
 					t.Errorf("the refused publish posted %v, want a refusal on the claim",
-						eventsOf(t, answering))
+						eventsOf(t, n))
 				}
 			})
 		})
 	}
 }
 
-// The container runtime binds a volume into the pod read-write unless
-// the pod asks for read-only, whatever the driver's own bind says, so
-// a publish that does not ask is refused before anything is bound.
 func TestAReadOnlyClaimRefusesAPodThatDoesNotAskForReadOnly(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, calls := testNode(t, io.Discard)
-		boundVolume(t, answering, "franchises", "")
+		n, calls := testNode(t, io.Discard)
+		boundVolume(t, n, "franchises", "")
 		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-		staged, _ := stagedReadOnly(t, answering, "franchises", fileURL(source),
+		staged, _ := stagedReadOnly(t, n, "franchises", fileURL(source),
 			map[string]string{"pull": "never"})
 		request := readOnlyPublish(t, staged, "reader-a")
 		request.Readonly = false
 		before := len(calls.mounts)
 
-		_, err := answering.NodePublishVolume(t.Context(), request)
+		_, err := n.NodePublishVolume(t.Context(), request)
 
 		if got := status.Code(err); got != codes.InvalidArgument {
-			t.Fatalf("NodePublishVolume answered %v, want %v", got, codes.InvalidArgument)
+			t.Fatalf("NodePublishVolume returned %v, want %v", got, codes.InvalidArgument)
 		}
 		if !strings.Contains(err.Error(), "readOnly") {
 			t.Errorf("the refusal reads %q, want it to name readOnly", err)
@@ -390,38 +387,38 @@ func TestAReadOnlyClaimRefusesAPodThatDoesNotAskForReadOnly(t *testing.T) {
 			t.Errorf("the refused publish made %d mounts, want none", len(calls.mounts)-before)
 		}
 		onPod := false
-		for _, posted := range eventsOf(t, answering) {
+		for _, posted := range eventsOf(t, n) {
 			if posted.Reason == reasonRefused && posted.InvolvedObject.Kind == "Pod" {
 				onPod = true
 			}
 		}
 		if !onPod {
-			t.Errorf("the refused publish posted %v, want a refusal on the pod", eventsOf(t, answering))
+			t.Errorf("the refused publish posted %v, want a refusal on the pod", eventsOf(t, n))
 		}
 	})
 }
 
-func TestADriverThatRestartsTakesBackAReadOnlyClaim(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	boundVolume(t, answering, "franchises", "")
+func TestARestartedDriverResumesAReadOnlyClaim(t *testing.T) {
+	n, _ := testNode(t, io.Discard)
+	boundVolume(t, n, "franchises", "")
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	staged, _ := stagedReadOnly(t, answering, "franchises", fileURL(source),
+	staged, _ := stagedReadOnly(t, n, "franchises", fileURL(source),
 		map[string]string{"pull": "1h"})
-	first := publishedTo(t, answering, staged, "reader-a")
-	second := publishedTo(t, answering, staged, "reader-b")
+	first := publishedTo(t, n, staged, "reader-a")
+	second := publishedTo(t, n, staged, "reader-b")
 
-	held := recordOf(t, answering, "franchises")
-	if held.Staging != staged.StagingTargetPath || held.Kind != readOnlyKind {
+	rec := recordOf(t, n, "franchises")
+	if rec.Staging != staged.StagingTargetPath || rec.Kind != readOnlyKind {
 		t.Errorf("the record is %+v, want a read-only claim staged at %s",
-			held, staged.StagingTargetPath)
+			rec, staged.StagingTargetPath)
 	}
 
-	again := restartedWith(t, answering, map[string]bool{first.TargetPath: true})
+	again := restartedWith(t, n, map[string]bool{first.TargetPath: true})
 	again.mu.Lock()
 	defer again.mu.Unlock()
-	resumed, standing := again.volumes["franchises"]
-	if !standing {
-		t.Fatal("the driver took back no read-only claim")
+	resumed, published := again.volumes["franchises"]
+	if !published {
+		t.Fatal("the driver resumed no read-only claim")
 	}
 	if got := resumed.boundTargets(); !sameStrings(got, []string{first.TargetPath}) {
 		t.Errorf("the resumed volume is bound at %v, want the one target still mounted %s",
@@ -431,53 +428,53 @@ func TestADriverThatRestartsTakesBackAReadOnlyClaim(t *testing.T) {
 		t.Error("the resumed volume is published and not staged")
 	}
 	if got := recordOf(t, again, "franchises").Targets; !sameStrings(got, []string{first.TargetPath}) {
-		t.Errorf("the record carries %v, want the one target still mounted %s",
+		t.Errorf("the record has %v, want the one target still mounted %s",
 			got, first.TargetPath)
 	}
 	if len(again.followers) != 1 {
-		t.Errorf("the driver holds %d fetch loops, want 1", len(again.followers))
+		t.Errorf("the driver has %d fetch loops, want 1", len(again.followers))
 	}
 	if resumed.claimNow().name != "config" {
 		t.Errorf("the resumed volume names the claim %+v, want home/config", resumed.claimNow())
 	}
 	if again.mounted(second.TargetPath) {
-		t.Error("the test's mount table holds the target the pod gave up")
+		t.Error("the test's mount table has the target the pod unmounted")
 	}
 }
 
 func TestAReadOnlyClaimNoPodStillReadsGoesWithItsDirectory(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
+	n, _ := testNode(t, io.Discard)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	staged, _ := stagedReadOnly(t, answering, "franchises", fileURL(source),
+	staged, _ := stagedReadOnly(t, n, "franchises", fileURL(source),
 		map[string]string{"pull": "1h"})
-	publishedTo(t, answering, staged, "reader-a")
+	publishedTo(t, n, staged, "reader-a")
 
-	again := restartedWith(t, answering, map[string]bool{})
-	if _, err := os.Stat(answering.store.volumeDir("franchises")); err == nil {
+	again := restartedWith(t, n, map[string]bool{})
+	if _, err := os.Stat(n.store.volumeDir("franchises")); err == nil {
 		t.Error("the directory of a claim no pod still reads stayed")
 	}
 	again.mu.Lock()
 	defer again.mu.Unlock()
 	if len(again.volumes) != 0 || len(again.staged) != 0 {
-		t.Errorf("the driver took back %d published and %d staged volumes, want none of either",
+		t.Errorf("the driver resumed %d published and %d staged volumes, want none of either",
 			len(again.volumes), len(again.staged))
 	}
 }
 
-// restartedWith is a second driver on the same store whose mount table
-// holds the paths the map names.
-func restartedWith(t *testing.T, answering *node, mounted map[string]bool) *node {
+// restartedWith returns a second driver on the same store, as after a
+// restart, whose mount table already contains the paths in the map.
+func restartedWith(t *testing.T, n *node, mounted map[string]bool) *node {
 	t.Helper()
 	again, _ := testNode(t, io.Discard)
-	again.store = answering.store
-	again.events = answering.events
-	again.arms.client = answering.arms.client
+	again.store = n.store
+	again.events = n.events
+	again.arming.client = n.arming.client
 	again.mounted = func(path string) bool { return mounted[path] }
 	again.resume(t.Context())
 	return again
 }
 
-// sameStrings reports whether the two lists hold the same paths in the
+// sameStrings reports whether two lists have the same strings in the
 // same order.
 func sameStrings(got, want []string) bool {
 	if len(got) != len(want) {
@@ -491,11 +488,9 @@ func sameStrings(got, want []string) bool {
 	return true
 }
 
-// unpublish takes one target away and fails the test when the call
-// does.
-func unpublish(t *testing.T, answering *node, id, target string) {
+func unpublish(t *testing.T, n *node, id, target string) {
 	t.Helper()
-	if _, err := answering.NodeUnpublishVolume(t.Context(), &csi.NodeUnpublishVolumeRequest{
+	if _, err := n.NodeUnpublishVolume(t.Context(), &csi.NodeUnpublishVolumeRequest{
 		VolumeId: id, TargetPath: target,
 	}); err != nil {
 		t.Fatalf("NodeUnpublishVolume: %v", err)
@@ -505,92 +500,91 @@ func unpublish(t *testing.T, answering *node, id, target string) {
 func TestTheRecordNamesTheKindOfEveryVolume(t *testing.T) {
 	for _, c := range []struct {
 		name    string
-		held    *record
+		rec     *record
 		kind    volumeKind
 		targets []string
 	}{
 		{
 			name:    "an inline volume",
-			held:    &record{Kind: inlineKind, Target: "/mount"},
+			rec:     &record{Kind: inlineKind, Target: "/mount"},
 			kind:    inlineVolume,
 			targets: []string{"/mount"},
 		},
 		{
 			name:    "a read-only claim",
-			held:    &record{Kind: readOnlyKind, Targets: []string{"/a", "/b"}},
+			rec:     &record{Kind: readOnlyKind, Targets: []string{"/a", "/b"}},
 			kind:    readOnlyClaim,
 			targets: []string{"/a", "/b"},
 		},
 		{
 			name:    "a writeable volume",
-			held:    &record{Kind: writeableKind, Target: "/mount"},
+			rec:     &record{Kind: writeableKind, Target: "/mount"},
 			kind:    writeableVolume,
 			targets: []string{"/mount"},
 		},
 		{
-			// A record from a driver that wrote no kind.
 			name:    "an ephemeral record with no kind",
-			held:    &record{Ephemeral: true, Target: "/mount"},
+			rec:     &record{Ephemeral: true, Target: "/mount"},
 			kind:    inlineVolume,
 			targets: []string{"/mount"},
 		},
 		{
 			name:    "a record with no kind that is not ephemeral",
-			held:    &record{Target: "/mount"},
+			rec:     &record{Target: "/mount"},
 			kind:    writeableVolume,
 			targets: []string{"/mount"},
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			if got := c.held.kind(); got != c.kind {
+			if got := c.rec.kind(); got != c.kind {
 				t.Errorf("the record is kind %v, want %v", got, c.kind)
 			}
-			if got := c.held.targetPaths(); !sameStrings(got, c.targets) {
+			if got := c.rec.targetPaths(); !sameStrings(got, c.targets) {
 				t.Errorf("the record names %v, want %v", got, c.targets)
 			}
 		})
 	}
 }
 
-func TestAReadOnlyClaimTellsThePodsItIsPublishedTo(t *testing.T) {
+func TestAReadOnlyClaimPostsEventsOnThePodsItIsPublishedTo(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, _ := testNode(t, io.Discard)
-		held := &volume{
+		n, _ := testNode(t, io.Discard)
+		vol := &volume{
 			id:      "franchises",
 			kind:    readOnlyClaim,
 			targets: map[string]podReference{},
 			claim:   claimReference{namespace: "home", name: "config"},
 		}
-		held.bind("/a", podReference{name: "reader-a", namespace: "home"})
+		vol.bind("/a", podReference{name: "reader-a", namespace: "home"})
 
-		answering.tell(held, corev1.EventTypeWarning, reasonStale, "the node's copy")
-		posted := eventsOf(t, answering)
+		n.postVolumeEvent(vol, corev1.EventTypeWarning, reasonStale, "the node's copy")
+		posted := eventsOf(t, n)
 		if len(posted) != 2 {
-			t.Fatalf("the volume told %d objects, want the pod and the claim", len(posted))
+			t.Fatalf("the volume posted Events on %d objects, want the pod and the claim", len(posted))
 		}
 	})
 }
 
 func TestADriverOutsideAClusterStagesAReadOnlyClaim(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	answering.arms.client = nil
+	n, _ := testNode(t, io.Discard)
+	n.arming.client = nil
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	_, held := stagedReadOnly(t, answering, "franchises", fileURL(source),
+	_, vol := stagedReadOnly(t, n, "franchises", fileURL(source),
 		map[string]string{"pull": "never"})
 
-	if held.claimNow().name != "" {
-		t.Errorf("the volume names the claim %+v, want none", held.claimNow())
+	if vol.claimNow().name != "" {
+		t.Errorf("the volume names the claim %+v, want none", vol.claimNow())
 	}
-	if got := readTree(t, held.tree); !sameTree(got, map[string]string{"a.txt": "one"}) {
-		t.Errorf("the tree holds %v, want the commit", got)
+	if got := readTree(t, vol.tree); !sameTree(got, map[string]string{"a.txt": "one"}) {
+		t.Errorf("the tree has %v, want the commit", got)
 	}
 }
 
 func TestAReadOnlyStageReportsTheDirectoryItCannotMake(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, _ := testNode(t, io.Discard)
-		boundVolume(t, answering, "franchises", "")
-		volumes := filepath.Join(answering.store.root, "volumes")
+		n, _ := testNode(t, io.Discard)
+		boundVolume(t, n, "franchises", "")
+		volumes := filepath.Join(n.store.root, "volumes")
 		if err := os.MkdirAll(volumes, 0o700); err != nil {
 			t.Fatalf("making the store: %v", err)
 		}
@@ -598,11 +592,11 @@ func TestAReadOnlyStageReportsTheDirectoryItCannotMake(t *testing.T) {
 		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 
 		staged := readOnlyStage(t, "franchises", fileURL(source), map[string]string{"pull": "never"})
-		_, err := answering.NodeStageVolume(t.Context(), staged)
+		_, err := n.NodeStageVolume(t.Context(), staged)
 		if got := status.Code(err); got != codes.Internal {
-			t.Fatalf("NodeStageVolume answered %v, want %v", got, codes.Internal)
+			t.Fatalf("NodeStageVolume returned %v, want %v", got, codes.Internal)
 		}
-		posted := eventsOf(t, answering)
+		posted := eventsOf(t, n)
 		if len(posted) != 1 || posted[0].InvolvedObject.Kind != "PersistentVolumeClaim" {
 			t.Errorf("the refused stage posted %v, want one refusal on the claim", posted)
 		}

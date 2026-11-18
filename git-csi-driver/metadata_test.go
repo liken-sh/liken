@@ -9,7 +9,8 @@ import (
 	"testing"
 )
 
-// createdWorkTree is a work tree of the source, checked out on main.
+// createdWorkTree creates a work tree of a repository with one commit of
+// files, checked out on main.
 func createdWorkTree(t *testing.T, files map[string]string) *workTree {
 	t.Helper()
 	work, commit := workTreeOf(t, repositoryWithACommit(t, files))
@@ -19,7 +20,7 @@ func createdWorkTree(t *testing.T, files map[string]string) *workTree {
 	return work
 }
 
-func TestTheWalkRecordsWhatACheckoutCannotCarry(t *testing.T) {
+func TestTheWalkRecordsWhatACheckoutCannotRestore(t *testing.T) {
 	tree := t.TempDir()
 	writeFiles(t, tree, map[string]string{
 		"plain.yaml":        "one",
@@ -58,7 +59,7 @@ func TestTheWalkRecordsWhatACheckoutCannotCarry(t *testing.T) {
 
 func TestTheWalkReportsATreeItCannotRead(t *testing.T) {
 	if _, err := walkTreeMetadata(filepath.Join(t.TempDir(), "gone")); err == nil {
-		t.Error("walkTreeMetadata answered no error for a tree that is not there")
+		t.Error("walkTreeMetadata returned no error for a tree that is not there")
 	}
 }
 
@@ -83,11 +84,11 @@ func TestARecordIsOneLine(t *testing.T) {
 	})
 	want := "0600 0 0 secret.yaml\n0755 1000 1000 .storage/\n"
 	if content != want {
-		t.Errorf("metadataContent answered %q, want %q", content, want)
+		t.Errorf("metadataContent returned %q, want %q", content, want)
 	}
 	read := parseMetadataContent(content)
 	if len(read) != 2 {
-		t.Fatalf("parseMetadataContent answered %v, want two records", read)
+		t.Fatalf("parseMetadataContent returned %v, want two records", read)
 	}
 	if read[0].path != "secret.yaml" || read[0].mode != fs.FileMode(0o600) || read[0].directory {
 		t.Errorf("the first record is %+v", read[0])
@@ -112,7 +113,7 @@ func TestALineTheDriverCannotReadIsNoRecord(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if one, ok := parseMetadataLine(c.line); ok {
-				t.Errorf("parseMetadataLine(%q) answered %+v, want no record", c.line, one)
+				t.Errorf("parseMetadataLine(%q) returned %+v, want no record", c.line, one)
 			}
 		})
 	}
@@ -159,25 +160,26 @@ func TestTheRecordIsCommittedOnlyWhenItChanges(t *testing.T) {
 	}
 	parents := gitIn(t, work, "rev-list", "--count", metadataRef)
 	if strings.TrimSpace(parents) != "2" {
-		t.Errorf("the metadata ref holds %s commits, want 2", strings.TrimSpace(parents))
+		t.Errorf("the metadata ref has %s commits, want 2", strings.TrimSpace(parents))
 	}
 }
 
-// gitIn runs the tests' own git against the work tree's git directory.
+// gitIn runs git against the work tree's git directory and returns its
+// output.
 func gitIn(t *testing.T, work *workTree, args ...string) string {
 	t.Helper()
 	return git(t, work.directory,
 		append([]string{"--git-dir=" + work.gitDir, "--work-tree=" + work.tree}, args...)...)
 }
 
-func TestTheRecordIsNotCommittedWhenGitCannotHoldIt(t *testing.T) {
+func TestTheRecordIsNotCommittedWhenGitCannotWriteIt(t *testing.T) {
 	for _, c := range []struct {
-		name  string
-		stand func(t *testing.T, work *workTree)
+		name   string
+		damage func(t *testing.T, work *workTree)
 	}{
 		{
 			name: "a record file the driver cannot write",
-			stand: func(t *testing.T, work *workTree) {
+			damage: func(t *testing.T, work *workTree) {
 				if err := os.MkdirAll(
 					filepath.Join(work.directory, metadataRecordFile), 0o755); err != nil {
 					t.Fatalf("making the record directory: %v", err)
@@ -186,7 +188,7 @@ func TestTheRecordIsNotCommittedWhenGitCannotHoldIt(t *testing.T) {
 		},
 		{
 			name: "a git directory that is gone",
-			stand: func(t *testing.T, work *workTree) {
+			damage: func(t *testing.T, work *workTree) {
 				if err := os.RemoveAll(work.gitDir); err != nil {
 					t.Fatalf("removing the git directory: %v", err)
 				}
@@ -194,7 +196,7 @@ func TestTheRecordIsNotCommittedWhenGitCannotHoldIt(t *testing.T) {
 		},
 		{
 			name: "an index the driver cannot write",
-			stand: func(t *testing.T, work *workTree) {
+			damage: func(t *testing.T, work *workTree) {
 				if err := os.MkdirAll(
 					filepath.Join(work.directory, metadataIndexFile), 0o755); err != nil {
 					t.Fatalf("making the index directory: %v", err)
@@ -207,15 +209,15 @@ func TestTheRecordIsNotCommittedWhenGitCannotHoldIt(t *testing.T) {
 			if err := os.Chmod(filepath.Join(work.tree, "a.txt"), 0o600); err != nil {
 				t.Fatalf("chmod: %v", err)
 			}
-			c.stand(t, work)
+			c.damage(t, work)
 			if err := work.recordMetadata(t.Context(), defaultPolicy()); err == nil {
-				t.Error("recordMetadata answered no error")
+				t.Error("recordMetadata returned no error")
 			}
 		})
 	}
 }
 
-func TestTheReplayGivesTheTreeItsModesAndEmptyDirectories(t *testing.T) {
+func TestTheReplayRestoresTheModesAndEmptyDirectoriesOfTheTree(t *testing.T) {
 	work := createdWorkTree(t, map[string]string{"a.txt": "one", "docs/b.txt": "two"})
 	rules := defaultPolicy()
 	if err := os.Chmod(filepath.Join(work.tree, "a.txt"), 0o600); err != nil {
@@ -228,7 +230,8 @@ func TestTheReplayGivesTheTreeItsModesAndEmptyDirectories(t *testing.T) {
 		t.Fatalf("recordMetadata: %v", err)
 	}
 
-	// The checkout a restore starts from carries neither.
+	// Undo what a fresh checkout would not restore: the mode of a.txt and
+	// the empty directory.
 	if err := os.Chmod(filepath.Join(work.tree, "a.txt"), 0o644); err != nil {
 		t.Fatalf("chmod: %v", err)
 	}
@@ -255,7 +258,7 @@ func TestTheReplayGivesTheTreeItsModesAndEmptyDirectories(t *testing.T) {
 	}
 }
 
-func TestTheReplayTakesTheOwnerWhereTheDriverMay(t *testing.T) {
+func TestTheReplaySetsTheOwnerOnlyWhenTheDriverRunsAsRoot(t *testing.T) {
 	work := createdWorkTree(t, map[string]string{"a.txt": "one"})
 	if err := os.Chmod(filepath.Join(work.tree, "a.txt"), 0o600); err != nil {
 		t.Fatalf("chmod: %v", err)
@@ -268,33 +271,33 @@ func TestTheReplayTakesTheOwnerWhereTheDriverMay(t *testing.T) {
 		slog.New(slog.NewTextHandler(logs, nil)), true); err != nil {
 		t.Fatalf("replayMetadata: %v", err)
 	}
-	if strings.Contains(logs.String(), "the owner was not replayed") {
-		t.Errorf("the driver could not take its own file: %s", logs)
+	if strings.Contains(logs.String(), "The owner of a metadata record was not set") {
+		t.Errorf("the driver cannot set the owner of its own file: %s", logs)
 	}
 }
 
-func TestTheReplayReportsWhatItCannotGive(t *testing.T) {
+func TestTheReplayLogsWhatItCannotRestore(t *testing.T) {
 	for _, c := range []struct {
 		name    string
 		content string
 		owners  bool
-		says    string
+		wants   string
 	}{
 		{
-			name:    "a directory a file stands in the way of",
+			name:    "a directory where a file already exists",
 			content: "0755 0 0 a.txt/\n",
-			says:    "the directory was not made",
+			wants:   "A directory of the metadata record was not created",
 		},
 		{
 			name:    "a path the checkout does not hold",
 			content: "0600 0 0 gone.yaml\n",
-			says:    "the mode was not replayed",
+			wants:   "The mode of a metadata record was not set",
 		},
 		{
 			name:    "an owner the driver may not take",
 			content: "0644 65534 65534 a.txt\n",
 			owners:  true,
-			says:    "the owner was not replayed",
+			wants:   "The owner of a metadata record was not set",
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -305,15 +308,15 @@ func TestTheReplayReportsWhatItCannotGive(t *testing.T) {
 				slog.New(slog.NewTextHandler(logs, nil)), c.owners); err != nil {
 				t.Fatalf("replayMetadata: %v", err)
 			}
-			if !strings.Contains(logs.String(), c.says) {
-				t.Errorf("the log is %q, want %q in it", logs, c.says)
+			if !strings.Contains(logs.String(), c.wants) {
+				t.Errorf("the log is %q, want %q in it", logs, c.wants)
 			}
 		})
 	}
 }
 
-// recordOnRef puts the content on the metadata ref, which is what a
-// restore reads.
+// recordOnRef commits content to metadataRef, which replayMetadata
+// reads.
 func recordOnRef(t *testing.T, work *workTree, content string) {
 	t.Helper()
 	if err := work.commitMetadata(t.Context(), defaultPolicy(), content); err != nil {
@@ -324,7 +327,7 @@ func recordOnRef(t *testing.T, work *workTree, content string) {
 func TestTheReplayReportsARefItCannotRead(t *testing.T) {
 	work := createdWorkTree(t, map[string]string{"a.txt": "one"})
 	if err := work.replayMetadata(t.Context(), slog.Default(), false); err == nil {
-		t.Error("replayMetadata answered no error for a tree with no metadata ref")
+		t.Error("replayMetadata returned no error for a tree with no metadata ref")
 	}
 }
 
@@ -334,6 +337,6 @@ func TestTheRecordIsNotMadeFromATreeThatIsGone(t *testing.T) {
 		t.Fatalf("removing the tree: %v", err)
 	}
 	if err := work.recordMetadata(t.Context(), defaultPolicy()); err == nil {
-		t.Error("recordMetadata answered no error for a tree that is not there")
+		t.Error("recordMetadata returned no error for a tree that is not there")
 	}
 }

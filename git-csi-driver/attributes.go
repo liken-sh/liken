@@ -14,8 +14,8 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// The keys the kubelet adds to the volume context itself. podInfoOnMount
-// on the CSIDriver object turns them on.
+// The keys that the kubelet adds to the volume context when the
+// CSIDriver object sets podInfoOnMount.
 const (
 	ephemeralKey      = "csi.storage.k8s.io/ephemeral"
 	podNameKey        = "csi.storage.k8s.io/pod.name"
@@ -38,7 +38,6 @@ const (
 	defaultPull = 5 * time.Minute
 )
 
-// pullMode is which of the three things pull says.
 type pullMode int
 
 const (
@@ -47,40 +46,40 @@ const (
 	pullTimed
 )
 
-// pullPolicy is what pull says. pullNever is the zero value, so a
-// volume with no policy follows nothing. every is the interval, and it
-// counts under pullTimed alone.
+// pullPolicy is the parsed pull attribute. every is the timer interval,
+// and it is set only when mode is pullTimed. A volume with no pull
+// attribute gets pullEvery(defaultPull), not the zero value.
 type pullPolicy struct {
 	mode  pullMode
 	every time.Duration
 }
 
-// pullEvery is the policy of a volume that names a duration.
 func pullEvery(interval time.Duration) pullPolicy {
 	return pullPolicy{mode: pullTimed, every: interval}
 }
 
-// follows reports whether the volume joins its repository's loop,
-// where a timer or a demand reaches it. A volume with pull never joins
-// none.
+// follows reports whether the volume takes part in its repository's
+// pull loop, which a timer or a demand drives. A volume with pull set
+// to never does not.
 func (p pullPolicy) follows() bool {
 	return p.mode != pullNever
 }
 
-// timer is the interval the loop's timer takes, and false when nothing
-// but a demand pulls the volume.
+// timer returns the interval of the loop's timer, and false when the
+// volume has no timer and only a demand pulls it.
 func (p pullPolicy) timer() (time.Duration, bool) {
 	return p.every, p.mode == pullTimed
 }
 
-// podReference is the pod the kubelet named, where an Event goes.
+// podReference is the pod that mounts the volume, as the kubelet
+// reports it. The driver posts Events about the volume on this pod.
 type podReference struct {
 	name      string
 	namespace string
 	uid       string
 }
 
-// attributes is one read-only volume as its attributes describe it.
+// attributes is the parsed volume context of one volume.
 type attributes struct {
 	url       string
 	ref       string
@@ -89,9 +88,9 @@ type attributes struct {
 	offline   offlinePolicy
 	ephemeral bool
 	pod       podReference
-	// webhookSecret names the Secret in the claim's namespace that the
-	// controller verifies a forge's push against before it marks this
-	// volume.
+	// webhookSecret is the name of a Secret in the claim's namespace. The
+	// controller verifies a forge's push against it before it demands a
+	// pull on this volume.
 	webhookSecret string
 }
 
@@ -105,33 +104,31 @@ func parseAttributes(request *csi.NodePublishVolumeRequest) (*attributes, error)
 	}
 	if parsed.ephemeral && !request.GetReadonly() {
 		return nil, status.Error(codes.InvalidArgument,
-			"readOnly: an inline volume of this driver has to be read-only")
+			"readOnly: an inline volume must be read-only")
 	}
-	// A webhook marks a PersistentVolume, and an inline volume is
-	// written into the pod spec, so no push ever reaches one.
+	// The webhook and a demand both work by annotating the volume's
+	// PersistentVolume. An inline volume has no PersistentVolume, so
+	// neither can reach it.
 	if parsed.ephemeral && parsed.webhookSecret != "" {
 		return nil, status.Error(codes.InvalidArgument,
-			"webhookSecret: a webhook marks a PersistentVolume, "+
-				"and an inline volume is none")
+			"webhookSecret: an inline volume has no PersistentVolume for a webhook to mark")
 	}
-	// A demand is an annotation on a PersistentVolume, and an inline
-	// volume has none, so nothing could ever demand it.
 	if parsed.ephemeral && parsed.pull.mode == pullOnDemand {
 		return nil, status.Error(codes.InvalidArgument,
-			"pull: on-demand names a demand on a PersistentVolume, "+
+			"pull: on-demand pulls when a demand annotates the PersistentVolume, "+
 				"and an inline volume has none")
 	}
 	return parsed, nil
 }
 
-// readOnlyAttributes are the attributes a read-only volume alone
-// accepts. A writeable volume follows its ref at stage and never after.
+// readOnlyAttributes are the attributes that only a read-only volume
+// accepts. A writeable volume checks out its ref once, at stage, and the
+// driver never pulls it after that.
 var readOnlyAttributes = []string{"pull", "depth", "offline", "webhookSecret"}
 
-// parseStageAttributes reads a persistent volume's attributes.
-//
-// A writeable stage refuses the read-only attributes. A read-only claim
-// takes the same attributes an inline volume takes.
+// parseStageAttributes reads the attributes of a persistent volume. A
+// writeable volume refuses the read-only attributes. A read-only claim
+// accepts the same attributes as an inline volume.
 func parseStageAttributes(kind volumeKind, context map[string]string) (*attributes, error) {
 	if kind != writeableVolume {
 		return parseVolumeContext(context)
@@ -139,14 +136,14 @@ func parseStageAttributes(kind volumeKind, context map[string]string) (*attribut
 	for _, key := range readOnlyAttributes {
 		if _, found := context[key]; found {
 			return nil, status.Errorf(codes.InvalidArgument,
-				"%s: a writeable volume follows its ref at stage alone", key)
+				"%s: only a read-only volume accepts this attribute", key)
 		}
 	}
 	return parseVolumeContext(context)
 }
 
-// parseVolumeContext reads the attributes both a stage call and a
-// publish call carry.
+// parseVolumeContext reads the attributes that both the stage call and
+// the publish call carry.
 func parseVolumeContext(context map[string]string) (*attributes, error) {
 	parsed := &attributes{ref: defaultRef, pull: pullEvery(defaultPull), offline: offlineRefuse}
 
@@ -187,46 +184,48 @@ func parseVolumeContext(context map[string]string) (*attributes, error) {
 		case podUIDKey:
 			parsed.pod.uid = value
 		case serviceAccountKey:
+			// The kubelet sends it. The driver accepts it and does not use it.
 		default:
-			return nil, status.Errorf(codes.InvalidArgument, "%s: unknown attribute", key)
+			return nil, status.Errorf(codes.InvalidArgument, "%s: unknown attribute, want one of url, ref, pull, depth, offline, webhookSecret", key)
 		}
 	}
 
 	if parsed.url == "" {
-		return nil, status.Error(codes.InvalidArgument, "url: an attribute the volume must set")
+		return nil, status.Error(codes.InvalidArgument, "url: the volume sets no url")
 	}
 	if err := checkURL(parsed.url); err != nil {
 		return nil, err
 	}
 	if parsed.ref == "" {
-		return nil, status.Error(codes.InvalidArgument, "ref: an empty ref names nothing")
+		return nil, status.Error(codes.InvalidArgument, "ref: the value is empty")
 	}
 	return parsed, nil
 }
 
-// checkURL refuses two URL shapes that would run a command. git accepts
-// options after the repository, so a URL that starts with a dash is an
-// option. A <transport>::<address> URL names a helper program git runs.
-// The driver fetches as root on the node and the URL comes from a pod
-// spec, so both are refused before git sees them.
+// checkURL refuses two kinds of URL that make git run something other
+// than a fetch. git reads a URL that starts with a dash as an option. A
+// <transport>::<address> URL makes git run a helper program for that
+// transport. The driver fetches as root on the node and the URL comes
+// from a pod spec, so both are refused before git runs.
 func checkURL(url string) error {
 	if strings.HasPrefix(url, "-") {
-		return status.Errorf(codes.InvalidArgument, "url: %q reads as an option to git", url)
+		return status.Errorf(codes.InvalidArgument, "url: %q starts with a dash, so git reads it as an option", url)
 	}
 	if transportHelper.MatchString(url) {
 		return status.Errorf(codes.InvalidArgument,
-			"url: %q names a transport helper, and the driver runs none", url)
+			"url: %q has the form <transport>::<address>, which makes git run a transport helper, and the driver runs none", url)
 	}
 	return nil
 }
 
-// transportHelper matches git's <transport>::<address> form. No https,
-// ssh, git, or file URL has two colons after its first word.
+// transportHelper matches a word followed by two colons, which is git's
+// <transport>::<address> form. No https, ssh, git, or file URL has
+// that.
 var transportHelper = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9+.\-]*::`)
 
-// parsePull reads pull. never pulls nothing after the publish, on a
-// timer or on a demand. on-demand pulls on a demand alone. A duration
-// pulls on the timer and on a demand.
+// parsePull reads the pull attribute. never means no pull after
+// publish. on-demand means a pull only when a demand arrives. A
+// duration means a pull on that timer and on a demand.
 func parsePull(value string) (pullPolicy, error) {
 	switch value {
 	case "never":
@@ -241,7 +240,7 @@ func parsePull(value string) (pullPolicy, error) {
 	}
 	if pull <= 0 {
 		return pullPolicy{}, status.Errorf(codes.InvalidArgument,
-			"pull: %q is not longer than zero", value)
+			"pull: %q must be longer than zero", value)
 	}
 	return pullEvery(pull), nil
 }

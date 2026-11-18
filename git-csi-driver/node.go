@@ -1,8 +1,5 @@
 package main
 
-// node.go implements the CSI Node service. The kubelet calls it to mount a
-// volume in a pod and to remove that mount.
-
 import (
 	"context"
 	"fmt"
@@ -20,99 +17,102 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// node implements the Node service and records what this node has published.
+// node implements the CSI Node service, which the kubelet calls to mount
+// a volume into a pod and to remove that mount. It keeps the volumes
+// that are published or staged on this node.
 type node struct {
 	csi.UnimplementedNodeServer
 	nodeID string
 	store  *store
 	mounts mountSyscalls
 	events *events
-	arms   *arming
-	// demands is the watch that reads a demand off a PersistentVolume.
-	// demandMin is the interval that bounds a burst of them.
-	demands   *demanding
+	arming *arming
+	// demands watches PersistentVolumes for demandAnnotation, which asks
+	// for a pull. A pull that the annotation starts waits until demandMin
+	// after the last pass of the repository's fetch loop.
+	demands   *demandWatch
 	demandMin time.Duration
-	// The gauges every volume reports itself on.
-	readings *metrics
-	logger   *slog.Logger
-	base     context.Context
-	// How long a tree rests before the driver reads what is pending, and
-	// how often it reads that anyway.
+	metrics   *metrics
+	logger    *slog.Logger
+	base      context.Context
+	// quiesce is how long a work tree must go without a write before the
+	// driver scans it for changes to commit. sweep is how often the driver
+	// scans each work tree when no inotify event arrives. A test replaces
+	// clock to control both.
 	quiesce time.Duration
 	sweep   time.Duration
-	// clock is what each watch measures the quiesce and the sweep
-	// against.
-	clock clock
-	// How often the driver walks the store's bare repositories.
+	clock   clock
+	// sweepEvery is how often sweepStore deletes the bare repositories
+	// and refs that no volume uses.
 	sweepEvery time.Duration
-	// mounted asks the kernel whether a path is still a mount. A restarted
-	// driver asks it about every record.
-	//
-	// mountinfo is the file mounted reads. It is a field so a test can
-	// name a file of its own.
+	// mounted reports whether a path is still a mount point. After a
+	// restart, the driver calls it for each target in its record files.
+	// It reads the mount table at mountinfo, which a test points at its
+	// own file.
 	mounted   func(string) bool
 	mountinfo string
-	// inotify opens the file the watch reads. It is a seam, so a test can
-	// drive a driver whose kernel refused one.
+	// inotify is a field so a test can fail it, as a kernel that refuses
+	// an inotify instance does.
 	inotify func(int) (int, error)
 
 	mu        sync.Mutex
 	volumes   map[string]*volume
 	followers map[string]*follower
-	// The writeable volumes this node has staged, and the loops that watch
-	// and arm them.
-	staged   map[string]*volume
-	watchers map[string]*watcher
-	armings  map[string]context.CancelFunc
+	// staged holds the volumes staged on this node. watchers holds the
+	// inotify loop of each writeable volume, and armingCancels holds the cancel
+	// function of the goroutine that follows each writeable volume's claim
+	// and its VolumeAttributesClass.
+	staged        map[string]*volume
+	watchers      map[string]*watcher
+	armingCancels map[string]context.CancelFunc
 }
 
-// newNode builds the service. base is the driver's run, so every fetch
-// loop ends when the pod stops.
-func newNode(base context.Context, cfg *config, posting *events, readings *metrics, logger *slog.Logger) *node {
-	answering := &node{
-		nodeID:     cfg.nodeID,
-		store:      newStore(cfg.store),
-		mounts:     kernelMounts{},
-		events:     posting,
-		readings:   readings,
-		logger:     logger,
-		base:       base,
-		quiesce:    defaultQuiesce,
-		sweep:      defaultSweep,
-		clock:      wallClock{},
-		sweepEvery: defaultSweepEvery,
-		demandMin:  cfg.demandMin,
-		mountinfo:  mountTable,
-		inotify:    unix.InotifyInit1,
-		volumes:    map[string]*volume{},
-		followers:  map[string]*follower{},
-		staged:     map[string]*volume{},
-		watchers:   map[string]*watcher{},
-		armings:    map[string]context.CancelFunc{},
+// newNode builds the service. base is the driver's context, so every
+// fetch loop ends when the driver's pod stops.
+func newNode(base context.Context, cfg *config, posting *events, registry *metrics, logger *slog.Logger) *node {
+	n := &node{
+		nodeID:        cfg.nodeID,
+		store:         newStore(cfg.store),
+		mounts:        kernelMounts{},
+		events:        posting,
+		metrics:       registry,
+		logger:        logger,
+		base:          base,
+		quiesce:       defaultQuiesce,
+		sweep:         defaultSweep,
+		clock:         wallClock{},
+		sweepEvery:    defaultSweepEvery,
+		demandMin:     cfg.demandMin,
+		mountinfo:     mountTable,
+		inotify:       unix.InotifyInit1,
+		volumes:       map[string]*volume{},
+		followers:     map[string]*follower{},
+		staged:        map[string]*volume{},
+		watchers:      map[string]*watcher{},
+		armingCancels: map[string]context.CancelFunc{},
 	}
-	answering.arms = newArming(answering, posting.client, logger)
-	answering.demands = newDemanding(answering, posting.client, logger)
-	answering.mounted = func(path string) bool { return mountedNow(answering.mountinfo, path) }
-	return answering
+	n.arming = newArming(n, posting.client, logger)
+	n.demands = newDemandWatch(n, posting.client, logger)
+	n.mounted = func(path string) bool { return mountedNow(n.mountinfo, path) }
+	return n
 }
 
-// NodeGetInfo returns the node name and no topology. A checkout is made
-// on whichever node publishes it, so no node is closer to a volume than
-// another.
+// NodeGetInfo returns the node ID and no topology. Each node makes its
+// own checkout, so a volume does not depend on where it is scheduled.
 func (n *node) NodeGetInfo(
 	context.Context, *csi.NodeGetInfoRequest,
 ) (*csi.NodeGetInfoResponse, error) {
 	return &csi.NodeGetInfoResponse{NodeId: n.nodeID}, nil
 }
 
-// NodeGetCapabilities declares what the kubelet may ask of this
-// node: STAGE_UNSTAGE_VOLUME makes the kubelet stage a persistent
-// volume once per node before it publishes it per pod, and
-// GET_VOLUME_STATS makes it poll NodeGetVolumeStats for the size.
+// NodeGetCapabilities lists the optional calls the kubelet may make.
+// STAGE_UNSTAGE_VOLUME makes the kubelet stage a persistent volume once
+// per node before it publishes the volume to each pod. GET_VOLUME_STATS
+// makes the kubelet call NodeGetVolumeStats for the volume's size.
 //
-// SINGLE_NODE_MULTI_WRITER is declared because the kubelet sends
-// the access modes ReadWriteOncePod uses only to a driver that declares
-// it, and sends the legacy SINGLE_NODE_WRITER to every other driver.
+// The kubelet sends SINGLE_NODE_SINGLE_WRITER for a ReadWriteOncePod
+// volume only to a driver that lists SINGLE_NODE_MULTI_WRITER. To any
+// other driver it sends SINGLE_NODE_WRITER, which stageKind refuses.
 func (n *node) NodeGetCapabilities(
 	context.Context, *csi.NodeGetCapabilitiesRequest,
 ) (*csi.NodeGetCapabilitiesResponse, error) {
@@ -132,18 +132,16 @@ func (n *node) NodeGetCapabilities(
 	return &csi.NodeGetCapabilitiesResponse{Capabilities: capabilities}, nil
 }
 
-// NodePublishVolume binds a tree under the pod. For an inline volume the
-// tree is a checkout of the ref made here. For a staged volume it is the
-// tree the stage made, bound read-only for a claim and read-write for a
-// writeable volume.
+// NodePublishVolume bind mounts a tree at the pod's target path. For an
+// inline volume, it checks out the ref here. For a staged volume, it
+// mounts the tree that NodeStageVolume made, read-only for a read-only
+// claim and read-write for a writeable volume.
 //
-// The kubelet repeats the call for every mounted volume on each pod
-// sync, because the CSIDriver sets requiresRepublish. A repeated call
-// for a published target mounts nothing and fetches nothing. It takes
-// the credential the call carries and answers success, so its cost is
-// the parse of the call. A repeated call that changes nothing writes no
-// log line. A call that fails, changes the credential, or reports a
-// missing publish Secret is logged.
+// The CSIDriver sets requiresRepublish, so the kubelet repeats this call
+// for every mounted volume on each pod sync. A repeated call for a
+// published target mounts and fetches nothing. It stores the call's
+// credential and returns success, and it logs only when the call fails,
+// changes the credential, or has no publish Secret.
 func (n *node) NodePublishVolume(
 	ctx context.Context, request *csi.NodePublishVolumeRequest,
 ) (*csi.NodePublishVolumeResponse, error) {
@@ -151,11 +149,11 @@ func (n *node) NodePublishVolume(
 	target := request.GetTargetPath()
 	switch {
 	case id == "":
-		return nil, status.Error(codes.InvalidArgument, "volume_id: the call names no volume")
+		return nil, status.Error(codes.InvalidArgument, "volume_id is empty")
 	case strings.ContainsRune(id, filepath.Separator):
 		return nil, status.Error(codes.InvalidArgument, "volume_id: a volume id is one path element")
 	case target == "":
-		return nil, status.Error(codes.InvalidArgument, "target_path: the call names no path")
+		return nil, status.Error(codes.InvalidArgument, "target_path is empty")
 	}
 
 	parsed, err := parseAttributes(request)
@@ -163,13 +161,13 @@ func (n *node) NodePublishVolume(
 		n.refused(podOf(request.GetVolumeContext()), err)
 		return nil, err
 	}
-	holder, err := parseCredentials(request.GetSecrets())
+	supplied, err := parseCredentials(request.GetSecrets())
 	if err != nil {
 		n.refused(parsed.pod, err)
 		return nil, err
 	}
 	if !parsed.ephemeral {
-		if err := n.publishStaged(ctx, request, parsed, holder); err != nil {
+		if err := n.publishStaged(ctx, request, parsed, supplied); err != nil {
 			n.refused(parsed.pod, err)
 			return nil, err
 		}
@@ -184,7 +182,7 @@ func (n *node) NodePublishVolume(
 			return nil, status.Errorf(codes.FailedPrecondition,
 				"volume_id: %s is published at %s", id, published.target)
 		}
-		n.republished(ctx, published, holder)
+		n.republished(ctx, published, supplied)
 		return &csi.NodePublishVolumeResponse{}, nil
 	}
 
@@ -192,7 +190,7 @@ func (n *node) NodePublishVolume(
 	mounting := &volume{
 		id:          id,
 		attributes:  parsed,
-		credentials: holder,
+		credentials: supplied,
 		directory:   directory,
 		tree:        filepath.Join(directory, "tree"),
 		target:      target,
@@ -209,13 +207,13 @@ func (n *node) NodePublishVolume(
 
 	n.mu.Lock()
 	n.volumes[id] = mounting
-	n.follow(mounting)
+	n.joinFetchLoop(mounting)
 	n.mu.Unlock()
 	return &csi.NodePublishVolumeResponse{}, nil
 }
 
-// publish makes the volume's directory, stages the ref into it, and
-// binds the tree onto the target path.
+// publish creates the volume's directory, fetches the ref into it, and
+// bind mounts the tree at the target path.
 func (n *node) publish(ctx context.Context, mounting *volume) error {
 	if err := os.MkdirAll(mounting.directory, 0o700); err != nil {
 		return status.Error(codes.Internal, err.Error())
@@ -226,8 +224,8 @@ func (n *node) publish(ctx context.Context, mounting *volume) error {
 	if err := os.MkdirAll(mounting.target, 0o755); err != nil {
 		return status.Error(codes.Internal, err.Error())
 	}
-	// A driver that restarted left its mounts behind, so the target
-	// comes away before the new bind goes on.
+	// A mount from before a driver restart can still be at the target,
+	// so unmount it before the new bind mount.
 	if err := unbind(n.mounts, mounting.target); err != nil {
 		return status.Error(codes.Internal, err.Error())
 	}
@@ -237,11 +235,12 @@ func (n *node) publish(ctx context.Context, mounting *volume) error {
 	return nil
 }
 
-// stage fetches the ref into the shared bare repository and places it
-// in the volume's own tree. offline decides what a failed fetch means:
-// refuse fails the publish, and allowStale publishes what the store
-// holds and reports the failure. A repository the store never fetched
-// is refused under both, because there is nothing to publish.
+// stage fetches the ref into the bare repository that every volume of
+// the URL shares, then checks out the commit into the volume's own tree.
+// When the fetch fails, the offline attribute decides the result.
+// offlineRefuse fails the publish. offlineAllowStale publishes the commit
+// that the store already has, and reports the failed fetch. Both fail
+// when the store has no commit for the ref.
 func (n *node) stage(ctx context.Context, mounting *volume) error {
 	repo := n.store.repository(mounting.attributes.url)
 	defer repo.lock()()
@@ -252,8 +251,9 @@ func (n *node) stage(ctx context.Context, mounting *volume) error {
 			return status.Error(codes.Internal, err.Error())
 		}
 	}
-	// depth applies to the first fetch of a repository. A later volume
-	// with a depth of its own reuses what is there.
+	// The depth applies only to the fetch that creates the repository. A
+	// later volume of the same URL reuses the history that is already
+	// there, whatever depth it asks for.
 	depth := 0
 	if first {
 		depth = mounting.attributes.depth
@@ -264,15 +264,15 @@ func (n *node) stage(ctx context.Context, mounting *volume) error {
 		return status.Error(codes.Internal, err.Error())
 	}
 	start := time.Now()
-	fetchErr := n.readings.timeFetch(repo.name, func() error {
+	fetchErr := n.metrics.timeFetch(repo.name, func() error {
 		return repo.fetch(ctx, env, mounting.attributes.ref, depth)
 	})
 	remove()
-	// A fetch that worked answers every demand stamped before it
-	// started. A stage that serves the node's copy after a failed fetch
-	// answers none, so the next demand read pulls.
+	// A successful fetch serves every pull annotation stamped more than
+	// demandSkew before the fetch started. A failed fetch serves none, so
+	// the next annotation starts another fetch.
 	if fetchErr == nil {
-		mounting.answerDemandsBefore(start)
+		mounting.satisfyDemandsBefore(start)
 	}
 
 	commit, resolveErr := repo.resolve(ctx, mounting.attributes.ref)
@@ -280,7 +280,7 @@ func (n *node) stage(ctx context.Context, mounting *volume) error {
 	case fetchErr != nil && mounting.attributes.offline == offlineRefuse:
 		return status.Error(codes.Unavailable, fetchErr.Error())
 	case fetchErr != nil && resolveErr != nil:
-		return status.Errorf(codes.Unavailable, "%s, and the node holds no copy of %s",
+		return status.Errorf(codes.Unavailable, "%s, and the node has no copy of %s",
 			fetchErr, mounting.attributes.ref)
 	case resolveErr != nil:
 		return status.Error(codes.Internal, resolveErr.Error())
@@ -292,22 +292,21 @@ func (n *node) stage(ctx context.Context, mounting *volume) error {
 	mounting.reportCommit(commit)
 	if fetchErr != nil {
 		mounting.reportFetchFailed(fetchErr.Error())
-		n.tell(mounting, corev1.EventTypeWarning, reasonStale,
-			fmt.Sprintf("%s is published from the node's copy at %s: %s",
+		n.postVolumeEvent(mounting, corev1.EventTypeWarning, reasonStale,
+			fmt.Sprintf("Published %s from the node's copy at %s, because the fetch failed: %s",
 				mounting.attributes.ref, short(commit), fetchErr))
 	}
-	// A volume published from a stale copy starts abnormal, so
-	// the gauge and the log carry that from the first moment it is
-	// mounted and not from the first fetch after it.
-	n.noteHealth(ctx, mounting)
+	// Set the health gauge now, so a volume published after a failed
+	// fetch shows as abnormal before the next fetch.
+	n.recordHealth(ctx, mounting)
 	return nil
 }
 
-// NodeUnpublishVolume takes one mount away. An inline volume's directory
-// goes with it. A read-only claim keeps its tree for the pods that still
-// read it, and gives it up at the unstage. A writeable volume's work tree
-// stays for the next pod on this node, and the bare repository stays for
-// the next volume of the same URL.
+// NodeUnpublishVolume removes one mount, and deletes an inline volume's
+// directory. A read-only claim keeps its tree, its fetch loop, and its
+// other targets for the other pods on this node until NodeUnstageVolume.
+// A writeable volume keeps its work tree for the next pod on this node.
+// The bare repository stays for the next volume of the same URL.
 func (n *node) NodeUnpublishVolume(
 	ctx context.Context, request *csi.NodeUnpublishVolumeRequest,
 ) (*csi.NodeUnpublishVolumeResponse, error) {
@@ -315,16 +314,13 @@ func (n *node) NodeUnpublishVolume(
 	target := request.GetTargetPath()
 	switch {
 	case id == "":
-		return nil, status.Error(codes.InvalidArgument, "volume_id: the call names no volume")
+		return nil, status.Error(codes.InvalidArgument, "volume_id is empty")
 	case target == "":
-		return nil, status.Error(codes.InvalidArgument, "target_path: the call names no path")
+		return nil, status.Error(codes.InvalidArgument, "target_path is empty")
 	}
 
 	n.mu.Lock()
 	published, found := n.volumes[id]
-	// A read-only claim keeps its tree, its fetch loop, and its other
-	// targets until the unstage, because other pods on this node still
-	// read it.
 	if found && published.kind == readOnlyClaim {
 		if published.unbind(target) == 0 {
 			delete(n.volumes, id)
@@ -332,7 +328,7 @@ func (n *node) NodeUnpublishVolume(
 	}
 	if found && published.kind != readOnlyClaim {
 		delete(n.volumes, id)
-		n.unfollow(published)
+		n.leaveFetchLoop(published)
 		n.unwatch(published)
 	}
 	n.mu.Unlock()
@@ -346,49 +342,44 @@ func (n *node) NodeUnpublishVolume(
 	if found && published.kind == readOnlyClaim {
 		n.record(ctx, published)
 	}
-	// A writeable volume gives up only its record of the mount. It stays
-	// on the gauges while it is staged, because it is still this node's
-	// volume.
 	if found && published.writeable() {
+		// Delete the record file, so a restarted driver does not resume
+		// this mount. The volume's metrics stay until NodeUnstageVolume.
 		n.forget(published)
-		// The pod is gone and nothing writes the tree now, so the
-		// last of its work is committed and pushed without waiting for a
-		// timer.
+		// The pod is gone and nothing writes the tree, so commit and push
+		// the remaining changes now instead of waiting for the quiesce.
 		if rules := published.policyNow(); rules != nil {
 			n.commit(ctx, published, rules)
 		}
 		n.push(ctx, published)
-		n.noteHealth(ctx, published)
+		n.recordHealth(ctx, published)
 	}
 	if found && published.kind == inlineVolume {
 		if err := os.RemoveAll(published.directory); err != nil {
 			return nil, status.Error(codes.Internal, err.Error())
 		}
-		// A read-only volume leaves the node with its mount, so
-		// its health gauge goes here, where a writeable volume's goes at
-		// unstage.
-		n.readings.forget(published)
+		// An inline volume has no unstage, so delete its metrics here.
+		n.metrics.forget(published)
 	}
-	n.logger.InfoContext(ctx, "unpublished", "volume", id)
+	n.logger.InfoContext(ctx, "Unpublished the volume", "volume", id)
 	return &csi.NodeUnpublishVolumeResponse{}, nil
 }
 
-// NodeGetVolumeStats reports the tree's size as used. A git volume has
-// no free space to report, so available is zero.
+// NodeGetVolumeStats reports the size of the tree as bytes used. A git
+// volume has no free space, so available is zero.
 //
-// The response returns usage and nothing else. The volume's
-// health reaches a person through git_csi_volume_abnormal, the Events,
-// and the driver's log, because CSI spec 1.13 removed the condition
-// this answer used to carry.
+// The response has no volume condition, because CSI spec 1.13 removed
+// the field. The volume's health is in the git_csi_volume_abnormal
+// metric, in Events, and in the driver's log.
 func (n *node) NodeGetVolumeStats(
 	_ context.Context, request *csi.NodeGetVolumeStatsRequest,
 ) (*csi.NodeGetVolumeStatsResponse, error) {
 	id := request.GetVolumeId()
 	switch {
 	case id == "":
-		return nil, status.Error(codes.InvalidArgument, "volume_id: the call names no volume")
+		return nil, status.Error(codes.InvalidArgument, "volume_id is empty")
 	case request.GetVolumePath() == "":
-		return nil, status.Error(codes.InvalidArgument, "volume_path: the call names no path")
+		return nil, status.Error(codes.InvalidArgument, "volume_path is empty")
 	}
 
 	n.mu.Lock()
@@ -415,40 +406,41 @@ func (n *node) NodeGetVolumeStats(
 func (n *node) NodeExpandVolume(
 	context.Context, *csi.NodeExpandVolumeRequest,
 ) (*csi.NodeExpandVolumeResponse, error) {
-	return nil, unimplemented("NodeExpandVolume", "never; git volumes have no size")
+	return nil, unimplemented("NodeExpandVolume", "a git volume has no size to expand")
 }
 
-// stagedVolume is the volume this node staged under the handle, and
-// nil when the node holds none. A demand names a handle, and only the
-// node that staged it acts.
+// stagedVolume returns the volume staged on this node with the CSI
+// volume handle, or nil. Every node watches the pull annotation of
+// every PersistentVolume, and only the node that staged the volume
+// fetches for it.
 func (n *node) stagedVolume(handle string) *volume {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	return n.staged[handle]
 }
 
-// volumesByRepo counts the volumes this node has mounted, by the
-// repository each one follows. git_csi_volumes reads this at every
-// scrape, so the count is never a second bookkeeping a publish or an
-// unpublish could fall out of step with.
+// volumesByRepo counts the volumes published on this node for each
+// repository. The git_csi_volumes metric calls it at each scrape, so the
+// metric keeps no count of its own that could differ from n.volumes.
 func (n *node) volumesByRepo() map[string]float64 {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	counts := map[string]float64{}
-	for _, held := range n.volumes {
-		counts[n.store.repository(held.attributes.url).name]++
+	for _, vol := range n.volumes {
+		counts[n.store.repository(vol.attributes.url).name]++
 	}
 	return counts
 }
 
-// refused posts the refusal on the pod, so a person who describes the
-// pod sees why it stays in ContainerCreating.
+// refused posts a Warning Event on the pod, so kubectl describe shows
+// why the pod stays in ContainerCreating.
 func (n *node) refused(pod podReference, err error) {
 	n.events.post(pod, corev1.EventTypeWarning, reasonRefused, status.Convert(err).Message())
 }
 
-// podOf reads the pod straight from the volume context, so a refused
-// parse still identifies the pod that receives its Event.
+// podOf reads the pod from the volume context without parsing the other
+// attributes, so a request with invalid attributes still has a pod to
+// post its Event on.
 func podOf(context map[string]string) podReference {
 	return podReference{
 		name:      context[podNameKey],
@@ -457,7 +449,7 @@ func podOf(context map[string]string) podReference {
 	}
 }
 
-// short is the seven characters git itself prints for a commit.
+// short abbreviates a commit hash to seven characters.
 func short(commit string) string {
 	if len(commit) > 7 {
 		return commit[:7]
@@ -465,9 +457,8 @@ func short(commit string) string {
 	return commit
 }
 
-// unimplemented returns an error for a call the driver does not serve
-// yet. The message names the plan that adds the call, so the log
-// identifies the work needed to make it available.
-func unimplemented(rpc, when string) error {
-	return status.Errorf(codes.Unimplemented, "%s: %s", rpc, when)
+// unimplemented returns the Unimplemented error for a call the driver
+// does not serve, with a message that says why.
+func unimplemented(rpc, why string) error {
+	return status.Errorf(codes.Unimplemented, "%s: %s", rpc, why)
 }

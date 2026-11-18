@@ -83,78 +83,78 @@ func TestTheSecretScopesWhatAPushMarks(t *testing.T) {
 		{name: "a volume the Secret scopes", volume: func(*corev1.PersistentVolume) {}, matches: true},
 		{
 			name: "a volume of another Secret",
-			volume: func(held *corev1.PersistentVolume) {
-				held.Spec.CSI.VolumeAttributes[webhookSecretAttribute] = "other-webhook"
+			volume: func(pv *corev1.PersistentVolume) {
+				pv.Spec.CSI.VolumeAttributes[webhookSecretAttribute] = "other-webhook"
 			},
 		},
 		{
 			name: "a volume that names no Secret",
-			volume: func(held *corev1.PersistentVolume) {
-				delete(held.Spec.CSI.VolumeAttributes, webhookSecretAttribute)
+			volume: func(pv *corev1.PersistentVolume) {
+				delete(pv.Spec.CSI.VolumeAttributes, webhookSecretAttribute)
 			},
 		},
 		{
 			name: "a claim in another namespace",
-			volume: func(held *corev1.PersistentVolume) {
-				held.Spec.ClaimRef.Namespace = "other"
+			volume: func(pv *corev1.PersistentVolume) {
+				pv.Spec.ClaimRef.Namespace = "other"
 			},
 		},
 		{
 			name:   "a volume bound to no claim",
-			volume: func(held *corev1.PersistentVolume) { held.Spec.ClaimRef = nil },
+			volume: func(pv *corev1.PersistentVolume) { pv.Spec.ClaimRef = nil },
 		},
 		{
 			name: "a volume of another driver",
-			volume: func(held *corev1.PersistentVolume) {
-				held.Spec.CSI.Driver = "another.example.com"
+			volume: func(pv *corev1.PersistentVolume) {
+				pv.Spec.CSI.Driver = "another.example.com"
 			},
 		},
 		{
 			name:   "a volume of no CSI driver",
-			volume: func(held *corev1.PersistentVolume) { held.Spec.CSI = nil },
+			volume: func(pv *corev1.PersistentVolume) { pv.Spec.CSI = nil },
 		},
 		{
 			name: "a writeable volume",
-			volume: func(held *corev1.PersistentVolume) {
-				held.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{
+			volume: func(pv *corev1.PersistentVolume) {
+				pv.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{
 					corev1.ReadWriteOncePod,
 				}
 			},
 		},
 		{
 			name: "a volume of both modes",
-			volume: func(held *corev1.PersistentVolume) {
-				held.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{
+			volume: func(pv *corev1.PersistentVolume) {
+				pv.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{
 					corev1.ReadOnlyMany, corev1.ReadWriteOnce,
 				}
 			},
 		},
 		{
 			name:   "a volume with no access mode",
-			volume: func(held *corev1.PersistentVolume) { held.Spec.AccessModes = nil },
+			volume: func(pv *corev1.PersistentVolume) { pv.Spec.AccessModes = nil },
 		},
 		{
 			name: "a volume of another repository",
-			volume: func(held *corev1.PersistentVolume) {
-				held.Spec.CSI.VolumeAttributes["url"] = "https://code.example.com/data/y.git"
+			volume: func(pv *corev1.PersistentVolume) {
+				pv.Spec.CSI.VolumeAttributes["url"] = "https://code.example.com/data/y.git"
 			},
 		},
 		{
 			name: "a volume that names no URL",
-			volume: func(held *corev1.PersistentVolume) {
-				delete(held.Spec.CSI.VolumeAttributes, "url")
+			volume: func(pv *corev1.PersistentVolume) {
+				delete(pv.Spec.CSI.VolumeAttributes, "url")
 			},
 		},
 		{
 			name: "a volume that follows another ref",
-			volume: func(held *corev1.PersistentVolume) {
-				held.Spec.CSI.VolumeAttributes["ref"] = "next"
+			volume: func(pv *corev1.PersistentVolume) {
+				pv.Spec.CSI.VolumeAttributes["ref"] = "next"
 			},
 		},
 		{
 			name: "a volume that names no ref",
-			volume: func(held *corev1.PersistentVolume) {
-				delete(held.Spec.CSI.VolumeAttributes, "ref")
+			volume: func(pv *corev1.PersistentVolume) {
+				delete(pv.Spec.CSI.VolumeAttributes, "ref")
 			},
 			matches: true,
 		},
@@ -162,14 +162,14 @@ func TestTheSecretScopesWhatAPushMarks(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			hooks := testWebhook(t, io.Discard)
 			followingVolume(t, hooks, "x", "sites", maps(following))
-			held, err := hooks.client.CoreV1().PersistentVolumes().
+			pv, err := hooks.client.CoreV1().PersistentVolumes().
 				Get(t.Context(), "x", metav1.GetOptions{})
 			if err != nil {
 				t.Fatalf("reading the PersistentVolume: %v", err)
 			}
-			c.volume(held)
+			c.volume(pv)
 
-			got := matchesPush(held, "sites", "x-webhook",
+			got := matchesPush(pv, "sites", "x-webhook",
 				comparisonKeys(pushed.urls), pushed.ref)
 			if got != c.matches {
 				t.Errorf("matchesPush = %v, want %v", got, c.matches)
@@ -178,8 +178,8 @@ func TestTheSecretScopesWhatAPushMarks(t *testing.T) {
 	}
 }
 
-// maps is a copy of the attributes, so a case that edits them edits its
-// own.
+// maps returns a copy of from, so a case that edits it does not change
+// the original.
 func maps(from map[string]string) map[string]string {
 	to := map[string]string{}
 	for key, value := range from {
@@ -204,10 +204,10 @@ func TestMarkAnnotatesEveryVolumeThePushNames(t *testing.T) {
 		pushedTo("https://code.example.com/data/x.git", "refs/heads/main"))
 
 	if err != nil {
-		t.Fatalf("mark: %v", err)
+		t.Fatalf("marking the volumes: %v", err)
 	}
 	if marked != 2 {
-		t.Errorf("mark answered %d, want 2", marked)
+		t.Errorf("mark returned %d, want 2", marked)
 	}
 	for _, name := range []string{"x", "x-again"} {
 		if demandedAt(t, hooks, name) != webhookTime.Format(time.RFC3339Nano) {
@@ -227,26 +227,26 @@ func TestMarkReportsWhatItCouldNotWrite(t *testing.T) {
 	})
 	hooks.client.(*fake.Clientset).PrependReactor("patch", "persistentvolumes",
 		func(k8stesting.Action) (bool, runtime.Object, error) {
-			return true, nil, errors.New("the API server said no")
+			return true, nil, errors.New("the API server refused the request")
 		})
 
 	marked, err := hooks.mark(t.Context(), "sites", "x-webhook",
 		pushedTo("https://code.example.com/data/x.git", "refs/heads/main"))
 
 	if err != nil {
-		t.Fatalf("mark: %v", err)
+		t.Fatalf("marking the volumes: %v", err)
 	}
 	if marked != 0 {
-		t.Errorf("mark answered %d, want 0", marked)
+		t.Errorf("mark returned %d, want 0", marked)
 	}
-	if !strings.Contains(logs.String(), "the volume was not marked") {
+	if !strings.Contains(logs.String(), "The pull demand was not set on the PersistentVolume") {
 		t.Errorf("the log is %q, want the volume that was not marked in it", logs)
 	}
 }
 
-func TestMarkCarriesBackAListItCannotRead(t *testing.T) {
+func TestMarkReturnsAListError(t *testing.T) {
 	hooks := testWebhook(t, io.Discard)
-	refused := errors.New("the API server said no")
+	refused := errors.New("the API server refused the request")
 	hooks.client.(*fake.Clientset).PrependReactor("list", "persistentvolumes",
 		func(k8stesting.Action) (bool, runtime.Object, error) {
 			return true, nil, refused
@@ -256,10 +256,10 @@ func TestMarkCarriesBackAListItCannotRead(t *testing.T) {
 		pushedTo("https://code.example.com/data/x.git", "refs/heads/main"))
 
 	if !strings.Contains(err.Error(), refused.Error()) {
-		t.Errorf("mark answered %v, want %v", err, refused)
+		t.Errorf("mark returned the error %v, want %v", err, refused)
 	}
 	if marked != 0 {
-		t.Errorf("mark answered %d, want 0", marked)
+		t.Errorf("mark returned %d, want 0", marked)
 	}
 }
 
@@ -312,12 +312,12 @@ func TestAStartReportsWhatItCouldNotMark(t *testing.T) {
 	})
 	hooks.client.(*fake.Clientset).PrependReactor("patch", "persistentvolumes",
 		func(k8stesting.Action) (bool, runtime.Object, error) {
-			return true, nil, errors.New("the API server said no")
+			return true, nil, errors.New("the API server refused the request")
 		})
 
 	hooks.demandAll(t.Context())
 
-	if !strings.Contains(logs.String(), "the volume was not marked") {
+	if !strings.Contains(logs.String(), "The pull demand was not set on the PersistentVolume") {
 		t.Errorf("the log is %q, want the volume that was not marked in it", logs)
 	}
 }
@@ -327,13 +327,13 @@ func TestAStartReportsAListItCannotRead(t *testing.T) {
 	hooks := testWebhook(t, logs)
 	hooks.client.(*fake.Clientset).PrependReactor("list", "persistentvolumes",
 		func(k8stesting.Action) (bool, runtime.Object, error) {
-			return true, nil, errors.New("the API server said no")
+			return true, nil, errors.New("the API server refused the request")
 		})
 
 	hooks.demandAll(t.Context())
 
-	if !strings.Contains(logs.String(), "the volumes were not listed") {
-		t.Errorf("the log is %q, want the list that failed in it", logs)
+	if !strings.Contains(logs.String(), "The PersistentVolumes were not listed") {
+		t.Errorf("the log is %q, want the listing that failed in it", logs)
 	}
 }
 

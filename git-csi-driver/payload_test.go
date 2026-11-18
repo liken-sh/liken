@@ -59,13 +59,13 @@ func TestParsePushReadsEachForgesBody(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			pushed, isPush := parsePush([]byte(c.body))
 			if !isPush {
-				t.Fatalf("parsePush read no push out of %s", c.body)
+				t.Fatalf("parsePush(%s) is not a push, want a push", c.body)
 			}
 			if pushed.ref != c.ref {
-				t.Errorf("parsePush read the ref %q, want %q", pushed.ref, c.ref)
+				t.Errorf("parsePush(%s) ref is %q, want %q", c.body, pushed.ref, c.ref)
 			}
 			if !slices.Equal(pushed.urls, c.urls) {
-				t.Errorf("parsePush read the URLs %q, want %q", pushed.urls, c.urls)
+				t.Errorf("parsePush(%s) URLs are %q, want %q", c.body, pushed.urls, c.urls)
 			}
 		})
 	}
@@ -83,7 +83,7 @@ func TestParsePushRefusesABodyThatIsNoPush(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if _, isPush := parsePush([]byte(c.body)); isPush {
-				t.Errorf("parsePush read a push out of %q", c.body)
+				t.Errorf("parsePush(%q) is a push, want no push", c.body)
 			}
 		})
 	}

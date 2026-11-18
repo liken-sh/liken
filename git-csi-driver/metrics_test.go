@@ -15,11 +15,11 @@ import (
 	"github.com/container-storage-interface/spec/lib/go/csi"
 )
 
-// gaugeOf is what one gauge reads for the claim, and false when the claim
-// is on no gauge.
-func gaugeOf(t *testing.T, readings *metrics, name, namespace, claim string) (float64, bool) {
+// gaugeOf returns the value of the named gauge for the claim, and false
+// when the gauge has no series for it.
+func gaugeOf(t *testing.T, registry *metrics, name, namespace, claim string) (float64, bool) {
 	t.Helper()
-	families, err := readings.registry.Gather()
+	families, err := registry.registry.Gather()
 	if err != nil {
 		t.Fatalf("gathering the metrics: %v", err)
 	}
@@ -40,14 +40,14 @@ func gaugeOf(t *testing.T, readings *metrics, name, namespace, claim string) (fl
 	return 0, false
 }
 
-// reported is a volume that has been read once, which is what the gauges
-// take.
+// reported returns a volume with the claim, armed state, and number of
+// pending paths that record reads.
 func reported(claim claimReference, armed bool, pending int) *volume {
-	held := &volume{claim: claim, armed: armed}
+	vol := &volume{claim: claim, armed: armed}
 	for range pending {
-		held.pending = append(held.pending, change{path: "a.txt"})
+		vol.pending = append(vol.pending, change{path: "a.txt"})
 	}
-	return held
+	return vol
 }
 
 func TestTheRuntimeCollectorsAreOnTheRegistry(t *testing.T) {
@@ -56,51 +56,51 @@ func TestTheRuntimeCollectorsAreOnTheRegistry(t *testing.T) {
 	body := recorder.Body.String()
 	for _, want := range []string{"go_goroutines ", "process_start_time_seconds "} {
 		if !strings.Contains(body, want) {
-			t.Errorf("the scrape carries no %s series", strings.TrimSpace(want))
+			t.Errorf("the scrape has no %s series", strings.TrimSpace(want))
 		}
 	}
 }
 
-func TestTheGaugesCarryTheClaim(t *testing.T) {
-	readings := newMetrics()
+func TestTheGaugesAreLabeledByTheClaim(t *testing.T) {
+	registry := newMetrics()
 	claim := claimReference{namespace: "home", name: "config"}
-	readings.record(reported(claim, true, 3))
+	registry.record(reported(claim, true, 3))
 
-	armed, found := gaugeOf(t, readings, "git_csi_armed", "home", "config")
+	armed, found := gaugeOf(t, registry, "git_csi_armed", "home", "config")
 	if !found || armed != 1 {
 		t.Errorf("git_csi_armed reads %v (found: %v), want 1", armed, found)
 	}
-	pending, found := gaugeOf(t, readings, "git_csi_pending_paths", "home", "config")
+	pending, found := gaugeOf(t, registry, "git_csi_pending_paths", "home", "config")
 	if !found || pending != 3 {
 		t.Errorf("git_csi_pending_paths reads %v (found: %v), want 3", pending, found)
 	}
 
-	readings.record(reported(claim, false, 0))
-	if armed, _ := gaugeOf(t, readings, "git_csi_armed", "home", "config"); armed != 0 {
+	registry.record(reported(claim, false, 0))
+	if armed, _ := gaugeOf(t, registry, "git_csi_armed", "home", "config"); armed != 0 {
 		t.Errorf("git_csi_armed reads %v after the class went, want 0", armed)
 	}
 }
 
-func TestForgetTakesTheVolumeOffTheGauges(t *testing.T) {
-	readings := newMetrics()
+func TestForgetDeletesTheVolumesGaugeSeries(t *testing.T) {
+	registry := newMetrics()
 	claim := claimReference{namespace: "home", name: "config"}
-	held := reported(claim, true, 1)
-	readings.record(held)
-	readings.forget(held)
+	vol := reported(claim, true, 1)
+	registry.record(vol)
+	registry.forget(vol)
 
-	if _, found := gaugeOf(t, readings, "git_csi_armed", "home", "config"); found {
+	if _, found := gaugeOf(t, registry, "git_csi_armed", "home", "config"); found {
 		t.Error("the claim is still on git_csi_armed after the volume went")
 	}
-	if _, found := gaugeOf(t, readings, "git_csi_pending_paths", "home", "config"); found {
+	if _, found := gaugeOf(t, registry, "git_csi_pending_paths", "home", "config"); found {
 		t.Error("the claim is still on git_csi_pending_paths after the volume went")
 	}
 }
 
-// abnormalOf is what git_csi_volume_abnormal reads for the volume, and
-// false when the volume is on no gauge.
-func abnormalOf(t *testing.T, readings *metrics, namespace, id string) (float64, bool) {
+// abnormalOf returns git_csi_volume_abnormal for the volume, and false
+// when the gauge has no series for it.
+func abnormalOf(t *testing.T, registry *metrics, namespace, id string) (float64, bool) {
 	t.Helper()
-	families, err := readings.registry.Gather()
+	families, err := registry.registry.Gather()
 	if err != nil {
 		t.Fatalf("gathering the metrics: %v", err)
 	}
@@ -121,127 +121,127 @@ func abnormalOf(t *testing.T, readings *metrics, namespace, id string) (float64,
 	return 0, false
 }
 
-// mounted is a volume of each kind, which the health gauge labels
-// from a different namespace: the pod's for the inline volume, and the
-// claim's for the one a claim binds.
+// mounted returns a volume of the given kind. The pod and the claim are
+// in different namespaces, because the health gauge takes the pod's
+// namespace for an inline volume and the claim's for any other.
 func mounted(id string, kind volumeKind) *volume {
-	held := &volume{
+	vol := &volume{
 		id:         id,
 		attributes: &attributes{ref: "main"},
 		kind:       kind,
 		pod:        podReference{name: "reader", namespace: "home"},
 	}
 	if kind != inlineVolume {
-		held.claim = claimReference{namespace: "apps", name: "config"}
+		vol.claim = claimReference{namespace: "apps", name: "config"}
 	}
-	return held
+	return vol
 }
 
-func TestTheHealthGaugeCarriesTheNamespaceAndTheVolume(t *testing.T) {
-	readings := newMetrics()
+func TestTheHealthGaugeIsLabeledByNamespaceAndVolume(t *testing.T) {
+	registry := newMetrics()
 	inline := mounted("csi-1", inlineVolume)
 	persistent := mounted("csi-2", writeableVolume)
-	readings.health(inline, true)
-	readings.health(persistent, false)
+	registry.health(inline, true)
+	registry.health(persistent, false)
 
-	if abnormal, found := abnormalOf(t, readings, "home", "csi-1"); !found || abnormal != 1 {
+	if abnormal, found := abnormalOf(t, registry, "home", "csi-1"); !found || abnormal != 1 {
 		t.Errorf("git_csi_volume_abnormal reads %v (found: %v) for the inline volume, want 1",
 			abnormal, found)
 	}
-	if abnormal, found := abnormalOf(t, readings, "apps", "csi-2"); !found || abnormal != 0 {
+	if abnormal, found := abnormalOf(t, registry, "apps", "csi-2"); !found || abnormal != 0 {
 		t.Errorf("git_csi_volume_abnormal reads %v (found: %v) for the claim's volume, want 0",
 			abnormal, found)
 	}
 
-	readings.forget(inline)
-	if _, found := abnormalOf(t, readings, "home", "csi-1"); found {
+	registry.forget(inline)
+	if _, found := abnormalOf(t, registry, "home", "csi-1"); found {
 		t.Error("the volume is still on git_csi_volume_abnormal after it went")
 	}
 }
 
-func TestTheDemandedPullsCounterCarriesTheNamespaceAndTheVolume(t *testing.T) {
-	readings := newMetrics()
-	held := mounted("csi-2", readOnlyClaim)
-	readings.demanded(held)
-	readings.demanded(held)
+func TestTheDemandedPullsCounterIsLabeledByNamespaceAndVolume(t *testing.T) {
+	registry := newMetrics()
+	vol := mounted("csi-2", readOnlyClaim)
+	registry.demanded(vol)
+	registry.demanded(vol)
 
-	counted, found := demandedOf(t, readings, "apps", "csi-2")
-	if !found || counted != 2 {
-		t.Errorf("git_csi_demanded_pulls_total reads %v (found: %v), want 2", counted, found)
+	count, found := demandedOf(t, registry, "apps", "csi-2")
+	if !found || count != 2 {
+		t.Errorf("git_csi_demanded_pulls_total reads %v (found: %v), want 2", count, found)
 	}
-	readings.forget(held)
-	if _, found := demandedOf(t, readings, "apps", "csi-2"); found {
+	registry.forget(vol)
+	if _, found := demandedOf(t, registry, "apps", "csi-2"); found {
 		t.Error("the volume is still on git_csi_demanded_pulls_total after it went")
 	}
 }
 
-func TestTheLogSaysWhenAVolumeTurnsAbnormalAndWhenItIsWellAgain(t *testing.T) {
+func TestTheLogRecordsWhenAVolumeBecomesAbnormalAndWhenItBecomesNormal(t *testing.T) {
 	logs := &logbook{}
-	answering, _ := testNode(t, logs)
-	held := mounted("csi-1", inlineVolume)
+	n, _ := testNode(t, logs)
+	vol := mounted("csi-1", inlineVolume)
 
-	answering.noteHealth(t.Context(), held)
-	if strings.Contains(logs.String(), "the volume is") {
+	n.recordHealth(t.Context(), vol)
+	if strings.Contains(logs.String(), "volume became") {
 		t.Errorf("the log is %q, want no line for a volume that was well all along", logs)
 	}
 
-	held.reportFetchFailed("the forge answered nothing")
-	answering.noteHealth(t.Context(), held)
-	answering.noteHealth(t.Context(), held)
-	if got := strings.Count(logs.String(), "the volume is abnormal"); got != 1 {
-		t.Errorf("the log says the volume is abnormal %d times, want 1", got)
+	vol.reportFetchFailed("the forge sent nothing")
+	n.recordHealth(t.Context(), vol)
+	n.recordHealth(t.Context(), vol)
+	if got := strings.Count(logs.String(), "volume became abnormal"); got != 1 {
+		t.Errorf("the log has the volume became abnormal %d times, want 1", got)
 	}
-	if !strings.Contains(logs.String(), "the forge answered nothing") {
+	if !strings.Contains(logs.String(), "the forge sent nothing") {
 		t.Errorf("the log is %q, want the report in it", logs)
 	}
-	if abnormal, _ := abnormalOf(t, answering.readings, "home", "csi-1"); abnormal != 1 {
+	if abnormal, _ := abnormalOf(t, n.metrics, "home", "csi-1"); abnormal != 1 {
 		t.Errorf("git_csi_volume_abnormal reads %v while the fetch fails, want 1", abnormal)
 	}
 
-	held.reportCommit("0123456789")
-	answering.noteHealth(t.Context(), held)
-	answering.noteHealth(t.Context(), held)
-	if got := strings.Count(logs.String(), "the volume is normal"); got != 1 {
-		t.Errorf("the log says the volume is normal %d times, want 1", got)
+	vol.reportCommit("0123456789")
+	n.recordHealth(t.Context(), vol)
+	n.recordHealth(t.Context(), vol)
+	if got := strings.Count(logs.String(), "volume became normal"); got != 1 {
+		t.Errorf("the log has the volume became normal %d times, want 1", got)
 	}
-	if abnormal, _ := abnormalOf(t, answering.readings, "home", "csi-1"); abnormal != 0 {
+	if abnormal, _ := abnormalOf(t, n.metrics, "home", "csi-1"); abnormal != 0 {
 		t.Errorf("git_csi_volume_abnormal reads %v after a fetch that worked, want 0", abnormal)
 	}
 }
 
 func TestAVolumeWithNoClaimIsOnNoGauge(t *testing.T) {
-	readings := newMetrics()
-	held := reported(claimReference{}, true, 1)
-	readings.record(held)
-	readings.health(held, true)
-	readings.demanded(held)
-	readings.forget(held)
+	registry := newMetrics()
+	vol := reported(claimReference{}, true, 1)
+	registry.record(vol)
+	registry.health(vol, true)
+	registry.demanded(vol)
+	registry.forget(vol)
 
-	families, err := readings.registry.Gather()
+	families, err := registry.registry.Gather()
 	if err != nil {
 		t.Fatalf("gathering the metrics: %v", err)
 	}
 	for _, family := range families {
-		// The runtime's own series and the build info are never
-		// empty; the test is about the series a volume puts there.
+		// The runtime series and the build info are never empty. The
+		// test checks only the series of the volume.
 		if strings.HasPrefix(family.GetName(), "go_") || strings.HasPrefix(family.GetName(), "process_") ||
 			family.GetName() == "liken_build_info" {
 			continue
 		}
 		if len(family.GetMetric()) != 0 {
-			t.Errorf("%s carries %v, want nothing", family.GetName(), family.GetMetric())
+			t.Errorf("%s has %v, want nothing", family.GetName(), family.GetMetric())
 		}
 	}
 
 	var absent *metrics
-	absent.record(held)
-	absent.health(held, true)
-	absent.demanded(held)
-	absent.forget(held)
+	absent.record(vol)
+	absent.health(vol, true)
+	absent.demanded(vol)
+	absent.forget(vol)
 	absent.watchRestarted(persistentVolumeKind)
 	ran := false
 	if err := absent.timeFetch("repo", func() error { ran = true; return nil }); err != nil {
-		t.Errorf("timeFetch on a nil registry answered %v, want no error", err)
+		t.Errorf("timeFetch on a nil registry returned %v, want no error", err)
 	}
 	if !ran {
 		t.Error("timeFetch on a nil registry did not run the fetch")
@@ -249,30 +249,30 @@ func TestAVolumeWithNoClaimIsOnNoGauge(t *testing.T) {
 }
 
 func TestTheListenerServesTheGauges(t *testing.T) {
-	readings := newMetrics()
-	readings.record(reported(claimReference{namespace: "home", name: "config"}, true, 2))
-	listener, err := readings.listen("127.0.0.1:0")
+	registry := newMetrics()
+	registry.record(reported(claimReference{namespace: "home", name: "config"}, true, 2))
+	listener, err := registry.listen("127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("listen: %v", err)
+		t.Fatalf("opening the metrics listener: %v", err)
 	}
 	ctx, stop := context.WithCancel(t.Context())
 	served := make(chan struct{})
 	go func() {
 		defer close(served)
-		serveMetrics(ctx, listener, readings, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		serveMetrics(ctx, listener, registry, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	}()
 
-	answer, err := http.Get("http://" + listener.Addr().String() + "/metrics")
+	response, err := http.Get("http://" + listener.Addr().String() + "/metrics")
 	if err != nil {
 		t.Fatalf("reading the metrics: %v", err)
 	}
-	defer answer.Body.Close()
-	body, err := io.ReadAll(answer.Body)
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		t.Fatalf("reading the metrics: %v", err)
 	}
-	if answer.StatusCode != http.StatusOK {
-		t.Errorf("the listener answered %d, want 200", answer.StatusCode)
+	if response.StatusCode != http.StatusOK {
+		t.Errorf("the listener responded %d, want 200", response.StatusCode)
 	}
 	if !strings.Contains(string(body), `git_csi_armed{claim="config",namespace="home"} 1`) {
 		t.Errorf("the metrics are %s, want the volume on them", body)
@@ -289,22 +289,22 @@ func TestTheListenerServesTheGauges(t *testing.T) {
 func TestAnEmptyAddressServesNoMetrics(t *testing.T) {
 	listener, err := newMetrics().listen("")
 	if err != nil || listener != nil {
-		t.Errorf("listen answered %v, %v, want no listener and no error", listener, err)
+		t.Errorf("listen returned %v, %v, want no listener and no error", listener, err)
 	}
 }
 
 func TestAListenerThatStopsOnItsOwnIsReported(t *testing.T) {
 	logs := &logbook{}
-	readings := newMetrics()
-	listener, err := readings.listen("127.0.0.1:0")
+	registry := newMetrics()
+	listener, err := registry.listen("127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("listen: %v", err)
+		t.Fatalf("opening the metrics listener: %v", err)
 	}
 	if err := listener.Close(); err != nil {
 		t.Fatalf("closing the listener: %v", err)
 	}
-	serveMetrics(t.Context(), listener, readings, slog.New(slog.NewTextHandler(logs, nil)))
-	if !strings.Contains(logs.String(), "the metrics listener stopped") {
+	serveMetrics(t.Context(), listener, registry, slog.New(slog.NewTextHandler(logs, nil)))
+	if !strings.Contains(logs.String(), "The metrics listener stopped") {
 		t.Errorf("the log is %q, want the listener that stopped in it", logs)
 	}
 }
@@ -326,23 +326,23 @@ func TestTheDriverServesTheMetricsItIsGivenAnAddressFor(t *testing.T) {
 		metrics:  "127.0.0.1:-1",
 	}, slog.Default())
 	if err == nil {
-		t.Error("newServer answered no error for an address it cannot take")
+		t.Error("newServer returned no error for an address it cannot take")
 	}
 }
 
 func TestAVolumeWithNoClaimCountsNoPushFailure(t *testing.T) {
-	readings := newMetrics()
-	readings.pushFailed(&volume{})
-	if _, found := counterOf(t, readings, "git_csi_push_failures_total", "", ""); found {
+	registry := newMetrics()
+	registry.pushFailed(&volume{})
+	if _, found := counterOf(t, registry, "git_csi_push_failures_total", "", ""); found {
 		t.Error("a volume with no claim is on the counter")
 	}
 }
 
-// buildInfoOf is what liken_build_info reads for the version, and false
-// when the release has not been reported.
-func buildInfoOf(t *testing.T, readings *metrics, version string) (float64, bool) {
+// buildInfoOf returns liken_build_info for the version, and false when
+// the version has not been reported.
+func buildInfoOf(t *testing.T, registry *metrics, version string) (float64, bool) {
 	t.Helper()
-	families, err := readings.registry.Gather()
+	families, err := registry.registry.Gather()
 	if err != nil {
 		t.Fatalf("gathering the metrics: %v", err)
 	}
@@ -364,21 +364,19 @@ func buildInfoOf(t *testing.T, readings *metrics, version string) (float64, bool
 }
 
 func TestReportBuildInfoSetsLikenBuildInfo(t *testing.T) {
-	readings := newMetrics()
-	readings.reportBuildInfo("2026.09.10-001")
+	registry := newMetrics()
+	registry.reportBuildInfo("2026.09.10-001")
 
-	if value, found := buildInfoOf(t, readings, "2026.09.10-001"); !found || value != 1 {
+	if value, found := buildInfoOf(t, registry, "2026.09.10-001"); !found || value != 1 {
 		t.Errorf("liken_build_info reads %v (found: %v), want 1", value, found)
 	}
 }
 
-// callCounters is what git_csi_reconcile_duration_seconds and
-// git_csi_reconcile_errors_total read for the operation, and how many
-// times duration was observed at all, which the histogram's own count
-// carries.
-func callCounters(t *testing.T, readings *metrics, kind string) (observations uint64, errs float64) {
+// callCounters returns, for the CSI call, the sample count of
+// git_csi_reconcile_duration_seconds and git_csi_reconcile_errors_total.
+func callCounters(t *testing.T, registry *metrics, kind string) (observations uint64, errs float64) {
 	t.Helper()
-	families, err := readings.registry.Gather()
+	families, err := registry.registry.Gather()
 	if err != nil {
 		t.Fatalf("gathering the metrics: %v", err)
 	}
@@ -405,11 +403,11 @@ func callCounters(t *testing.T, readings *metrics, kind string) (observations ui
 }
 
 func TestObserveCallRecordsTheDurationAndCountsAnError(t *testing.T) {
-	readings := newMetrics()
-	readings.observeCall("NodePublishVolume", 10*time.Millisecond, false)
-	readings.observeCall("NodePublishVolume", 20*time.Millisecond, true)
+	registry := newMetrics()
+	registry.observeCall("NodePublishVolume", 10*time.Millisecond, false)
+	registry.observeCall("NodePublishVolume", 20*time.Millisecond, true)
 
-	observations, errs := callCounters(t, readings, "NodePublishVolume")
+	observations, errs := callCounters(t, registry, "NodePublishVolume")
 	if observations != 2 {
 		t.Errorf("git_csi_reconcile_duration_seconds observed %d calls, want 2", observations)
 	}
@@ -418,11 +416,11 @@ func TestObserveCallRecordsTheDurationAndCountsAnError(t *testing.T) {
 	}
 }
 
-// gitCSIVolumesOf is what git_csi_volumes reads for the repository, and
-// false when the repository is on no series.
-func gitCSIVolumesOf(t *testing.T, readings *metrics, repo string) (float64, bool) {
+// gitCSIVolumesOf returns git_csi_volumes for the repository, and false
+// when the metric has no series for it.
+func gitCSIVolumesOf(t *testing.T, registry *metrics, repo string) (float64, bool) {
 	t.Helper()
-	families, err := readings.registry.Gather()
+	families, err := registry.registry.Gather()
 	if err != nil {
 		t.Fatalf("gathering the metrics: %v", err)
 	}
@@ -442,38 +440,38 @@ func gitCSIVolumesOf(t *testing.T, readings *metrics, repo string) (float64, boo
 }
 
 func TestGitCSIVolumesCountsByRepository(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
+	n, _ := testNode(t, io.Discard)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 	url := fileURL(source)
-	repo := answering.store.repository(url).name
+	repo := n.store.repository(url).name
 
 	first := publishRequest(t, "csi-1", url, map[string]string{"pull": "never"})
-	if _, err := answering.NodePublishVolume(t.Context(), first); err != nil {
+	if _, err := n.NodePublishVolume(t.Context(), first); err != nil {
 		t.Fatalf("NodePublishVolume: %v", err)
 	}
 	second := publishRequest(t, "csi-2", url, map[string]string{"pull": "never"})
-	if _, err := answering.NodePublishVolume(t.Context(), second); err != nil {
+	if _, err := n.NodePublishVolume(t.Context(), second); err != nil {
 		t.Fatalf("NodePublishVolume: %v", err)
 	}
-	if count, found := gitCSIVolumesOf(t, answering.readings, repo); !found || count != 2 {
+	if count, found := gitCSIVolumesOf(t, n.metrics, repo); !found || count != 2 {
 		t.Errorf("git_csi_volumes reads %v (found: %v), want 2", count, found)
 	}
 
-	if _, err := answering.NodeUnpublishVolume(t.Context(), &csi.NodeUnpublishVolumeRequest{
+	if _, err := n.NodeUnpublishVolume(t.Context(), &csi.NodeUnpublishVolumeRequest{
 		VolumeId: "csi-1", TargetPath: first.TargetPath,
 	}); err != nil {
 		t.Fatalf("NodeUnpublishVolume: %v", err)
 	}
-	if count, found := gitCSIVolumesOf(t, answering.readings, repo); !found || count != 1 {
+	if count, found := gitCSIVolumesOf(t, n.metrics, repo); !found || count != 1 {
 		t.Errorf("git_csi_volumes reads %v (found: %v) after one unpublish, want 1", count, found)
 	}
 }
 
-// fetchCounters is what git_csi_fetch_duration_seconds and
-// git_csi_fetch_failures_total read for the repository.
-func fetchCounters(t *testing.T, readings *metrics, repo string) (observations uint64, failures float64) {
+// fetchCounters returns, for the repository, the sample count of
+// git_csi_fetch_duration_seconds and git_csi_fetch_failures_total.
+func fetchCounters(t *testing.T, registry *metrics, repo string) (observations uint64, failures float64) {
 	t.Helper()
-	families, err := readings.registry.Gather()
+	families, err := registry.registry.Gather()
 	if err != nil {
 		t.Fatalf("gathering the metrics: %v", err)
 	}
@@ -500,17 +498,17 @@ func fetchCounters(t *testing.T, readings *metrics, repo string) (observations u
 }
 
 func TestTimeFetchObservesTheDurationAndCountsAFailure(t *testing.T) {
-	readings := newMetrics()
-	readings.registerNodeFacts(func() map[string]float64 { return nil })
-	if err := readings.timeFetch("repo-1", func() error { return nil }); err != nil {
+	registry := newMetrics()
+	registry.registerNodeFacts(func() map[string]float64 { return nil })
+	if err := registry.timeFetch("repo-1", func() error { return nil }); err != nil {
 		t.Fatalf("timeFetch: %v", err)
 	}
 	refused := errors.New("the forge refused the fetch")
-	if err := readings.timeFetch("repo-1", func() error { return refused }); !errors.Is(err, refused) {
-		t.Errorf("timeFetch answered %v, want %v", err, refused)
+	if err := registry.timeFetch("repo-1", func() error { return refused }); !errors.Is(err, refused) {
+		t.Errorf("timeFetch returned %v, want %v", err, refused)
 	}
 
-	observations, failures := fetchCounters(t, readings, "repo-1")
+	observations, failures := fetchCounters(t, registry, "repo-1")
 	if observations != 2 {
 		t.Errorf("git_csi_fetch_duration_seconds observed %d fetches, want 2", observations)
 	}
@@ -519,10 +517,10 @@ func TestTimeFetchObservesTheDurationAndCountsAFailure(t *testing.T) {
 	}
 }
 
-// storeBytesOf is what git_csi_store_bytes reads.
-func storeBytesOf(t *testing.T, readings *metrics) float64 {
+// storeBytesOf returns git_csi_store_bytes.
+func storeBytesOf(t *testing.T, registry *metrics) float64 {
 	t.Helper()
-	families, err := readings.registry.Gather()
+	families, err := registry.registry.Gather()
 	if err != nil {
 		t.Fatalf("gathering the metrics: %v", err)
 	}
@@ -537,28 +535,28 @@ func storeBytesOf(t *testing.T, readings *metrics) float64 {
 }
 
 func TestMeasureStoreSetsGitCSIStoreBytes(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
+	n, _ := testNode(t, io.Discard)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one two three"})
 	request := publishRequest(t, "csi-1", fileURL(source), map[string]string{"pull": "never"})
-	if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
+	if _, err := n.NodePublishVolume(t.Context(), request); err != nil {
 		t.Fatalf("NodePublishVolume: %v", err)
 	}
 
-	answering.measureStore(t.Context())
+	n.measureStore(t.Context())
 
-	if got := storeBytesOf(t, answering.readings); got <= 0 {
+	if got := storeBytesOf(t, n.metrics); got <= 0 {
 		t.Errorf("git_csi_store_bytes reads %v, want more than 0 with a tree checked out", got)
 	}
 }
 
 func TestMeasureStoreReportsAWalkItCannotRead(t *testing.T) {
 	logs := &logbook{}
-	answering, _ := testNode(t, logs)
-	answering.store.root = filepath.Join(t.TempDir(), "gone")
+	n, _ := testNode(t, logs)
+	n.store.root = filepath.Join(t.TempDir(), "gone")
 
-	answering.measureStore(t.Context())
+	n.measureStore(t.Context())
 
 	if !strings.Contains(logs.String(), "the store was not measured") {
-		t.Errorf("the log is %q, want the store not measured in it", logs)
+		t.Errorf("the log is %q, want the the store measurement warning in it", logs)
 	}
 }

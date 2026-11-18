@@ -1,15 +1,12 @@
 package main
 
-// republish.go takes a volume's credential from the kubelet's repeated
-// NodePublishVolume calls.
-//
-// A Secret reaches the driver only inside a kubelet call, and the driver
-// keeps it in memory and never on the node's disk. The CSIDriver sets
-// requiresRepublish, so the kubelet calls NodePublishVolume again for
-// every mounted volume on each pod sync, and reads the volume's
-// nodePublishSecretRef Secret again for each call. A driver that
-// restarted takes its credentials back from those calls, with no read of
-// a Secret of its own.
+// The driver keeps each volume's credential in memory only, never on the
+// node's disk, and never reads a Secret from the API server. The
+// CSIDriver sets requiresRepublish, so the kubelet calls
+// NodePublishVolume again for every mounted volume on each pod sync,
+// with the current contents of the volume's nodePublishSecretRef Secret.
+// Those calls give a restarted driver its credentials back, and give a
+// running driver a rotated Secret.
 
 import (
 	"context"
@@ -19,20 +16,20 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// lostCredential is what a volume reports from the moment a restarted
-// driver resumes it until a republish returns its credential.
-const lostCredential = "the driver restarted and holds no credential for this volume " +
+// lostCredential is the health report of a resumed volume until the
+// next publish call supplies its credential.
+const lostCredential = "The driver restarted and has no credential for this volume " +
 	"until the kubelet publishes it again"
 
-// noPublishSecret is what a volume says when no publish can return its
-// credential. A PersistentVolume's csi block is immutable, so the fix is
-// a new PersistentVolume.
-const noPublishSecret = "the PersistentVolume names nodeStageSecretRef and no nodePublishSecretRef, " +
-	"so the driver cannot take this volume's credential back after it restarts; " +
-	"create the PersistentVolume again with nodePublishSecretRef equal to nodeStageSecretRef"
+// noPublishSecret explains why a resumed volume never gets its
+// credential back. The csi block of a PersistentVolume is immutable, so
+// the message tells the person to create the PersistentVolume again.
+const noPublishSecret = "the PersistentVolume sets nodeStageSecretRef and no nodePublishSecretRef, " +
+	"so the driver cannot get the credential of this volume again after it restarts. " +
+	"Create the PersistentVolume again with nodePublishSecretRef equal to nodeStageSecretRef"
 
-// same reports whether two credentials hold the same keys. Two absent
-// credentials are the same.
+// same reports whether two credentials are equal, and treats two nils
+// as equal.
 func (c *credentials) same(other *credentials) bool {
 	if c == nil || other == nil {
 		return c == other
@@ -40,47 +37,44 @@ func (c *credentials) same(other *credentials) bool {
 	return *c == *other
 }
 
-// credential is the Secret the volume fetches and pushes with. A
-// republish replaces it while the fetch loop and the watch read it, so
-// every read takes the volume's lock.
+// credential takes the volume's lock because a republish can replace
+// the credential while the fetch loop or the watch reads it.
 func (v *volume) credential() *credentials {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	return v.credentials
 }
 
-// needsCredential reports whether the volume had a credential, which is
-// what the record keeps. A resumed volume that waits for its credential
-// still needs one, so a second restart also waits.
-func (v *volume) needsCredential() bool {
+// hasOrAwaitsCredential reports whether the volume has a credential or is
+// waiting for one. The volume's record on disk stores the result, so a
+// volume that is still waiting when the driver restarts again waits
+// again.
+func (v *volume) hasOrAwaitsCredential() bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	return v.credentials != nil || v.credentialLost
 }
 
-// waitsForCredential reports whether the volume is a resumed volume
-// that had a credential and holds none yet. Such a volume fetches and
-// pushes nothing, because every attempt fails without the credential and
-// writes a warning. The republish that returns the credential starts the
-// fetch or the push at once.
+// waitsForCredential reports whether the volume was resumed after a
+// restart and has not received its credential yet. The fetch loop and
+// the watch skip such a volume, because each attempt would fail and log
+// a warning.
 func (v *volume) waitsForCredential() bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	return v.credentialLost
 }
 
-// loseCredential marks a resumed volume that had a credential and holds
-// none now.
-func (v *volume) loseCredential() {
+func (v *volume) markCredentialLost() {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.credentialLost = true
 }
 
-// credentialReport is what a volume that waits for its credential
-// reports, and false for every other volume. It comes before a failed
-// fetch or push in the report: the failure is from before the restart,
-// and no fetch or push runs until the credential returns.
+// credentialReport returns the health report of a volume that waits for
+// its credential, and false for every other volume. The report replaces
+// the error of the last fetch or push, because that error is from before
+// the restart, and no fetch or push runs until the credential arrives.
 func (v *volume) credentialReport() (string, bool) {
 	if !v.credentialLost {
 		return "", false
@@ -91,10 +85,9 @@ func (v *volume) credentialReport() (string, bool) {
 	return lostCredential, true
 }
 
-// takeCredential holds the credential a publish carried, and reports
-// whether the volume waited for one after a restart. That credential
-// also clears the report of the wait.
-func (v *volume) takeCredential(fresh *credentials) bool {
+// storeCredential stores the credential, ends any wait for one, and
+// reports whether the volume was waiting.
+func (v *volume) storeCredential(fresh *credentials) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.credentials = fresh
@@ -103,10 +96,9 @@ func (v *volume) takeCredential(fresh *credentials) bool {
 	return waited
 }
 
-// reportNoPublishSecret records that no publish carries the volume's
-// credential, and reports whether this is the first time for this
-// volume, which is when the Event goes out. A volume that waits for its
-// credential then reports why none arrives.
+// reportNoPublishSecret records that the PersistentVolume has no
+// nodePublishSecretRef, and returns true only the first time, so the
+// Event is posted once per volume.
 func (v *volume) reportNoPublishSecret() bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -117,14 +109,13 @@ func (v *volume) reportNoPublishSecret() bool {
 	return true
 }
 
-// checkSecret refuses a first publish of a staged volume whose Secret
-// differs from the credential the volume holds. That credential came
-// from the stage, or from a later republish after a rotation. Without
-// the refusal the driver would choose one of the two Secrets in
-// silence.
-func checkSecret(held *volume, holder *credentials) error {
-	current := held.credential()
-	if current != nil && holder != nil && !current.same(holder) {
+// checkSecret refuses the first publish of a staged volume when its
+// Secret differs from the credential the volume already has from
+// nodeStageSecretRef or an earlier publish. Without the check, the
+// driver would use one of the two Secrets and nobody would know which.
+func checkSecret(vol *volume, supplied *credentials) error {
+	current := vol.credential()
+	if current != nil && supplied != nil && !current.same(supplied) {
 		return status.Error(codes.InvalidArgument,
 			"nodePublishSecretRef: the Secret differs from the credential the volume holds, "+
 				"which came from nodeStageSecretRef or from an earlier publish; "+
@@ -133,121 +124,115 @@ func checkSecret(held *volume, holder *credentials) error {
 	return nil
 }
 
-// takeSecret holds the credential of a publish call. A repeated publish
-// carries the Secret the kubelet read just now, which is the one to use
-// after a rotation, so it replaces what the volume holds.
+// storeSecret stores the credential of a publish call. The kubelet reads
+// the Secret again for each call, so a rotated Secret replaces the stored
+// credential at the next pod sync.
 //
-// A publish with no Secret leaves the credential in place. When the
-// volume holds a credential from the stage, or waits for one after a
-// restart, the PersistentVolume names no publish Secret, and the volume
-// says so.
+// A call with no Secret leaves the credential as it is. When the volume
+// has a credential or waits for one, that means the PersistentVolume has
+// nodeStageSecretRef and no nodePublishSecretRef, and storeSecret reports
+// it once.
 //
-// It reports whether the call changed anything, which is what decides
-// whether a repeated publish is worth a line in the log.
-func (n *node) takeSecret(ctx context.Context, held *volume, holder *credentials) bool {
-	if holder == nil {
-		return held.needsCredential() && n.noPublishSecret(ctx, held)
+// It returns whether the call changed anything, and republished skips
+// the call's log line when it did not.
+func (n *node) storeSecret(ctx context.Context, vol *volume, supplied *credentials) bool {
+	if supplied == nil {
+		return vol.hasOrAwaitsCredential() && n.noPublishSecret(ctx, vol)
 	}
-	old := held.credential()
-	if old.same(holder) {
+	old := vol.credential()
+	if old.same(supplied) {
 		return false
 	}
 	switch {
-	case held.takeCredential(holder):
-		n.logger.InfoContext(ctx, "the credential returned", "volume", held.id)
-		n.noteHealth(ctx, held)
+	case vol.storeCredential(supplied):
+		n.logger.InfoContext(ctx, "The volume has its credential again", "volume", vol.id)
+		n.recordHealth(ctx, vol)
 	case old != nil:
-		n.logger.InfoContext(ctx, "the credential changed", "volume", held.id)
+		n.logger.InfoContext(ctx, "The credential of the volume changed", "volume", vol.id)
 	default:
-		// A first publish that carries the Secret the stage did not.
-		// The stage fetched without a credential and worked, so no
-		// fetch or push waits for this one.
-		n.logger.InfoContext(ctx, "the credential arrived", "volume", held.id)
+		// The volume had no credential and was not waiting for one, so
+		// its fetches already work without one and nothing needs to run
+		// again.
+		n.logger.InfoContext(ctx, "The volume received its credential", "volume", vol.id)
 		return true
 	}
-	n.credentialArrived(held)
+	n.credentialArrived(vol)
 	return true
 }
 
-// republished takes the credential of a repeated publish. A repeat that
-// changes nothing is marked quiet, so the call's log line is left out:
-// the kubelet repeats the call for every volume on each pod sync, and a
-// line for each would bury the calls that did something.
-func (n *node) republished(ctx context.Context, held *volume, holder *credentials) {
-	if !n.takeSecret(ctx, held, holder) {
+// republished handles a repeated publish. The kubelet repeats the call
+// for every volume on every pod sync, so a repeat that changes nothing
+// is marked quiet and logs no call line.
+func (n *node) republished(ctx context.Context, vol *volume, supplied *credentials) {
+	if !n.storeSecret(ctx, vol, supplied) {
 		quietCall(ctx)
 	}
 }
 
-// noPublishSecret posts the Event and writes the log line once for the
-// volume, and reports whether it did.
-func (n *node) noPublishSecret(ctx context.Context, held *volume) bool {
-	if !held.reportNoPublishSecret() {
+// noPublishSecret logs the warning and posts the
+// GitVolumeNoPublishSecret Event the first time it is called for a
+// volume, and returns true when it did.
+func (n *node) noPublishSecret(ctx context.Context, vol *volume) bool {
+	if !vol.reportNoPublishSecret() {
 		return false
 	}
-	n.logger.WarnContext(ctx, "no publish Secret", "volume", held.id, "reason", noPublishSecret)
-	n.tell(held, corev1.EventTypeWarning, reasonNoPublishSecret, noPublishSecret)
-	if held.writeable() {
-		n.events.postClaim(held.claimNow(), corev1.EventTypeWarning, reasonNoPublishSecret, noPublishSecret)
+	n.logger.WarnContext(ctx, "The PersistentVolume sets no nodePublishSecretRef", "volume", vol.id, "reason", noPublishSecret)
+	n.postVolumeEvent(vol, corev1.EventTypeWarning, reasonNoPublishSecret, noPublishSecret)
+	if vol.writeable() {
+		n.events.postClaim(vol.claimNow(), corev1.EventTypeWarning, reasonNoPublishSecret, noPublishSecret)
 	}
-	n.noteHealth(ctx, held)
+	n.recordHealth(ctx, vol)
 	return true
 }
 
-// credentialArrived starts the work the missing or old credential held
-// back, at once and not at the next timer. A read-only volume fetches
-// its ref, and a writeable volume pushes what it committed.
-//
-// A restart is one case: every fetch and push before the republish
-// failed without a credential. A rotation is the other: when the old
-// key is revoked, a fetch or a push with it fails, and a fetch that a
-// demand asked for waits a backoff of up to five minutes before it
-// tries again. The new key ends that wait. A rotation is rare, so the
-// cost is one extra fetch or push for each volume at each rotation.
-func (n *node) credentialArrived(held *volume) {
+// credentialArrived wakes the volume's watch to push and the volume's
+// fetch loop to fetch, so the volume does not wait for its next timer.
+// After a rotation, fetches with the revoked key fail, and a fetch for a
+// demand retries on a backoff of up to maxDemandRetry. The new
+// credential ends that wait.
+func (n *node) credentialArrived(vol *volume) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	if seeing, found := n.watchers[held.id]; found && seeing.volume == held {
-		seeing.credentialArrived()
+	if watch, found := n.watchers[vol.id]; found && watch.volume == vol {
+		watch.credentialArrived()
 	}
-	if !held.attributes.pull.follows() {
+	if !vol.attributes.pull.follows() {
 		return
 	}
-	if loop := n.loopOf(held); loop != nil {
-		loop.credentialArrived(held)
+	if loop := n.loopOf(vol); loop != nil {
+		loop.credentialArrived(vol)
 	}
 }
 
-// credentialArrived wants a pass for the volume and wakes the loop
-// past --demand-min-interval. The pass counts no demand, because nobody
-// demanded it. A pass that works ends the backoff, and a pass that
-// fails fetches again after the backoff a failed demand takes.
-func (f *follower) credentialArrived(held *volume) {
+// credentialArrived adds the volume to wanted and wakes the loop, which
+// runs a pass at once, without the --demand-min-interval delay of a
+// demand. Because the volume is in wanted, a failed fetch retries on the
+// demand backoff.
+func (f *follower) credentialArrived(vol *volume) {
 	f.mu.Lock()
-	if f.volumes[held.id] != held {
+	if f.volumes[vol.id] != vol {
 		f.mu.Unlock()
 		return
 	}
-	f.wanted[held.id] = held
+	f.wanted[vol.id] = vol
 	f.mu.Unlock()
 	select {
-	case f.arrived <- struct{}{}:
+	case f.republishWake <- struct{}{}:
 	default:
 	}
 }
 
-// credentialArrived wakes the watch to push.
 func (w *watcher) credentialArrived() {
 	select {
-	case w.arrived <- struct{}{}:
+	case w.republishWake <- struct{}{}:
 	default:
 	}
 }
 
-// pushArrived pushes what the tree committed while the credential was
-// missing or old. It commits nothing, because the class's quiesce
-// decides when a write is finished.
+// pushArrived pushes the commits made while the credential was missing
+// or revoked. It commits nothing, because only the quiesce period of the
+// volume's class decides when a write is finished.
 func (w *watcher) pushArrived(ctx context.Context) {
 	w.node.push(ctx, w.volume)
-	w.node.noteHealth(ctx, w.volume)
+	w.node.recordHealth(ctx, w.volume)
 }

@@ -9,81 +9,81 @@ import (
 	"testing"
 )
 
-// recordOf reads the record a volume's directory carries.
-func recordOf(t *testing.T, answering *node, id string) *record {
+// recordOf reads the record file in a volume's directory.
+func recordOf(t *testing.T, n *node, id string) *record {
 	t.Helper()
-	held, err := readRecord(filepath.Join(answering.store.volumeDir(id), recordFile))
+	rec, err := readRecord(filepath.Join(n.store.volumeDir(id), recordFile))
 	if err != nil {
 		t.Fatalf("reading the record of %s: %v", id, err)
 	}
-	return held
+	return rec
 }
 
-// restarted is a second driver on the same store, which is what a rollout
-// of the DaemonSet leaves.
-func restarted(t *testing.T, answering *node, mounted bool) *node {
+// restarted returns a new driver on the same store, as after a rollout
+// of the DaemonSet. Every target counts as mounted when mounted is true.
+func restarted(t *testing.T, n *node, mounted bool) *node {
 	t.Helper()
 	again, _ := testNode(t, io.Discard)
-	again.store = answering.store
+	again.store = n.store
 	again.mounted = func(string) bool { return mounted }
 	again.resume(t.Context())
 	return again
 }
 
 func TestTheRecordIsWrittenAtPublishAndGoneAtUnpublish(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
+	n, _ := testNode(t, io.Discard)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 	request := publishRequest(t, "csi-1", fileURL(source), map[string]string{"pull": "never"})
 	request.Secrets = map[string]string{tokenKey: "a token"}
-	if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
-		t.Fatalf("NodePublishVolume: %v", err)
+	if _, err := n.NodePublishVolume(t.Context(), request); err != nil {
+		t.Fatalf("publishing the volume: %v", err)
 	}
 
-	held := recordOf(t, answering, "csi-1")
-	if held.Target != request.TargetPath || !held.Ephemeral || held.Staging != "" {
-		t.Errorf("the record is %+v, want an inline volume at %s", held, request.TargetPath)
+	rec := recordOf(t, n, "csi-1")
+	if rec.Target != request.TargetPath || !rec.Ephemeral || rec.Staging != "" {
+		t.Errorf("the record is %+v, want an inline volume at %s", rec, request.TargetPath)
 	}
-	if held.Attributes["url"] != fileURL(source) {
-		t.Errorf("the record names %q, want the URL", held.Attributes["url"])
+	if rec.Attributes["url"] != fileURL(source) {
+		t.Errorf("the record has the URL %q, want the URL in the volume attributes", rec.Attributes["url"])
 	}
-	if !held.Credentials {
-		t.Error("the record does not say the volume had a credential")
+	if !rec.Credentials {
+		t.Error("the record does not mark that the volume had a credential, want it marked")
 	}
-	content, err := os.ReadFile(filepath.Join(answering.store.volumeDir("csi-1"), recordFile))
+	content, err := os.ReadFile(filepath.Join(n.store.volumeDir("csi-1"), recordFile))
 	if err != nil {
 		t.Fatalf("reading the record: %v", err)
 	}
 	if strings.Contains(string(content), "a token") {
-		t.Errorf("the record carries the credential: %s", content)
+		t.Errorf("the record file has the credential: %s, want none", content)
 	}
 }
 
-func TestADriverThatRestartsTakesBackItsVolumes(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
+func TestARestartedDriverResumesItsMountedVolumes(t *testing.T) {
+	n, _ := testNode(t, io.Discard)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 	inline := publishRequest(t, "csi-1", fileURL(source), map[string]string{"pull": "1h"})
-	if _, err := answering.NodePublishVolume(t.Context(), inline); err != nil {
-		t.Fatalf("NodePublishVolume: %v", err)
+	if _, err := n.NodePublishVolume(t.Context(), inline); err != nil {
+		t.Fatalf("publishing the volume: %v", err)
 	}
-	published, _ := stagedWriteable(t, answering, "config", fileURL(source))
+	published, _ := stagedWriteable(t, n, "config", fileURL(source))
 	writeFiles(t, published.tree, map[string]string{"new.txt": "the pod wrote this"})
 
-	again := restarted(t, answering, true)
+	again := restarted(t, n, true)
 	again.mu.Lock()
 	defer again.mu.Unlock()
 	if len(again.volumes) != 2 {
-		t.Fatalf("the driver took back %d volumes, want 2", len(again.volumes))
+		t.Fatalf("the restarted driver resumed %d volumes, want 2", len(again.volumes))
 	}
-	if len(again.staged) != 1 || len(again.watchers) != 1 || len(again.armings) != 1 {
-		t.Errorf("the driver holds %d staged, %d watches, %d arming loops, want one of each",
-			len(again.staged), len(again.watchers), len(again.armings))
+	if len(again.staged) != 1 || len(again.watchers) != 1 || len(again.armingCancels) != 1 {
+		t.Errorf("the driver has %d staged volumes, %d watches, and %d arming loops, want 1 of each",
+			len(again.staged), len(again.watchers), len(again.armingCancels))
 	}
 	if len(again.followers) != 1 {
-		t.Errorf("the driver holds %d fetch loops, want 1", len(again.followers))
+		t.Errorf("the driver has %d fetch loops, want 1", len(again.followers))
 	}
 	resumed := again.volumes["config"]
 	if resumed.commit == "" {
-		t.Error("the writeable volume forgot the commit its tree stands on")
+		t.Error("the resumed writeable volume has no record of the commit of its tree, want one")
 	}
 	if resumed.target != published.target || !resumed.writeable() {
 		t.Errorf("the volume is %+v, want the writeable volume at %s", resumed, published.target)
@@ -91,67 +91,67 @@ func TestADriverThatRestartsTakesBackItsVolumes(t *testing.T) {
 }
 
 func TestAStaleRecordOfAReadOnlyVolumeGoesWithItsDirectory(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
+	n, _ := testNode(t, io.Discard)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 	request := publishRequest(t, "csi-1", fileURL(source), map[string]string{"pull": "never"})
-	if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
-		t.Fatalf("NodePublishVolume: %v", err)
+	if _, err := n.NodePublishVolume(t.Context(), request); err != nil {
+		t.Fatalf("publishing the volume: %v", err)
 	}
 
-	again := restarted(t, answering, false)
-	if _, err := os.Stat(answering.store.volumeDir("csi-1")); err == nil {
-		t.Error("the directory of a volume that is no longer mounted stayed")
+	again := restarted(t, n, false)
+	if _, err := os.Stat(n.store.volumeDir("csi-1")); err == nil {
+		t.Error("the directory of a read-only volume with no mount is still there after resume, want it deleted")
 	}
 	again.mu.Lock()
 	defer again.mu.Unlock()
 	if len(again.volumes) != 0 {
-		t.Errorf("the driver took back %d volumes, want 0", len(again.volumes))
+		t.Errorf("the restarted driver resumed %d volumes, want 0", len(again.volumes))
 	}
 }
 
 func TestAStaleRecordOfAWriteableVolumeKeepsItsTree(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
+	n, _ := testNode(t, io.Discard)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	published, _ := stagedWriteable(t, answering, "config", fileURL(source))
+	published, _ := stagedWriteable(t, n, "config", fileURL(source))
 	writeFiles(t, published.tree, map[string]string{"new.txt": "the pod wrote this"})
 
-	again := restarted(t, answering, false)
+	again := restarted(t, n, false)
 	want := map[string]string{"a.txt": "one", "new.txt": "the pod wrote this"}
 	if got := readTree(t, published.tree); !sameTree(got, want) {
-		t.Errorf("the work tree holds %v, want %v", got, want)
+		t.Errorf("the work tree has %v, want %v", got, want)
 	}
 	again.mu.Lock()
 	defer again.mu.Unlock()
 	if len(again.volumes) != 0 {
-		t.Errorf("the driver took back %d volumes, want 0", len(again.volumes))
+		t.Errorf("the restarted driver resumed %d volumes, want 0", len(again.volumes))
 	}
 }
 
-func TestAResumedVolumeWithACredentialSaysSo(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
+func TestAResumedVolumeThatHadACredentialReportsItLost(t *testing.T) {
+	n, _ := testNode(t, io.Discard)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 	request := publishRequest(t, "csi-1", fileURL(source), map[string]string{"pull": "never"})
 	request.Secrets = map[string]string{tokenKey: "a token"}
-	if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
-		t.Fatalf("NodePublishVolume: %v", err)
+	if _, err := n.NodePublishVolume(t.Context(), request); err != nil {
+		t.Fatalf("publishing the volume: %v", err)
 	}
 
-	again := restarted(t, answering, true)
+	again := restarted(t, n, true)
 	again.mu.Lock()
 	resumed := again.volumes["csi-1"]
 	again.mu.Unlock()
-	abnormal, message := resumed.report()
+	abnormal, message := resumed.health()
 	if !abnormal || !strings.Contains(message, "no credential") {
-		t.Errorf("the condition says %q, want the credential the driver lost", message)
+		t.Errorf("the health report message is %q, want it to say the credential is missing", message)
 	}
 }
 
 func TestResumeSkipsWhatItCannotRead(t *testing.T) {
 	logs := &logbook{}
-	answering, _ := testNode(t, logs)
-	answering.resume(t.Context())
+	n, _ := testNode(t, logs)
+	n.resume(t.Context())
 
-	volumes := filepath.Join(answering.store.root, "volumes")
+	volumes := filepath.Join(n.store.root, "volumes")
 	if err := os.MkdirAll(filepath.Join(volumes, "csi-1"), 0o700); err != nil {
 		t.Fatalf("making the volume directory: %v", err)
 	}
@@ -170,62 +170,62 @@ func TestResumeSkipsWhatItCannotRead(t *testing.T) {
 	}
 	writeFiles(t, filepath.Join(volumes, "csi-3"), map[string]string{recordFile: string(content)})
 
-	answering.mounted = func(string) bool { return true }
-	answering.resume(t.Context())
-	answering.mu.Lock()
-	defer answering.mu.Unlock()
-	if len(answering.volumes) != 0 {
-		t.Errorf("the driver took back %d volumes, want 0", len(answering.volumes))
+	n.mounted = func(string) bool { return true }
+	n.resume(t.Context())
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if len(n.volumes) != 0 {
+		t.Errorf("the restarted driver resumed %d volumes, want 0", len(n.volumes))
 	}
-	if !strings.Contains(logs.String(), "the volume's record was not read") {
-		t.Errorf("the log is %q, want the refused record in it", logs)
+	if !strings.Contains(logs.String(), "The attributes in the record file of the volume were not parsed") {
+		t.Errorf("the log is %q, want the line for the record file that was not parsed", logs)
 	}
 }
 
 func TestTheRecordReportsWhatItCannotWrite(t *testing.T) {
 	logs := &logbook{}
-	answering, _ := testNode(t, logs)
-	directory := answering.store.volumeDir("csi-1")
+	n, _ := testNode(t, logs)
+	directory := n.store.volumeDir("csi-1")
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		t.Fatalf("making the volume directory: %v", err)
 	}
-	held := &volume{id: "csi-1", directory: directory}
+	vol := &volume{id: "csi-1", directory: directory}
 	readOnlyDir(t, directory)
 
-	answering.record(t.Context(), held)
-	answering.forget(held)
-	if !strings.Contains(logs.String(), "the volume's record was not written") {
-		t.Errorf("the log is %q, want the record it could not write in it", logs)
+	n.record(t.Context(), vol)
+	n.forget(vol)
+	if !strings.Contains(logs.String(), "The record file of the volume was not written") {
+		t.Errorf("the log is %q, want the line for the record file that was not written", logs)
 	}
-	if !strings.Contains(logs.String(), "the volume's record was not removed") {
-		t.Errorf("the log is %q, want the record it could not remove in it", logs)
+	if !strings.Contains(logs.String(), "The record file of the volume was not removed") {
+		t.Errorf("the log is %q, want the line for the record file that was not removed", logs)
 	}
 }
 
 func TestAStaleDirectoryThatStaysIsReported(t *testing.T) {
 	logs := &logbook{}
-	answering, _ := testNode(t, logs)
-	volumes := filepath.Join(answering.store.root, "volumes")
+	n, _ := testNode(t, logs)
+	volumes := filepath.Join(n.store.root, "volumes")
 	directory := filepath.Join(volumes, "csi-1")
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		t.Fatalf("making the volume directory: %v", err)
 	}
 	writeFiles(t, directory, map[string]string{"tree/a.txt": "one"})
 
-	// A writeable volume keeps its tree, whatever the mount says.
-	answering.drop(t.Context(), &record{VolumeID: "csi-1"}, directory)
+	// A writeable volume keeps its tree even when nothing is mounted.
+	n.drop(t.Context(), &record{VolumeID: "csi-1"}, directory)
 	if _, err := os.Stat(directory); err != nil {
-		t.Fatalf("the writeable volume's directory went: %v", err)
+		t.Fatalf("the directory of a writeable volume is missing after drop: %v, want it kept", err)
 	}
 
 	readOnlyDir(t, volumes)
-	answering.drop(t.Context(), &record{VolumeID: "csi-1", Ephemeral: true}, directory)
-	if !strings.Contains(logs.String(), "the volume's directory stayed") {
-		t.Errorf("the log is %q, want the directory it could not remove in it", logs)
+	n.drop(t.Context(), &record{VolumeID: "csi-1", Ephemeral: true}, directory)
+	if !strings.Contains(logs.String(), "The volume directory was not removed") {
+		t.Errorf("the log is %q, want the line for the directory that was not removed", logs)
 	}
 }
 
-func TestTheMountTableSaysWhatIsStillMounted(t *testing.T) {
+func TestMountedInFindsAPathInAMountinfoTable(t *testing.T) {
 	table := strings.Join([]string{
 		"24 30 0:22 / /sys rw,nosuid shared:7 - sysfs sysfs rw",
 		`26 30 0:5 / /var/lib/kubelet/pods/9b1c/volumes/a\040path rw shared:9 - tmpfs tmpfs rw`,
@@ -241,39 +241,39 @@ func TestTheMountTableSaysWhatIsStillMounted(t *testing.T) {
 	} {
 		t.Run(c.path, func(t *testing.T) {
 			if got := mountedIn(strings.NewReader(table), c.path); got != c.want {
-				t.Errorf("mountedIn(%q) answered %v, want %v", c.path, got, c.want)
+				t.Errorf("mountedIn(%q) returned %v, want %v", c.path, got, c.want)
 			}
 		})
 	}
 }
 
-func TestTheKernelsOwnMountTableAnswers(t *testing.T) {
+func TestMountedNowReadsTheKernelMountTable(t *testing.T) {
 	if !mountedNow(mountTable, "/") {
-		t.Error("the root is not a mount, and the kernel says it is")
+		t.Error("the root is not a mount, want true from mountedNow")
 	}
 	if mountedNow(mountTable, t.TempDir()) {
-		t.Error("a temporary directory is a mount")
+		t.Error("a temporary directory is a mount, want false from mountedNow")
 	}
 }
 
-func TestAMountTableTheDriverCannotReadHoldsNothing(t *testing.T) {
+func TestMountedNowReportsNoMountWhenTheTableCannotBeRead(t *testing.T) {
 	if mountedNow(filepath.Join(t.TempDir(), "mountinfo"), "/") {
-		t.Error("a mount table that is not there answered that the root is a mount")
+		t.Error("a mount table that is not there returned that the root is a mount, want false")
 	}
 }
 
-func TestTheDriverReadsTheMountTableItIsGiven(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
+func TestTheNodeReadsTheMountTableAtItsMountinfoPath(t *testing.T) {
+	n, _ := testNode(t, io.Discard)
 	table := filepath.Join(t.TempDir(), "mountinfo")
 	if err := os.WriteFile(table, []byte(
 		"36 35 0:32 / /var/lib/kubelet/pods/9b1c/volumes/config rw - tmpfs tmpfs rw\n"), 0o600); err != nil {
 		t.Fatalf("writing the mount table: %v", err)
 	}
-	answering.mountinfo = table
-	if !answering.mounted("/var/lib/kubelet/pods/9b1c/volumes/config") {
-		t.Error("the driver read no mount from the table it was given")
+	n.mountinfo = table
+	if !n.mounted("/var/lib/kubelet/pods/9b1c/volumes/config") {
+		t.Error("no mount was read from the table, want one")
 	}
-	if answering.mounted("/var/lib/kubelet/pods/9b1c/volumes/other") {
-		t.Error("the driver read a mount the table does not carry")
+	if n.mounted("/var/lib/kubelet/pods/9b1c/volumes/other") {
+		t.Error("a mount was read that the table does not contain, want none")
 	}
 }

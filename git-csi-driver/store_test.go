@@ -29,51 +29,51 @@ func writeFiles(t testing.TB, dir string, files map[string]string) {
 // for the URL.
 func storeWith(t *testing.T, url string) (*store, *repository) {
 	t.Helper()
-	holder := newStore(t.TempDir())
-	return holder, holder.repository(url)
+	stored := newStore(t.TempDir())
+	return stored, stored.repository(url)
 }
 
-// fileURL is the file:// URL of a repository the test made.
 func fileURL(dir string) string {
 	return "file://" + dir
 }
 
-// checkoutOf fetches the ref and checks it out, returning the tree.
+// checkoutOf creates the repository, fetches the ref, and returns the
+// new directory it checked the ref out into.
 func checkoutOf(t *testing.T, repo *repository, ref string) string {
 	t.Helper()
 	if err := repo.create(t.Context()); err != nil {
-		t.Fatalf("create: %v", err)
+		t.Fatalf("creating the repository: %v", err)
 	}
 	if err := repo.fetch(t.Context(), nil, ref, 0); err != nil {
-		t.Fatalf("fetch: %v", err)
+		t.Fatalf("fetching the ref: %v", err)
 	}
 	commit, err := repo.resolve(t.Context(), ref)
 	if err != nil {
-		t.Fatalf("resolve: %v", err)
+		t.Fatalf("resolving the ref: %v", err)
 	}
 	tree := filepath.Join(t.TempDir(), "tree")
 	if err := repo.checkout(t.Context(), commit, tree); err != nil {
-		t.Fatalf("checkout: %v", err)
+		t.Fatalf("checking out the commit: %v", err)
 	}
 	return tree
 }
 
-func TestTheStoreNamesARepositoryByTheHashOfItsURL(t *testing.T) {
-	holder, repo := storeWith(t, "https://example.com/data.git")
+func TestTheRepositoryDirectoryIsNamedByTheHashOfItsURL(t *testing.T) {
+	stored, repo := storeWith(t, "https://example.com/data.git")
 	sum := sha256.Sum256([]byte("https://example.com/data.git"))
-	want := filepath.Join(holder.root, "repos", hex.EncodeToString(sum[:]))
+	want := filepath.Join(stored.root, "repos", hex.EncodeToString(sum[:]))
 	if repo.dir != want {
 		t.Errorf("the repository is at %q, want %q", repo.dir, want)
 	}
-	if other := holder.repository("https://example.com/other.git"); other.dir == repo.dir {
-		t.Error("two URLs named the same directory")
+	if other := stored.repository("https://example.com/other.git"); other.dir == repo.dir {
+		t.Error("two different URLs map to the same repository directory, want different directories")
 	}
 }
 
-func TestTheStoreNamesAVolumeByItsID(t *testing.T) {
-	holder := newStore(t.TempDir())
-	want := filepath.Join(holder.root, "volumes", "csi-abc")
-	if got := holder.volumeDir("csi-abc"); got != want {
+func TestTheVolumeDirectoryIsNamedByItsID(t *testing.T) {
+	stored := newStore(t.TempDir())
+	want := filepath.Join(stored.root, "volumes", "csi-abc")
+	if got := stored.volumeDir("csi-abc"); got != want {
 		t.Errorf("the volume is at %q, want %q", got, want)
 	}
 }
@@ -81,20 +81,20 @@ func TestTheStoreNamesAVolumeByItsID(t *testing.T) {
 func TestCreateWritesTheURLBesideTheRepository(t *testing.T) {
 	_, repo := storeWith(t, "https://example.com/data.git")
 	if repo.exists() {
-		t.Fatal("the repository exists before it is created")
+		t.Fatal("exists() is true before create, want false")
 	}
 	if err := repo.create(t.Context()); err != nil {
-		t.Fatalf("create: %v", err)
+		t.Fatalf("creating the repository: %v", err)
 	}
 	if !repo.exists() {
-		t.Error("the repository does not exist after it is created")
+		t.Error("exists() is false after create, want true")
 	}
 	url, err := os.ReadFile(filepath.Join(repo.dir, "url"))
 	if err != nil {
 		t.Fatalf("reading the url file: %v", err)
 	}
 	if strings.TrimSpace(string(url)) != "https://example.com/data.git" {
-		t.Errorf("the url file says %q", url)
+		t.Errorf("the url file has %q, want the repository URL", url)
 	}
 	if bare := git(t, repo.dir, "rev-parse", "--is-bare-repository"); strings.TrimSpace(bare) != "true" {
 		t.Errorf("the repository is not bare: %q", bare)
@@ -104,9 +104,9 @@ func TestCreateWritesTheURLBesideTheRepository(t *testing.T) {
 func TestCreateReportsADirectoryItCannotMake(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "file")
 	writeFiles(t, filepath.Dir(file), map[string]string{"file": ""})
-	holder := newStore(file)
-	if err := holder.repository("https://example.com/data.git").create(t.Context()); err == nil {
-		t.Error("create answered no error under a file")
+	stored := newStore(file)
+	if err := stored.repository("https://example.com/data.git").create(t.Context()); err == nil {
+		t.Error("create returned no error under a file, want one")
 	}
 }
 
@@ -124,28 +124,28 @@ func TestFetchAndCheckoutBringTheRefIntoATree(t *testing.T) {
 			t.Fatalf("reading %s: %v", name, err)
 		}
 		if string(got) != want {
-			t.Errorf("%s holds %q, want %q", name, got, want)
+			t.Errorf("%s has %q, want %q", name, got, want)
 		}
 	}
 	if _, err := os.Stat(filepath.Join(tree, ".git")); err == nil {
-		t.Error("the tree holds a .git")
+		t.Error("the checked-out tree has a .git, want none")
 	}
 	if _, err := os.Stat(tree + ".index"); err == nil {
-		t.Error("the index outlived the checkout")
+		t.Error("the index file is still there after the checkout, want it removed")
 	}
 }
 
-func TestFetchTakesTheDepthItIsGiven(t *testing.T) {
+func TestFetchLimitsHistoryToTheDepthItIsGiven(t *testing.T) {
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 	commitFiles(t, source, map[string]string{"a.txt": "two"})
 	commitFiles(t, source, map[string]string{"a.txt": "three"})
 
 	_, repo := storeWith(t, fileURL(source))
 	if err := repo.create(t.Context()); err != nil {
-		t.Fatalf("create: %v", err)
+		t.Fatalf("creating the repository: %v", err)
 	}
 	if err := repo.fetch(t.Context(), nil, "main", 1); err != nil {
-		t.Fatalf("fetch: %v", err)
+		t.Fatalf("fetching the ref: %v", err)
 	}
 	history := git(t, repo.dir, "rev-list", "--count", refPrefix+"main")
 	if strings.TrimSpace(history) != "1" {
@@ -157,54 +157,54 @@ func TestFetchReportsARefTheRemoteDoesNotHave(t *testing.T) {
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 	_, repo := storeWith(t, fileURL(source))
 	if err := repo.create(t.Context()); err != nil {
-		t.Fatalf("create: %v", err)
+		t.Fatalf("creating the repository: %v", err)
 	}
 	err := repo.fetch(t.Context(), nil, "release", 0)
 	if err == nil {
-		t.Fatal("fetch answered no error for a ref the remote does not have")
+		t.Fatal("fetch returned no error for a ref the remote does not have, want one")
 	}
 	if !strings.Contains(err.Error(), "release") {
-		t.Errorf("fetch said %q, want the ref named", err)
+		t.Errorf("the fetch error is %q, want it to name the ref release", err)
 	}
 }
 
 func TestFetchReportsARemoteThatIsNotThere(t *testing.T) {
 	_, repo := storeWith(t, fileURL(filepath.Join(t.TempDir(), "gone")))
 	if err := repo.create(t.Context()); err != nil {
-		t.Fatalf("create: %v", err)
+		t.Fatalf("creating the repository: %v", err)
 	}
 	if err := repo.fetch(t.Context(), nil, "main", 0); err == nil {
-		t.Error("fetch answered no error for a remote that is not there")
+		t.Error("fetch returned no error for a remote that is not there, want one")
 	}
 }
 
-func TestResolveReportsARefTheStoreDoesNotHold(t *testing.T) {
+func TestResolveReportsARefTheStoreDoesNotHave(t *testing.T) {
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 	_, repo := storeWith(t, fileURL(source))
 	if err := repo.create(t.Context()); err != nil {
-		t.Fatalf("create: %v", err)
+		t.Fatalf("creating the repository: %v", err)
 	}
 	if _, err := repo.resolve(t.Context(), "main"); err == nil {
-		t.Error("resolve answered no error before any fetch")
+		t.Error("resolve returned no error before any fetch, want one")
 	}
 }
 
-func TestResolveAnswersTheCommitTheRefNames(t *testing.T) {
+func TestResolveReturnsTheCommitOfTheRef(t *testing.T) {
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 	want := strings.TrimSpace(git(t, source, "rev-parse", "HEAD"))
 	_, repo := storeWith(t, fileURL(source))
 	if err := repo.create(t.Context()); err != nil {
-		t.Fatalf("create: %v", err)
+		t.Fatalf("creating the repository: %v", err)
 	}
 	if err := repo.fetch(t.Context(), nil, "main", 0); err != nil {
-		t.Fatalf("fetch: %v", err)
+		t.Fatalf("fetching the ref: %v", err)
 	}
 	got, err := repo.resolve(t.Context(), "main")
 	if err != nil {
-		t.Fatalf("resolve: %v", err)
+		t.Fatalf("resolving the ref: %v", err)
 	}
 	if got != want {
-		t.Errorf("resolve answered %q, want %q", got, want)
+		t.Errorf("resolve returned %q, want %q", got, want)
 	}
 }
 
@@ -212,50 +212,51 @@ func TestCheckoutReportsATreeItCannotMake(t *testing.T) {
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 	_, repo := storeWith(t, fileURL(source))
 	if err := repo.create(t.Context()); err != nil {
-		t.Fatalf("create: %v", err)
+		t.Fatalf("creating the repository: %v", err)
 	}
 	if err := repo.fetch(t.Context(), nil, "main", 0); err != nil {
-		t.Fatalf("fetch: %v", err)
+		t.Fatalf("fetching the ref: %v", err)
 	}
 	commit, err := repo.resolve(t.Context(), "main")
 	if err != nil {
-		t.Fatalf("resolve: %v", err)
+		t.Fatalf("resolving the ref: %v", err)
 	}
 	file := filepath.Join(t.TempDir(), "file")
 	writeFiles(t, filepath.Dir(file), map[string]string{"file": ""})
 	if err := repo.checkout(t.Context(), commit, filepath.Join(file, "tree")); err == nil {
-		t.Error("checkout answered no error under a file")
+		t.Error("checkout returned no error under a file, want one")
 	}
 	if err := repo.checkout(t.Context(), "0000000000000000000000000000000000000000",
 		filepath.Join(t.TempDir(), "tree")); err == nil {
-		t.Error("checkout answered no error for a commit the store does not hold")
+		t.Error("checkout returned no error for a commit the store does not have, want one")
 	}
 }
 
 func TestTheLockIsPerRepository(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		holder := newStore(t.TempDir())
-		one := holder.repository("https://example.com/one.git")
-		two := holder.repository("https://example.com/two.git")
+		stored := newStore(t.TempDir())
+		one := stored.repository("https://example.com/one.git")
+		two := stored.repository("https://example.com/two.git")
 
 		release := one.lock()
-		// Another URL takes its own lock while the first is held.
-		holder.repository("https://example.com/two.git").lock()()
+		// Another URL has its own lock, which is free while the first is
+		// held.
+		stored.repository("https://example.com/two.git").lock()()
 		two.lock()()
 
 		taken := make(chan struct{})
 		go func() {
 			defer close(taken)
-			holder.repository("https://example.com/one.git").lock()()
+			stored.repository("https://example.com/one.git").lock()()
 		}()
 		synctest.Wait()
 		select {
 		case <-taken:
-			t.Fatal("the same repository was locked twice at once")
+			t.Fatal("two callers hold the lock of the same repository at once, want one")
 		default:
 		}
-		// A lock never taken blocks the bubble for good, and synctest
-		// fails the test.
+		// A goroutine still blocked at the end of the bubble makes synctest
+		// fail the test, so a lock that was never released fails here.
 		release()
 		<-taken
 	})
@@ -321,17 +322,17 @@ func TestReplaceTreeMakesThePublishedTreeMatchTheFreshOne(t *testing.T) {
 			writeFiles(t, fresh, c.fresh)
 
 			if err := replaceTree(fresh, published); err != nil {
-				t.Fatalf("replaceTree: %v", err)
+				t.Fatalf("replacing the tree: %v", err)
 			}
 			if got := readTree(t, published); !sameTree(got, c.fresh) {
-				t.Errorf("the published tree holds %v, want %v", got, c.fresh)
+				t.Errorf("the published tree has %v, want %v", got, c.fresh)
 			}
 		})
 	}
 }
 
-// readTree is every file under dir by its path, so a test compares whole
-// trees.
+// readTree returns the contents of every file under dir, keyed by path,
+// so a test can compare whole trees.
 func readTree(t *testing.T, dir string) map[string]string {
 	t.Helper()
 	found := map[string]string{}
@@ -370,10 +371,10 @@ func sameTree(got, want map[string]string) bool {
 func TestReplaceTreeReportsATreeThatIsNotThere(t *testing.T) {
 	dir := t.TempDir()
 	if err := replaceTree(filepath.Join(dir, "gone"), dir); err == nil {
-		t.Error("replaceTree answered no error for a fresh tree that is not there")
+		t.Error("replaceTree returned no error for a fresh tree that is not there, want one")
 	}
 	if err := replaceTree(dir, filepath.Join(dir, "gone")); err == nil {
-		t.Error("replaceTree answered no error for a published tree that is not there")
+		t.Error("replaceTree returned no error for a published tree that is not there, want one")
 	}
 }
 
@@ -382,40 +383,40 @@ func TestTreeSizeAddsUpTheFiles(t *testing.T) {
 	writeFiles(t, dir, map[string]string{"a.txt": "12345", "docs/b.txt": "123"})
 	size, err := treeSize(dir)
 	if err != nil {
-		t.Fatalf("treeSize: %v", err)
+		t.Fatalf("measuring the tree: %v", err)
 	}
 	if size != 8 {
-		t.Errorf("treeSize answered %d, want 8", size)
+		t.Errorf("treeSize returned %d, want 8", size)
 	}
 }
 
 func TestTreeSizeReportsATreeThatIsNotThere(t *testing.T) {
 	if _, err := treeSize(filepath.Join(t.TempDir(), "gone")); err == nil {
-		t.Error("treeSize answered no error for a tree that is not there")
+		t.Error("treeSize returned no error for a tree that is not there, want one")
 	}
 }
 
-// readOnlyDir makes a directory that refuses writes, and skips the test
-// under root, because root writes through the mode
+// readOnlyDir makes the directory at path read-only. Root ignores the
+// mode, so the test is skipped when it runs as root.
 func readOnlyDir(t *testing.T, path string) {
 	t.Helper()
 	if os.Geteuid() == 0 {
-		t.Skip("a mode holds nothing closed to root")
+		t.Skip("root can read a file whatever its mode")
 	}
 	if err := os.Chmod(path, 0o500); err != nil {
-		t.Fatalf("holding %s closed: %v", path, err)
+		t.Fatalf("removing the permissions of %s: %v", path, err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(path, 0o700) })
 }
 
 func TestCreateReportsARepositoryGitCannotMake(t *testing.T) {
-	holder, repo := storeWith(t, "https://example.com/data.git")
+	stored, repo := storeWith(t, "https://example.com/data.git")
 	if err := os.MkdirAll(repo.dir, 0o755); err != nil {
 		t.Fatalf("making the directory: %v", err)
 	}
 	readOnlyDir(t, repo.dir)
-	if err := holder.repository("https://example.com/data.git").create(t.Context()); err == nil {
-		t.Error("create answered no error in a directory it cannot write")
+	if err := stored.repository("https://example.com/data.git").create(t.Context()); err == nil {
+		t.Error("create returned no error in a directory it cannot write, want one")
 	}
 }
 
@@ -465,7 +466,7 @@ func TestReplaceTreeReportsWhatItCannotChange(t *testing.T) {
 			readOnlyDir(t, filepath.Join(published, c.closed))
 
 			if err := replaceTree(fresh, published); err == nil {
-				t.Error("replaceTree answered no error under a directory it cannot write")
+				t.Error("replaceTree returned no error under a directory it cannot write, want one")
 			}
 		})
 	}

@@ -1,14 +1,12 @@
-# The lab: one liken machine in QEMU, booted from the public release
+# The lab is one liken machine in QEMU, booted from the public release
 # channel, and a git forge on the host that the machine reaches over the
-# user-mode network. Every drill in this repository runs here, because
-# nothing is installed on a real cluster until a person has seen it
-# work. The targets, disk names, firmware paths, and network devices
-# copy liken's own dev-cluster/Makefile for one node.
+# user-mode network. Every drill of the driver runs here, so that a
+# person sees a change work before it is installed on a real cluster.
+# The targets, disk names, firmware paths, and network devices follow
+# liken/dev-cluster/Makefile, for one node.
 
-# A recipe that fails, or a build that is killed during one, leaves its
-# target partly written and newer than its inputs. make deletes that
-# target, so the next build makes it again and does not take it as
-# current.
+# A recipe that fails or is killed can leave its target partly written
+# and newer than its inputs, so make deletes the target on failure.
 .DELETE_ON_ERROR:
 
 NODE := node-1
@@ -17,53 +15,54 @@ PIDFILE := $(GUEST)/qemu.pid
 FORGE_PIDFILE := guests/forge.pid
 
 # Where releases come from, and the version this checkout runs. fetch
-# writes the version it resolved to channel/version, so every later
-# target names the same release without asking the channel again.
+# writes the version it resolved to channel/version, so later targets
+# use the same release without querying the channel again.
 SOURCE ?= https://releases.liken.sh
 VERSION ?= $(shell cat channel/version 2>/dev/null)
 RELEASE := channel/$(VERSION)
 LIKEN := $(RELEASE)/liken
 
-# The release's own toolkit fetches the release. The media format is
-# versioned with the toolkit, so a release is always composed by the
-# liken binary it ships, never by another version's.
+# fetch downloads the release's own liken binary here and runs it to
+# fetch the release. The format of the install media changes with the
+# liken binary, so each target runs the binary of the release it builds.
 BOOTSTRAP := channel/.liken
 
-# The image the deploy target pins. The default is the newest build CI
-# pushed, read from the package registry, so a drill after a push to
-# main runs that push.
+# The image that the deploy target pins. The default tag is the newest
+# tag that CI pushed to the package registry, so a drill after a push
+# to main runs that build.
 IMAGE ?= ghcr.io/liken-sh/git-csi-driver
 IMAGE_TAG ?= $(shell gh api /orgs/liken-sh/packages/container/git-csi-driver/versions \
 	--jq '[.[].metadata.container.tags[]] | map(select(test("^[0-9]"))) | .[0]' 2>/dev/null)
 
-# Every wait in this file has a deadline, in seconds. These are them.
+# The deadlines of the waits in this file, in seconds.
 INSTALL_DEADLINE ?= 600
 READY_DEADLINE ?= 300
 DEPLOY_DEADLINE ?= 300
 CSINODE_DEADLINE ?= 300
 STORE_DEADLINE ?= 300
 
-# The guest's shape, from liken's dev cluster. A disk boot runs in
-# 1 GiB, the liken envelope. The install boot carries the whole release
-# in its initramfs and unpacks it into RAM, so it needs more.
+# The guest's size, as in liken's dev cluster. A boot from disk gets
+# 1 GiB, the memory that liken's plans budget for a machine. The install
+# boot unpacks the whole release from its initramfs into RAM, so it
+# gets more.
 SMP := 4
 MEM_RUN := 1024
 MEM_INSTALL := 4096
 OVMF_CODE := /usr/share/OVMF/OVMF_CODE_4M.fd
 OVMF_VARS := /usr/share/OVMF/OVMF_VARS_4M.fd
 
-# Each liken lab spells two letters into its MAC bytes and its multicast
-# group. liken's dev cluster spells LK and its GitOps lab spells GO;
-# this lab spells GC. A stray frame or a duplicate address then names
-# the lab it came from, and two labs can run on one machine at once.
+# Each liken lab puts two ASCII letters in its MAC addresses and its
+# multicast group: LK in liken's dev cluster, GO in its GitOps lab, and
+# GC here, as 47:43 in the MACs and 71.67 in the group. So a stray frame
+# shows which lab sent it, and two labs can run on one host at once.
 UPLINK_MAC := 52:54:00:47:43:01
 CLUSTER_MAC := 52:54:00:47:44:01
 CLUSTER_SEGMENT := 239.192.71.67:26445
 
-# The flags every boot shares: the UEFI firmware, two network devices,
-# and three disks. eth0 is the user-mode network, which reaches the
-# host at 10.0.2.2 and forwards the API port. eth1 is the cluster
-# segment, a multicast socket that needs no root.
+# The flags that every boot shares: the UEFI firmware, two network
+# devices, and three disks. eth0 is the user-mode network. The guest
+# reaches the host at 10.0.2.2, and QEMU forwards the API port. eth1 is
+# the cluster segment, a multicast socket that needs no root.
 QEMU_COMMON = \
 	-accel kvm -accel tcg \
 	-cpu max \
@@ -86,8 +85,9 @@ QEMU_COMMON = \
 .PHONY: fetch identity media install run stop kubeconfig wait forge forge-stop \
 	repo deploy smoke clean distclean
 
-# fetch reads the channel, takes that version's own toolkit, and has the
-# toolkit download and verify the whole release against release.yaml.
+# fetch reads the channel, downloads that version's liken binary, and
+# runs it to download the whole release and verify it against
+# release.yaml.
 fetch:
 	@mkdir -p channel
 	@set -eu; \
@@ -105,16 +105,16 @@ fetch:
 	chmod +x channel/$$version/liken; \
 	echo "$$version" > channel/version
 
-# identity mints the cluster's certificate authorities and join token
-# once. It is private, and git ignores it.
+# identity creates the cluster's certificate authorities and join token
+# once. It is secret, and git ignores it.
 identity: identity/token
 
 identity/token:
 	@test -x $(LIKEN)
 	$(LIKEN) mint identity
 
-# The layer packs the manifests and the identity. The media puts the
-# release under it, as an initramfs QEMU boots directly.
+# The layer packs the manifests and the identity. The media target adds
+# the release to it, as an initramfs that QEMU boots directly.
 media: install.cpio
 
 deployment.cpio: cluster.yaml machines/node-1.yaml identity/token
@@ -125,9 +125,10 @@ install.cpio: deployment.cpio
 	@test -x $(LIKEN)
 	$(LIKEN) media $(RELEASE) deployment.cpio $@
 
-# install makes blank disks and a blank UEFI variable store, then boots
-# the install media once. The install claims the disks, writes the
-# release into slot A, records the boot entries, and powers off.
+# install creates blank disks and a blank UEFI variable store, then
+# boots the install media once. The installer claims the disks,
+# writes the release into slot A, records the boot entries, and powers
+# off.
 install: install.cpio
 	@test -x $(LIKEN)
 	rm -rf $(GUEST)
@@ -147,8 +148,7 @@ install: install.cpio
 		</dev/null >$(GUEST)/install-qemu.log 2>&1
 	grep -q "liken: installed to slot" $(GUEST)/install-console.log
 
-# The disks and the variable store, for a run target that has no guest
-# yet. install makes the same files itself, from nothing.
+# The disks and variable store for run when no guest exists yet.
 $(GUEST)/state.qcow2:
 	mkdir -p $(GUEST)
 	qemu-img create -f qcow2 $@ 4G
@@ -165,8 +165,8 @@ $(GUEST)/OVMF_VARS.fd:
 	mkdir -p $(GUEST)
 	cp $(OVMF_VARS) $@
 
-# run boots from disk, detached, with QEMU's own pid file as the handle
-# stop uses. The console goes to a file a drill can read.
+# run boots from disk in the background. QEMU writes the pid file that
+# stop reads, and the console goes to a file that a drill can read.
 run: $(GUEST)/state.qcow2 $(GUEST)/pods.qcow2 $(GUEST)/boot.qcow2 $(GUEST)/OVMF_VARS.fd
 	qemu-system-x86_64 \
 		$(QEMU_COMMON) \
@@ -175,9 +175,9 @@ run: $(GUEST)/state.qcow2 $(GUEST)/pods.qcow2 $(GUEST)/boot.qcow2 $(GUEST)/OVMF_
 		-pidfile $(PIDFILE) \
 		-daemonize
 
-# stop ends the guest by its pid, never by a process name pattern,
-# which could match the calling shell. A guest that outlives a drill
-# holds the disk images' locks, so this waits for it to exit.
+# stop kills the guest by pid, not by a process name pattern, which
+# could match the calling shell. A running guest locks the disk images,
+# so this waits for it to exit.
 stop:
 	@set -eu; \
 	test -f $(PIDFILE) || exit 0; \
@@ -193,14 +193,14 @@ stop:
 	done; \
 	rm -f $(PIDFILE)
 
-# kubeconfig mints the admin credential on the host, pointed at the
-# forwarded API port. The guest is never asked for it.
+# kubeconfig creates the admin credential on the host from the identity,
+# for the forwarded API port. It reads nothing from the guest.
 kubeconfig:
 	@test -x $(LIKEN)
 	$(LIKEN) kubeconfig -server https://127.0.0.1:18443 .
 
-# wait polls the node's own Ready condition to a deadline, and prints
-# the console's tail when the deadline passes.
+# wait polls the node's Ready condition until a deadline, and prints
+# the end of the console log if the deadline passes.
 wait:
 	@set -eu; \
 	deadline=$$(( $$(date +%s) + $(READY_DEADLINE) )); \
@@ -215,16 +215,16 @@ wait:
 	tail -n 40 $(GUEST)/console.log >&2; \
 	exit 1
 
-# forge serves the bare repositories under forge/ with git daemon,
-# accepting pushes. The guest reaches it at git://10.0.2.2:9418/, the
-# user-mode network's gateway. It needs no credentials.
+# forge serves the bare repositories under forge/ with git daemon, and
+# accepts pushes without credentials. The guest reaches it at
+# git://10.0.2.2:9418/, the user-mode network's gateway.
 forge: forge-stop
 	mkdir -p forge guests
 	git daemon --base-path=forge --export-all --enable=receive-pack --reuseaddr \
 		--listen=0.0.0.0 --port=9418 --detach --pid-file=$(FORGE_PIDFILE)
 
-# forge-stop ends the daemon by its pid, so the next forge can bind the
-# port.
+# forge-stop kills the daemon by pid, so that the next forge can bind
+# the port.
 forge-stop:
 	@set -eu; \
 	test -f $(FORGE_PIDFILE) || exit 0; \
@@ -240,8 +240,8 @@ forge-stop:
 	done; \
 	rm -f $(FORGE_PIDFILE)
 
-# repo makes forge/NAME.git, a bare repository seeded from
-# fixtures/NAME with one commit on main.
+# repo creates the bare repository forge/NAME.git, with one commit on
+# main that contains fixtures/NAME.
 repo:
 	@test -n "$(NAME)"
 	@test -d fixtures/$(NAME)
@@ -258,9 +258,9 @@ repo:
 	git -C guests/seed-$(NAME) push -q "$(CURDIR)/forge/$(NAME).git" main
 
 # deploy applies this repository's deploy/ with the image pinned to a
-# build CI pushed. The node reports Ready before k3s has made the
-# liken-system namespace, so the apply retries to a deadline. It then
-# waits for every DaemonSet the base carries.
+# build that CI pushed. The node is Ready before k3s creates the
+# liken-system namespace, so the apply retries until a deadline. Then it
+# waits for the rollout of every DaemonSet in the manifests.
 deploy:
 	@set -eu; \
 	tag="$(IMAGE_TAG)"; \
@@ -293,8 +293,8 @@ deploy:
 		./kubectl rollout status -f "$$doc" --timeout=$(DEPLOY_DEADLINE)s; \
 	done
 
-# smoke runs the whole chain from nothing to a node that lists the
-# driver, and ends by reading where the store lands on the node's disks.
+# smoke runs every step from an empty lab to a node that lists the
+# driver, then reads which of the node's disks holds the store.
 smoke:
 	$(MAKE) clean
 	$(MAKE) fetch
@@ -308,7 +308,7 @@ smoke:
 	$(MAKE) repo NAME=hello
 	$(MAKE) deploy
 	@# The kubelet registers the driver after the pod is ready, so the
-	@# csinode entry follows the rollout by a few seconds.
+	@# CSINode entry appears a few seconds after the rollout.
 	@set -eu; \
 	deadline=$$(( $$(date +%s) + $(CSINODE_DEADLINE) )); \
 	until ./kubectl get csinode $(NODE) \
@@ -320,9 +320,9 @@ smoke:
 		sleep 5; \
 	done
 	./kubectl get csinode $(NODE) -o wide
-	@# A privileged pod reads the node's own mount table for the store
-	@# path, so a change to liken's disk layout shows up here first.
-	@# Busybox has no findmnt, hence Debian.
+	@# A privileged pod reads the node's mount table for the store path,
+	@# so a change to liken's disk layout shows up here first. The image
+	@# is Debian because Busybox has no findmnt.
 	printf '%s\n' \
 		'apiVersion: v1' \
 		'kind: Pod' \
@@ -357,11 +357,11 @@ smoke:
 			break; \
 		done'
 
-# clean is a factory reset of the guest. It keeps the download and the
-# identity.
+# clean resets the guest to a blank state. It keeps the downloaded
+# release and the identity.
 clean: stop forge-stop
 	rm -rf guests
 
-# distclean removes everything git does not carry.
+# distclean removes every file that git does not track.
 distclean: clean
 	rm -rf channel identity deployment.cpio install.cpio

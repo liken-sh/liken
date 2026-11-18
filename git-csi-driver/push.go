@@ -1,7 +1,7 @@
 package main
 
-// push.go selects when the driver sends its commits to the remote and
-// performs those pushes.
+// push.go decides when a writeable volume's commits are pushed to the
+// remote, and pushes them.
 
 import (
 	"context"
@@ -13,12 +13,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// pushedRef is the mark the driver moves after a successful push. The
-// commits after this mark are unpushed.
+// pushedRef is a ref in the work tree that points at the last commit
+// pushed to the remote. The commits after it are unpushed.
 const pushedRef = refPrefix + "pushed"
 
-// unpushed is what the work tree contains that the remote does not,
-// and when the oldest of those commits was made.
+// unpushed returns how many commits the work tree has that the remote
+// does not, and the commit time of the oldest of them.
 func (w *workTree) unpushed(ctx context.Context, ref string) (int, time.Time, error) {
 	output, err := w.git(ctx, "log", "--format=%ct", "--reverse", "--end-of-options",
 		pushedRef+"..refs/heads/"+ref)
@@ -32,8 +32,8 @@ func (w *workTree) unpushed(ctx context.Context, ref string) (int, time.Time, er
 	return len(times), commitTime(times[0]), nil
 }
 
-// commitTime reads git's %ct, a whole number of seconds since the
-// epoch. A field that is not one names no time at all.
+// commitTime parses git's %ct, a count of seconds since the Unix epoch.
+// It returns the zero time when the field is not a number.
 func commitTime(field string) time.Time {
 	seconds, err := strconv.ParseInt(field, 10, 64)
 	if err != nil {
@@ -42,15 +42,14 @@ func commitTime(field string) time.Time {
 	return time.Unix(seconds, 0)
 }
 
-// markPushed moves the mark to the commit the remote now holds.
 func (w *workTree) markPushed(ctx context.Context, commit string) error {
 	_, err := w.git(ctx, "update-ref", pushedRef, commit)
 	return err
 }
 
-// pushTo sends the branch to remote, the branch it takes on the remote,
-// which is the ref itself until the volume takes a side branch. The
-// metadata ref goes beside it when the work tree holds one.
+// pushTo pushes the local branch ref to the branch remote at url. remote
+// is the volume's ref, or its side branch after the volume diverged.
+// When the work tree has a metadataRef, the same push sends it.
 func (w *workTree) pushTo(
 	ctx context.Context, env []string, url, ref, remote string,
 ) (gitOutput, error) {
@@ -61,18 +60,19 @@ func (w *workTree) pushTo(
 	return w.gitWith(ctx, env, append([]string{"push", "--quiet", url}, specs...)...)
 }
 
-// fetchMetadata takes the record the remote holds, onto the ref the
-// caller names. A restore fetches it over the volume's own record,
-// and a rebase fetches it beside the volume's own, so the caller
-// says which.
+// fetchMetadata fetches the remote's metadataRef into the local ref
+// into. Staging fetches it into metadataRef itself. fetchUpstream
+// fetches it into remoteMetadataRef, which the rebase reads.
 func (w *workTree) fetchMetadata(ctx context.Context, env []string, url, into string) error {
 	_, err := w.gitWith(ctx, env, "fetch", "--quiet", "--no-tags", url,
 		"+"+metadataRef+":"+into)
 	return err
 }
 
-// pushDue is the policy's answer: the tree has rested for the
-// quiesce, or the oldest unpushed commit has outlived push.maxLatency.
+// pushDue reports whether to push now. It is true when something is
+// unpushed and either the tree has been quiet for at least the policy's
+// quiesce, or the oldest unpushed commit is older than maxLatency. A
+// maxLatency of zero means there is no age limit.
 func pushDue(rules *policy, unpushed int, oldest, now time.Time, quiet time.Duration) bool {
 	if unpushed == 0 {
 		return false
@@ -83,155 +83,152 @@ func pushDue(rules *policy, unpushed int, oldest, now time.Time, quiet time.Dura
 	return rules.maxLatency != 0 && !oldest.IsZero() && now.Sub(oldest) > rules.maxLatency
 }
 
-// pushIfDue counts what is unpushed, reports it, and pushes when
-// the policy says so.
-func (n *node) pushIfDue(ctx context.Context, held *volume, rules *policy, quiet time.Duration) {
+// pushIfDue counts the unpushed commits, records the count, and pushes
+// when pushDue says to.
+func (n *node) pushIfDue(ctx context.Context, vol *volume, rules *policy, quiet time.Duration) {
 	if rules == nil {
 		return
 	}
-	count, oldest, err := n.counted(ctx, held)
+	count, oldest, err := n.countUnpushed(ctx, vol)
 	if err != nil {
 		return
 	}
 	if pushDue(rules, count, oldest, time.Now(), quiet) {
-		n.pushNow(ctx, held, count)
+		n.pushNow(ctx, vol, count)
 	}
 }
 
-// push is what unpublish and unstage do. It asks the policy nothing,
-// because durability is the last push.
+// push is the final push at unpublish and unstage. It ignores the push
+// policy, because the pod is gone and the commits must reach the remote.
 //
-// A volume that waits for its credential cannot push, and the pod is
-// gone, so no republish comes. The failure is posted, because the
-// commits stay in this node's work tree.
-func (n *node) push(ctx context.Context, held *volume) {
-	count, _, err := n.counted(ctx, held)
+// A volume that a restarted driver resumed has no credential, and no
+// republish brings one after the pod is gone. push reports that as a
+// failed push, because the commits then exist only on this node.
+func (n *node) push(ctx context.Context, vol *volume) {
+	count, _, err := n.countUnpushed(ctx, vol)
 	if err != nil || count == 0 {
 		return
 	}
-	if held.waitsForCredential() {
-		n.pushFailed(ctx, held, fmt.Sprintf("%d commits stay on this node: %s", count, lostCredential))
+	if vol.waitsForCredential() {
+		n.pushFailed(ctx, vol, fmt.Sprintf("%d commits stay on this node: %s", count, lostCredential))
 		return
 	}
-	n.pushNow(ctx, held, count)
+	n.pushNow(ctx, vol, count)
 }
 
-// counted reads the unpushed commits and records them, which is
-// what the volume's report and the gauges carry.
-func (n *node) counted(ctx context.Context, held *volume) (int, time.Time, error) {
-	count, oldest, err := held.work.unpushed(ctx, held.attributes.ref)
+// countUnpushed calls unpushed, and records the count and the oldest commit's
+// time in the volume's status.
+func (n *node) countUnpushed(ctx context.Context, vol *volume) (int, time.Time, error) {
+	count, oldest, err := vol.work.unpushed(ctx, vol.attributes.ref)
 	if err != nil {
-		n.logger.WarnContext(ctx, "the unpushed commits were not counted",
-			"volume", held.id, "error", err)
+		n.logger.WarnContext(ctx, "The work tree's unpushed commits were not counted",
+			"volume", vol.id, "error", err)
 		return 0, time.Time{}, err
 	}
-	held.reportUnpushed(count, oldest)
+	vol.reportUnpushed(count, oldest)
 	return count, oldest, nil
 }
 
-// pushNow sends what the work tree holds and moves the mark. A
-// failure is the volume's report until a push works.
-// A push the remote rejects as non-fast-forward means another
-// writer pushed first. The driver rebases onto what the remote holds
-// now and pushes again, and takes its side branch only when that
-// fails too.
-func (n *node) pushNow(ctx context.Context, held *volume, count int) {
-	// A volume that waits for its credential keeps its commits in the
-	// work tree. A push without the credential only fails, and the
-	// republish that returns the credential pushes at once.
-	if held.refIsDeleted() || held.waitsForCredential() {
+// pushNow pushes the work tree and moves pushedRef. A failure stays in
+// the volume's status until a push succeeds.
+//
+// A non-fast-forward rejection means another writer pushed first. The
+// driver rebases onto the remote's branch and pushes again. Only when
+// that fails does it diverge onto a side branch.
+func (n *node) pushNow(ctx context.Context, vol *volume, count int) {
+	// Push nothing while the remote has no ref, or while a resumed volume
+	// has no credential and a push can only fail. The commits stay in the
+	// work tree, and the republish that brings the credential pushes them.
+	if vol.refIsDeleted() || vol.waitsForCredential() {
 		return
 	}
-	head, err := held.work.head(ctx)
+	head, err := vol.work.head(ctx)
 	if err != nil {
-		n.logger.WarnContext(ctx, "the tree's commit was not read",
-			"volume", held.id, "error", err)
+		n.logger.WarnContext(ctx, "The work tree's HEAD commit was not read",
+			"volume", vol.id, "error", err)
 		return
 	}
-	branch := held.divergedFrom()
-	if branch != "" && n.healIfMerged(ctx, held, branch) {
+	branch := vol.sideBranch()
+	if branch != "" && n.returnToRefIfMerged(ctx, vol, branch) {
 		branch = ""
-		head = held.work.refCommit(ctx, "HEAD")
+		head = vol.work.refCommit(ctx, "HEAD")
 	}
-	remote := held.attributes.ref
+	remote := vol.attributes.ref
 	if branch != "" {
 		remote = branch
 	}
-	output, pushErr := n.sendTo(ctx, held, remote)
+	output, pushErr := n.sendTo(ctx, vol, remote)
 	if pushErr != nil && branch == "" && rejectedPush(output) {
-		if rebased, landed := n.rebaseAndRetry(ctx, held, count); landed {
+		if rebased, pushed := n.rebaseAndRetry(ctx, vol, count); pushed {
 			head, pushErr = rebased, nil
 		} else {
-			n.diverge(ctx, held)
-			remote = held.divergedFrom()
-			// A retry that rebased and still lost moved the branch,
-			// so the side branch's mark is the commit the tree holds
-			// now, not the one the push started from.
-			head = held.work.refCommit(ctx, "HEAD")
-			_, pushErr = n.sendTo(ctx, held, remote)
+			n.diverge(ctx, vol)
+			remote = vol.sideBranch()
+			// The retries may have rebased the branch, so mark the current
+			// HEAD as pushed, not the commit this call started with.
+			head = vol.work.refCommit(ctx, "HEAD")
+			_, pushErr = n.sendTo(ctx, vol, remote)
 		}
 	}
 	if pushErr != nil {
-		n.pushFailed(ctx, held, pushErr.Error())
+		n.pushFailed(ctx, vol, pushErr.Error())
 		return
 	}
-	if err := held.work.markPushed(ctx, head); err != nil {
-		n.logger.WarnContext(ctx, "the pushed mark did not move",
-			"volume", held.id, "error", err)
+	if err := vol.work.markPushed(ctx, head); err != nil {
+		n.logger.WarnContext(ctx, "The work tree's pushedRef was not updated",
+			"volume", vol.id, "error", err)
 	}
-	held.reportPushed(time.Now())
-	claim, _, _ := held.reading()
-	n.report(held, claim, corev1.EventTypeNormal, reasonPushed,
-		fmt.Sprintf("pushed %d commits to %s at %s", count, remote, short(head)))
-	n.logger.InfoContext(ctx, "pushed",
-		"volume", held.id, "commits", count, "branch", remote, "commit", short(head))
-	n.readings.record(held)
-	n.noteHealth(ctx, held)
+	vol.reportPushed(time.Now())
+	claim, _, _ := vol.gaugeValues()
+	n.report(vol, claim, corev1.EventTypeNormal, reasonPushed,
+		fmt.Sprintf("Pushed %d commits to %s at %s", count, remote, short(head)))
+	n.logger.InfoContext(ctx, "Pushed the volume's commits",
+		"volume", vol.id, "commits", count, "branch", remote, "commit", short(head))
+	n.metrics.record(vol)
+	n.recordHealth(ctx, vol)
 }
 
-// rebaseAttempts bounds the retry. A loss is a race with another
-// writer, and three losses in a row say the writers race faster
-// than a rebase settles.
+// rebaseAttempts is how many times rebaseAndRetry fetches, rebases, and
+// pushes before the volume diverges onto a side branch.
 const rebaseAttempts = 3
 
-// rebaseAndRetry puts the volume's commits on top of the ref the
-// remote holds now and pushes again. It returns the commit that landed,
-// or false when the volume has to take its side branch.
-func (n *node) rebaseAndRetry(ctx context.Context, held *volume, count int) (string, bool) {
+// rebaseAndRetry rebases the volume's commits onto the remote's current
+// branch and pushes again. It returns the pushed commit and true, or
+// false when the volume must diverge onto a side branch.
+func (n *node) rebaseAndRetry(ctx context.Context, vol *volume, count int) (string, bool) {
 	for range rebaseAttempts {
-		upstream, err := n.fetchUpstream(ctx, held)
+		upstream, err := n.fetchUpstream(ctx, vol)
 		if err != nil {
-			n.logger.WarnContext(ctx, "the ref was not fetched",
-				"volume", held.id, "error", err)
+			n.logger.WarnContext(ctx, "The ref was not fetched from the remote",
+				"volume", vol.id, "error", err)
 			return "", false
 		}
-		before := held.work.refCommit(ctx, "HEAD")
-		if err := n.rebaseAside(ctx, held, upstream); err != nil {
-			n.logger.WarnContext(ctx, "the rebase was aborted",
-				"volume", held.id, "error", err)
+		before := vol.work.refCommit(ctx, "HEAD")
+		if err := n.rebaseInScratchTree(ctx, vol, upstream); err != nil {
+			n.logger.WarnContext(ctx, "The rebase of the tree onto upstream did not complete",
+				"volume", vol.id, "error", err)
 			return "", false
 		}
-		// The record goes on top of the remote's in the same pass,
-		// because a push sends the branch and the record together
-		// and the remote accepts or rejects each on its own.
-		if err := held.work.reparentMetadata(ctx, held.authorEnv()); err != nil {
-			n.logger.WarnContext(ctx, "the record was not put on top of the remote's",
-				"volume", held.id, "error", err)
+		// Rebase the metadata record onto the remote's as well. One push
+		// sends the branch and the record, and the remote accepts or
+		// rejects each ref separately.
+		if err := vol.work.reparentMetadata(ctx, vol.authorEnv()); err != nil {
+			n.logger.WarnContext(ctx, "The metadata record was not rebased onto the remote's record",
+				"volume", vol.id, "error", err)
 			return "", false
 		}
-		head := held.work.refCommit(ctx, "HEAD")
-		if _, err := n.sendTo(ctx, held, held.attributes.ref); err != nil {
+		head := vol.work.refCommit(ctx, "HEAD")
+		if _, err := n.sendTo(ctx, vol, vol.attributes.ref); err != nil {
 			continue
 		}
-		// The Event goes out after the push it describes, and only
-		// when the rebase moved the tree. A push the remote rejected
-		// for the record alone rebased nothing.
+		// Post the Event only if the rebase changed HEAD. A push that the
+		// remote rejected only for the metadata ref rebased no commits.
 		if head != before {
-			claim, _, _ := held.reading()
-			n.report(held, claim, corev1.EventTypeNormal, reasonRebased,
-				fmt.Sprintf("rebased %d commits onto %s and pushed to %s",
-					count, short(upstream), held.attributes.ref))
-			n.logger.InfoContext(ctx, "rebased", "volume", held.id,
+			claim, _, _ := vol.gaugeValues()
+			n.report(vol, claim, corev1.EventTypeNormal, reasonRebased,
+				fmt.Sprintf("Rebased %d commits onto %s and pushed them to %s",
+					count, short(upstream), vol.attributes.ref))
+			n.logger.InfoContext(ctx, "Rebased the volume's commits", "volume", vol.id,
 				"commits", count, "onto", short(upstream))
 		}
 		return head, true
@@ -239,49 +236,50 @@ func (n *node) rebaseAndRetry(ctx context.Context, held *volume, count int) (str
 	return "", false
 }
 
-// fetchUpstream takes what the remote holds on the ref now, under
-// the repository's lock and in a credential window of its own, the
-// way a stage does.
-func (n *node) fetchUpstream(ctx context.Context, held *volume) (string, error) {
-	repo := held.work.repository
+// fetchUpstream fetches the volume's ref from the remote and returns its
+// commit. It holds the repository's lock and uses the credential for the
+// duration of the fetch only, as stage does.
+func (n *node) fetchUpstream(ctx context.Context, vol *volume) (string, error) {
+	repo := vol.work.repository
 	defer repo.lock()()
 
-	env, remove, err := held.credential().use(held.directory)
+	env, remove, err := vol.credential().use(vol.directory)
 	if err != nil {
 		return "", err
 	}
 	defer remove()
-	if err := n.readings.timeFetch(repo.name, func() error {
-		return repo.fetch(ctx, env, held.attributes.ref, 0)
+	if err := n.metrics.timeFetch(repo.name, func() error {
+		return repo.fetch(ctx, env, vol.attributes.ref, 0)
 	}); err != nil {
 		return "", err
 	}
-	// The record comes in the same window as the ref. A remote
-	// that holds none leaves the rebase nothing to replay.
-	_ = held.work.fetchMetadata(ctx, env, held.attributes.url, remoteMetadataRef)
-	return repo.resolve(ctx, held.attributes.ref)
+	// A remote without a metadataRef fails this fetch, and the rebase
+	// then has no remote record to replay, so the error is ignored.
+	_ = vol.work.fetchMetadata(ctx, env, vol.attributes.url, remoteMetadataRef)
+	return repo.resolve(ctx, vol.attributes.ref)
 }
 
-// sendTo opens the credential window, pushes, and closes it, so
-// no key file outlives the invocation that reads it.
-func (n *node) sendTo(ctx context.Context, held *volume, remote string) (gitOutput, error) {
-	env, remove, err := held.credential().use(held.directory)
+// sendTo pushes to the branch named remote. The credential's files exist
+// only while the push runs.
+func (n *node) sendTo(ctx context.Context, vol *volume, remote string) (gitOutput, error) {
+	env, remove, err := vol.credential().use(vol.directory)
 	if err != nil {
 		return gitOutput{}, err
 	}
 	defer remove()
-	return held.work.pushTo(ctx, env, held.attributes.url, held.attributes.ref, remote)
+	return vol.work.pushTo(ctx, env, vol.attributes.url, vol.attributes.ref, remote)
 }
 
-// pushFailed reports the failure in every place a person reads
-// and posts its Event once, at the first failure after a push that
-// worked.
-func (n *node) pushFailed(ctx context.Context, held *volume, message string) {
-	if held.reportPushFailed(message) {
-		claim, _, _ := held.reading()
-		n.report(held, claim, corev1.EventTypeWarning, reasonPushFailed, message)
+// pushFailed records the failure in the volume's status, the metrics,
+// and the log. It posts an Event only for the first failure after a
+// successful push.
+func (n *node) pushFailed(ctx context.Context, vol *volume, message string) {
+	if vol.reportPushFailed(message) {
+		claim, _, _ := vol.gaugeValues()
+		n.report(vol, claim, corev1.EventTypeWarning, reasonPushFailed,
+			fmt.Sprintf("The push to %s failed: %s", vol.attributes.ref, message))
 	}
-	n.readings.pushFailed(held)
-	n.noteHealth(ctx, held)
-	n.logger.WarnContext(ctx, "the push failed", "volume", held.id, "error", message)
+	n.metrics.pushFailed(vol)
+	n.recordHealth(ctx, vol)
+	n.logger.WarnContext(ctx, "The push to the remote did not complete", "volume", vol.id, "error", message)
 }

@@ -1,7 +1,7 @@
 package main
 
-// follow.go holds the fetch loop that keeps a published tree on the ref
-// it follows.
+// follow.go runs the loop that fetches a repository and moves each
+// volume's published tree to the commit its ref now points at.
 
 import (
 	"context"
@@ -13,44 +13,45 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// follower is one fetch loop for one repository, shared by every volume
-// of that URL on this node. The fetch is the repository's work, not the
-// volume's, so ten pods on one repository cost one fetch.
+// follower is the fetch loop for one repository on this node. Every
+// volume with the repository's URL shares the loop, because a fetch
+// updates the node's copy of the repository and not one volume.
 type follower struct {
 	node       *node
 	repository *repository
 	cancel     context.CancelFunc
-	wake       chan struct{}
-	// demanded is the second wake. It runs a pass at once instead of
-	// reading the interval again. demand.go sends on it.
+	// wake tells the loop to recompute its timer, because a volume
+	// joined or left.
+	wake chan struct{}
+	// demanded tells the loop to run a pass now. demand.go sends on it.
 	demanded chan struct{}
-	// arrived is the third. It runs a pass at once when a republish
-	// returns a credential a restart lost, or carries a rotated one.
-	// republish.go sends on it.
-	arrived chan struct{}
+	// republishWake tells the loop to run a pass now, because a republish
+	// brought back a credential that a restart lost, or brought a
+	// rotated one. republish.go sends on it.
+	republishWake chan struct{}
 
 	mu      sync.Mutex
 	volumes map[string]*volume
-	// wanted is the volumes a demand named that no pass has answered
-	// yet. lastPull is when the last pass ran, which is what a demand
-	// waits on.
+	// wanted holds the volumes that a demand named and no pass has run
+	// for yet. lastPull is the start time of the last pass, which a
+	// demand compares against --demand-min-interval.
 	wanted   map[string]*volume
 	lastPull time.Time
-	// backoff is the wait before the loop fetches again for a demand
-	// whose fetch failed. Only run reads and writes it.
+	// backoff is the current wait before the loop retries a fetch that
+	// failed for a demand. Only run's goroutine reads and writes it.
 	backoff time.Duration
 }
 
-// maxDemandRetry bounds the wait between fetches for a demand whose
-// fetch keeps failing, so a remote that comes back is pulled within
-// five minutes.
+// maxDemandRetry is the longest wait between retries of a fetch that
+// keeps failing for a demand, so a remote that comes back is fetched
+// within this time.
 const maxDemandRetry = 5 * time.Minute
 
-// follow adds a volume to its repository's loop, starting the loop on
-// the first volume. The caller holds the node's lock. A volume with
-// pull never joins no loop, so a repository every volume pins fetches
-// nothing.
-func (n *node) follow(mounting *volume) {
+// joinFetchLoop adds the volume to its repository's loop, and starts the
+// loop when the volume is the first. A volume whose pull is "never" joins no
+// loop, so a repository that only such volumes use is never fetched
+// after the stage. The caller holds the node's lock.
+func (n *node) joinFetchLoop(mounting *volume) {
 	if !mounting.attributes.pull.follows() {
 		return
 	}
@@ -59,14 +60,14 @@ func (n *node) follow(mounting *volume) {
 	if !found {
 		ctx, cancel := context.WithCancel(n.base)
 		loop = &follower{
-			node:       n,
-			repository: repo,
-			cancel:     cancel,
-			wake:       make(chan struct{}, 1),
-			demanded:   make(chan struct{}, 1),
-			arrived:    make(chan struct{}, 1),
-			volumes:    map[string]*volume{},
-			wanted:     map[string]*volume{},
+			node:          n,
+			repository:    repo,
+			cancel:        cancel,
+			wake:          make(chan struct{}, 1),
+			demanded:      make(chan struct{}, 1),
+			republishWake: make(chan struct{}, 1),
+			volumes:       map[string]*volume{},
+			wanted:        map[string]*volume{},
 		}
 		n.followers[repo.name] = loop
 		go loop.run(ctx)
@@ -74,9 +75,9 @@ func (n *node) follow(mounting *volume) {
 	loop.add(mounting)
 }
 
-// unfollow removes a volume from its loop and stops the loop when the
-// last volume of the repository goes. The caller holds the node's lock.
-func (n *node) unfollow(published *volume) {
+// leaveFetchLoop stops the loop when the volume was its last. The caller
+// holds the node's lock.
+func (n *node) leaveFetchLoop(published *volume) {
 	if !published.attributes.pull.follows() {
 		return
 	}
@@ -98,9 +99,10 @@ func (f *follower) add(mounting *volume) {
 	f.nudge()
 }
 
-// remove takes the volume off the loop, and off the demands that wait
-// for a pass. A pass after this never counts, notes, or wants the
-// volume again, so a series the unstage deletes stays deleted.
+// remove takes the volume off the loop and off the demands that wait
+// for a pass, and returns how many volumes remain. A pass that starts
+// after remove does not touch the volume's metrics, so the series that
+// the unstage deletes is not created again.
 func (f *follower) remove(published *volume) int {
 	f.mu.Lock()
 	delete(f.volumes, published.id)
@@ -111,9 +113,9 @@ func (f *follower) remove(published *volume) int {
 	return left
 }
 
-// nudge wakes the loop so it reads the interval again. The channel has
-// one slot and the send never blocks, so a publish never waits on a
-// loop that is fetching.
+// nudge tells the loop to recompute its timer. The send never blocks,
+// so a publish does not wait for a loop that is in the middle of a
+// fetch.
 func (f *follower) nudge() {
 	select {
 	case f.wake <- struct{}{}:
@@ -121,14 +123,12 @@ func (f *follower) nudge() {
 	}
 }
 
-// interval is the shortest pull among the volumes that share the
-// repository, and false when every one of them pulls on demand alone.
 func (f *follower) interval() (time.Duration, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	shortest := time.Duration(0)
-	for _, held := range f.volumes {
-		every, timed := held.attributes.pull.timer()
+	for _, vol := range f.volumes {
+		every, timed := vol.attributes.pull.timer()
 		if timed && (shortest == 0 || every < shortest) {
 			shortest = every
 		}
@@ -136,12 +136,14 @@ func (f *follower) interval() (time.Duration, bool) {
 	return shortest, shortest != 0
 }
 
-// run fetches on the interval until the context ends. The context
-// descends from the driver's run, so the pod's stop ends every loop.
+// run runs a pass when the interval timer fires, on a demand, on a
+// republish that brings a credential, and on a retry, until ctx ends. A
+// wake only restarts the interval timer.
 //
-// The second timer is the one a demand inside --demand-min-interval
-// waits on. While it waits, a pull is already scheduled, so every
-// further demand until it runs is dropped.
+// A demand that arrives sooner than --demand-min-interval after the
+// last pass waits on the delay timer. While it waits, run drops further
+// demands, because the pass at the end of the delay fetches for them too.
+// The retry timer runs a pass again after a fetch failed for a demand.
 func (f *follower) run(ctx context.Context) {
 	timer := time.NewTimer(time.Hour)
 	defer timer.Stop()
@@ -152,13 +154,13 @@ func (f *follower) run(ctx context.Context) {
 	defer retry.Stop()
 	retry.Stop()
 	waiting := false
-	f.arm(timer)
+	f.resetTimer(timer)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-f.wake:
-			f.arm(timer)
+			f.resetTimer(timer)
 		case <-f.demanded:
 			if waiting {
 				break
@@ -168,99 +170,93 @@ func (f *follower) run(ctx context.Context) {
 				waiting = true
 				break
 			}
-			f.settle(f.tick(ctx), retry)
-			f.arm(timer)
+			f.setRetry(f.runPass(ctx), retry)
+			f.resetTimer(timer)
 		case <-delay.C:
 			waiting = false
-			f.settle(f.tick(ctx), retry)
-			f.arm(timer)
-		case <-f.arrived:
-			f.settle(f.tick(ctx), retry)
-			f.arm(timer)
+			f.setRetry(f.runPass(ctx), retry)
+			f.resetTimer(timer)
+		case <-f.republishWake:
+			f.setRetry(f.runPass(ctx), retry)
+			f.resetTimer(timer)
 		case <-timer.C:
-			f.settle(f.tick(ctx), retry)
-			f.arm(timer)
+			f.setRetry(f.runPass(ctx), retry)
+			f.resetTimer(timer)
 		case <-retry.C:
-			f.settle(f.tick(ctx), retry)
-			f.arm(timer)
+			f.setRetry(f.runPass(ctx), retry)
+			f.resetTimer(timer)
 		}
 	}
 }
 
-// arm sets the timer to the interval, and leaves it stopped when no
-// volume of the repository names one.
-func (f *follower) arm(timer *time.Timer) {
+func (f *follower) resetTimer(timer *time.Timer) {
 	timer.Stop()
 	if every, timed := f.interval(); timed {
 		timer.Reset(every)
 	}
 }
 
-// tick is one pass over the volumes of this repository, under the
-// repository's lock, so a fetch never races a publish. It reports
-// whether the fetch failed for a volume a demand named.
+// runPass runs one pass over the repository's volumes while it holds the
+// repository's lock, so a fetch does not race a publish. It returns
+// true when a fetch failed for a volume that a demand named.
 //
-// A volume that waits for its credential is passed over. Each volume
-// fetches with its own credential, so another volume's fetch of the same
-// repository does not serve it, and a fetch with no credential only
-// fails. The republish that returns its credential wants it in a pass of
-// its own.
+// runPass skips a volume that waits for its credential. Each volume
+// fetches with its own credential, so a fetch without it can only fail.
+// The republish that brings the credential starts its own pass.
 //
-// The pass is timed from its start, so the demands that arrive while it
-// fetches are answered by the next pass. A fetch that worked answers
-// every demand stamped before that start. A fetch that failed answers
-// none, so the volume stays wanted and the loop fetches again after the
-// backoff. Without that, a volume with pull on-demand keeps its old
-// commit until the next demand.
-func (f *follower) tick(ctx context.Context) bool {
+// A fetch that succeeds satisfies every demand made before the pass
+// started. A demand that arrives during the pass is left for the next
+// pass. A fetch that fails satisfies no demand, so runPass puts the volume
+// back in wanted and the loop retries after the backoff. Without the
+// retry, a volume with pull on-demand stays on its old commit until the
+// next demand.
+func (f *follower) runPass(ctx context.Context) bool {
 	defer f.repository.lock()()
 	now := time.Now()
-	wanted := f.answered(now)
+	wanted := f.startPass(now)
 	failed := false
-	for _, held := range f.snapshot() {
-		if held.waitsForCredential() {
+	for _, vol := range f.snapshot() {
+		if vol.waitsForCredential() {
 			continue
 		}
-		held.reportPulled(now)
-		if f.refresh(ctx, held) {
-			held.answerDemandsBefore(now)
+		vol.reportPulled(now)
+		if f.refresh(ctx, vol) {
+			vol.satisfyDemandsBefore(now)
 			continue
 		}
-		if wanted[held.id] != nil && f.wantAgain(held) {
+		if wanted[vol.id] != nil && f.wantAgain(vol) {
 			failed = true
 		}
 	}
 	return failed
 }
 
-// wantAgain puts a volume whose demanded fetch failed back on the
-// demands that wait for a pass, and reports whether it did. A volume
-// the node removed during the fetch is not put back.
-func (f *follower) wantAgain(held *volume) bool {
+// wantAgain puts a volume whose fetch failed for a demand back in
+// wanted, and returns whether it did. A volume that the node removed
+// during the fetch is not put back.
+func (f *follower) wantAgain(vol *volume) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.volumes[held.id] != held {
+	if f.volumes[vol.id] != vol {
 		return false
 	}
-	f.wanted[held.id] = held
+	f.wanted[vol.id] = vol
 	return true
 }
 
-// noteHealth records the volume's health, only while the volume is on
-// the loop. The check and the note hold the loop's lock, so an unstage
-// that removes the volume either comes after the note and deletes the
-// series, or comes before and the note does not write it.
-func (f *follower) noteHealth(ctx context.Context, held *volume) {
+// recordHealth records the volume's health only while the volume is on
+// the loop. It checks and records under the loop's lock. An unstage
+// that removes the volume then either runs after the record and deletes
+// the series, or runs before and the record is never written.
+func (f *follower) recordHealth(ctx context.Context, vol *volume) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.volumes[held.id] == held {
-		f.node.noteHealth(ctx, held)
+	if f.volumes[vol.id] == vol {
+		f.node.recordHealth(ctx, vol)
 	}
 }
 
-// settle sets the retry after a pass. A pass whose demanded fetch
-// failed waits nextRetry. A pass that worked stops the retry.
-func (f *follower) settle(failed bool, retry *time.Timer) {
+func (f *follower) setRetry(failed bool, retry *time.Timer) {
 	retry.Stop()
 	if !failed {
 		f.backoff = 0
@@ -270,19 +266,20 @@ func (f *follower) settle(failed bool, retry *time.Timer) {
 }
 
 // nextRetry doubles the backoff, from --demand-min-interval up to
-// maxDemandRetry, and answers the wait before the next fetch. The retry
-// fetches without the gate a demand waits on, so the wait itself never
-// falls below --demand-min-interval.
+// maxDemandRetry, and returns the wait before the next fetch. A retry
+// does not go through the delay timer that limits demands, so the wait
+// itself has to stay at or above --demand-min-interval.
 func (f *follower) nextRetry() time.Duration {
 	f.backoff = min(max(2*f.backoff, f.node.demandMin), maxDemandRetry)
 	return jittered(f.backoff, f.node.demandMin)
 }
 
-// jittered is a wait from half the backoff, or the floor when that is
-// higher, up to the backoff. Every node that fetches a repository fails
-// when its remote does, and the same doubling would retry them all at
-// the same moment when it comes back. The jitter comes off the backoff,
-// not on top of it, so the wait never passes maxDemandRetry.
+// jittered returns a random wait between half the backoff and the
+// backoff, raised to floor when half the backoff is below it. Every
+// node that fetches a repository fails when its remote does, and equal
+// backoffs would make them all retry at the same moment when the remote
+// returns. The wait never exceeds backoff, so it never exceeds
+// maxDemandRetry.
 func jittered(backoff, floor time.Duration) time.Duration {
 	if backoff < 2 {
 		return backoff
@@ -297,73 +294,72 @@ func jittered(backoff, floor time.Duration) time.Duration {
 func (f *follower) snapshot() []*volume {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	held := make([]*volume, 0, len(f.volumes))
+	vol := make([]*volume, 0, len(f.volumes))
 	for _, one := range f.volumes {
-		held = append(held, one)
+		vol = append(vol, one)
 	}
-	return held
+	return vol
 }
 
-// refresh fetches the volume's ref and, when it moved, places the new
-// commit in the published tree. It reports whether the tree now holds
-// what the remote holds.
+// refresh fetches the volume's ref and, when the commit changed,
+// places it in the published tree. It returns true when the tree is on
+// the commit that the ref now points at.
 //
-// Every path out of a fetch changes what the volume reports, so
-// the gauge and the log take the answer here, once, rather than at each
-// of them.
-func (f *follower) refresh(ctx context.Context, held *volume) bool {
-	defer f.noteHealth(ctx, held)
-	env, remove, err := held.credential().use(held.directory)
+// Every return changes the volume's health, so the deferred recordHealth
+// records it once for all of them.
+func (f *follower) refresh(ctx context.Context, vol *volume) bool {
+	defer f.recordHealth(ctx, vol)
+	env, remove, err := vol.credential().use(vol.directory)
 	if err != nil {
-		f.trouble(ctx, held, err.Error())
+		f.recordFailure(ctx, vol, err.Error())
 		return false
 	}
-	fetchErr := f.node.readings.timeFetch(f.repository.name, func() error {
-		return f.repository.fetch(ctx, env, held.attributes.ref, 0)
+	fetchErr := f.node.metrics.timeFetch(f.repository.name, func() error {
+		return f.repository.fetch(ctx, env, vol.attributes.ref, 0)
 	})
 	remove()
 	if fetchErr != nil {
-		f.trouble(ctx, held, fetchErr.Error())
+		f.recordFailure(ctx, vol, fetchErr.Error())
 		return false
 	}
-	commit, err := f.repository.resolve(ctx, held.attributes.ref)
+	commit, err := f.repository.resolve(ctx, vol.attributes.ref)
 	if err != nil {
-		f.trouble(ctx, held, err.Error())
+		f.recordFailure(ctx, vol, err.Error())
 		return false
 	}
-	if standing, _ := held.condition(); standing == commit {
-		f.recovered(held, commit)
+	if current, _ := vol.commitAndFault(); current == commit {
+		f.recordRecovery(vol, commit)
 		return true
 	}
 
-	if err := f.repository.place(ctx, commit, held.directory, held.tree); err != nil {
-		f.trouble(ctx, held, err.Error())
+	if err := f.repository.place(ctx, commit, vol.directory, vol.tree); err != nil {
+		f.recordFailure(ctx, vol, err.Error())
 		return false
 	}
-	f.recovered(held, commit)
-	f.node.logger.InfoContext(ctx, "the tree moved",
-		"volume", held.id, "ref", held.attributes.ref, "commit", short(commit))
+	f.recordRecovery(vol, commit)
+	f.node.logger.InfoContext(ctx, "The tree of the volume moved",
+		"volume", vol.id, "ref", vol.attributes.ref, "commit", short(commit))
 	return true
 }
 
-// recovered records the commit a fetch that worked found. The first
-// fetch that works after a failure posts one Event, which closes the
-// Warning the failure posted, so `kubectl describe` shows that the
-// fault ended and when.
-func (f *follower) recovered(held *volume, commit string) {
-	if held.reportCommit(commit) {
-		f.node.tell(held, corev1.EventTypeNormal, reasonRecovered,
-			fmt.Sprintf("fetched %s at %s after the fetch failed", held.attributes.ref, short(commit)))
+// recordRecovery records the commit of a successful fetch. The first
+// success after a failure posts a Normal Event, so `kubectl describe`
+// shows when the Warning from the failure ended.
+func (f *follower) recordRecovery(vol *volume, commit string) {
+	if vol.reportCommit(commit) {
+		f.node.postVolumeEvent(vol, corev1.EventTypeNormal, reasonRecovered,
+			fmt.Sprintf("Fetched %s at %s after the previous fetch failed", vol.attributes.ref, short(commit)))
 	}
 }
 
-// trouble records a failed fetch. The first failure after a
-// success posts one Event, and the volume's report carries the failure
-// until a fetch works again.
-func (f *follower) trouble(ctx context.Context, held *volume, message string) {
-	if held.reportFetchFailed(message) {
-		f.node.tell(held, corev1.EventTypeWarning, reasonFailed, message)
+// recordFailure records a failed fetch. The first failure after a
+// success posts a Warning Event. The volume keeps the message in its
+// health report until a fetch succeeds.
+func (f *follower) recordFailure(ctx context.Context, vol *volume, message string) {
+	if vol.reportFetchFailed(message) {
+		f.node.postVolumeEvent(vol, corev1.EventTypeWarning, reasonFailed,
+			fmt.Sprintf("The fetch of %s failed: %s", vol.attributes.ref, message))
 	}
-	f.node.logger.WarnContext(ctx, "the fetch failed",
-		"volume", held.id, "ref", held.attributes.ref, "error", message)
+	f.node.logger.WarnContext(ctx, "The repository fetch for the volume did not succeed",
+		"volume", vol.id, "ref", vol.attributes.ref, "error", message)
 }

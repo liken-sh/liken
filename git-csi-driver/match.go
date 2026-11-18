@@ -1,9 +1,9 @@
 package main
 
-// match.go selects which PersistentVolumes a push moves and writes
-// the demand on them. The Secret the path named narrows the list
-// first, so a push that verifies against one team's Secret can only
-// ever mark that team's volumes.
+// match.go finds the PersistentVolumes that a push applies to and
+// annotates them with a demand. The Secret named in the request path
+// narrows the list first, so a push verified against one team's Secret
+// can annotate only that team's volumes.
 
 import (
 	"context"
@@ -16,15 +16,15 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-// mark writes the demand on every PersistentVolume the push matches
-// and returns how many it marked. A person who configures a webhook
-// reads that count, so a list the API server refuses returns the error
-// and not a count of zero.
+// mark annotates every PersistentVolume that matches the push with a
+// demand and returns how many it annotated. A list that the API server
+// refuses returns the error and not zero, because the person who
+// configures a webhook reads the count.
 //
-// The controller holds no watch on PersistentVolumes, so each push
-// costs one list. A watch would hold a copy of every PersistentVolume
-// in the cluster for the controller's whole life, to answer a request
-// that comes only when a person pushes.
+// mark lists PersistentVolumes on every push and does not watch them. A
+// watch would keep a copy of every PersistentVolume in the cluster for
+// the controller's whole life, to serve requests that come only when
+// someone pushes.
 func (w *webhook) mark(
 	ctx context.Context, namespace, secret string, pushed push,
 ) (int, error) {
@@ -35,25 +35,25 @@ func (w *webhook) mark(
 	keys := comparisonKeys(pushed.urls)
 	marked := 0
 	for i := range volumes.Items {
-		held := &volumes.Items[i]
-		if !matchesPush(held, namespace, secret, keys, pushed.ref) {
+		pv := &volumes.Items[i]
+		if !matchesPush(pv, namespace, secret, keys, pushed.ref) {
 			continue
 		}
-		if err := w.demandPull(ctx, held.Name); err != nil {
-			w.logger.WarnContext(ctx, "the volume was not marked",
-				"volume", held.Name, "error", err)
+		if err := w.demandPull(ctx, pv.Name); err != nil {
+			w.logger.WarnContext(ctx, "The pull demand was not set on the PersistentVolume",
+				"volume", pv.Name, "error", err)
 			continue
 		}
 		marked++
 	}
-	w.readings.webhookMarked(marked)
+	w.metrics.webhookMarked(marked)
 	return marked, nil
 }
 
-// demandAll marks every read-only volume of this driver. A webhook
-// that arrived while the Deployment restarted is lost, and a volume
-// that pulls on demand has no timer to cover the loss, so the
-// controller's start is a demand on every volume.
+// demandAll demands a pull on every read-only volume of this driver
+// when the controller starts. A webhook that arrives while the
+// Deployment restarts is lost, and a volume with pull set to on-demand
+// has no timer to make up for it.
 func (w *webhook) demandAll(ctx context.Context) {
 	if w.client == nil {
 		return
@@ -63,29 +63,29 @@ func (w *webhook) demandAll(ctx context.Context) {
 
 	volumes, err := w.client.CoreV1().PersistentVolumes().List(ctx, metav1.ListOptions{})
 	if err != nil {
-		w.logger.WarnContext(ctx, "the volumes were not listed", "error", err)
+		w.logger.WarnContext(ctx, "The PersistentVolumes were not listed, so the controller demanded no pull on start", "error", err)
 		return
 	}
 	marked := 0
 	for i := range volumes.Items {
-		held := &volumes.Items[i]
-		source := held.Spec.CSI
-		if source == nil || source.Driver != driverName || !readOnlyClaimVolume(held) {
+		pv := &volumes.Items[i]
+		source := pv.Spec.CSI
+		if source == nil || source.Driver != driverName || !readOnlyClaimVolume(pv) {
 			continue
 		}
-		if err := w.demandPull(ctx, held.Name); err != nil {
-			w.logger.WarnContext(ctx, "the volume was not marked",
-				"volume", held.Name, "error", err)
+		if err := w.demandPull(ctx, pv.Name); err != nil {
+			w.logger.WarnContext(ctx, "The pull demand was not set on the PersistentVolume",
+				"volume", pv.Name, "error", err)
 			continue
 		}
 		marked++
 	}
-	w.logger.InfoContext(ctx, "the controller demanded a pull on start", "marked", marked)
+	w.logger.InfoContext(ctx, "The controller demanded a pull on the read-only volumes at start", "marked", marked)
 }
 
-// demandPull writes the annotation the node plugins watch. The merge
-// patch names the one annotation, so nothing else on the object
-// moves.
+// demandPull sets the annotation that the node plugins watch. It sends
+// a merge patch of that one annotation, so no other field of the object
+// changes.
 func (w *webhook) demandPull(ctx context.Context, name string) error {
 	patch := fmt.Sprintf(`{"metadata":{"annotations":{%q:%q}}}`,
 		demandAnnotation, w.now().UTC().Format(time.RFC3339Nano))
@@ -94,26 +94,26 @@ func (w *webhook) demandPull(ctx context.Context, name string) error {
 	return err
 }
 
-// matchesPush reads one PersistentVolume against the push. It matches
-// when the volume is this driver's, names this Secret, is bound to a
-// claim in this namespace, is read-only, and follows a URL and a ref
-// the push names.
+// matchesPush reports whether the push applies to the PersistentVolume.
+// It does when the volume belongs to this driver, names this Secret as
+// its webhookSecret, is bound to a claim in this namespace, is read-
+// only, and follows a URL and a ref that the push names.
 func matchesPush(
-	held *corev1.PersistentVolume, namespace, secret string, keys map[string]bool, ref string,
+	pv *corev1.PersistentVolume, namespace, secret string, keys map[string]bool, ref string,
 ) bool {
-	source := held.Spec.CSI
+	source := pv.Spec.CSI
 	if source == nil || source.Driver != driverName {
 		return false
 	}
 	if source.VolumeAttributes[webhookSecretAttribute] != secret {
 		return false
 	}
-	if held.Spec.ClaimRef == nil || held.Spec.ClaimRef.Namespace != namespace {
+	if pv.Spec.ClaimRef == nil || pv.Spec.ClaimRef.Namespace != namespace {
 		return false
 	}
-	// While a pod holds a writeable tree, only the application changes
-	// it, so a demand never reaches one.
-	if !readOnlyClaimVolume(held) {
+	// Only the application changes a writeable tree, so a push never
+	// demands a pull on one.
+	if !readOnlyClaimVolume(pv) {
 		return false
 	}
 	url := source.VolumeAttributes["url"]
@@ -123,8 +123,8 @@ func matchesPush(
 	return refMatches(ref, volumeRef(source.VolumeAttributes))
 }
 
-// volumeRef is the ref the volume follows, which is main when the
-// attributes name none, the way parseVolumeContext reads it.
+// volumeRef returns the ref the volume follows. It is main when the ref
+// attribute is unset, the same rule as parseVolumeContext.
 func volumeRef(attributes map[string]string) string {
 	if ref := attributes["ref"]; ref != "" {
 		return ref
@@ -132,15 +132,16 @@ func volumeRef(attributes map[string]string) string {
 	return defaultRef
 }
 
-// readOnlyClaimVolume reports the kind the way stageKind does at the
-// node. The kubelet sends ReadOnlyMany as MULTI_NODE_READER_ONLY, which
-// stages a read-only claim. Every other mode a PersistentVolume carries
-// stages a writeable volume.
-func readOnlyClaimVolume(held *corev1.PersistentVolume) bool {
-	if len(held.Spec.AccessModes) == 0 {
+// readOnlyClaimVolume reports whether the volume stages as a read-only
+// claim, by the same rule as stageKind on the node. The kubelet sends
+// ReadOnlyMany as MULTI_NODE_READER_ONLY, which stages a read-only
+// claim. Of the other access modes, ReadWriteOncePod stages a writeable
+// volume and stageKind refuses the rest.
+func readOnlyClaimVolume(pv *corev1.PersistentVolume) bool {
+	if len(pv.Spec.AccessModes) == 0 {
 		return false
 	}
-	for _, mode := range held.Spec.AccessModes {
+	for _, mode := range pv.Spec.AccessModes {
 		if mode != corev1.ReadOnlyMany {
 			return false
 		}
@@ -148,15 +149,16 @@ func readOnlyClaimVolume(held *corev1.PersistentVolume) bool {
 	return true
 }
 
-// refMatches reads the payload's full ref against the branch or tag
-// name a volume's ref attribute carries.
+// refMatches reports whether the ref in the push payload is the branch
+// or tag that a volume's ref attribute follows. The payload has the
+// full ref, such as refs/heads/main, and the attribute has the
+// short name.
 func refMatches(pushed, followed string) bool {
 	return pushed == followed ||
 		pushed == "refs/heads/"+followed ||
 		pushed == "refs/tags/"+followed
 }
 
-// comparisonKeys is the key of every URL the payload named.
 func comparisonKeys(urls []string) map[string]bool {
 	keys := map[string]bool{}
 	for _, url := range urls {
@@ -167,11 +169,11 @@ func comparisonKeys(urls []string) map[string]bool {
 	return keys
 }
 
-// comparisonKey reduces a URL to the lowercased host and the path. The
-// scheme, the userinfo, the port, a leading and a trailing slash, and a
-// trailing .git are removed, so the https, ssh, and scp-like forms of
-// one repository make one key. The port goes because a volume often
-// clones over one port while the forge advertises another.
+// comparisonKey reduces a URL to its lowercased host and path. It
+// removes the scheme, the userinfo, the port, leading and trailing
+// slashes, and a trailing .git, so the https, ssh, and scp-like URLs of
+// one repository give one key. It removes the port because a volume
+// often clones over one port while the forge advertises another.
 func comparisonKey(raw string) string {
 	rest := raw
 	_, after, scheme := strings.Cut(rest, "://")
@@ -182,7 +184,8 @@ func comparisonKey(raw string) string {
 		rest = after
 	}
 	// Without a scheme, a colon before the first slash starts the path,
-	// which is git's scp-like form. With a scheme it starts the port.
+	// which is git's scp-like form. With a scheme, the colon starts the
+	// port.
 	if host, path, colon := strings.Cut(rest, ":"); !scheme && colon && !strings.Contains(host, "/") {
 		rest = host + "/" + path
 	}

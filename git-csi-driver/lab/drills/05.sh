@@ -1,37 +1,40 @@
 #!/usr/bin/env bash
-# Drill 05. An armed volume against the host forge: a class arms it, the
-# driver commits and pushes what the pod writes, a changed class takes
-# effect with no restart, a file over the size guard is skipped, a pod
-# deleted mid-timer pushes at unpublish, and a volume made again from
-# nothing restores the modes and the empty directory.
+# Drill 05. A writeable volume against the host forge. A
+# VolumeAttributesClass arms the volume, and the driver commits and
+# pushes what the pod writes. A claim moved to another class takes the
+# new policy without a plugin restart. The ignore list and
+# commit.maxFileSize keep files out of the commit. A pod deleted before
+# the push timer fires still pushes, at unpublish. A new volume handle on
+# the same repository restores the file modes and the empty directory.
 set -euo pipefail
 
 LAB="$(cd "$(dirname "$0")/.." && pwd)"
 KUBECTL="$LAB/kubectl"
 
-# The forge is on the host, and the guest reaches it at the
-# user-mode network's gateway.
+# The forge is a git daemon on the host. 10.0.2.2 is the host as a QEMU
+# guest sees it on user-mode networking.
 GUEST_FORGE="git://10.0.2.2:9418/hello.git"
 FORGE="$LAB/forge/hello.git"
 
-# The writer image is one the lab already pulled, so no drill
-# waits on a registry.
+# The writer image is already in the lab's image store, so the drill
+# does not wait on a registry.
 IMAGE="${IMAGE:-debian:sid-slim}"
 DRIVER_NAMESPACE="${DRIVER_NAMESPACE:-liken-system}"
 NAMESPACE=drill-05
-# The store on the node keeps a work tree per handle, and the forge is
-# reseeded on every run, so a handle carries a run's own stamp. A handle
-# reused across runs would find the last run's tree and push against a
-# history the forge no longer holds.
+# The node's store keeps a work tree for each volume handle, and
+# `make repo` creates the forge's repository again on every run. A
+# handle from an earlier run would find that run's tree and push commits
+# the new repository does not have, so each handle includes the run's
+# start time.
 RUN="$(date +%s)"
 HANDLE="drill-05-$RUN"
-# The restore is a volume the node has never held, so it takes a handle
-# of its own against the same repository.
+# The restore volume uses a handle the node has never seen, on the same
+# repository.
 RESTORE_HANDLE="drill-05-restore-$RUN"
 CLASS=drill-05
 SECOND_CLASS=drill-05-eager
 
-# Every wait in this drill has a deadline, in seconds.
+# Every wait in this drill gives up after a deadline in seconds.
 READY_DEADLINE="${READY_DEADLINE:-240}"
 ARMED_DEADLINE="${ARMED_DEADLINE:-180}"
 PUSH_DEADLINE="${PUSH_DEADLINE:-180}"
@@ -42,8 +45,6 @@ kube() {
 	"$KUBECTL" --request-timeout="$CALL_TIMEOUT" "$@"
 }
 
-# Cleanup leaves the cluster as the drill found it, however the
-# drill ends.
 cleanup() {
 	local status=$?
 	kube delete namespace "$NAMESPACE" --ignore-not-found --wait=false >/dev/null 2>&1 || true
@@ -54,21 +55,20 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Driver_log is what the node plugin wrote about this volume.
 driver_log() {
 	kube logs -n "$DRIVER_NAMESPACE" -l app=git-csi-driver-node -c driver --tail=400 2>/dev/null || true
 }
 
-# Driver_pod names the one node plugin pod, so the drill can tell a pod
-# that kept running from one that restarted.
+# driver_pod prints the node plugin pod's name and restart count, so the
+# drill can tell whether the plugin restarted.
 driver_pod() {
 	kube get pods -n "$DRIVER_NAMESPACE" -l app=git-csi-driver-node \
 		-o jsonpath='{.items[0].metadata.name}:{.items[0].status.containerStatuses[0].restartCount}' \
 		2>/dev/null || true
 }
 
-# The driver's own metrics, read through the API server's pod
-# proxy, because the DaemonSet publishes the port and no Service.
+# driver_metrics reads the driver's metrics through the API server's pod
+# proxy, because the DaemonSet has no Service for the metrics port.
 driver_metrics() {
 	local pod
 	pod="$(kube get pods -n "$DRIVER_NAMESPACE" -l app=git-csi-driver-node \
@@ -77,8 +77,6 @@ driver_metrics() {
 	kube get --raw "/api/v1/namespaces/$DRIVER_NAMESPACE/pods/$pod:9808/proxy/metrics" 2>/dev/null || true
 }
 
-# Wait_for_metric waits until the driver's own gauges carry the
-# pattern, or fails on the deadline.
 wait_for_metric() {
 	local pattern="$1" deadline="$2" what="$3"
 	local limit
@@ -96,8 +94,6 @@ wait_for_metric() {
 	return 1
 }
 
-# Wait_for_event waits until the namespace's events carry the
-# pattern, or fails on the deadline.
 wait_for_event() {
 	local pattern="$1" deadline
 	deadline=$(($(date +%s) + EVENT_DEADLINE))
@@ -113,15 +109,15 @@ wait_for_event() {
 	return 1
 }
 
-# Wait_for_forge waits until the host forge's main carries the subject,
-# which is the whole proof that a commit was pushed.
+# wait_for_forge waits until the subject of the newest commit on the
+# forge's main matches the pattern, which shows that the push arrived.
 wait_for_forge() {
 	local pattern="$1" deadline="$2" what="$3"
 	local limit
 	limit=$(($(date +%s) + deadline))
 	while [ "$(date +%s)" -lt "$limit" ]; do
 		if git -C "$FORGE" log --format=%s -1 main 2>/dev/null | grep -qE "$pattern"; then
-			echo "drill 05: the forge holds $what"
+			echo "drill 05: the forge has $what"
 			return 0
 		fi
 		sleep 3
@@ -132,15 +128,15 @@ wait_for_forge() {
 	return 1
 }
 
-# Wait_for_path waits until the host forge's main carries the path,
-# which is the proof for a commit whose subject another commit shares.
+# wait_for_path waits until the forge's main has the path. Use it in
+# place of wait_for_forge when earlier commits have the same subject.
 wait_for_path() {
 	local path="$1" deadline="$2"
 	local limit
 	limit=$(($(date +%s) + deadline))
 	while [ "$(date +%s)" -lt "$limit" ]; do
 		if git -C "$FORGE" ls-tree -r --name-only main 2>/dev/null | grep -qxF "$path"; then
-			echo "drill 05: the forge holds $path"
+			echo "drill 05: the forge has $path"
 			return 0
 		fi
 		sleep 3
@@ -177,8 +173,8 @@ parameters:
   ignore: "*.log"
 YAML
 
-# Volume writes a PersistentVolume against the host forge, and a claim on
-# it that names the class.
+# volume creates a PersistentVolume on the host forge's repository and a
+# claim that binds it and names the class.
 volume() {
 	kube apply -f - >/dev/null <<YAML
 apiVersion: v1
@@ -189,8 +185,8 @@ spec:
   capacity: {storage: 1Gi}
   accessModes: [ReadWriteOncePod]
   persistentVolumeReclaimPolicy: Retain
-  # The binder pairs a claim and a volume only when both name the same
-  # class, so the volume carries the class the claim will name.
+  # The binder binds a claim to a volume only when both set the same
+  # volumeAttributesClassName.
   volumeAttributesClassName: $CLASS
   csi:
     driver: git.liken.sh
@@ -213,8 +209,8 @@ spec:
 YAML
 }
 
-# Writer holds the volume open, so a drill can write into the tree with
-# kubectl exec.
+# writer runs a pod that mounts the claim and sleeps, so the drill can
+# write into the volume with kubectl exec.
 writer() {
 	kube apply -n "$NAMESPACE" -f - >/dev/null <<YAML
 apiVersion: v1
@@ -253,7 +249,7 @@ wait_for_metric "git_csi_armed\{claim=\"config\",namespace=\"$NAMESPACE\"\} 1" \
 	"$ARMED_DEADLINE" "the volume armed"
 wait_for_event "GitVolumeArmed" || true
 
-echo "drill 05: the commit lands on the forge inside the quiesce"
+echo "drill 05: the commit reaches the forge within the quiesce"
 wait_for_forge "Update 1 paths" "$PUSH_DEADLINE" "the driver's commit"
 git -C "$FORGE" log --format='%an <%ae> %s' -1 main
 if ! git -C "$FORGE" log --format='%an <%ae>' -1 main | grep -q "The lab <lab@liken.sh>"; then
@@ -263,11 +259,10 @@ fi
 wait_for_event "GitVolumePushed" || true
 
 echo "drill 05: a changed class takes effect with no restart"
-# A class's parameters are immutable, so a policy change is a second
-# class and a claim that names it. The second class changes two
-# parameters at once. The shorter quiesce is what plan 05 asks the drill
-# to change, and the new author is what proves the change reached the
-# running plugin: the next commit carries it.
+# The parameters of a VolumeAttributesClass are immutable, so the drill
+# creates a second class and moves the claim to it. When the next commit
+# has the second class's commit.author, the running plugin read the
+# change.
 before="$(driver_pod)"
 kube apply -f - >/dev/null <<YAML
 apiVersion: storage.k8s.io/v1
@@ -297,8 +292,8 @@ if [ "$before" != "$after" ]; then
 	echo "drill 05: the plugin was $before and is now $after, and it must not have restarted" >&2
 	exit 1
 fi
-echo "drill 05: the plugin is still $after, and it took the new class"
-driver_log | grep -E "committed|pushed" | tail -n 5
+echo "drill 05: the plugin is still $after, and it uses the new class"
+driver_log | grep -iE "committed|pushed" | tail -n 5
 
 echo "drill 05: the ignore list keeps a path out"
 kube exec -n "$NAMESPACE" writer -- sh -c 'cd /config && echo noise > app.log'
@@ -355,7 +350,7 @@ if ! kube exec -n "$NAMESPACE" writer -- test -d /config/storage; then
 	echo "drill 05: the empty directory did not return to the restored volume" >&2
 	exit 1
 fi
-echo "drill 05: the restored tree holds secret.yaml at 600 and the empty directory"
+echo "drill 05: the restored tree has secret.yaml at 600 and the empty directory"
 
 echo "drill 05: the plugin's memory"
 kube top pod -n "$DRIVER_NAMESPACE" -l app=git-csi-driver-node ||

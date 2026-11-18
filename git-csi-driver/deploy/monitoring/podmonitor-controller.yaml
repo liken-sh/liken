@@ -1,12 +1,6 @@
-# app: git-csi-driver-controller is the Deployment's own selector
-# label, the same reasoning podmonitor-node.yaml gives for the
-# DaemonSet. The pod serves /metrics on the port named metrics in
-# deploy/controller.yaml, beside the webhook port that PodMonitor
-# never touches.
-#
-# The controller runs on no node of its own, so the relabeling carries
-# whichever node the scheduler placed its one replica on, the same
-# rule every PodMonitor in the organization applies.
+# Scrapes /metrics on the port named metrics of the controller pods in
+# deploy/controller.yaml, selected by their app label. The relabeling
+# adds a node label, as in podmonitor-node.yaml.
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:

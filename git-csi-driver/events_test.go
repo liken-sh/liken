@@ -21,29 +21,29 @@ import (
 	"k8s.io/client-go/tools/clientcmd/api"
 )
 
-// recorded is the fake API server that holds what one events value
-// posted, and a signal for each write it answered, which a test
-// outside a synctest bubble waits on.
+// recorded is the fake API server that stores the Events of one events
+// value. Its channel receives a signal after each request, for tests
+// that run outside a synctest bubble.
 type recorded struct {
-	held    *eventstest.Events
-	arrived chan struct{}
+	stored        *eventstest.Events
+	republishWake chan struct{}
 }
 
-// recordings finds the fake API server of each events value a test
-// built. A test node shares its events with a second node it builds,
-// so the key is the events value and not the node.
+// recordings maps each events value a test built to its fake API
+// server. It is keyed by events and not by node, because a test node
+// shares its events with a second node the test may build.
 var recordings sync.Map
 
-// fakeEvents posts through the driver's own recorder to a fake API
-// server, and reads and arms through a client-go fake.
+// fakeEvents returns an events value whose recorder posts to a fake
+// API server, and whose clientset is a client-go fake.
 func fakeEvents(t testing.TB, logs io.Writer) *events {
 	t.Helper()
-	target := recorded{held: &eventstest.Events{}, arrived: make(chan struct{}, 1)}
-	served := target.held.Around(http.NotFoundHandler())
+	target := recorded{stored: &eventstest.Events{}, republishWake: make(chan struct{}, 1)}
+	served := target.stored.Around(http.NotFoundHandler())
 	server := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		served.ServeHTTP(w, r)
 		select {
-		case target.arrived <- struct{}{}:
+		case target.republishWake <- struct{}{}:
 		default:
 		}
 	}))
@@ -55,23 +55,24 @@ func fakeEvents(t testing.TB, logs io.Writer) *events {
 	return posting
 }
 
-// recordingOf answers the fake API server the events value posts to.
+// recordingOf returns the fake API server that the events value posts
+// to.
 func recordingOf(t testing.TB, posting *events) recorded {
 	t.Helper()
 	target, found := recordings.Load(posting)
 	if !found {
-		t.Fatal("the events value posts to no fake API server")
+		t.Fatal("the events value has no recording fake API server, want one")
 	}
 	return target.(recorded)
 }
 
-// postedEvents is every Event the fake API server holds, in the order
-// posted, once the recorder has written its queue. The test runs in a
-// synctest bubble.
+// postedEvents returns every Event the fake API server stored, in the
+// order posted, after the recorder has written its queue. The test must
+// run in a synctest bubble.
 func postedEvents(t *testing.T, posting *events) []kevents.Event {
 	t.Helper()
 	synctest.Wait()
-	return recordingOf(t, posting).held.List()
+	return recordingOf(t, posting).stored.List()
 }
 
 func TestPostNamesThePodAndTheDriver(t *testing.T) {
@@ -90,7 +91,8 @@ func TestPostNamesThePodAndTheDriver(t *testing.T) {
 			t.Errorf("the event is on %+v, want the pod", event.InvolvedObject)
 		}
 		if event.Reason != reasonRefused || event.Message != "the forge is not there" {
-			t.Errorf("the event says %q: %q", event.Reason, event.Message)
+			t.Errorf("the event has reason %q and message %q, want %q and %q",
+				event.Reason, event.Message, reasonRefused, "the forge is not there")
 		}
 		if event.Type != kevents.TypeWarning {
 			t.Errorf("the event is a %q, want %q", event.Type, kevents.TypeWarning)
@@ -106,7 +108,7 @@ func TestPostNamesThePodAndTheDriver(t *testing.T) {
 	})
 }
 
-func TestPostSaysNothingWithoutAPodOrAClient(t *testing.T) {
+func TestPostPostsNothingWithoutAPodOrAClient(t *testing.T) {
 	for _, c := range []struct {
 		name string
 		pod  podReference
@@ -119,7 +121,7 @@ func TestPostSaysNothingWithoutAPodOrAClient(t *testing.T) {
 				posting := fakeEvents(t, io.Discard)
 				posting.post(c.pod, kevents.TypeNormal, reasonStale, "stale")
 				if posted := postedEvents(t, posting); len(posted) != 0 {
-					t.Errorf("post made %v", posted)
+					t.Errorf("post made %v, want no Events", posted)
 				}
 			})
 		})
@@ -130,13 +132,13 @@ func TestPostSaysNothingWithoutAPodOrAClient(t *testing.T) {
 		kevents.TypeNormal, reasonStale, "stale")
 }
 
-// The recorder sends a refused Event three times, 10 seconds apart,
-// and then logs it through the driver's own log.
+// kubernetes/events sends a refused Event three times, 10 seconds
+// apart, and then logs it.
 func TestPostLogsAnEventTheAPIServerRefused(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		logs := &bytes.Buffer{}
 		posting := fakeEvents(t, logs)
-		recordingOf(t, posting).held.Refuse(3)
+		recordingOf(t, posting).stored.Refuse(3)
 
 		posting.post(podReference{name: "reader", namespace: "home"},
 			kevents.TypeWarning, reasonFailed, "the fetch failed")
@@ -153,10 +155,10 @@ func TestNewEventsRunsOnWithNoCluster(t *testing.T) {
 	logs := &strings.Builder{}
 	posting := newEvents(t.Context(), "node-1", slog.New(slog.NewTextHandler(logs, nil)))
 	if posting.client != nil || posting.recorder != nil {
-		t.Error("newEvents found a cluster in a test process")
+		t.Error("newEvents returned a client in a test process, want none outside a cluster")
 	}
-	if !strings.Contains(logs.String(), "no events") {
-		t.Errorf("the log is %q, want the missing cluster in it", logs)
+	if !strings.Contains(logs.String(), "posts no Events") {
+		t.Errorf("the log is %q, want the warning that the driver posts no Events", logs)
 	}
 	posting.post(podReference{name: "reader", namespace: "home"},
 		kevents.TypeNormal, reasonStale, "stale")
@@ -187,7 +189,7 @@ func TestEventsFromACluster(t *testing.T) {
 			wantClient: false,
 		},
 		{
-			// A queries-per-second with no burst to spend it from.
+			// client-go refuses a QPS limit with a burst of zero.
 			name: "a rate client-go refuses",
 			load: func() (*rest.Config, error) {
 				return &rest.Config{Host: "https://10.43.0.1:443", QPS: 1, Burst: 0}, nil
@@ -201,11 +203,11 @@ func TestEventsFromACluster(t *testing.T) {
 			defer cancel()
 			posting := eventsFrom(ctx, "node-1", slog.New(slog.NewTextHandler(logs, nil)), c.load)
 			if (posting.client != nil) != c.wantClient || (posting.recorder != nil) != c.wantClient {
-				t.Errorf("eventsFrom answered a client: %v, want %v (%q)",
+				t.Errorf("eventsFrom returned a client: %v, want %v (log %q)",
 					posting.client != nil, c.wantClient, logs)
 			}
-			if !c.wantClient && !strings.Contains(logs.String(), "no events") {
-				t.Errorf("the log is %q, want the missing cluster in it", logs)
+			if !c.wantClient && !strings.Contains(logs.String(), "posts no Events") {
+				t.Errorf("the log is %q, want the warning that the driver posts no Events", logs)
 			}
 		})
 	}
@@ -231,7 +233,7 @@ func TestPostClaimNamesTheClaim(t *testing.T) {
 	})
 }
 
-func TestPostClaimSaysNothingWithoutAClaim(t *testing.T) {
+func TestPostClaimPostsNothingWithoutAClaim(t *testing.T) {
 	for _, claim := range []claimReference{
 		{namespace: "home"},
 		{name: "config"},
@@ -240,7 +242,7 @@ func TestPostClaimSaysNothingWithoutAClaim(t *testing.T) {
 			posting := fakeEvents(t, io.Discard)
 			posting.postClaim(claim, kevents.TypeNormal, reasonArmed, "armed")
 			if posted := postedEvents(t, posting); len(posted) != 0 {
-				t.Errorf("postClaim made %v", posted)
+				t.Errorf("postClaim made %v, want no Events", posted)
 			}
 		})
 	}

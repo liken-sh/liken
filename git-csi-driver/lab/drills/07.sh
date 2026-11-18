@@ -1,37 +1,41 @@
 #!/usr/bin/env bash
-# Drill 07. A ReadOnlyMany claim on the forge's repository. Two pods in
-# one namespace read the tree, and a push reaches both inside pull. A
-# write in a pod fails, and a pod that does not ask for read-only is
-# refused. The driver pod is deleted, and the new one takes
-# the volume back and follows the next push. The last pod's exit removes
-# the tree from the node. With the forge stopped, a claim with
-# offline: refuse stays refused, and the forge's return starts its pod.
+# Drill 07. A ReadOnlyMany claim on a repository of the host's forge.
+#
+# Two pods in one namespace mount the claim, and a push reaches both
+# within the pull interval. A write in a pod fails, and the volume of a
+# pod that does not set readOnly on it fails to mount. After the
+# driver's node pod is deleted, its replacement keeps serving the volume
+# and follows the next push. When the last pod that uses the volume is
+# deleted, the driver deletes the volume's tree from the node's store.
+# With the forge stopped, a claim with offline: refuse fails to mount
+# until the forge returns.
 set -euo pipefail
 
 LAB="$(cd "$(dirname "$0")/.." && pwd)"
 KUBECTL="$LAB/kubectl"
 
-# The forge is on the host, and the guest reaches it at the
-# user-mode network's gateway.
+# The forge runs on the host. The guest reaches it at the gateway
+# address of QEMU's user-mode network.
 GUEST_FORGE="git://10.0.2.2:9418/hello.git"
 HOST_FORGE="$LAB/forge/hello.git"
 
-# The reader image is one the lab already pulled, so no drill waits on
-# a registry.
+# An image that the lab has already pulled, so the drill does not wait
+# on a registry.
 IMAGE="${IMAGE:-debian:sid-slim}"
 DRIVER_NAMESPACE="${DRIVER_NAMESPACE:-liken-system}"
 NAMESPACE=drill-07
 PULL="${PULL:-15s}"
-# The store on the node keeps a tree per handle, and the forge is
-# reseeded on every run, so a handle carries a run's own stamp.
+# The node's store keeps one tree for each volume handle, and each run
+# creates the forge's repository again, so every run uses new handles.
 RUN="$(date +%s)"
 HANDLE="drill-07-$RUN"
 OFFLINE_HANDLE="drill-07-offline-$RUN"
-# The driver's store on the node. The DaemonSet mounts it from the
-# pod-storage partition.
+# The driver's store. deploy/node.yaml mounts this host directory at the
+# same path in the driver container.
 STORE=/var/lib/liken/pod-storage/git-csi
 
-# Every wait in this drill has a deadline, in seconds.
+# The deadline of each wait, in seconds, and the timeout of each kubectl
+# request.
 READY_DEADLINE="${READY_DEADLINE:-240}"
 REACH_DEADLINE="${REACH_DEADLINE:-180}"
 EVENT_DEADLINE="${EVENT_DEADLINE:-180}"
@@ -42,8 +46,8 @@ kube() {
 	"$KUBECTL" --request-timeout="$CALL_TIMEOUT" "$@"
 }
 
-# Cleanup leaves the cluster and the host as the drill found them,
-# however the drill ends.
+# Runs on exit, whether the drill passes or fails, and starts the forge
+# again in case the drill stopped it.
 cleanup() {
 	local status=$?
 	kube delete namespace "$NAMESPACE" --ignore-not-found --wait=false >/dev/null 2>&1 || true
@@ -55,13 +59,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Driver_pod is the node plugin's pod on the one node this lab runs.
+# Prints the name of the driver's node pod. The lab has one node, so
+# there is one such pod.
 driver_pod() {
 	kube get pods -n "$DRIVER_NAMESPACE" -l app=git-csi-driver-node \
 		-o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true
 }
 
-# Store_volumes is what the node's store holds under volumes/.
+# Lists the volume handles under volumes/ in the node's store.
 store_volumes() {
 	local pod
 	pod="$(driver_pod)"
@@ -70,8 +75,8 @@ store_volumes() {
 		sh -c "ls -1 $STORE/volumes 2>/dev/null" 2>/dev/null || true
 }
 
-# Claim writes the PersistentVolume and the claim that binds it, both
-# ReadOnlyMany.
+# Creates a ReadOnlyMany PersistentVolume and the PersistentVolumeClaim
+# that binds it.
 claim() {
 	local handle="$1" name="$2" offline="$3"
 	kube apply -f - >/dev/null <<YAML
@@ -107,9 +112,9 @@ spec:
 YAML
 }
 
-# Reader makes one pod that mounts the claim read-only. A pod has to ask
-# for read-only, or the driver refuses it, because the container runtime
-# binds the volume into the pod read-write otherwise.
+# Creates a pod that mounts the claim. The driver fails the mount when
+# the pod does not set readOnly on the volume, because the kubelet then
+# mounts the volume into the pod read-write.
 reader() {
 	local name="$1" claimName="$2" readOnly="${3:-true}"
 	kube apply -n "$NAMESPACE" -f - >/dev/null <<YAML
@@ -136,15 +141,14 @@ spec:
 YAML
 }
 
-# Greeting is what the pod reads out of the mounted checkout, or nothing.
+# Prints the greeting that the pod reads from the mounted checkout, or
+# nothing when it cannot read one.
 greeting() {
 	local name="$1"
 	kube exec -n "$NAMESPACE" "$name" -- \
 		sh -c 'sed -n "s/^greeting: //p" /hello/greeting.yaml' 2>/dev/null || true
 }
 
-# Wait_for_greeting waits until the pod reads the greeting, or fails on
-# the deadline.
 wait_for_greeting() {
 	local name="$1" want="$2" deadline
 	deadline=$(($(date +%s) + REACH_DEADLINE))
@@ -160,8 +164,7 @@ wait_for_greeting() {
 	return 1
 }
 
-# Wait_for_event waits until the events of the object carry the reason,
-# or fails on the deadline.
+# Waits for an event of the object that the field selector selects.
 wait_for_event() {
 	local selector="$1" pattern="$2" deadline
 	deadline=$(($(date +%s) + EVENT_DEADLINE))
@@ -178,7 +181,7 @@ wait_for_event() {
 	return 1
 }
 
-# Push writes the greeting on the forge and pushes it.
+# Commits a new greeting to the forge's repository and pushes it.
 push() {
 	local greeting="$1"
 	rm -rf "$LAB/guests/drill-07"
@@ -241,18 +244,18 @@ push hello-again
 wait_for_greeting reader-a hello-again
 wait_for_greeting reader-b hello-again
 
-echo "drill 07: both pods are deleted, and the store holds no tree"
+echo "drill 07: both pods are deleted, and the store has no tree"
 kube delete -n "$NAMESPACE" pod/reader-a pod/reader-b --timeout="${READY_DEADLINE}s"
 deadline=$(($(date +%s) + STORE_DEADLINE))
 while [ "$(date +%s)" -lt "$deadline" ]; do
 	if ! store_volumes | grep -qx "$HANDLE"; then
-		echo "drill 07: the store holds no tree for $HANDLE"
+		echo "drill 07: the store has no tree for $HANDLE"
 		break
 	fi
 	sleep 3
 done
 if store_volumes | grep -qx "$HANDLE"; then
-	echo "drill 07: the store still holds a tree for $HANDLE after ${STORE_DEADLINE}s" >&2
+	echo "drill 07: the store still has a tree for $HANDLE after ${STORE_DEADLINE}s" >&2
 	store_volumes >&2
 	exit 1
 fi
@@ -273,7 +276,7 @@ make -C "$LAB" forge
 kube wait -n "$NAMESPACE" --for=condition=Ready pod/reader-c --timeout="${READY_DEADLINE}s"
 wait_for_greeting reader-c hello-again
 
-# kubectl top needs a metrics server. A lab without one still passes.
+# kubectl top needs a metrics server. The drill passes without one.
 echo "drill 07: the plugin's memory"
 kube top pod -n "$DRIVER_NAMESPACE" -l app=git-csi-driver-node ||
 	echo "drill 07: no metrics server in this lab"

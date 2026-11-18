@@ -12,7 +12,7 @@ import (
 func TestAnEmptyClassResolvesToTheDefaults(t *testing.T) {
 	resolved, err := parsePolicy(nil)
 	if err != nil {
-		t.Fatalf("parsePolicy: %v", err)
+		t.Fatalf("parsing the policy: %v", err)
 	}
 	for _, c := range []struct {
 		name string
@@ -35,12 +35,10 @@ func TestAnEmptyClassResolvesToTheDefaults(t *testing.T) {
 	}
 }
 
-// A class that sets push.quiesce alone means a quiet tree pushes after
-// that long, so the default push.maxLatency stretches to match it.
 func TestALongQuiesceAloneStretchesTheDefaultLatency(t *testing.T) {
 	resolved, err := parsePolicy(map[string]string{quiesceParameter: "10m"})
 	if err != nil {
-		t.Fatalf("parsePolicy: %v", err)
+		t.Fatalf("parsing the policy: %v", err)
 	}
 	if resolved.maxLatency != 10*time.Minute {
 		t.Errorf("push.maxLatency resolved to %s, want 10m0s", resolved.maxLatency)
@@ -57,7 +55,7 @@ func TestAClassResolvesEveryParameter(t *testing.T) {
 		metadataParameter:    "false",
 	})
 	if err != nil {
-		t.Fatalf("parsePolicy: %v", err)
+		t.Fatalf("parsing the policy: %v", err)
 	}
 	for _, c := range []struct {
 		name string
@@ -78,13 +76,13 @@ func TestAClassResolvesEveryParameter(t *testing.T) {
 	}
 }
 
-func TestAClassTakesNoLimitAndNoLatency(t *testing.T) {
+func TestAClassCanTurnOffTheSizeLimitAndTheMaximumLatency(t *testing.T) {
 	resolved, err := parsePolicy(map[string]string{
 		maxFileSizeParameter: "0",
 		maxLatencyParameter:  neverLatency,
 	})
 	if err != nil {
-		t.Fatalf("parsePolicy: %v", err)
+		t.Fatalf("parsing the policy: %v", err)
 	}
 	if resolved.maxFileSize != 0 {
 		t.Errorf("%s resolved to %d, want no limit", maxFileSizeParameter, resolved.maxFileSize)
@@ -96,91 +94,91 @@ func TestAClassTakesNoLimitAndNoLatency(t *testing.T) {
 
 func TestAClassIsRefusedByTheFirstBadParameter(t *testing.T) {
 	for _, c := range []struct {
-		name       string
-		parameters map[string]string
-		says       string
+		name        string
+		parameters  map[string]string
+		wantMessage string
 	}{
 		{
-			name:       "a quiesce that is not a duration",
-			parameters: map[string]string{quiesceParameter: "soon"},
-			says:       `push.quiesce: "soon" is not a duration`,
+			name:        "a quiesce that is not a duration",
+			parameters:  map[string]string{quiesceParameter: "soon"},
+			wantMessage: `push.quiesce: "soon" is not a duration`,
 		},
 		{
-			name:       "a quiesce under the floor",
-			parameters: map[string]string{quiesceParameter: "1s"},
-			says:       "push.quiesce: 1s is shorter than 5s",
+			name:        "a quiesce under the shortest quiesce",
+			parameters:  map[string]string{quiesceParameter: "1s"},
+			wantMessage: "push.quiesce: 1s is shorter than 5s",
 		},
 		{
-			name:       "a latency that is not a duration",
-			parameters: map[string]string{maxLatencyParameter: "later"},
-			says:       `push.maxLatency: "later" is not a duration or never`,
+			name:        "a latency that is not a duration",
+			parameters:  map[string]string{maxLatencyParameter: "later"},
+			wantMessage: `push.maxLatency: "later" is not a duration or never`,
 		},
 		{
 			name: "a latency shorter than the quiesce",
 			parameters: map[string]string{
 				quiesceParameter: "1m", maxLatencyParameter: "30s",
 			},
-			says: "push.maxLatency: 30s is shorter than push.quiesce 1m0s",
+			wantMessage: "push.maxLatency: 30s is shorter than push.quiesce 1m0s",
 		},
 		{
-			name:       "a size that is not a quantity",
-			parameters: map[string]string{maxFileSizeParameter: "big"},
-			says:       `commit.maxFileSize: "big" is not a quantity`,
+			name:        "a size that is not a quantity",
+			parameters:  map[string]string{maxFileSizeParameter: "big"},
+			wantMessage: `commit.maxFileSize: "big" is not a quantity`,
 		},
 		{
-			name:       "a size under zero",
-			parameters: map[string]string{maxFileSizeParameter: "-1Mi"},
-			says:       `commit.maxFileSize: "-1Mi" is smaller than zero`,
+			name:        "a size under zero",
+			parameters:  map[string]string{maxFileSizeParameter: "-1Mi"},
+			wantMessage: `commit.maxFileSize: "-1Mi" is smaller than zero`,
 		},
 		{
-			name:       "an author with no address",
-			parameters: map[string]string{authorParameter: "Home Assistant"},
-			says:       `commit.author: "Home Assistant" is not Name <email>`,
+			name:        "an author with no address",
+			parameters:  map[string]string{authorParameter: "Home Assistant"},
+			wantMessage: `commit.author: "Home Assistant" is not Name <email>`,
 		},
 		{
-			name:       "an author with no name",
-			parameters: map[string]string{authorParameter: "<home@example>"},
-			says:       `commit.author: "<home@example>" is not Name <email>`,
+			name:        "an author with no name",
+			parameters:  map[string]string{authorParameter: "<home@example>"},
+			wantMessage: `commit.author: "<home@example>" is not Name <email>`,
 		},
 		{
-			name:       "a metadata flag that is not a word",
-			parameters: map[string]string{metadataParameter: "1"},
-			says:       `metadata: "1" is not true or false`,
+			name:        "a metadata flag of 1",
+			parameters:  map[string]string{metadataParameter: "1"},
+			wantMessage: `metadata: "1" is not true or false`,
 		},
 		{
-			name:       "an unknown parameter",
-			parameters: map[string]string{"push.eager": "true"},
-			says:       "push.eager: unknown parameter",
+			name:        "an unknown parameter",
+			parameters:  map[string]string{"push.eager": "true"},
+			wantMessage: "push.eager: unknown parameter, want one of push.quiesce, push.maxLatency, commit.maxFileSize, commit.author, ignore, metadata",
 		},
 		{
 			name: "the first of two bad parameters, in sorted order",
 			parameters: map[string]string{
 				metadataParameter: "yes", quiesceParameter: "soon",
 			},
-			says: `metadata: "yes" is not true or false`,
+			wantMessage: `metadata: "yes" is not true or false`,
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			resolved, err := parsePolicy(c.parameters)
 			if err == nil {
-				t.Fatalf("parsePolicy answered %+v, want a refusal", resolved)
+				t.Fatalf("parsePolicy returned %+v, want an InvalidArgument refusal", resolved)
 			}
 			if got := status.Code(err); got != codes.InvalidArgument {
-				t.Errorf("parsePolicy answered %v, want %v", got, codes.InvalidArgument)
+				t.Errorf("parsePolicy returned code %v, want %v", got, codes.InvalidArgument)
 			}
-			if got := status.Convert(err).Message(); got != c.says {
-				t.Errorf("parsePolicy said %q, want %q", got, c.says)
+			if got := status.Convert(err).Message(); got != c.wantMessage {
+				t.Errorf("parsePolicy returned the message %q, want %q", got, c.wantMessage)
 			}
 		})
 	}
 }
 
-func TestTheAuthorIsTheEnvironmentEveryCommitRunsUnder(t *testing.T) {
+func TestAuthorSetsTheAuthorAndTheCommitterOfACommit(t *testing.T) {
 	resolved, err := parsePolicy(map[string]string{
 		authorParameter: "Home Assistant <homeassistant@home.example>",
 	})
 	if err != nil {
-		t.Fatalf("parsePolicy: %v", err)
+		t.Fatalf("parsing the policy: %v", err)
 	}
 	want := []string{
 		"GIT_AUTHOR_NAME=Home Assistant",
@@ -189,6 +187,6 @@ func TestTheAuthorIsTheEnvironmentEveryCommitRunsUnder(t *testing.T) {
 		"GIT_COMMITTER_EMAIL=homeassistant@home.example",
 	}
 	if strings.Join(resolved.author(), "\n") != strings.Join(want, "\n") {
-		t.Errorf("author answered %v, want %v", resolved.author(), want)
+		t.Errorf("author() returned %v, want %v", resolved.author(), want)
 	}
 }

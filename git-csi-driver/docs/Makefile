@@ -1,12 +1,11 @@
-# The docs domain builds the manual served at liken.sh/git, with the
-# same `make build` every manual runs, so the root Makefile and CI build
-# each manual one way.
+# Builds the manual served at liken.sh/git. Every manual has a
+# `make build` target, so the root Makefile and CI build all manuals the
+# same way.
 HUGO := go tool hugo
 
-# A recipe that fails, or a build that is killed during one, leaves its
-# target partly written and newer than its inputs. make deletes that
-# target, so the next build makes it again and does not take it as
-# current.
+# A recipe that fails or is killed can leave a partly written target
+# that is newer than its inputs. make deletes that target, so the next
+# build creates it again.
 .DELETE_ON_ERROR:
 
 SKILLS := go tool skills
@@ -16,17 +15,16 @@ BASE := https://liken.sh/git/
 build:
 	$(HUGO) --destination dist/site
 
-# The site's own tests: every internal link resolves before the build
-# (manual_test.go passes this site's exceptions).
+# Checks that every internal link resolves. manual_test.go lists this
+# site's exceptions.
 .PHONY: test
 test:
 	go test ./...
 
-# The skills target emits every guide as an Agent Skill into ../skills,
-# one SKILL.md per guide, with the generator the brand component
-# publishes (its README says what the output holds). The output is
-# committed, and the test-docs target in ../Makefile fails when it is
-# stale.
+# Writes each guide as an Agent Skill, one SKILL.md per guide, into
+# ../skills, using the generator from the brand component (its README
+# describes the output). The output is committed, and the test-docs
+# target in ../Makefile fails when it is out of date.
 .PHONY: skills
 skills:
 	$(SKILLS) -base $(BASE) content/docs/guides ../skills

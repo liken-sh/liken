@@ -5,11 +5,11 @@ weight: 20
 
 # Class parameters
 
-A `VolumeAttributesClass` with `driverName: git.liken.sh` carries a
-commit and push policy in `parameters`. Every parameter has a default,
-so an empty class arms a volume with the defaults. The controller
-refuses a class with an unknown or malformed parameter, naming the
-first bad one.
+A `VolumeAttributesClass` with `driverName: git.liken.sh` sets the
+commit and push policy of a writeable volume in `parameters`. Every
+parameter has a default, so an empty class works. The controller
+rejects a class with an unknown or malformed parameter, and the error
+message gives the first bad one.
 
 | Parameter | Values | Default |
 |---|---|---|
@@ -24,44 +24,44 @@ first bad one.
 
 | Reason | When |
 |---|---|
-| `GitVolumeArmed` | The claim named a class of this driver. |
-| `GitVolumeUnarmed` | The claim names no class of this driver. |
-| `GitVolumePending` | The tree holds paths the driver has not committed. Posted when the set first becomes non-empty. |
+| `GitVolumeArmed` | The claim now uses a class of this driver, so the driver starts committing and pushing. |
+| `GitVolumeUnarmed` | The claim no longer uses a class of this driver, so the driver stops committing. |
+| `GitVolumePending` | The tree has paths that the driver has not committed. Posted when the first such path appears. |
 | `GitVolumePushed` | A push succeeded, with the commit and the count of paths. |
 | `GitVolumePushFailed` | A push failed, with git's error. |
 | `GitVolumeFileSkipped` | A file over `commit.maxFileSize` was left out of a commit. |
-| `GitVolumeRebased` | A rejected push rebased the tree onto upstream and landed, with the count of commits and the upstream commit. |
-| `GitVolumeDiverged` | The volume moved to its side branch, after a push still rejected after three rebases, an aborted rebase, or a file the application and upstream both changed. |
-| `GitVolumeHealed` | Upstream took the side branch's work, and the volume is back on its ref. |
-| `GitVolumeNoPublishSecret` | The `PersistentVolume` names `nodeStageSecretRef` and no `nodePublishSecretRef`, so a restart of the driver loses the credential. Posted once for each stage and for each restart. |
-| `GitVolumeUpstreamMoved` | The stage found that upstream moved while the tree held uncommitted writes, so it left the tree as it was. Posted on the claim when the driver finds it after the stage. |
-| `GitVolumeRefDeleted` | The stage found that the remote no longer holds the ref, so the driver pushes nothing until the ref exists again. Posted on the claim when the driver finds it after the stage. |
+| `GitVolumeRebased` | A push was rejected, so the driver rebased the tree onto upstream and pushed again, with the count of commits and the upstream commit. |
+| `GitVolumeDiverged` | The volume moved to its side branch, because a push was still rejected after three rebases, a rebase aborted, or the application and upstream both changed a file. |
+| `GitVolumeHealed` | A person merged the side branch into the ref, so the volume pushes to its ref again and the driver deletes the side branch. |
+| `GitVolumeNoPublishSecret` | The `PersistentVolume` sets `nodeStageSecretRef` and no `nodePublishSecretRef`. The driver keeps the credential only in memory, so after a restart of the driver the volume cannot fetch or push until the kubelet stages it again. Posted once for each volume each time the driver runs. |
+| `GitVolumeUpstreamMoved` | When the pod started, upstream had moved while the tree had uncommitted writes, so the driver left the tree as it was. |
+| `GitVolumeRefDeleted` | When the pod started, the remote no longer had the ref, so the driver pushes nothing until the ref exists again. |
 
-Each fault, a failed push, a failed fetch, and an upstream that moved,
-posts its event at the first failure after a success, and does not post
-it again until a success ends that fault. A fault of one kind does not
-hold back the event of a fault of another kind.
+For a failed push, a failed fetch, or an upstream that moved, the
+driver posts the event at the first failure after a success. It does
+not post it again until a success ends that fault. A fault of one kind
+does not stop the event of another kind.
 
 ## The abnormal gauge
 
-`git_csi_volume_abnormal`, labeled `namespace` and `volume`, is one for
-an unarmed volume with pending paths, a failed push, a skipped file, an
-unpushed commit older than `push.maxLatency`, an invalid class, a ref
-that moved upstream while the tree held uncommitted writes, a diverged
-volume, and a ref the remote no longer holds. The driver's log says
-which.
+`git_csi_volume_abnormal{namespace, volume}` is one while any of these
+is true for a volume, and zero otherwise. The `volume` label is the
+`volumeHandle`.
+
+* The volume lost its credential at a restart of the driver.
+* The last fetch or the last push failed.
+* Upstream moved while the tree had uncommitted writes.
+* The remote no longer has the ref.
+* The volume pushes to its side branch.
+* The claim's class is invalid.
+* The last commit left out a file over `commit.maxFileSize`.
+* An unpushed commit is older than `push.maxLatency`.
+* The claim has no class of this driver, and the tree has changes that
+  are not committed.
+
+The driver's log gives the reason.
 
 ## Metrics
 
-Each gauge is labeled `namespace` and `claim`.
-
-| Metric | Meaning |
-|---|---|
-| `git_csi_armed` | One when a class of this driver arms the volume. |
-| `git_csi_pending_paths` | Paths the last scan found that the driver has not committed. |
-| `git_csi_unpushed_commits` | Commits not yet on the remote. |
-| `git_csi_last_push_timestamp_seconds` | When the last push succeeded. |
-| `git_csi_push_failures_total` | Pushes that failed. |
-| `git_csi_skipped_files` | Files over `commit.maxFileSize` in the tree. |
-| `git_csi_diverged` | One while the volume pushes to its side branch. |
-| `git_csi_volume_abnormal` | One while anything above is wrong. Labeled `namespace` and `volume`, not claim. |
+[What the driver reports](../metrics/) lists the metrics of each
+writeable volume, with the rest of the driver's metrics.

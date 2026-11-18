@@ -14,113 +14,115 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 )
 
-// These tests read one old or one new demand in every order the list,
-// the watch, the stage, and a restart can take on a node. The node acts
-// on a demand by its time alone, so no order pulls for an old demand
-// and none misses a new one.
+// These tests deliver one old demand or one new demand in every order
+// that the list, the watch, the stage, and a restart can occur on a
+// node. The node acts on a demand by its timestamp alone, so no order
+// may pull for an old demand or miss a new one.
 
 func TestAStageBeforeTheFirstListIgnoresAnOldDemand(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, _ := testNode(t, io.Discard)
+		n, _ := testNode(t, io.Discard)
 		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-		held := demandedVolume(t, answering, "franchises", fileURL(source), "on-demand")
-		demandPull(t, answering, "franchises", oldDemand)
+		vol := demandedVolume(t, n, "franchises", fileURL(source), "on-demand")
+		demandPull(t, n, "franchises", oldDemand)
 
-		watchDemands(t, answering)
+		watchDemands(t, n)
 		synctest.Wait()
 
-		noDemand(t, held)
-		if counted, found := demandedOf(t, answering.readings, "home", "franchises"); found {
-			t.Errorf("an old annotation counted %v demanded pulls, want none", counted)
+		noDemand(t, vol)
+		if count, found := demandedOf(t, n.metrics, "home", "franchises"); found {
+			t.Errorf("an old annotation counted %v demanded pulls, want none", count)
 		}
 	})
 }
 
 func TestARestartCountsOneDemandForAnOldAnnotation(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, _ := testNode(t, io.Discard)
-		answering.demandMin = 50 * time.Millisecond
+		n, _ := testNode(t, io.Discard)
+		n.demandMin = 50 * time.Millisecond
 		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-		demandedVolume(t, answering, "franchises", fileURL(source), "on-demand")
-		demandPull(t, answering, "franchises", oldDemand)
+		demandedVolume(t, n, "franchises", fileURL(source), "on-demand")
+		demandPull(t, n, "franchises", oldDemand)
 
 		again, _ := testNode(t, io.Discard)
 		again.demandMin = 50 * time.Millisecond
-		again.store = answering.store
-		again.events = answering.events
-		again.arms.client = answering.arms.client
+		again.store = n.store
+		again.events = n.events
+		again.arming.client = n.arming.client
 		again.mounted = func(string) bool { return true }
-		again.demands = newDemanding(again, cluster(t, answering), slog.New(slog.NewTextHandler(io.Discard, nil)))
+		again.demands = newDemandWatch(again, cluster(t, n), slog.New(slog.NewTextHandler(io.Discard, nil)))
 		again.resume(t.Context())
 		again.mu.Lock()
 		resumed := again.staged["franchises"]
 		again.mu.Unlock()
-		// The restart's own pull runs first, as it does when the list is
-		// slower than the pass.
+		// The restart pulls first. Wait for that pull before the demand loop
+		// starts.
 		waitForCondition(t, resumed, ", pulled ")
-		go again.demands.follow(t.Context())
-		// Ten intervals pass, so a second demanded pull has room to
-		// happen.
+		go again.demands.run(t.Context())
+		// Advance the clock ten intervals, enough for a second demanded pull
+		// if one were wrongly started.
 		time.Sleep(10 * again.demandMin)
 		synctest.Wait()
 
-		if counted, _ := demandedOf(t, again.readings, "home", resumed.id); counted > 1 {
-			t.Errorf("a restart with an old annotation counted %v demanded pulls, want at most 1", counted)
+		if count, _ := demandedOf(t, again.metrics, "home", resumed.id); count > 1 {
+			t.Errorf("a restart with an old annotation counted %v demanded pulls, want at most 1", count)
 		}
 	})
 }
 
 func TestAStageDuringARelistIgnoresAnOldDemand(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
+	n, _ := testNode(t, io.Discard)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 	old := annotated(csiVolume("franchises", driverName), oldDemand)
-	answering.demands.read(t.Context(), old)
-	// A relist reads the old value again while the stage looks up its
-	// claim.
+	n.demands.read(t.Context(), old)
+	// A relist delivers the old annotation again while the stage looks up
+	// its claim.
 	var once sync.Once
-	cluster(t, answering).PrependReactor("list", "persistentvolumes",
+	cluster(t, n).PrependReactor("list", "persistentvolumes",
 		func(k8stesting.Action) (bool, runtime.Object, error) {
-			once.Do(func() { answering.demands.read(t.Context(), old) })
+			once.Do(func() { n.demands.read(t.Context(), old) })
 			return false, nil, nil
 		})
-	held := demandedVolume(t, answering, "franchises", fileURL(source), "on-demand")
+	vol := demandedVolume(t, n, "franchises", fileURL(source), "on-demand")
 
-	noDemand(t, held)
+	noDemand(t, vol)
 }
 
 func TestARestartedWriteableVolumeIgnoresAnOldDemand(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	boundVolume(t, answering, "config", "")
-	stagedWriteable(t, answering, "config",
+	n, _ := testNode(t, io.Discard)
+	boundVolume(t, n, "config", "")
+	stagedWriteable(t, n, "config",
 		fileURL(bareRemote(t, map[string]string{"a.txt": "one"})))
 
 	logs := &logbook{}
 	again, _ := testNode(t, logs)
-	again.store = answering.store
-	again.events = answering.events
-	again.arms.client = answering.arms.client
+	again.store = n.store
+	again.events = n.events
+	again.arming.client = n.arming.client
 	again.mounted = func(string) bool { return true }
 	again.resume(t.Context())
 	again.demands.read(t.Context(), writeableDemand(oldDemand))
 
-	if strings.Contains(logs.String(), "the demand did nothing") {
+	if strings.Contains(logs.String(), "Ignored a pull demand") {
 		t.Errorf("an old demand was acted on after the restart (%q)", logs)
 	}
 }
 
-// demandsActedOn stages the writeable volume config, reads a demand at
-// each time, and counts the demands the node acted on.
+// demandsActedOn stages a writeable volume, delivers a demand with each
+// of the timestamps, and returns how many demands the node accepted. The
+// node starts no pull for a writeable volume. It logs "the demand did
+// nothing" for each demand it accepts, so the test counts that line.
 func demandsActedOn(t *testing.T, stamps ...string) int {
 	t.Helper()
 	logs := &logbook{}
-	answering, _ := testNode(t, logs)
-	boundVolume(t, answering, "config", "")
-	stagedWriteable(t, answering, "config",
+	n, _ := testNode(t, logs)
+	boundVolume(t, n, "config", "")
+	stagedWriteable(t, n, "config",
 		fileURL(bareRemote(t, map[string]string{"a.txt": "one"})))
 	for _, at := range stamps {
-		answering.demands.read(t.Context(), writeableDemand(at))
+		n.demands.read(t.Context(), writeableDemand(at))
 	}
-	return strings.Count(logs.String(), "the demand did nothing")
+	return strings.Count(logs.String(), "Ignored a pull demand")
 }
 
 func TestADemandIsActedOnByItsTime(t *testing.T) {
@@ -183,43 +185,44 @@ func TestADemandIsActedOnByItsTime(t *testing.T) {
 	}
 }
 
-func TestADemandThatIsNotATimeSaysSo(t *testing.T) {
+func TestADemandThatIsNotATimeIsLogged(t *testing.T) {
 	logs := &logbook{}
-	answering, _ := testNode(t, logs)
+	n, _ := testNode(t, logs)
 
-	answering.demands.read(t.Context(), annotated(csiVolume("franchises", driverName), "soon"))
+	n.demands.read(t.Context(), annotated(csiVolume("franchises", driverName), "soon"))
 
-	if !strings.Contains(logs.String(), "the demand is not a time") {
+	if !strings.Contains(logs.String(), "The pull annotation is not an RFC 3339 time") {
 		t.Errorf("the log is %q, want the value that is not a time in it", logs)
 	}
 }
 
 func TestADemandWhoseFetchFailsIsFetchedAgain(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, _ := testNode(t, io.Discard)
-		answering.demandMin = 50 * time.Millisecond
+		n, _ := testNode(t, io.Discard)
+		n.demandMin = 50 * time.Millisecond
 		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-		held := demandedVolume(t, answering, "franchises", fileURL(source), "on-demand")
+		vol := demandedVolume(t, n, "franchises", fileURL(source), "on-demand")
 		want := commitFiles(t, source, map[string]string{"a.txt": "two"})
 
-		// The remote is gone when the demand arrives, so the pull it starts
-		// fails.
+		// The remote is gone when the demand arrives, so the pull that the
+		// demand starts fails.
 		away := source + ".away"
 		if err := os.Rename(source, away); err != nil {
 			t.Fatalf("moving the remote away: %v", err)
 		}
-		answering.demands.read(t.Context(),
+		n.demands.read(t.Context(),
 			annotated(csiVolume("franchises", driverName), demandAt(0)))
 		synctest.Wait()
-		if _, trouble := held.condition(); trouble == "" {
-			t.Fatal("a fetch from a remote that is gone left the condition normal")
+		if _, fault := vol.commitAndFault(); fault == "" {
+			t.Fatal("a fetch from a remote that is gone left the health report empty, want it to report the fetch")
 		}
 		if err := os.Rename(away, source); err != nil {
 			t.Fatalf("moving the remote back: %v", err)
 		}
 
-		// The longest retry wait passes, so the loop fetches again.
+		// Advance the clock by the longest retry wait, so the loop fetches
+		// again.
 		time.Sleep(maxDemandRetry)
-		waitForCommit(t, held, want)
+		waitForCommit(t, vol, want)
 	})
 }

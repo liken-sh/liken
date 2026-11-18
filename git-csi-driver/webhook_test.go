@@ -21,27 +21,27 @@ import (
 	"k8s.io/client-go/tools/clientcmd/api"
 )
 
-// webhookTime is the moment the listener writes on every mark.
+// webhookTime is the clock of testWebhook, and the value it writes in
+// every demand annotation.
 var webhookTime = time.Unix(1757000000, 0).UTC()
 
-// testWebhook is the controller's listener on a fake cluster, with a
-// clock a test moves.
+// testWebhook returns a listener on a fake clientset, with its clock
+// stopped at webhookTime.
 func testWebhook(t *testing.T, logs io.Writer) *webhook {
 	t.Helper()
 	at := webhookTime
-	readings := newMetrics()
-	readings.registerWebhook()
+	registry := newMetrics()
+	registry.registerWebhook()
 	return &webhook{
-		client:   fake.NewClientset(),
-		readings: readings,
-		logger:   slog.New(slog.NewTextHandler(logs, nil)),
-		now:      func() time.Time { return at },
-		held:     map[string]cachedSecret{},
+		client:  fake.NewClientset(),
+		metrics: registry,
+		logger:  slog.New(slog.NewTextHandler(logs, nil)),
+		now:     func() time.Time { return at },
+		secrets: map[string]cachedSecret{},
 	}
 }
 
-// listening serves the webhook on a socket of the test's own and
-// answers its address.
+// listening serves the webhook on a test server and returns its URL.
 func listening(t *testing.T, hooks *webhook) string {
 	t.Helper()
 	served := httptest.NewServer(http.HandlerFunc(hooks.handle))
@@ -49,21 +49,21 @@ func listening(t *testing.T, hooks *webhook) string {
 	return served.URL
 }
 
-// webhookSecret writes the Secret a path names.
+// webhookSecret creates the Secret that a webhook path names.
 func webhookSecret(t *testing.T, hooks *webhook, namespace, name, value string) {
 	t.Helper()
-	held := &corev1.Secret{
+	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name},
 		Data:       map[string][]byte{webhookSecretKey: []byte(value)},
 	}
 	if _, err := hooks.client.CoreV1().Secrets(namespace).
-		Create(t.Context(), held, metav1.CreateOptions{}); err != nil {
+		Create(t.Context(), secret, metav1.CreateOptions{}); err != nil {
 		t.Fatalf("writing the Secret: %v", err)
 	}
 }
 
-// followingVolume is a read-only PersistentVolume of this driver, bound
-// to a claim in the namespace, with the attributes a test names.
+// followingVolume creates a read-only PersistentVolume of this driver,
+// bound to a claim of the same name in the namespace.
 func followingVolume(
 	t *testing.T, hooks *webhook, name, namespace string, attributes map[string]string,
 ) {
@@ -84,56 +84,53 @@ func followingVolume(
 	})
 }
 
-// writeVolume puts one PersistentVolume in the fake cluster.
-func writeVolume(t *testing.T, hooks *webhook, held *corev1.PersistentVolume) {
+func writeVolume(t *testing.T, hooks *webhook, pv *corev1.PersistentVolume) {
 	t.Helper()
 	if _, err := hooks.client.CoreV1().PersistentVolumes().
-		Create(t.Context(), held, metav1.CreateOptions{}); err != nil {
+		Create(t.Context(), pv, metav1.CreateOptions{}); err != nil {
 		t.Fatalf("writing the PersistentVolume: %v", err)
 	}
 }
 
-// demandedAt is the annotation plan 10's channel carries, and "" where
-// the volume carries none.
+// demandedAt returns the value of the volume's demand annotation, or ""
+// when it has none.
 func demandedAt(t *testing.T, hooks *webhook, name string) string {
 	t.Helper()
-	held, err := hooks.client.CoreV1().PersistentVolumes().
+	pv, err := hooks.client.CoreV1().PersistentVolumes().
 		Get(t.Context(), name, metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("reading the PersistentVolume: %v", err)
 	}
-	return held.Annotations[demandAnnotation]
+	return pv.Annotations[demandAnnotation]
 }
 
-// githubPush is the payload GitHub sends for a push to the URL, and the
-// header that signs it with the secret.
+// githubPush returns the parts of GitHub's push body that the listener
+// reads, and the signature header for that body and secret.
 func githubPush(url, ref, secret string) (string, map[string]string) {
 	body := `{"ref":"` + ref + `","repository":{"clone_url":"` + url + `"}}`
 	return body, map[string]string{githubSignatureHeader: githubPrefix + signature(body, secret)}
 }
 
-// post sends one request to the listener and answers its status and its
-// body.
 func post(t *testing.T, address, path string, header map[string]string, body string) (int, string) {
 	t.Helper()
 	request, err := http.NewRequestWithContext(
 		t.Context(), http.MethodPost, address+path, strings.NewReader(body))
 	if err != nil {
-		t.Fatalf("making the request: %v", err)
+		t.Fatalf("creating the request: %v", err)
 	}
 	for key, value := range header {
 		request.Header.Set(key, value)
 	}
-	answer, err := http.DefaultClient.Do(request)
+	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatalf("posting the request: %v", err)
 	}
-	defer answer.Body.Close()
-	read, err := io.ReadAll(answer.Body)
+	defer response.Body.Close()
+	read, err := io.ReadAll(response.Body)
 	if err != nil {
-		t.Fatalf("reading the answer: %v", err)
+		t.Fatalf("reading the response: %v", err)
 	}
-	return answer.StatusCode, string(read)
+	return response.StatusCode, string(read)
 }
 
 func TestAVerifiedPushMarksTheVolume(t *testing.T) {
@@ -147,13 +144,13 @@ func TestAVerifiedPushMarksTheVolume(t *testing.T) {
 	body, header := githubPush(
 		"https://code.example.com/data/x.git", "refs/heads/main", "what-the-forge-was-told")
 
-	code, answered := post(t, listening(t, hooks), "/webhook/sites/x-webhook", header, body)
+	code, responseBody := post(t, listening(t, hooks), "/webhook/sites/x-webhook", header, body)
 
 	if code != http.StatusAccepted {
-		t.Fatalf("the listener answered %d, want 202 (%q)", code, answered)
+		t.Fatalf("the listener responded %d, want 202 (%q)", code, responseBody)
 	}
-	if !strings.Contains(answered, "marked 1") {
-		t.Errorf("the listener answered %q, want the count in it", answered)
+	if !strings.Contains(responseBody, "marked 1") {
+		t.Errorf("the listener responded %q, want the count in it", responseBody)
 	}
 	if got := demandedAt(t, hooks, "x"); got != webhookTime.Format(time.RFC3339Nano) {
 		t.Errorf("the volume is marked %q, want %q", got, webhookTime.Format(time.RFC3339Nano))
@@ -175,17 +172,17 @@ func TestAPushThatMatchesNothingIsAccepted(t *testing.T) {
 	webhookSecret(t, hooks, "sites", "x-webhook", "s")
 	body, header := githubPush("https://code.example.com/data/other.git", "refs/heads/main", "s")
 
-	code, answered := post(t, listening(t, hooks), "/webhook/sites/x-webhook", header, body)
+	code, responseBody := post(t, listening(t, hooks), "/webhook/sites/x-webhook", header, body)
 
 	if code != http.StatusAccepted {
-		t.Fatalf("the listener answered %d, want 202 (%q)", code, answered)
+		t.Fatalf("the listener responded %d, want 202 (%q)", code, responseBody)
 	}
-	if !strings.Contains(answered, "marked 0") {
-		t.Errorf("the listener answered %q, want a count of zero", answered)
+	if !strings.Contains(responseBody, "marked 0") {
+		t.Errorf("the listener responded %q, want a count of zero", responseBody)
 	}
 }
 
-func TestTheListenerRefusesAndSaysNothing(t *testing.T) {
+func TestTheListenerRefusesAnUnverifiedRequestWith401AndAnEmptyBody(t *testing.T) {
 	body, header := githubPush("https://code.example.com/data/x.git", "refs/heads/main", "s")
 
 	for _, c := range []struct {
@@ -234,13 +231,13 @@ func TestTheListenerRefusesAndSaysNothing(t *testing.T) {
 			hooks := testWebhook(t, io.Discard)
 			webhookSecret(t, hooks, "sites", "x-webhook", "s")
 
-			code, answered := post(t, listening(t, hooks), c.path, c.header, c.body)
+			code, responseBody := post(t, listening(t, hooks), c.path, c.header, c.body)
 
 			if code != http.StatusUnauthorized {
-				t.Errorf("the listener answered %d, want 401", code)
+				t.Errorf("the listener responded %d, want 401", code)
 			}
-			if answered != "" {
-				t.Errorf("the listener answered %q, want an empty body", answered)
+			if responseBody != "" {
+				t.Errorf("the listener responded %q, want an empty body", responseBody)
 			}
 		})
 	}
@@ -259,14 +256,14 @@ func TestASecretWithNoValueRefusesTheRequest(t *testing.T) {
 	code, _ := post(t, listening(t, hooks), "/webhook/sites/x-webhook", header, body)
 
 	if code != http.StatusUnauthorized {
-		t.Errorf("the listener answered %d, want 401", code)
+		t.Errorf("the listener responded %d, want 401", code)
 	}
 }
 
 func TestTheListenerReportsWhatItCouldNotServe(t *testing.T) {
 	body, header := githubPush("https://code.example.com/data/x.git", "refs/heads/main", "s")
 	refused := func(k8stesting.Action) (bool, runtime.Object, error) {
-		return true, nil, errors.New("the API server said no")
+		return true, nil, errors.New("the API server refused the request")
 	}
 
 	for _, c := range []struct {
@@ -274,13 +271,13 @@ func TestTheListenerReportsWhatItCouldNotServe(t *testing.T) {
 		cross func(*webhook)
 	}{
 		{
-			name: "a Secret the API server would not answer for",
+			name: "a Secret the API server refused to return",
 			cross: func(hooks *webhook) {
 				hooks.client.(*fake.Clientset).PrependReactor("get", "secrets", refused)
 			},
 		},
 		{
-			name: "a list of volumes the API server would not answer for",
+			name: "a list of volumes the API server refused to return",
 			cross: func(hooks *webhook) {
 				hooks.client.(*fake.Clientset).PrependReactor("list", "persistentvolumes", refused)
 			},
@@ -296,18 +293,18 @@ func TestTheListenerReportsWhatItCouldNotServe(t *testing.T) {
 			webhookSecret(t, hooks, "sites", "x-webhook", "s")
 			c.cross(hooks)
 
-			code, answered := post(t, listening(t, hooks), "/webhook/sites/x-webhook", header, body)
+			code, responseBody := post(t, listening(t, hooks), "/webhook/sites/x-webhook", header, body)
 
 			if code != http.StatusInternalServerError {
-				t.Errorf("the listener answered %d, want 500", code)
+				t.Errorf("the listener responded %d, want 500", code)
 			}
-			if answered != "" {
-				t.Errorf("the listener answered %q, want an empty body", answered)
+			if responseBody != "" {
+				t.Errorf("the listener responded %q, want an empty body", responseBody)
 			}
-			if !strings.Contains(logs.String(), "the webhook was not served") {
-				t.Errorf("the log is %q, want the request it did not serve in it", logs)
+			if !strings.Contains(logs.String(), "The webhook was not served") {
+				t.Errorf("the log is %q, want the unserved request in it", logs)
 			}
-			if got := webhookCounter(t, hooks.readings,
+			if got := webhookCounter(t, hooks.metrics,
 				"git_csi_webhook_requests_total", resultFailed); got != 1 {
 				t.Errorf("git_csi_webhook_requests_total{result=\"failed\"} reads %v, want 1", got)
 			}
@@ -337,29 +334,28 @@ func TestTheListenerRefusesABodyItCannotRead(t *testing.T) {
 				githubSignatureHeader: githubPrefix + signature(body, "s"),
 			}
 
-			// The handler answers on a recorder. Over a socket, net/http
-			// holds the connection open for 500ms after it refuses a body
-			// over the limit, so the client reads the answer before the
-			// reset.
+			// The test calls the handler directly, because over a socket
+			// net/http waits before it closes a connection whose body was
+			// over the limit.
 			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
 				"/webhook/sites/x-webhook", strings.NewReader(body))
 			for key, value := range header {
 				request.Header.Set(key, value)
 			}
-			answer := httptest.NewRecorder()
-			hooks.handle(answer, request)
+			response := httptest.NewRecorder()
+			hooks.handle(response, request)
 
-			if answer.Code != http.StatusBadRequest {
-				t.Errorf("the listener answered %d, want 400", answer.Code)
+			if response.Code != http.StatusBadRequest {
+				t.Errorf("the listener responded %d, want 400", response.Code)
 			}
-			if answered := answer.Body.String(); answered != "" {
-				t.Errorf("the listener answered %q, want an empty body", answered)
+			if responseBody := response.Body.String(); responseBody != "" {
+				t.Errorf("the listener responded %q, want an empty body", responseBody)
 			}
 		})
 	}
 }
 
-func TestTheListenerCountsWhatItAnswered(t *testing.T) {
+func TestTheListenerCountsEachRequestByItsResult(t *testing.T) {
 	hooks := testWebhook(t, io.Discard)
 	webhookSecret(t, hooks, "sites", "x-webhook", "s")
 	followingVolume(t, hooks, "x", "sites", map[string]string{
@@ -376,19 +372,20 @@ func TestTheListenerCountsWhatItAnswered(t *testing.T) {
 	for result, want := range map[string]float64{
 		resultAccepted: 1, resultUnauthenticated: 1, resultMalformed: 1,
 	} {
-		if got := webhookCounter(t, hooks.readings, "git_csi_webhook_requests_total", result); got != want {
+		if got := webhookCounter(t, hooks.metrics, "git_csi_webhook_requests_total", result); got != want {
 			t.Errorf("git_csi_webhook_requests_total{result=%q} reads %v, want %v", result, got, want)
 		}
 	}
-	if got := webhookCounter(t, hooks.readings, "git_csi_webhook_marked_total", ""); got != 1 {
+	if got := webhookCounter(t, hooks.metrics, "git_csi_webhook_marked_total", ""); got != 1 {
 		t.Errorf("git_csi_webhook_marked_total reads %v, want 1", got)
 	}
 }
 
-// webhookCounter is what one of the controller's counters reads.
-func webhookCounter(t *testing.T, readings *metrics, name, result string) float64 {
+// webhookCounter returns the value of the counter with the given result
+// label, or 0 when it has none.
+func webhookCounter(t *testing.T, registry *metrics, name, result string) float64 {
 	t.Helper()
-	families, err := readings.registry.Gather()
+	families, err := registry.registry.Gather()
 	if err != nil {
 		t.Fatalf("gathering the metrics: %v", err)
 	}
@@ -436,25 +433,25 @@ func TestTheSecretIsReadOnceInsideTheWindow(t *testing.T) {
 	}
 }
 
-func TestNewWebhookTakesTheAddressItIsGiven(t *testing.T) {
+func TestNewWebhookListensOnTheAddressItIsGiven(t *testing.T) {
 	logs := &logbook{}
 	logger := slog.New(slog.NewTextHandler(logs, nil))
 
 	none, err := newWebhook(&config{}, newMetrics(), logger)
 	if err != nil || none.listener != nil {
-		t.Errorf("newWebhook answered %v, %v, want no listener and no error", none.listener, err)
+		t.Errorf("newWebhook returned %v, %v, want no listener and no error", none.listener, err)
 	}
 
-	taken, err := newWebhook(&config{webhook: "127.0.0.1:0"}, newMetrics(), logger)
+	bound, err := newWebhook(&config{webhook: "127.0.0.1:0"}, newMetrics(), logger)
 	if err != nil {
-		t.Fatalf("newWebhook: %v", err)
+		t.Fatalf("creating the webhook: %v", err)
 	}
-	if err := taken.listener.Close(); err != nil {
+	if err := bound.listener.Close(); err != nil {
 		t.Fatalf("closing the listener: %v", err)
 	}
 
 	if _, err := newWebhook(&config{webhook: "127.0.0.1:-1"}, newMetrics(), logger); err == nil {
-		t.Error("newWebhook answered no error for an address it cannot take")
+		t.Error("newWebhook returned no error for an address it cannot take")
 	}
 }
 
@@ -462,7 +459,7 @@ func TestTheListenerServesUntilTheRunEnds(t *testing.T) {
 	hooks := testWebhook(t, io.Discard)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("listen: %v", err)
+		t.Fatalf("opening the listener: %v", err)
 	}
 	hooks.listener = listener
 	ctx, stop := context.WithCancel(t.Context())
@@ -474,7 +471,7 @@ func TestTheListenerServesUntilTheRunEnds(t *testing.T) {
 
 	code, _ := post(t, "http://"+listener.Addr().String(), "/", nil, "")
 	if code != http.StatusUnauthorized {
-		t.Errorf("the listener answered %d, want 401", code)
+		t.Errorf("the listener responded %d, want 401", code)
 	}
 
 	stop()
@@ -490,7 +487,7 @@ func TestAWebhookListenerThatStopsOnItsOwnIsReported(t *testing.T) {
 	hooks := testWebhook(t, logs)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("listen: %v", err)
+		t.Fatalf("opening the listener: %v", err)
 	}
 	if err := listener.Close(); err != nil {
 		t.Fatalf("closing the listener: %v", err)
@@ -499,7 +496,7 @@ func TestAWebhookListenerThatStopsOnItsOwnIsReported(t *testing.T) {
 
 	hooks.serve(t.Context())
 
-	if !strings.Contains(logs.String(), "the webhook listener stopped") {
+	if !strings.Contains(logs.String(), "The webhook listener stopped") {
 		t.Errorf("the log is %q, want the listener that stopped in it", logs)
 	}
 }
@@ -510,21 +507,21 @@ func TestTheControllerReadsItsOwnCredentials(t *testing.T) {
 	if clusterClient(logger, func() (*rest.Config, error) {
 		return &rest.Config{Host: "https://10.43.0.1:443"}, nil
 	}) == nil {
-		t.Error("clusterClient answered no client for a cluster it can reach")
+		t.Error("clusterClient returned no client for a cluster it can reach")
 	}
 	if clusterClient(logger, func() (*rest.Config, error) {
 		return nil, errors.New("not in a cluster")
 	}) != nil {
-		t.Error("clusterClient answered a client with no cluster")
+		t.Error("clusterClient returned a client with no cluster")
 	}
 	if clusterClient(logger, func() (*rest.Config, error) {
 		return &rest.Config{Host: "https://10.43.0.1:443",
 			ExecProvider: &api.ExecConfig{},
 			AuthProvider: &api.AuthProviderConfig{Name: "gcp"}}, nil
 	}) != nil {
-		t.Error("clusterClient answered a client for a configuration client-go refuses")
+		t.Error("clusterClient returned a client for a configuration client-go refuses")
 	}
-	if !strings.Contains(logs.String(), "no webhook") {
+	if !strings.Contains(logs.String(), "The webhook has no cluster client") {
 		t.Errorf("the log is %q, want the missing cluster in it", logs)
 	}
 }
@@ -544,8 +541,8 @@ func TestTwoPushesInOneSecondWriteTwoDemands(t *testing.T) {
 		t.Fatalf("marking the second push: %v", err)
 	}
 
-	// The same value writes no change, so the watch sends no event and
-	// the second push is not pulled.
+	// A patch with the same value does not change the object, so the
+	// node's watch would receive no event for the second push.
 	if second := demandedAt(t, hooks, "franchises"); second == first {
 		t.Errorf("both pushes wrote %q, want two values", first)
 	}

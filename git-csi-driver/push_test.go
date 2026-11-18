@@ -11,20 +11,21 @@ import (
 	"time"
 )
 
-// pushedVolume is an armed volume against a bare remote, with one commit
-// of its own that the remote does not hold.
-func pushedVolume(t *testing.T, logs io.Writer, parameters map[string]string) (*node, *volume, string) {
+// committedVolume returns a node, a writeable volume whose claim's class
+// has the parameters, and the path of the volume's bare remote. The
+// volume has one commit that the remote does not have.
+func committedVolume(t *testing.T, logs io.Writer, parameters map[string]string) (*node, *volume, string) {
 	t.Helper()
 	remote := bareRemote(t, map[string]string{"a.txt": "one"})
-	answering, _ := testNode(t, logs)
-	held := armedVolume(t, answering, "config", fileURL(remote), parameters)
-	unwatched(t, answering, held)
-	writeFiles(t, held.tree, map[string]string{"one.yaml": "1"})
-	answering.commit(t.Context(), held, held.policyNow())
-	return answering, held, remote
+	n, _ := testNode(t, logs)
+	vol := armedVolume(t, n, "config", fileURL(remote), parameters)
+	unwatched(t, n, vol)
+	writeFiles(t, vol.tree, map[string]string{"one.yaml": "1"})
+	n.commit(t.Context(), vol, vol.policyNow())
+	return n, vol, remote
 }
 
-func TestThePolicySaysWhenToPush(t *testing.T) {
+func TestPushDueFollowsTheQuiesceAndTheMaximumLatency(t *testing.T) {
 	now := time.Now()
 	rested := policy{quiesce: 30 * time.Second, maxLatency: 5 * time.Minute}
 	never := policy{quiesce: 30 * time.Second}
@@ -61,7 +62,7 @@ func TestThePolicySaysWhenToPush(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if got := pushDue(&c.rules, c.unpushed, c.oldest, now, c.quiet); got != c.want {
-				t.Errorf("pushDue answered %v, want %v", got, c.want)
+				t.Errorf("pushDue returned %v, want %v", got, c.want)
 			}
 		})
 	}
@@ -69,111 +70,112 @@ func TestThePolicySaysWhenToPush(t *testing.T) {
 
 func TestACommitTimeIsWholeSeconds(t *testing.T) {
 	if got := commitTime("1757030400"); !got.Equal(time.Unix(1757030400, 0)) {
-		t.Errorf("commitTime answered %s", got)
+		t.Errorf("commitTime returned %s, want 1757030400 seconds after the epoch", got)
 	}
 	if got := commitTime("recently"); !got.IsZero() {
-		t.Errorf("commitTime answered %s, want no time", got)
+		t.Errorf("commitTime returned %s, want no time", got)
 	}
 }
 
-func TestTheUnpushedCommitsAreTheOnesAfterTheMark(t *testing.T) {
+func TestTheUnpushedCommitsAreTheOnesAfterPushedRef(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, held, _ := pushedVolume(t, io.Discard, nil)
-		count, oldest, err := held.work.unpushed(t.Context(), "main")
+		n, vol, _ := committedVolume(t, io.Discard, nil)
+		count, oldest, err := vol.work.unpushed(t.Context(), "main")
 		if err != nil {
 			t.Fatalf("unpushed: %v", err)
 		}
 		if count != 1 {
-			t.Errorf("the work tree holds %d unpushed commits, want 1", count)
+			t.Errorf("the work tree has %d unpushed commits, want 1", count)
 		}
 		if oldest.IsZero() {
-			t.Error("the oldest unpushed commit names no time")
+			t.Error("the oldest unpushed commit has no time, want one")
 		}
-		answering.push(t.Context(), held)
-		count, _, err = held.work.unpushed(t.Context(), "main")
+		n.push(t.Context(), vol)
+		count, _, err = vol.work.unpushed(t.Context(), "main")
 		if err != nil {
 			t.Fatalf("unpushed: %v", err)
 		}
 		if count != 0 {
-			t.Errorf("the work tree holds %d unpushed commits after a push, want 0", count)
+			t.Errorf("the work tree has %d unpushed commits after a push, want 0", count)
 		}
 	})
 }
 
 func TestAPushSendsTheBranchAndTheMetadataRef(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, held, remote := pushedVolume(t, io.Discard, nil)
-		answering.push(t.Context(), held)
+		n, vol, remote := committedVolume(t, io.Discard, nil)
+		n.push(t.Context(), vol)
 
 		if got := strings.TrimSpace(git(t, remote, "log", "--format=%s", "-1", "main")); got != "Update 1 paths" {
 			t.Errorf("the remote's main is at %q, want the driver's commit", got)
 		}
 		if got := strings.TrimSpace(git(t, remote, "rev-parse", "--verify", metadataRef)); got == "" {
-			t.Error("the remote holds no metadata ref")
+			t.Error("the remote has no metadata ref, want one")
 		}
-		pushed := eventsWithReason(t, answering, reasonPushed)
+		pushed := eventsWithReason(t, n, reasonPushed)
 		if len(pushed) != 2 {
 			t.Fatalf("the push posted %v, want one Event on the pod and one on the claim", pushed)
 		}
-		if pushed[0].Message != "pushed 1 commits to main at "+
-			short(strings.TrimSpace(gitIn(t, held.work, "rev-parse", "HEAD"))) {
-			t.Errorf("the event says %q", pushed[0].Message)
+		if pushed[0].Message != "Pushed 1 commits to main at "+
+			short(strings.TrimSpace(gitIn(t, vol.work, "rev-parse", "HEAD"))) {
+			t.Errorf("the pushed event message is %q, want the commit count, the branch, and the short commit", pushed[0].Message)
 		}
-		answering.readings.record(held)
-		if got, found := gaugeOf(t, answering.readings,
+		n.metrics.record(vol)
+		if got, found := gaugeOf(t, n.metrics,
 			"git_csi_unpushed_commits", "home", "config"); !found || got != 0 {
 			t.Errorf("the gauge reports %v unpushed commits, want 0", got)
 		}
-		if _, found := gaugeOf(t, answering.readings,
+		if _, found := gaugeOf(t, n.metrics,
 			"git_csi_last_push_timestamp_seconds", "home", "config"); !found {
-			t.Error("the gauge names no time of the last push")
+			t.Error("the gauge has no last push time, want one")
 		}
 	})
 }
 
 func TestAVolumeThatHasNeverPushedReportsNoTime(t *testing.T) {
-	readings := newMetrics()
-	readings.record(reported(claimReference{namespace: "home", name: "config"}, true, 0))
-	if _, found := gaugeOf(t, readings,
+	registry := newMetrics()
+	registry.record(reported(claimReference{namespace: "home", name: "config"}, true, 0))
+	if _, found := gaugeOf(t, registry,
 		"git_csi_last_push_timestamp_seconds", "home", "config"); found {
-		t.Error("a volume that has never pushed names a time")
+		t.Error("a volume that has never pushed reports a last push time, want none")
 	}
 }
 
-func TestAPushThatFailsIsTheConditionUntilOneWorks(t *testing.T) {
+func TestAFailedPushStaysInTheHealthReportUntilAPushSucceeds(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		logs := &logbook{}
-		answering, held, remote := pushedVolume(t, logs, nil)
+		n, vol, remote := committedVolume(t, logs, nil)
 		if err := os.RemoveAll(remote); err != nil {
 			t.Fatalf("removing the remote: %v", err)
 		}
 
-		answering.push(t.Context(), held)
-		abnormal, message := held.report()
+		n.push(t.Context(), vol)
+		abnormal, message := vol.health()
 		if !abnormal || !strings.Contains(message, "push --quiet") {
-			t.Errorf("the condition is %v, %q, want the failed push", abnormal, message)
+			t.Errorf("the health report is %v, %q, want the failed push", abnormal, message)
 		}
-		if got := len(eventsWithReason(t, answering, reasonPushFailed)); got != 2 {
+		if got := len(eventsWithReason(t, n, reasonPushFailed)); got != 2 {
 			t.Fatalf("the failure posted %d events, want one on the pod and one on the claim", got)
 		}
-		answering.push(t.Context(), held)
-		if got := len(eventsWithReason(t, answering, reasonPushFailed)); got != 2 {
+		n.push(t.Context(), vol)
+		if got := len(eventsWithReason(t, n, reasonPushFailed)); got != 2 {
 			t.Errorf("a second failure posted %d events, want the two of the first", got)
 		}
-		counted, found := counterOf(t, answering.readings, "git_csi_push_failures_total", "home", "config")
-		if !found || counted != 2 {
-			t.Errorf("the counter reports %v failures, want 2", counted)
+		count, found := counterOf(t, n.metrics, "git_csi_push_failures_total", "home", "config")
+		if !found || count != 2 {
+			t.Errorf("the counter reports %v failures, want 2", count)
 		}
-		if !strings.Contains(logs.String(), "the push failed") {
+		if !strings.Contains(logs.String(), "The push to the remote did not complete") {
 			t.Errorf("the log is %q, want the failed push in it", logs)
 		}
 	})
 }
 
-// counterOf is what one counter reads for the claim.
-func counterOf(t *testing.T, readings *metrics, name, namespace, claim string) (float64, bool) {
+// counterOf returns the value of one counter for the claim, and whether
+// the counter has a series for it.
+func counterOf(t *testing.T, registry *metrics, name, namespace, claim string) (float64, bool) {
 	t.Helper()
-	families, err := readings.registry.Gather()
+	families, err := registry.registry.Gather()
 	if err != nil {
 		t.Fatalf("gathering the metrics: %v", err)
 	}
@@ -196,52 +198,52 @@ func counterOf(t *testing.T, readings *metrics, name, namespace, claim string) (
 
 func TestAPushWithNoCredentialItCanWriteFails(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, held, _ := pushedVolume(t, io.Discard, nil)
-		held.credentials = &credentials{privateKey: "a key"}
-		held.directory = filepath.Join(t.TempDir(), "gone")
+		n, vol, _ := committedVolume(t, io.Discard, nil)
+		vol.credentials = &credentials{privateKey: "a key"}
+		vol.directory = filepath.Join(t.TempDir(), "gone")
 
-		answering.push(t.Context(), held)
-		abnormal, message := held.report()
+		n.push(t.Context(), vol)
+		abnormal, message := vol.health()
 		if !abnormal || message == "" {
-			t.Errorf("the condition is %v, %q, want the failure", abnormal, message)
+			t.Errorf("the health report is %v, %q, want the failure", abnormal, message)
 		}
 	})
 }
 
 func TestAPushReportsWhatItCannotRead(t *testing.T) {
 	for _, c := range []struct {
-		name  string
-		stand func(t *testing.T, held *volume)
-		says  string
+		name        string
+		setup       func(t *testing.T, vol *volume)
+		wantMessage string
 	}{
 		{
 			name: "a work tree whose commits it cannot count",
-			stand: func(t *testing.T, held *volume) {
-				if err := os.RemoveAll(held.work.gitDir); err != nil {
+			setup: func(t *testing.T, vol *volume) {
+				if err := os.RemoveAll(vol.work.gitDir); err != nil {
 					t.Fatalf("removing the git directory: %v", err)
 				}
 			},
-			says: "the unpushed commits were not counted",
+			wantMessage: "The work tree's unpushed commits were not counted",
 		},
 		{
-			name: "a mark it cannot move",
-			stand: func(t *testing.T, held *volume) {
-				if err := os.MkdirAll(filepath.Join(held.work.gitDir,
+			name: "a pushedRef it cannot update",
+			setup: func(t *testing.T, vol *volume) {
+				if err := os.MkdirAll(filepath.Join(vol.work.gitDir,
 					filepath.FromSlash(pushedRef)+".lock"), 0o755); err != nil {
 					t.Fatalf("making the lock directory: %v", err)
 				}
 			},
-			says: "the pushed mark did not move",
+			wantMessage: "The work tree's pushedRef was not updated",
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				logs := &logbook{}
-				answering, held, _ := pushedVolume(t, logs, nil)
-				c.stand(t, held)
-				answering.push(t.Context(), held)
-				if !strings.Contains(logs.String(), c.says) {
-					t.Errorf("the log is %q, want %q in it", logs, c.says)
+				n, vol, _ := committedVolume(t, logs, nil)
+				c.setup(t, vol)
+				n.push(t.Context(), vol)
+				if !strings.Contains(logs.String(), c.wantMessage) {
+					t.Errorf("the log is %q, want %q in it", logs, c.wantMessage)
 				}
 			})
 		})
@@ -251,12 +253,12 @@ func TestAPushReportsWhatItCannotRead(t *testing.T) {
 func TestAPushReportsAHeadItCannotRead(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		logs := &logbook{}
-		answering, held, _ := pushedVolume(t, logs, nil)
-		if err := os.Remove(filepath.Join(held.work.gitDir, "HEAD")); err != nil {
+		n, vol, _ := committedVolume(t, logs, nil)
+		if err := os.Remove(filepath.Join(vol.work.gitDir, "HEAD")); err != nil {
 			t.Fatalf("removing HEAD: %v", err)
 		}
-		answering.pushNow(t.Context(), held, 1)
-		if !strings.Contains(logs.String(), "the tree's commit was not read") {
+		n.pushNow(t.Context(), vol, 1)
+		if !strings.Contains(logs.String(), "The work tree's HEAD commit was not read") {
 			t.Errorf("the log is %q, want the unreadable commit in it", logs)
 		}
 	})
@@ -264,18 +266,18 @@ func TestAPushReportsAHeadItCannotRead(t *testing.T) {
 
 func TestAnUnarmedVolumePushesNothingOnTheTimer(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, held, remote := pushedVolume(t, io.Discard, nil)
-		answering.pushIfDue(t.Context(), held, nil, time.Hour)
+		n, vol, remote := committedVolume(t, io.Discard, nil)
+		n.pushIfDue(t.Context(), vol, nil, time.Hour)
 		if got := strings.TrimSpace(git(t, remote, "log", "--format=%s", "-1", "main")); got != "one" {
 			t.Errorf("the remote's main is at %q, want the commit it started with", got)
 		}
 	})
 }
 
-func TestTheTimerPushesWhenTheTreeHasRested(t *testing.T) {
+func TestTheTimerPushesAfterTheQuiesce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, held, remote := pushedVolume(t, io.Discard, nil)
-		answering.pushIfDue(t.Context(), held, held.policyNow(), time.Hour)
+		n, vol, remote := committedVolume(t, io.Discard, nil)
+		n.pushIfDue(t.Context(), vol, vol.policyNow(), time.Hour)
 		if got := strings.TrimSpace(git(t, remote, "log", "--format=%s", "-1", "main")); got != "Update 1 paths" {
 			t.Errorf("the remote's main is at %q, want the driver's commit", got)
 		}
@@ -284,8 +286,8 @@ func TestTheTimerPushesWhenTheTreeHasRested(t *testing.T) {
 
 func TestTheTimerWaitsWhileTheTreeIsWritten(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, held, remote := pushedVolume(t, io.Discard, nil)
-		answering.pushIfDue(t.Context(), held, held.policyNow(), time.Second)
+		n, vol, remote := committedVolume(t, io.Discard, nil)
+		n.pushIfDue(t.Context(), vol, vol.policyNow(), time.Second)
 		if got := strings.TrimSpace(git(t, remote, "log", "--format=%s", "-1", "main")); got != "one" {
 			t.Errorf("the remote's main is at %q, want the commit it started with", got)
 		}
@@ -295,19 +297,19 @@ func TestTheTimerWaitsWhileTheTreeIsWritten(t *testing.T) {
 func TestTheTimerReportsAWorkTreeItCannotCount(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		logs := &logbook{}
-		answering, held, _ := pushedVolume(t, logs, nil)
-		if err := os.RemoveAll(held.work.gitDir); err != nil {
+		n, vol, _ := committedVolume(t, logs, nil)
+		if err := os.RemoveAll(vol.work.gitDir); err != nil {
 			t.Fatalf("removing the git directory: %v", err)
 		}
-		answering.pushIfDue(t.Context(), held, held.policyNow(), time.Hour)
-		if !strings.Contains(logs.String(), "the unpushed commits were not counted") {
+		n.pushIfDue(t.Context(), vol, vol.policyNow(), time.Hour)
+		if !strings.Contains(logs.String(), "The work tree's unpushed commits were not counted") {
 			t.Errorf("the log is %q, want the failure in it", logs)
 		}
 	})
 }
 
 func TestAnOverdueCommitIsAbnormal(t *testing.T) {
-	held := &volume{
+	vol := &volume{
 		attributes: &attributes{ref: "main"},
 		kind:       writeableVolume,
 		armed:      true,
@@ -315,51 +317,51 @@ func TestAnOverdueCommitIsAbnormal(t *testing.T) {
 		unpushed:   3,
 		oldest:     time.Now().Add(-time.Hour),
 	}
-	abnormal, message := held.report()
+	abnormal, message := vol.health()
 	if !abnormal || message != "3 unpushed commits, the oldest older than 5m0s" {
-		t.Errorf("the condition is %v, %q, want the overdue commits", abnormal, message)
+		t.Errorf("the health report is %v, %q, want the overdue commits", abnormal, message)
 	}
 }
 
-func TestARejectedPushRebasesAndLandsOnTheRef(t *testing.T) {
+func TestARejectedPushIsRebasedAndPushedToTheRef(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, held, remote := pushedVolume(t, io.Discard, nil)
+		n, vol, remote := committedVolume(t, io.Discard, nil)
 		upstream := remoteCommit(t, remote, map[string]string{"maps/m.yaml": "m"})
 
-		answering.push(t.Context(), held)
+		n.push(t.Context(), vol)
 
 		want := map[string]string{"a.txt": "one", "one.yaml": "1", "maps/m.yaml": "m"}
-		if got := readTree(t, held.tree); !sameTree(got, want) {
-			t.Errorf("the tree holds %v, want %v", got, want)
+		if got := readTree(t, vol.tree); !sameTree(got, want) {
+			t.Errorf("the tree contains %v, want %v", got, want)
 		}
 		got := git(t, remote, "ls-tree", "-r", "--name-only", "main")
 		if !strings.Contains(got, "one.yaml") || !strings.Contains(got, "maps/m.yaml") {
-			t.Errorf("main on the remote holds %q, want both writers' files", got)
+			t.Errorf("main on the remote has %q, want both writers' files", got)
 		}
 		if branches := branchesOn(t, remote); strings.Contains(branches, "main.config") {
-			t.Errorf("the remote holds %q, want no side branch", branches)
+			t.Errorf("the remote has %q, want no side branch", branches)
 		}
-		if branch := held.divergedFrom(); branch != "" {
+		if branch := vol.sideBranch(); branch != "" {
 			t.Errorf("the volume pushes to %q, want the ref", branch)
 		}
-		rebased := eventsWithReason(t, answering, reasonRebased)
+		rebased := eventsWithReason(t, n, reasonRebased)
 		if len(rebased) != 2 {
 			t.Fatalf("the rebase posted %v, want one Event on the pod and one on the claim", rebased)
 		}
-		message := fmt.Sprintf("rebased 1 commits onto %s and pushed to main", short(upstream))
+		message := fmt.Sprintf("Rebased 1 commits onto %s and pushed them to main", short(upstream))
 		if rebased[0].Message != message {
-			t.Errorf("the event says %q, want %q", rebased[0].Message, message)
+			t.Errorf("the Event message is %q, want %q", rebased[0].Message, message)
 		}
-		head := held.work.refCommit(t.Context(), "HEAD")
-		if mark := held.work.refCommit(t.Context(), pushedRef); mark != head {
-			t.Errorf("the pushed mark is at %s, want the rebased head %s", mark, head)
+		head := vol.work.refCommit(t.Context(), "HEAD")
+		if mark := vol.work.refCommit(t.Context(), pushedRef); mark != head {
+			t.Errorf("pushedRef is at %s, want the rebased head %s", mark, head)
 		}
 	})
 }
 
-// declineHook is a forge that refuses every push to the ref and
-// records the attempt, which is what a writer that loses the race
-// every time meets.
+// declineHook is a pre-receive hook that rejects every push to main and
+// appends each attempt to a file. It simulates a remote where a writer
+// loses the race on every push.
 const declineHook = `#!/bin/sh
 while read -r old new ref; do
 	if [ "$ref" = refs/heads/main ]; then
@@ -371,8 +373,8 @@ done
 exit 0
 `
 
-// declineMain installs the hook on the remote and answers the file
-// the refused pushes are counted in.
+// declineMain installs declineHook on the remote and returns the path of
+// the file that records the rejected pushes.
 func declineMain(t *testing.T, remote string) string {
 	t.Helper()
 	declined := filepath.Join(t.TempDir(), "declined")
@@ -383,7 +385,7 @@ func declineMain(t *testing.T, remote string) string {
 	return declined
 }
 
-// acceptMain removes the hook, so the forge accepts a push again.
+// acceptMain removes the hook, so the remote accepts pushes again.
 func acceptMain(t *testing.T, remote string) {
 	t.Helper()
 	if err := os.Remove(filepath.Join(remote, "hooks", "pre-receive")); err != nil {
@@ -391,8 +393,8 @@ func acceptMain(t *testing.T, remote string) {
 	}
 }
 
-// refused counts the pushes to the ref the forge declined.
-func refused(t *testing.T, declined string) int {
+// rejectedPushes counts the pushes that declineHook rejected.
+func rejectedPushes(t *testing.T, declined string) int {
 	t.Helper()
 	content, err := os.ReadFile(declined)
 	if err != nil {
@@ -401,84 +403,84 @@ func refused(t *testing.T, declined string) int {
 	return len(strings.Fields(strings.TrimSpace(string(content))))
 }
 
-func TestThreeRejectedPushesInARowTakeTheSideBranch(t *testing.T) {
+func TestThreeRejectedPushesInARowDivergeToTheSideBranch(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, held, remote := pushedVolume(t, io.Discard, nil)
+		n, vol, remote := committedVolume(t, io.Discard, nil)
 		declined := declineMain(t, remote)
 
-		answering.push(t.Context(), held)
+		n.push(t.Context(), vol)
 
-		if branch := held.divergedFrom(); branch != "main.config" {
+		if branch := vol.sideBranch(); branch != "main.config" {
 			t.Errorf("the volume pushes to %q, want main.config", branch)
 		}
 		if branches := branchesOn(t, remote); !strings.Contains(branches, "main.config") {
-			t.Errorf("the remote holds %q, want the side branch on it", branches)
+			t.Errorf("the remote has %q, want the side branch on it", branches)
 		}
-		if tried := refused(t, declined); tried != 1+rebaseAttempts {
+		if tried := rejectedPushes(t, declined); tried != 1+rebaseAttempts {
 			t.Errorf("the forge refused %d pushes, want %d", tried, 1+rebaseAttempts)
 		}
-		if rebased := eventsWithReason(t, answering, reasonRebased); len(rebased) != 0 {
-			t.Errorf("the volume posted %v, want no rebase it never landed", rebased)
+		if rebased := eventsWithReason(t, n, reasonRebased); len(rebased) != 0 {
+			t.Errorf("the volume posted %v, want no rebase Event for a push that did not complete", rebased)
 		}
 	})
 }
 
-func TestARebaseThatConflictsAfterARejectedPushTakesTheSideBranch(t *testing.T) {
+func TestARebaseThatConflictsAfterARejectedPushDivergesToTheSideBranch(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, held, remote := pushedVolume(t, io.Discard, nil)
+		n, vol, remote := committedVolume(t, io.Discard, nil)
 		remoteCommit(t, remote, map[string]string{"one.yaml": "the forge wrote this"})
 
-		answering.push(t.Context(), held)
+		n.push(t.Context(), vol)
 
 		want := map[string]string{"a.txt": "one", "one.yaml": "1"}
-		if got := readTree(t, held.tree); !sameTree(got, want) {
-			t.Errorf("the tree holds %v, want %v", got, want)
+		if got := readTree(t, vol.tree); !sameTree(got, want) {
+			t.Errorf("the tree contains %v, want %v", got, want)
 		}
-		if branch := held.divergedFrom(); branch != "main.config" {
+		if branch := vol.sideBranch(); branch != "main.config" {
 			t.Errorf("the volume pushes to %q, want main.config", branch)
 		}
-		if _, err := os.Stat(filepath.Join(held.directory, scratchTree)); !os.IsNotExist(err) {
-			t.Errorf("the volume directory holds a scratch work tree: %v", err)
+		if _, err := os.Stat(filepath.Join(vol.directory, scratchTree)); !os.IsNotExist(err) {
+			t.Errorf("the volume directory has a scratch work tree: %v", err)
 		}
 	})
 }
 
-func TestAPathThePodAndUpstreamBothWroteTakesTheSideBranch(t *testing.T) {
+func TestAPathThePodAndUpstreamBothWroteDivergesToTheSideBranch(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, held, remote := pushedVolume(t, io.Discard, nil)
+		n, vol, remote := committedVolume(t, io.Discard, nil)
 		remoteCommit(t, remote, map[string]string{"a.txt": "the forge wrote this"})
-		writeFiles(t, held.tree, map[string]string{"a.txt": "the pod is writing"})
+		writeFiles(t, vol.tree, map[string]string{"a.txt": "the pod is writing"})
 
-		answering.push(t.Context(), held)
+		n.push(t.Context(), vol)
 
 		want := map[string]string{"a.txt": "the pod is writing", "one.yaml": "1"}
-		if got := readTree(t, held.tree); !sameTree(got, want) {
-			t.Errorf("the tree holds %v, want %v", got, want)
+		if got := readTree(t, vol.tree); !sameTree(got, want) {
+			t.Errorf("the tree contains %v, want %v", got, want)
 		}
-		if branch := held.divergedFrom(); branch != "main.config" {
+		if branch := vol.sideBranch(); branch != "main.config" {
 			t.Errorf("the volume pushes to %q, want main.config", branch)
 		}
 		if got := git(t, remote, "ls-tree", "-r", "--name-only", "main.config"); !strings.Contains(got, "one.yaml") {
-			t.Errorf("the side branch holds %q, want the pod's work on it", got)
+			t.Errorf("the side branch has %q, want the pod's work on it", got)
 		}
 	})
 }
 
 func TestAPathUpstreamDidNotWriteSurvivesTheRebase(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, held, remote := pushedVolume(t, io.Discard, nil)
+		n, vol, remote := committedVolume(t, io.Discard, nil)
 		remoteCommit(t, remote, map[string]string{"maps/m.yaml": "m"})
-		writeFiles(t, held.tree, map[string]string{"draft.yaml": "unsaved"})
+		writeFiles(t, vol.tree, map[string]string{"draft.yaml": "unsaved"})
 
-		answering.push(t.Context(), held)
+		n.push(t.Context(), vol)
 
 		want := map[string]string{
 			"a.txt": "one", "one.yaml": "1", "maps/m.yaml": "m", "draft.yaml": "unsaved",
 		}
-		if got := readTree(t, held.tree); !sameTree(got, want) {
-			t.Errorf("the tree holds %v, want %v", got, want)
+		if got := readTree(t, vol.tree); !sameTree(got, want) {
+			t.Errorf("the tree contains %v, want %v", got, want)
 		}
-		if branch := held.divergedFrom(); branch != "" {
+		if branch := vol.sideBranch(); branch != "" {
 			t.Errorf("the volume pushes to %q, want the ref", branch)
 		}
 	})
@@ -486,22 +488,22 @@ func TestAPathUpstreamDidNotWriteSurvivesTheRebase(t *testing.T) {
 
 func TestARetryThatCannotReachTheRemoteDoesNotRebase(t *testing.T) {
 	for _, c := range []struct {
-		name  string
-		stand func(t *testing.T, answering *node, held *volume, remote string)
-		says  string
+		name        string
+		setup       func(t *testing.T, n *node, vol *volume, remote string)
+		wantMessage string
 	}{
 		{
 			name: "a credential it cannot write",
-			stand: func(_ *testing.T, _ *node, held *volume, _ string) {
-				held.credentials = &credentials{privateKey: "a key"}
-				held.directory = filepath.Join(held.directory, "gone")
+			setup: func(_ *testing.T, _ *node, vol *volume, _ string) {
+				vol.credentials = &credentials{privateKey: "a key"}
+				vol.directory = filepath.Join(vol.directory, "gone")
 			},
-			says: "the ref was not fetched",
+			wantMessage: "The ref was not fetched from the remote",
 		},
 		{
 			name: "a fetch the store cannot hold",
-			stand: func(t *testing.T, answering *node, held *volume, _ string) {
-				where := filepath.Join(answering.store.repository(held.attributes.url).dir,
+			setup: func(t *testing.T, n *node, vol *volume, _ string) {
+				where := filepath.Join(n.store.repository(vol.attributes.url).dir,
 					"FETCH_HEAD")
 				if err := os.Remove(where); err != nil {
 					t.Fatalf("removing the fetch record: %v", err)
@@ -510,46 +512,46 @@ func TestARetryThatCannotReachTheRemoteDoesNotRebase(t *testing.T) {
 					t.Fatalf("making the fetch directory: %v", err)
 				}
 			},
-			says: "the ref was not fetched",
+			wantMessage: "The ref was not fetched from the remote",
 		},
 		{
 			name: "a record it cannot put on top of the remote's",
-			stand: func(t *testing.T, _ *node, held *volume, remote string) {
+			setup: func(t *testing.T, _ *node, vol *volume, remote string) {
 				remoteRecord(t, remote, recordLine(0o600, "maps/secret.yaml"))
-				if err := os.MkdirAll(filepath.Join(held.work.gitDir,
+				if err := os.MkdirAll(filepath.Join(vol.work.gitDir,
 					filepath.FromSlash(metadataRef)+".lock"), 0o755); err != nil {
 					t.Fatalf("making the lock directory: %v", err)
 				}
 			},
-			says: "the record was not put on top of the remote's",
+			wantMessage: "The metadata record was not rebased onto the remote's record",
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				logs := &logbook{}
-				answering, held, remote := pushedVolume(t, logs, nil)
+				n, vol, remote := committedVolume(t, logs, nil)
 				remoteCommit(t, remote, map[string]string{"maps/m.yaml": "m"})
-				c.stand(t, answering, held, remote)
+				c.setup(t, n, vol, remote)
 
-				if _, landed := answering.rebaseAndRetry(t.Context(), held, 1); landed {
-					t.Error("the retry answered a push that landed")
+				if _, pushed := n.rebaseAndRetry(t.Context(), vol, 1); pushed {
+					t.Error("the retry reported a push that completed")
 				}
-				if !strings.Contains(logs.String(), c.says) {
-					t.Errorf("the log is %q, want %q in it", logs, c.says)
+				if !strings.Contains(logs.String(), c.wantMessage) {
+					t.Errorf("the log is %q, want %q in it", logs, c.wantMessage)
 				}
 			})
 		})
 	}
 }
 
-// recordLine is one line of a record, in the format the driver
-// writes and reads.
+// recordLine formats one line of the metadata record, as the driver
+// writes and reads it.
 func recordLine(mode int, path string) string {
 	return fmt.Sprintf("%04o %d %d %s", mode, os.Getuid(), os.Getgid(), path)
 }
 
-// remoteRecord puts another writer's record on the remote's
-// metadata ref, which is what that writer's push leaves there.
+// remoteRecord creates a metadata commit on the remote, as another
+// writer's push would, and returns its hash.
 func remoteRecord(t *testing.T, remote string, lines ...string) string {
 	t.Helper()
 	clone := t.TempDir()
@@ -564,7 +566,7 @@ func remoteRecord(t *testing.T, remote string, lines ...string) string {
 	return strings.TrimSpace(git(t, remote, "rev-parse", metadataRef))
 }
 
-// modeOf is the mode one path in the tree carries now.
+// modeOf returns the current file mode of path in the tree.
 func modeOf(t *testing.T, tree, path string) os.FileMode {
 	t.Helper()
 	info, err := os.Stat(filepath.Join(tree, filepath.FromSlash(path)))
@@ -574,10 +576,10 @@ func modeOf(t *testing.T, tree, path string) os.FileMode {
 	return info.Mode().Perm()
 }
 
-func TestARebaseTakesUpstreamsModesAndLeavesThePodsOwn(t *testing.T) {
+func TestARebaseAppliesUpstreamModesAndKeepsThePodsModes(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, held, remote := pushedVolume(t, io.Discard, nil)
-		if err := os.Chmod(filepath.Join(held.tree, "one.yaml"), 0o600); err != nil {
+		n, vol, remote := committedVolume(t, io.Discard, nil)
+		if err := os.Chmod(filepath.Join(vol.tree, "one.yaml"), 0o600); err != nil {
 			t.Fatalf("chmod: %v", err)
 		}
 		remoteCommit(t, remote, map[string]string{"maps/secret.yaml": "s"})
@@ -587,33 +589,33 @@ func TestARebaseTakesUpstreamsModesAndLeavesThePodsOwn(t *testing.T) {
 			recordLine(0o700, "maps/storage/"),
 			recordLine(0o700, "one.yaml"))
 
-		answering.push(t.Context(), held)
+		n.push(t.Context(), vol)
 
-		if got := modeOf(t, held.tree, "maps/secret.yaml"); got != 0o600 {
+		if got := modeOf(t, vol.tree, "maps/secret.yaml"); got != 0o600 {
 			t.Errorf("maps/secret.yaml is %v, want the mode upstream recorded", got)
 		}
-		if got := modeOf(t, held.tree, "maps"); got != 0o700 {
+		if got := modeOf(t, vol.tree, "maps"); got != 0o700 {
 			t.Errorf("maps is %v, want the mode upstream recorded", got)
 		}
-		if got := modeOf(t, held.tree, "maps/storage"); got != 0o700 {
+		if got := modeOf(t, vol.tree, "maps/storage"); got != 0o700 {
 			t.Errorf("maps/storage is %v, want the empty directory upstream recorded", got)
 		}
-		if got := modeOf(t, held.tree, "one.yaml"); got != 0o600 {
+		if got := modeOf(t, vol.tree, "one.yaml"); got != 0o600 {
 			t.Errorf("one.yaml is %v, want the mode the pod set", got)
 		}
 	})
 }
 
-func TestAMetadataRefTheRemoteRejectsGoesOnTopOfItAndLands(t *testing.T) {
+func TestAMetadataRefTheRemoteRejectsIsRebasedAndPushed(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, held, remote := pushedVolume(t, io.Discard, nil)
-		if err := os.Chmod(filepath.Join(held.tree, "one.yaml"), 0o600); err != nil {
+		n, vol, remote := committedVolume(t, io.Discard, nil)
+		if err := os.Chmod(filepath.Join(vol.tree, "one.yaml"), 0o600); err != nil {
 			t.Fatalf("chmod: %v", err)
 		}
-		answering.commit(t.Context(), held, held.policyNow())
+		n.commit(t.Context(), vol, vol.policyNow())
 		theirs := remoteRecord(t, remote, recordLine(0o600, "maps/secret.yaml"))
 
-		answering.push(t.Context(), held)
+		n.push(t.Context(), vol)
 
 		if got := strings.TrimSpace(git(t, remote, "log", "--format=%s", "-1", "main")); got != "Update 1 paths" {
 			t.Errorf("the remote's main is at %q, want the driver's commit", got)
@@ -625,13 +627,13 @@ func TestAMetadataRefTheRemoteRejectsGoesOnTopOfItAndLands(t *testing.T) {
 		if !strings.Contains(record, "one.yaml") {
 			t.Errorf("the remote's record is %q, want this volume's own record", record)
 		}
-		if got := len(eventsWithReason(t, answering, reasonPushFailed)); got != 0 {
+		if got := len(eventsWithReason(t, n, reasonPushFailed)); got != 0 {
 			t.Errorf("the push posted %d failures, want none", got)
 		}
-		if got := len(eventsWithReason(t, answering, reasonPushed)); got != 2 {
+		if got := len(eventsWithReason(t, n, reasonPushed)); got != 2 {
 			t.Errorf("the push posted %d events, want one on the pod and one on the claim", got)
 		}
-		if got := len(eventsWithReason(t, answering, reasonRebased)); got != 0 {
+		if got := len(eventsWithReason(t, n, reasonRebased)); got != 0 {
 			t.Errorf("the push posted %d rebases, want none for a push that rebased nothing", got)
 		}
 	})

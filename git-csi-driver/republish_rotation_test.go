@@ -9,93 +9,96 @@ import (
 	"time"
 )
 
-// waitForTrouble waits until the bubble is blocked, and fails unless
-// the volume reports a failed fetch or push.
-func waitForTrouble(t *testing.T, held *volume) {
+// waitForFault waits until every goroutine in the bubble is blocked,
+// then fails the test unless the volume reports a fault.
+func waitForFault(t *testing.T, vol *volume) {
 	t.Helper()
 	synctest.Wait()
-	if _, trouble := held.condition(); trouble == "" {
-		t.Fatal("the volume reports no failure")
+	if _, fault := vol.commitAndFault(); fault == "" {
+		t.Fatal("the volume reports no fault, want one")
 	}
 }
 
 func TestARotatedCredentialFetchesAtOnceAfterAFailedFetch(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, _ := testNode(t, io.Discard)
-		// A failed demand fetches again after a backoff that starts at
-		// --demand-min-interval. An hour leaves the rotation as the only
-		// thing that can fetch again within the test.
-		answering.demandMin = time.Hour
+		n, _ := testNode(t, io.Discard)
+		// With --demand-min-interval at an hour, a new demand cannot
+		// pull during the test, and the retry of the failed fetch waits
+		// maxDemandRetry. The bubble's clock does not reach either, so
+		// only the republish with the new credential can fetch b.txt.
+		n.demandMin = time.Hour
 		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 		staged := readOnlyStage(t, "franchises", fileURL(source), map[string]string{"pull": "on-demand"})
 		staged.Secrets = secretA
-		if _, err := answering.NodeStageVolume(t.Context(), staged); err != nil {
-			t.Fatalf("NodeStageVolume: %v", err)
+		if _, err := n.NodeStageVolume(t.Context(), staged); err != nil {
+			t.Fatalf("staging the volume: %v", err)
 		}
 		request := readOnlyPublish(t, staged, "reader-a")
 		request.Secrets = secretA
-		if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
-			t.Fatalf("NodePublishVolume: %v", err)
+		if _, err := n.NodePublishVolume(t.Context(), request); err != nil {
+			t.Fatalf("publishing the volume: %v", err)
 		}
-		held := resumedVolume(answering, "franchises")
+		vol := resumedVolume(n, "franchises")
 
-		// The remote that is gone stands for a remote that revoked the old
-		// key: the demanded fetch fails, and the loop waits out its backoff.
+		// Moving the remote away makes the demanded fetch fail, the way
+		// it fails when the remote has revoked the old key.
 		away := source + ".away"
 		if err := os.Rename(source, away); err != nil {
 			t.Fatalf("moving the remote away: %v", err)
 		}
-		answering.demand(held)
-		waitForTrouble(t, held)
-		passEnded(answering, fileURL(source))
+		n.demand(vol)
+		waitForFault(t, vol)
+		passEnded(n, fileURL(source))
 		if err := os.Rename(away, source); err != nil {
 			t.Fatalf("moving the remote back: %v", err)
 		}
 		commitFiles(t, source, map[string]string{"b.txt": "two"})
 
 		request.Secrets = secretB
-		if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
-			t.Fatalf("the republish: %v", err)
+		if _, err := n.NodePublishVolume(t.Context(), request); err != nil {
+			t.Fatalf("publishing the volume again with the new credential: %v", err)
 		}
-		waitForFile(t, held.tree, "b.txt")
-		waitForCondition(t, held, "main at")
+		waitForFile(t, vol.tree, "b.txt")
+		waitForCondition(t, vol, "main at")
 	})
 }
 
 func TestARotatedCredentialPushesAtOnce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, _ := testNode(t, io.Discard)
-		// The sweep and the class's quiesce are an hour, so only the
-		// rotation can push within the test.
-		answering.sweep = time.Hour
+		n, _ := testNode(t, io.Discard)
+		// With the sweep and push.quiesce at an hour and push.maxLatency
+		// at never, only the republish with the new credential can start
+		// a push.
+		n.sweep = time.Hour
 		remote := bareRemote(t, map[string]string{"a.txt": "one"})
-		boundVolume(t, answering, "config", "config-calm")
-		armingClass(t, answering, "config-calm",
+		boundVolume(t, n, "config", "config-calm")
+		createClass(t, n, "config-calm",
 			map[string]string{quiesceParameter: "1h", maxLatencyParameter: neverLatency})
 		staged := stageRequest(t, "config", fileURL(remote), nil)
 		staged.Secrets = secretA
-		if _, err := answering.NodeStageVolume(t.Context(), staged); err != nil {
-			t.Fatalf("NodeStageVolume: %v", err)
+		if _, err := n.NodeStageVolume(t.Context(), staged); err != nil {
+			t.Fatalf("staging the volume: %v", err)
 		}
 		request := persistentPublish(t, staged)
 		request.Secrets = secretA
-		if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
-			t.Fatalf("NodePublishVolume: %v", err)
+		if _, err := n.NodePublishVolume(t.Context(), request); err != nil {
+			t.Fatalf("publishing the volume: %v", err)
 		}
-		held := resumedVolume(answering, "config")
-		waitForArmed(t, held, true)
-		// The commit stands for one whose push failed with the old key.
-		writeFiles(t, held.tree, map[string]string{"one.yaml": "1"})
-		answering.commit(t.Context(), held, held.policyNow())
-		committed := held.work.refCommit(t.Context(), "HEAD")
+		vol := resumedVolume(n, "config")
+		waitForArmed(t, vol, true)
+		// n.commit does not push, so the remote lacks this commit, as it
+		// would after a push with the old key failed.
+		writeFiles(t, vol.tree, map[string]string{"one.yaml": "1"})
+		n.commit(t.Context(), vol, vol.policyNow())
+		committed := vol.work.refCommit(t.Context(), "HEAD")
 
 		request.Secrets = secretB
-		if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
-			t.Fatalf("the republish: %v", err)
+		if _, err := n.NodePublishVolume(t.Context(), request); err != nil {
+			t.Fatalf("publishing the volume again with the new credential: %v", err)
 		}
-		waitForPushed(t, held)
+		waitForPushed(t, vol)
 		if got := strings.TrimSpace(git(t, remote, "rev-parse", "main")); got != committed {
-			t.Errorf("the remote holds %s after the rotation, want %s", got, committed)
+			t.Errorf("the remote main is at %s after the credential rotation, want %s", got, committed)
 		}
 	})
 }

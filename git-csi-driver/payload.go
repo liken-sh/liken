@@ -1,21 +1,20 @@
 package main
 
-// payload.go reads a push out of a forge's JSON. The four forges name
-// the repository in different fields, and the reader takes every one of
-// them it finds.
+// payload.go parses the JSON body of a push webhook.
 
 import "encoding/json"
 
-// push is what the listener read: the ref the forge pushed, and every
-// URL the payload names for the repository.
+// push is a parsed webhook body: the ref that was pushed, and every URL
+// the payload gives for the repository.
 type push struct {
 	ref  string
 	urls []string
 }
 
-// pushPayload is the union of the four forges' push bodies. GitHub,
-// Gitea, and Forgejo fill repository. GitLab fills project and
-// repository.url. A field a forge does not send stays empty.
+// pushPayload has the URL fields of a push body from GitHub, GitLab,
+// Gitea, and Forgejo, because each forge puts the repository URL in
+// different fields. GitHub, Gitea, and Forgejo set repository. GitLab
+// sets project and repository.url.
 type pushPayload struct {
 	Ref        string `json:"ref"`
 	Repository struct {
@@ -32,8 +31,9 @@ type pushPayload struct {
 	} `json:"project"`
 }
 
-// parsePush reads the body. A body that is not JSON, that names no
-// ref, or that names no repository is not a push.
+// parsePush returns the push in a webhook body. The second result is
+// false when the body is not JSON, has no ref, or has no repository
+// URL.
 func parsePush(body []byte) (push, bool) {
 	var payload pushPayload
 	if err := json.Unmarshal(body, &payload); err != nil {

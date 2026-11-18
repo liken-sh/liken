@@ -6,17 +6,17 @@ license = "MIT"
 [docs]
 prefix = "git"
 
-# The Event writer of the shared kubernetes module, the scripts that
-# put the license notices in the image, the CA bundle that the image
-# copies, and the vulkan directory. The closure installs git from the
-# Debian snapshot, with vulkan's snapshot.sh and vulkan's version as
-# the snapshot date. The Go and Debian images come from toolchains.
+# kubernetes provides the Event writer. notices provides the scripts
+# that copy license notices into the image. trust provides the CA bundle
+# that the image copies. The closure installs git from the Debian
+# snapshot, using vulkan's snapshot.sh and the snapshot date of
+# vulkan's version. toolchains provides the Go and Debian images.
 [depends]
 components = ["kubernetes", "notices", "toolchains", "trust", "vulkan"]
 
-# gofmt, vet, a tidy check of go.mod, and one run of the tests that
-# checks for races and writes the coverage profile, then the coverage
-# gate on that profile. .testcoverage.yml holds the floor.
+# Runs gofmt, go vet, a check that go.mod is tidy, and the tests with
+# the race detector, which write the coverage profile. Then the
+# coverage gate reads that profile. .testcoverage.yml sets the minimum.
 [[jobs]]
 name = "go"
 toolchain = "go"
@@ -24,28 +24,28 @@ run = "make test-go"
 timeout = 15
 coverage = ["coverage.out"]
 
-# The link check, the generated skills, and the site build.
+# Checks the links, checks that the generated skills are current, and
+# builds the site.
 [[jobs]]
 name = "docs"
 toolchain = "hugo"
 module = "docs"
 run = "make test-docs"
 
-# The hooks in .pre-commit-config.yaml: the formatters, the linters,
-# and the hygiene checks. The jobs above run the tests and the
-# coverage gates.
+# Runs the hooks in .pre-commit-config.yaml: the formatters, the
+# linters, and the file checks.
 [[jobs]]
 name = "prek"
 toolchain = "prek"
-# The go job runs the same checks as these hooks.
+# The go job already runs these hooks' checks.
 skip = ["gofmt", "go-vet", "go-mod-tidy"]
 
 [outputs]
 deploy = "deploy"
 
-# The image builds from this module's go.mod, which replaces the shared
-# kubernetes module with ../kubernetes, so it takes that directory as a
-# build context.
+# This module's go.mod replaces the kubernetes module with
+# ../kubernetes, so the image build needs that directory as a build
+# context.
 [[outputs.images]]
 name = "git-csi-driver"
 description = "git-csi-driver, which mounts a git repository as a Kubernetes volume, with the git and ssh that it runs."

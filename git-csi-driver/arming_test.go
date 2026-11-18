@@ -12,6 +12,7 @@ import (
 	kevents "github.com/liken-sh/liken/kubernetes/events"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
@@ -19,18 +20,19 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 )
 
-// cluster is the fake API server the node's arming and demand watch
-// read.
-func cluster(t *testing.T, answering *node) *fake.Clientset {
+// cluster returns the fake clientset that the node's arming and demand
+// watch read from.
+func cluster(t *testing.T, n *node) *fake.Clientset {
 	t.Helper()
-	return answering.events.client.(*fake.Clientset)
+	return n.events.client.(*fake.Clientset)
 }
 
-// boundVolume writes the PersistentVolume that carries the handle and the
-// claim it is bound to.
-func boundVolume(t *testing.T, answering *node, handle, class string) {
+// boundVolume creates a PersistentVolume with the CSI handle, bound to
+// the claim home/config, and creates that claim. A non-empty class goes
+// in the claim's spec.
+func boundVolume(t *testing.T, n *node, handle, class string) {
 	t.Helper()
-	held := &corev1.PersistentVolume{
+	pv := &corev1.PersistentVolume{
 		ObjectMeta: metav1.ObjectMeta{Name: handle},
 		Spec: corev1.PersistentVolumeSpec{
 			PersistentVolumeSource: corev1.PersistentVolumeSource{
@@ -49,9 +51,9 @@ func boundVolume(t *testing.T, answering *node, handle, class string) {
 	if class != "" {
 		claim.Spec.VolumeAttributesClassName = &class
 	}
-	client := cluster(t, answering)
+	client := cluster(t, n)
 	if _, err := client.CoreV1().PersistentVolumes().
-		Create(t.Context(), held, metav1.CreateOptions{}); err != nil {
+		Create(t.Context(), pv, metav1.CreateOptions{}); err != nil {
 		t.Fatalf("writing the PersistentVolume: %v", err)
 	}
 	if _, err := client.CoreV1().PersistentVolumeClaims("home").
@@ -60,10 +62,11 @@ func boundVolume(t *testing.T, answering *node, handle, class string) {
 	}
 }
 
-// nameClass names the class on the claim that boundVolume wrote.
-func nameClass(t *testing.T, answering *node, class string) {
+// nameClass sets the class in the spec of the claim that boundVolume
+// created.
+func nameClass(t *testing.T, n *node, class string) {
 	t.Helper()
-	claims := cluster(t, answering).CoreV1().PersistentVolumeClaims("home")
+	claims := cluster(t, n).CoreV1().PersistentVolumeClaims("home")
 	claim, err := claims.Get(t.Context(), "config", metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("reading the claim: %v", err)
@@ -74,68 +77,69 @@ func nameClass(t *testing.T, answering *node, class string) {
 	}
 }
 
-// attributesClass writes a VolumeAttributesClass of the driver it names.
-func attributesClass(t *testing.T, answering *node, name, driver string) {
+// attributesClass creates a VolumeAttributesClass that belongs to the
+// given driver.
+func attributesClass(t *testing.T, n *node, name, driver string) {
 	t.Helper()
 	class := &storagev1.VolumeAttributesClass{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 		DriverName: driver,
 	}
-	if _, err := cluster(t, answering).StorageV1().VolumeAttributesClasses().
+	if _, err := cluster(t, n).StorageV1().VolumeAttributesClasses().
 		Create(t.Context(), class, metav1.CreateOptions{}); err != nil {
 		t.Fatalf("writing the class: %v", err)
 	}
 }
 
-// armingClass writes a class of this driver with the parameters plan 05
-// reads.
-func armingClass(t *testing.T, answering *node, name string, parameters map[string]string) {
+// createClass creates a VolumeAttributesClass of this driver with the
+// given parameters.
+func createClass(t *testing.T, n *node, name string, parameters map[string]string) {
 	t.Helper()
 	class := &storagev1.VolumeAttributesClass{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 		DriverName: driverName,
 		Parameters: parameters,
 	}
-	if _, err := cluster(t, answering).StorageV1().VolumeAttributesClasses().
+	if _, err := cluster(t, n).StorageV1().VolumeAttributesClasses().
 		Create(t.Context(), class, metav1.CreateOptions{}); err != nil {
 		t.Fatalf("writing the class: %v", err)
 	}
 }
 
-// armedVolume stages and publishes a writeable volume whose claim names a
-// class with the parameters, and waits for the class to arm it.
+// armedVolume stages and publishes a writeable volume whose claim names
+// a class with the parameters, and waits until the class has armed it.
 func armedVolume(
-	t *testing.T, answering *node, id, url string, parameters map[string]string,
+	t *testing.T, n *node, id, url string, parameters map[string]string,
 ) *volume {
 	t.Helper()
-	boundVolume(t, answering, id, "config-eager")
-	armingClass(t, answering, "config-eager", parameters)
-	held, _ := stagedWriteable(t, answering, id, url)
-	waitForArmed(t, held, true)
-	return held
+	boundVolume(t, n, id, "config-eager")
+	createClass(t, n, "config-eager", parameters)
+	vol, _ := stagedWriteable(t, n, id, url)
+	waitForArmed(t, vol, true)
+	return vol
 }
 
-// waitForArmed waits until every goroutine in the test's bubble is
-// blocked, and fails unless the volume then reports the armed state.
-func waitForArmed(t *testing.T, held *volume, want bool) {
+// waitForArmed waits until every goroutine in the synctest bubble is
+// blocked, then fails the test unless the volume's armed state is want.
+func waitForArmed(t *testing.T, vol *volume, want bool) {
 	t.Helper()
 	synctest.Wait()
-	if _, armed, _ := held.reading(); armed != want {
+	if _, armed, _ := vol.gaugeValues(); armed != want {
 		t.Fatalf("the volume is armed: %v, want %v", armed, want)
 	}
 }
 
 func TestAClassOfThisDriverArmsTheVolume(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, _ := testNode(t, io.Discard)
-		boundVolume(t, answering, "config", "config-eager")
-		attributesClass(t, answering, "config-eager", driverName)
+		n, _ := testNode(t, io.Discard)
+		boundVolume(t, n, "config", "config-eager")
+		attributesClass(t, n, "config-eager", driverName)
 		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 
-		published, _ := stagedWriteable(t, answering, "config", fileURL(source))
+		published, _ := stagedWriteable(t, n, "config", fileURL(source))
 		waitForArmed(t, published, true)
 
-		claim, _, _ := published.reading()
+		claim, _, _ := published.gaugeValues()
 		if claim.namespace != "home" || claim.name != "config" {
 			t.Errorf("the volume names the claim %+v, want home/config", claim)
 		}
@@ -150,55 +154,55 @@ func TestAClassOfThisDriverArmsTheVolume(t *testing.T) {
 
 func TestAClassOfAnotherDriverLeavesTheVolumeUnarmed(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, _ := testNode(t, io.Discard)
-		boundVolume(t, answering, "config", "other-storage")
-		attributesClass(t, answering, "other-storage", "other.example.com")
+		n, _ := testNode(t, io.Discard)
+		boundVolume(t, n, "config", "other-storage")
+		attributesClass(t, n, "other-storage", "other.example.com")
 		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-		published, _ := stagedWriteable(t, answering, "config", fileURL(source))
+		published, _ := stagedWriteable(t, n, "config", fileURL(source))
 
 		waitForClaim(t, published)
-		if _, armed, _ := published.reading(); armed {
-			t.Error("a class of another driver armed the volume")
+		if _, armed, _ := published.gaugeValues(); armed {
+			t.Error("the volume is armed, want it unarmed by a class of another driver")
 		}
 	})
 }
 
-// waitForClaim waits until the bubble is blocked, and fails unless the
-// loop has found the claim, which is the first thing a pass does.
-func waitForClaim(t *testing.T, held *volume) {
+// waitForClaim waits until the bubble is blocked, then fails the test
+// unless the loop has found the volume's claim.
+func waitForClaim(t *testing.T, vol *volume) {
 	t.Helper()
 	synctest.Wait()
-	if claim, _, _ := held.reading(); claim.name == "" {
+	if claim, _, _ := vol.gaugeValues(); claim.name == "" {
 		t.Fatal("the loop did not find the claim")
 	}
 }
 
-func TestTheClaimIsFoundThroughTheVolumeHandle(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	boundVolume(t, answering, "config", "")
+func TestClaimOfFindsTheClaimThroughTheVolumeHandle(t *testing.T) {
+	n, _ := testNode(t, io.Discard)
+	boundVolume(t, n, "config", "")
 
-	found, err := answering.arms.claimOf(t.Context(), "config")
+	found, err := n.arming.claimOf(t.Context(), "config")
 	if err != nil {
-		t.Fatalf("claimOf: %v", err)
+		t.Fatalf("finding the claim through the volume handle: %v", err)
 	}
 	if found != (claimReference{namespace: "home", name: "config"}) {
-		t.Errorf("claimOf answered %+v, want home/config", found)
+		t.Errorf("claimOf returned %+v, want home/config", found)
 	}
-	if _, err := answering.arms.claimOf(t.Context(), "other"); err == nil {
-		t.Error("claimOf answered no error for a handle no PersistentVolume carries")
+	if _, err := n.arming.claimOf(t.Context(), "other"); err == nil {
+		t.Error("claimOf returned no error for a handle that no PersistentVolume has, want one")
 	}
 }
 
-func TestTheClaimIsNotFoundWhenTheClusterCannotAnswer(t *testing.T) {
+func TestClaimOfReturnsAnErrorWhenNoClaimCanBeFound(t *testing.T) {
 	for _, c := range []struct {
-		name  string
-		stand func(t *testing.T, answering *node)
-		says  string
+		name      string
+		setup     func(t *testing.T, n *node)
+		wantError string
 	}{
 		{
 			name: "a PersistentVolume of another driver",
-			stand: func(t *testing.T, answering *node) {
-				held := &corev1.PersistentVolume{
+			setup: func(t *testing.T, n *node) {
+				pv := &corev1.PersistentVolume{
 					ObjectMeta: metav1.ObjectMeta{Name: "config"},
 					Spec: corev1.PersistentVolumeSpec{
 						PersistentVolumeSource: corev1.PersistentVolumeSource{
@@ -209,17 +213,17 @@ func TestTheClaimIsNotFoundWhenTheClusterCannotAnswer(t *testing.T) {
 						},
 					},
 				}
-				if _, err := cluster(t, answering).CoreV1().PersistentVolumes().
-					Create(t.Context(), held, metav1.CreateOptions{}); err != nil {
+				if _, err := cluster(t, n).CoreV1().PersistentVolumes().
+					Create(t.Context(), pv, metav1.CreateOptions{}); err != nil {
 					t.Fatalf("writing the PersistentVolume: %v", err)
 				}
 			},
-			says: "carries the handle",
+			wantError: "has the volume handle",
 		},
 		{
 			name: "a PersistentVolume bound to no claim",
-			stand: func(t *testing.T, answering *node) {
-				held := &corev1.PersistentVolume{
+			setup: func(t *testing.T, n *node) {
+				pv := &corev1.PersistentVolume{
 					ObjectMeta: metav1.ObjectMeta{Name: "config"},
 					Spec: corev1.PersistentVolumeSpec{
 						PersistentVolumeSource: corev1.PersistentVolumeSource{
@@ -230,39 +234,39 @@ func TestTheClaimIsNotFoundWhenTheClusterCannotAnswer(t *testing.T) {
 						},
 					},
 				}
-				if _, err := cluster(t, answering).CoreV1().PersistentVolumes().
-					Create(t.Context(), held, metav1.CreateOptions{}); err != nil {
+				if _, err := cluster(t, n).CoreV1().PersistentVolumes().
+					Create(t.Context(), pv, metav1.CreateOptions{}); err != nil {
 					t.Fatalf("writing the PersistentVolume: %v", err)
 				}
 			},
-			says: "bound to no claim",
+			wantError: "bound to no claim",
 		},
 		{
 			name: "an API server that refuses the list",
-			stand: func(t *testing.T, answering *node) {
-				cluster(t, answering).PrependReactor("list", "persistentvolumes",
+			setup: func(t *testing.T, n *node) {
+				cluster(t, n).PrependReactor("list", "persistentvolumes",
 					func(k8stesting.Action) (bool, runtime.Object, error) {
-						return true, nil, errors.New("the api server said no")
+						return true, nil, errors.New("the API server refused the request")
 					})
 			},
-			says: "the api server said no",
+			wantError: "the API server refused the request",
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			answering, _ := testNode(t, io.Discard)
-			c.stand(t, answering)
-			_, err := answering.arms.claimOf(t.Context(), "config")
+			n, _ := testNode(t, io.Discard)
+			c.setup(t, n)
+			_, err := n.arming.claimOf(t.Context(), "config")
 			if err == nil {
-				t.Fatal("claimOf answered no error")
+				t.Fatal("claimOf returned no error, want one")
 			}
-			if !strings.Contains(err.Error(), c.says) {
-				t.Errorf("claimOf said %q, want %q in it", err, c.says)
+			if !strings.Contains(err.Error(), c.wantError) {
+				t.Errorf("claimOf returned %q, want %q in it", err, c.wantError)
 			}
 		})
 	}
 }
 
-func TestTheClassInForceIsTheOneTheStatusCarries(t *testing.T) {
+func TestTheClassInForceIsTheStatusClassOrElseTheSpecClass(t *testing.T) {
 	asked, current := "asked", "current"
 	for _, c := range []struct {
 		name  string
@@ -282,7 +286,7 @@ func TestTheClassInForceIsTheOneTheStatusCarries(t *testing.T) {
 			want: "asked",
 		},
 		{
-			name: "a claim whose status carries one",
+			name: "a claim whose status has one",
 			claim: &corev1.PersistentVolumeClaim{
 				Spec: corev1.PersistentVolumeClaimSpec{VolumeAttributesClassName: &asked},
 				Status: corev1.PersistentVolumeClaimStatus{
@@ -294,15 +298,15 @@ func TestTheClassInForceIsTheOneTheStatusCarries(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if got := className(c.claim); got != c.want {
-				t.Errorf("className answered %q, want %q", got, c.want)
+				t.Errorf("className returned %q, want %q", got, c.want)
 			}
 		})
 	}
 }
 
-// volumeNamed is a staged volume of the handle. Every volume the
-// driver holds has the attributes its stage parsed and the pod its
-// publish named, so a volume a test hands the arming loop has them too.
+// volumeNamed returns a staged writeable volume with the id. It sets the
+// attributes and pod that a real stage and publish set, which the
+// arming loop reads.
 func volumeNamed(id string) *volume {
 	return &volume{
 		id:         id,
@@ -313,44 +317,44 @@ func volumeNamed(id string) *volume {
 }
 
 func TestAClassTheNodeCannotReadIsAnError(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
+	n, _ := testNode(t, io.Discard)
 	gone := "gone"
 	claim := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "home", Name: "config"},
 		Spec:       corev1.PersistentVolumeClaimSpec{VolumeAttributesClassName: &gone},
 	}
 
-	err := answering.arms.read(t.Context(), volumeNamed("config"),
+	err := n.arming.read(t.Context(), volumeNamed("config"),
 		claimReference{namespace: "home", name: "config"}, claim)
-	if err == nil || !strings.Contains(err.Error(), "the class gone was not read") {
-		t.Errorf("read answered %v, want the class that was not read", err)
+	if !apierrors.IsNotFound(err) {
+		t.Errorf("read returned %v, want the NotFound error for the class gone", err)
 	}
 }
 
 func TestAClaimOfAnotherNameArmsNothing(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	held := volumeNamed("config")
+	n, _ := testNode(t, io.Discard)
+	vol := volumeNamed("config")
 	other := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "home", Name: "other"},
 	}
 
-	if err := answering.arms.read(t.Context(), held,
+	if err := n.arming.read(t.Context(), vol,
 		claimReference{namespace: "home", name: "config"}, other); err != nil {
-		t.Fatalf("read: %v", err)
+		t.Fatalf("reading a claim of another name: %v", err)
 	}
-	if claim, _, _ := held.reading(); claim.name != "" {
-		t.Errorf("a claim of another name armed the volume for %+v", claim)
+	if claim, _, _ := vol.gaugeValues(); claim.name != "" {
+		t.Errorf("the volume is armed for the claim %+v, want it unarmed by a claim of another name", claim)
 	}
 }
 
-// followArming runs the volume's arming loop until the test ends, and
-// returns the channel that closes when the loop does.
-func followArming(t *testing.T, answering *node, ctx context.Context, held *volume) <-chan struct{} {
+// followArming runs the arming loop for the volume in a goroutine until
+// ctx ends, and returns a channel that closes when the loop returns.
+func followArming(t *testing.T, n *node, ctx context.Context, vol *volume) <-chan struct{} {
 	t.Helper()
 	over := make(chan struct{})
 	go func() {
 		defer close(over)
-		answering.arms.follow(ctx, held)
+		n.arming.watchClaim(ctx, vol)
 	}()
 	return over
 }
@@ -358,28 +362,27 @@ func followArming(t *testing.T, answering *node, ctx context.Context, held *volu
 func TestTheLoopReadsTheClaimAgainWhileThereIsNone(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		logs := &logbook{}
-		answering, _ := testNode(t, logs)
+		n, _ := testNode(t, logs)
 		ctx, stop := context.WithCancel(t.Context())
-		over := followArming(t, answering, ctx, volumeNamed("config"))
+		over := followArming(t, n, ctx, volumeNamed("config"))
 
-		// The first read finds no claim at once, and the retry reads
-		// again.
-		time.Sleep(answering.arms.retry)
+		// The first lookup finds no claim, and the retry looks again.
+		time.Sleep(n.arming.retry)
 		synctest.Wait()
 		stop()
 		<-over
-		if got := strings.Count(logs.String(), "the claim was not found"); got < 2 {
-			t.Errorf("the log says the claim was not found %d times, want at least 2 (%q)", got, logs)
+		if got := strings.Count(logs.String(), "The PersistentVolumeClaim of the volume was not found"); got < 2 {
+			t.Errorf("the log has the claim-not-found line %d times, want at least 2 (%q)", got, logs)
 		}
 	})
 }
 
 func TestAClaimThatArrivesAfterTheVolumeArmsIt(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, _ := testNode(t, io.Discard)
-		boundVolume(t, answering, "config", "config-eager")
-		attributesClass(t, answering, "config-eager", driverName)
-		claims := cluster(t, answering).CoreV1().PersistentVolumeClaims("home")
+		n, _ := testNode(t, io.Discard)
+		boundVolume(t, n, "config", "config-eager")
+		attributesClass(t, n, "config-eager", driverName)
+		claims := cluster(t, n).CoreV1().PersistentVolumeClaims("home")
 		claim, err := claims.Get(t.Context(), "config", metav1.GetOptions{})
 		if err != nil {
 			t.Fatalf("reading the claim: %v", err)
@@ -387,12 +390,12 @@ func TestAClaimThatArrivesAfterTheVolumeArmsIt(t *testing.T) {
 		if err := claims.Delete(t.Context(), "config", metav1.DeleteOptions{}); err != nil {
 			t.Fatalf("deleting the claim: %v", err)
 		}
-		// The retry is long, so only the watch can carry the new claim.
-		answering.arms.retry = 30 * time.Second
+		// The retry is long, so only the watch can deliver the new claim.
+		n.arming.retry = 30 * time.Second
 		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-		published, _ := stagedWriteable(t, answering, "config", fileURL(source))
-		// The loop reads the claim and finds none before the claim
-		// arrives.
+		published, _ := stagedWriteable(t, n, "config", fileURL(source))
+		// The loop looks for the claim and finds none before the test
+		// creates it.
 		synctest.Wait()
 
 		claim.ResourceVersion = ""
@@ -406,31 +409,31 @@ func TestAClaimThatArrivesAfterTheVolumeArmsIt(t *testing.T) {
 
 func TestAClassThatArrivesAfterTheClaimNamesItArmsTheVolume(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, _ := testNode(t, io.Discard)
-		boundVolume(t, answering, "config", "config-eager")
+		n, _ := testNode(t, io.Discard)
+		boundVolume(t, n, "config", "config-eager")
 		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-		published, _ := stagedWriteable(t, answering, "config", fileURL(source))
-		// The loop reads the claim and finds no class before the class
-		// arrives.
+		published, _ := stagedWriteable(t, n, "config", fileURL(source))
+		// The loop reads the claim and finds that its class does not
+		// exist yet.
 		synctest.Wait()
 
-		attributesClass(t, answering, "config-eager", driverName)
+		attributesClass(t, n, "config-eager", driverName)
 
-		// The loop reads the class again after its retry.
-		time.Sleep(answering.arms.retry)
+		// The loop reads the class again after the retry.
+		time.Sleep(n.arming.retry)
 		waitForArmed(t, published, true)
 	})
 }
 
 func TestTheArmingLoopEndsWithTheDriver(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, _ := testNode(t, io.Discard)
-		boundVolume(t, answering, "config", "")
+		n, _ := testNode(t, io.Discard)
+		boundVolume(t, n, "config", "")
 		ctx, stop := context.WithCancel(t.Context())
-		over := followArming(t, answering, ctx, volumeNamed("config"))
+		over := followArming(t, n, ctx, volumeNamed("config"))
 
-		// A loop that outlives its context blocks the bubble for good,
-		// and synctest fails the test.
+		// A loop that outlives its context leaves a goroutine blocked in
+		// the bubble, and synctest fails the test.
 		stop()
 		<-over
 	})
@@ -438,24 +441,22 @@ func TestTheArmingLoopEndsWithTheDriver(t *testing.T) {
 
 func TestADeletedClaimLeavesTheVolumeArmed(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, _ := testNode(t, io.Discard)
+		n, _ := testNode(t, io.Discard)
 		sent := watch.NewFake()
-		cluster(t, answering).PrependWatchReactor("persistentvolumeclaims",
+		cluster(t, n).PrependWatchReactor("persistentvolumeclaims",
 			func(k8stesting.Action) (bool, watch.Interface, error) {
 				return true, sent, nil
 			})
-		held := armedVolume(t, answering, "config",
+		vol := armedVolume(t, n, "config",
 			fileURL(bareRemote(t, map[string]string{"a.txt": "one"})), nil)
-		armingClass(t, answering, "config-later", nil)
+		createClass(t, n, "config-later", nil)
 
-		// The deleted claim names no class, so a read of it would unarm the
-		// volume and post an Event that says so. The claim after it names
-		// another class of this driver, and the informer hands the reads
-		// its events in order, so once that class is in force the delete
-		// has been through the handlers. The test catches a handler that
-		// arms from a delete only when the reads take the deleted copy
-		// before the next one replaces it in the slot, so it can pass
-		// where such a handler exists.
+		// The deleted copy has no class, so reading it would unarm the
+		// volume and post an Event. The informer delivers events in
+		// order, so once config-later is in force the delete has passed
+		// through the handlers. A handler that offers the delete fails
+		// this test only when armFromClaims receives the deleted copy before the
+		// next copy replaces it.
 		sent.Delete(&corev1.PersistentVolumeClaim{
 			ObjectMeta: metav1.ObjectMeta{Namespace: "home", Name: "config"},
 		})
@@ -466,70 +467,70 @@ func TestADeletedClaimLeavesTheVolumeArmed(t *testing.T) {
 		})
 		synctest.Wait()
 
-		if class := classOf(held); class != later {
+		if class := classOf(vol); class != later {
 			t.Fatalf("the volume is armed by %q, want %q", class, later)
 		}
-		if posted := eventsWithReason(t, answering, reasonUnarmed); len(posted) != 0 {
-			t.Errorf("a deleted claim unarmed the volume: %v", posted)
+		if posted := eventsWithReason(t, n, reasonUnarmed); len(posted) != 0 {
+			t.Errorf("deleting the claim posted the unarmed Events %v, want none", posted)
 		}
 	})
 }
 
-// classOf is the class the volume last read from its claim.
-func classOf(held *volume) string {
-	held.mu.Lock()
-	defer held.mu.Unlock()
-	return held.class
+// classOf returns the class that the volume last read from its claim.
+func classOf(vol *volume) string {
+	vol.mu.Lock()
+	defer vol.mu.Unlock()
+	return vol.class
 }
 
-// waitForEvents waits until the bubble is blocked, and returns what the
-// node has posted for the reason. The volume reports its state before
-// the node posts the Events, so a test that reads the Events waits for
-// the posts too.
-func waitForEvents(t *testing.T, answering *node, reason string) []kevents.Event {
+// waitForEvents waits until the bubble is blocked, then returns the
+// Events that the node has posted with the reason. The volume records
+// its state before the node posts the Events, so a test that reads the
+// Events has to wait for the posts as well.
+func waitForEvents(t *testing.T, n *node, reason string) []kevents.Event {
 	t.Helper()
 	synctest.Wait()
-	return eventsWithReason(t, answering, reason)
+	return eventsWithReason(t, n, reason)
 }
 
 func TestTheLoopReadsTheClaimAgainWhenItChanges(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, _ := testNode(t, io.Discard)
-		// The retry is long, so the watch is what carries the change here.
-		answering.arms.retry = 30 * time.Second
-		boundVolume(t, answering, "config", "")
-		attributesClass(t, answering, "config-eager", driverName)
+		n, _ := testNode(t, io.Discard)
+		// The retry is long, so only the watch can deliver the change.
+		n.arming.retry = 30 * time.Second
+		boundVolume(t, n, "config", "")
+		attributesClass(t, n, "config-eager", driverName)
 		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-		published, _ := stagedWriteable(t, answering, "config", fileURL(source))
+		published, _ := stagedWriteable(t, n, "config", fileURL(source))
 		waitForClaim(t, published)
 
-		nameClass(t, answering, "config-eager")
+		nameClass(t, n, "config-eager")
 
-		armed := waitForEvents(t, answering, reasonArmed)
+		armed := waitForEvents(t, n, reasonArmed)
 		if len(armed) != 2 {
 			t.Fatalf("the change posted %v, want one Event on the pod and one on the claim", armed)
 		}
 		kinds := armed[0].InvolvedObject.Kind + " " + armed[1].InvolvedObject.Kind
 		if !strings.Contains(kinds, "Pod") || !strings.Contains(kinds, "PersistentVolumeClaim") {
-			t.Errorf("the events are on %q, want the pod and the claim", kinds)
+			t.Errorf("the Events are on %q, want the Pod and the PersistentVolumeClaim", kinds)
 		}
-		if armed[0].Message != "armed by the class config-eager" {
-			t.Errorf("the event says %q", armed[0].Message)
+		if !strings.Contains(armed[0].Message, "config-eager") {
+			t.Errorf("the Event message is %q, want it to name the class config-eager", armed[0].Message)
 		}
 	})
 }
 
-func TestTheVolumeThatLosesItsClassSaysSo(t *testing.T) {
+func TestAVolumeThatLosesItsClassPostsAnUnarmedEventOnThePodAndClaim(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, _ := testNode(t, io.Discard)
-		held := volumeNamed("config")
+		n, _ := testNode(t, io.Discard)
+		vol := volumeNamed("config")
 		claim := claimReference{namespace: "home", name: "config"}
 
-		answering.armed(t.Context(), held, claim, "config-eager", &policy{}, "")
-		answering.armed(t.Context(), held, claim, "", nil, "")
+		n.armed(t.Context(), vol, claim, "config-eager", &policy{}, "")
+		n.armed(t.Context(), vol, claim, "", nil, "")
 
 		unarmed := []kevents.Event{}
-		for _, posted := range eventsOf(t, answering) {
+		for _, posted := range eventsOf(t, n) {
 			if posted.Reason == reasonUnarmed {
 				unarmed = append(unarmed, posted)
 			}
@@ -537,58 +538,58 @@ func TestTheVolumeThatLosesItsClassSaysSo(t *testing.T) {
 		if len(unarmed) != 2 {
 			t.Fatalf("the change posted %v, want one Event on the pod and one on the claim", unarmed)
 		}
-		if unarmed[0].Message != "unarmed: the claim names no class of "+driverName {
-			t.Errorf("the event says %q", unarmed[0].Message)
+		if want := "Unarmed because the claim sets no VolumeAttributesClass of " + driverName; unarmed[0].Message != want {
+			t.Errorf("the Event message is %q, want %q", unarmed[0].Message, want)
 		}
 	})
 }
 
 func TestADriverOutsideAClusterArmsNothing(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	answering.arms.client = nil
-	answering.mu.Lock()
-	defer answering.mu.Unlock()
-	held := &volume{id: "config"}
-	answering.arm(held)
-	answering.disarm(held)
-	if got := len(answering.armings); got != 0 {
-		t.Errorf("the node holds %d arming loops, want 0", got)
+	n, _ := testNode(t, io.Discard)
+	n.arming.client = nil
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	vol := &volume{id: "config"}
+	n.arm(vol)
+	n.disarm(vol)
+	if got := len(n.armingCancels); got != 0 {
+		t.Errorf("the node has %d arming loops, want 0", got)
 	}
 }
 
-// waitForCondition waits until the bubble is blocked, and fails unless
-// the volume's condition carries the text.
-func waitForCondition(t *testing.T, held *volume, says string) {
+// waitForCondition waits until the bubble is blocked, then fails the
+// test unless the volume's health report contains the text.
+func waitForCondition(t *testing.T, vol *volume, text string) {
 	t.Helper()
 	synctest.Wait()
-	if _, message := held.report(); !strings.Contains(message, says) {
-		t.Fatalf("the condition is %q, want %q in it", message, says)
+	if _, message := vol.health(); !strings.Contains(message, text) {
+		t.Fatalf("the health report is %q, want %q in it", message, text)
 	}
 }
 
-func TestAClassTheDriverCannotReadArmsNothing(t *testing.T) {
+func TestAnInvalidClassUnarmsTheVolume(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, _ := testNode(t, io.Discard)
-		held := armedVolume(t, answering, "config",
+		n, _ := testNode(t, io.Discard)
+		vol := armedVolume(t, n, "config",
 			fileURL(bareRemote(t, map[string]string{"a.txt": "one"})), nil)
 
-		// A class's parameters are immutable, so a claim takes new rules by
-		// naming another class.
-		armingClass(t, answering, "config-broken", map[string]string{quiesceParameter: "1s"})
-		nameClass(t, answering, "config-broken")
+		// A class's parameters are immutable, so a claim gets new rules
+		// by naming a different class.
+		createClass(t, n, "config-broken", map[string]string{quiesceParameter: "1s"})
+		nameClass(t, n, "config-broken")
 
-		waitForArmed(t, held, false)
-		want := "the class config-broken is not valid: push.quiesce: 1s is shorter than 5s"
-		waitForCondition(t, held, want)
-		if held.policyNow() != nil {
-			t.Error("a class the driver cannot read left the volume armed")
+		waitForArmed(t, vol, false)
+		want := "the VolumeAttributesClass config-broken is not valid: push.quiesce: 1s is shorter than 5s"
+		waitForCondition(t, vol, want)
+		if vol.policyNow() != nil {
+			t.Error("the volume is armed, want it unarmed by an invalid class")
 		}
-		unarmed := waitForEvents(t, answering, reasonUnarmed)
+		unarmed := waitForEvents(t, n, reasonUnarmed)
 		if len(unarmed) != 2 {
 			t.Fatalf("the change posted %v, want one Event on the pod and one on the claim", unarmed)
 		}
-		if unarmed[0].Message != "unarmed: "+want {
-			t.Errorf("the event says %q, want %q", unarmed[0].Message, "unarmed: "+want)
+		if !strings.HasSuffix(unarmed[0].Message, want) {
+			t.Errorf("the Event message is %q, want it to end with %q", unarmed[0].Message, want)
 		}
 	})
 }

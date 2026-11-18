@@ -9,23 +9,23 @@ import (
 	"time"
 )
 
-// workTreeOf makes the bare repository of the source, fetches the ref, and
-// answers the work tree of one volume on it.
+// workTreeOf creates the bare repository of the source, fetches main,
+// and returns a work tree that reads from it and main's commit.
 func workTreeOf(t *testing.T, source string) (*workTree, string) {
 	t.Helper()
-	holder := newStore(t.TempDir())
-	repo := holder.repository(fileURL(source))
+	stored := newStore(t.TempDir())
+	repo := stored.repository(fileURL(source))
 	if err := repo.create(t.Context()); err != nil {
-		t.Fatalf("create: %v", err)
+		t.Fatalf("creating the work tree: %v", err)
 	}
 	if err := repo.fetch(t.Context(), nil, "main", 0); err != nil {
-		t.Fatalf("fetch: %v", err)
+		t.Fatalf("fetching main into the bare repository: %v", err)
 	}
 	commit, err := repo.resolve(t.Context(), "main")
 	if err != nil {
-		t.Fatalf("resolve: %v", err)
+		t.Fatalf("resolving main: %v", err)
 	}
-	work := holder.workTree(repo, "csi-1")
+	work := stored.workTree(repo, "csi-1")
 	if err := os.MkdirAll(work.directory, 0o700); err != nil {
 		t.Fatalf("making the volume directory: %v", err)
 	}
@@ -39,7 +39,7 @@ func TestTheWorkTreeReadsTheBareRepositorysObjects(t *testing.T) {
 		t.Fatal("the work tree exists before it is created")
 	}
 	if err := work.create(t.Context(), "main", commit); err != nil {
-		t.Fatalf("create: %v", err)
+		t.Fatalf("creating the work tree: %v", err)
 	}
 
 	if !work.exists() {
@@ -47,10 +47,10 @@ func TestTheWorkTreeReadsTheBareRepositorysObjects(t *testing.T) {
 	}
 	want := map[string]string{"a.txt": "one", "docs/b.txt": "two"}
 	if got := readTree(t, work.tree); !sameTree(got, want) {
-		t.Errorf("the tree holds %v, want %v", got, want)
+		t.Errorf("the tree has %v, want %v", got, want)
 	}
 	if _, err := os.Stat(filepath.Join(work.tree, ".git")); err == nil {
-		t.Error("the tree holds a .git, which the pod would see")
+		t.Error("the tree has a .git, which the pod would see")
 	}
 	alternates, err := os.ReadFile(filepath.Join(work.gitDir, alternatesFile))
 	if err != nil {
@@ -58,17 +58,17 @@ func TestTheWorkTreeReadsTheBareRepositorysObjects(t *testing.T) {
 	}
 	objects := filepath.Join(work.repository.dir, "objects")
 	if strings.TrimSpace(string(alternates)) != objects {
-		t.Errorf("the alternates name %q, want %q", alternates, objects)
+		t.Errorf("the alternates file has %q, want %q", alternates, objects)
 	}
 	head, err := work.head(t.Context())
 	if err != nil {
-		t.Fatalf("head: %v", err)
+		t.Fatalf("reading HEAD of the work tree: %v", err)
 	}
 	if head != commit {
-		t.Errorf("the tree stands on %s, want %s", head, commit)
+		t.Errorf("HEAD of the work tree is %s, want %s", head, commit)
 	}
 	if got := strings.TrimSpace(git(t, work.gitDir, "symbolic-ref", "HEAD")); got != "refs/heads/main" {
-		t.Errorf("HEAD names %q, want refs/heads/main", got)
+		t.Errorf("HEAD points to %q, want refs/heads/main", got)
 	}
 }
 
@@ -118,38 +118,34 @@ func TestThePendingSetIsWhatThePodWrote(t *testing.T) {
 			source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 			work, commit := workTreeOf(t, source)
 			if err := work.create(t.Context(), "main", commit); err != nil {
-				t.Fatalf("create: %v", err)
+				t.Fatalf("creating the work tree: %v", err)
 			}
 			c.write(t, work.tree)
 
 			found, err := work.pending(t.Context())
 			if err != nil {
-				t.Fatalf("pending: %v", err)
+				t.Fatalf("reading the pending changes: %v", err)
 			}
 			if len(found) != len(c.want) {
-				t.Fatalf("pending answered %v, want %v", found, c.want)
+				t.Fatalf("pending returned %v, want %v", found, c.want)
 			}
 			for i := range c.want {
 				if found[i] != c.want[i] {
-					t.Errorf("pending answered %v, want %v", found, c.want)
+					t.Errorf("pending returned %v, want %v", found, c.want)
 				}
 			}
 		})
 	}
 }
 
-// The watch reads the pending set in the background, and unwatch kills
-// that read when the pod goes. A read that writes the index holds
-// index.lock, and a kill leaves the lock behind, so every later commit
-// of the volume fails.
 func TestThePendingReadLeavesTheIndexAlone(t *testing.T) {
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 	work, commit := workTreeOf(t, source)
 	if err := work.create(t.Context(), "main", commit); err != nil {
-		t.Fatalf("create: %v", err)
+		t.Fatalf("creating the work tree: %v", err)
 	}
-	// A new modification time with the same content is what makes git
-	// refresh the index, which is the write the read must not make.
+	// A new modification time with the same content makes git status
+	// refresh the index.
 	later := time.Now().Add(time.Hour)
 	if err := os.Chtimes(filepath.Join(work.tree, "a.txt"), later, later); err != nil {
 		t.Fatalf("touching the file: %v", err)
@@ -161,7 +157,7 @@ func TestThePendingReadLeavesTheIndexAlone(t *testing.T) {
 	}
 
 	if _, err := work.pending(t.Context()); err != nil {
-		t.Fatalf("pending: %v", err)
+		t.Fatalf("reading the pending changes: %v", err)
 	}
 
 	after, err := os.ReadFile(index)
@@ -176,17 +172,17 @@ func TestThePendingReadLeavesTheIndexAlone(t *testing.T) {
 func TestTheChangesReadGitsOwnReport(t *testing.T) {
 	work := &workTree{tree: t.TempDir()}
 	writeFiles(t, work.tree, map[string]string{"new.txt": "12345"})
-	// Git writes the new path first and the old one after it, with -z.
+	// With -z, git writes the new path first and the old path after it.
 	report := "R  new.txt\x00old.txt\x00 M kept.txt\x00"
 	want := []change{{path: "new.txt", size: 5}, {path: "kept.txt", size: 0}}
 
 	got := work.changes(report)
 	if len(got) != len(want) {
-		t.Fatalf("changes answered %v, want %v", got, want)
+		t.Fatalf("changes returned %v, want %v", got, want)
 	}
 	for i := range want {
 		if got[i] != want[i] {
-			t.Errorf("changes answered %v, want %v", got, want)
+			t.Errorf("changes returned %v, want %v", got, want)
 		}
 	}
 }
@@ -196,16 +192,16 @@ func TestTheWorkTreeReportsWhatGitCannotDo(t *testing.T) {
 	work, commit := workTreeOf(t, source)
 
 	if _, err := work.pending(t.Context()); err == nil {
-		t.Error("pending answered no error before the work tree was made")
+		t.Error("pending returned no error before the work tree was created, want one")
 	}
 	if _, err := work.head(t.Context()); err == nil {
-		t.Error("head answered no error before the work tree was made")
+		t.Error("head returned no error before the work tree was created, want one")
 	}
 	if err := work.create(t.Context(), "not a ref", commit); err == nil {
-		t.Error("create answered no error for a ref git refuses")
+		t.Error("create returned no error for a ref that git refuses, want one")
 	}
 	if err := work.create(t.Context(), "main", "0000000000000000000000000000000000000000"); err == nil {
-		t.Error("create answered no error for a commit the store does not hold")
+		t.Error("create returned no error for a commit that the store does not hold, want one")
 	}
 }
 
@@ -214,7 +210,7 @@ func TestTheWorkTreeReportsATreeItCannotMake(t *testing.T) {
 	work, commit := workTreeOf(t, source)
 	writeFiles(t, work.directory, map[string]string{"tree": ""})
 	if err := work.create(t.Context(), "main", commit); err == nil {
-		t.Error("create answered no error where the tree is a file")
+		t.Error("create returned no error where the tree path is a file, want one")
 	}
 }
 
@@ -226,18 +222,18 @@ func TestTheWorkTreeReportsAnAlternatesFileItCannotWrite(t *testing.T) {
 	}
 	writeFiles(t, filepath.Join(work.gitDir, "objects"), map[string]string{"info": ""})
 	if err := work.create(t.Context(), "main", commit); err == nil {
-		t.Error("create answered no error where the alternates cannot be written")
+		t.Error("create returned no error where the alternates file cannot be written, want one")
 	}
 }
 
 func TestTheWorkTreeReportsWhatItCannotMake(t *testing.T) {
 	for _, c := range []struct {
 		name  string
-		stand func(t *testing.T, work *workTree)
+		setup func(t *testing.T, work *workTree)
 	}{
 		{
 			name: "a git directory git will not take",
-			stand: func(t *testing.T, work *workTree) {
+			setup: func(t *testing.T, work *workTree) {
 				if err := os.WriteFile(work.gitDir, nil, 0o600); err != nil {
 					t.Fatalf("writing the git directory as a file: %v", err)
 				}
@@ -245,7 +241,7 @@ func TestTheWorkTreeReportsWhatItCannotMake(t *testing.T) {
 		},
 		{
 			name: "an alternates file the driver cannot write",
-			stand: func(t *testing.T, work *workTree) {
+			setup: func(t *testing.T, work *workTree) {
 				if err := os.MkdirAll(
 					filepath.Join(work.gitDir, alternatesFile), 0o755); err != nil {
 					t.Fatalf("making the alternates a directory: %v", err)
@@ -254,7 +250,7 @@ func TestTheWorkTreeReportsWhatItCannotMake(t *testing.T) {
 		},
 		{
 			name: "a tree the driver cannot make",
-			stand: func(t *testing.T, work *workTree) {
+			setup: func(t *testing.T, work *workTree) {
 				if err := os.WriteFile(work.tree, nil, 0o600); err != nil {
 					t.Fatalf("writing the tree as a file: %v", err)
 				}
@@ -264,9 +260,9 @@ func TestTheWorkTreeReportsWhatItCannotMake(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 			work, commit := workTreeOf(t, source)
-			c.stand(t, work)
+			c.setup(t, work)
 			if err := work.create(t.Context(), "main", commit); err == nil {
-				t.Error("create answered no error")
+				t.Error("create returned no error, want one")
 			}
 		})
 	}

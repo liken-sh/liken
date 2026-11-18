@@ -9,8 +9,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// mountCall is one call the driver made, kept so a test reads its
-// arguments.
 type mountCall struct {
 	source     string
 	target     string
@@ -19,8 +17,8 @@ type mountCall struct {
 	data       string
 }
 
-// recordedMounts records instead of mounting, because a test process is
-// not privileged to mount anything.
+// recordedMounts records the calls instead of mounting, because a test
+// process has no privilege to mount.
 type recordedMounts struct {
 	mounts     []mountCall
 	unmounts   []string
@@ -45,7 +43,7 @@ func (r *recordedMounts) Unmount(target string, _ int) error {
 func TestBindReadOnlyBindsThenRemountsReadOnly(t *testing.T) {
 	calls := &recordedMounts{}
 	if err := bindReadOnly(calls, "/store/tree", "/kubelet/mount"); err != nil {
-		t.Fatalf("bindReadOnly: %v", err)
+		t.Fatalf("bindReadOnly returned %v", err)
 	}
 	want := []mountCall{
 		{source: "/store/tree", target: "/kubelet/mount", flags: unix.MS_BIND},
@@ -72,7 +70,7 @@ func TestBindReadOnlyReportsABindItCannotMake(t *testing.T) {
 	calls := &recordedMounts{failAt: 1, mountErr: unix.EPERM}
 	err := bindReadOnly(calls, "/store/tree", "/kubelet/mount")
 	if !errors.Is(err, unix.EPERM) {
-		t.Fatalf("bindReadOnly answered %v, want %v", err, unix.EPERM)
+		t.Fatalf("bindReadOnly returned %v, want %v", err, unix.EPERM)
 	}
 	if len(calls.mounts) != 1 {
 		t.Errorf("bindReadOnly made %v, want the bind alone", calls.mounts)
@@ -83,29 +81,29 @@ func TestBindReadOnlyUndoesTheBindWhenTheRemountFails(t *testing.T) {
 	calls := &recordedMounts{failAt: 2, mountErr: unix.EPERM}
 	err := bindReadOnly(calls, "/store/tree", "/kubelet/mount")
 	if !errors.Is(err, unix.EPERM) {
-		t.Fatalf("bindReadOnly answered %v, want %v", err, unix.EPERM)
+		t.Fatalf("bindReadOnly returned %v, want %v", err, unix.EPERM)
 	}
 	if len(calls.unmounts) != 1 || calls.unmounts[0] != "/kubelet/mount" {
 		t.Errorf("bindReadOnly unmounted %v, want the target alone", calls.unmounts)
 	}
 }
 
-func TestUnbindPassesOverATargetThatHoldsNoMount(t *testing.T) {
+func TestUnbindSucceedsOnATargetWithNoMount(t *testing.T) {
 	for _, c := range []struct {
 		name     string
 		failWith error
 		wantErr  bool
 	}{
-		{name: "a mount that comes away", failWith: nil},
-		{name: "a target that holds no mount", failWith: unix.EINVAL},
-		{name: "a target that is not there", failWith: unix.ENOENT},
+		{name: "a mounted target", failWith: nil},
+		{name: "a target with no mount", failWith: unix.EINVAL},
+		{name: "a target that does not exist", failWith: unix.ENOENT},
 		{name: "a target the driver may not unmount", failWith: unix.EPERM, wantErr: true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			calls := &recordedMounts{unmountErr: c.failWith}
 			err := unbind(calls, "/kubelet/mount")
 			if (err != nil) != c.wantErr {
-				t.Errorf("unbind answered %v, want an error: %v", err, c.wantErr)
+				t.Errorf("unbind returned %v, want an error: %t", err, c.wantErr)
 			}
 			if len(calls.unmounts) != 1 {
 				t.Errorf("unbind unmounted %v, want the target alone", calls.unmounts)
@@ -114,7 +112,7 @@ func TestUnbindPassesOverATargetThatHoldsNoMount(t *testing.T) {
 	}
 }
 
-func TestTheKernelAnswersTheDriversOwnSyscalls(t *testing.T) {
+func TestKernelMountsFailsWithoutPrivilegeAndMountsAsRoot(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "tree")
 	target := filepath.Join(dir, "mount")
@@ -127,27 +125,28 @@ func TestTheKernelAnswersTheDriversOwnSyscalls(t *testing.T) {
 	err := bindReadOnly(kernelMounts{}, source, target)
 	if os.Geteuid() != 0 {
 		if err == nil {
-			t.Error("an unprivileged bind answered no error")
+			t.Error("an unprivileged bind returned no error, want a permission error")
 		}
-		// An unprivileged unmount is refused before the kernel looks at the
-		// target.
+		// The kernel refuses an unprivileged unmount with EPERM before it
+		// checks whether the target is mounted, so unbind does not see
+		// the EINVAL that it ignores.
 		if got := unbind(kernelMounts{}, target); got == nil {
-			t.Error("an unprivileged unmount answered no error")
+			t.Error("an unprivileged unmount returned no error, want a permission error")
 		}
 		return
 	}
 	if err != nil {
-		t.Fatalf("bindReadOnly as root: %v", err)
+		t.Fatalf("bindReadOnly as root returned %v, want no error", err)
 	}
 	if err := unbind(kernelMounts{}, target); err != nil {
-		t.Errorf("unbind as root: %v", err)
+		t.Errorf("unbind as root returned %v, want no error", err)
 	}
 }
 
 func TestBindReadWriteBindsOnce(t *testing.T) {
 	calls := &recordedMounts{}
 	if err := bindReadWrite(calls, "/store/tree", "/kubelet/mount"); err != nil {
-		t.Fatalf("bindReadWrite: %v", err)
+		t.Fatalf("bindReadWrite returned %v", err)
 	}
 	want := mountCall{source: "/store/tree", target: "/kubelet/mount", flags: unix.MS_BIND}
 	if len(calls.mounts) != 1 || calls.mounts[0] != want {
@@ -158,6 +157,6 @@ func TestBindReadWriteBindsOnce(t *testing.T) {
 func TestBindReadWriteReportsABindItCannotMake(t *testing.T) {
 	calls := &recordedMounts{failAt: 1, mountErr: unix.EPERM}
 	if err := bindReadWrite(calls, "/store/tree", "/kubelet/mount"); !errors.Is(err, unix.EPERM) {
-		t.Errorf("bindReadWrite answered %v, want %v", err, unix.EPERM)
+		t.Errorf("bindReadWrite returned %v, want %v", err, unix.EPERM)
 	}
 }

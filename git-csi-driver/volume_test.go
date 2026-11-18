@@ -4,65 +4,65 @@ import (
 	"testing"
 )
 
-func TestTheConditionSaysWhatIsWrongFirst(t *testing.T) {
+func TestTheHealthReportShowsTheFirstProblem(t *testing.T) {
 	claim := claimReference{namespace: "home", name: "config"}
 	for _, c := range []struct {
-		name     string
-		held     *volume
-		abnormal bool
-		says     string
+		name        string
+		vol         *volume
+		abnormal    bool
+		wantMessage string
 	}{
 		{
-			name:     "a tree on its ref",
-			held:     &volume{attributes: &attributes{ref: "main"}, commit: "d633176146e997"},
-			abnormal: false,
-			says:     "main at d633176",
+			name:        "a tree on its ref",
+			vol:         &volume{attributes: &attributes{ref: "main"}, commit: "d633176146e997"},
+			abnormal:    false,
+			wantMessage: "main at d633176",
 		},
 		{
 			name: "a fetch that failed",
-			held: &volume{
+			vol: &volume{
 				attributes: &attributes{ref: "main"},
 				commit:     "d633176146e997",
 				fetchFault: "the forge is not there",
 			},
-			abnormal: true,
-			says:     "the forge is not there",
+			abnormal:    true,
+			wantMessage: "the forge is not there",
 		},
 		{
 			name: "a push that failed",
-			held: &volume{
+			vol: &volume{
 				attributes: &attributes{ref: "main"},
 				commit:     "d633176146e997",
 				pushFault:  "the remote refused the push",
 			},
-			abnormal: true,
-			says:     "the remote refused the push",
+			abnormal:    true,
+			wantMessage: "the remote refused the push",
 		},
 		{
 			name: "an upstream that moved",
-			held: &volume{
+			vol: &volume{
 				attributes:    &attributes{ref: "main"},
 				commit:        "d633176146e997",
 				upstreamMoved: "upstream moved: main is at 9b1c0de",
 			},
-			abnormal: true,
-			says:     "upstream moved: main is at 9b1c0de",
+			abnormal:    true,
+			wantMessage: "upstream moved: main is at 9b1c0de",
 		},
 		{
 			name: "an unarmed volume with work pending",
-			held: &volume{
+			vol: &volume{
 				attributes: &attributes{ref: "main"},
 				commit:     "d633176146e997",
 				kind:       writeableVolume,
 				claim:      claim,
 				pending:    []change{{path: "a.txt"}, {path: "b.txt"}},
 			},
-			abnormal: true,
-			says:     "unarmed: 2 paths pending, no class on claim home/config",
+			abnormal:    true,
+			wantMessage: "Unarmed: 2 paths pending, and the claim home/config sets no class",
 		},
 		{
 			name: "an armed volume with work pending",
-			held: &volume{
+			vol: &volume{
 				attributes: &attributes{ref: "main"},
 				commit:     "d633176146e997",
 				kind:       writeableVolume,
@@ -70,133 +70,133 @@ func TestTheConditionSaysWhatIsWrongFirst(t *testing.T) {
 				claim:      claim,
 				pending:    []change{{path: "a.txt"}},
 			},
-			abnormal: false,
-			says:     "main at d633176, 1 paths pending",
+			abnormal:    false,
+			wantMessage: "main at d633176, 1 paths pending",
 		},
 		{
-			name: "a ref the remote no longer holds",
-			held: &volume{
+			name: "a ref the remote no longer has",
+			vol: &volume{
 				attributes: &attributes{ref: "main"},
 				commit:     "d633176146e997",
 				kind:       writeableVolume,
 				refDeleted: true,
 			},
-			abnormal: true,
-			says:     "RefDeleted: the remote holds no main",
+			abnormal:    true,
+			wantMessage: "RefDeleted: the remote has no ref main",
 		},
 		{
 			name: "a volume on its side branch",
-			held: &volume{
+			vol: &volume{
 				attributes: &attributes{ref: "main"},
 				commit:     "d633176146e997",
 				kind:       writeableVolume,
 				diverged:   "main.config",
 			},
-			abnormal: true,
-			says:     "Diverged: the tree pushes to main.config, not main",
+			abnormal:    true,
+			wantMessage: "Diverged: the tree pushes to main.config, not main",
 		},
 		{
 			name: "a class the driver cannot read",
-			held: &volume{
+			vol: &volume{
 				attributes: &attributes{ref: "main"},
 				commit:     "d633176146e997",
 				kind:       writeableVolume,
 				claim:      claim,
-				invalid:    "the class config-eager is not valid: metadata: \"yes\" is not true or false",
+				invalid:    "the VolumeAttributesClass config-eager is not valid: metadata: \"yes\" is not true or false",
 			},
-			abnormal: true,
-			says:     "the class config-eager is not valid: metadata: \"yes\" is not true or false",
+			abnormal:    true,
+			wantMessage: "the VolumeAttributesClass config-eager is not valid: metadata: \"yes\" is not true or false",
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			abnormal, message := c.held.report()
-			if abnormal != c.abnormal || message != c.says {
-				t.Errorf("report answered %v, %q, want %v, %q",
-					abnormal, message, c.abnormal, c.says)
+			abnormal, message := c.vol.health()
+			if abnormal != c.abnormal || message != c.wantMessage {
+				t.Errorf("report() = %v, %q, want %v, %q",
+					abnormal, message, c.abnormal, c.wantMessage)
 			}
 		})
 	}
 }
 
-func TestTheSideBranchIsHeldUntilAHeal(t *testing.T) {
-	held := &volume{attributes: &attributes{ref: "main"}}
-	if got := held.divergedFrom(); got != "" {
-		t.Errorf("a volume on its ref names the branch %q, want none", got)
+func TestTheSideBranchLastsUntilTheVolumePushesToItsRefAgain(t *testing.T) {
+	vol := &volume{attributes: &attributes{ref: "main"}}
+	if got := vol.sideBranch(); got != "" {
+		t.Errorf("sideBranch() on a volume that pushes to its ref is %q, want empty", got)
 	}
-	held.reportDiverged("main.config")
-	if got := held.divergedFrom(); got != "main.config" {
-		t.Errorf("the volume names the branch %q, want main.config", got)
+	vol.reportDiverged("main.config")
+	if got := vol.sideBranch(); got != "main.config" {
+		t.Errorf("sideBranch() after reportDiverged is %q, want main.config", got)
 	}
-	held.reportHealed()
-	if got := held.divergedFrom(); got != "" {
-		t.Errorf("a healed volume names the branch %q, want none", got)
-	}
-}
-
-func TestAFetchThatReachesTheRefEndsTheDeletedReport(t *testing.T) {
-	held := &volume{attributes: &attributes{ref: "main"}}
-	held.reportRefDeleted("d633176146e997")
-	if !held.refIsDeleted() {
-		t.Error("the volume does not report the ref the remote no longer holds")
-	}
-	held.reportCommit("d633176146e997")
-	if held.refIsDeleted() {
-		t.Error("a fetch that reached the ref still reports it deleted")
+	vol.reportReturnedToRef()
+	if got := vol.sideBranch(); got != "" {
+		t.Errorf("sideBranch() after reportHealed is %q, want empty", got)
 	}
 }
 
-func TestTheAuthorIsTheClassWhereAClassArmsTheVolume(t *testing.T) {
-	held := &volume{}
-	if got := held.authorEnv(); got[0] != "GIT_AUTHOR_NAME="+defaultAuthorName {
-		t.Errorf("an unarmed volume commits as %q, want the driver's own name", got[0])
+func TestAFetchThatFindsTheRefClearsTheDeletedRef(t *testing.T) {
+	vol := &volume{attributes: &attributes{ref: "main"}}
+	vol.reportRefDeleted("d633176146e997")
+	if !vol.refIsDeleted() {
+		t.Error("refIsDeleted() is false after reportRefDeleted, want true")
 	}
-	held.reportArmed(claimReference{}, "config-eager", &policy{authorName: "The lab"}, "")
-	if got := held.authorEnv(); got[0] != "GIT_AUTHOR_NAME=The lab" {
-		t.Errorf("an armed volume commits as %q, want the class's author", got[0])
-	}
-}
-
-func TestThePendingSetIsFirstWhenItGoesFromEmpty(t *testing.T) {
-	held := &volume{}
-	if held.reportPending(nil) {
-		t.Error("an empty set is the first work pending")
-	}
-	if !held.reportPending([]change{{path: "a.txt"}}) {
-		t.Error("the first work pending is not reported as first")
-	}
-	if held.reportPending([]change{{path: "a.txt"}, {path: "b.txt"}}) {
-		t.Error("more work pending is reported as first")
-	}
-	if _, _, count := held.reading(); count != 2 {
-		t.Errorf("the volume holds %d pending paths, want 2", count)
+	vol.reportCommit("d633176146e997")
+	if vol.refIsDeleted() {
+		t.Error("refIsDeleted() is true after a commit was reported from a fetch of the ref, want false")
 	}
 }
 
-func TestTheArmedStateChangesOnlyWhenTheClassDoes(t *testing.T) {
-	held := &volume{}
+func TestTheAuthorComesFromTheClassOnAnArmedVolume(t *testing.T) {
+	vol := &volume{}
+	if got := vol.authorEnv(); got[0] != "GIT_AUTHOR_NAME="+defaultAuthorName {
+		t.Errorf("the author of a volume with no class is %q, want the driver's default name", got[0])
+	}
+	vol.reportArmed(claimReference{}, "config-eager", &policy{authorName: "The lab"}, "")
+	if got := vol.authorEnv(); got[0] != "GIT_AUTHOR_NAME=The lab" {
+		t.Errorf("the author of a volume with a class is %q, want the author of the class", got[0])
+	}
+}
+
+func TestReportPendingReturnsTrueOnlyWhenTheSetBecomesNotEmpty(t *testing.T) {
+	vol := &volume{}
+	if vol.reportPending(nil) {
+		t.Error("reportPending() returned true for an empty set, want false")
+	}
+	if !vol.reportPending([]change{{path: "a.txt"}}) {
+		t.Error("reportPending() returned false for the first non-empty set, want true")
+	}
+	if vol.reportPending([]change{{path: "a.txt"}, {path: "b.txt"}}) {
+		t.Error("reportPending() returned true for a second non-empty set, want false")
+	}
+	if _, _, count := vol.gaugeValues(); count != 2 {
+		t.Errorf("the volume has %d pending paths, want 2", count)
+	}
+}
+
+func TestReportArmedReturnsTrueOnlyWhenTheArmedStateChanges(t *testing.T) {
+	vol := &volume{}
 	claim := claimReference{namespace: "home", name: "config"}
-	if held.reportArmed(claim, "", nil, "") {
-		t.Error("a volume that was never armed changed hands")
+	if vol.reportArmed(claim, "", nil, "") {
+		t.Error("reportArmed() returned true for a volume that was never armed, want false")
 	}
-	if !held.reportArmed(claim, "config-eager", &policy{}, "") {
-		t.Error("a volume the class took did not change hands")
+	if !vol.reportArmed(claim, "config-eager", &policy{}, "") {
+		t.Error("reportArmed() returned false when a class armed the volume, want true")
 	}
-	if held.reportArmed(claim, "config-eager", &policy{}, "") {
-		t.Error("a volume the same class holds changed hands")
+	if vol.reportArmed(claim, "config-eager", &policy{}, "") {
+		t.Error("reportArmed() returned true for the same class again, want false")
 	}
-	if !held.reportArmed(claim, "", nil, "") {
-		t.Error("a volume the class left did not change hands")
+	if !vol.reportArmed(claim, "", nil, "") {
+		t.Error("reportArmed() returned false when the class was removed, want true")
 	}
 }
 
-func TestThePodComesFromThePublish(t *testing.T) {
-	held := &volume{}
-	if got := held.podRef(); got != (podReference{}) {
-		t.Errorf("a staged volume names the pod %+v, want none", got)
+func TestThePodIsTheOneNamedInThePublish(t *testing.T) {
+	vol := &volume{}
+	if got := vol.podRef(); got != (podReference{}) {
+		t.Errorf("podRef() on a staged volume is %+v, want empty", got)
 	}
 	pod := podReference{name: "writer", namespace: "home", uid: "9b1c"}
-	held.setPod(pod)
-	if got := held.podRef(); got != pod {
-		t.Errorf("the volume names the pod %+v, want %+v", got, pod)
+	vol.setPod(pod)
+	if got := vol.podRef(); got != pod {
+		t.Errorf("podRef() after setPod is %+v, want %+v", got, pod)
 	}
 }

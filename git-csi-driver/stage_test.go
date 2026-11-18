@@ -14,8 +14,8 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// stageRequest is the stage call the kubelet makes for a persistent volume
-// of the URL.
+// stageRequest builds the stage call that the kubelet sends for a
+// persistent writeable volume of the repository at url.
 func stageRequest(t testing.TB, id, url string, extra map[string]string) *csi.NodeStageVolumeRequest {
 	t.Helper()
 	attributes := map[string]string{"url": url}
@@ -37,8 +37,9 @@ func capabilityOf(mode csi.VolumeCapability_AccessMode_Mode) *csi.VolumeCapabili
 	}
 }
 
-// persistentPublish is the publish call the kubelet makes after the stage,
-// which carries the pod and the same attributes.
+// persistentPublish builds the publish call that the kubelet sends after
+// the stage. It has the same volume context plus the pod's name,
+// namespace, and UID.
 func persistentPublish(t testing.TB, staged *csi.NodeStageVolumeRequest) *csi.NodePublishVolumeRequest {
 	t.Helper()
 	attributes := map[string]string{
@@ -58,64 +59,64 @@ func persistentPublish(t testing.TB, staged *csi.NodeStageVolumeRequest) *csi.No
 	}
 }
 
-// stagedWriteable stages and publishes one writeable volume and answers
-// what the node holds for it.
+// stagedWriteable stages and publishes one writeable volume, and returns
+// the node's volume and the publish request.
 func stagedWriteable(
-	t *testing.T, answering *node, id, url string,
+	t *testing.T, n *node, id, url string,
 ) (*volume, *csi.NodePublishVolumeRequest) {
 	t.Helper()
 	staged := stageRequest(t, id, url, nil)
-	if _, err := answering.NodeStageVolume(t.Context(), staged); err != nil {
-		t.Fatalf("NodeStageVolume: %v", err)
+	if _, err := n.NodeStageVolume(t.Context(), staged); err != nil {
+		t.Fatalf("calling NodeStageVolume: %v", err)
 	}
 	request := persistentPublish(t, staged)
-	if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
-		t.Fatalf("NodePublishVolume: %v", err)
+	if _, err := n.NodePublishVolume(t.Context(), request); err != nil {
+		t.Fatalf("calling NodePublishVolume: %v", err)
 	}
-	answering.mu.Lock()
-	defer answering.mu.Unlock()
-	return answering.volumes[id], request
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.volumes[id], request
 }
 
 func TestNodeStageVolumeRefusesACallThatNamesTooLittle(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
+	n, _ := testNode(t, io.Discard)
 	for _, c := range []struct {
-		name    string
-		request *csi.NodeStageVolumeRequest
-		says    string
+		name        string
+		request     *csi.NodeStageVolumeRequest
+		wantMessage string
 	}{
 		{
-			name:    "no volume",
-			request: &csi.NodeStageVolumeRequest{StagingTargetPath: "/staging"},
-			says:    "volume_id: the call names no volume",
+			name:        "no volume",
+			request:     &csi.NodeStageVolumeRequest{StagingTargetPath: "/staging"},
+			wantMessage: "volume_id is empty",
 		},
 		{
 			name: "a volume id that is a path",
 			request: &csi.NodeStageVolumeRequest{
 				VolumeId: "../escape", StagingTargetPath: "/staging",
 			},
-			says: "volume_id: a volume id is one path element",
+			wantMessage: "volume_id: a volume id is one path element",
 		},
 		{
-			name:    "no staging path",
-			request: &csi.NodeStageVolumeRequest{VolumeId: "config"},
-			says:    "staging_target_path: the call names no path",
+			name:        "no staging path",
+			request:     &csi.NodeStageVolumeRequest{VolumeId: "config"},
+			wantMessage: "staging_target_path is empty",
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			_, err := answering.NodeStageVolume(t.Context(), c.request)
+			_, err := n.NodeStageVolume(t.Context(), c.request)
 			if got := status.Code(err); got != codes.InvalidArgument {
-				t.Fatalf("NodeStageVolume answered %v, want %v", got, codes.InvalidArgument)
+				t.Fatalf("the status code of NodeStageVolume is %v, want %v", got, codes.InvalidArgument)
 			}
-			if got := status.Convert(err).Message(); got != c.says {
-				t.Errorf("NodeStageVolume said %q, want %q", got, c.says)
+			if got := status.Convert(err).Message(); got != c.wantMessage {
+				t.Errorf("the message of NodeStageVolume is %q, want %q", got, c.wantMessage)
 			}
 		})
 	}
 }
 
-func TestNodeStageVolumeRefusesEveryAccessModeButTheThreeItServes(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
+func TestNodeStageVolumeRefusesAnUnsupportedAccessMode(t *testing.T) {
+	n, _ := testNode(t, io.Discard)
 	for _, mode := range []csi.VolumeCapability_AccessMode_Mode{
 		csi.VolumeCapability_AccessMode_UNKNOWN,
 		csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
@@ -126,13 +127,13 @@ func TestNodeStageVolumeRefusesEveryAccessModeButTheThreeItServes(t *testing.T) 
 		t.Run(mode.String(), func(t *testing.T) {
 			request := stageRequest(t, "config", "file:///nowhere", nil)
 			request.VolumeCapability = capabilityOf(mode)
-			_, err := answering.NodeStageVolume(t.Context(), request)
+			_, err := n.NodeStageVolume(t.Context(), request)
 			if got := status.Code(err); got != codes.InvalidArgument {
-				t.Fatalf("NodeStageVolume answered %v, want %v", got, codes.InvalidArgument)
+				t.Fatalf("the status code of NodeStageVolume is %v, want %v", got, codes.InvalidArgument)
 			}
 			for _, named := range []string{"ReadWriteOncePod", "ReadOnlyMany"} {
 				if !strings.Contains(status.Convert(err).Message(), named) {
-					t.Errorf("NodeStageVolume said %q, want %s named",
+					t.Errorf("the message of NodeStageVolume is %q, want it to contain %s",
 						status.Convert(err).Message(), named)
 				}
 			}
@@ -152,194 +153,194 @@ func TestTheAccessModeDecidesTheKind(t *testing.T) {
 		t.Run(c.mode.String(), func(t *testing.T) {
 			got, err := stageKind(capabilityOf(c.mode))
 			if err != nil {
-				t.Fatalf("stageKind: %v", err)
+				t.Fatalf("calling stageKind: %v", err)
 			}
 			if got != c.want {
-				t.Errorf("stageKind answered %v, want %v", got, c.want)
+				t.Errorf("stageKind() = %v, want %v", got, c.want)
 			}
 		})
 	}
 }
 
 func TestNodeStageVolumeRefusesAReadOnlyAttribute(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
+	n, _ := testNode(t, io.Discard)
 	for attribute, value := range map[string]string{
 		"pull": "5m", "depth": "1", "offline": "allowStale",
 	} {
 		t.Run(attribute, func(t *testing.T) {
 			request := stageRequest(t, "config", "file:///nowhere",
 				map[string]string{attribute: value})
-			_, err := answering.NodeStageVolume(t.Context(), request)
+			_, err := n.NodeStageVolume(t.Context(), request)
 			if got := status.Code(err); got != codes.InvalidArgument {
-				t.Fatalf("NodeStageVolume answered %v, want %v", got, codes.InvalidArgument)
+				t.Fatalf("the status code of NodeStageVolume is %v, want %v", got, codes.InvalidArgument)
 			}
 			if !strings.HasPrefix(status.Convert(err).Message(), attribute+":") {
-				t.Errorf("NodeStageVolume said %q, want %s named", status.Convert(err).Message(), attribute)
+				t.Errorf("the message of NodeStageVolume is %q, want it to contain %s", status.Convert(err).Message(), attribute)
 			}
 		})
 	}
 }
 
 func TestNodeStageVolumeRefusesWhatItCannotRead(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
+	n, _ := testNode(t, io.Discard)
 
 	unknown := stageRequest(t, "config", "file:///nowhere", map[string]string{"branch": "main"})
-	if got := status.Code(mustFail(t, answering, unknown)); got != codes.InvalidArgument {
-		t.Errorf("NodeStageVolume answered %v for an unknown attribute, want %v",
+	if got := status.Code(mustFail(t, n, unknown)); got != codes.InvalidArgument {
+		t.Errorf("the status code of NodeStageVolume for an unknown attribute is %v, want %v",
 			got, codes.InvalidArgument)
 	}
 
 	secret := stageRequest(t, "config", "file:///nowhere", nil)
 	secret.Secrets = map[string]string{"password": "hunter2"}
-	if got := status.Code(mustFail(t, answering, secret)); got != codes.InvalidArgument {
-		t.Errorf("NodeStageVolume answered %v for a Secret with no credential, want %v",
+	if got := status.Code(mustFail(t, n, secret)); got != codes.InvalidArgument {
+		t.Errorf("the status code of NodeStageVolume for a Secret with no credential is %v, want %v",
 			got, codes.InvalidArgument)
 	}
 }
 
-// mustFail runs the stage and fails the test when it works.
-func mustFail(t *testing.T, answering *node, request *csi.NodeStageVolumeRequest) error {
+// mustFail runs the stage and fails the test when it succeeds.
+func mustFail(t *testing.T, n *node, request *csi.NodeStageVolumeRequest) error {
 	t.Helper()
-	_, err := answering.NodeStageVolume(t.Context(), request)
+	_, err := n.NodeStageVolume(t.Context(), request)
 	if err == nil {
-		t.Fatal("NodeStageVolume answered no error")
+		t.Fatal("NodeStageVolume returned no error, want one")
 	}
 	return err
 }
 
-func TestNodeStageVolumeMakesTheWorkTreeFromTheRef(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
+func TestNodeStageVolumeCreatesTheWorkTreeAtTheRef(t *testing.T) {
+	n, _ := testNode(t, io.Discard)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 	request := stageRequest(t, "config", fileURL(source), nil)
 
-	if _, err := answering.NodeStageVolume(t.Context(), request); err != nil {
-		t.Fatalf("NodeStageVolume: %v", err)
+	if _, err := n.NodeStageVolume(t.Context(), request); err != nil {
+		t.Fatalf("calling NodeStageVolume: %v", err)
 	}
 
-	answering.mu.Lock()
-	staged, found := answering.staged["config"]
-	answering.mu.Unlock()
+	n.mu.Lock()
+	staged, found := n.staged["config"]
+	n.mu.Unlock()
 	if !found {
-		t.Fatal("the node holds no staged volume")
+		t.Fatal("the node has no staged volume config")
 	}
 	if !staged.writeable() || staged.staging != request.StagingTargetPath {
 		t.Errorf("the volume is %+v, want a writeable volume staged at %s",
 			staged, request.StagingTargetPath)
 	}
 	if got := readTree(t, staged.tree); !sameTree(got, map[string]string{"a.txt": "one"}) {
-		t.Errorf("the tree holds %v", got)
+		t.Errorf("the work tree is %v, want a.txt with one", got)
 	}
-	abnormal, message := staged.report()
+	abnormal, message := staged.health()
 	if abnormal {
-		t.Errorf("a first stage reported %q", message)
+		t.Errorf("report() after a first stage is abnormal with %q, want normal", message)
 	}
 }
 
-func TestNodeStageVolumeAnswersTheSameCallTwice(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
+func TestNodeStageVolumeSucceedsWhenTheSameCallRepeats(t *testing.T) {
+	n, _ := testNode(t, io.Discard)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 	request := stageRequest(t, "config", fileURL(source), nil)
 	for range 2 {
-		if _, err := answering.NodeStageVolume(t.Context(), request); err != nil {
-			t.Fatalf("NodeStageVolume: %v", err)
+		if _, err := n.NodeStageVolume(t.Context(), request); err != nil {
+			t.Fatalf("calling NodeStageVolume: %v", err)
 		}
 	}
 
 	elsewhere := stageRequest(t, "config", fileURL(source), nil)
-	_, err := answering.NodeStageVolume(t.Context(), elsewhere)
+	_, err := n.NodeStageVolume(t.Context(), elsewhere)
 	if got := status.Code(err); got != codes.FailedPrecondition {
-		t.Fatalf("NodeStageVolume answered %v, want %v", got, codes.FailedPrecondition)
+		t.Fatalf("the status code of NodeStageVolume is %v, want %v", got, codes.FailedPrecondition)
 	}
 }
 
 func TestNodeStageVolumeRefusesAForgeItCannotReach(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
+	n, _ := testNode(t, io.Discard)
 	request := stageRequest(t, "config", fileURL(filepath.Join(t.TempDir(), "gone")), nil)
-	_, err := answering.NodeStageVolume(t.Context(), request)
+	_, err := n.NodeStageVolume(t.Context(), request)
 	if got := status.Code(err); got != codes.Unavailable {
-		t.Errorf("NodeStageVolume answered %v, want %v", got, codes.Unavailable)
+		t.Errorf("the status code of NodeStageVolume is %v, want %v", got, codes.Unavailable)
 	}
 }
 
 func TestNodeStageVolumeReportsWhatItCannotWrite(t *testing.T) {
 	for _, c := range []struct {
-		name  string
-		stand func(t *testing.T, answering *node, request *csi.NodeStageVolumeRequest)
+		name    string
+		prepare func(t *testing.T, n *node, request *csi.NodeStageVolumeRequest)
 	}{
 		{
 			name: "a store it cannot write",
-			stand: func(t *testing.T, answering *node, _ *csi.NodeStageVolumeRequest) {
+			prepare: func(t *testing.T, n *node, _ *csi.NodeStageVolumeRequest) {
 				file := filepath.Join(t.TempDir(), "file")
 				writeFiles(t, filepath.Dir(file), map[string]string{"file": ""})
-				answering.store = newStore(file)
+				n.store = newStore(file)
 			},
 		},
 		{
 			name: "a repository it cannot make",
-			stand: func(t *testing.T, answering *node, _ *csi.NodeStageVolumeRequest) {
-				if err := os.MkdirAll(answering.store.root, 0o755); err != nil {
-					t.Fatalf("making the store: %v", err)
+			prepare: func(t *testing.T, n *node, _ *csi.NodeStageVolumeRequest) {
+				if err := os.MkdirAll(n.store.root, 0o755); err != nil {
+					t.Fatalf("creating the store: %v", err)
 				}
-				writeFiles(t, answering.store.root, map[string]string{"repos": ""})
+				writeFiles(t, n.store.root, map[string]string{"repos": ""})
 			},
 		},
 		{
 			name: "a work tree that is already a file",
-			stand: func(t *testing.T, answering *node, _ *csi.NodeStageVolumeRequest) {
-				directory := answering.store.volumeDir("config")
+			prepare: func(t *testing.T, n *node, _ *csi.NodeStageVolumeRequest) {
+				directory := n.store.volumeDir("config")
 				if err := os.MkdirAll(directory, 0o700); err != nil {
-					t.Fatalf("making the volume directory: %v", err)
+					t.Fatalf("creating the volume directory: %v", err)
 				}
 				writeFiles(t, directory, map[string]string{"tree": ""})
 			},
 		},
 		{
 			name: "a key it cannot write",
-			stand: func(t *testing.T, answering *node, request *csi.NodeStageVolumeRequest) {
+			prepare: func(t *testing.T, n *node, request *csi.NodeStageVolumeRequest) {
 				request.Secrets = map[string]string{privateKeyKey: "KEY"}
-				directory := answering.store.volumeDir("config")
+				directory := n.store.volumeDir("config")
 				if err := os.MkdirAll(directory, 0o700); err != nil {
-					t.Fatalf("making the volume directory: %v", err)
+					t.Fatalf("creating the volume directory: %v", err)
 				}
 				readOnlyDir(t, directory)
 			},
 		},
 		{
 			name: "a ref that names no commit",
-			stand: func(t *testing.T, _ *node, request *csi.NodeStageVolumeRequest) {
+			prepare: func(t *testing.T, _ *node, request *csi.NodeStageVolumeRequest) {
 				source := strings.TrimPrefix(request.VolumeContext["url"], "file://")
 				request.VolumeContext["ref"] = blobRef(t, source)
 			},
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			answering, _ := testNode(t, io.Discard)
+			n, _ := testNode(t, io.Discard)
 			source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 			request := stageRequest(t, "config", fileURL(source), nil)
-			c.stand(t, answering, request)
+			c.prepare(t, n, request)
 
-			_, err := answering.NodeStageVolume(t.Context(), request)
+			_, err := n.NodeStageVolume(t.Context(), request)
 			if got := status.Code(err); got != codes.Internal {
-				t.Errorf("NodeStageVolume answered %v, want %v", got, codes.Internal)
+				t.Errorf("the status code of NodeStageVolume is %v, want %v", got, codes.Internal)
 			}
 		})
 	}
 }
 
 func TestNodeStageVolumeReportsAHeadItCannotRead(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
+	n, _ := testNode(t, io.Discard)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 	request := stageRequest(t, "config", fileURL(source), nil)
-	if _, err := answering.NodeStageVolume(t.Context(), request); err != nil {
-		t.Fatalf("NodeStageVolume: %v", err)
+	if _, err := n.NodeStageVolume(t.Context(), request); err != nil {
+		t.Fatalf("calling NodeStageVolume: %v", err)
 	}
 
-	// A git directory with a HEAD and nothing else is what a stage that
-	// was cut off leaves.
-	answering.mu.Lock()
-	delete(answering.staged, "config")
-	answering.mu.Unlock()
-	gitDir := filepath.Join(answering.store.volumeDir("config"), "git")
+	// Remove the refs so the git directory has a HEAD and nothing else,
+	// which is what an interrupted stage leaves.
+	n.mu.Lock()
+	delete(n.staged, "config")
+	n.mu.Unlock()
+	gitDir := filepath.Join(n.store.volumeDir("config"), "git")
 	if err := os.RemoveAll(filepath.Join(gitDir, "refs")); err != nil {
 		t.Fatalf("removing the refs: %v", err)
 	}
@@ -347,71 +348,71 @@ func TestNodeStageVolumeReportsAHeadItCannotRead(t *testing.T) {
 		t.Fatalf("removing the objects: %v", err)
 	}
 
-	_, err := answering.NodeStageVolume(t.Context(), request)
+	_, err := n.NodeStageVolume(t.Context(), request)
 	if got := status.Code(err); got != codes.Internal {
-		t.Errorf("NodeStageVolume answered %v, want %v", got, codes.Internal)
+		t.Errorf("the status code of NodeStageVolume is %v, want %v", got, codes.Internal)
 	}
 }
 
 func TestNodeUnstageVolumeRefusesACallThatNamesTooLittle(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
+	n, _ := testNode(t, io.Discard)
 	for _, c := range []struct {
-		name    string
-		request *csi.NodeUnstageVolumeRequest
-		says    string
+		name        string
+		request     *csi.NodeUnstageVolumeRequest
+		wantMessage string
 	}{
 		{
-			name:    "no volume",
-			request: &csi.NodeUnstageVolumeRequest{StagingTargetPath: "/staging"},
-			says:    "volume_id: the call names no volume",
+			name:        "no volume",
+			request:     &csi.NodeUnstageVolumeRequest{StagingTargetPath: "/staging"},
+			wantMessage: "volume_id is empty",
 		},
 		{
-			name:    "no staging path",
-			request: &csi.NodeUnstageVolumeRequest{VolumeId: "config"},
-			says:    "staging_target_path: the call names no path",
+			name:        "no staging path",
+			request:     &csi.NodeUnstageVolumeRequest{VolumeId: "config"},
+			wantMessage: "staging_target_path is empty",
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			_, err := answering.NodeUnstageVolume(t.Context(), c.request)
-			if got := status.Convert(err).Message(); got != c.says {
-				t.Errorf("NodeUnstageVolume said %q, want %q", got, c.says)
+			_, err := n.NodeUnstageVolume(t.Context(), c.request)
+			if got := status.Convert(err).Message(); got != c.wantMessage {
+				t.Errorf("the message of NodeUnstageVolume is %q, want %q", got, c.wantMessage)
 			}
 		})
 	}
 }
 
 func TestNodeUnstageVolumeKeepsTheWorkTree(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
+	n, _ := testNode(t, io.Discard)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 	request := stageRequest(t, "config", fileURL(source), nil)
-	if _, err := answering.NodeStageVolume(t.Context(), request); err != nil {
-		t.Fatalf("NodeStageVolume: %v", err)
+	if _, err := n.NodeStageVolume(t.Context(), request); err != nil {
+		t.Fatalf("calling NodeStageVolume: %v", err)
 	}
 
 	for range 2 {
-		if _, err := answering.NodeUnstageVolume(t.Context(), &csi.NodeUnstageVolumeRequest{
+		if _, err := n.NodeUnstageVolume(t.Context(), &csi.NodeUnstageVolumeRequest{
 			VolumeId: "config", StagingTargetPath: request.StagingTargetPath,
 		}); err != nil {
-			t.Fatalf("NodeUnstageVolume: %v", err)
+			t.Fatalf("calling NodeUnstageVolume: %v", err)
 		}
 	}
 
-	answering.mu.Lock()
-	staged := len(answering.staged)
-	answering.mu.Unlock()
+	n.mu.Lock()
+	staged := len(n.staged)
+	n.mu.Unlock()
 	if staged != 0 {
-		t.Errorf("the node holds %d staged volumes, want 0", staged)
+		t.Errorf("the node has %d staged volumes after the unstage, want 0", staged)
 	}
-	tree := filepath.Join(answering.store.volumeDir("config"), "tree")
+	tree := filepath.Join(n.store.volumeDir("config"), "tree")
 	if got := readTree(t, tree); !sameTree(got, map[string]string{"a.txt": "one"}) {
-		t.Errorf("the work tree holds %v after the unstage, want the checkout", got)
+		t.Errorf("the work tree is %v after the unstage, want the checkout", got)
 	}
 }
 
 func TestNodePublishVolumeBindsTheWorkTreeReadWrite(t *testing.T) {
-	answering, calls := testNode(t, io.Discard)
+	n, calls := testNode(t, io.Discard)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	published, request := stagedWriteable(t, answering, "config", fileURL(source))
+	published, request := stagedWriteable(t, n, "config", fileURL(source))
 
 	if len(calls.mounts) != 1 {
 		t.Fatalf("the publish made %v, want one bind", calls.mounts)
@@ -424,21 +425,21 @@ func TestNodePublishVolumeBindsTheWorkTreeReadWrite(t *testing.T) {
 		t.Errorf("the bind is %+v, want it writeable", calls.mounts[0])
 	}
 	if got := published.podRef(); got.name != "writer" || got.namespace != "home" {
-		t.Errorf("the volume names the pod %+v, want the pod of the publish", got)
+		t.Errorf("podRef() is %+v, want the pod of the publish", got)
 	}
 }
 
-func TestNodePublishVolumeAnswersTheSameWriteableCallTwice(t *testing.T) {
-	answering, calls := testNode(t, io.Discard)
+func TestNodePublishVolumeSucceedsWhenTheSameWriteableCallRepeats(t *testing.T) {
+	n, calls := testNode(t, io.Discard)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 	staged := stageRequest(t, "config", fileURL(source), nil)
-	if _, err := answering.NodeStageVolume(t.Context(), staged); err != nil {
-		t.Fatalf("NodeStageVolume: %v", err)
+	if _, err := n.NodeStageVolume(t.Context(), staged); err != nil {
+		t.Fatalf("calling NodeStageVolume: %v", err)
 	}
 	request := persistentPublish(t, staged)
 	for range 2 {
-		if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
-			t.Fatalf("NodePublishVolume: %v", err)
+		if _, err := n.NodePublishVolume(t.Context(), request); err != nil {
+			t.Fatalf("calling NodePublishVolume: %v", err)
 		}
 	}
 	if len(calls.mounts) != 1 {
@@ -446,41 +447,41 @@ func TestNodePublishVolumeAnswersTheSameWriteableCallTwice(t *testing.T) {
 	}
 
 	elsewhere := persistentPublish(t, staged)
-	_, err := answering.NodePublishVolume(t.Context(), elsewhere)
+	_, err := n.NodePublishVolume(t.Context(), elsewhere)
 	if got := status.Code(err); got != codes.FailedPrecondition {
-		t.Errorf("NodePublishVolume answered %v, want %v", got, codes.FailedPrecondition)
+		t.Errorf("the status code of NodePublishVolume is %v, want %v", got, codes.FailedPrecondition)
 	}
 }
 
-func TestNodePublishVolumeTakesTheSecretOfThePublish(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
+func TestNodePublishVolumeUsesTheSecretOfThePublish(t *testing.T) {
+	n, _ := testNode(t, io.Discard)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 	staged := stageRequest(t, "config", fileURL(source), nil)
-	if _, err := answering.NodeStageVolume(t.Context(), staged); err != nil {
-		t.Fatalf("NodeStageVolume: %v", err)
+	if _, err := n.NodeStageVolume(t.Context(), staged); err != nil {
+		t.Fatalf("calling NodeStageVolume: %v", err)
 	}
 	request := persistentPublish(t, staged)
 	request.Secrets = map[string]string{tokenKey: "a token"}
-	if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
-		t.Fatalf("NodePublishVolume: %v", err)
+	if _, err := n.NodePublishVolume(t.Context(), request); err != nil {
+		t.Fatalf("calling NodePublishVolume: %v", err)
 	}
 
-	answering.mu.Lock()
-	published := answering.volumes["config"]
-	answering.mu.Unlock()
+	n.mu.Lock()
+	published := n.volumes["config"]
+	n.mu.Unlock()
 	if published.credentials == nil || published.credentials.token != "a token" {
-		t.Errorf("the volume holds %+v, want the token of the publish", published.credentials)
+		t.Errorf("the credentials of the volume are %+v, want the token of the publish", published.credentials)
 	}
 }
 
 func TestNodePublishVolumeReportsWhatItCannotBind(t *testing.T) {
 	for _, c := range []struct {
-		name  string
-		stand func(t *testing.T, calls *recordedMounts, request *csi.NodePublishVolumeRequest)
+		name    string
+		prepare func(t *testing.T, calls *recordedMounts, request *csi.NodePublishVolumeRequest)
 	}{
 		{
 			name: "a target path under a file",
-			stand: func(t *testing.T, _ *recordedMounts, request *csi.NodePublishVolumeRequest) {
+			prepare: func(t *testing.T, _ *recordedMounts, request *csi.NodePublishVolumeRequest) {
 				file := filepath.Join(t.TempDir(), "file")
 				writeFiles(t, filepath.Dir(file), map[string]string{"file": ""})
 				request.TargetPath = filepath.Join(file, "mount")
@@ -488,87 +489,87 @@ func TestNodePublishVolumeReportsWhatItCannotBind(t *testing.T) {
 		},
 		{
 			name: "a mount that stays",
-			stand: func(_ *testing.T, calls *recordedMounts, _ *csi.NodePublishVolumeRequest) {
+			prepare: func(_ *testing.T, calls *recordedMounts, _ *csi.NodePublishVolumeRequest) {
 				calls.unmountErr = unix.EPERM
 			},
 		},
 		{
 			name: "a bind it cannot make",
-			stand: func(_ *testing.T, calls *recordedMounts, _ *csi.NodePublishVolumeRequest) {
+			prepare: func(_ *testing.T, calls *recordedMounts, _ *csi.NodePublishVolumeRequest) {
 				calls.failAt = 1
 				calls.mountErr = unix.EPERM
 			},
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			answering, calls := testNode(t, io.Discard)
+			n, calls := testNode(t, io.Discard)
 			source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
 			staged := stageRequest(t, "config", fileURL(source), nil)
-			if _, err := answering.NodeStageVolume(t.Context(), staged); err != nil {
-				t.Fatalf("NodeStageVolume: %v", err)
+			if _, err := n.NodeStageVolume(t.Context(), staged); err != nil {
+				t.Fatalf("calling NodeStageVolume: %v", err)
 			}
 			request := persistentPublish(t, staged)
-			c.stand(t, calls, request)
+			c.prepare(t, calls, request)
 
-			_, err := answering.NodePublishVolume(t.Context(), request)
+			_, err := n.NodePublishVolume(t.Context(), request)
 			if got := status.Code(err); got != codes.Internal {
-				t.Errorf("NodePublishVolume answered %v, want %v", got, codes.Internal)
+				t.Errorf("the status code of NodePublishVolume is %v, want %v", got, codes.Internal)
 			}
 		})
 	}
 }
 
 func TestNodeUnpublishVolumeKeepsAWriteableTree(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
+	n, _ := testNode(t, io.Discard)
 	source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-	published, request := stagedWriteable(t, answering, "config", fileURL(source))
+	published, request := stagedWriteable(t, n, "config", fileURL(source))
 	writeFiles(t, published.tree, map[string]string{"new.txt": "the pod wrote this"})
 
-	if _, err := answering.NodeUnpublishVolume(t.Context(), &csi.NodeUnpublishVolumeRequest{
+	if _, err := n.NodeUnpublishVolume(t.Context(), &csi.NodeUnpublishVolumeRequest{
 		VolumeId: "config", TargetPath: request.TargetPath,
 	}); err != nil {
-		t.Fatalf("NodeUnpublishVolume: %v", err)
+		t.Fatalf("calling NodeUnpublishVolume: %v", err)
 	}
 
 	want := map[string]string{"a.txt": "one", "new.txt": "the pod wrote this"}
 	if got := readTree(t, published.tree); !sameTree(got, want) {
-		t.Errorf("the work tree holds %v, want %v", got, want)
+		t.Errorf("the work tree has %v, want %v", got, want)
 	}
 	if _, err := os.Stat(filepath.Join(published.directory, recordFile)); err == nil {
 		t.Error("the record stayed after the unpublish")
 	}
-	answering.mu.Lock()
-	watching := len(answering.watchers)
-	answering.mu.Unlock()
+	n.mu.Lock()
+	watching := len(n.watchers)
+	n.mu.Unlock()
 	if watching != 0 {
-		t.Errorf("the node holds %d watches after the unpublish, want 0", watching)
+		t.Errorf("the node has %d watches after the unpublish, want 0", watching)
 	}
 }
 
 func TestTheUnpublishCommitsAndPushesTheLastOfTheWork(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		remote := bareRemote(t, map[string]string{"a.txt": "one"})
-		answering, _ := testNode(t, io.Discard)
-		boundVolume(t, answering, "config", "config-eager")
-		armingClass(t, answering, "config-eager", nil)
+		n, _ := testNode(t, io.Discard)
+		boundVolume(t, n, "config", "config-eager")
+		createClass(t, n, "config-eager", nil)
 		staged := stageRequest(t, "config", fileURL(remote), nil)
-		if _, err := answering.NodeStageVolume(t.Context(), staged); err != nil {
-			t.Fatalf("NodeStageVolume: %v", err)
+		if _, err := n.NodeStageVolume(t.Context(), staged); err != nil {
+			t.Fatalf("calling NodeStageVolume: %v", err)
 		}
 		request := persistentPublish(t, staged)
-		if _, err := answering.NodePublishVolume(t.Context(), request); err != nil {
-			t.Fatalf("NodePublishVolume: %v", err)
+		if _, err := n.NodePublishVolume(t.Context(), request); err != nil {
+			t.Fatalf("calling NodePublishVolume: %v", err)
 		}
-		answering.mu.Lock()
-		published := answering.volumes["config"]
-		answering.mu.Unlock()
+		n.mu.Lock()
+		published := n.volumes["config"]
+		n.mu.Unlock()
 		waitForArmed(t, published, true)
 		writeFiles(t, published.tree, map[string]string{"one.yaml": "1"})
 
-		if _, err := answering.NodeUnpublishVolume(t.Context(), &csi.NodeUnpublishVolumeRequest{
+		if _, err := n.NodeUnpublishVolume(t.Context(), &csi.NodeUnpublishVolumeRequest{
 			VolumeId: "config", TargetPath: request.TargetPath,
 		}); err != nil {
-			t.Fatalf("NodeUnpublishVolume: %v", err)
+			t.Fatalf("calling NodeUnpublishVolume: %v", err)
 		}
 		if got := strings.TrimSpace(git(t, remote, "log", "--format=%s", "-1", "main")); got != "Update 1 paths" {
 			t.Errorf("the remote's main is at %q, want the last of the pod's work", got)
@@ -578,11 +579,11 @@ func TestTheUnpublishCommitsAndPushesTheLastOfTheWork(t *testing.T) {
 
 func TestTheUnstagePushesWhatTheUnpublishCouldNot(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, held, remote := pushedVolume(t, io.Discard, nil)
-		if _, err := answering.NodeUnstageVolume(t.Context(), &csi.NodeUnstageVolumeRequest{
-			VolumeId: "config", StagingTargetPath: held.staging,
+		n, vol, remote := committedVolume(t, io.Discard, nil)
+		if _, err := n.NodeUnstageVolume(t.Context(), &csi.NodeUnstageVolumeRequest{
+			VolumeId: "config", StagingTargetPath: vol.staging,
 		}); err != nil {
-			t.Fatalf("NodeUnstageVolume: %v", err)
+			t.Fatalf("calling NodeUnstageVolume: %v", err)
 		}
 		if got := strings.TrimSpace(git(t, remote, "log", "--format=%s", "-1", "main")); got != "Update 1 paths" {
 			t.Errorf("the remote's main is at %q, want the driver's commit", got)
@@ -594,23 +595,24 @@ func TestARestoreReplaysTheModesAndTheEmptyDirectories(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		remote := bareRemote(t, map[string]string{"a.txt": "one"})
 		first, _ := testNode(t, io.Discard)
-		held := armedVolume(t, first, "config", fileURL(remote), nil)
-		unwatched(t, first, held)
-		writeFiles(t, held.tree, map[string]string{"secret.yaml": "1"})
-		if err := os.Chmod(filepath.Join(held.tree, "secret.yaml"), 0o600); err != nil {
-			t.Fatalf("chmod: %v", err)
+		vol := armedVolume(t, first, "config", fileURL(remote), nil)
+		unwatched(t, first, vol)
+		writeFiles(t, vol.tree, map[string]string{"secret.yaml": "1"})
+		if err := os.Chmod(filepath.Join(vol.tree, "secret.yaml"), 0o600); err != nil {
+			t.Fatalf("changing the mode of the file: %v", err)
 		}
-		if err := os.MkdirAll(filepath.Join(held.tree, ".storage"), 0o700); err != nil {
-			t.Fatalf("mkdir: %v", err)
+		if err := os.MkdirAll(filepath.Join(vol.tree, ".storage"), 0o700); err != nil {
+			t.Fatalf("creating the directory: %v", err)
 		}
-		first.commit(t.Context(), held, held.policyNow())
-		first.push(t.Context(), held)
+		first.commit(t.Context(), vol, vol.policyNow())
+		first.push(t.Context(), vol)
 
-		// A node that has never held the volume is a restore.
+		// A second node has no work tree for the volume, so its stage
+		// creates one and restores the modes from the remote.
 		again, _ := testNode(t, io.Discard)
 		if _, err := again.NodeStageVolume(t.Context(),
 			stageRequest(t, "config", fileURL(remote), nil)); err != nil {
-			t.Fatalf("NodeStageVolume: %v", err)
+			t.Fatalf("calling NodeStageVolume: %v", err)
 		}
 		again.mu.Lock()
 		restored := again.staged["config"]
@@ -618,14 +620,14 @@ func TestARestoreReplaysTheModesAndTheEmptyDirectories(t *testing.T) {
 
 		secret, err := os.Stat(filepath.Join(restored.tree, "secret.yaml"))
 		if err != nil {
-			t.Fatalf("the restored tree holds no secret.yaml: %v", err)
+			t.Fatalf("the restored tree has no secret.yaml: %v", err)
 		}
 		if secret.Mode().Perm() != 0o600 {
 			t.Errorf("secret.yaml is %s, want -rw-------", secret.Mode())
 		}
 		storage, err := os.Stat(filepath.Join(restored.tree, ".storage"))
 		if err != nil {
-			t.Fatalf("the restored tree holds no empty directory: %v", err)
+			t.Fatalf("the restored tree has no empty directory: %v", err)
 		}
 		if !storage.IsDir() || storage.Mode().Perm() != 0o700 {
 			t.Errorf(".storage is %s, want drwx------", storage.Mode())
@@ -635,104 +637,104 @@ func TestARestoreReplaysTheModesAndTheEmptyDirectories(t *testing.T) {
 
 func TestARestoreReportsAMetadataRefItCannotRead(t *testing.T) {
 	remote := bareRemote(t, map[string]string{"a.txt": "one"})
-	// A metadata ref whose tree holds no record is a ref the driver
-	// cannot replay.
+	// The ref points at a tree with no metadata record, so the driver
+	// cannot replay it.
 	git(t, remote, "update-ref", metadataRef, "refs/heads/main")
 
 	logs := &logbook{}
-	answering, _ := testNode(t, logs)
-	if _, err := answering.NodeStageVolume(t.Context(),
+	n, _ := testNode(t, logs)
+	if _, err := n.NodeStageVolume(t.Context(),
 		stageRequest(t, "config", fileURL(remote), nil)); err != nil {
-		t.Fatalf("NodeStageVolume: %v", err)
+		t.Fatalf("calling NodeStageVolume: %v", err)
 	}
-	if !strings.Contains(logs.String(), "the metadata was not replayed") {
-		t.Errorf("the log is %q, want the failed replay in it", logs)
+	if !strings.Contains(logs.String(), "was not replayed") {
+		t.Errorf("the log is %q, want it to say the metadata was not replayed", logs)
 	}
 }
 
 func TestARestoreReportsACredentialItCannotWrite(t *testing.T) {
 	logs := &logbook{}
-	answering, _ := testNode(t, logs)
-	answering.restore(t.Context(), &volume{
+	n, _ := testNode(t, logs)
+	n.restore(t.Context(), &volume{
 		id:          "config",
 		attributes:  &attributes{url: "file:///nowhere", ref: "main"},
 		credentials: &credentials{privateKey: "a key"},
 		directory:   filepath.Join(t.TempDir(), "gone"),
 	})
-	if !strings.Contains(logs.String(), "the metadata was not fetched") {
-		t.Errorf("the log is %q, want the failure in it", logs)
+	if !strings.Contains(logs.String(), "credential was not written") {
+		t.Errorf("the log is %q, want it to say the credential was not written", logs)
 	}
 }
 
-func TestNodeStageVolumeReportsAMarkItCannotMove(t *testing.T) {
+func TestNodeStageVolumeFailsWhenItCannotUpdatePushedRef(t *testing.T) {
 	for _, c := range []struct {
-		name  string
-		stand func(t *testing.T, answering *node, source string)
+		name    string
+		prepare func(t *testing.T, n *node, source string)
 	}{
 		{
 			name: "on the first stage of a volume",
-			stand: func(t *testing.T, answering *node, _ string) {
-				lockTheMark(t, answering, "config")
+			prepare: func(t *testing.T, n *node, _ string) {
+				lockPushedRef(t, n, "config")
 			},
 		},
 		{
-			name: "on a work tree a driver that made no commits left",
-			stand: func(t *testing.T, answering *node, source string) {
+			name: "on a work tree that has no pushedRef",
+			prepare: func(t *testing.T, n *node, source string) {
 				staged := stageRequest(t, "config", fileURL(source), nil)
-				if _, err := answering.NodeStageVolume(t.Context(), staged); err != nil {
-					t.Fatalf("NodeStageVolume: %v", err)
+				if _, err := n.NodeStageVolume(t.Context(), staged); err != nil {
+					t.Fatalf("calling NodeStageVolume: %v", err)
 				}
-				if _, err := answering.NodeUnstageVolume(t.Context(),
+				if _, err := n.NodeUnstageVolume(t.Context(),
 					&csi.NodeUnstageVolumeRequest{
 						VolumeId: "config", StagingTargetPath: staged.StagingTargetPath,
 					}); err != nil {
-					t.Fatalf("NodeUnstageVolume: %v", err)
+					t.Fatalf("calling NodeUnstageVolume: %v", err)
 				}
-				work := answering.store.workTree(
-					answering.store.repository(fileURL(source)), "config")
+				work := n.store.workTree(
+					n.store.repository(fileURL(source)), "config")
 				if err := os.Remove(
 					filepath.Join(work.gitDir, filepath.FromSlash(pushedRef))); err != nil {
-					t.Fatalf("removing the mark: %v", err)
+					t.Fatalf("removing pushedRef: %v", err)
 				}
-				lockTheMark(t, answering, "config")
+				lockPushedRef(t, n, "config")
 			},
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			answering, _ := testNode(t, io.Discard)
+			n, _ := testNode(t, io.Discard)
 			source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-			c.stand(t, answering, source)
-			_, err := answering.NodeStageVolume(t.Context(),
+			c.prepare(t, n, source)
+			_, err := n.NodeStageVolume(t.Context(),
 				stageRequest(t, "config", fileURL(source), nil))
 			if got := status.Code(err); got != codes.Internal {
-				t.Errorf("NodeStageVolume answered %v, want %v", got, codes.Internal)
+				t.Errorf("the status code of NodeStageVolume is %v, want %v", got, codes.Internal)
 			}
 		})
 	}
 }
 
-// lockTheMark puts a directory where git writes the mark's lock file, so
-// the next move of the mark fails.
-func lockTheMark(t *testing.T, answering *node, id string) {
+// lockPushedRef creates a directory where git writes the lock file of
+// pushedRef, so the next update of pushedRef fails.
+func lockPushedRef(t *testing.T, n *node, id string) {
 	t.Helper()
-	lock := filepath.Join(answering.store.volumeDir(id), "git",
+	lock := filepath.Join(n.store.volumeDir(id), "git",
 		filepath.FromSlash(pushedRef)+".lock")
 	if err := os.MkdirAll(lock, 0o755); err != nil {
-		t.Fatalf("making the lock directory: %v", err)
+		t.Fatalf("creating the lock directory: %v", err)
 	}
 }
 
-func TestAStageThatFindsTheMarkLeavesItWhereItIs(t *testing.T) {
+func TestNodeUnstageVolumePushesAndMovesPushedRef(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, held, _ := pushedVolume(t, io.Discard, nil)
-		before := held.work.refCommit(t.Context(), pushedRef)
-		if _, err := answering.NodeUnstageVolume(t.Context(), &csi.NodeUnstageVolumeRequest{
-			VolumeId: "config", StagingTargetPath: held.staging,
+		n, vol, _ := committedVolume(t, io.Discard, nil)
+		before := vol.work.refCommit(t.Context(), pushedRef)
+		if _, err := n.NodeUnstageVolume(t.Context(), &csi.NodeUnstageVolumeRequest{
+			VolumeId: "config", StagingTargetPath: vol.staging,
 		}); err != nil {
-			t.Fatalf("NodeUnstageVolume: %v", err)
+			t.Fatalf("calling NodeUnstageVolume: %v", err)
 		}
-		if after := held.work.refCommit(t.Context(), pushedRef); after == before {
-			t.Error("the unstage pushed nothing, and the mark did not move")
+		if after := vol.work.refCommit(t.Context(), pushedRef); after == before {
+			t.Error("the unstage pushed nothing, and pushedRef did not move")
 		}
 	})
 }

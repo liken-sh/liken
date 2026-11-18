@@ -7,20 +7,22 @@ This skill is the guide at https://liken.sh/git/docs/guides/install/, emitted fo
 
 # Install the driver
 
-Install the driver from the kustomize base in the driver's `deploy/`
-directory. You need a cluster with standard CSI plumbing, `kubectl`
-with cluster-admin rights, and the `liken-system` namespace.
+At the end of this guide, every node runs the driver's node plugin
+and can mount git repositories as volumes. You need `kubectl` with
+cluster-admin rights and the `liken-system` namespace.
 
-Add the base to your own kustomization and pin `<tag>` to the
-driver's version, so the install is the same every time you apply it.
-The base creates the `CSIDriver` object,
-the `ServiceAccount`s and their roles, the
-`DaemonSet` that runs the node plugin beside the kubelet's registrar,
-and the `Deployment` that runs the controller plugin beside the
-`external-resizer` and the `external-provisioner`. The
-`external-resizer` sends a claim's class change to the driver. The
-`external-provisioner` deletes a released `PersistentVolume` of the
-`Delete` reclaim policy, and provisions nothing.
+Add the kustomize base in the driver's `deploy/` directory to your own
+kustomization, with `<tag>` set to the driver's version. The base
+creates:
+
+* the `CSIDriver` object, and the `ServiceAccount`s and their roles.
+* a `DaemonSet` that runs the node plugin and the
+  `csi-node-driver-registrar`, which registers the plugin with the kubelet.
+* a `Deployment` that runs the controller plugin with the
+  `external-resizer` and the `external-provisioner`. The
+  `external-resizer` sends a change of a claim's class to the driver.
+  The `external-provisioner` creates no volumes. It only deletes a
+  released `PersistentVolume` that has the `Delete` reclaim policy.
 
 ```yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -36,14 +38,14 @@ images:
     newTag: <tag>
 ```
 
-The driver's version is the release tag that last published it. The
-[GitHub release](https://github.com/liken-sh/liken/releases) for each
+The driver's version is the tag of the release that last published
+it. The [GitHub release](https://github.com/liken-sh/liken/releases) for each
 tag lists every component and its version.
 
-Check that every node lists `git.liken.sh` among its drivers. A node
-appears there after the registrar tells its kubelet about the plugin
-and the kubelet calls the plugin. A node missing from the answer has
-no plugin pod running yet.
+Apply your kustomization. Then check that every node lists
+`git.liken.sh` among its drivers. A node lists the driver after its
+node plugin pod is running and the registrar has registered it with
+the kubelet, so a node without it has no running plugin pod yet.
 
 ```console
 kubectl get csinode -o custom-columns=NODE:.metadata.name,DRIVERS:.spec.drivers[*].name
@@ -51,41 +53,39 @@ kubectl get csinode -o custom-columns=NODE:.metadata.name,DRIVERS:.spec.drivers[
 
 ## The plugin's flags
 
-One binary runs both plugins, and a subcommand picks which one runs.
-The base passes `node` to the `DaemonSet` and `controller` to the
-`Deployment`, and each subcommand accepts only its own flags. Change
-a flag through a kustomize patch on the container's `args`.
+One binary runs both plugins. The subcommand `node` runs the node
+plugin, and `controller` runs the controller plugin. Each subcommand
+accepts only its own flags. To change a flag, write a kustomize patch
+on the container's `args`.
 
 `git-csi-driver node` takes these flags.
 
 | Flag | Default | Meaning |
 |---|---|---|
 | `--endpoint` | `unix:///csi/csi.sock` | The socket the kubelet and the sidecars call. |
-| `--node-id` | none | The node's name, which the base takes from the pod's `spec.nodeName`. |
-| `--store` | `/var/lib/liken/pod-storage/git-csi` | Where the node plugin keeps its bare repositories, trees, and records. On `liken` this is the pod-storage partition. |
-| `--metrics` | `:9200` | Where the node plugin serves its Prometheus metrics. An empty value serves none. |
-| `--demand-min-interval` | `10s` | How long a demanded pull waits after the last pull of the same repository on the node. A burst of demands inside that interval costs one pull. |
+| `--node-id` | none, required | The node's name. The base sets it from the pod's `spec.nodeName`. |
+| `--store` | `/var/lib/liken/pod-storage/git-csi` | The directory where the node plugin keeps its bare repositories and work trees. On `liken` this directory is on the pod-storage partition. |
+| `--metrics` | `:9200` | The address where the node plugin serves its Prometheus metrics. An empty value turns the metrics off. |
+| `--demand-min-interval` | `10s` | The shortest time between two demanded pulls of the same repository on the node. Demands that arrive inside that interval cause one pull. |
 
 `git-csi-driver controller` takes these flags.
 
 | Flag | Default | Meaning |
 |---|---|---|
 | `--endpoint` | `unix:///csi/csi.sock` | The socket the sidecars call. |
-| `--metrics` | `:9200` | Where the controller serves its Prometheus metrics. An empty value serves none. |
-| `--webhook` | `:8080` | Where the controller serves the webhook listener. An empty value serves none. |
+| `--metrics` | `:9200` | The address where the controller serves its Prometheus metrics. An empty value turns the metrics off. |
+| `--webhook` | `:8080` | The address where the controller receives webhooks from a forge. An empty value turns the webhook off. |
 
 `git-csi-driver --version` prints the version and exits.
 
-The controller pod declares both ports, and the base includes a
-`Service` named `git-csi-driver-webhook` on port 80 in front of the
-webhook port. The [read-only guide](https://liken.sh/git/docs/guides/read-only/#webhooks) says how a
-forge reaches it.
+The base includes a `Service` named `git-csi-driver-webhook` that
+forwards port 80 to the controller's webhook port. The [read-only
+guide](https://liken.sh/git/docs/guides/read-only/#webhooks) describes how a forge sends requests to it.
 
 The base runs one controller pod. To run two, patch the `Deployment`
-named `git-csi-driver-controller` to `replicas: 2`. Either pod answers
-a webhook. The `external-resizer` in each pod acts only while it holds
-the `Lease` named `external-resizer-git-liken-sh` in `liken-system`,
-so one resizer at a time writes a claim's status. The
-`external-provisioner` acts only while it holds the `Lease` named
-`git-liken-sh`, so one provisioner at a time deletes a
-`PersistentVolume`.
+named `git-csi-driver-controller` to `replicas: 2`. Either pod can
+receive a webhook. The two sidecars elect a leader through a `Lease`
+in `liken-system`, so only one pod at a time writes a claim's status
+or deletes a `PersistentVolume`. The `external-resizer` uses the
+`Lease` named `external-resizer-git-liken-sh`, and the
+`external-provisioner` uses `git-liken-sh`.

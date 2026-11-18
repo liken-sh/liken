@@ -1,8 +1,9 @@
 package main
 
-// diverged.go holds the side branch: the state a volume takes when
-// a rebase cannot put its work on the ref, where its pushes go while
-// it holds that state, and what ends it.
+// diverged.go handles a volume whose commits cannot be rebased onto the
+// remote ref. The driver pushes them to a side branch instead, and goes
+// back to the ref once upstream contains that work, normally because a
+// person merged the side branch.
 
 import (
 	"context"
@@ -12,24 +13,24 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// divergedKey is the key the volume's own git directory carries, so a
-// driver that restarted and a stage on the same node both read the state the
-// last push or the last stage wrote.
+// divergedKey is the git config key in the volume's git directory that
+// records the side branch name. It is on disk so that a restarted driver
+// and a later stage still push to the side branch.
 const divergedKey = "git-csi.diverged"
 
-// rejectionWords are how git states a rejected push. A rejection is
-// the one push failure the driver answers with a rebase, and with a
-// branch of its own when the rebase cannot land.
+// rejectionWords are the strings in git's stderr that show the remote
+// rejected a push. Only a rejected push makes the driver rebase, and it
+// diverges when the push after the rebase fails too.
 var rejectionWords = []string{"rejected", "non-fast-forward", "fetch first"}
 
-// sideBranch names the ref and the volume, so two volumes of one
-// ref on one remote never take the same branch.
+// The side branch name includes the volume id so that two volumes of
+// the same ref on one remote do not share a branch.
 func sideBranch(ref, id string) string {
 	return ref + "." + id
 }
 
-// rejectedPush reads git's whole stderr, because the last line of
-// a rejected push is a hint and the rejection is above it.
+// rejectedPush searches all of stderr, because git prints hints after
+// the rejection line.
 func rejectedPush(output gitOutput) bool {
 	for _, word := range rejectionWords {
 		if strings.Contains(output.stderr, word) {
@@ -39,8 +40,8 @@ func rejectedPush(output gitOutput) bool {
 	return false
 }
 
-// divergedBranch is the side branch the git directory records,
-// and the empty string where it records none.
+// divergedBranch returns the empty string when the volume is not
+// diverged.
 func (w *workTree) divergedBranch(ctx context.Context) string {
 	output, err := w.git(ctx, "config", "--get", "--", divergedKey)
 	if err != nil {
@@ -49,63 +50,60 @@ func (w *workTree) divergedBranch(ctx context.Context) string {
 	return trimLine(output.stdout)
 }
 
-// markDiverged writes the side branch where the next stage reads
-// it.
 func (w *workTree) markDiverged(ctx context.Context, branch string) error {
 	_, err := w.git(ctx, "config", "--local", "--", divergedKey, branch)
 	return err
 }
 
-// clearDiverged is what a heal writes, so the next push goes to
-// the ref again.
 func (w *workTree) clearDiverged(ctx context.Context) error {
 	_, err := w.git(ctx, "config", "--unset", "--", divergedKey)
 	return err
 }
 
-// deleteBranch removes the branch from the remote, which is the
-// push git makes from an empty source.
 func (w *workTree) deleteBranch(ctx context.Context, env []string, url, branch string) error {
 	_, err := w.gitWith(ctx, env, "push", "--quiet", url, ":refs/heads/"+branch)
 	return err
 }
 
-// diverge moves the volume to its side branch, after a rebase could
-// not put its work on the ref, and reports it in every place a person
-// reads. A state it cannot write is still the state in force for this
-// run.
-func (n *node) diverge(ctx context.Context, held *volume) {
-	branch := sideBranch(held.attributes.ref, held.id)
-	if err := held.work.markDiverged(ctx, branch); err != nil {
-		n.logger.WarnContext(ctx, "the diverged state was not written",
-			"volume", held.id, "error", err)
+// diverge switches the volume to its side branch, and reports it in the
+// volume's status, an Event, the log, and the metrics. When the git
+// config cannot be written, the volume still pushes to the side branch
+// until the driver restarts.
+func (n *node) diverge(ctx context.Context, vol *volume) {
+	branch := sideBranch(vol.attributes.ref, vol.id)
+	if err := vol.work.markDiverged(ctx, branch); err != nil {
+		n.logger.WarnContext(ctx, "The diverged record was not written to the volume git config",
+			"volume", vol.id, "error", err)
 	}
-	held.reportDiverged(branch)
-	claim := n.claimFor(ctx, held)
-	n.report(held, claim, corev1.EventTypeWarning, reasonDiverged,
-		fmt.Sprintf("diverged: every push goes to %s, not %s", branch, held.attributes.ref))
-	n.logger.WarnContext(ctx, "diverged", "volume", held.id, "branch", branch)
-	n.readings.record(held)
-	n.noteHealth(ctx, held)
+	vol.reportDiverged(branch)
+	claim := n.claimFor(ctx, vol)
+	n.report(vol, claim, corev1.EventTypeWarning, reasonDiverged,
+		fmt.Sprintf("Every push goes to the side branch %s, not to %s", branch, vol.attributes.ref))
+	n.logger.WarnContext(ctx, "The volume diverged", "volume", vol.id, "branch", branch)
+	n.metrics.record(vol)
+	n.recordHealth(ctx, vol)
 }
 
-// healOrHold answers the one question a stage asks a diverged
-// volume, which is whether upstream now holds the work.
-func (n *node) healOrHold(
+// stageDiverged runs when a stage finds a diverged volume. When
+// upstream contains the tree's HEAD, it returns the volume to its ref.
+// Otherwise it reports the volume as still diverged.
+func (n *node) stageDiverged(
 	ctx context.Context, staging *volume, branch, head, upstream, side string,
 ) error {
 	if !staging.work.ancestor(ctx, head, upstream) {
 		staging.reportDiverged(branch)
-		n.readings.record(staging)
-		n.noteHealth(ctx, staging)
+		n.metrics.record(staging)
+		n.recordHealth(ctx, staging)
 		return nil
 	}
-	return n.heal(ctx, staging, branch, upstream, side)
+	return n.resetToUpstream(ctx, staging, branch, upstream, side)
 }
 
-// heal takes upstream, deletes the side branch the remote still
-// holds, and clears the state, which is the whole end of a divergence.
-func (n *node) heal(ctx context.Context, staging *volume, branch, upstream, side string) error {
+// resetToUpstream resets the tree to upstream, moves pushedRef there,
+// and replays the file metadata that the reset dropped. Then it deletes the
+// side branch when the remote still has one, and clears the diverged
+// record.
+func (n *node) resetToUpstream(ctx context.Context, staging *volume, branch, upstream, side string) error {
 	if err := staging.work.reset(ctx, upstream); err != nil {
 		return err
 	}
@@ -116,96 +114,93 @@ func (n *node) heal(ctx context.Context, staging *volume, branch, upstream, side
 	if side != "" {
 		n.removeSide(ctx, staging, branch)
 	}
-	return n.healed(ctx, staging, branch)
+	return n.recordReturnToRef(ctx, staging, branch)
 }
 
-// healIfMerged fetches the ref before a diverged volume pushes, and
-// ends the divergence when upstream holds the side branch's work,
-// which is a person's merge. The pod keeps running through it, so
-// a merge no longer waits for the next restart.
-func (n *node) healIfMerged(ctx context.Context, held *volume, branch string) bool {
-	upstream, err := n.fetchUpstream(ctx, held)
+// returnToRefIfMerged runs before a diverged volume pushes. It fetches
+// the ref, and returns the volume to its ref when upstream contains the
+// side branch's work. It returns whether the volume is on its ref again.
+func (n *node) returnToRefIfMerged(ctx context.Context, vol *volume, branch string) bool {
+	upstream, err := n.fetchUpstream(ctx, vol)
 	if err != nil {
-		n.logger.WarnContext(ctx, "the ref was not fetched",
-			"volume", held.id, "error", err)
+		n.logger.WarnContext(ctx, "The upstream ref was not fetched",
+			"volume", vol.id, "error", err)
 		return false
 	}
-	// The pushed mark is the last commit the side branch took.
-	// Upstream holds it after the person's merge and at no other time.
-	if !held.work.ancestor(ctx, pushedRef, upstream) {
+	// pushedRef is the last commit pushed to the side branch.
+	if !vol.work.ancestor(ctx, pushedRef, upstream) {
 		return false
 	}
-	if err := n.healInTree(ctx, held, branch, upstream); err != nil {
-		n.logger.WarnContext(ctx, "the volume was not healed",
-			"volume", held.id, "error", err)
+	if err := n.returnToRefByRebase(ctx, vol, branch, upstream); err != nil {
+		n.logger.WarnContext(ctx, "The volume was not returned to its ref",
+			"volume", vol.id, "error", err)
 		return false
 	}
 	return true
 }
 
-// healInTree ends a divergence while a pod holds the tree. The
-// scratch rebase moves the tree, and not a reset, because a reset
-// rewrites every file under the pod. The pushed mark moves with the
-// push that follows.
-func (n *node) healInTree(ctx context.Context, held *volume, branch, upstream string) error {
-	if err := n.rebaseAside(ctx, held, upstream); err != nil {
+// returnToRefByRebase returns a volume to its ref while a pod has the
+// tree mounted. It rebases in a scratch tree instead of resetting,
+// because a reset rewrites every file under the running pod. pushedRef
+// moves with the push that follows.
+func (n *node) returnToRefByRebase(ctx context.Context, vol *volume, branch, upstream string) error {
+	if err := n.rebaseInScratchTree(ctx, vol, upstream); err != nil {
 		return err
 	}
-	n.removeSide(ctx, held, branch)
-	return n.healed(ctx, held, branch)
+	n.removeSide(ctx, vol, branch)
+	return n.recordReturnToRef(ctx, vol, branch)
 }
 
-// removeSide deletes the side branch on the remote. A branch that
-// stays there is logged and does not stop the heal, because the tree
+// A failure to delete the side branch is only logged, because the tree
 // is back on its ref either way.
-func (n *node) removeSide(ctx context.Context, held *volume, branch string) {
-	if err := n.deleteSide(ctx, held, branch); err != nil {
-		n.logger.WarnContext(ctx, "the side branch stayed on the remote",
-			"volume", held.id, "branch", branch, "error", err)
+func (n *node) removeSide(ctx context.Context, vol *volume, branch string) {
+	if err := n.deleteSide(ctx, vol, branch); err != nil {
+		n.logger.WarnContext(ctx, "The side branch was not deleted from the remote",
+			"volume", vol.id, "branch", branch, "error", err)
 	}
 }
 
-// healed clears the diverged state and reports the end of the
-// divergence in every place a person reads.
-func (n *node) healed(ctx context.Context, held *volume, branch string) error {
-	if err := held.work.clearDiverged(ctx); err != nil {
+// recordReturnToRef clears the diverged record, and reports the return
+// in the same places where diverge reports a divergence.
+func (n *node) recordReturnToRef(ctx context.Context, vol *volume, branch string) error {
+	if err := vol.work.clearDiverged(ctx); err != nil {
 		return err
 	}
-	held.reportHealed()
-	claim := n.claimFor(ctx, held)
-	n.report(held, claim, corev1.EventTypeNormal, reasonHealed,
-		fmt.Sprintf("healed: the tree is back on %s and %s is gone",
-			held.attributes.ref, branch))
-	n.logger.InfoContext(ctx, "healed", "volume", held.id, "branch", branch)
-	n.readings.record(held)
-	n.noteHealth(ctx, held)
+	vol.reportReturnedToRef()
+	claim := n.claimFor(ctx, vol)
+	n.report(vol, claim, corev1.EventTypeNormal, reasonHealed,
+		fmt.Sprintf("Pushes go to %s again, and the side branch %s was deleted",
+			vol.attributes.ref, branch))
+	n.logger.InfoContext(ctx, "The volume returned to its ref", "volume", vol.id, "branch", branch)
+	n.metrics.record(vol)
+	n.recordHealth(ctx, vol)
 	return nil
 }
 
-// claimFor is the claim the volume already names, and otherwise
-// the one the cluster names for its handle, because a stage diverges
-// before the loop that reads the claim has run.
-func (n *node) claimFor(ctx context.Context, held *volume) claimReference {
-	claim, _, _ := held.reading()
-	if claim.name != "" || n.arms.client == nil {
+// claimFor returns the volume's claim for an Event. A stage can diverge
+// or return to the ref before the arming loop has found the claim, so claimFor then
+// looks up the claim from the volume's handle.
+func (n *node) claimFor(ctx context.Context, vol *volume) claimReference {
+	claim, _, _ := vol.gaugeValues()
+	if claim.name != "" || n.arming.client == nil {
 		return claim
 	}
-	found, err := n.arms.claimOf(ctx, held.id)
+	found, err := n.arming.claimOf(ctx, vol.id)
 	if err != nil {
-		n.logger.InfoContext(ctx, "the volume names no claim",
-			"volume", held.id, "reason", err)
+		n.logger.InfoContext(ctx, "The claim of the volume was not found for its Event",
+			"volume", vol.id, "error", err)
 		return claim
 	}
 	return found
 }
 
-// deleteSide sends the deletion in a credential window of its
-// own, the way every other call to the remote does.
-func (n *node) deleteSide(ctx context.Context, held *volume, branch string) error {
-	env, remove, err := held.credential().use(held.directory)
+// deleteSide writes the credential for this one call and removes it
+// after, as every call to the remote does.
+func (n *node) deleteSide(ctx context.Context, vol *volume, branch string) error {
+	env, remove, err := vol.credential().use(vol.directory)
 	if err != nil {
 		return err
 	}
 	defer remove()
-	return held.work.deleteBranch(ctx, env, held.attributes.url, branch)
+	return vol.work.deleteBranch(ctx, env, vol.attributes.url, branch)
 }

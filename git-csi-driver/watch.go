@@ -1,8 +1,8 @@
 package main
 
-// watch.go holds the inotify watch on a published work tree and the
-// sweep that backs it up. Together they decide when the driver reads
-// what the pod wrote.
+// watch.go watches a published work tree with inotify, and scans it
+// when the pod stops writing and on a timer. A scan commits and pushes
+// what the pod wrote when the volume's class allows it.
 
 import (
 	"context"
@@ -18,21 +18,17 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// defaultQuiesce is how long a tree rests before the driver reads what
-// is pending. defaultSweep is how often it reads that anyway. The class
-// sets the quiesce in plan 05.
+// defaultQuiesce is how long the tree must go without a write before a
+// scan commits it, unless the volume's class sets its own. defaultSweep
+// is how often the tree is scanned when no event arrives.
 const (
 	defaultQuiesce = 30 * time.Second
 	defaultSweep   = time.Minute
 )
 
-// watchMask is the events that mean the pod changed the tree: a write,
-// a create, a delete, and both halves of a rename.
 const watchMask = unix.IN_CREATE | unix.IN_DELETE | unix.IN_MODIFY |
 	unix.IN_MOVED_FROM | unix.IN_MOVED_TO | unix.IN_CLOSE_WRITE
 
-// watcher is the inotify watch and the sweep of one published work
-// tree.
 type watcher struct {
 	node    *node
 	volume  *volume
@@ -41,74 +37,73 @@ type watcher struct {
 	clock   clock
 	cancel  context.CancelFunc
 	changes chan struct{}
-	// arrived wakes the loop to push when a republish returns a
-	// credential a restart lost, or carries a rotated one.
-	arrived chan struct{}
-	// classed wakes the loop when the class sets a new quiesce, so the
-	// timer that started before the class runs for the class's rest.
+	// republishWake wakes run to push when a republish brings a credential,
+	// either one that was missing after a restart or a rotated one.
+	republishWake chan struct{}
+	// classed wakes run to restart the quiesce timer with the class's
+	// value.
 	classed chan struct{}
 	running sync.WaitGroup
 
-	// The raw descriptor adds watches, and the file reads events. Calling
-	// Fd on the file would take it out of the runtime's poller and make
-	// the read blocking, so both are kept.
+	// InotifyAddWatch needs the raw descriptor, and calling Fd on the
+	// os.File would switch the descriptor to blocking mode, so read
+	// could no longer be stopped by closing the file. So the watcher
+	// keeps the descriptor and the file separately.
 	descriptor int
 	inotify    *os.File
 	watched    map[int32]string
 
-	// When the pod last changed the tree, which is what the
-	// quiesce is measured from.
+	// written is when read last received events, or when the watch
+	// started. The quiesce counts from it.
 	mu      sync.Mutex
 	written time.Time
 }
 
-// watch starts the loops that read one published work tree. The caller
-// holds the node's lock.
+// watch does nothing for a read-only volume. The caller holds the
+// node's lock.
 func (n *node) watch(published *volume) {
 	if !published.writeable() {
 		return
 	}
 	ctx, cancel := context.WithCancel(n.base)
-	seeing := &watcher{
-		node:    n,
-		volume:  published,
-		quiesce: n.quiesce,
-		sweep:   n.sweep,
-		clock:   n.clock,
-		cancel:  cancel,
-		changes: make(chan struct{}, 1),
-		arrived: make(chan struct{}, 1),
-		classed: make(chan struct{}, 1),
-		watched: map[int32]string{},
-		written: n.clock.Now(),
+	w := &watcher{
+		node:          n,
+		volume:        published,
+		quiesce:       n.quiesce,
+		sweep:         n.sweep,
+		clock:         n.clock,
+		cancel:        cancel,
+		changes:       make(chan struct{}, 1),
+		republishWake: make(chan struct{}, 1),
+		classed:       make(chan struct{}, 1),
+		watched:       map[int32]string{},
+		written:       n.clock.Now(),
 	}
-	n.watchers[published.id] = seeing
-	seeing.running.Add(2)
-	seeing.open(ctx)
-	go seeing.read(ctx)
-	go seeing.run(ctx)
+	n.watchers[published.id] = w
+	w.running.Add(2)
+	w.open(ctx)
+	go w.read(ctx)
+	go w.run(ctx)
 }
 
-// unwatch ends both loops and waits for them, so a volume the kubelet
-// unpublished holds no file open. The caller holds the node's lock.
+// unwatch waits for both goroutines to end, so an unpublished volume
+// leaves no inotify file open. The caller holds the node's lock.
 func (n *node) unwatch(published *volume) {
-	seeing, found := n.watchers[published.id]
+	w, found := n.watchers[published.id]
 	if !found {
 		return
 	}
 	delete(n.watchers, published.id)
-	seeing.cancel()
-	seeing.running.Wait()
+	w.cancel()
+	w.running.Wait()
 }
 
-// open takes an inotify file and adds a watch for the tree and every
-// directory under it. A watch the kernel refuses, for example at the
-// inotify limit, leaves the sweep as the whole watch, which is why the
-// sweep exists.
+// When the kernel refuses an inotify instance, for example at the
+// per-user limit, only the sweep scans the volume.
 func (w *watcher) open(ctx context.Context) {
 	fd, err := w.node.inotify(unix.IN_CLOEXEC | unix.IN_NONBLOCK)
 	if err != nil {
-		w.node.logger.WarnContext(ctx, "the watch did not start",
+		w.node.logger.WarnContext(ctx, "The inotify instance was refused, so only the sweep scans the volume",
 			"volume", w.volume.id, "error", err)
 		return
 	}
@@ -117,8 +112,8 @@ func (w *watcher) open(ctx context.Context) {
 	w.add(ctx, w.volume.tree)
 }
 
-// add watches the directory and everything under it, because inotify
-// watches one directory at a time.
+// add watches dir and every directory under it, because an inotify
+// watch does not cover subdirectories.
 func (w *watcher) add(ctx context.Context, dir string) {
 	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || !entry.IsDir() {
@@ -132,14 +127,14 @@ func (w *watcher) add(ctx context.Context, dir string) {
 		return nil
 	})
 	if err != nil {
-		w.node.logger.WarnContext(ctx, "the watch missed a directory",
+		w.node.logger.WarnContext(ctx, "The inotify watches do not cover every directory of the volume",
 			"volume", w.volume.id, "directory", dir, "error", err)
 	}
 }
 
-// read turns every batch of inotify events into one nudge and adds a
-// watch for each directory the pod created. It ends when run closes the
-// file.
+// read records one write for each batch of inotify events, and adds a
+// watch for each directory the pod created. It returns when run closes
+// the file.
 func (w *watcher) read(ctx context.Context) {
 	defer w.running.Done()
 	if w.inotify == nil {
@@ -156,20 +151,21 @@ func (w *watcher) read(ctx context.Context) {
 				w.add(ctx, event.directory)
 			}
 		}
-		w.nudge()
+		w.noteWrite()
 	}
 }
 
-// arrival is one inotify event: the directory the pod created, or
-// nothing.
-type arrival struct {
+// inotifyEvent.directory is the path of a directory the pod created,
+// or empty for any other event.
+type inotifyEvent struct {
 	directory string
 }
 
-// events reads the kernel's own record: a watch descriptor, a mask, a
-// cookie, the name's length, and the name.
-func (w *watcher) events(buffer []byte) []arrival {
-	found := []arrival{}
+// events decodes the struct inotify_event records in buffer: watch
+// descriptor, mask, cookie, name length, then the name padded with zero
+// bytes.
+func (w *watcher) events(buffer []byte) []inotifyEvent {
+	found := []inotifyEvent{}
 	for offset := 0; offset+unix.SizeofInotifyEvent <= len(buffer); {
 		descriptor := int32(binary.NativeEndian.Uint32(buffer[offset:]))
 		mask := binary.NativeEndian.Uint32(buffer[offset+4:])
@@ -178,7 +174,7 @@ func (w *watcher) events(buffer []byte) []arrival {
 		if length > 0 {
 			name = string(trimZeros(buffer[offset+unix.SizeofInotifyEvent : offset+unix.SizeofInotifyEvent+length]))
 		}
-		one := arrival{}
+		one := inotifyEvent{}
 		if mask&unix.IN_CREATE != 0 && mask&unix.IN_ISDIR != 0 {
 			one.directory = filepath.Join(w.watched[descriptor], name)
 		}
@@ -188,7 +184,6 @@ func (w *watcher) events(buffer []byte) []arrival {
 	return found
 }
 
-// trimZeros removes the zero bytes inotify pads a name with.
 func trimZeros(name []byte) []byte {
 	for len(name) > 0 && name[len(name)-1] == 0 {
 		name = name[:len(name)-1]
@@ -196,9 +191,10 @@ func trimZeros(name []byte) []byte {
 	return name
 }
 
-// nudge restarts the quiesce timer. The channel has one slot and the
-// send never blocks, so a burst of writes costs one nudge.
-func (w *watcher) nudge() {
+// noteWrite records the time of a write and wakes run to restart the
+// quiesce timer. The send never blocks, so a burst of writes leaves at
+// most one wake-up in the channel.
+func (w *watcher) noteWrite() {
 	w.mu.Lock()
 	w.written = w.clock.Now()
 	w.mu.Unlock()
@@ -208,53 +204,48 @@ func (w *watcher) nudge() {
 	}
 }
 
-// quietFor is how long the tree has rested, which is what the
-// push policy measures its quiesce against.
-func (w *watcher) quietFor() time.Duration {
+func (w *watcher) sinceWrite() time.Duration {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.clock.Now().Sub(w.written)
 }
 
-// rest is the quiesce in force. A class that arms the volume or sets a
-// new quiesce reaches the timer at once, so no remount is needed.
-func (w *watcher) rest() time.Duration {
+// quiesceNow returns the class's quiesce when the volume is armed, and
+// the driver's default otherwise.
+func (w *watcher) quiesceNow() time.Duration {
 	if rules := w.volume.policyNow(); rules != nil {
 		return rules.quiesce
 	}
 	return w.quiesce
 }
 
-// classChanged sets the quiesce timer of a writeable volume's watch
-// again when a class arms the volume or sets a new quiesce. The class
-// arrives from the claim's own watch, after the watch on the tree may
-// have started its timer: a timer that ran out on an unarmed volume
-// committed nothing, and a timer that runs for the driver's own quiesce
-// is not the class's. Without this, a write that no event follows waits
-// for the sweep.
+// classChanged tells the watcher that the volume was armed or its
+// quiesce changed. The watcher usually starts before the class is read,
+// so its timer may already have fired while the volume was unarmed, or
+// may be running with the driver's default quiesce. Without this, the
+// last write before the class arrived is not committed until the next
+// sweep.
 func (n *node) classChanged(staged *volume) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	if seeing, found := n.watchers[staged.id]; found && seeing.volume == staged {
+	if w, found := n.watchers[staged.id]; found && w.volume == staged {
 		select {
-		case seeing.classed <- struct{}{}:
+		case w.classed <- struct{}{}:
 		default:
 		}
 	}
 }
 
-// run waits until the tree has been quiet for the quiesce, then reads
-// what is pending. The sweep reads it anyway on a timer, because an
-// inotify watch the kernel refused reports nothing.
+// run scans the tree once at start, once the quiesce has passed with
+// no write, and on every sweep. The sweep covers writes that inotify did
+// not report, such as in a directory whose watch the kernel refused.
 //
-// The quiesce also starts with the watch. A write made while the driver
-// was down, or while no pod held the tree, sends no event, so without
-// that start only the sweep would commit it. The rest counts from the
-// start of the watch, because the driver cannot know when the write
-// ended.
+// The quiesce timer starts with the watch, because a write made while
+// the driver was down sends no event. The driver cannot tell when such a
+// write ended, so the quiesce counts from the start of the watch.
 func (w *watcher) run(ctx context.Context) {
 	defer w.running.Done()
-	quiesce := w.clock.NewTimer(w.rest())
+	quiesce := w.clock.NewTimer(w.quiesceNow())
 	defer quiesce.Stop()
 	sweep := w.clock.NewTimer(w.sweep)
 	defer sweep.Stop()
@@ -266,59 +257,56 @@ func (w *watcher) run(ctx context.Context) {
 			w.close()
 			return
 		case <-w.changes:
-			quiesce.Reset(w.rest())
+			quiesce.Reset(w.quiesceNow())
 		case <-w.classed:
-			quiesce.Reset(max(0, w.rest()-w.quietFor()))
+			quiesce.Reset(max(0, w.quiesceNow()-w.sinceWrite()))
 		case <-quiesce.Chan():
 			w.scan(ctx)
 		case <-sweep.Chan():
 			sweep.Reset(w.sweep)
 			w.scan(ctx)
-		case <-w.arrived:
+		case <-w.republishWake:
 			w.pushArrived(ctx)
 		}
 	}
 }
 
-// close ends the read loop, because a read of a closed file answers an
-// error.
+// Closing the inotify file makes the blocked Read in read return an
+// error, which ends that goroutine.
 func (w *watcher) close() {
 	if w.inotify != nil {
 		_ = w.inotify.Close()
 	}
 }
 
-// scan commits and pushes what the class allows, then records what git
-// still finds in the tree. An unarmed volume commits none of it, and
-// its report is what a person reads before a class arms the volume.
+// scan commits and pushes what the class allows, and reports the paths
+// that git still shows as changed. An unarmed volume commits nothing, so
+// the report is how a person sees its uncommitted work.
 func (w *watcher) scan(ctx context.Context) {
-	rules, quiet := w.volume.policyNow(), w.quietFor()
-	// The sweep reads the tree on its own timer, so the rest is
-	// asked for again here: a commit before the tree has rested is a
-	// commit of a write the application has not finished.
+	rules, quiet := w.volume.policyNow(), w.sinceWrite()
+	// A sweep can fire while the pod is still writing. Checking the
+	// quiesce here keeps a half-written file out of a commit.
 	if rules != nil && quiet >= rules.quiesce {
 		w.node.commit(ctx, w.volume, rules)
 	}
 	found, err := w.volume.work.pending(ctx)
 	if err != nil {
-		w.node.logger.WarnContext(ctx, "the tree was not read",
+		w.node.logger.WarnContext(ctx, "The pending paths of the volume tree were not read",
 			"volume", w.volume.id, "error", err)
 		return
 	}
 	if w.volume.reportPending(found) {
-		claim, _, count := w.volume.reading()
-		w.node.logger.InfoContext(ctx, "the tree holds work",
+		claim, _, count := w.volume.gaugeValues()
+		w.node.logger.InfoContext(ctx, "The volume tree has pending paths",
 			"volume", w.volume.id, "paths", count)
 		w.node.report(w.volume, claim, corev1.EventTypeNormal, reasonPending,
 			pendingMessage(count))
 	}
 	w.node.pushIfDue(ctx, w.volume, rules, quiet)
-	w.node.readings.record(w.volume)
-	w.node.noteHealth(ctx, w.volume)
+	w.node.metrics.record(w.volume)
+	w.node.recordHealth(ctx, w.volume)
 }
 
-// pendingMessage is what the Event says about a tree the driver has not
-// committed.
 func pendingMessage(count int) string {
 	return fmt.Sprintf("%d paths pending", count)
 }

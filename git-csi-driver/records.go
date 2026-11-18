@@ -1,8 +1,9 @@
 package main
 
-// records.go is what a restarted driver reads to find the volumes it
-// published. The mounts belong to the kernel and survive the driver;
-// its own set does not.
+// records.go writes a record file for each published volume and
+// rebuilds the driver's volumes from those files at startup. A driver
+// restart clears the in-memory set of volumes, and the kernel keeps the
+// mounts.
 
 import (
 	"bufio"
@@ -15,17 +16,15 @@ import (
 	"time"
 )
 
-// recordFile is the file each volume's directory carries beside its
-// tree.
 const recordFile = "volume.json"
 
-// record is one published volume as the store holds it. The credentials
-// are not in it. A Secret reaches the driver through the kubelet, and
-// the node's disk is not where it belongs.
+// record is the JSON written for one published volume. Credentials
+// records only whether the volume had a credential, because the driver
+// keeps the Secret's data in memory and never on the node's disk.
 //
-// An inline volume and a writeable volume carry the one target they can
-// have in targetPath. A read-only claim carries every target it is bound
-// at in targetPaths.
+// An inline volume and a writeable volume have one target, in Target.
+// A read-only claim can be mounted in several pods, so Targets lists
+// each of its targets.
 type record struct {
 	VolumeID    string            `json:"volumeId"`
 	Attributes  map[string]string `json:"attributes"`
@@ -37,25 +36,22 @@ type record struct {
 	Credentials bool              `json:"credentials"`
 }
 
-// The names a record writes for the three kinds.
+// The values of record.Kind.
 const (
 	inlineKind    = "inline"
 	readOnlyKind  = "readOnly"
 	writeableKind = "writeable"
 )
 
-// kindNames is the name each kind writes and reads.
 var kindNames = map[volumeKind]string{
 	inlineVolume:    inlineKind,
 	readOnlyClaim:   readOnlyKind,
 	writeableVolume: writeableKind,
 }
 
-// kind is what the record says this volume is.
-//
-// A record with no kind is read by its ephemeral flag: an inline volume
-// when it is set, and a writeable volume when it is not. Those are the
-// two kinds a driver that writes no kind holds.
+// kind reads Ephemeral when Kind is empty. record writes Kind for every
+// volume, so an empty Kind comes from an earlier driver version, and
+// such a record is an inline volume or a writeable volume.
 func (r *record) kind() volumeKind {
 	switch r.Kind {
 	case inlineKind:
@@ -71,7 +67,6 @@ func (r *record) kind() volumeKind {
 	return writeableVolume
 }
 
-// targetPaths is every target the record names.
 func (r *record) targetPaths() []string {
 	if r.kind() == readOnlyClaim {
 		return r.Targets
@@ -79,9 +74,9 @@ func (r *record) targetPaths() []string {
 	return []string{r.Target}
 }
 
-// record writes the volume's own record. A record the driver cannot
-// write is logged and nothing more, because a mount is worth more than
-// the record of it.
+// record writes the volume's record file. A failed write is only
+// logged, so a volume that is mounted and working does not fail because
+// its record is missing.
 func (n *node) record(ctx context.Context, published *volume) {
 	written := &record{
 		VolumeID:    published.id,
@@ -91,34 +86,30 @@ func (n *node) record(ctx context.Context, published *volume) {
 		Staging:     published.staging,
 		Ephemeral:   published.kind == inlineVolume,
 		Kind:        kindNames[published.kind],
-		Credentials: published.needsCredential(),
+		Credentials: published.hasOrAwaitsCredential(),
 	}
 	content, err := json.Marshal(written)
 	if err == nil {
 		err = os.WriteFile(filepath.Join(published.directory, recordFile), content, 0o600)
 	}
 	if err != nil {
-		n.logger.WarnContext(ctx, "the volume's record was not written",
+		n.logger.WarnContext(ctx, "The record file of the volume was not written",
 			"volume", published.id, "error", err)
 	}
 }
 
-// forget removes the record, so a driver that starts after this
-// unpublish does not resume a mount the kubelet took away.
+// forget deletes the record file, so a driver that restarts after an
+// unpublish does not resume a volume that the kubelet has removed.
 func (n *node) forget(published *volume) {
 	if err := os.Remove(filepath.Join(published.directory, recordFile)); err != nil {
-		n.logger.Warn("the volume's record was not removed", "volume", published.id, "error", err)
+		n.logger.Warn("The record file of the volume was not removed", "volume", published.id, "error", err)
 	}
 }
 
-// resume rebuilds the driver's set from the store. A target that is
-// still a mount is a volume a pod still reads, so its loops start
-// again. A target that is not is a read-only volume the store may drop,
-// or a work tree that may hold work nobody has pushed.
-//
-// The driver mounts nothing at a staging path, so the targets are the
-// whole evidence that a volume is still held. A record with no target
-// that the kernel still holds is dropped.
+// resume rebuilds the driver's volumes from the record files. A volume
+// is still in use when one of its targets is mounted. The driver mounts
+// nothing at the staging path, so resume checks only the targets. It
+// passes a volume with no mounted target to drop.
 func (n *node) resume(ctx context.Context) {
 	volumes := filepath.Join(n.store.root, "volumes")
 	entries, err := os.ReadDir(volumes)
@@ -127,24 +118,22 @@ func (n *node) resume(ctx context.Context) {
 	}
 	for _, entry := range entries {
 		directory := filepath.Join(volumes, entry.Name())
-		held, err := readRecord(filepath.Join(directory, recordFile))
+		rec, err := readRecord(filepath.Join(directory, recordFile))
 		if err != nil {
 			continue
 		}
-		mounted := n.mountedTargets(held)
+		mounted := n.mountedTargets(rec)
 		if len(mounted) == 0 {
-			n.drop(ctx, held, directory)
+			n.drop(ctx, rec, directory)
 			continue
 		}
-		n.resumeOne(ctx, held, directory, mounted)
+		n.resumeOne(ctx, rec, directory, mounted)
 	}
 }
 
-// mountedTargets is the targets the record names that the kernel still
-// holds.
-func (n *node) mountedTargets(held *record) []string {
+func (n *node) mountedTargets(rec *record) []string {
 	mounted := []string{}
-	for _, target := range held.targetPaths() {
+	for _, target := range rec.targetPaths() {
 		if n.mounted(target) {
 			mounted = append(mounted, target)
 		}
@@ -152,81 +141,83 @@ func (n *node) mountedTargets(held *record) []string {
 	return mounted
 }
 
-// drop removes a read-only volume whose mounts are gone, because it
-// leaves nothing worth keeping. A writeable one keeps its tree until
-// plan 06's sweep or a person takes it.
-func (n *node) drop(ctx context.Context, held *record, directory string) {
-	if held.kind() == writeableVolume {
+// drop deletes the directory of a read-only volume that has no mounts,
+// because its tree is a copy of the remote. It keeps a writeable
+// volume's directory, which can hold commits that were never pushed.
+// reclaim.go deletes that directory when its PersistentVolume is
+// deleted with the Delete reclaim policy.
+func (n *node) drop(ctx context.Context, rec *record, directory string) {
+	if rec.kind() == writeableVolume {
 		return
 	}
 	if err := os.RemoveAll(directory); err != nil {
-		n.logger.WarnContext(ctx, "the volume's directory stayed",
-			"volume", held.VolumeID, "error", err)
+		n.logger.WarnContext(ctx, "The volume directory was not removed",
+			"volume", rec.VolumeID, "error", err)
 	}
 }
 
-// resumeOne rebuilds one volume and starts the loops it had. It
-// holds no credential: the Secret came with a kubelet call, and the
-// driver keeps it in memory alone. The kubelet's next NodePublishVolume
-// for the volume carries it again, and republish.go starts the fetch or
-// the push the volume missed. Until then, the volume's report says what
-// it waits for.
-func (n *node) resumeOne(ctx context.Context, held *record, directory string, mounted []string) {
-	parsed, err := parseVolumeContext(held.Attributes)
+// resumeOne rebuilds one volume from its record and starts its fetch
+// loop or its watch. A volume that had a credential has none now,
+// because the driver never writes it to disk. Such a volume starts no
+// fetch here, and its health report says that it waits for a
+// credential. The kubelet calls NodePublishVolume again for each mounted
+// volume with the Secret, and republish.go then starts the fetch or
+// push.
+func (n *node) resumeOne(ctx context.Context, rec *record, directory string, mounted []string) {
+	parsed, err := parseVolumeContext(rec.Attributes)
 	if err != nil {
-		n.logger.WarnContext(ctx, "the volume's record was not read",
-			"volume", held.VolumeID, "error", err)
+		n.logger.WarnContext(ctx, "The attributes in the record file of the volume were not parsed",
+			"volume", rec.VolumeID, "error", err)
 		return
 	}
 	resumed := &volume{
-		id:         held.VolumeID,
+		id:         rec.VolumeID,
 		attributes: parsed,
 		directory:  directory,
 		tree:       filepath.Join(directory, "tree"),
-		target:     held.Target,
-		staging:    held.Staging,
-		kind:       held.kind(),
-		context:    held.Attributes,
+		target:     rec.Target,
+		staging:    rec.Staging,
+		kind:       rec.kind(),
+		context:    rec.Attributes,
 		targets:    map[string]podReference{},
 		pod:        parsed.pod,
 		commit:     placedCommit(directory),
 	}
-	if held.Credentials {
-		resumed.loseCredential()
+	if rec.Credentials {
+		resumed.markCredentialLost()
 	}
 	if resumed.kind == readOnlyClaim {
-		// The record names no pod for a target, so the resumed volume
-		// reports to the claim alone until each pod publishes again.
+		// The record has no pod for each target, so the volume posts its
+		// Events only to the claim until each pod publishes again.
 		for _, target := range mounted {
 			resumed.bind(target, podReference{})
 		}
 		n.findClaim(ctx, resumed)
-		// The record is written again, so the targets a pod gave up
-		// while the driver was down leave it.
+		// Writing the record again removes the targets that were
+		// unmounted while the driver was down.
 		n.record(ctx, resumed)
 	}
-	n.noteHealth(ctx, resumed)
-	// The restart pulls every read-only volume that follows its ref,
-	// and a writeable tree belongs to the application, so the restart
-	// answers every demand stamped before it.
-	resumed.answerDemandsBefore(time.Now())
+	n.recordHealth(ctx, resumed)
+	// A demand stamped before the restart needs no fetch of its own.
+	// resumePull, or the publish that returns the credential, fetches
+	// each read-only volume that follows its ref, and a writeable volume
+	// ignores demands.
+	resumed.satisfyDemandsBefore(time.Now())
 
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.volumes[resumed.id] = resumed
-	// A volume that waits for its credential pulls when the credential
-	// returns, because a pull now fails without it.
 	if resumed.kind == readOnlyClaim {
 		n.staged[resumed.id] = resumed
-		n.follow(resumed)
-		if !held.Credentials {
+		n.joinFetchLoop(resumed)
+		if !rec.Credentials {
 			n.resumePull(resumed)
 		}
 		return
 	}
 	if resumed.kind == inlineVolume {
-		n.follow(resumed)
-		if !held.Credentials {
+		n.joinFetchLoop(resumed)
+		if !rec.Credentials {
 			n.resumePull(resumed)
 		}
 		return
@@ -240,24 +231,25 @@ func (n *node) resumeOne(ctx context.Context, held *record, directory string, mo
 	n.watch(resumed)
 }
 
-// readRecord reads one volume's record.
 func readRecord(path string) (*record, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	held := &record{}
-	if err := json.Unmarshal(content, held); err != nil {
+	rec := &record{}
+	if err := json.Unmarshal(content, rec); err != nil {
 		return nil, err
 	}
-	return held, nil
+	return rec, nil
 }
 
-// mountTable is where the kernel publishes what is mounted.
+// mountTable is the kernel's list of the mounts that this process
+// sees.
 const mountTable = "/proc/self/mountinfo"
 
-// mountedNow asks the kernel whether the path is still a mount. Only
-// the mount table says what is still there.
+// mountedNow reports whether path is a mount point in the mount table,
+// because a path can exist on disk after its mount is gone. A table that
+// cannot be read reports no mount.
 func mountedNow(table, path string) bool {
 	published, err := os.Open(table)
 	if err != nil {
@@ -267,9 +259,9 @@ func mountedNow(table, path string) bool {
 	return mountedIn(published, path)
 }
 
-// mountedIn reads mountinfo. The fifth field of every line is the mount
-// point, with a space, a tab, a newline, and a backslash written as
-// octal escapes.
+// mountedIn reads the mount point from the fifth field of each line. The
+// kernel writes a space, tab, newline, or backslash in that field as an
+// octal escape.
 func mountedIn(table io.Reader, path string) bool {
 	lines := bufio.NewScanner(table)
 	for lines.Scan() {

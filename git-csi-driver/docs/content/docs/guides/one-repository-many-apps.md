@@ -19,9 +19,9 @@ for a static site.
 
 ## A volume for each application
 
-Each application gets its own `PersistentVolume`. The URL and the ref
-are the same on both. The `volumeHandle` is not: it names the volume on
-the node, so each volume needs its own.
+Each application gets its own `PersistentVolume`, with the same URL
+and ref. Each needs its own `volumeHandle`, because the driver names the
+volume on the node by its handle.
 
 ```yaml
 apiVersion: v1
@@ -69,16 +69,17 @@ spec:
       namespace: home
 ```
 
-Each volume names its own deploy key here, in both references. Two
-volumes can name one `Secret` instead, because they push to one
-repository. [The credential](../writeable/#the-credential) says why a
-volume names its `Secret` twice.
+Here each volume has its own deploy key, named in both secret
+references. Because both volumes push to the same repository, they can
+also share one `Secret`. [The credential](../writeable/#the-credential) explains why a
+volume references its `Secret` twice.
 
 ## A claim for each application
 
-Each claim binds one volume and names a class. The binder pairs a claim
-and a static volume only when both name the same class, so the
-`PersistentVolume` above has the same `volumeAttributesClassName`.
+Each claim binds one volume and sets a class. Kubernetes binds a claim
+to a pre-created volume only when both have the same
+`volumeAttributesClassName`, so each `PersistentVolume` above sets the
+same class as its claim.
 
 ```yaml
 apiVersion: v1
@@ -137,11 +138,11 @@ its values, and its default.
 
 ## One directory in each pod
 
-`subPath` on the volume mount publishes one directory of the tree into
-the container. The container gets that directory and nothing else of
-the repository. Use `strategy: Recreate` on a `Deployment`, because a
-rolling update would wait forever for a second pod that
-`ReadWriteOncePod` never lets start.
+Set `subPath` on the volume mount, so the container sees only its own
+directory of the repository. Use `strategy: Recreate` on the
+`Deployment`. A rolling update starts the new pod before it stops the
+old one, and `ReadWriteOncePod` never lets the second pod start, so
+the rollout waits forever.
 
 ```yaml
 apiVersion: apps/v1
@@ -197,38 +198,40 @@ spec:
 
 ## When both applications push
 
-Each volume commits and pushes on its own. The first of the two pushes
-succeeds. The second runs against a ref that moved, so the forge
-rejects it. The driver then fetches, rebases the volume's commits onto
-upstream beside the pod's tree, and pushes again, three times at most.
-The pod's tree takes the result in one step that rewrites only the
-files upstream changed. Those files are the other application's, and
-`subPath` keeps them out of its pod. The claim's events include
-`GitVolumeRebased`, with the count of commits and the upstream commit.
+Each volume pushes on its own schedule. When both push close
+together, the forge rejects the second push, because the ref has
+moved. The driver then fetches the ref, rebases the volume's commits
+onto it, and pushes again, up to three times. It then writes into the
+pod's tree only the files that upstream changed, which are in the
+other application's directory and hidden by `subPath`. The claim gets
+a `GitVolumeRebased` event.
 
 ## When both applications write one file
 
-The rebase does not settle a file that the application and upstream both
-changed. That volume moves to the branch `<ref>.<volumeHandle>`, and
-its events include `GitVolumeDiverged`. Every push goes there until a
-person merges it into the ref on the forge, and commits continue, so no
-work stops. At the volume's next push after the merge, it is back on
-the ref and the side branch is deleted. The writeable guide's [When upstream
-moves](../writeable/#when-upstream-moves) gives the full rule.
+When the application and upstream both changed the same file, the
+rebase conflicts. The driver moves that volume to the side branch
+`<ref>.<volumeHandle>`, posts `GitVolumeDiverged`, and keeps
+committing and pushing there, so the application keeps working. When
+a person merges the side branch into the ref on the forge, the volume
+returns to the ref at its next push, and the driver deletes the side
+branch. [When upstream
+moves](../writeable/#when-upstream-moves) in the writeable guide gives
+the full rule.
 
 ## The metadata record
 
-The modes, owners, and empty directories of the tree are recorded on
-one ref, `refs/git-csi/metadata`, as the writeable guide says. Two
-writers share it. After a rebase, a volume takes the other
-application's modes for the files the rebase brought in. The driver
-rebuilds a record the forge rejects on the record the forge holds, so
-neither application's record overwrites the other's. Leave the
-`metadata` parameter on.
+The driver records file modes, owners, and empty directories on the
+ref `refs/git-csi/metadata`, as the writeable guide describes. All the
+volumes of one repository write the same ref. After a rebase, a volume
+applies the other application's recorded modes to the files that the
+rebase brought in. When the forge rejects a push of the record, the
+driver commits its record again with the forge's record as its
+parent, so the next push of the record is a fast-forward. Leave
+the `metadata` parameter at `true`.
 
 ## A read-only claim beside the writers
 
-A read-only claim on the same repository takes no part in any of this.
-The driver ignores a `VolumeAttributesClass` on such a claim, because a
-read-only volume commits nothing and pushes nothing. [Mount a repository
+A read-only claim on the same repository works as usual beside the
+writeable ones. The driver ignores a `VolumeAttributesClass` on a
+read-only claim, because a read-only volume never commits or pushes. [Mount a repository
 read-only](../read-only/) gives its form.

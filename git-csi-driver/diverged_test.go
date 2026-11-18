@@ -13,35 +13,34 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// divergedVolume is an armed volume on a forge that refuses every
-// push to the ref, which is the one way a volume takes a side branch
-// outside a stage now that a disjoint push rebases and lands.
+// divergedVolume returns an armed volume that has diverged. A push
+// that a rebase fixes would succeed, so the remote refuses every push to
+// main for the one push that makes the volume diverge.
 func divergedVolume(
 	t *testing.T, logs io.Writer,
 ) (*node, *volume, string, *csi.NodeStageVolumeRequest) {
 	t.Helper()
 	remote := bareRemote(t, map[string]string{"a.txt": "one"})
-	answering, _ := testNode(t, logs)
-	boundVolume(t, answering, "config", "config-eager")
-	armingClass(t, answering, "config-eager", nil)
-	held, request := stagedVolume(t, answering, "config", fileURL(remote))
-	waitForArmed(t, held, true)
-	driverCommit(t, answering, held, map[string]string{"c.txt": "three"})
+	n, _ := testNode(t, logs)
+	boundVolume(t, n, "config", "config-eager")
+	createClass(t, n, "config-eager", nil)
+	vol, request := stagedVolume(t, n, "config", fileURL(remote))
+	waitForArmed(t, vol, true)
+	driverCommit(t, n, vol, map[string]string{"c.txt": "three"})
 	remoteCommit(t, remote, map[string]string{"b.txt": "two"})
 	declineMain(t, remote)
-	answering.push(t.Context(), held)
+	n.push(t.Context(), vol)
 	acceptMain(t, remote)
-	return answering, held, remote, request
+	return n, vol, remote, request
 }
 
-// branchesOn is every branch the remote holds.
 func branchesOn(t *testing.T, remote string) string {
 	t.Helper()
 	return git(t, remote, "for-each-ref", "--format=%(refname:short)", "refs/heads/")
 }
 
-// mergeSideBranch is the person on the forge: a clone, a merge of
-// the side branch into the ref, and a push.
+// mergeSideBranch merges the side branch into main on the remote, as a
+// person would on the forge.
 func mergeSideBranch(t *testing.T, remote, branch string) {
 	t.Helper()
 	clone := t.TempDir()
@@ -51,34 +50,34 @@ func mergeSideBranch(t *testing.T, remote, branch string) {
 	git(t, clone, "push", "--quiet", "origin", "main")
 }
 
-func TestAPushTheRemoteRejectsTakesTheSideBranch(t *testing.T) {
+func TestAPushTheRemoteRejectsDivergesToTheSideBranch(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, held, remote, _ := divergedVolume(t, io.Discard)
+		n, vol, remote, _ := divergedVolume(t, io.Discard)
 
-		if got := held.divergedFrom(); got != "main.config" {
+		if got := vol.sideBranch(); got != "main.config" {
 			t.Fatalf("the volume pushes to %q, want main.config", got)
 		}
 		if got := branchesOn(t, remote); !strings.Contains(got, "main.config") {
-			t.Errorf("the remote holds %q, want the side branch on it", got)
+			t.Errorf("the remote has %q, want the side branch on it", got)
 		}
 		if got := git(t, remote, "ls-tree", "--name-only", "main.config"); !strings.Contains(got, "c.txt") {
-			t.Errorf("the side branch holds %q, want the pod's work on it", got)
+			t.Errorf("the side branch has %q, want the pod's work on it", got)
 		}
-		count, _, err := held.work.unpushed(t.Context(), "main")
+		count, _, err := vol.work.unpushed(t.Context(), "main")
 		if err != nil {
-			t.Fatalf("unpushed: %v", err)
+			t.Fatalf("counting the unpushed commits: %v", err)
 		}
 		if count != 0 {
-			t.Errorf("the tree holds %d unpushed commits after the push, want 0", count)
+			t.Errorf("the tree has %d unpushed commits after the push, want 0", count)
 		}
-		abnormal, message := held.report()
+		abnormal, message := vol.health()
 		if !abnormal || !strings.Contains(message, "Diverged") {
-			t.Errorf("the condition says %v, %q, want Diverged", abnormal, message)
+			t.Errorf("the health report is %v, %q, want Diverged", abnormal, message)
 		}
-		if got := reasonsOf(t, answering); !strings.Contains(got, reasonDiverged) {
+		if got := reasonsOf(t, n); !strings.Contains(got, reasonDiverged) {
 			t.Errorf("the events are %q, want %s in them", got, reasonDiverged)
 		}
-		value, found := gaugeOf(t, answering.readings, "git_csi_diverged", "home", "config")
+		value, found := gaugeOf(t, n.metrics, "git_csi_diverged", "home", "config")
 		if !found || value != 1 {
 			t.Errorf("git_csi_diverged reads %v (found: %v), want 1", value, found)
 		}
@@ -87,102 +86,102 @@ func TestAPushTheRemoteRejectsTakesTheSideBranch(t *testing.T) {
 
 func TestAVolumeOnItsSideBranchKeepsPushingThere(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, held, remote, _ := divergedVolume(t, io.Discard)
-		driverCommit(t, answering, held, map[string]string{"d.txt": "four"})
+		n, vol, remote, _ := divergedVolume(t, io.Discard)
+		driverCommit(t, n, vol, map[string]string{"d.txt": "four"})
 
-		answering.push(t.Context(), held)
+		n.push(t.Context(), vol)
 
 		if got := git(t, remote, "ls-tree", "--name-only", "main.config"); !strings.Contains(got, "d.txt") {
-			t.Errorf("the side branch holds %q, want the later work on it", got)
+			t.Errorf("the side branch has %q, want the later work on it", got)
 		}
 		if got := git(t, remote, "ls-tree", "--name-only", "main"); strings.Contains(got, "d.txt") {
-			t.Errorf("the ref holds %q, want none of the diverged work", got)
+			t.Errorf("the ref has %q, want none of the diverged work", got)
 		}
 	})
 }
 
-// waitForGauge waits until the bubble is blocked, and fails unless the
-// claim is on the gauge. A stage labels no gauge, because the volume
-// has no claim until the loop that reads the claim finds it, and that
-// loop runs after the stage returns.
-func waitForGauge(t *testing.T, readings *metrics, name, namespace, claim string) float64 {
+// waitForGauge waits until every goroutine in the bubble is blocked,
+// then fails unless the gauge has a series for the claim. A test of a
+// stage needs the wait, because the arming loop finds the claim only
+// after the stage returns.
+func waitForGauge(t *testing.T, registry *metrics, name, namespace, claim string) float64 {
 	t.Helper()
 	synctest.Wait()
-	value, found := gaugeOf(t, readings, name, namespace, claim)
+	value, found := gaugeOf(t, registry, name, namespace, claim)
 	if !found {
 		t.Fatalf("%s is not on %s/%s", name, namespace, claim)
 	}
 	return value
 }
 
-func TestAStageHealsAVolumeUpstreamHasMerged(t *testing.T) {
+func TestAStageReturnsAVolumeToItsRefWhenUpstreamHasMerged(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, _, remote, request := divergedVolume(t, io.Discard)
+		n, _, remote, request := divergedVolume(t, io.Discard)
 		mergeSideBranch(t, remote, "main.config")
 
-		again := restaged(t, answering, request)
+		again := restaged(t, n, request)
 
 		want := map[string]string{"a.txt": "one", "b.txt": "two", "c.txt": "three"}
 		if got := readTree(t, again.tree); !sameTree(got, want) {
-			t.Errorf("the tree holds %v, want %v", got, want)
+			t.Errorf("the tree has %v, want %v", got, want)
 		}
-		if got := again.divergedFrom(); got != "" {
-			t.Errorf("the healed volume pushes to %q, want its ref", got)
+		if got := again.sideBranch(); got != "" {
+			t.Errorf("the volume on its ref again pushes to %q, want its ref", got)
 		}
 		if got := again.work.divergedBranch(t.Context()); got != "" {
 			t.Errorf("the git directory records %q, want no side branch", got)
 		}
 		if got := branchesOn(t, remote); strings.Contains(got, "main.config") {
-			t.Errorf("the remote holds %q, want the side branch deleted", got)
+			t.Errorf("the remote has %q, want the side branch deleted", got)
 		}
-		if abnormal, message := again.report(); abnormal {
-			t.Errorf("the healed volume reported %q", message)
+		if abnormal, message := again.health(); abnormal {
+			t.Errorf("the volume on its ref again reports the message %q, want none", message)
 		}
-		if got := reasonsOf(t, answering); !strings.Contains(got, reasonHealed) {
+		if got := reasonsOf(t, n); !strings.Contains(got, reasonHealed) {
 			t.Errorf("the events are %q, want %s in them", got, reasonHealed)
 		}
-		if value := waitForGauge(t, answering.readings, "git_csi_diverged", "home", "config"); value != 0 {
+		if value := waitForGauge(t, n.metrics, "git_csi_diverged", "home", "config"); value != 0 {
 			t.Errorf("git_csi_diverged reads %v, want 0", value)
 		}
 		count, _, err := again.work.unpushed(t.Context(), "main")
 		if err != nil {
-			t.Fatalf("unpushed: %v", err)
+			t.Fatalf("counting the unpushed commits: %v", err)
 		}
 		if count != 0 {
-			t.Errorf("the healed tree holds %d unpushed commits, want 0", count)
+			t.Errorf("the tree on its ref again has %d unpushed commits, want 0", count)
 		}
 	})
 }
 
-func TestAStageHealsAVolumeWhoseSideBranchIsAlreadyDeleted(t *testing.T) {
+func TestAStageReturnsAVolumeToItsRefWhenItsSideBranchIsAlreadyDeleted(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		logs := &logbook{}
-		answering, _, remote, request := divergedVolume(t, logs)
+		n, _, remote, request := divergedVolume(t, logs)
 		mergeSideBranch(t, remote, "main.config")
 		git(t, remote, "update-ref", "-d", "refs/heads/main.config")
 
-		again := restaged(t, answering, request)
+		again := restaged(t, n, request)
 
-		if got := again.divergedFrom(); got != "" {
-			t.Errorf("the healed volume pushes to %q, want its ref", got)
+		if got := again.sideBranch(); got != "" {
+			t.Errorf("the volume on its ref again pushes to %q, want its ref", got)
 		}
-		if !strings.Contains(logs.String(), "the remote holds no side branch") {
+		if !strings.Contains(logs.String(), "The side branch was not fetched from the remote") {
 			t.Errorf("the log is %q, want the side branch it could not fetch in it", logs)
 		}
 	})
 }
 
-func TestAStageHoldsAVolumeUpstreamHasNotMerged(t *testing.T) {
+func TestAStageKeepsAVolumeDivergedWhenUpstreamHasNotMerged(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, _, remote, request := divergedVolume(t, io.Discard)
+		n, _, remote, request := divergedVolume(t, io.Discard)
 
-		again := restaged(t, answering, request)
+		again := restaged(t, n, request)
 
-		if got := again.divergedFrom(); got != "main.config" {
+		if got := again.sideBranch(); got != "main.config" {
 			t.Errorf("the volume pushes to %q, want main.config", got)
 		}
 		if got := branchesOn(t, remote); !strings.Contains(got, "main.config") {
-			t.Errorf("the remote holds %q, want the side branch still on it", got)
+			t.Errorf("the remote has %q, want the side branch still on it", got)
 		}
 	})
 }
@@ -190,124 +189,123 @@ func TestAStageHoldsAVolumeUpstreamHasNotMerged(t *testing.T) {
 func TestADivergedStateItCannotWriteIsStillInForce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		logs := &logbook{}
-		answering, held, _, _ := divergedVolume(t, logs)
-		held.reportHealed()
-		lockTheConfig(t, held)
+		n, vol, _, _ := divergedVolume(t, logs)
+		vol.reportReturnedToRef()
+		lockTheConfig(t, vol)
 
-		answering.diverge(t.Context(), held)
+		n.diverge(t.Context(), vol)
 
-		if got := held.divergedFrom(); got != "main.config" {
+		if got := vol.sideBranch(); got != "main.config" {
 			t.Errorf("the volume pushes to %q, want main.config", got)
 		}
-		if !strings.Contains(logs.String(), "the diverged state was not written") {
+		if !strings.Contains(logs.String(), "The diverged record was not written to the volume git config") {
 			t.Errorf("the log is %q, want the state it could not write in it", logs)
 		}
 	})
 }
 
-// lockTheConfig writes the lock file git takes before it changes
-// a configuration file, so the next change fails.
-func lockTheConfig(t *testing.T, held *volume) {
+// lockTheConfig creates config.lock in the git directory, so the next
+// git config write fails.
+func lockTheConfig(t *testing.T, vol *volume) {
 	t.Helper()
-	lock := filepath.Join(held.work.gitDir, "config.lock")
+	lock := filepath.Join(vol.work.gitDir, "config.lock")
 	if err := os.WriteFile(lock, nil, 0o600); err != nil {
 		t.Fatalf("locking the configuration: %v", err)
 	}
 }
 
-func TestAHealReportsWhatItCannotWrite(t *testing.T) {
+func TestAReturnToTheRefReportsAGitConfigItCannotWrite(t *testing.T) {
 	for _, c := range []struct {
 		name  string
-		stand func(t *testing.T, answering *node, held *volume)
+		setup func(t *testing.T, n *node, vol *volume)
 	}{
 		{
 			name: "a tree it cannot reset",
-			stand: func(t *testing.T, _ *node, held *volume) {
-				// A reset with a file to write back is the one a
-				// tree closed to writes can refuse.
-				if err := os.Remove(filepath.Join(held.tree, "b.txt")); err != nil {
+			setup: func(t *testing.T, _ *node, vol *volume) {
+				// A reset that has to restore a deleted file fails on
+				// a read-only tree.
+				if err := os.Remove(filepath.Join(vol.tree, "b.txt")); err != nil {
 					t.Fatalf("removing the file: %v", err)
 				}
-				readOnlyDir(t, held.tree)
+				readOnlyDir(t, vol.tree)
 			},
 		},
 		{
-			name: "a mark it cannot move",
-			stand: func(t *testing.T, answering *node, _ *volume) {
-				lockTheMark(t, answering, "config")
+			name: "a pushedRef it cannot update",
+			setup: func(t *testing.T, n *node, _ *volume) {
+				lockPushedRef(t, n, "config")
 			},
 		},
 		{
 			name: "a state it cannot clear",
-			stand: func(t *testing.T, _ *node, held *volume) {
-				lockTheConfig(t, held)
+			setup: func(t *testing.T, _ *node, vol *volume) {
+				lockTheConfig(t, vol)
 			},
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				answering, held, remote, request := divergedVolume(t, io.Discard)
+				n, vol, remote, request := divergedVolume(t, io.Discard)
 				mergeSideBranch(t, remote, "main.config")
-				answering.mu.Lock()
-				delete(answering.staged, "config")
-				answering.mu.Unlock()
-				c.stand(t, answering, held)
+				n.mu.Lock()
+				delete(n.staged, "config")
+				n.mu.Unlock()
+				c.setup(t, n, vol)
 
-				_, err := answering.NodeStageVolume(t.Context(), request)
+				_, err := n.NodeStageVolume(t.Context(), request)
 				if got := status.Code(err); got != codes.Internal {
-					t.Errorf("NodeStageVolume answered %v, want %v", got, codes.Internal)
+					t.Errorf("NodeStageVolume returned %v, want %v", got, codes.Internal)
 				}
 			})
 		})
 	}
 }
 
-func TestAHealReportsASideBranchItCannotDelete(t *testing.T) {
+func TestAReturnToTheRefLogsASideBranchItCannotDelete(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		logs := &logbook{}
-		answering, held, _, _ := divergedVolume(t, logs)
-		head, err := held.work.head(t.Context())
+		n, vol, _, _ := divergedVolume(t, logs)
+		head, err := vol.work.head(t.Context())
 		if err != nil {
-			t.Fatalf("head: %v", err)
+			t.Fatalf("reading HEAD: %v", err)
 		}
-		// The arming loop reads what the volume reports, and that reads the
-		// attributes a stage set once, so the loop is stopped before the test
-		// points the volume at a forge that is not there. The loop's last
-		// pass may still be reading under the volume's lock, so the test
-		// writes under the same lock.
-		answering.mu.Lock()
-		answering.disarm(held)
-		answering.mu.Unlock()
-		held.mu.Lock()
-		held.attributes = &attributes{url: fileURL(filepath.Join(t.TempDir(), "gone")), ref: "main"}
-		held.mu.Unlock()
+		// The arming loop reads the volume's attributes, so the test
+		// stops it before pointing the volume at a remote that does not
+		// exist, and writes under the volume's lock in case the loop's
+		// last pass still holds it.
+		n.mu.Lock()
+		n.disarm(vol)
+		n.mu.Unlock()
+		vol.mu.Lock()
+		vol.attributes = &attributes{url: fileURL(filepath.Join(t.TempDir(), "gone")), ref: "main"}
+		vol.mu.Unlock()
 
-		if err := answering.heal(t.Context(), held, "main.config", head, "main.config"); err != nil {
-			t.Fatalf("heal: %v", err)
+		if err := n.resetToUpstream(t.Context(), vol, "main.config", head, "main.config"); err != nil {
+			t.Fatalf("healing the volume: %v", err)
 		}
-		if !strings.Contains(logs.String(), "the side branch stayed on the remote") {
+		if !strings.Contains(logs.String(), "The side branch was not deleted from the remote") {
 			t.Errorf("the log is %q, want the branch it could not delete in it", logs)
 		}
-		if got := held.divergedFrom(); got != "" {
-			t.Errorf("the healed volume pushes to %q, want its ref", got)
+		if got := vol.sideBranch(); got != "" {
+			t.Errorf("the volume on its ref again pushes to %q, want its ref", got)
 		}
 	})
 }
 
 func TestADeletionWithNoCredentialItCanWriteFails(t *testing.T) {
-	answering, _ := testNode(t, io.Discard)
-	held := &volume{
+	n, _ := testNode(t, io.Discard)
+	vol := &volume{
 		id:          "config",
 		attributes:  &attributes{url: "file:///nowhere", ref: "main"},
 		credentials: &credentials{privateKey: "a key"},
 		directory:   filepath.Join(t.TempDir(), "gone"),
 	}
-	if err := answering.deleteSide(t.Context(), held, "main.config"); err == nil {
-		t.Error("deleteSide answered no error for a credential it cannot write")
+	if err := n.deleteSide(t.Context(), vol, "main.config"); err == nil {
+		t.Error("deleteSide returned no error for a credential it cannot write, want one")
 	}
 }
 
-func TestARejectionIsWhatGitSaysAboutIt(t *testing.T) {
+func TestARejectionIsFoundInGitsStderr(t *testing.T) {
 	for _, c := range []struct {
 		name   string
 		stderr string
@@ -319,7 +317,7 @@ func TestARejectionIsWhatGitSaysAboutIt(t *testing.T) {
 			want:   true,
 		},
 		{
-			name:   "a remote that holds work the tree does not",
+			name:   "a remote that has work the tree does not",
 			stderr: " ! [rejected] main -> main (fetch first)\n",
 			want:   true,
 		},
@@ -330,86 +328,86 @@ func TestARejectionIsWhatGitSaysAboutIt(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if got := rejectedPush(gitOutput{stderr: c.stderr}); got != c.want {
-				t.Errorf("rejectedPush answered %v, want %v", got, c.want)
+				t.Errorf("rejectedPush returned %v, want %v", got, c.want)
 			}
 		})
 	}
 }
 
-func TestADivergedVolumeHealsAtItsNextPush(t *testing.T) {
+func TestADivergedVolumeReturnsToItsRefAtItsNextPush(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, held, remote, _ := divergedVolume(t, io.Discard)
+		n, vol, remote, _ := divergedVolume(t, io.Discard)
 		mergeSideBranch(t, remote, "main.config")
-		driverCommit(t, answering, held, map[string]string{"d.txt": "four"})
+		driverCommit(t, n, vol, map[string]string{"d.txt": "four"})
 
-		answering.push(t.Context(), held)
+		n.push(t.Context(), vol)
 
-		if got := held.divergedFrom(); got != "" {
-			t.Errorf("the healed volume pushes to %q, want its ref", got)
+		if got := vol.sideBranch(); got != "" {
+			t.Errorf("the volume on its ref again pushes to %q, want its ref", got)
 		}
-		if got := held.work.divergedBranch(t.Context()); got != "" {
+		if got := vol.work.divergedBranch(t.Context()); got != "" {
 			t.Errorf("the git directory records %q, want no side branch", got)
 		}
 		if got := branchesOn(t, remote); strings.Contains(got, "main.config") {
-			t.Errorf("the remote holds %q, want the side branch deleted", got)
+			t.Errorf("the remote has %q, want the side branch deleted", got)
 		}
 		if got := git(t, remote, "ls-tree", "--name-only", "main"); !strings.Contains(got, "d.txt") {
-			t.Errorf("the ref holds %q, want the work the pod wrote after the merge", got)
+			t.Errorf("the ref has %q, want the work the pod wrote after the merge", got)
 		}
 		want := map[string]string{"a.txt": "one", "b.txt": "two", "c.txt": "three", "d.txt": "four"}
-		if got := readTree(t, held.tree); !sameTree(got, want) {
-			t.Errorf("the tree holds %v, want %v", got, want)
+		if got := readTree(t, vol.tree); !sameTree(got, want) {
+			t.Errorf("the tree has %v, want %v", got, want)
 		}
-		if got := reasonsOf(t, answering); !strings.Contains(got, reasonHealed) {
+		if got := reasonsOf(t, n); !strings.Contains(got, reasonHealed) {
 			t.Errorf("the events are %q, want %s in them", got, reasonHealed)
 		}
-		value, found := gaugeOf(t, answering.readings, "git_csi_diverged", "home", "config")
+		value, found := gaugeOf(t, n.metrics, "git_csi_diverged", "home", "config")
 		if !found || value != 0 {
 			t.Errorf("git_csi_diverged reads %v (found: %v), want 0", value, found)
 		}
-		count, _, err := held.work.unpushed(t.Context(), "main")
+		count, _, err := vol.work.unpushed(t.Context(), "main")
 		if err != nil {
-			t.Fatalf("unpushed: %v", err)
+			t.Fatalf("counting the unpushed commits: %v", err)
 		}
 		if count != 0 {
-			t.Errorf("the healed tree holds %d unpushed commits, want 0", count)
+			t.Errorf("the tree on its ref again has %d unpushed commits, want 0", count)
 		}
 	})
 }
 
-func TestADivergedVolumeHealsThoughItsSideBranchIsAlreadyGone(t *testing.T) {
+func TestADivergedVolumeReturnsToItsRefWhenItsSideBranchIsAlreadyDeleted(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, held, remote, _ := divergedVolume(t, io.Discard)
+		n, vol, remote, _ := divergedVolume(t, io.Discard)
 		mergeSideBranch(t, remote, "main.config")
 		git(t, remote, "update-ref", "-d", "refs/heads/main.config")
-		driverCommit(t, answering, held, map[string]string{"d.txt": "four"})
+		driverCommit(t, n, vol, map[string]string{"d.txt": "four"})
 
-		answering.push(t.Context(), held)
+		n.push(t.Context(), vol)
 
-		if got := held.divergedFrom(); got != "" {
-			t.Errorf("the healed volume pushes to %q, want its ref", got)
+		if got := vol.sideBranch(); got != "" {
+			t.Errorf("the volume on its ref again pushes to %q, want its ref", got)
 		}
 		if got := git(t, remote, "ls-tree", "--name-only", "main"); !strings.Contains(got, "d.txt") {
-			t.Errorf("the ref holds %q, want the work the pod wrote after the merge", got)
+			t.Errorf("the ref has %q, want the work the pod wrote after the merge", got)
 		}
 	})
 }
 
-func TestADivergedVolumeThatCannotHealKeepsPushingToItsSideBranch(t *testing.T) {
+func TestADivergedVolumeThatCannotReturnToItsRefKeepsPushingToItsSideBranch(t *testing.T) {
 	for _, c := range []struct {
 		name   string
 		merged bool
-		stand  func(t *testing.T, answering *node, held *volume)
+		setup  func(t *testing.T, n *node, vol *volume)
 	}{
 		{
 			name:  "an upstream that does not hold the work",
-			stand: func(*testing.T, *node, *volume) {},
+			setup: func(*testing.T, *node, *volume) {},
 		},
 		{
 			name:   "a fetch the store cannot hold",
 			merged: true,
-			stand: func(t *testing.T, answering *node, held *volume) {
-				where := filepath.Join(answering.store.repository(held.attributes.url).dir,
+			setup: func(t *testing.T, n *node, vol *volume) {
+				where := filepath.Join(n.store.repository(vol.attributes.url).dir,
 					"FETCH_HEAD")
 				if err := os.Remove(where); err != nil {
 					t.Fatalf("removing the fetch record: %v", err)
@@ -422,9 +420,9 @@ func TestADivergedVolumeThatCannotHealKeepsPushingToItsSideBranch(t *testing.T) 
 		{
 			name:   "a scratch work tree git will not add",
 			merged: true,
-			stand: func(t *testing.T, _ *node, held *volume) {
+			setup: func(t *testing.T, _ *node, vol *volume) {
 				if err := os.WriteFile(
-					filepath.Join(held.work.gitDir, "worktrees"), nil, 0o600); err != nil {
+					filepath.Join(vol.work.gitDir, "worktrees"), nil, 0o600); err != nil {
 					t.Fatalf("writing the worktrees directory as a file: %v", err)
 				}
 			},
@@ -432,27 +430,27 @@ func TestADivergedVolumeThatCannotHealKeepsPushingToItsSideBranch(t *testing.T) 
 		{
 			name:   "a state it cannot clear",
 			merged: true,
-			stand: func(t *testing.T, _ *node, held *volume) {
-				lockTheConfig(t, held)
+			setup: func(t *testing.T, _ *node, vol *volume) {
+				lockTheConfig(t, vol)
 			},
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				answering, held, remote, _ := divergedVolume(t, io.Discard)
+				n, vol, remote, _ := divergedVolume(t, io.Discard)
 				if c.merged {
 					mergeSideBranch(t, remote, "main.config")
 				}
-				driverCommit(t, answering, held, map[string]string{"d.txt": "four"})
-				c.stand(t, answering, held)
+				driverCommit(t, n, vol, map[string]string{"d.txt": "four"})
+				c.setup(t, n, vol)
 
-				answering.push(t.Context(), held)
+				n.push(t.Context(), vol)
 
-				if got := held.divergedFrom(); got != "main.config" {
+				if got := vol.sideBranch(); got != "main.config" {
 					t.Errorf("the volume pushes to %q, want main.config", got)
 				}
 				if got := git(t, remote, "ls-tree", "--name-only", "main.config"); !strings.Contains(got, "d.txt") {
-					t.Errorf("the side branch holds %q, want the later work on it", got)
+					t.Errorf("the side branch has %q, want the later work on it", got)
 				}
 			})
 		})

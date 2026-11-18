@@ -1,8 +1,9 @@
 package main
 
-// demand.go is the channel that pulls a read-only volume from outside
-// the node: the annotation on the PersistentVolume, the one list and
-// watch that read it, and the interval that bounds a burst of demands.
+// A demand asks the node to pull a volume now. The webhook, or a person
+// with kubectl, writes it as an annotation on the volume's
+// PersistentVolume, and every node reads it from a watch of
+// PersistentVolumes.
 
 import (
 	"context"
@@ -19,86 +20,75 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// demandAnnotation is where a demand is written. The value is the time
-// of the demand in RFC 3339, the form kubectl describe shows a person,
-// and the form the webhook writes.
+// demandAnnotation holds the time of the demand in RFC 3339.
 const demandAnnotation = "git.liken.sh/pull-requested-at"
 
-// demandSkew is how far the writer's clock may run behind this node's
-// clock before the node misses a demand.
-//
-// A demand's time comes from the clock of whatever wrote it: the
-// controller's node for a webhook, or a person's computer for kubectl.
-// The node compares that time with its own clock. A fetch that starts
-// at time F answers every demand stamped at or before F minus the skew,
-// and the node pulls for every later one.
-//
-// A writer whose clock runs behind by less than the skew stamps a new
-// demand earlier than it happened. The demand is still later than F
-// minus the skew, so the node pulls. A writer whose clock runs ahead
-// stamps a demand later than it happened, and the node pulls for it.
-// The cost of either error is one extra pull. A demand the node misses
-// leaves the volume on an old commit until the next demand, so the
-// skew is generous: a minute is far wider than the clock drift between
-// machines that keep time with NTP.
+// demandSkew allows for the clock of the machine that wrote the demand.
+// A fetch satisfies a demand when it starts after the demand was
+// written, because the fetch then gets every commit that the writer
+// asked for. The node compares the demand's time with its own clock, so
+// it treats a fetch that starts at time F as satisfying only the demands
+// stamped at or before F minus demandSkew. A demand stamped later pulls
+// again, so a writer whose clock is behind by less than demandSkew
+// still gets its pull. The cost is an extra pull for a demand that a
+// fetch already satisfied. A missed demand leaves the volume on an old
+// commit until the next demand, so the skew is much wider than the
+// clock drift between machines that run NTP.
 const demandSkew = time.Minute
 
-// persistentVolumeKind is what git_csi_watch_restarts_total names the
-// node's one watch on PersistentVolumes.
+// persistentVolumeKind is the kind label of the
+// git_csi_watch_restarts_total metric for the PersistentVolume watch.
 const persistentVolumeKind = "PersistentVolume"
 
-// defaultDemandMin is the default --demand-min-interval. It bounds a
-// burst of demands to six pulls a minute per repository per node.
+// defaultDemandMin is the default --demand-min-interval: how long a
+// demand waits after the last pass of the repository's loop before it
+// pulls.
 const defaultDemandMin = 10 * time.Second
 
-// demanding is the one watch on PersistentVolumes the node holds. One
-// watch covers every volume the node stages, so a node with fifty
-// volumes holds one connection to the API server, not fifty.
-type demanding struct {
+// demandWatch watches every PersistentVolume of the cluster for demands.
+// The node opens one watch for all of its volumes, so it holds one
+// connection to the API server however many volumes it stages.
+type demandWatch struct {
 	node   *node
 	client kubernetes.Interface
 	logger *slog.Logger
 
-	// seen is the last demand the node read, by volume handle, whether
-	// or not this node staged the handle. A stage reads it when it adds
-	// the volume to the node.
+	// seen is the last demand read for each volume handle, including
+	// handles that this node has not staged yet, because a stage that
+	// ends after the demand arrived reads it from here.
 	mu   sync.Mutex
 	seen map[string]time.Time
 
-	// held is the watch's store of every PersistentVolume, indexed by
-	// the handle of each one of this driver. It is nil until follow
-	// builds the watch, after the watch ends, and in a driver outside a
-	// cluster.
-	held atomic.Pointer[cache.Indexer]
-	// listed is true from the moment the watch's first read of the
-	// cluster is in the store until the watch ends. Before that read,
-	// the store holds no PersistentVolume at all, which says nothing
-	// about whether one was deleted.
+	// store is the informer's cache of PersistentVolumes, indexed by
+	// handleIndex. It is nil while no watch runs, which includes a
+	// driver outside a cluster.
+	store atomic.Pointer[cache.Indexer]
+	// listed is true from the informer's first sync until the watch
+	// ends. Before the first sync, an empty store does not mean that a
+	// PersistentVolume was deleted.
 	listed atomic.Bool
 }
 
-// handleIndex names the index of the store by volume handle. The
-// kubelet names a volume by its handle, never by the name of its
-// PersistentVolume, so a stage finds its PersistentVolume by the
-// handle.
+// handleIndex indexes the store by volume handle, because the kubelet
+// names a volume by its handle and not by its PersistentVolume.
 const handleIndex = "handle"
 
-// volumeHandle indexes a PersistentVolume of this driver by its handle.
-// A PersistentVolume of any other driver is in no index entry.
+// volumeHandle returns the handle of a PersistentVolume of this driver,
+// and no key for any other object.
 func volumeHandle(object any) ([]string, error) {
-	held, isVolume := object.(*corev1.PersistentVolume)
-	if !isVolume || held.Spec.CSI == nil || held.Spec.CSI.Driver != driverName {
+	pv, isVolume := object.(*corev1.PersistentVolume)
+	if !isVolume || pv.Spec.CSI == nil || pv.Spec.CSI.Driver != driverName {
 		return nil, nil
 	}
-	return []string{held.Spec.CSI.VolumeHandle}, nil
+	return []string{pv.Spec.CSI.VolumeHandle}, nil
 }
 
-// heldVolume is the watch's copy of the PersistentVolume that carries
-// the handle, and false when the watch holds none. Two PersistentVolumes
-// of this driver that carry one handle also answer false, so the
-// caller reads the API server and takes the answer it always took.
-func (d *demanding) heldVolume(handle string) (*corev1.PersistentVolume, bool) {
-	store := d.held.Load()
+// cachedVolume returns the cached PersistentVolume with the handle. It
+// returns false when there is none, and also when two PersistentVolumes
+// of this driver have the same handle, because then neither is the
+// right one.
+func (d *demandWatch) cachedVolume(handle string) (*corev1.PersistentVolume, bool) {
+	store := d.store.Load()
 	if store == nil {
 		return nil, false
 	}
@@ -106,15 +96,15 @@ func (d *demanding) heldVolume(handle string) (*corev1.PersistentVolume, bool) {
 	if err != nil || len(found) != 1 {
 		return nil, false
 	}
-	held, isVolume := found[0].(*corev1.PersistentVolume)
-	return held, isVolume
+	pv, isVolume := found[0].(*corev1.PersistentVolume)
+	return pv, isVolume
 }
 
-// carried reports whether a PersistentVolume of the driver carries the
-// handle. It answers true while the watch has not read the cluster,
-// because a removal on that answer would remove a live volume's tree.
-func (d *demanding) carried(handle string) bool {
-	store := d.held.Load()
+// hasVolume reports whether a PersistentVolume of this driver has the
+// handle. It returns true until the informer's first sync, because the
+// caller deletes the work tree of a handle with no PersistentVolume.
+func (d *demandWatch) hasVolume(handle string) bool {
+	store := d.store.Load()
 	if store == nil || !d.listed.Load() {
 		return true
 	}
@@ -122,28 +112,22 @@ func (d *demanding) carried(handle string) bool {
 	return err != nil || len(found) > 0
 }
 
-func newDemanding(answering *node, client kubernetes.Interface, logger *slog.Logger) *demanding {
-	return &demanding{
-		node:   answering,
+func newDemandWatch(n *node, client kubernetes.Interface, logger *slog.Logger) *demandWatch {
+	return &demandWatch{
+		node:   n,
 		client: client,
 		logger: logger,
 		seen:   map[string]time.Time{},
 	}
 }
 
-// follow holds the list and the watch for the driver's whole run. A
-// driver outside a cluster holds no client, so it reads no demand. The
-// first read takes every PersistentVolume once, which catches a demand
-// written while no watch was open, and the watch carries every demand
-// after it. The same first read is when the node can tell which work
-// trees lost their PersistentVolume while the plugin was down, so
-// reclaimAll runs once it is in the store.
+// run lists and watches PersistentVolumes until ctx ends. A driver
+// outside a cluster has no client and reads no demands.
 //
-// Every add and every update is read, because a demand is an
-// annotation, and an annotation changes no generation. read acts only
-// on a demand later than what the volume's last fetch answered, so a
-// status write the watch also sends acts on nothing.
-func (d *demanding) follow(ctx context.Context) {
+// The first list reads the demands written while no watch was open. It
+// also shows which work trees lost their PersistentVolume while the
+// plugin was down, so reclaimAll runs after the first sync.
+func (d *demandWatch) run(ctx context.Context) {
 	if d.client == nil {
 		return
 	}
@@ -165,13 +149,11 @@ func (d *demanding) follow(ctx context.Context) {
 			},
 			DeleteFunc: func(object any) { d.deleted(ctx, object) },
 		},
-		readings: d.node.readings,
+		metrics:  d.node.metrics,
 		indexers: cache.Indexers{handleIndex: volumeHandle},
 	}.informer()
-	d.held.Store(&store)
-	defer d.held.Store(nil)
-	// cache.WaitForCacheSync returns false when the context ends first,
-	// and the watch then reclaims nothing.
+	d.store.Store(&store)
+	defer d.store.Store(nil)
 	first := make(chan struct{})
 	go func() {
 		defer close(first)
@@ -185,64 +167,62 @@ func (d *demanding) follow(ctx context.Context) {
 	d.listed.Store(false)
 }
 
-// deleted forgets the demand of a PersistentVolume the watch reports
-// deleted, and reclaims the work tree of its handle by the policy the
-// PersistentVolume had last. A read after a gap in the watch reports a
-// PersistentVolume it no longer holds as a tombstone, which carries the
-// last copy the informer held. The informer takes the object out of
-// its store before it calls the handler, so carried answers for the
-// PersistentVolumes that are left.
-func (d *demanding) deleted(ctx context.Context, object any) {
-	held, isVolume := unwrapped(object).(*corev1.PersistentVolume)
+// deleted forgets the demand of a deleted PersistentVolume and reclaims
+// the work tree of its handle under the last reclaim policy the node
+// recorded. When the watch missed the delete, the informer's next list
+// reports it as a tombstone that wraps the last cached copy. The
+// informer removes the object from its store before it calls this
+// handler, so hasVolume checks only the PersistentVolumes that remain.
+func (d *demandWatch) deleted(ctx context.Context, object any) {
+	pv, isVolume := unwrapped(object).(*corev1.PersistentVolume)
 	if !isVolume {
-		// The informer of a typed kind stores only that kind, so this
-		// names a fault in client-go. The demand stays in seen, where
-		// it costs one entry and acts on nothing new, because a fetch
-		// already answered it.
-		d.logger.WarnContext(ctx, "the delete carries no PersistentVolume",
+		// An informer of PersistentVolumes sends no other type, so this
+		// is a fault in client-go. Without the PersistentVolume there
+		// is no handle to forget, so the handle's last demand stays in
+		// seen. Only a later stage of the same handle reads that entry,
+		// and the fetch of that stage has already satisfied it.
+		d.logger.WarnContext(ctx, "The delete event carried no PersistentVolume",
 			"object", fmt.Sprintf("%#v", object))
 		return
 	}
-	d.forget(held)
-	if held.Spec.CSI == nil || held.Spec.CSI.Driver != driverName {
+	d.forget(pv)
+	if pv.Spec.CSI == nil || pv.Spec.CSI.Driver != driverName {
 		return
 	}
-	// Another PersistentVolume that carries the same handle keeps the
-	// tree, and keeps the policy the tree records too.
-	if d.carried(held.Spec.CSI.VolumeHandle) {
+	// While another PersistentVolume has the same handle, the work tree
+	// and its recorded reclaim policy stay.
+	if d.hasVolume(pv.Spec.CSI.VolumeHandle) {
 		return
 	}
-	d.node.notePolicy(ctx, held)
-	d.node.reclaim(ctx, held.Spec.CSI.VolumeHandle)
+	d.node.recordReclaimPolicy(ctx, pv)
+	d.node.reclaim(ctx, pv.Spec.CSI.VolumeHandle)
 }
 
-// read acts on one PersistentVolume. It records the reclaim policy of
-// a volume of this driver whose work tree the node holds. It acts on a
-// demand only when the volume is this driver's, only when this node
-// staged the handle, and only when the demand is later than what the
-// volume's last fetch answered. It
-// records the demand for a handle this node has not staged, because a
-// stage fetches before it adds the volume to the node, and a demand
-// that arrives between the two is read again when the stage ends.
+// read handles one add or update of a PersistentVolume of this driver.
+// It records the reclaim policy and saves the demand, and pulls when
+// this node staged the handle and no fetch has satisfied the demand.
 //
-// The time decides, not the order of reads. A webhook never removes
-// its annotation, so the list, the watch, a stage, and a restart all
-// read old demands, in any order, and the volume's own fetches already
-// answer them.
-func (d *demanding) read(ctx context.Context, held *corev1.PersistentVolume) {
-	source := held.Spec.CSI
+// It saves the demand even for a handle this node has not staged. A
+// stage fetches before it adds the volume to the node, and actOnSavedDemand
+// reads the saved demand when the stage ends.
+//
+// The webhook never removes its annotation, so the list, the watch,
+// and a restart read the same old demand many times. Only the demand's
+// time decides whether to pull, so a repeated read does nothing.
+func (d *demandWatch) read(ctx context.Context, pv *corev1.PersistentVolume) {
+	source := pv.Spec.CSI
 	if source == nil || source.Driver != driverName {
 		return
 	}
-	d.node.notePolicy(ctx, held)
-	asked := held.Annotations[demandAnnotation]
-	if asked == "" {
+	d.node.recordReclaimPolicy(ctx, pv)
+	value := pv.Annotations[demandAnnotation]
+	if value == "" {
 		return
 	}
-	at, err := time.Parse(time.RFC3339, asked)
+	at, err := time.Parse(time.RFC3339, value)
 	if err != nil {
-		d.logger.WarnContext(ctx, "the demand is not a time",
-			"volume", held.Name, "value", asked, "error", err)
+		d.logger.WarnContext(ctx, "The pull annotation is not an RFC 3339 time",
+			"volume", pv.Name, "value", value, "error", err)
 		return
 	}
 	d.mu.Lock()
@@ -251,23 +231,22 @@ func (d *demanding) read(ctx context.Context, held *corev1.PersistentVolume) {
 	d.actOn(ctx, source.VolumeHandle, at)
 }
 
-// forget drops the demand the node read for a deleted PersistentVolume,
-// so seen holds one entry for each PersistentVolume that exists, not
-// for every one the driver ever read.
-func (d *demanding) forget(held *corev1.PersistentVolume) {
-	if held.Spec.CSI == nil {
+// forget deletes the saved demand of a deleted PersistentVolume, so
+// seen does not grow for as long as the driver runs.
+func (d *demandWatch) forget(pv *corev1.PersistentVolume) {
+	if pv.Spec.CSI == nil {
 		return
 	}
 	d.mu.Lock()
-	delete(d.seen, held.Spec.CSI.VolumeHandle)
+	delete(d.seen, pv.Spec.CSI.VolumeHandle)
 	d.mu.Unlock()
 }
 
-// arrived acts on the last demand the node read for a volume a stage
-// just added to the node. The watch sends no event for that demand
-// again, so without this read a demand that arrived during the stage
-// leaves the volume on its old commit until the next demand.
-func (d *demanding) arrived(ctx context.Context, handle string) {
+// actOnSavedDemand acts on the saved demand of a volume that a stage just added
+// to the node. The watch does not send that demand again, so without
+// this call a demand that arrived during the stage would leave the
+// volume on its old commit until the next demand.
+func (d *demandWatch) actOnSavedDemand(ctx context.Context, handle string) {
 	d.mu.Lock()
 	at, found := d.seen[handle]
 	d.mu.Unlock()
@@ -276,86 +255,83 @@ func (d *demanding) arrived(ctx context.Context, handle string) {
 	}
 }
 
-// actOn carries the demand to the volume the handle names, when this
-// node staged the handle and no fetch answered the demand yet.
-func (d *demanding) actOn(ctx context.Context, handle string, at time.Time) {
+func (d *demandWatch) actOn(ctx context.Context, handle string, at time.Time) {
 	staged := d.node.stagedVolume(handle)
 	if staged == nil {
 		return
 	}
-	if !staged.takeDemand(at, time.Now()) {
+	if !staged.acceptDemand(at, time.Now()) {
 		return
 	}
 	if staged.writeable() {
-		// While a pod holds a writeable tree, only the application
-		// changes it. A demand that pulled would rewrite the pod's files
-		// at a moment nobody chose.
-		d.logger.InfoContext(ctx, "the demand did nothing",
+		// Only the application changes a writeable tree. A pull would
+		// rewrite the pod's files while it runs.
+		d.logger.InfoContext(ctx, "Ignored a pull demand for a writeable volume",
 			"volume", staged.id, "reason", "the volume is writeable")
 		return
 	}
 	d.node.demand(staged)
 }
 
-// demand carries a demand to the volume's loop. A volume with pull
-// never follows no loop, so a demand does not reach it.
-func (n *node) demand(held *volume) {
-	if !held.attributes.pull.follows() {
+// demand passes a demand to the loop of the volume's repository. It
+// drops the demand when the volume's pull attribute is "never",
+// because such a volume joins no loop.
+func (n *node) demand(v *volume) {
+	if !v.attributes.pull.follows() {
 		return
 	}
 	n.mu.Lock()
-	loop := n.loopOf(held)
+	loop := n.loopOf(v)
 	n.mu.Unlock()
 	if loop == nil {
 		return
 	}
-	loop.demand(held)
+	loop.demand(v)
 }
 
-// loopOf is the loop that follows the volume's repository, and nil
-// when none does. The caller holds the node's lock.
-func (n *node) loopOf(held *volume) *follower {
-	return n.followers[n.store.repository(held.attributes.url).name]
+// loopOf returns the loop of the volume's repository, or nil. The
+// caller holds the node's lock.
+func (n *node) loopOf(v *volume) *follower {
+	return n.followers[n.store.repository(v.attributes.url).name]
 }
 
-// demand records the volume the demand named and wakes the loop. The
-// channel has one slot and the send never blocks, so a burst of demands
-// never waits on a loop that is fetching.
+// demand adds the volume to the loop's wanted set and wakes the loop.
+// The send to the wake channel, which has a buffer of one, does not
+// block, so a burst of demands never waits on a loop that is fetching.
 //
-// A volume that waits for its credential takes no demand. Its fetch
-// fails without the credential, and a wake would fetch the other
-// volumes of the repository for a demand that did not name them. The
-// republish that returns the credential runs a pass, and that pass
-// answers every demand stamped before it.
-func (f *follower) demand(held *volume) {
-	if held.waitsForCredential() {
+// A volume that waits for its credential ignores demands. Its fetch
+// would fail, and the wake would fetch the repository's other volumes
+// for nothing. The pass that runs when the credential is republished
+// satisfies the demand.
+func (f *follower) demand(v *volume) {
+	if v.waitsForCredential() {
 		return
 	}
 	f.mu.Lock()
-	if f.volumes[held.id] != held {
-		// The unstage took the volume off the loop after the node
-		// found it.
+	if f.volumes[v.id] != v {
+		// An unstage removed the volume from the loop after the node
+		// looked the loop up.
 		f.mu.Unlock()
 		return
 	}
-	if f.wanted[held.id] == nil {
-		// One count for each volume a pass takes a demand for. Further
-		// demands before that pass, and the passes that fetch again
-		// after a failure, add no count.
-		f.node.readings.demanded(held)
+	if f.wanted[v.id] == nil {
+		// git_csi_demanded_pulls_total counts pulls, not demands. More
+		// demands before the pass, and the retry of a failed fetch, do
+		// not count again.
+		f.node.metrics.demanded(v)
 	}
-	f.wanted[held.id] = held
+	f.wanted[v.id] = v
 	f.mu.Unlock()
-	held.reportDemanded(time.Now())
+	v.reportDemanded(time.Now())
 	select {
 	case f.demanded <- struct{}{}:
 	default:
 	}
 }
 
-// demandWait is how long a demand waits before the loop pulls: nothing
-// until the loop has pulled once, and what is left of
-// --demand-min-interval after that.
+// demandWait returns how long a demand must still wait before it
+// pulls: zero before the loop's first pass, and after that the rest of
+// --demand-min-interval since the last pass.
 func (f *follower) demandWait(now time.Time) time.Duration {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -365,9 +341,9 @@ func (f *follower) demandWait(now time.Time) time.Duration {
 	return f.node.demandMin - now.Sub(f.lastPull)
 }
 
-// answered records when the pass ran, and takes and returns the
-// volumes a demand named since the last pass.
-func (f *follower) answered(at time.Time) map[string]*volume {
+// startPass records the start of a pass and returns the volumes that
+// were demanded since the last pass.
+func (f *follower) startPass(at time.Time) map[string]*volume {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	wanted := f.wanted
@@ -376,9 +352,11 @@ func (f *follower) answered(at time.Time) map[string]*volume {
 	return wanted
 }
 
-// resumePull is the demand a restart makes. A demand that came while
-// the node plugin was down is lost, and a volume with pull on-demand
-// has no timer to cover the loss. The caller holds the node's lock.
+// resumePull demands a pull of a volume that a restart resumed. The
+// restart treats every demand stamped before it as satisfied, so a demand
+// written while the node plugin was down starts no pull, and a volume
+// with pull on-demand has no timer to pull it later. The caller holds
+// the node's lock.
 func (n *node) resumePull(resumed *volume) {
 	if !resumed.attributes.pull.follows() {
 		return

@@ -1,7 +1,9 @@
 package main
 
-// commit.go is what an armed volume does when the quiesce fires:
-// the ignore list, the size guard, and the commit.
+// The driver commits what a pod wrote to an armed volume, a writeable
+// volume whose claim has a VolumeAttributesClass of this driver. It
+// commits when the tree has been quiet for push.quiesce, and when the
+// pod unpublishes the volume.
 
 import (
 	"context"
@@ -14,82 +16,85 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// excludeFile is where git reads the patterns the class adds
-// beside the repository's own .gitignore.
+// excludeFile holds the class's ignore patterns. Git reads it in
+// addition to the repository's .gitignore, and it is in the git
+// directory and not the tree, so the patterns are never committed.
 const excludeFile = "info/exclude"
 
-// stageBatch is how many paths one git add carries, so a tree of
-// thousands never makes a command line the kernel refuses.
+// stageBatch is how many paths one git add receives, so a tree with
+// thousands of changes does not exceed the kernel's limit on the length
+// of a command line.
 const stageBatch = 100
 
-// literalPathspecs makes git read a path as a path and not a pattern.
-// Every path here comes from git's own report.
+// literalPathspecs makes git add treat each path as a literal file
+// name. The paths come from git status, so a file whose name has glob
+// characters must match only itself.
 var literalPathspecs = []string{"GIT_LITERAL_PATHSPECS=1"}
 
-// commit records the metadata, then commits what the pod wrote.
-// A metadata record that fails is reported and does not stop the commit,
-// because the tree's content is worth more than the record of its modes.
-func (n *node) commit(ctx context.Context, held *volume, rules *policy) {
+// commit records the metadata, then commits the tree. A failure to
+// record the metadata does not stop the commit, because losing the
+// file contents is worse than losing the file modes.
+func (n *node) commit(ctx context.Context, v *volume, rules *policy) {
 	if rules.metadata {
-		if err := held.work.recordMetadata(ctx, rules); err != nil {
-			n.logger.WarnContext(ctx, "the metadata was not recorded",
-				"volume", held.id, "error", err)
+		if err := v.work.recordMetadata(ctx, rules); err != nil {
+			n.logger.WarnContext(ctx, "The file metadata was not recorded",
+				"volume", v.id, "error", err)
 		}
 	}
-	staged, err := n.stageAndCommit(ctx, held, rules)
+	staged, err := n.stageAndCommit(ctx, v, rules)
 	if err != nil {
-		n.logger.WarnContext(ctx, "the tree was not committed",
-			"volume", held.id, "error", err)
+		n.logger.WarnContext(ctx, "The work tree was not committed",
+			"volume", v.id, "error", err)
 		return
 	}
 	if len(staged) == 0 {
 		return
 	}
-	n.logger.InfoContext(ctx, "committed", "volume", held.id, "paths", len(staged))
+	n.logger.InfoContext(ctx, "Committed the work tree", "volume", v.id, "paths", len(staged))
 }
 
-// stageAndCommit writes the ignore list, stages every path under
-// the size guard, and commits what the index holds. It answers the paths
-// the commit carried, and none where nothing was staged.
+// stageAndCommit returns the paths it committed, and none when nothing
+// changed.
 func (n *node) stageAndCommit(
-	ctx context.Context, held *volume, rules *policy,
+	ctx context.Context, v *volume, rules *policy,
 ) ([]string, error) {
-	// The ignore list is written before the status is read,
-	// because it decides what the status names.
-	if err := held.work.exclude(rules.ignore); err != nil {
+	// The ignore list changes which paths git status reports, so it is
+	// written first.
+	if err := v.work.exclude(rules.ignore); err != nil {
 		return nil, err
 	}
-	found, err := held.work.pending(ctx)
+	found, err := v.work.pending(ctx)
 	if err != nil {
 		return nil, err
 	}
-	staged, skipped, err := held.work.stageChanges(ctx, found, rules)
-	n.skipping(ctx, held, skipped)
+	staged, skipped, err := v.work.stageChanges(ctx, found, rules)
+	n.skipping(v, skipped, rules.maxFileSize)
 	if err != nil || len(staged) == 0 {
 		return nil, err
 	}
-	return staged, held.work.commit(ctx, rules, staged)
+	return staged, v.work.commit(ctx, rules, staged)
 }
 
-// skipping records what the size guard left out and posts one
-// Event per path the last pass did not already hold.
-func (n *node) skipping(ctx context.Context, held *volume, skipped []change) {
-	claim, _, _ := held.reading()
-	for _, one := range held.reportSkipped(skipped) {
-		n.report(held, claim, corev1.EventTypeWarning, reasonSkipped,
-			fmt.Sprintf("%s is %d bytes, over %s", one.path, one.size, maxFileSizeParameter))
+// skipping posts one Event for each path over commit.maxFileSize that
+// the previous pass did not already skip.
+func (n *node) skipping(v *volume, skipped []change, limit int64) {
+	claim, _, _ := v.gaugeValues()
+	for _, one := range v.reportSkipped(skipped) {
+		n.report(v, claim, corev1.EventTypeWarning, reasonSkipped,
+			fmt.Sprintf("Skipped %s because it is %d bytes, over the %s of %d bytes",
+				one.path, one.size, maxFileSizeParameter, limit))
 	}
 }
 
-// exclude writes the class's patterns where git reads them, and
-// writes nothing when the file already holds them.
+// exclude writes the ignore patterns to the exclude file, and leaves
+// the file unchanged when it already has them.
 func (w *workTree) exclude(patterns []string) error {
 	path := filepath.Join(w.gitDir, excludeFile)
 	content := ""
 	if len(patterns) > 0 {
 		content = strings.Join(patterns, "\n") + "\n"
 	}
-	if standing, err := os.ReadFile(path); err == nil && string(standing) == content {
+	if current, err := os.ReadFile(path); err == nil && string(current) == content {
 		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -98,8 +103,9 @@ func (w *workTree) exclude(patterns []string) error {
 	return os.WriteFile(path, []byte(content), 0o644)
 }
 
-// stageChanges stages every path under commit.maxFileSize and
-// answers what the index holds and what the guard left out.
+// stageChanges runs git add on each change within the policy's
+// maxFileSize, where zero means no limit. It returns every path that is
+// now staged, and the changes it skipped as too large.
 func (w *workTree) stageChanges(
 	ctx context.Context, found []change, rules *policy,
 ) ([]string, []change, error) {
@@ -121,8 +127,7 @@ func (w *workTree) stageChanges(
 	return staged, skipped, err
 }
 
-// staged is what the index holds that the commit does not, which
-// is what the next commit carries.
+// staged returns the paths whose index entry differs from HEAD.
 func (w *workTree) staged(ctx context.Context) ([]string, error) {
 	output, err := w.git(ctx, "diff", "--cached", "--name-only", "-z")
 	if err != nil {
@@ -131,8 +136,8 @@ func (w *workTree) staged(ctx context.Context) ([]string, error) {
 	return splitZero(output.stdout), nil
 }
 
-// splitZero reads git's -z output, which ends every path with a
-// zero byte and holds no empty path.
+// splitZero splits the output of a git command run with -z, where each
+// path ends with a NUL byte.
 func splitZero(report string) []string {
 	found := []string{}
 	for _, entry := range strings.Split(report, "\x00") {
@@ -143,9 +148,8 @@ func splitZero(report string) []string {
 	return found
 }
 
-// commit makes the commit. The message names the count and then every
-// path, so a person reading the history sees what one rest of the tree
-// carried.
+// commit commits the index with a message that lists the paths, so the
+// history shows what each commit changed.
 func (w *workTree) commit(ctx context.Context, rules *policy, staged []string) error {
 	message := fmt.Sprintf("Update %d paths\n\n%s", len(staged), strings.Join(staged, "\n"))
 	_, err := w.gitWith(ctx, rules.author(), "commit", "--quiet", "-m", message)

@@ -1,8 +1,8 @@
 package main
 
-// The reflector's own loop is upstream's to test. These tests run the
-// driver's handlers through the real reflector, against the fake
-// clientset, and prove what the driver adds around it.
+// These tests do not cover the reflector's loop, which upstream tests.
+// They run the driver's handlers through the real reflector against a
+// fake clientset, and cover what the driver adds around it.
 
 import (
 	"io"
@@ -19,23 +19,23 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 )
 
-// gone is the error event an API server sends when the watch's version
-// is older than the changes it still holds.
+// gone is the error event an API server sends when the watch's
+// resourceVersion is older than the oldest change it still keeps.
 func gone() watch.Event {
 	status := apierrors.NewResourceExpired("too old resource version").Status()
 	return watch.Event{Type: watch.Error, Object: &status}
 }
 
 func TestTheInformerStoresNoManagedFields(t *testing.T) {
-	held := &corev1.PersistentVolume{ObjectMeta: metav1.ObjectMeta{
+	pv := &corev1.PersistentVolume{ObjectMeta: metav1.ObjectMeta{
 		Name:          "franchises",
 		ManagedFields: []metav1.ManagedFieldsEntry{{Manager: "kubectl"}},
 	}}
 
-	stored, err := dropManagedFields(held)
+	stored, err := dropManagedFields(pv)
 
 	if err != nil {
-		t.Fatalf("the transform failed: %v", err)
+		t.Fatalf("running the transform: %v", err)
 	}
 	if fields := stored.(*corev1.PersistentVolume).ManagedFields; fields != nil {
 		t.Errorf("the informer stores managedFields %v, want none", fields)
@@ -44,15 +44,15 @@ func TestTheInformerStoresNoManagedFields(t *testing.T) {
 
 func TestADemandWrittenBetweenTheListAndTheWatchPullsTheTree(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, _ := testNode(t, io.Discard)
+		n, _ := testNode(t, io.Discard)
 		source := repositoryWithACommit(t, map[string]string{"a.txt": "one"})
-		held := demandedVolume(t, answering, "franchises", fileURL(source), "on-demand")
+		vol := demandedVolume(t, n, "franchises", fileURL(source), "on-demand")
 		want := commitFiles(t, source, map[string]string{"a.txt": "two"})
 
-		// The list answers the state before the demand, and the demand is
-		// written before the watch opens. Only a watch that opens at the
-		// list's version sends it.
-		client := cluster(t, answering)
+		// The list returns the state from before the demand, and the
+		// demand is written before the watch opens. Only a watch that
+		// starts at the list's resourceVersion delivers it.
+		client := cluster(t, n)
 		resource := schema.GroupVersionResource{Version: "v1", Resource: "persistentvolumes"}
 		kind := schema.GroupVersionKind{Version: "v1", Kind: "PersistentVolume"}
 		var once sync.Once
@@ -73,8 +73,8 @@ func TestADemandWrittenBetweenTheListAndTheWatchPullsTheTree(t *testing.T) {
 				})
 				return handled, listed, err
 			})
-		watchDemands(t, answering)
+		watchDemands(t, n)
 
-		waitForCommit(t, held, want)
+		waitForCommit(t, vol, want)
 	})
 }

@@ -15,8 +15,8 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// startController is the controller plugin on a socket of its own, which
-// is the same binary under its controller subcommand.
+// startController runs the driver's controller subcommand on its own
+// socket and returns a connection to it.
 func startController(t *testing.T) *grpc.ClientConn {
 	t.Helper()
 	dir := t.TempDir()
@@ -29,32 +29,29 @@ func startController(t *testing.T) *grpc.ClientConn {
 
 func TestTheControllerDeclaresTheControllerService(t *testing.T) {
 	client := csi.NewIdentityClient(startController(t))
-	answer, err := client.GetPluginCapabilities(t.Context(),
+	response, err := client.GetPluginCapabilities(t.Context(),
 		&csi.GetPluginCapabilitiesRequest{})
 	if err != nil {
-		t.Fatalf("GetPluginCapabilities: %v", err)
+		t.Fatalf("calling GetPluginCapabilities: %v", err)
 	}
-	declared := answer.GetCapabilities()
+	declared := response.GetCapabilities()
 	if len(declared) != 1 {
-		t.Fatalf("GetPluginCapabilities answered %v, want the controller service", declared)
+		t.Fatalf("GetPluginCapabilities returned %v, want the controller service", declared)
 	}
 	if got := declared[0].GetService().GetType(); got != csi.PluginCapability_Service_CONTROLLER_SERVICE {
 		t.Errorf("GetPluginCapabilities declared %v, want CONTROLLER_SERVICE", got)
 	}
 }
 
-// csi-provisioner reads CREATE_DELETE_VOLUME before it starts, and
-// calls DeleteVolume for a released PersistentVolume of the Delete
-// reclaim policy only when the controller declares it.
 func TestTheControllerDeclaresModifyVolumeAndDeleteVolume(t *testing.T) {
 	client := csi.NewControllerClient(startController(t))
-	answer, err := client.ControllerGetCapabilities(t.Context(),
+	response, err := client.ControllerGetCapabilities(t.Context(),
 		&csi.ControllerGetCapabilitiesRequest{})
 	if err != nil {
-		t.Fatalf("ControllerGetCapabilities: %v", err)
+		t.Fatalf("calling ControllerGetCapabilities: %v", err)
 	}
 	var declared []csi.ControllerServiceCapability_RPC_Type
-	for _, one := range answer.GetCapabilities() {
+	for _, one := range response.GetCapabilities() {
 		declared = append(declared, one.GetRpc().GetType())
 	}
 	want := []csi.ControllerServiceCapability_RPC_Type{
@@ -66,11 +63,11 @@ func TestTheControllerDeclaresModifyVolumeAndDeleteVolume(t *testing.T) {
 	}
 }
 
-func TestDeleteVolumeAnswersForEveryVolumeItNames(t *testing.T) {
+func TestDeleteVolumeSucceedsForEveryVolumeID(t *testing.T) {
 	client := csi.NewControllerClient(startController(t))
 	if _, err := client.DeleteVolume(t.Context(),
 		&csi.DeleteVolumeRequest{VolumeId: "config"}); err != nil {
-		t.Errorf("DeleteVolume: %v", err)
+		t.Errorf("DeleteVolume returned an error: %v, want none", err)
 	}
 }
 
@@ -78,34 +75,34 @@ func TestDeleteVolumeRefusesACallThatNamesNoVolume(t *testing.T) {
 	client := csi.NewControllerClient(startController(t))
 	_, err := client.DeleteVolume(t.Context(), &csi.DeleteVolumeRequest{})
 	if got := status.Code(err); got != codes.InvalidArgument {
-		t.Errorf("DeleteVolume answered %v, want %v", got, codes.InvalidArgument)
+		t.Errorf("DeleteVolume returned %v, want %v", got, codes.InvalidArgument)
 	}
 }
 
 func TestTheControllerDeclaresNoNodeCapability(t *testing.T) {
 	client := csi.NewNodeClient(startController(t))
-	answer, err := client.NodeGetCapabilities(t.Context(),
+	response, err := client.NodeGetCapabilities(t.Context(),
 		&csi.NodeGetCapabilitiesRequest{})
 	if err != nil {
-		t.Fatalf("NodeGetCapabilities: %v", err)
+		t.Fatalf("calling NodeGetCapabilities: %v", err)
 	}
-	if declared := answer.GetCapabilities(); len(declared) != 0 {
-		t.Errorf("NodeGetCapabilities answered %v, want none", declared)
+	if declared := response.GetCapabilities(); len(declared) != 0 {
+		t.Errorf("NodeGetCapabilities returned %v, want none", declared)
 	}
 }
 
-func TestTheControllerHoldsNoNodesVolumes(t *testing.T) {
+func TestTheControllerTracksNoVolumesOfANode(t *testing.T) {
 	client := csi.NewNodeClient(startController(t))
 	_, err := client.NodeGetInfo(t.Context(), &csi.NodeGetInfoRequest{})
 	if got := status.Code(err); got != codes.Unimplemented {
-		t.Fatalf("NodeGetInfo answered %v, want %v", got, codes.Unimplemented)
+		t.Fatalf("NodeGetInfo returned %v, want %v", got, codes.Unimplemented)
 	}
 	if got := status.Convert(err).Message(); !strings.Contains(got, "NodeGetInfo") {
-		t.Errorf("NodeGetInfo said %q, want the call named", got)
+		t.Errorf("NodeGetInfo returned the message %q, want one that names the call", got)
 	}
 }
 
-func TestControllerModifyVolumeTakesAClassItCanRead(t *testing.T) {
+func TestControllerModifyVolumeAcceptsAValidClass(t *testing.T) {
 	client := csi.NewControllerClient(startController(t))
 	for _, c := range []struct {
 		name       string
@@ -130,7 +127,7 @@ func TestControllerModifyVolumeTakesAClassItCanRead(t *testing.T) {
 					VolumeId:          "config",
 					MutableParameters: c.parameters,
 				}); err != nil {
-				t.Errorf("ControllerModifyVolume: %v", err)
+				t.Errorf("ControllerModifyVolume returned an error: %v, want none", err)
 			}
 		})
 	}
@@ -143,11 +140,11 @@ func TestControllerModifyVolumeRefusesAClassItCannotRead(t *testing.T) {
 		MutableParameters: map[string]string{quiesceParameter: "1s"},
 	})
 	if got := status.Code(err); got != codes.InvalidArgument {
-		t.Fatalf("ControllerModifyVolume answered %v, want %v", got, codes.InvalidArgument)
+		t.Fatalf("ControllerModifyVolume returned %v, want %v", got, codes.InvalidArgument)
 	}
 	want := "push.quiesce: 1s is shorter than 5s"
 	if got := status.Convert(err).Message(); got != want {
-		t.Errorf("ControllerModifyVolume said %q, want %q", got, want)
+		t.Errorf("ControllerModifyVolume returned %q, want %q", got, want)
 	}
 }
 
@@ -245,24 +242,24 @@ func TestTheControllerServesNoOtherCall(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			err := c.call(t.Context())
 			if got := status.Code(err); got != codes.Unimplemented {
-				t.Fatalf("%s answered %v, want %v", c.name, got, codes.Unimplemented)
+				t.Fatalf("%s returned %v, want %v", c.name, got, codes.Unimplemented)
 			}
-			if got := status.Convert(err).Message(); !strings.HasPrefix(got, c.name+": never; ") {
-				t.Errorf("%s said %q, want a reason", c.name, got)
+			if got := status.Convert(err).Message(); !strings.HasPrefix(got, c.name+": ") {
+				t.Errorf("%s returned the message %q, want a reason after the call name", c.name, got)
 			}
 		})
 	}
 }
 
-func TestTheControllerHoldsNoVolume(t *testing.T) {
+func TestTheControllerTracksNoVolume(t *testing.T) {
 	client := csi.NewNodeClient(startController(t))
 	_, err := client.NodeGetInfo(t.Context(), &csi.NodeGetInfoRequest{})
 	if got := status.Code(err); got != codes.Unimplemented {
-		t.Errorf("NodeGetInfo answered %v, want %v", got, codes.Unimplemented)
+		t.Errorf("NodeGetInfo returned %v, want %v", got, codes.Unimplemented)
 	}
 }
 
-func TestTheControllerReportsAWebhookAddressItCannotTake(t *testing.T) {
+func TestTheControllerReportsAWebhookAddressItCannotListenOn(t *testing.T) {
 	dir := t.TempDir()
 	_, err := newServer(t.Context(), &config{
 		endpoint:   "unix://" + filepath.Join(dir, "csi.sock"),
@@ -271,6 +268,6 @@ func TestTheControllerReportsAWebhookAddressItCannotTake(t *testing.T) {
 		webhook:    "127.0.0.1:-1",
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err == nil {
-		t.Error("newServer answered no error for an address it cannot take")
+		t.Error("newServer returned no error for a webhook address that cannot be bound, want one")
 	}
 }

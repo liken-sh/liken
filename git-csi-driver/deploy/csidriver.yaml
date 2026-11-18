@@ -1,39 +1,38 @@
-# The CSIDriver object tells the kubelet and the scheduler how to treat
-# git.liken.sh. Its name is the driver name every volume names.
+# The CSIDriver tells the kubelet and the scheduler how to call the
+# driver git.liken.sh.
 apiVersion: storage.k8s.io/v1
 kind: CSIDriver
 metadata:
   name: git.liken.sh
 spec:
-  # There is no attach step. A checkout is made on the node that
-  # publishes it.
+  # The node plugin makes the checkout on the node that mounts it, so
+  # there is no attach step.
   attachRequired: false
 
-  # The node plugin receives the pod's name and namespace with each
-  # publish, so it can post events on the pod and find the claim that
-  # arms the volume.
+  # The kubelet passes the pod's name and namespace in each
+  # NodePublishVolume call, so the node plugin can post an Event on the
+  # pod when it refuses a mount.
   podInfoOnMount: true
 
-  # The driver owns file modes, and replays them from the metadata
-  # ref. The kubelet changes none of them.
+  # The driver restores each file's mode and owner from its own metadata
+  # record, so the kubelet must not change them for fsGroup.
   fsGroupPolicy: None
 
-  # A writeable volume is a PersistentVolume. A read-only volume is an
-  # inline volume in the pod spec.
+  # A writeable volume is a PersistentVolume. A read-only volume can
+  # also be an inline volume in the pod spec.
   volumeLifecycleModes:
     - Persistent
     - Ephemeral
 
-  # A volume's Secret reaches the driver only inside a kubelet call, and
-  # the driver keeps it in memory, never on the node's disk. With
-  # requiresRepublish, the kubelet calls NodePublishVolume again for
-  # every mounted volume on each pod sync, and reads the volume's
-  # nodePublishSecretRef Secret again for each call. A driver that
-  # restarted takes its credentials back from the next call, with no
-  # grant to read Secrets. A repeated call mounts nothing and fetches
+  # The node plugin receives a volume's nodePublishSecretRef Secret only
+  # in a NodePublishVolume call, and keeps it in memory, never on disk.
+  # With requiresRepublish, the kubelet repeats that call for every
+  # mounted volume on each pod sync, with the Secret's current contents.
+  # So a restarted node plugin gets its credentials back without
+  # permission to read Secrets. A repeated call mounts and fetches
   # nothing.
   requiresRepublish: true
 
-  # The driver provisions nothing, so it reports no capacity for the
-  # scheduler to weigh.
+  # The driver does not provision storage, so it reports no capacity to
+  # the scheduler.
   storageCapacity: false

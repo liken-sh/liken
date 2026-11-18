@@ -1,23 +1,17 @@
-# This is the coverage gate, enforced in CI (see
-# .github/workflows/ci.yaml).
+# The coverage gate. `make test-go` runs it, locally and in CI.
 #
-# The numbers are measured with Go 1.27.2 and later, which count each basic
-# block once. Go 1.27.1 and earlier count a block once for each row
-# that comments split it into (golang/go#80974), and measure higher.
-#
-# The floor started at 90, the project's target, because a skeleton has
-# no mature measurement to set it under. It rises with each
-# measurement above it.
+# Go 1.27.1 and earlier count a basic block once for each line that
+# comments split it into (golang/go#80974), so they report higher
+# coverage than Go 1.27.2 and later, which count each block once.
 
 profile: coverage.out
 
-# Main.go holds one statement no test can run, the call that
-# hands the process's exit code to the operating system, so the gate
-# measures every other file and asks for all of it.
+# main.go has one statement that no test can run, the os.Exit call, so
+# the gate excludes the file and requires full coverage of the rest.
 exclude:
   paths:
     - ^main\.go$
 
 threshold:
-  # One package, so the total is the whole gate.
+  # The module has one package, so the total is the only threshold.
   total: 100

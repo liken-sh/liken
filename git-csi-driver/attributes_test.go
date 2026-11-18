@@ -9,8 +9,8 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// inlineRequest is the request the kubelet sends for an inline volume,
-// with the attributes a test names.
+// inlineRequest returns the request that the kubelet sends for an
+// inline volume, with the attributes that the test sets.
 func inlineRequest(context map[string]string) *csi.NodePublishVolumeRequest {
 	volumeContext := map[string]string{
 		ephemeralKey:    "true",
@@ -34,7 +34,7 @@ func TestParseAttributesDefaultsEverythingButTheURL(t *testing.T) {
 		"url": "https://example.com/data.git",
 	}))
 	if err != nil {
-		t.Fatalf("parseAttributes: %v", err)
+		t.Fatalf("parsing the attributes: %v", err)
 	}
 	want := attributes{
 		url:       "https://example.com/data.git",
@@ -46,11 +46,11 @@ func TestParseAttributesDefaultsEverythingButTheURL(t *testing.T) {
 		pod:       podReference{name: "reader", namespace: "home", uid: "9b1c"},
 	}
 	if *parsed != want {
-		t.Errorf("parseAttributes answered %+v, want %+v", *parsed, want)
+		t.Errorf("parseAttributes returned %+v, want %+v", *parsed, want)
 	}
 }
 
-func TestParseAttributesTakesEveryAttribute(t *testing.T) {
+func TestParseAttributesAcceptsEveryAttribute(t *testing.T) {
 	for _, c := range []struct {
 		name    string
 		context map[string]string
@@ -101,14 +101,14 @@ func TestParseAttributesTakesEveryAttribute(t *testing.T) {
 			c.context["url"] = "https://example.com/data.git"
 			parsed, err := parseAttributes(inlineRequest(c.context))
 			if err != nil {
-				t.Fatalf("parseAttributes: %v", err)
+				t.Fatalf("parsing the attributes: %v", err)
 			}
 			want := c.want
 			want.url = "https://example.com/data.git"
 			want.ephemeral = true
 			want.pod = podReference{name: "reader", namespace: "home", uid: "9b1c"}
 			if *parsed != want {
-				t.Errorf("parseAttributes answered %+v, want %+v", *parsed, want)
+				t.Errorf("parseAttributes returned %+v, want %+v", *parsed, want)
 			}
 		})
 	}
@@ -116,68 +116,67 @@ func TestParseAttributesTakesEveryAttribute(t *testing.T) {
 
 func TestParseAttributesRefuses(t *testing.T) {
 	for _, c := range []struct {
-		name    string
-		request *csi.NodePublishVolumeRequest
-		says    string
+		name        string
+		request     *csi.NodePublishVolumeRequest
+		wantMessage string
 	}{
 		{
-			name:    "no url",
-			request: inlineRequest(nil),
-			says:    "url: an attribute the volume must set",
+			name:        "no url",
+			request:     inlineRequest(nil),
+			wantMessage: "url: the volume sets no url",
 		},
 		{
-			name:    "an empty ref",
-			request: inlineRequest(map[string]string{"url": "u", "ref": ""}),
-			says:    "ref: an empty ref names nothing",
+			name:        "an empty ref",
+			request:     inlineRequest(map[string]string{"url": "u", "ref": ""}),
+			wantMessage: "ref: the value is empty",
 		},
 		{
-			name:    "an unknown attribute",
-			request: inlineRequest(map[string]string{"url": "u", "branch": "main"}),
-			says:    "branch: unknown attribute",
+			name:        "an unknown attribute",
+			request:     inlineRequest(map[string]string{"url": "u", "branch": "main"}),
+			wantMessage: "branch: unknown attribute, want one of url, ref, pull, depth, offline, webhookSecret",
 		},
 		{
-			name:    "a pull that is not a duration",
-			request: inlineRequest(map[string]string{"url": "u", "pull": "often"}),
-			says:    `pull: "often" is not a duration, on-demand, or never`,
+			name:        "a pull that is not a duration",
+			request:     inlineRequest(map[string]string{"url": "u", "pull": "often"}),
+			wantMessage: `pull: "often" is not a duration, on-demand, or never`,
 		},
 		{
 			name: "an inline volume that names a webhook Secret",
 			request: inlineRequest(map[string]string{
 				"url": "u", "webhookSecret": "x-webhook",
 			}),
-			says: "webhookSecret: a webhook marks a PersistentVolume, " +
-				"and an inline volume is none",
+			wantMessage: "webhookSecret: an inline volume has no PersistentVolume for a webhook to mark",
 		},
 		{
 			name:    "an inline volume that pulls on demand",
 			request: inlineRequest(map[string]string{"url": "u", "pull": "on-demand"}),
-			says: "pull: on-demand names a demand on a PersistentVolume, " +
+			wantMessage: "pull: on-demand pulls when a demand annotates the PersistentVolume, " +
 				"and an inline volume has none",
 		},
 		{
-			name:    "a pull of zero",
-			request: inlineRequest(map[string]string{"url": "u", "pull": "0s"}),
-			says:    `pull: "0s" is not longer than zero`,
+			name:        "a pull of zero",
+			request:     inlineRequest(map[string]string{"url": "u", "pull": "0s"}),
+			wantMessage: `pull: "0s" must be longer than zero`,
 		},
 		{
-			name:    "a pull that runs backwards",
-			request: inlineRequest(map[string]string{"url": "u", "pull": "-5m"}),
-			says:    `pull: "-5m" is not longer than zero`,
+			name:        "a pull that runs backwards",
+			request:     inlineRequest(map[string]string{"url": "u", "pull": "-5m"}),
+			wantMessage: `pull: "-5m" must be longer than zero`,
 		},
 		{
-			name:    "a depth that is not a number",
-			request: inlineRequest(map[string]string{"url": "u", "depth": "deep"}),
-			says:    `depth: "deep" is not a whole number of commits`,
+			name:        "a depth that is not a number",
+			request:     inlineRequest(map[string]string{"url": "u", "depth": "deep"}),
+			wantMessage: `depth: "deep" is not a whole number of commits`,
 		},
 		{
-			name:    "a depth below zero",
-			request: inlineRequest(map[string]string{"url": "u", "depth": "-1"}),
-			says:    `depth: "-1" is not a whole number of commits`,
+			name:        "a depth below zero",
+			request:     inlineRequest(map[string]string{"url": "u", "depth": "-1"}),
+			wantMessage: `depth: "-1" is not a whole number of commits`,
 		},
 		{
-			name:    "an offline policy the driver does not have",
-			request: inlineRequest(map[string]string{"url": "u", "offline": "cache"}),
-			says:    `offline: "cache" is not refuse or allowStale`,
+			name:        "an offline policy the driver does not have",
+			request:     inlineRequest(map[string]string{"url": "u", "offline": "cache"}),
+			wantMessage: `offline: "cache" is not refuse or allowStale`,
 		},
 		{
 			name: "an inline volume that is not read-only",
@@ -186,16 +185,16 @@ func TestParseAttributesRefuses(t *testing.T) {
 				request.Readonly = false
 				return request
 			}(),
-			says: "readOnly: an inline volume of this driver has to be read-only",
+			wantMessage: "readOnly: an inline volume must be read-only",
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := parseAttributes(c.request)
 			if got := status.Code(err); got != codes.InvalidArgument {
-				t.Fatalf("parseAttributes answered %v, want %v", got, codes.InvalidArgument)
+				t.Fatalf("parseAttributes returned the code %v, want %v", got, codes.InvalidArgument)
 			}
-			if got := status.Convert(err).Message(); got != c.says {
-				t.Errorf("parseAttributes said %q, want %q", got, c.says)
+			if got := status.Convert(err).Message(); got != c.wantMessage {
+				t.Errorf("parseAttributes message is %q, want %q", got, c.wantMessage)
 			}
 		})
 	}
@@ -207,43 +206,43 @@ func TestParseAttributesMarksAPersistentVolume(t *testing.T) {
 	request.Readonly = false
 	parsed, err := parseAttributes(request)
 	if err != nil {
-		t.Fatalf("parseAttributes: %v", err)
+		t.Fatalf("parsing the attributes: %v", err)
 	}
 	if parsed.ephemeral {
-		t.Error("parseAttributes marked a volume with no ephemeral attribute as inline")
+		t.Error("parseAttributes marked a volume as inline, want a volume with no ephemeral attribute to be not inline")
 	}
 }
 
 func TestParseAttributesRefusesAURLThatIsNotOne(t *testing.T) {
 	for _, c := range []struct {
-		name string
-		url  string
-		says string
+		name        string
+		url         string
+		wantMessage string
 	}{
 		{
-			name: "an option to git",
-			url:  "--upload-pack=/bin/sh",
-			says: `url: "--upload-pack=/bin/sh" reads as an option to git`,
+			name:        "an option to git",
+			url:         "--upload-pack=/bin/sh",
+			wantMessage: `url: "--upload-pack=/bin/sh" starts with a dash, so git reads it as an option`,
 		},
 		{
-			name: "a transport helper",
-			url:  "ext::sh -c whoami",
-			says: `url: "ext::sh -c whoami" names a transport helper, and the driver runs none`,
+			name:        "a transport helper",
+			url:         "ext::sh -c whoami",
+			wantMessage: `url: "ext::sh -c whoami" has the form <transport>::<address>, which makes git run a transport helper, and the driver runs none`,
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := parseAttributes(inlineRequest(map[string]string{"url": c.url}))
 			if got := status.Code(err); got != codes.InvalidArgument {
-				t.Fatalf("parseAttributes answered %v, want %v", got, codes.InvalidArgument)
+				t.Fatalf("parseAttributes returned the code %v, want %v", got, codes.InvalidArgument)
 			}
-			if got := status.Convert(err).Message(); got != c.says {
-				t.Errorf("parseAttributes said %q, want %q", got, c.says)
+			if got := status.Convert(err).Message(); got != c.wantMessage {
+				t.Errorf("parseAttributes message is %q, want %q", got, c.wantMessage)
 			}
 		})
 	}
 }
 
-func TestParseAttributesTakesTheURLsGitReallyServes(t *testing.T) {
+func TestParseAttributesAcceptsTheURLSchemesGitFetchesFrom(t *testing.T) {
 	for _, url := range []string{
 		"https://example.com/data.git",
 		"git://10.0.2.2:9418/hello.git",
@@ -254,7 +253,7 @@ func TestParseAttributesTakesTheURLsGitReallyServes(t *testing.T) {
 	} {
 		t.Run(url, func(t *testing.T) {
 			if _, err := parseAttributes(inlineRequest(map[string]string{"url": url})); err != nil {
-				t.Errorf("parseAttributes refused %q: %v", url, err)
+				t.Errorf("parseAttributes refused the URL %q, want it accepted: %v", url, err)
 			}
 		})
 	}
@@ -270,60 +269,60 @@ func TestParseStageAttributesRefusesAReadOnlyAttribute(t *testing.T) {
 				"url": "https://example.com/data.git", attribute: value,
 			})
 			if got := status.Code(err); got != codes.InvalidArgument {
-				t.Fatalf("parseStageAttributes answered %v, want %v", got, codes.InvalidArgument)
+				t.Fatalf("parseStageAttributes returned the code %v, want %v", got, codes.InvalidArgument)
 			}
-			want := attribute + ": a writeable volume follows its ref at stage alone"
+			want := attribute + ": only a read-only volume accepts this attribute"
 			if got := status.Convert(err).Message(); got != want {
-				t.Errorf("parseStageAttributes said %q, want %q", got, want)
+				t.Errorf("parseStageAttributes message is %q, want %q", got, want)
 			}
 		})
 	}
 }
 
-func TestParseStageAttributesTakesAPullOnDemand(t *testing.T) {
+func TestParseStageAttributesAcceptsPullOnDemand(t *testing.T) {
 	parsed, err := parseStageAttributes(readOnlyClaim, map[string]string{
 		"url":  "https://example.com/data.git",
 		"pull": "on-demand",
 	})
 	if err != nil {
-		t.Fatalf("parseStageAttributes: %v", err)
+		t.Fatalf("parsing the stage attributes: %v", err)
 	}
 	if parsed.pull != (pullPolicy{mode: pullOnDemand}) {
-		t.Errorf("parseStageAttributes answered %+v, want a pull on demand", parsed.pull)
+		t.Errorf("parseStageAttributes returned the pull %+v, want a pull on demand", parsed.pull)
 	}
 	if !parsed.pull.follows() {
-		t.Error("a volume that pulls on demand joined no loop")
+		t.Error("a volume that pulls on demand is in no pull loop, want it in one")
 	}
 	if every, timed := parsed.pull.timer(); timed {
-		t.Errorf("a volume that pulls on demand set a timer of %v", every)
+		t.Errorf("a volume that pulls on demand has a timer of %v, want none", every)
 	}
 }
 
-func TestParseStageAttributesTakesTheAttributesOfAWriteableVolume(t *testing.T) {
+func TestParseStageAttributesAcceptsTheAttributesOfAWriteableVolume(t *testing.T) {
 	parsed, err := parseStageAttributes(writeableVolume, map[string]string{
 		"url": "https://example.com/data.git",
 		"ref": "release",
 	})
 	if err != nil {
-		t.Fatalf("parseStageAttributes: %v", err)
+		t.Fatalf("parsing the stage attributes: %v", err)
 	}
 	if parsed.url != "https://example.com/data.git" || parsed.ref != "release" {
-		t.Errorf("parseStageAttributes answered %+v", *parsed)
+		t.Errorf("parseStageAttributes returned %+v, want a volume that is not ephemeral", *parsed)
 	}
 	if parsed.ephemeral {
-		t.Error("a staged volume is ephemeral")
+		t.Error("a staged volume is ephemeral, want it not ephemeral")
 	}
 }
 
-func TestParseStageAttributesTakesAWebhookSecret(t *testing.T) {
+func TestParseStageAttributesAcceptsAWebhookSecret(t *testing.T) {
 	parsed, err := parseStageAttributes(readOnlyClaim, map[string]string{
 		"url":           "https://example.com/data.git",
 		"webhookSecret": "x-webhook",
 	})
 	if err != nil {
-		t.Fatalf("parseStageAttributes: %v", err)
+		t.Fatalf("parsing the stage attributes: %v", err)
 	}
 	if parsed.webhookSecret != "x-webhook" {
-		t.Errorf("parseStageAttributes answered the Secret %q, want x-webhook", parsed.webhookSecret)
+		t.Errorf("parseStageAttributes returned the Secret %q, want x-webhook", parsed.webhookSecret)
 	}
 }

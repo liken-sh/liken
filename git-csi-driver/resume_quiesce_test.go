@@ -9,46 +9,44 @@ import (
 )
 
 // waitForPushed waits until the bubble is blocked, and fails unless the
-// volume reports a push. The remote's ref moves before git push
-// returns, because the remote's receive-pack runs its maintenance after
-// the ref update. A git process is not durably blocked, so
-// synctest.Wait returns only after git push and that maintenance end,
-// and the removal of the test's temporary directories finds no lock
-// file.
-func waitForPushed(t *testing.T, held *volume) {
+// volume reports a push. The test waits for synctest.Wait and not for the
+// remote's ref, because receive-pack updates the ref and then runs its
+// maintenance, which can hold a lock file while the test removes its
+// temporary directories. synctest.Wait does not return while a git
+// process runs, so it returns after that maintenance ends.
+func waitForPushed(t *testing.T, vol *volume) {
 	t.Helper()
 	synctest.Wait()
-	if _, last, _ := held.pushing(); last.IsZero() {
-		_, report := held.report()
-		t.Fatalf("the volume reports no push: %s", report)
+	if _, last, _ := vol.pushing(); last.IsZero() {
+		_, report := vol.health()
+		t.Fatalf("the volume report is %q, want a push", report)
 	}
 }
 
 // waitForNoPush waits until the bubble is blocked, and fails if the
 // volume reports a push.
-func waitForNoPush(t *testing.T, held *volume) {
+func waitForNoPush(t *testing.T, vol *volume) {
 	t.Helper()
 	synctest.Wait()
-	if _, last, _ := held.pushing(); !last.IsZero() {
-		t.Fatalf("the volume pushed at %s, before the quiesce ran out", last)
+	if _, last, _ := vol.pushing(); !last.IsZero() {
+		t.Fatalf("the volume pushed at %s, want no push before the quiesce ran out", last)
 	}
 }
 
-// remoteSubject is the subject of the commit the remote's main holds.
+// remoteSubject returns the subject of the commit at the remote's main.
 func remoteSubject(t *testing.T, remote string) string {
 	t.Helper()
 	return strings.TrimSpace(git(t, remote, "log", "--format=%s", "-1", "main"))
 }
 
 // A write made while the driver was down sends no inotify event, so the
-// watch that starts after the restart has to start the quiesce itself.
-// The class arrives from the claim's own watch, 1s after the watch
-// starts. The driver's own quiesce is what the timer takes until the
-// class arrives. A short one runs out first and finds the volume
-// unarmed, and a long one is still running when the class shortens it.
-// The rest counts from the start of the watch in both cases, so the
-// class's timer runs out 5s after the start and not 5s after the class
-// arrived.
+// watch that starts after the restart must start the quiesce itself.
+// The class arrives 1s after the watch starts, and until then the timer
+// runs with the driver's default quiesce. A default shorter than 1s ends
+// first and finds the volume unarmed. A longer default is shortened when
+// the class arrives. In both cases the quiesce counts from the start of
+// the watch, so the push happens 5s after the start, not 5s after the
+// class arrives.
 func TestAWriteMadeWhileTheDriverWasDownIsCommittedAfterTheClassQuiesce(t *testing.T) {
 	for _, c := range []struct {
 		name    string
@@ -59,19 +57,19 @@ func TestAWriteMadeWhileTheDriverWasDownIsCommittedAfterTheClassQuiesce(t *testi
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				answering, _ := testNode(t, io.Discard)
+				n, _ := testNode(t, io.Discard)
 				remote := bareRemote(t, map[string]string{"a.txt": "one"})
-				boundVolume(t, answering, "config", "")
-				armingClass(t, answering, "config-eager",
+				boundVolume(t, n, "config", "")
+				createClass(t, n, "config-eager",
 					map[string]string{quiesceParameter: "5s"})
-				held, _ := stagedWriteable(t, answering, "config", fileURL(remote))
-				unwatched(t, answering, held)
-				writeFiles(t, held.tree, map[string]string{"one.yaml": "1"})
+				vol, _ := stagedWriteable(t, n, "config", fileURL(remote))
+				unwatched(t, n, vol)
+				writeFiles(t, vol.tree, map[string]string{"one.yaml": "1"})
 
 				again, _ := testNode(t, io.Discard)
-				again.store = answering.store
-				again.events = answering.events
-				again.arms.client = answering.arms.client
+				again.store = n.store
+				again.events = n.events
+				again.arming.client = n.arming.client
 				again.mounted = func(string) bool { return true }
 				again.quiesce = c.quiesce
 				// The sweep is an hour, so only the quiesce can commit
@@ -81,7 +79,7 @@ func TestAWriteMadeWhileTheDriverWasDownIsCommittedAfterTheClassQuiesce(t *testi
 				resumed := resumedVolume(again, "config")
 
 				time.Sleep(time.Second)
-				nameClass(t, answering, "config-eager")
+				nameClass(t, n, "config-eager")
 
 				time.Sleep(4*time.Second - time.Nanosecond)
 				waitForNoPush(t, resumed)
@@ -95,29 +93,29 @@ func TestAWriteMadeWhileTheDriverWasDownIsCommittedAfterTheClassQuiesce(t *testi
 	}
 }
 
-// A watch that starts on a tree whose class is already known starts the
-// quiesce from that class, with no event and no class change to start
-// it. A pod that starts on a tree written while no watch ran is the case.
+// A pod can start on a tree that was written while no watch ran. The
+// watch then starts the quiesce with the volume's class, with no inotify
+// event and no change of class to restart it.
 func TestAWatchThatStartsOnAnArmedTreeCommitsAWriteThatSentNoEvent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		answering, _ := testNode(t, io.Discard)
+		n, _ := testNode(t, io.Discard)
 		// The sweep is an hour, so only the quiesce can commit within
 		// the test.
-		answering.sweep = time.Hour
+		n.sweep = time.Hour
 		remote := bareRemote(t, map[string]string{"a.txt": "one"})
-		held := armedVolume(t, answering, "config", fileURL(remote),
+		vol := armedVolume(t, n, "config", fileURL(remote),
 			map[string]string{quiesceParameter: "5s"})
-		unwatched(t, answering, held)
-		writeFiles(t, held.tree, map[string]string{"one.yaml": "1"})
+		unwatched(t, n, vol)
+		writeFiles(t, vol.tree, map[string]string{"one.yaml": "1"})
 
-		answering.mu.Lock()
-		answering.watch(held)
-		answering.mu.Unlock()
+		n.mu.Lock()
+		n.watch(vol)
+		n.mu.Unlock()
 
 		time.Sleep(5*time.Second - time.Nanosecond)
-		waitForNoPush(t, held)
+		waitForNoPush(t, vol)
 		time.Sleep(time.Nanosecond)
-		waitForPushed(t, held)
+		waitForPushed(t, vol)
 		if got := remoteSubject(t, remote); got != "Update 1 paths" {
 			t.Errorf("the remote's main is at %q, want %q", got, "Update 1 paths")
 		}

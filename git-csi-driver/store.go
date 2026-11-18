@@ -1,8 +1,8 @@
 package main
 
-// store.go holds the driver's directories on the node: one bare
-// repository per URL under repos/, and one published tree per volume
-// under volumes/.
+// store.go lays out the driver's directories on the node: one bare
+// repository per URL under repos/, and one directory per volume under
+// volumes/.
 
 import (
 	"context"
@@ -14,19 +14,19 @@ import (
 	"sync"
 )
 
-// refPrefix is where a store repository keeps the refs it follows. The
-// driver's own namespace keeps them apart from anything the remote
-// names, and lets one bare repository serve volumes on different refs.
+// refPrefix is the ref namespace where a store repository keeps the refs
+// it fetches. A separate namespace cannot collide with the remote's own
+// ref names, and one bare repository can serve volumes that follow
+// different refs.
 const refPrefix = "refs/git-csi/"
 
-// store is the root directory and one lock per repository, made on
-// first use.
+// store is the root directory of the driver's data on the node.
 //
-// Each repository's lock is a channel with one slot, not a
-// `sync.Mutex`. A goroutine that waits to send on a channel is durably
-// blocked in a synctest bubble, so a test's fake clock still moves
-// while a publish waits for a fetch of the same repository. A goroutine
-// that waits on a `sync.Mutex` stops the clock.
+// Each repository's lock is a channel with a buffer of one in place of
+// a `sync.Mutex`. synctest counts a goroutine blocked on a channel send
+// as durably blocked, so the fake clock keeps moving while a publish
+// waits for a fetch of the same repository. A goroutine blocked on a
+// `sync.Mutex` stops the clock.
 type store struct {
 	root string
 
@@ -38,12 +38,13 @@ func newStore(root string) *store {
 	return &store{root: root, locks: map[string]chan struct{}{}}
 }
 
-// repositoryURLFile is the file a bare repository carries beside its
-// objects, so a person reads the remote without hashing anything.
+// repositoryURLFile holds the remote URL in a bare repository's
+// directory, so a person can tell which remote a hashed directory name
+// belongs to.
 const repositoryURLFile = "url"
 
-// repository is one bare repository, shared by every volume of the same
-// URL on this node.
+// repository is the bare repository that every volume of the same URL on
+// this node shares.
 type repository struct {
 	store *store
 	url   string
@@ -51,8 +52,8 @@ type repository struct {
 	dir   string
 }
 
-// repository names the directory by the sha256 of the URL, because a URL
-// is not a file name. create writes the URL beside it for a reader.
+// repository names the directory by the sha256 of the URL, because a
+// URL is not a valid file name.
 func (s *store) repository(url string) *repository {
 	sum := sha256.Sum256([]byte(url))
 	name := hex.EncodeToString(sum[:])
@@ -64,35 +65,34 @@ func (s *store) repository(url string) *repository {
 	}
 }
 
-// volumeDir is where a volume keeps its published tree and, around each
-// git invocation, its credential files.
+// volumeDir is the directory of one volume. It holds the volume's tree,
+// its record, and the credential files that exist while git runs.
 func (s *store) volumeDir(id string) string {
 	return filepath.Join(s.root, "volumes", id)
 }
 
-// lock takes this repository's lock and returns the release. A fetch
-// and a publish of the same URL never run at once.
+// lock waits for this repository's lock and returns the function that
+// releases it. Every caller that fetches into the bare repository takes
+// it, and so does the sweep, so two fetches never write the repository
+// at once and the sweep never deletes it during a fetch.
 func (r *repository) lock() func() {
 	r.store.mu.Lock()
-	held, found := r.store.locks[r.name]
+	lock, found := r.store.locks[r.name]
 	if !found {
-		held = make(chan struct{}, 1)
-		r.store.locks[r.name] = held
+		lock = make(chan struct{}, 1)
+		r.store.locks[r.name] = lock
 	}
 	r.store.mu.Unlock()
 
-	held <- struct{}{}
-	return func() { <-held }
+	lock <- struct{}{}
+	return func() { <-lock }
 }
 
-// exists reports whether the store already holds this repository.
 func (r *repository) exists() bool {
 	_, err := os.Stat(filepath.Join(r.dir, "HEAD"))
 	return err == nil
 }
 
-// create makes the bare repository and writes the URL beside it, so a
-// person can read the store without hashing anything.
 func (r *repository) create(ctx context.Context) error {
 	if err := os.MkdirAll(r.dir, 0o755); err != nil {
 		return err
@@ -103,9 +103,9 @@ func (r *repository) create(ctx context.Context) error {
 	return os.WriteFile(filepath.Join(r.dir, repositoryURLFile), []byte(r.url+"\n"), 0o644)
 }
 
-// fetch moves the driver's own ref to what the remote holds now. depth
-// applies only when the caller asks, which is the first fetch of a new
-// repository.
+// fetch writes the remote's ref to refPrefix+ref. The leading + of the
+// refspec forces the update when the remote's history was rewritten. A
+// depth of zero fetches the full history.
 func (r *repository) fetch(ctx context.Context, env []string, ref string, depth int) error {
 	args := []string{"fetch", "--quiet", "--no-tags"}
 	if depth > 0 {
@@ -116,8 +116,8 @@ func (r *repository) fetch(ctx context.Context, env []string, ref string, depth 
 	return err
 }
 
-// resolve is the commit the driver's own ref names, or an error when
-// the store holds no copy of the ref.
+// resolve returns the commit at refPrefix+ref, or an error when the
+// repository has not fetched the ref.
 func (r *repository) resolve(ctx context.Context, ref string) (string, error) {
 	output, err := runGit(ctx, r.dir, nil, "rev-parse", "--verify", "--end-of-options",
 		refPrefix+ref+"^{commit}")
@@ -127,9 +127,9 @@ func (r *repository) resolve(ctx context.Context, ref string) (string, error) {
 	return trimLine(output.stdout), nil
 }
 
-// checkout writes the commit into dir. The index file lives outside the
-// tree and is removed after, so the tree holds only what the commit
-// holds and no pod ever sees a git file.
+// checkout writes the files of the commit into dir. The index file is
+// written beside dir and deleted afterward, so a pod sees no git
+// metadata in dir.
 func (r *repository) checkout(ctx context.Context, commit, dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -143,15 +143,16 @@ func (r *repository) checkout(ctx context.Context, commit, dir string) error {
 	return err
 }
 
-// nextTree is the checkout a placement makes beside the published tree.
+// nextTree is the directory where place checks out a commit before it
+// moves the files into the published tree.
 const nextTree = "next"
 
-// place puts the commit in the published tree. A tree that is not there
-// yet arrives whole, with one rename. A tree a pod already reads is
-// replaced entry by entry, because a bind mount follows the directory
-// the driver bound and not its name: a renamed directory leaves every
-// reader on the old tree. So the new tree arrives inside the directory
-// the pod holds, and each file appears in one rename.
+// place checks the commit out into nextTree and moves its files into
+// tree. When tree does not exist yet, one rename moves the checkout into
+// place. When tree exists, a pod can have it bind-mounted, and a bind
+// mount follows the directory and not its name. Renaming a new
+// directory over tree would leave the pod reading the old files, so
+// replaceTree moves the files into the existing directory.
 func (r *repository) place(ctx context.Context, commit, directory, tree string) error {
 	fresh := filepath.Join(directory, nextTree)
 	if err := os.RemoveAll(fresh); err != nil {
@@ -160,36 +161,34 @@ func (r *repository) place(ctx context.Context, commit, directory, tree string) 
 	if err := r.checkout(ctx, commit, fresh); err != nil {
 		return err
 	}
-	if err := arrive(fresh, tree); err != nil {
+	if err := installTree(fresh, tree); err != nil {
 		return err
 	}
 	return recordPlaced(directory, commit)
 }
 
-// arrive moves the checkout at fresh into the published tree.
-func arrive(fresh, tree string) error {
+func installTree(fresh, tree string) error {
 	if _, err := os.Stat(tree); err != nil {
 		return os.Rename(fresh, tree)
 	}
 	if err := replaceTree(fresh, tree); err != nil {
 		return err
 	}
-	// The pod already reads the new tree, and the next placement removes
-	// this checkout again, so a removal that fails is not a failure of
-	// the placement.
+	// The next call to place removes fresh before it checks out, so a
+	// failed removal here is harmless.
 	_ = os.RemoveAll(fresh)
 	return nil
 }
 
-// placedFile is the file beside a read-only volume's tree that names the
-// commit the tree holds. The tree holds no git directory, so a restarted
-// driver reads the commit from this file, and the volume's report names
-// it before the next fetch.
+// placedFile, beside a read-only volume's tree, holds the commit that
+// the tree was checked out from. The tree has no git directory, so a
+// restarted driver reads the commit from this file and reports it
+// before the next fetch.
 const placedFile = "commit"
 
-// recordPlaced writes the commit the tree now holds. The file arrives
-// with one rename, so a driver that stops during the write leaves the
-// old commit or the new one, and never part of a name.
+// recordPlaced writes a temporary file and renames it over placedFile,
+// so a driver that stops partway leaves the old commit or the new one,
+// never a truncated hash.
 func recordPlaced(directory, commit string) error {
 	next := filepath.Join(directory, placedFile+".next")
 	if err := os.WriteFile(next, []byte(commit+"\n"), 0o644); err != nil {
@@ -198,14 +197,12 @@ func recordPlaced(directory, commit string) error {
 	return os.Rename(next, filepath.Join(directory, placedFile))
 }
 
-// placedCommit is the commit recordPlaced wrote, and the empty string
-// for a volume with no such file.
+// placedCommit returns an empty string when placedFile does not exist.
 func placedCommit(directory string) string {
 	content, _ := os.ReadFile(filepath.Join(directory, placedFile))
 	return trimLine(string(content))
 }
 
-// trimLine removes the newline from one line of git output.
 func trimLine(out string) string {
 	for len(out) > 0 && (out[len(out)-1] == '\n' || out[len(out)-1] == '\r') {
 		out = out[:len(out)-1]
@@ -213,26 +210,27 @@ func trimLine(out string) string {
 	return out
 }
 
-// replaceTree makes published hold exactly what fresh holds. Entries
-// upstream removed go first. A directory present on both sides is
-// recursed into, so its inode and the pod's view of it stay. Every other
-// entry moves with one rename, so a reader sees the old file or the
-// new one and never a partial write.
+// replaceTree makes published hold exactly the entries of fresh, and
+// deletes the entries that fresh does not have. When both have a
+// directory of the same name, it recurses into the pair, so the
+// directory keeps its inode and a bind mount of it keeps working. It
+// moves every other entry with one rename, so a reader sees the old file
+// or the new one, never a partial write.
 func replaceTree(fresh, published string) error {
-	arriving, err := os.ReadDir(fresh)
+	incoming, err := os.ReadDir(fresh)
 	if err != nil {
 		return err
 	}
-	standing, err := os.ReadDir(published)
+	existing, err := os.ReadDir(published)
 	if err != nil {
 		return err
 	}
 
-	keep := make(map[string]bool, len(arriving))
-	for _, entry := range arriving {
+	keep := make(map[string]bool, len(incoming))
+	for _, entry := range incoming {
 		keep[entry.Name()] = true
 	}
-	for _, entry := range standing {
+	for _, entry := range existing {
 		if !keep[entry.Name()] {
 			if err := os.RemoveAll(filepath.Join(published, entry.Name())); err != nil {
 				return err
@@ -240,7 +238,7 @@ func replaceTree(fresh, published string) error {
 		}
 	}
 
-	for _, entry := range arriving {
+	for _, entry := range incoming {
 		from := filepath.Join(fresh, entry.Name())
 		to := filepath.Join(published, entry.Name())
 		there, err := os.Lstat(to)
@@ -262,8 +260,8 @@ func replaceTree(fresh, published string) error {
 	return nil
 }
 
-// treeSize is the bytes the tree's regular files hold, which
-// NodeGetVolumeStats reports as used.
+// treeSize returns the total size in bytes of the regular files under
+// dir.
 func treeSize(dir string) (int64, error) {
 	var total int64
 	err := filepath.Walk(dir, func(_ string, info os.FileInfo, err error) error {

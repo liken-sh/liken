@@ -1,8 +1,7 @@
-# The monitoring component, liken's shared contract for connecting a
-# Prometheus to a process, milestone 65 in the liken repository. The
-# base in deploy/ runs both plugins with their metrics listeners open
-# and nothing scraping them. A cluster owner who runs the
-# prometheus-operator adds this component beside the base:
+# Adds a PodMonitor for the driver's node pods and one for its
+# controller pods, and a Grafana dashboard. The base in deploy/ opens
+# the metrics ports, but nothing scrapes them. In a cluster that runs
+# prometheus-operator, add this component beside the base:
 #
 #   resources:
 #     - https://github.com/liken-sh/liken//git-csi-driver/deploy?ref=<tag>
@@ -11,10 +10,10 @@
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 
-# No top-level namespace here: a Component's namespace field would also
-# move the dashboard ConfigMap below into liken-system, but the sidecar
-# that loads dashboards watches monitoring instead. Each PodMonitor
-# below sets its own metadata.namespace to liken-system.
+# This Component sets no namespace field, because the field would also
+# move the dashboard ConfigMap into liken-system, and Grafana's
+# dashboard sidecar watches the monitoring namespace. Each PodMonitor
+# sets metadata.namespace to liken-system itself.
 
 resources:
   - podmonitor-node.yaml

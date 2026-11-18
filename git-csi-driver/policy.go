@@ -1,7 +1,7 @@
 package main
 
-// policy.go reads a VolumeAttributesClass's parameters into the
-// rules an armed volume commits and pushes under.
+// policy.go parses the parameters of a VolumeAttributesClass into the
+// rules that an armed volume commits and pushes under.
 
 import (
 	"regexp"
@@ -14,7 +14,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
-// The parameter names.
 const (
 	quiesceParameter     = "push.quiesce"
 	maxLatencyParameter  = "push.maxLatency"
@@ -24,8 +23,10 @@ const (
 	metadataParameter    = "metadata"
 )
 
-// Every parameter has a default, so an empty class arms a volume with
-// the defaults.
+// The defaults of the parameters that a class leaves out. The default
+// of push.quiesce is defaultQuiesce in watch.go, beside the watch that
+// uses it. shortestQuiesce is the lowest push.quiesce that a class may
+// set.
 const (
 	shortestQuiesce    = 5 * time.Second
 	defaultMaxLatency  = 5 * time.Minute
@@ -34,11 +35,19 @@ const (
 	defaultAuthorEmail = "git-csi-driver@liken.sh"
 )
 
-// neverLatency is the one value of push.maxLatency that is not a
-// duration. It resolves to no maximum.
+// parameterNames lists every parameter that a class may set, for the
+// message that refuses an unknown one.
+var parameterNames = []string{
+	quiesceParameter, maxLatencyParameter, maxFileSizeParameter,
+	authorParameter, ignoreParameter, metadataParameter,
+}
+
+// neverLatency is the value of push.maxLatency that turns off the
+// maximum.
 const neverLatency = "never"
 
-// policy is a parsed class. A nil policy marks an unarmed volume.
+// policy is a parsed class. A volume that no class arms has a nil
+// policy.
 type policy struct {
 	quiesce     time.Duration
 	maxLatency  time.Duration
@@ -49,10 +58,11 @@ type policy struct {
 	metadata    bool
 }
 
-// parsePolicy resolves a class's parameters with the defaults. It
-// refuses an unknown parameter and a malformed value with
-// InvalidArgument and the parameter's name. The parameters are read in
-// sorted order, so the first bad one is the same on every pass.
+// parsePolicy applies a class's parameters over the defaults. It
+// returns InvalidArgument with the parameter's name for an unknown
+// parameter or a malformed value. It reads the parameters in sorted
+// order, so when several are bad the error names the same one every
+// time.
 func parsePolicy(parameters map[string]string) (*policy, error) {
 	resolved := defaultPolicy()
 
@@ -80,17 +90,16 @@ func parsePolicy(parameters map[string]string) (*policy, error) {
 		case metadataParameter:
 			resolved.metadata, err = parseMetadataFlag(value)
 		default:
-			err = status.Errorf(codes.InvalidArgument, "%s: unknown parameter", name)
+			err = status.Errorf(codes.InvalidArgument, "%s: unknown parameter, want one of %s", name, strings.Join(parameterNames, ", "))
 		}
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	// A class that sets push.quiesce alone means a quiet tree pushes
-	// after that long, so the default push.maxLatency stretches to it. A
-	// class that sets both has to agree with itself, and that check
-	// comes last, because it needs both values read.
+	// A maximum shorter than the quiesce is refused. When a class sets
+	// only push.quiesce, the default maximum rises to the quiesce, so a
+	// long quiesce alone is not refused.
 	if !latencySet && resolved.maxLatency < resolved.quiesce {
 		resolved.maxLatency = resolved.quiesce
 	}
@@ -101,9 +110,10 @@ func parsePolicy(parameters map[string]string) (*policy, error) {
 	return resolved, nil
 }
 
-// defaultPolicy is what every parameter resolves to before a
-// class states it, and what a rebase at stage commits under where no
-// class arms the volume.
+// defaultPolicy returns a policy with every parameter at its default.
+// A volume that no class arms writes no commit of its own. When a stage
+// or a push rebases the commits that it already has, the rebased
+// commits take the default author from this policy.
 func defaultPolicy() *policy {
 	return &policy{
 		quiesce:     defaultQuiesce,
@@ -115,8 +125,9 @@ func defaultPolicy() *policy {
 	}
 }
 
-// parseQuiesce reads push.quiesce. It has a floor, because a shorter
-// rest commits a write the application has not finished.
+// parseQuiesce reads push.quiesce. It refuses a value under
+// shortestQuiesce, because a shorter wait can commit a file that the
+// application is still writing.
 func parseQuiesce(value string) (time.Duration, error) {
 	quiesce, err := time.ParseDuration(value)
 	if err != nil {
@@ -130,8 +141,8 @@ func parseQuiesce(value string) (time.Duration, error) {
 	return quiesce, nil
 }
 
-// parseMaxLatency reads push.maxLatency. never reads as zero: no push
-// the quiesce did not ask for.
+// parseMaxLatency returns zero for never, which means no maximum, so
+// only the quiesce starts a push.
 func parseMaxLatency(value string) (time.Duration, error) {
 	if value == neverLatency {
 		return 0, nil
@@ -144,9 +155,9 @@ func parseMaxLatency(value string) (time.Duration, error) {
 	return latency, nil
 }
 
-// parseMaxFileSize reads commit.maxFileSize as the quantity Kubernetes
-// itself writes, so 1Mi means what it means everywhere else. Zero is
-// no limit.
+// parseMaxFileSize reads commit.maxFileSize as a Kubernetes quantity,
+// so 1Mi means the same as it does in a resource request. Zero means no
+// limit.
 func parseMaxFileSize(value string) (int64, error) {
 	quantity, err := resource.ParseQuantity(value)
 	if err != nil {
@@ -161,11 +172,11 @@ func parseMaxFileSize(value string) (int64, error) {
 	return size, nil
 }
 
-// authorForm is the one shape git accepts for an identity.
+// authorForm matches the Name <email> form of a git identity.
 var authorForm = regexp.MustCompile(`^(\S.*?)\s+<([^<>\s]+)>$`)
 
-// parseAuthor splits commit.author into the name and the address
-// every commit carries.
+// parseAuthor splits commit.author into the name and the email address
+// of the commit's author and committer.
 func parseAuthor(value string) (string, string, error) {
 	found := authorForm.FindStringSubmatch(value)
 	if found == nil {
@@ -175,8 +186,6 @@ func parseAuthor(value string) (string, string, error) {
 	return found[1], found[2], nil
 }
 
-// parseIgnore splits the comma-separated list. An empty piece is not a
-// pattern, because an empty pattern excludes nothing.
 func parseIgnore(value string) []string {
 	patterns := []string{}
 	for _, pattern := range strings.Split(value, ",") {
@@ -187,8 +196,8 @@ func parseIgnore(value string) []string {
 	return patterns
 }
 
-// parseMetadataFlag reads metadata. The two words are its whole domain,
-// so 1 and yes are refused where a person meant true.
+// parseMetadataFlag accepts only true and false, and refuses the other
+// forms that strconv.ParseBool accepts, such as 1 and yes.
 func parseMetadataFlag(value string) (bool, error) {
 	switch value {
 	case "true":
@@ -200,8 +209,8 @@ func parseMetadataFlag(value string) (bool, error) {
 		"%s: %q is not true or false", metadataParameter, value)
 }
 
-// author is the environment git reads the author and the committer
-// from, so no configuration file has to carry them.
+// author returns the environment variables that set git's author and
+// committer, so a commit needs no git configuration file.
 func (p *policy) author() []string {
 	return []string{
 		"GIT_AUTHOR_NAME=" + p.authorName,

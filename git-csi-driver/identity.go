@@ -1,7 +1,8 @@
 package main
 
-// identity.go implements the CSI Identity service. The plugin receives
-// these calls before it publishes a volume.
+// identity.go implements the CSI Identity service, which the kubelet and
+// the CSI sidecars call to read the plugin's name, its capabilities, and
+// whether it is ready.
 
 import (
 	"context"
@@ -11,18 +12,13 @@ import (
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
-// driverName is the name every volume and the CSIDriver object use to
-// select this driver.
+// driverName is the name that the CSIDriver object and every volume use
+// to select this driver.
 const driverName = "git.liken.sh"
 
-// identity implements the Identity service. Its state includes the store
-// path and whether this process is the controller. Readiness depends on
-// whether the store accepts a write.
 type identity struct {
 	csi.UnimplementedIdentityServer
-	store string
-	// The controller declares CONTROLLER_SERVICE, and the node
-	// plugin declares nothing.
+	store      string
 	controller bool
 }
 
@@ -32,15 +28,15 @@ func (i *identity) GetPluginInfo(
 	return &csi.GetPluginInfoResponse{Name: driverName, VendorVersion: version}, nil
 }
 
-// GetPluginCapabilities declares the controller service on the
-// controller plugin and nothing on the node plugin. The driver has no
-// topology, because a checkout is made on whichever node publishes it.
+// GetPluginCapabilities declares CONTROLLER_SERVICE on the controller
+// plugin and no capability on the node plugin. The driver declares no
+// topology, because any node can make a checkout.
 func (i *identity) GetPluginCapabilities(
 	context.Context, *csi.GetPluginCapabilitiesRequest,
 ) (*csi.GetPluginCapabilitiesResponse, error) {
-	answer := &csi.GetPluginCapabilitiesResponse{}
+	response := &csi.GetPluginCapabilitiesResponse{}
 	if i.controller {
-		answer.Capabilities = []*csi.PluginCapability{{
+		response.Capabilities = []*csi.PluginCapability{{
 			Type: &csi.PluginCapability_Service_{
 				Service: &csi.PluginCapability_Service{
 					Type: csi.PluginCapability_Service_CONTROLLER_SERVICE,
@@ -48,19 +44,18 @@ func (i *identity) GetPluginCapabilities(
 			},
 		}}
 	}
-	return answer, nil
+	return response, nil
 }
 
-// Probe reports ready when the store accepts a write. The store contains
-// every repository and work tree, so the driver cannot operate without
-// write access to it.
+// Probe returns ready only when the store accepts a write, because the
+// store holds every repository and work tree.
 func (i *identity) Probe(context.Context, *csi.ProbeRequest) (*csi.ProbeResponse, error) {
 	return &csi.ProbeResponse{Ready: wrapperspb.Bool(i.storeIsWriteable())}, nil
 }
 
-// storeIsWriteable creates and removes a file instead of reading the
-// directory's mode. A mode says what a user may do, and a write says
-// what this process did.
+// storeIsWriteable creates and removes a file in the store instead of
+// checking the directory's mode, because the mode does not show a
+// read-only filesystem or a permission that this process lacks.
 func (i *identity) storeIsWriteable() bool {
 	file, err := os.CreateTemp(i.store, ".probe-")
 	if err != nil {

@@ -1,7 +1,7 @@
 package main
 
-// credentials.go turns a Secret's data into the environment one git
-// invocation runs under.
+// credentials.go turns the data of a Secret into the environment for
+// one git invocation.
 
 import (
 	"os"
@@ -12,7 +12,8 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// The keys the driver reads out of a nodePublishSecretRef Secret.
+// The keys that the driver reads from the Secret that
+// nodePublishSecretRef names.
 const (
 	privateKeyKey = "ssh-privatekey"
 	knownHostsKey = "known_hosts"
@@ -20,20 +21,22 @@ const (
 	usernameKey   = "username"
 )
 
-// defaultUsername is the user a token authenticates as when the Secret
-// names none. Forges accept any user with a token; git is the custom.
+// defaultUsername is the user that a token authenticates as when the
+// Secret sets none. Forges accept any user with a token, and git is the
+// conventional choice.
 const defaultUsername = "git"
 
-// The file names the credentials take under the volume's directory.
+// The names of the credential files, written under the volume's
+// directory.
 const (
 	privateKeyFile = "ssh-privatekey"
 	knownHostsFile = "known_hosts"
 	helperFile     = "credential-helper"
 )
 
-// credentials is what the kubelet passed from the Secret. It stays in
-// memory on the volume, so a later fetch can use it, and reaches the
-// disk only around a git invocation.
+// credentials is the data from the Secret that the kubelet passed. The
+// volume keeps it in memory so that later fetches can use it. It
+// reaches the disk only while one git invocation runs.
 type credentials struct {
 	privateKey string
 	knownHosts string
@@ -41,8 +44,9 @@ type credentials struct {
 	username   string
 }
 
-// parseCredentials reads the Secret. No Secret is fine. A Secret with
-// neither key is refused, because the person who named it meant one.
+// parseCredentials reads the Secret's data. No Secret returns nil
+// credentials. A Secret with neither a private key nor a token is
+// refused, because whoever referenced it meant to authenticate.
 func parseCredentials(secrets map[string]string) (*credentials, error) {
 	if len(secrets) == 0 {
 		return nil, nil
@@ -55,7 +59,7 @@ func parseCredentials(secrets map[string]string) (*credentials, error) {
 	}
 	if parsed.privateKey == "" && parsed.token == "" {
 		return nil, status.Errorf(codes.InvalidArgument,
-			"nodePublishSecretRef: the Secret carries no %s and no %s", privateKeyKey, tokenKey)
+			"nodePublishSecretRef: the Secret has neither %s nor %s", privateKeyKey, tokenKey)
 	}
 	if parsed.username == "" {
 		parsed.username = defaultUsername
@@ -63,11 +67,11 @@ func parseCredentials(secrets map[string]string) (*credentials, error) {
 	return parsed, nil
 }
 
-// use writes the credential files under dir and returns the environment
-// that names them and the function that removes them. A private key on
-// the node's disk lives no longer than the git invocation that reads it.
-// The token goes through a helper script, not the command line, so it
-// never appears in the process table.
+// use writes the credential files under dir. It returns the environment
+// variables that point git at them and a function that deletes them,
+// which the caller runs when the git invocation ends. The token goes
+// through a helper script and not the command line, so it never appears
+// in the process list.
 func (c *credentials) use(dir string) ([]string, func(), error) {
 	if c == nil {
 		return nil, func() {}, nil
@@ -113,10 +117,11 @@ func (c *credentials) use(dir string) ([]string, func(), error) {
 	return env, remove, nil
 }
 
-// sshCommand makes ssh read the key and the hosts file the driver wrote
-// and nothing of the node's own. A Secret with known_hosts can check
-// the host key, so that one demands a match. Without it, ssh accepts
-// the first key it sees and refuses a later change.
+// sshCommand returns a GIT_SSH_COMMAND that uses only the key and the
+// known_hosts file that the driver wrote, and nothing of the node's
+// own. When the Secret has known_hosts, ssh requires the host key to
+// match. Without it, ssh accepts any host key, because use writes an
+// empty known_hosts file for each invocation and deletes it after.
 func sshCommand(key, hosts string, knownHosts bool) string {
 	checking := "accept-new"
 	if knownHosts {
@@ -132,8 +137,9 @@ func sshCommand(key, hosts string, knownHosts bool) string {
 	}, " ")
 }
 
-// credentialHelper is the script git runs for a password. git reads the
-// answer from its standard output.
+// credentialHelper returns a shell script for git's credential.helper.
+// It prints the username and password on standard output, where git
+// reads them.
 func credentialHelper(username, token string) string {
 	return strings.Join([]string{
 		"#!/bin/sh",
@@ -145,14 +151,14 @@ func credentialHelper(username, token string) string {
 	}, "\n")
 }
 
-// quote makes a path safe inside GIT_SSH_COMMAND, which git splits with
-// a shell's rules.
+// quote single-quotes a path for GIT_SSH_COMMAND, which git splits by
+// shell rules.
 func quote(path string) string {
 	return "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
 }
 
-// endWithNewline appends the newline ssh requires at the end of a key
-// file. A Secret authored by hand often lacks it.
+// endWithNewline appends the newline that ssh requires at the end of a
+// key file. A Secret written by hand often lacks it.
 func endWithNewline(text string) string {
 	if strings.HasSuffix(text, "\n") {
 		return text

@@ -8,14 +8,14 @@ import (
 	"testing"
 )
 
-// signature is the hex HMAC-SHA256 a forge sends for the body.
+// signature returns the hex HMAC-SHA256 of the body, which is what a
+// forge sends.
 func signature(body, secret string) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte(body))
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// headers is one request's headers, named by the test.
 func headers(pairs map[string]string) http.Header {
 	sent := http.Header{}
 	for key, value := range pairs {
@@ -96,7 +96,7 @@ func TestVerifyReadsEachForgesHeader(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			forge, verified := verify(headers(c.header), []byte(body), "s")
 			if forge != c.forge || verified != c.verified {
-				t.Errorf("verify answered %q, %v, want %q, %v",
+				t.Errorf("verify returned %q, %v, want %q, %v",
 					forge, verified, c.forge, c.verified)
 			}
 		})
@@ -111,6 +111,6 @@ func TestVerifyReadsTheHeadersInOneOrder(t *testing.T) {
 		giteaSignatureHeader:  "nonsense",
 	}), []byte(body), "s")
 	if forge != forgeGitHub || !verified {
-		t.Errorf("verify answered %q, %v, want %q, true", forge, verified, forgeGitHub)
+		t.Errorf("verify returned %q, %v, want %q, true", forge, verified, forgeGitHub)
 	}
 }

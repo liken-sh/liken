@@ -1,7 +1,7 @@
 package main
 
-// metadata.go records what a git checkout cannot carry: the
-// modes, the owners, and the empty directories.
+// metadata.go records and restores what git does not store: file modes
+// other than 0644 and 0755, file owners, and empty directories.
 
 import (
 	"context"
@@ -17,8 +17,10 @@ import (
 	"syscall"
 )
 
-// The driver-owned ref, the one file in its tree, and the two
-// files a commit on it needs beside the work tree.
+// metadataRef is a ref that only the driver writes. Each commit on it
+// has a tree with the single file metadataFile. commitMetadata writes
+// metadataRecordFile and metadataIndexFile in the volume's directory, next
+// to its git directory and its tree, and deletes them when it returns.
 const (
 	metadataRef        = refPrefix + "metadata"
 	metadataFile       = "metadata"
@@ -26,24 +28,25 @@ const (
 	metadataIndexFile  = "metadata.index"
 )
 
-// remoteMetadataRef is where a fetch puts the record the remote
-// holds, beside the volume's own record. A rebase needs both: the
-// other writer's modes to replay, and their record to put the
-// volume's own record on top of.
+// remoteMetadataRef is where a fetch stores the remote's metadata
+// record. A rebase reads it for the other writer's modes to replay, and
+// uses its commit as the parent of the volume's own record.
 const remoteMetadataRef = metadataRef + ".remote"
 
-// metadataMessage is the message every commit on the metadata ref
-// carries, because the record is the whole change.
+// metadataMessage is the message of every commit on metadataRef. Each
+// commit replaces the whole record, so the message does not describe a
+// change.
 const metadataMessage = "Update the metadata record"
 
-// The modes a checkout already gives, so a path with either of
-// them is recorded nowhere.
+// The modes that a git checkout gives a file and a directory. The record
+// omits a path that has its default mode.
 const (
 	defaultFileMode fs.FileMode = 0o644
 	defaultDirMode  fs.FileMode = 0o755
 )
 
-// metadataRecord is one path the checkout cannot carry.
+// metadataRecord is the mode and owner of one path, or an empty
+// directory.
 type metadataRecord struct {
 	path      string
 	directory bool
@@ -52,8 +55,9 @@ type metadataRecord struct {
 	gid       int
 }
 
-// walkTreeMetadata records every path with a mode other than the
-// default, an owner other than the driver's own, or no entries.
+// walkTreeMetadata returns a record for each path in the tree that has a
+// non-default mode, an owner other than the driver's user and group, or,
+// for a directory, no entries. The records are sorted by path.
 func walkTreeMetadata(tree string) ([]metadataRecord, error) {
 	records := []metadataRecord{}
 	uid, gid := os.Getuid(), os.Getgid()
@@ -65,8 +69,8 @@ func walkTreeMetadata(tree string) ([]metadataRecord, error) {
 			return nil
 		}
 		name := filepath.ToSlash(strings.TrimPrefix(path, tree+string(filepath.Separator)))
-		// A newline in a path would make two lines of one record,
-		// so such a path is recorded nowhere.
+		// The record has one line per path, so it cannot hold a path
+		// that contains a newline.
 		if strings.ContainsAny(name, "\n\r") {
 			return nil
 		}
@@ -79,8 +83,9 @@ func walkTreeMetadata(tree string) ([]metadataRecord, error) {
 	return records, err
 }
 
-// pathRecord returns the record for one path and whether the
-// checkout already gives what it says.
+// pathRecord returns the record for one path, and whether the record is
+// needed because a checkout would not restore the path's mode, owner, or
+// empty directory. Only regular files and directories get a record.
 func pathRecord(name, path string, info os.FileInfo, uid, gid int) (metadataRecord, bool) {
 	owner, group := ownerOf(info)
 	one := metadataRecord{
@@ -100,22 +105,23 @@ func pathRecord(name, path string, info os.FileInfo, uid, gid int) (metadataReco
 	return one, false
 }
 
-// ownerOf reads the owner and group. On Linux os.Lstat always answers
-// a Stat_t, and the driver runs nowhere else.
+// ownerOf returns the user and group ids of a file. The driver runs
+// only on Linux, where Sys returns a *syscall.Stat_t.
 func ownerOf(info os.FileInfo) (int, int) {
 	stat := info.Sys().(*syscall.Stat_t)
 	return int(stat.Uid), int(stat.Gid)
 }
 
-// emptyDirectory reports a directory with no entries, which git cannot
-// carry.
+// emptyDirectory reports whether the directory has no entries. git does
+// not store an empty directory, so the record must.
 func emptyDirectory(path string) bool {
 	entries, err := os.ReadDir(path)
 	return err == nil && len(entries) == 0
 }
 
-// metadataContent writes one record per line: the mode, the owner, the
-// group, and the path, with a trailing slash on a directory.
+// metadataContent formats the records, one per line, as the octal mode,
+// the user id, the group id, and the path. A directory path ends with a
+// slash.
 func metadataContent(records []metadataRecord) string {
 	lines := &strings.Builder{}
 	for _, one := range records {
@@ -128,8 +134,8 @@ func metadataContent(records []metadataRecord) string {
 	return lines.String()
 }
 
-// parseMetadataContent reads the record. A line the driver cannot read
-// is left out, so one bad record never stops a restore.
+// parseMetadataContent parses the text of a metadata record. It skips a
+// line that does not parse, so one bad line does not stop a restore.
 func parseMetadataContent(content string) []metadataRecord {
 	records := []metadataRecord{}
 	for _, line := range strings.Split(content, "\n") {
@@ -158,8 +164,8 @@ func parseMetadataLine(line string) (metadataRecord, bool) {
 		return metadataRecord{}, false
 	}
 	name := strings.TrimSuffix(fields[3], "/")
-	// A record names a path inside the tree, so anything that
-	// climbs out of it is not a record.
+	// A record names a path inside the tree. A path that leaves the tree
+	// would make a restore change files outside it, so it is rejected.
 	if !filepath.IsLocal(filepath.FromSlash(name)) {
 		return metadataRecord{}, false
 	}
@@ -172,22 +178,23 @@ func parseMetadataLine(line string) (metadataRecord, bool) {
 	}, true
 }
 
-// recordMetadata commits the record on the driver-owned ref as a
-// single-file tree, and only when its content changed.
+// recordMetadata commits the tree's current metadata to the metadata
+// ref, unless the ref already holds the same record.
 func (w *workTree) recordMetadata(ctx context.Context, rules *policy) error {
 	records, err := walkTreeMetadata(w.tree)
 	if err != nil {
 		return err
 	}
 	content := metadataContent(records)
-	if standing, err := w.metadataRecord(ctx, metadataRef); err == nil && standing == content {
+	if current, err := w.metadataRecord(ctx, metadataRef); err == nil && current == content {
 		return nil
 	}
 	return w.commitMetadata(ctx, rules, content)
 }
 
-// metadataRecord is the record the ref holds now: the volume's own,
-// or the one fetched from the remote.
+// metadataRecord returns the text of the record at ref, which is
+// metadataRef for the volume's own record or remoteMetadataRef for the
+// remote's.
 func (w *workTree) metadataRecord(ctx context.Context, ref string) (string, error) {
 	output, err := w.git(ctx, "show", "--no-textconv", ref+":"+metadataFile)
 	if err != nil {
@@ -196,15 +203,16 @@ func (w *workTree) metadataRecord(ctx context.Context, ref string) (string, erro
 	return output.stdout, nil
 }
 
-// gitSteps runs a plumbing sequence and holds the first failure,
-// so a caller states the sequence once and checks it once.
+// gitSteps runs a sequence of git commands and keeps the first error, so
+// a caller checks err once after the sequence.
 type gitSteps struct {
 	work *workTree
 	err  error
 }
 
-// run returns the invocation's one line of output and does nothing
-// once a step before it has failed.
+// run runs git with args and returns its output with the trailing
+// newline removed. After an earlier step has failed it runs nothing and
+// returns an empty string.
 func (s *gitSteps) run(ctx context.Context, env []string, args ...string) string {
 	if s.err != nil {
 		return ""
@@ -214,9 +222,9 @@ func (s *gitSteps) run(ctx context.Context, env []string, args ...string) string
 	return trimLine(output.stdout)
 }
 
-// The commit is made with plumbing and an index of its own, so
-// nothing here touches the tree the pod writes or the index the pod's
-// changes are staged in.
+// commitMetadata commits content to the metadata ref with git plumbing
+// commands and a separate index file. It never touches the files that
+// the pod writes or the index that holds the pod's staged changes.
 func (w *workTree) commitMetadata(ctx context.Context, rules *policy, content string) error {
 	record := filepath.Join(w.directory, metadataRecordFile)
 	index := filepath.Join(w.directory, metadataIndexFile)
@@ -236,8 +244,8 @@ func (w *workTree) commitMetadata(ctx context.Context, rules *policy, content st
 	tree := steps.run(ctx, indexed, "write-tree")
 
 	args := []string{"commit-tree", "-m", metadataMessage}
-	// The new record stands on the last one, so the ref carries the
-	// history of the modes as well as the modes.
+	// The previous record is the parent, so the ref keeps the history of
+	// the metadata.
 	if parent := w.refCommit(ctx, metadataRef); parent != "" {
 		args = append(args, "-p", parent)
 	}
@@ -246,10 +254,9 @@ func (w *workTree) commitMetadata(ctx context.Context, rules *policy, content st
 	return steps.err
 }
 
-// replayMetadata gives a checkout the modes, the owners, and the
-// empty directories the ref records. owners is false where the driver
-// is not root, and a chown it cannot make is not a failure of the
-// restore.
+// replayMetadata applies the modes, owners, and empty directories in
+// metadataRef to the checkout. owners is false when the driver does not
+// run as root and so cannot change owners. That is not an error.
 func (w *workTree) replayMetadata(ctx context.Context, logger *slog.Logger, owners bool) error {
 	content, err := w.metadataRecord(ctx, metadataRef)
 	if err != nil {
@@ -259,10 +266,10 @@ func (w *workTree) replayMetadata(ctx context.Context, logger *slog.Logger, owne
 	return nil
 }
 
-// replayMetadataFor replays the remote's record for the paths an
-// update rewrote, and no other path. Those paths are another writer's
+// replayMetadataFor applies the remote's record to the paths that an
+// update changed, and to no other path. Another writer wrote those
 // files, so their modes come from that writer's record, and the modes
-// the pod set on its own files stand.
+// that the pod set on its other files stay.
 func (w *workTree) replayMetadataFor(
 	ctx context.Context, logger *slog.Logger, owners bool, changed []string,
 ) error {
@@ -274,23 +281,22 @@ func (w *workTree) replayMetadataFor(
 	return nil
 }
 
-// recordsUnder selects the records of the paths an update rewrote:
-// the paths themselves, the directories that hold them, and the
-// directories the record names inside those, which is where an empty
-// directory another writer added is. The root's own children are
-// never selected, so a record line for one of the pod's own top-level
-// paths is not replayed.
+// recordsUnder returns the records of the changed paths, and the records
+// of the directories that contain a changed path or whose parent does.
+// The second rule restores an empty directory that another writer added
+// beside a file it changed. The root is never an ancestor here, so a
+// top-level directory that contains no changed path is not replayed.
 func recordsUnder(records []metadataRecord, changed []string) []metadataRecord {
-	rewritten, holding := map[string]bool{}, map[string]bool{}
+	rewritten, ancestors := map[string]bool{}, map[string]bool{}
 	for _, one := range changed {
 		rewritten[one] = true
 		for dir := path.Dir(one); dir != "."; dir = path.Dir(dir) {
-			holding[dir] = true
+			ancestors[dir] = true
 		}
 	}
 	found := []metadataRecord{}
 	for _, one := range records {
-		inside := one.directory && (holding[one.path] || holding[path.Dir(one.path)])
+		inside := one.directory && (ancestors[one.path] || ancestors[path.Dir(one.path)])
 		if rewritten[one.path] || inside {
 			found = append(found, one)
 		}
@@ -298,10 +304,11 @@ func recordsUnder(records []metadataRecord, changed []string) []metadataRecord {
 	return found
 }
 
-// reparentMetadata makes the volume's record a child of the record
-// the remote holds now. A record is a snapshot of the whole tree, so
-// a new parent is the whole rebase it needs, and it can never
-// conflict. A record already on top of the remote's is left alone.
+// reparentMetadata commits the volume's record again with the remote's
+// record as its parent. Each record lists the whole tree, so a rebase
+// only changes the parent and cannot conflict. It does nothing when
+// either side has no record, or when the remote's commit is already an
+// ancestor of the volume's.
 func (w *workTree) reparentMetadata(ctx context.Context, author []string) error {
 	remote, local := w.refCommit(ctx, remoteMetadataRef), w.refCommit(ctx, metadataRef)
 	if remote == "" || local == "" || w.ancestor(ctx, remote, local) {
@@ -314,26 +321,25 @@ func (w *workTree) reparentMetadata(ctx context.Context, author []string) error 
 	return steps.err
 }
 
-// replayRecords writes what a checkout cannot carry, one record at
-// a time. A record it cannot write is logged and does not stop the
-// ones after it.
+// replayRecords applies each record to the checkout. It logs a record
+// that it cannot apply and continues with the next.
 func (w *workTree) replayRecords(
 	ctx context.Context, logger *slog.Logger, owners bool, records []metadataRecord,
 ) {
 	if !owners {
-		logger.InfoContext(ctx, "the owners are not replayed", "tree", w.tree)
+		logger.InfoContext(ctx, "Kept the current owners of the checkout, because the driver does not run as root", "tree", w.tree)
 	}
 	for _, one := range records {
 		where := filepath.Join(w.tree, filepath.FromSlash(one.path))
 		if one.directory {
 			if err := os.MkdirAll(where, one.mode); err != nil {
-				logger.WarnContext(ctx, "the directory was not made",
+				logger.WarnContext(ctx, "A directory of the metadata record was not created",
 					"path", one.path, "error", err)
 				continue
 			}
 		}
 		if err := os.Chmod(where, one.mode); err != nil {
-			logger.WarnContext(ctx, "the mode was not replayed",
+			logger.WarnContext(ctx, "The mode of a metadata record was not set",
 				"path", one.path, "error", err)
 			continue
 		}
@@ -341,7 +347,7 @@ func (w *workTree) replayRecords(
 			continue
 		}
 		if err := os.Lchown(where, one.uid, one.gid); err != nil {
-			logger.WarnContext(ctx, "the owner was not replayed",
+			logger.WarnContext(ctx, "The owner of a metadata record was not set",
 				"path", one.path, "error", err)
 		}
 	}

@@ -1,9 +1,9 @@
 package main
 
-// reconcile.go brings a work tree the node already has to the
-// ref the remote holds now, at stage and after a rejected push. The
-// rebase runs in a scratch tree in both cases, because a pod may hold
-// the tree, and a rebase in the pod's tree would rewrite its files.
+// reconcile.go brings an existing work tree up to the remote's ref, at
+// stage and after a rejected push. A rebase runs in a scratch tree,
+// because a rebase in the mounted tree would rewrite files that a pod
+// may have open.
 
 import (
 	"context"
@@ -11,13 +11,14 @@ import (
 	"os"
 )
 
-// reconcile is the reconcile table: a tree equal to upstream or ahead
-// of it is left alone, a tree behind it takes upstream, and a tree that
-// moved beside it is rebased onto it. A tree with uncommitted writes is
-// never rewritten.
+// reconcile brings the tree to upstream at stage. For a diverged
+// volume, stageDiverged runs in its place. Otherwise a tree equal to upstream or
+// ahead of it stays as it is, a tree behind upstream is
+// fast-forwarded, and a tree whose history split from upstream is
+// rebased onto it. A tree with uncommitted changes is not rewritten.
 func (n *node) reconcile(ctx context.Context, staging *volume, head, upstream, side string) error {
 	if branch := staging.work.divergedBranch(ctx); branch != "" {
-		return n.healOrHold(ctx, staging, branch, head, upstream, side)
+		return n.stageDiverged(ctx, staging, branch, head, upstream, side)
 	}
 	switch {
 	case head == upstream:
@@ -25,15 +26,14 @@ func (n *node) reconcile(ctx context.Context, staging *volume, head, upstream, s
 	case staging.work.ancestor(ctx, upstream, head):
 		return nil
 	}
-	// A reset or a rebase rewrites the tree, and the tree may hold
-	// writes no commit carries yet: an unarmed volume's whole work, or an
-	// armed volume's last writes before the quiesce fired. The driver
-	// loses nothing, so such a tree is left as it is and the volume
-	// reports that upstream moved. The next stage after a commit
-	// reconciles it.
+	// A reset or a rebase would overwrite uncommitted changes. An unarmed
+	// volume never commits, and an armed volume does not commit a write
+	// until the quiesce time has passed. So the tree stays as it is, and
+	// the volume reports that upstream moved. A later stage reconciles
+	// the tree after the changes are committed.
 	if pending, _ := staging.work.pending(ctx); len(pending) > 0 {
 		staging.reportUpstreamMoved(fmt.Sprintf(
-			"upstream moved: %s is at %s and the tree holds %d uncommitted paths",
+			"Upstream moved: %s is at %s and the tree has %d uncommitted paths",
 			staging.attributes.ref, short(upstream), len(pending)))
 		return nil
 	}
@@ -43,23 +43,19 @@ func (n *node) reconcile(ctx context.Context, staging *volume, head, upstream, s
 	return n.rebase(ctx, staging, upstream)
 }
 
-// ancestor reports whether the first commit is in the second
-// one's history, which is how git itself answers behind and ahead.
-func (w *workTree) ancestor(ctx context.Context, first, second string) bool {
-	_, err := w.git(ctx, "merge-base", "--is-ancestor", "--end-of-options", first, second)
+func (w *workTree) ancestor(ctx context.Context, commit, descendant string) bool {
+	_, err := w.git(ctx, "merge-base", "--is-ancestor", "--end-of-options", commit, descendant)
 	return err == nil
 }
 
-// reset moves the branch, the index, and the tree to the commit
-// in one call.
 func (w *workTree) reset(ctx context.Context, commit string) error {
 	_, err := w.git(ctx, "reset", "--hard", "--quiet", "--end-of-options", commit)
 	return err
 }
 
-// fastForward is what a tree with no commits of its own does with
-// an upstream that moved, and the mark moves with it because the remote
-// holds everything the tree now holds.
+// fastForward resets a tree that has no commits of its own to upstream,
+// and moves pushedRef there too, because the remote has every commit
+// that the tree now has.
 func (n *node) fastForward(ctx context.Context, staging *volume, upstream string) error {
 	if err := staging.work.reset(ctx, upstream); err != nil {
 		return err
@@ -68,18 +64,18 @@ func (n *node) fastForward(ctx context.Context, staging *volume, upstream string
 		return err
 	}
 	n.restore(ctx, staging)
-	n.logger.InfoContext(ctx, "the tree took upstream",
+	n.logger.InfoContext(ctx, "Fast-forwarded the tree of the volume to upstream",
 		"volume", staging.id, "commit", short(upstream))
 	return nil
 }
 
-// rebase puts the tree's own commits on top of upstream, and a
-// rebase that conflicts is aborted with the tree as it was, because the
-// driver merges nothing. The mark is upstream after a rebase: every
-// commit above it is new, and the remote holds none of them.
+// rebase replays the tree's own commits onto upstream. When the rebase
+// fails, the tree stays as it was and the volume moves to its side
+// branch, because the driver does not resolve conflicts. After a
+// rebase, pushedRef is upstream, so every commit above it is unpushed.
 func (n *node) rebase(ctx context.Context, staging *volume, upstream string) error {
-	if err := n.rebaseAside(ctx, staging, upstream); err != nil {
-		n.logger.WarnContext(ctx, "the rebase was aborted",
+	if err := n.rebaseInScratchTree(ctx, staging, upstream); err != nil {
+		n.logger.WarnContext(ctx, "The rebase of the tree onto upstream did not complete",
 			"volume", staging.id, "error", err)
 		n.diverge(ctx, staging)
 		return nil
@@ -88,51 +84,49 @@ func (n *node) rebase(ctx context.Context, staging *volume, upstream string) err
 		return err
 	}
 	n.restore(ctx, staging)
-	n.logger.InfoContext(ctx, "the tree was rebased",
+	n.logger.InfoContext(ctx, "Rebased the tree of the volume onto upstream",
 		"volume", staging.id, "commit", short(upstream))
 	return nil
 }
 
-// rebaseAside replays the volume's commits onto upstream in a
-// scratch tree and moves the mounted tree to the result in one step,
-// so a pod never sees its own files rewritten.
-func (n *node) rebaseAside(ctx context.Context, held *volume, upstream string) error {
-	head := held.work.refCommit(ctx, "HEAD")
-	dir, cleanup, err := held.work.scratch(ctx)
+// rebaseInScratchTree rebases the volume's commits onto upstream in a scratch
+// tree. Then moveCheckout updates only the paths of the mounted tree that the
+// rebase changed.
+func (n *node) rebaseInScratchTree(ctx context.Context, vol *volume, upstream string) error {
+	head := vol.work.refCommit(ctx, "HEAD")
+	dir, cleanup, err := vol.work.addScratchTree(ctx)
 	if err != nil {
 		return err
 	}
-	rebased, err := replay(ctx, dir, held.authorEnv(), upstream)
+	rebased, err := replay(ctx, dir, vol.authorEnv(), upstream)
 	cleanup()
 	if err != nil {
 		return err
 	}
-	if err := held.work.take(ctx, head, rebased); err != nil {
+	if err := vol.work.moveCheckout(ctx, head, rebased); err != nil {
 		return err
 	}
-	n.replayTaken(ctx, held, held.work.changedPaths(ctx, head, rebased))
+	n.restoreChangedMetadata(ctx, vol, vol.work.changedPaths(ctx, head, rebased))
 	return nil
 }
 
-// replayTaken gives the paths the update rewrote the modes, the
-// owners, and the empty directories the remote's record names for
-// them, and touches no other path, so the modes the pod set on its
-// own files stand.
-func (n *node) replayTaken(ctx context.Context, held *volume, changed []string) {
-	if err := held.work.replayMetadataFor(ctx, n.logger, os.Geteuid() == 0, changed); err != nil {
-		n.logger.InfoContext(ctx, "the remote holds no metadata",
-			"volume", held.id, "reason", err)
+// restoreChangedMetadata applies the remote's recorded modes, owners,
+// and empty directories to the changed paths. A failure is logged and
+// does not fail the rebase.
+func (n *node) restoreChangedMetadata(ctx context.Context, vol *volume, changed []string) {
+	if err := vol.work.replayMetadataFor(ctx, n.logger, os.Geteuid() == 0, changed); err != nil {
+		n.logger.InfoContext(ctx, "Did not apply the metadata record of the remote to the changed paths",
+			"volume", vol.id, "error", err)
 	}
 }
 
-// replay runs the rebase in the scratch tree and returns the commit
-// it landed on. A commit git cannot read is the empty string, which
-// take refuses like any other commit it cannot resolve.
+// replay rebases the scratch tree onto upstream and returns the new
+// HEAD. When git cannot resolve HEAD, replay returns an empty string,
+// and moveCheckout then fails.
 func replay(ctx context.Context, dir string, author []string, upstream string) (string, error) {
 	if _, err := runGit(ctx, dir, author,
 		"rebase", "--quiet", "--end-of-options", upstream); err != nil {
-		// A rebase that never started leaves nothing to abort, and
-		// the caller falls back either way.
+		// The abort fails when the rebase never started, which is fine.
 		_, _ = runGit(ctx, dir, nil, "rebase", "--abort")
 		return "", err
 	}

@@ -5,11 +5,11 @@ weight: 30
 
 # What the driver reports
 
-The driver serves its metrics at `/metrics` on the port named
-`metrics`, `9200` by default, on both the node plugin and the
-controller. The base in `deploy/` needs no Prometheus and applies
-without one. A cluster owner who runs the prometheus-operator adds the
-`deploy/monitoring` component beside the base to scrape both pods:
+The node plugin and the controller each serve Prometheus metrics at
+`/metrics` on the container port named `metrics`, which is `9200` by
+default. The base in `deploy/` works without Prometheus. If your
+cluster runs the prometheus-operator, add the `deploy/monitoring`
+component next to the base, and Prometheus scrapes both pods:
 
 ```yaml
 resources:
@@ -18,28 +18,28 @@ components:
   - https://github.com/liken-sh/liken//git-csi-driver/deploy/monitoring?ref=<tag>
 ```
 
-| Component | Metric | Type | Why |
+| Component | Metric | Type | What it shows |
 | --- | --- | --- | --- |
-| git-csi-driver | `liken_build_info{component, version}` | gauge | the release this process runs, on the graph every component in the cluster shares |
-| git-csi-driver | `git_csi_volumes{repo}` | gauge | what is mounted |
-| git-csi-driver | `git_csi_fetch_duration_seconds{repo}` | histogram | the forge is slow |
-| git-csi-driver | `git_csi_fetch_failures_total{repo}` | counter | the forge is down |
-| git-csi-driver | `git_csi_store_bytes` | gauge | growth on the wrong filesystem |
-| git-csi-driver | `git_csi_armed{namespace, claim}` | gauge | one when a class of the driver arms the volume, zero when none does |
+| git-csi-driver | `liken_build_info{component, version}` | gauge | the release this process runs, always `1`. Every `liken` component exports this metric, so one graph shows the versions of all of them |
+| git-csi-driver | `git_csi_volumes{repo}` | gauge | the number of volumes mounted from each repository. `repo` is the driver's short name for the repository, without the URL or a credential |
+| git-csi-driver | `git_csi_fetch_duration_seconds{repo}` | histogram | how long each fetch from the forge takes |
+| git-csi-driver | `git_csi_fetch_failures_total{repo}` | counter | fetches from the forge that failed |
+| git-csi-driver | `git_csi_store_bytes` | gauge | the bytes that the bare repositories and work trees in the node's store take on disk |
+| git-csi-driver | `git_csi_armed{namespace, claim}` | gauge | one while the claim uses a class of this driver, so the driver commits and pushes, zero otherwise |
 | git-csi-driver | `git_csi_pending_paths{namespace, claim}` | gauge | paths the last scan found that the driver has not committed |
-| git-csi-driver | `git_csi_unpushed_commits{namespace, claim}` | gauge | commits the work tree holds that the remote does not |
-| git-csi-driver | `git_csi_last_push_timestamp_seconds{namespace, claim}` | gauge | when a push to the remote last worked, in seconds since the epoch |
+| git-csi-driver | `git_csi_unpushed_commits{namespace, claim}` | gauge | commits in the tree that are not yet on the remote |
+| git-csi-driver | `git_csi_last_push_timestamp_seconds{namespace, claim}` | gauge | when the last push to the remote succeeded, in seconds since the epoch |
 | git-csi-driver | `git_csi_push_failures_total{namespace, claim}` | counter | pushes to the remote that failed |
-| git-csi-driver | `git_csi_skipped_files{namespace, claim}` | gauge | files the last commit left out, over `commit.maxFileSize` |
+| git-csi-driver | `git_csi_skipped_files{namespace, claim}` | gauge | files that the last commit left out, because they are larger than `commit.maxFileSize` |
 | git-csi-driver | `git_csi_diverged{namespace, claim}` | gauge | one while the volume pushes to its side branch, zero while it pushes to its ref |
-| git-csi-driver | `git_csi_volume_abnormal{namespace, volume}` | gauge | one while the volume's report says something is wrong with it, zero while it says nothing is |
-| git-csi-driver | `git_csi_demanded_pulls_total{namespace, volume}` | counter | pulls a demand on the volume's `PersistentVolume` started |
-| git-csi-driver | `git_csi_reconcile_duration_seconds{kind}` | histogram | a slow CSI call blocks the kubelet |
-| git-csi-driver | `git_csi_reconcile_errors_total{kind}` | counter | a CSI call the kubelet retries |
-| git-csi-driver | `git_csi_watch_restarts_total{kind}` | counter | watches the node plugin opened again after one ended, by the kind it watches. Each watch restarts 6 to 12 times an hour when it is healthy. The node holds one `PersistentVolume` watch and one `PersistentVolumeClaim` watch for each writeable volume, so a higher rate than that is a watch that fails soon after it opens. A refused watch is not counted, so a rate near zero is a watch the API server refuses |
-| git-csi-driver | `git_csi_webhook_requests_total{result}` | counter | webhook requests the controller answered, by what it answered |
-| git-csi-driver | `git_csi_webhook_marked_total` | counter | `PersistentVolumes` a verified push marked |
+| git-csi-driver | `git_csi_volume_abnormal{namespace, volume}` | gauge | one while any problem listed under [the abnormal gauge](../classes/#the-abnormal-gauge) is true for the volume, zero otherwise. `volume` is the `volumeHandle`, so this metric also covers read-only volumes, which have no claim of their own |
+| git-csi-driver | `git_csi_demanded_pulls_total{namespace, volume}` | counter | pulls started by a demand on the volume's `PersistentVolume` |
+| git-csi-driver | `git_csi_reconcile_duration_seconds{kind}` | histogram | how long each CSI call takes to return, by call. The kubelet waits for the call, so a slow call delays the pod |
+| git-csi-driver | `git_csi_reconcile_errors_total{kind}` | counter | CSI calls that failed, which the kubelet retries |
+| git-csi-driver | `git_csi_watch_restarts_total{kind}` | counter | times the node plugin opened a watch again after it ended, by the kind it watches. The node plugin runs one watch of `PersistentVolume`s, and one watch of a `PersistentVolumeClaim` for each writeable volume. client-go ends each watch after 5 to 10 minutes and opens it again, so a healthy watch restarts 6 to 12 times an hour. A higher rate means watches that fail soon after they open. A refused watch is not counted, so a rate near zero can mean the API server refuses every watch |
+| git-csi-driver | `git_csi_webhook_requests_total{result}` | counter | webhook requests the controller handled, by `result`: `accepted`, `unauthenticated`, `malformed`, or `failed` |
+| git-csi-driver | `git_csi_webhook_marked_total` | counter | `PersistentVolume`s that the controller marked for a pull after a push that it verified |
 
-The guides for [writeable volumes](../../guides/writeable/) and
-[read-only volumes](../../guides/read-only/) describe several of these
-metrics in context.
+The [writeable guide](../../guides/writeable/) and the
+[read-only guide](../../guides/read-only/) show how to read several of
+these metrics.

@@ -6,17 +6,18 @@ description: "Give an application a git repository as a writeable volume that th
 
 # Give an application a repository to write
 
-A writeable volume is a `PersistentVolume` that names a repository, a
-`PersistentVolumeClaim` that binds it, and a `VolumeAttributesClass`
-that says how the driver commits and pushes. The application gets a
-plain directory and writes to it as it always does. The driver commits
-what the application wrote and pushes it.
+A writeable volume lets an application keep its files in a git
+repository. It takes three objects: a `PersistentVolume` that names the
+repository, a `PersistentVolumeClaim` that binds it, and a
+`VolumeAttributesClass` that sets how the driver commits and pushes. The
+application sees a plain directory and writes to it as usual. The driver
+commits what the application wrote and pushes the commits.
 
 ## The volume
 
-The `PersistentVolume` holds what identifies the volume: the
-repository, the ref, and the credentials. Its `csi` block cannot
-change after creation, so nothing that a person tunes is here.
+The `PersistentVolume` sets the repository, the ref, and the
+credentials. Its `csi` block cannot change after you create it, so the
+settings that you may want to change later go in the class, below.
 
 ```yaml
 apiVersion: v1
@@ -41,22 +42,24 @@ spec:
       namespace: home
 ```
 
-`capacity` is required by the API, and the driver ignores it.
-`Retain` keeps the node's work tree when you delete the
-`PersistentVolume`, and `Delete` removes it. [Work trees the node
-keeps](#work-trees-the-node-keeps) says when to choose each. The
-access mode must be `ReadWriteOncePod`. `ReadWriteOnce` allows two pods
-on one node to write the same tree, and the driver refuses it.
+The Kubernetes API requires `capacity`, and the driver ignores it.
+With `Retain`, the node keeps its work tree when you delete the
+`PersistentVolume`. With `Delete`, the node removes it. [Work trees the
+node keeps](#work-trees-the-node-keeps) says when to choose each. The
+access mode must be `ReadWriteOncePod`. The driver refuses
+`ReadWriteOnce`, because it lets two pods on one node write the same
+tree.
 
-A private repository names one `Secret` in both references.
-[The credential](#the-credential) says why.
+A private repository needs the same `Secret` in both references.
+[The credential](#the-credential) gives the reason.
 
 ## The claim
 
-The claim names the volume. Until it also names a class, the volume is
-unarmed: the driver watches the tree and reports what it would commit,
-and commits nothing. Write the repository's `.gitignore` now, before
-the first commit can include a token or a database.
+The claim names the volume in `volumeName`. Until the claim also names
+a class, the volume is unarmed: the driver watches the tree and reports
+what it would commit, and commits nothing. Add the repository's
+`.gitignore` now, before the first commit can include a token or a
+database.
 
 ```yaml
 apiVersion: v1
@@ -70,16 +73,18 @@ spec:
   resources: {requests: {storage: 1Gi}}
 ```
 
-Mount the claim in the application's pod as any other claim. Use
-`strategy: Recreate` on a `Deployment`, because a rolling update would
-wait forever for a second pod that `ReadWriteOncePod` never lets
-start.
+Mount the claim in the application's pod like any other claim. Set
+`strategy: Recreate` on a `Deployment`. A rolling update starts the new
+pod before it stops the old one, and `ReadWriteOncePod` does not let
+the new pod start while the old pod uses the claim, so the update never
+finishes.
 
 ## The class
 
-A `VolumeAttributesClass` is the cluster owner's word for a commit and
-push policy. Set it on the claim to arm the volume. The field is
-mutable, so a policy change never restarts the application.
+A `VolumeAttributesClass` sets the commit and push policy of a volume.
+Name it in the claim to arm the volume: an armed volume is one that
+the driver commits and pushes. Because the claim's class is
+mutable, you can change the policy without restarting the application.
 
 ```yaml
 apiVersion: storage.k8s.io/v1
@@ -99,169 +104,178 @@ parameters:
 kubectl patch pvc config -n home -p '{"spec":{"volumeAttributesClassName":"config-eager"}}'
 ```
 
-Set the class after the claim is bound. The binder pairs a claim and a
+Set the class after the claim is bound. Kubernetes binds a claim to a
 static volume only when both name the same class. So a claim that names
 a class before it binds needs the same `volumeAttributesClassName` on
-the `PersistentVolume`. A bound claim takes a class change without that.
+the `PersistentVolume`. A claim that is already bound accepts a class
+change without that.
 
 The [class reference](../../reference/classes/) lists every parameter,
 its values, and its default.
 
 ## The credential
 
-The kubelet sends a volume's `Secret` inside its calls to the driver,
-and the driver keeps it in memory, never on the node's disk. The stage
-call carries `nodeStageSecretRef`, and the driver fetches the ref with
-it before the pod starts. Each publish call carries
-`nodePublishSecretRef`. The kubelet calls publish again for every
-mounted volume on each pod sync, about once a minute, and reads the
-`Secret` again for each call.
+The kubelet reads the volume's `Secret` and sends it to the driver. The
+stage call sends `nodeStageSecretRef`, and the driver fetches the ref
+with it before the pod starts. Each publish call sends
+`nodePublishSecretRef`, and the kubelet calls publish again for every
+mounted volume on each pod sync, about once a minute. The driver keeps
+the credential in memory and writes it to a file on the node only while
+a git command runs.
 
-So a driver that restarts, for example in an upgrade, holds no
-credential until the next publish. Then it pushes what the tree
-committed at once, with no restart of the application. Until then, the
-volume's report and the abnormal gauge say the volume waits for its
-credential.
+So after the driver restarts, for example in an upgrade, it has no
+credential until the next publish call. Then it pushes the commits in
+the tree, and the application does not restart. Until then, the
+volume's report and the gauge `git_csi_volume_abnormal` show that the
+volume is waiting for its credential.
 
-A rotated `Secret` reaches the driver at the next publish, and the
-driver then pushes every commit the remote does not hold yet, at once,
-with the new key. So a commit that a push with a revoked key could not
-send does not wait for the next timed push. A publish whose `Secret`
-differs from the stage's is refused with `GitVolumeRefused`, because the driver cannot choose
-between two credentials for one volume.
+A rotated `Secret` reaches the driver at the next publish call, and the
+driver pushes every unpushed commit with the new key at once, instead
+of waiting for the next timed push. The driver refuses a publish whose
+`Secret` differs from the stage's, and posts `GitVolumeRefused`, because
+one volume cannot use two credentials.
 
-A `PersistentVolume` with `nodeStageSecretRef` and no
-`nodePublishSecretRef` works until the driver restarts, and then the
-driver pushes nothing for it until the pod is deleted and started
-again. The driver posts
-`GitVolumeNoPublishSecret` on the pod and the claim when it publishes
-such a volume. The `csi` block cannot change, so give the volume a new
-`PersistentVolume`. Do it before an upgrade of the driver, because the
-upgrade restarts the driver. After a restart, the driver does not
-push at step 1 either, and posts `GitVolumePushFailed`. The commits
-stay in the node's work tree until the volume is
-staged on the same node again.
+A `PersistentVolume` that has `nodeStageSecretRef` and no
+`nodePublishSecretRef` works until the driver restarts. After that, the
+driver cannot push for it until the pod is deleted and started again.
+The driver posts `GitVolumeNoPublishSecret` on the pod and the claim
+when it publishes such a volume. The `csi` block cannot change, so
+replace the `PersistentVolume`, and do it before you upgrade the
+driver, because an upgrade restarts it:
 
-1. Scale the application to zero. The driver pushes what the tree holds
-   when the pod stops.
+1. Scale the application to zero. The driver pushes the commits in the
+   tree when the pod stops.
 2. Delete the claim and then the `PersistentVolume`. With
    `persistentVolumeReclaimPolicy: Retain`, the repository and the
-   node's work tree stay.
+   node's work tree are kept.
 3. Create the `PersistentVolume` again with the same `volumeHandle` and
    both references, and create the claim again.
-4. Scale the application up. On the same node, the stage starts from
-   the work tree the node kept.
+4. Scale the application up. When the pod runs on the same node, the
+   stage starts from the work tree that the node kept.
+
+If the driver has already restarted, it has no credential at step 1,
+so it cannot push when the pod stops, and it posts
+`GitVolumePushFailed`. The commits stay in the node's work tree until
+the volume is staged on the same node again.
 
 ## What happens after a write
 
-The driver waits until the tree has been quiet for `push.quiesce`,
-then commits every changed path that is not ignored and not over
-`commit.maxFileSize`. It pushes when the quiesce passes with no new
-write, or when the oldest unpushed commit is older than
-`push.maxLatency`, and always when the pod stops. A write made while
-the driver was not running, for example during an upgrade, sends the
-driver no event. So the driver also starts the quiesce when it starts
-to watch the tree, and commits that write when the quiesce passes.
+The driver waits until the tree has had no writes for `push.quiesce`.
+Then it commits every changed path that is not ignored and not larger
+than `commit.maxFileSize`. It pushes when `push.quiesce` passes with no
+new write, when the oldest unpushed commit is older than
+`push.maxLatency`, and when the pod stops. A write made while the driver
+was not running, for example during an upgrade, produces no file event
+for the driver to see. So the driver also starts the wait for
+`push.quiesce` when it starts to watch the tree, and commits that write
+when the wait ends.
 
-The driver records modes, owners, and empty directories on a ref of its
-own, `refs/git-csi/metadata`. That ref never appears in the tree or on the
-forge's file view.
+The driver records file modes, owners, and empty directories on a ref of
+its own, `refs/git-csi/metadata`. That ref is not part of the tree and
+does not show in the forge's file view.
 
 ## When upstream moves
 
-The application's tree changes only when the application writes it,
-with one exception below. The driver applies upstream to the tree at
-stage, when the pod starts. At stage the driver compares the tree to
-the ref:
+The driver brings in upstream commits at stage, before the pod starts.
+While the pod runs, it changes the tree's files only after a rejected
+push, described after this list. At stage, the driver compares the tree
+with the ref:
 
-- **Behind.** The tree takes upstream.
-- **Ahead.** Nothing changes. The next push includes the commits.
-- **Diverged.** The driver rebases the tree's commits onto upstream.
-  The driver aborts a rebase that conflicts, and the volume moves to a
-  side branch.
-- **Uncommitted writes.** When the tree has writes that no commit
-  holds yet, the driver leaves the tree as it is, whatever upstream
-  did. The abnormal gauge and the log then say upstream moved.
+- **Behind.** The tree has no commits that upstream lacks, and upstream
+  has new commits. The driver updates the tree to upstream.
+- **Ahead.** The tree has commits that upstream lacks. Nothing changes,
+  and the next push sends the commits.
+- **Diverged.** Both have commits that the other lacks. The driver
+  rebases the tree's commits onto upstream. When the rebase conflicts,
+  the driver aborts it and moves the volume to a side branch.
+- **Uncommitted writes.** The tree has writes that are not committed yet.
+  The driver leaves the tree as it is, whatever upstream did, and the
+  gauge `git_csi_volume_abnormal` and the log report that upstream
+  moved.
 
-The exception is a push the forge rejects because the ref moved. The
-driver then fetches, rebases the tree's commits onto upstream beside
-the pod's tree, and pushes again, three times at most. The pod's tree
-takes the result in one step that rewrites only the files upstream
-changed. A file the application wrote since the last commit is kept,
-unless upstream changed that same file. The claim's events include
-`GitVolumeRebased` when this happens.
+When the forge rejects a push because the ref moved, the driver fetches,
+rebases the tree's commits onto upstream in a scratch copy of the tree,
+and pushes again, up to three times. Then it updates the pod's tree in
+one step that rewrites only the files that upstream changed, and posts
+`GitVolumeRebased` on the claim. When the application wrote a file since
+the last commit and upstream also changed that file, git refuses to
+update the tree, and the driver moves the volume to a side branch.
 
-Three things move the volume to the branch `<ref>.<volumeHandle>`: a
-push still rejected after the third rebase, an aborted rebase, or a
-file the application and upstream both changed. Every push goes there
-until a person merges it into the ref on the forge. The events and the
-log name both branches, and commits continue, so no work stops. At the
-volume's next push after the merge, or its next pod start, the volume
-is back on the ref and the driver deletes the side branch.
+The driver moves the volume to the side branch `<ref>.<volumeHandle>`
+when a push is still rejected after the third rebase, when a rebase
+fails and is aborted, or when the application and upstream changed the same file.
+Every push goes to that branch until a person merges it into the ref on
+the forge. The driver keeps committing, so no work is lost, and the
+events and the log name both branches. At the volume's next push after the merge, or at its
+next pod start, the volume is back on the ref and the driver deletes the
+side branch.
 
 ## Many writers on one repository
 
-One repository can hold the configuration of many applications, each
-with its own writeable volume and its own directory mounted with
-`subPath`. [Give many applications one
-repository](../one-repository-many-apps/) gives the manifests and the
+One repository can hold the configuration of many applications. Each
+application has its own writeable volume, and its own directory of the
+repository is mounted with `subPath`. [Give many applications one
+repository](../one-repository-many-apps/) has the manifests and the
 rules.
 
 ## Restore
 
-Delete the claim, make a `PersistentVolume` against the same URL, and
-bind a new claim to it. The pod starts on any node from the last push,
-with its modes and empty directories replayed.
+To restore a volume, delete the claim, create a `PersistentVolume` with
+the same URL, and bind a new claim to it. The pod starts on any node
+from the last push, and the driver restores the file modes and empty
+directories from `refs/git-csi/metadata`.
 
 ## Work trees the node keeps
 
-A work tree stays on the node after the pod stops, so the next stage on
-the same node is not a clone. The `PersistentVolume`'s
-`persistentVolumeReclaimPolicy` decides what happens to the tree on
-each node that staged it when you delete the volume. A
-`PersistentVolume` that you write takes `Retain` unless it names a
+The work tree stays on the node after the pod stops, so the next stage
+on the same node does not clone the repository again. When you delete
+the volume, the `persistentVolumeReclaimPolicy` of the `PersistentVolume`
+decides what happens to the tree on each node that staged it. A
+`PersistentVolume` that you create has `Retain` unless you set another
 policy.
 
 - **`Retain`** keeps each tree. A new `PersistentVolume` with the same
   `volumeHandle` stages from the tree on the same node, and its next
   push sends any commit that the last unstage could not push.
-  [Restore](#restore) and [the credential](#the-credential) use this.
-  The driver never removes a `Retain` tree.
-- **`Delete`** removes each tree, with any commit in it that no push
-  sent. When you delete the claim, the `external-provisioner` deletes
-  the released `PersistentVolume`, and the node plugin on each node
-  removes its own tree. You can also delete the `PersistentVolume`
-  first. A node plugin that is down at the time removes its tree when
+  [Restore](#restore) and [the credential](#the-credential) depend on
+  this. The driver never removes a tree under `Retain`.
+- **`Delete`** removes each tree, including any commit in it that no
+  push sent. When you delete the claim, the `external-provisioner`
+  deletes the released `PersistentVolume`, and the node plugin on each
+  node removes its own tree. You can also delete the `PersistentVolume`
+  first. A node plugin that is down at that time removes its tree when
   it starts again.
 
-The driver never deletes the remote repository under either policy.
+The driver never deletes the remote repository, under either policy.
 The pod's unstage pushes before the volume leaves the node, so `Delete`
-loses only a commit whose push failed. The node plugin's log names
-each tree it removes, and says whether the tree held an unpushed commit
+loses only a commit whose push failed. The node plugin's log names each
+tree that it removes, and says whether the tree held an unpushed commit
 or a side branch.
 
-Once an hour, and after each tree it removes, the driver deletes the
-refs under `refs/git-csi/` that no volume follows, removes each bare
-repository that no volume and no work tree names, and runs `git gc` in
-each one that stays. The node's store then does not grow with every ref
-a volume ever followed.
+So that the node's store does not grow with every ref a volume once
+used, the driver cleans it once an hour and after each tree that it
+removes. It deletes the refs under `refs/git-csi/` that no volume uses,
+removes each bare repository that no volume and no work tree uses, and
+runs `git gc` in each bare repository that remains.
 
 ## What the driver does not serve
 
-A checkout is one ref of one repository. A submodule's directory is
-empty, a Git LFS pointer file is checked out as the pointer and not the
-object it names, and a writeable volume takes no `depth`.
+A volume is a checkout of one ref of one repository. The directory of a
+submodule is empty, and a Git LFS file appears as its pointer file, not
+as the content that the pointer names. A writeable volume does not
+accept `depth`.
 
 ## What the driver reports
 
-The pod's events and the claim's events include `GitVolumeArmed`,
-`GitVolumeUnarmed`, `GitVolumePending`, `GitVolumePushed`,
-`GitVolumePushFailed`, `GitVolumeFileSkipped`, `GitVolumeRebased`,
-`GitVolumeDiverged`, `GitVolumeHealed`,
-`GitVolumeNoPublishSecret`, `GitVolumeUpstreamMoved`, and
-`GitVolumeRefDeleted`. The node plugin's `/metrics`
-listener exports `git_csi_volume_abnormal`, one while anything is wrong
-with a volume, and `git_csi_armed`, `git_csi_pending_paths`,
-`git_csi_unpushed_commits`, `git_csi_last_push_timestamp_seconds`,
-`git_csi_push_failures_total`, `git_csi_skipped_files`, and
-`git_csi_diverged`, labeled by namespace and claim.
+The events on the pod and on the claim use these reasons:
+`GitVolumeArmed`, `GitVolumeUnarmed`, `GitVolumePending`,
+`GitVolumePushed`, `GitVolumePushFailed`, `GitVolumeFileSkipped`,
+`GitVolumeRebased`, `GitVolumeDiverged`, `GitVolumeHealed`,
+`GitVolumeNoPublishSecret`, `GitVolumeUpstreamMoved`,
+`GitVolumeRefDeleted`, and `GitVolumeRefused`. The node plugin's `/metrics` listener exports
+`git_csi_volume_abnormal`, which is 1 while anything is wrong with a
+volume, labeled with the namespace and the volume. It also exports
+`git_csi_armed`, `git_csi_pending_paths`, `git_csi_unpushed_commits`,
+`git_csi_last_push_timestamp_seconds`, `git_csi_push_failures_total`,
+`git_csi_skipped_files`, and `git_csi_diverged`, each labeled with the
+namespace and the claim.
