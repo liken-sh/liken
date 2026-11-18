@@ -1,9 +1,9 @@
 package main
 
-// The part of a Pod that the operator writes for an upload or a scan
-// and reads back. The operator declares its own structs for the
-// objects it writes, and links k8s.io/api only for the attribute types
-// that the CEL compiler reads (selector.go).
+// The fields of a Pod that the operator writes for its upload, scan,
+// rehearsal, and apply pods and reads back. The operator declares its
+// own structs for the objects it writes, and imports k8s.io/api only
+// for the device attribute types that the CEL compiler reads.
 
 import "encoding/json"
 
@@ -48,11 +48,6 @@ type podSpec struct {
 	Containers                    []container        `json:"containers"`
 }
 
-// volume is a host directory, a directory in memory, the pod's own
-// fields, or a ConfigMap. A rehearsal pod mounts the machine's
-// /sys/firmware and keeps its copy in memory, an apply pod reads its
-// own annotations, and a pod that loads a catalog with spec.trust
-// mounts the signer's certificate.
 type volume struct {
 	Name        string             `json:"name"`
 	HostPath    *hostPath          `json:"hostPath,omitempty"`
@@ -131,7 +126,7 @@ type container struct {
 }
 
 // probe is a command that the kubelet runs in the container. An apply
-// pod's readiness probe reports that its prepare is done.
+// pod's readiness probe succeeds when the pod has finished preparing.
 type probe struct {
 	Exec          *execAction `json:"exec,omitempty"`
 	PeriodSeconds int32       `json:"periodSeconds,omitempty"`
@@ -194,20 +189,17 @@ type terminated struct {
 	FinishedAt string `json:"finishedAt,omitempty"`
 }
 
-// The phases after which a pod runs no more.
 const (
 	podPending   = "Pending"
 	podSucceeded = "Succeeded"
 	podFailed    = "Failed"
 )
 
-// scheduled reports whether the scheduler placed the pod on its node.
-// The scheduler places a pod only after it allocated the pod's claim,
-// so a scheduled pod's claim exists.
+// scheduled reports whether the pod's PodScheduled condition is True.
+// The scheduler places a pod only after it allocates the pod's claims,
+// so a scheduled upload pod's claim exists.
 func (p pod) scheduled() bool { return p.conditionTrue("PodScheduled") }
 
-// ready reports whether every container of the pod passed its readiness
-// probe.
 func (p pod) ready() bool { return p.conditionTrue("Ready") }
 
 func (p pod) conditionTrue(kind string) bool {
@@ -219,19 +211,18 @@ func (p pod) conditionTrue(kind string) bool {
 	return false
 }
 
-// over reports whether the pod runs no more.
 func (p pod) over() bool { return p.Status.Phase == podSucceeded || p.Status.Phase == podFailed }
 
-// loader answers the terminated state of the upload's container, or
-// nil while it has not ended.
+// loader returns the terminated state of the upload container, or nil
+// if the container has not terminated.
 func (p pod) loader() *terminated { return p.ended(uploadContainer) }
 
-// ended answers the terminated state of one container, or nil while it
-// has not ended.
+// ended returns the terminated state of the named container, or nil if
+// it has not terminated.
 func (p pod) ended(name string) *terminated {
-	for _, held := range p.Status.ContainerStatuses {
-		if held.Name == name {
-			return held.State.Terminated
+	for _, status := range p.Status.ContainerStatuses {
+		if status.Name == name {
+			return status.State.Terminated
 		}
 	}
 	return nil
@@ -245,8 +236,9 @@ func podPath(namespace, name string) string {
 	return podsPathIn(namespace) + "/" + name
 }
 
-// mustJSON encodes an object the operator built. Its structs hold only
-// strings, numbers, booleans, maps, and slices, which always encode.
+// mustJSON ignores the error of json.Marshal, because the operator's
+// structs contain only strings, numbers, booleans, maps, and slices, which
+// always encode.
 func mustJSON(object any) []byte {
 	body, _ := json.Marshal(object)
 	return body

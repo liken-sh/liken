@@ -1,14 +1,20 @@
-// firmware-operator writes firmware into the USB devices of a liken
-// cluster that hold none of their own, and finds the firmware that each
-// machine's devices keep. A Firmware with upload names the devices it
-// matches with a CEL selector, and the image and command that load
-// them. When a matched device appears in a machine's ResourceSlice, the
-// operator starts one short pod on that machine, with a claim on that
-// one device, and writes the result into the Firmware's status. A
-// FirmwareCatalog names a source of firmware releases, such as LVFS. The
-// operator scans each machine against it with fwupd in a short pod, and
-// keeps one discovered Firmware with update for each catalog component
-// it finds a release of, with the releases the catalog offers.
+// firmware-operator does two jobs for a liken cluster.
+//
+// It uploads firmware to USB devices that lose their firmware at power
+// off. A Firmware's spec.selector picks devices with a CEL expression,
+// and its spec.upload sets the image and command that load them. When a
+// matching device appears in a machine's ResourceSlice, the operator
+// runs a pod on that machine with a claim on the device, and writes the
+// result into the Firmware's status.
+//
+// It also finds and installs firmware updates. A FirmwareCatalog is a
+// source of firmware releases, such as LVFS. The operator runs fwupd in
+// a pod on each machine to scan the machine against the catalog. For
+// each catalog component that has a release for a device, the operator
+// creates a discovered Firmware whose spec.update lists the releases.
+// When a person approves a release there, the operator rehearses the
+// install on each machine, then applies it during a reboot that it
+// requests through a Disruption.
 package main
 
 import (
@@ -28,9 +34,9 @@ import (
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
-// The downward API sets these. The operator starts the upload pods in
-// its own namespace, holds its Lease in that namespace, and names its
-// pod in the Lease's holder.
+// The downward API sets these variables. The operator creates its pods
+// and its Lease in its own namespace, and uses its pod name as the
+// Lease's holder identity.
 const (
 	podNameVariable      = "POD_NAME"
 	podNamespaceVariable = "POD_NAMESPACE"
@@ -43,14 +49,13 @@ func main() {
 	}
 }
 
-// operate builds the in-cluster clients and runs the operator's
-// process (leader.go). A SIGTERM from the kubelet ends the process
-// after the rule in flight, and the process then releases the Lease.
+// operate builds the in-cluster clients and runs the operator until
+// SIGTERM or an interrupt.
 func operate() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
 
-	scanImage := flag.String("scan-image", "", "the image of the scan pods; empty means the operator's own image with -scan added, at its tag")
+	scanImage := flag.String("scan-image", "", "the image of the scan pods. When empty, the operator uses its own image with -scan added to the repository name, at the same tag")
 	interval := flag.Duration("catalog-interval", time.Hour, "the time between two reads of a FirmwareCatalog's jcat")
 	flag.Parse()
 
@@ -80,10 +85,6 @@ func operate() error {
 		lease:     lease,
 		pod:       name,
 		namespace: namespace,
-		// A read of a catalog runs inside the pass, so the timeout bounds
-		// how long one slow download holds the pass. The transport is
-		// Go's default, which verifies LVFS with the CA bundle that the
-		// image copies from the trust component.
 		discovery: discoverySettings{scanImage: image, interval: *interval, http: &http.Client{Timeout: 2 * time.Minute}},
 		report:    func(line string) { fmt.Fprintf(os.Stderr, "firmware-operator: %s\n", line) },
 		exit:      os.Exit,

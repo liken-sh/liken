@@ -1,26 +1,19 @@
-# The kustomize base for firmware-operator: the Firmware and FirmwareCatalog
-# resource definitions, the operator that runs the uploads and the
-# scans, the class and network policy of the upload pods, the network
-# policies of the scan, rehearsal, and apply pods, and the lvfs
-# FirmwareCatalog.
+# The kustomize base for firmware-operator. `liken` does not apply it.
+# Apply it through your own GitOps with your own patches, or read it
+# and write your own manifests.
 #
-# The lvfs FirmwareCatalog is an object of a kind that this base defines. On
-# the first apply, kubectl sends the object before the API server
-# serves the new kind, and refuses it with "ensure CRDs are installed
-# first". A second apply creates it. Flux applies the definitions first
-# and waits for them.
-#
-# This base is for the cluster owner to take. `liken` does not apply
-# it and does not name it. Take it through your own GitOps with
-# patches of your own, or read it and write your own manifests.
+# The base defines the FirmwareCatalog CRD and also declares the lvfs
+# FirmwareCatalog. On a first `kubectl apply`, kubectl sends lvfs
+# before the API server serves the new kind, and fails with "ensure
+# CRDs are installed first". Apply the base a second time. Flux applies
+# CRDs first and waits for them to be established.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# The namespace is set with a transformer, not with the top-level
-# namespace field, because unsetOnly keeps an object that states its
-# own namespace where it belongs. The CRDs,
-# the DeviceClass, and the FirmwareCatalog are cluster-scoped, and the API
-# server ignores a namespace on them.
+# The top-level namespace field would overwrite the namespace of every
+# object. This transformer, with unsetOnly, sets liken-system only on
+# an object that has no namespace. The API server ignores the namespace
+# on the cluster-scoped objects.
 transformers:
   - |-
     apiVersion: builtin
@@ -47,8 +40,8 @@ labels:
       app.kubernetes.io/name: firmware-operator
       app.kubernetes.io/part-of: liken
 
-# The scan image takes the operator's tag, which the operator reads
-# from its own pod (images.go), so this list names only the operator.
+# The operator derives the scan image from its own image and tag
+# (images.go), so newTag here moves both images.
 images:
   - name: ghcr.io/liken-sh/firmware-operator
     newTag: latest

@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 )
 
-// config is the scan's input, which the operator sets as environment
-// variables on the pod's container.
+// config is the scan's input. The operator sets each field as an
+// environment variable on the scan container.
 type config struct {
 	name   string // CATALOG_NAME, the FirmwareCatalog object's name
 	url    string // CATALOG_URL, the unversioned catalog URL
@@ -28,17 +28,17 @@ func configFromEnv(getenv func(string) string) config {
 	}
 }
 
-// scanner holds what a scan touches outside the process, so that a test
-// substitutes each one.
+// scanner holds the directories, the HTTP client, and the fwupdtool
+// command of a scan, so that a test can replace each of them.
 type scanner struct {
 	cfg    config
 	client *http.Client
-	// firmwareHost is the machine's /sys/firmware, mounted read-only,
-	// and firmwareCopy the copy that fwupd reads through
-	// FWUPD_SYSFSFWDIR, whose variable store the pod mounts in memory.
-	// fwupd's uefi_capsule plugin reads devices only from a variable
-	// store that is a writable mount point, and the copy is one, while
-	// the machine's store is never writable from the scan.
+	// firmwareHost is the machine's /sys/firmware, mounted read-only.
+	// fwupd reads firmwareCopy instead, through FWUPD_SYSFSFWDIR,
+	// because its uefi_capsule plugin lists devices only when the EFI
+	// variable store is a writable mount point. The pod mounts an
+	// in-memory volume as the copy's variable store, so the machine's
+	// own store is never written.
 	firmwareHost string
 	firmwareCopy string
 	fwupdtool    fwupdtool
@@ -53,9 +53,9 @@ func sum(data []byte) string {
 	return hex.EncodeToString(digest[:])
 }
 
-// scan runs the steps in order and stops at the first that fails. It
-// never returns an error: every outcome, including a failure, is a
-// Result for the operator to read.
+// scan stops at the first step that fails. It returns a failure as a
+// Result and not as an error, because the operator reads every outcome
+// from the Result in the pod's log.
 func (s scanner) scan(ctx context.Context) Result {
 	cfg := s.cfg
 	if err := copyScanFirmware(s.firmwareHost, s.firmwareCopy); err != nil {
@@ -71,11 +71,12 @@ func (s scanner) scan(ctx context.Context) Result {
 	return Result{Result: resultScanned, File: cfg.file, Message: summary(devices), Devices: devices}
 }
 
-// loadCatalog downloads the catalog file that the operator named,
-// checks it against the jcat and the operator's SHA-256, makes its
-// FirmwareCatalog fwupd's only remote, and refreshes fwupd from it. A
-// result other than nil ends the run: the jcat names another file, or
-// a step failed.
+// loadCatalog downloads the jcat and the catalog file, configures the
+// FirmwareCatalog as a fwupd remote, and refreshes fwupd from the saved
+// files. The file's SHA-256 must equal CATALOG_SHA256, and the jcat's
+// digest when the jcat has one. It returns nil on success. Otherwise it
+// returns the Result that ends the scan: CatalogMoved when the jcat
+// lists a different file than CATALOG_FILE, or Failed.
 func (s scanner) loadCatalog(ctx context.Context) *Result {
 	cfg := s.cfg
 	end := func(r Result) *Result { return &r }
@@ -91,7 +92,7 @@ func (s scanner) loadCatalog(ctx context.Context) *Result {
 	if item.file != cfg.file {
 		return end(Result{
 			Result: resultCatalogMoved, File: cfg.file,
-			Message: fmt.Sprintf("the jcat now names %s", item.file),
+			Message: fmt.Sprintf("the jcat now lists %s", item.file),
 		})
 	}
 
@@ -124,9 +125,8 @@ func (s scanner) loadCatalog(ctx context.Context) *Result {
 	return nil
 }
 
-// save writes the catalog and its jcat side by side under the names
-// that fwupd pairs them by: the jcat is the catalog's name with .jcat
-// appended.
+// save writes the catalog and its jcat into workDir, under the names
+// <file> and <file>.jcat that fwupd pairs them by.
 func (s scanner) save(file string, catalog, jcat []byte) ([]string, error) {
 	if err := os.MkdirAll(s.workDir, 0o755); err != nil {
 		return nil, err
@@ -139,12 +139,11 @@ func (s scanner) save(file string, catalog, jcat []byte) ([]string, error) {
 }
 
 // copyScanFirmware copies the machine's firmware tables for fwupd. A
-// machine that booted in BIOS mode has no variable store, and fwupd
-// then finds no UEFI devices, which is a valid answer, so it copies
-// nothing.
-func copyScanFirmware(host, copy string) error {
+// machine that booted in BIOS mode has no efi/efivars, so nothing is
+// copied and fwupd correctly finds no UEFI devices.
+func copyScanFirmware(host, dest string) error {
 	if _, err := os.Stat(filepath.Join(host, "efi", "efivars")); err != nil {
 		return nil
 	}
-	return copyFirmware(host, copy)
+	return copyFirmware(host, dest)
 }

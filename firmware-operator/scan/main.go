@@ -1,9 +1,10 @@
-// The scan program runs in the privileged pod that firmware-operator
-// starts on one machine. It answers which firmware devices the machine
-// has and which releases one catalog offers for them, and prints the
-// answer as one line of JSON on stdout. Everything else it prints goes
-// to stderr, so the operator finds the answer as the last line of the
-// pod's log.
+// The scan program runs in the privileged pods that firmware-operator
+// starts on a machine. With no argument it scans: it finds the
+// machine's firmware devices and the releases that one catalog offers
+// for them. With rehearse or apply it runs a rehearsal or an apply. Each
+// mode prints its result as the last line of stdout, as JSON, and the
+// operator reads that line from the pod's log. An apply also prints a
+// progress line to stdout when its prepare passes.
 package main
 
 import (
@@ -15,35 +16,34 @@ import (
 )
 
 const (
-	// scanTimeout bounds the whole scan. The downloads and fwupdtool
-	// are fast on a working network, so a scan that passes this is
-	// stuck, and a Failed result lets the operator report it.
+	// scanTimeout limits a scan, a rehearsal, and the prepare of an
+	// apply. One that runs longer is taken to be stuck, and its failed
+	// result lets the operator report it.
 	scanTimeout = 10 * time.Minute
 
 	workDir = "/run/scan"
 
 	// A rehearsal reads the machine's /sys/firmware at hostFirmware,
-	// mounted read-only, and keeps its copy and its downloads in
-	// rehearsalDir, a directory in memory. An apply mounts the same
-	// directory read-write at the same path, and rehearses the same
-	// way before it writes.
+	// mounted read-only, and keeps its downloads and fwupd's state in
+	// rehearsalDir, which is in memory. An apply mounts hostFirmware
+	// read-write and runs the same rehearsal before it writes.
 	hostFirmware = "/host/firmware"
 	rehearsalDir = "/run/rehearsal"
 	// firmwareCopy is where each pod copies the machine's firmware
-	// tables for fwupd. fwupd names a capsule device by the path of its
-	// ESRT entry, so the scan, the rehearsal, and the apply's prepare
-	// copy to the same path, and the device keeps the ID that the scan
-	// recorded (firmwareCopyPath in rehearsalpod.go).
+	// tables for fwupd. fwupd derives a capsule device's ID from the
+	// path of its ESRT entry, so every pod copies to the same path, and
+	// a rehearsal finds the device ID that the scan recorded
+	// (firmwareCopyPath in rehearsalpod.go).
 	firmwareCopy = "/run/fw"
 
-	// nextESPPath is where the operator mounts the ESP of the machine's
-	// next boot, when it has one (nextESPPath in rehearsalpod.go).
+	// nextESPPath is where the operator mounts the EFI system partition
+	// that the machine boots from next, when there is one (nextESPPath
+	// in rehearsalpod.go).
 	nextESPPath = "/run/esp-next"
 
-	// An apply reads its own annotations, which carry the operator's
-	// signal to write, from the downward API volume at signalDir. It
-	// marks its finished prepare with the file preparedMarker, in a
-	// directory in memory, which the pod's readiness probe reads.
+	// signalDir is the downward API volume of an apply's annotations
+	// (signal.go). An apply creates preparedMarker when its prepare
+	// passes, and the pod's readiness probe checks for it.
 	signalDir      = "/run/signal"
 	preparedMarker = "/run/apply/prepared"
 )
@@ -57,8 +57,8 @@ func main() {
 		applyMain()
 		return
 	}
-	// The readiness probe of an apply pod: exit 0 when the apply's
-	// prepare passed, and 1 while it runs or after it failed.
+	// The readiness probe of an apply pod exits 0 when the prepare has
+	// passed, and 1 while it runs or after it failed.
 	if len(os.Args) > 1 && os.Args[1] == "prepared" {
 		if !isPrepared(preparedMarker) {
 			os.Exit(1)
@@ -86,7 +86,6 @@ func main() {
 	}
 }
 
-// rehearseMain runs a rehearsal (rehearse.go).
 func rehearseMain() {
 	ctx, cancel := context.WithTimeout(context.Background(), scanTimeout)
 	defer cancel()
@@ -98,16 +97,16 @@ func rehearseMain() {
 	}
 }
 
-// applyMain runs an apply (apply.go): a rehearsal like rehearseMain's,
-// the wait for the operator's signal (signal.go), and then the write to
-// the machine's own variable. apply bounds the rehearsal itself, and the
-// wait has no bound.
+// applyMain runs an apply (apply.go): a rehearsal, a wait for the
+// operator's signal (signal.go), and then an append to a UEFI variable
+// or a capsule install. Its context has no timeout, because the
+// machine's reboot turn can come much later.
 func applyMain() {
 	a := applierFromEnv(os.Getenv)
 	a.rehearser, a.store, a.marker = rehearserIn(a.rehearser), osVariableStore(), preparedMarker
-	// A capsule's install runs fwupd on the machine itself: its variable
-	// store through the read-write mount of /sys/firmware, and the ESP
-	// of its next boot. fwupd keeps its own state in the pod.
+	// A capsule install runs fwupd on the machine's own /sys/firmware,
+	// mounted read-write, and on the next boot's EFI system partition.
+	// fwupd keeps its own state in the pod.
 	a.installer = execFwupdtool(nextESPPath, "FWUPD_SYSFSFWDIR="+hostFirmware, "FWUPD_LOCALSTATEDIR="+rehearsalDir+"/machine")
 	a.signal = func(ctx context.Context) error { return awaitSignal(ctx, signalDir, inotifyWatch) }
 	if err := emit(os.Stdout, a.apply(context.Background(), os.Stdout)); err != nil {
@@ -116,9 +115,9 @@ func applyMain() {
 	}
 }
 
-// rehearserIn completes a rehearser with the paths of its pod. fwupd
-// reads the copy in rehearsalDir and keeps its own state there too, so
-// nothing of the install reaches the machine.
+// rehearserIn sets a rehearser's paths. fwupd reads the firmware copy
+// and keeps its state under rehearsalDir, so a rehearsed install changes
+// nothing on the machine.
 func rehearserIn(r rehearser) rehearser {
 	copyDir := firmwareCopy
 	r.scanner = scanner{

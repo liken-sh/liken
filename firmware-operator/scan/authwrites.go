@@ -1,29 +1,33 @@
 package main
 
 // fwupd installs a Secure Boot database update as one authenticated
-// write to the variable for each payload in the cabinet. A cabinet of
-// the third-party db and the option ROM db holds two payloads, and
+// write to the EFI variable for each payload in the cabinet. A cabinet
+// with the third-party db and the option ROM db has two payloads, and
 // fwupd can install a cabinet more than once in one run, so a
-// rehearsal can record several writes. The firmware verifies the
-// signature of each write over that write's own signature lists, and
-// the kernel passes each write call to it as one SetVariable. So the
-// apply must write each one by itself: the bytes of two writes in one
-// call fail the first signature. The copy that a rehearsal runs
-// against is a plain file, which keeps the bytes of every write and
-// loses where one ends, so splitWrites finds the ends again from the
-// format that UEFI gives a write:
+// rehearsal can record several writes.
 //
-//   - the four bytes of attributes that efivarfs puts first;
-//   - the EFI_VARIABLE_AUTHENTICATION_2 header: an EFI_TIME of 16
-//     bytes, then a WIN_CERTIFICATE_UEFI_GUID whose dwLength counts its
-//     own header, its CertType, and the PKCS7 signature;
+// The kernel passes each write(2) on an efivarfs file to the firmware as
+// one SetVariable call, and the firmware checks each write's signature
+// against that write's own signature lists. So the apply must replay the
+// writes one write(2) each: with two writes in one call, the first
+// signature does not match. A rehearsal reads the bytes that fwupd
+// appended to a plain copy of the variable, which loses where each write
+// ends. splitWrites finds
+// the boundaries again from the layout that UEFI defines for a write:
+//
+//   - four bytes of attributes, which efivarfs puts first.
+//   - the EFI_VARIABLE_AUTHENTICATION_2 header: a 16-byte EFI_TIME,
+//     then a WIN_CERTIFICATE_UEFI_GUID whose dwLength counts its own
+//     header, its CertType, and the PKCS7 signature.
 //   - the EFI_SIGNATURE_LISTs, each of which states its own size.
 //
-// The lists of a write end where the bytes end, or where the next
-// write's header starts. A list starts with its SignatureType, and
-// splitWrites reads a header only where the attributes of an
-// authenticated append, a certificate of revision 0x0200 and type
-// WIN_CERT_TYPE_EFI_GUID, and the PKCS7 CertType all match.
+// No field gives the number of lists, so a write's lists end at the end
+// of the bytes or where the next write's header starts. splitWrites
+// treats bytes as a header only when the attributes are those of an
+// authenticated append, the certificate has revision 0x0200 and type
+// WIN_CERT_TYPE_EFI_GUID, and the CertType is PKCS7. The check is
+// strict so that the SignatureType GUID at the start of a signature
+// list is not taken for a header.
 
 import (
 	"encoding/binary"
@@ -31,15 +35,16 @@ import (
 )
 
 const (
-	// certOffset is where a write's certificate starts: after the
+	// certOffset is where a write's certificate starts, after the
 	// attributes and the EFI_TIME.
 	certOffset = 4 + 16
 	// certHeaderSize is the WIN_CERTIFICATE header and the CertType GUID.
 	certHeaderSize = 8 + 16
-	// writeHeaderSize is the smallest write that holds a whole header.
+	// writeHeaderSize is the size of a write's whole header, so the
+	// smallest possible write.
 	writeHeaderSize = certOffset + certHeaderSize
-	// listHeaderSize is an EFI_SIGNATURE_LIST's SignatureType and its
-	// three sizes.
+	// listHeaderSize is the size of an EFI_SIGNATURE_LIST header: the
+	// SignatureType GUID and three 4-byte sizes.
 	listHeaderSize = 16 + 4 + 4 + 4
 
 	winCertRevision    = 0x0200
@@ -47,12 +52,12 @@ const (
 )
 
 // pkcs7GUID is EFI_CERT_TYPE_PKCS7_GUID,
-// 4aafd29d-68df-49ee-8aa9-347d375665a7, as it is stored.
+// 4aafd29d-68df-49ee-8aa9-347d375665a7, in its stored byte order.
 var pkcs7GUID = [16]byte{0x9d, 0xd2, 0xaf, 0x4a, 0xdf, 0x68, 0xee, 0x49, 0x8a, 0xa9, 0x34, 0x7d, 0x37, 0x56, 0x65, 0xa7}
 
-// splitWrites answers the authenticated writes whose bytes follow each
-// other in b, or an error that names the first byte that is not part
-// of one.
+// splitWrites splits b into the authenticated writes it holds back to
+// back. It returns an error that identifies the first bytes that are
+// not part of a write.
 func splitWrites(b []byte) ([][]byte, error) {
 	var writes [][]byte
 	for start := 0; start < len(b); {
@@ -66,8 +71,8 @@ func splitWrites(b []byte) ([][]byte, error) {
 	return writes, nil
 }
 
-// writeLength answers the length of the write at the start of b, the
-// write numbered index.
+// writeLength returns the length of the write at the start of b. The
+// index is the write's position in the input, used in error messages.
 func writeLength(b []byte, index int) (int, error) {
 	if len(b) < writeHeaderSize {
 		return 0, fmt.Errorf("write %d has %d bytes, fewer than the %d of an authenticated write's header", index, len(b), writeHeaderSize)
@@ -78,7 +83,7 @@ func writeLength(b []byte, index int) (int, error) {
 	certLength := int(binary.LittleEndian.Uint32(b[certOffset:]))
 	n := certOffset + certLength
 	if certLength < certHeaderSize || n > len(b) {
-		return 0, fmt.Errorf("write %d states a certificate of %d bytes, which runs past the end of its %d bytes", index, certLength, len(b))
+		return 0, fmt.Errorf("write %d has a certificate length of %d bytes, which is below the %d-byte certificate header or past the end of its %d bytes", index, certLength, certHeaderSize, len(b))
 	}
 	for n < len(b) && !isWriteHeader(b[n:]) {
 		remaining := len(b) - n
@@ -87,10 +92,10 @@ func writeLength(b []byte, index int) (int, error) {
 		}
 		size := int(binary.LittleEndian.Uint32(b[n+16:]))
 		if size < listHeaderSize {
-			return 0, fmt.Errorf("the signature list at byte %d of write %d states %d bytes, fewer than its %d-byte header", n, index, size, listHeaderSize)
+			return 0, fmt.Errorf("the signature list at byte %d of write %d has a size field of %d bytes, fewer than its %d-byte header", n, index, size, listHeaderSize)
 		}
 		if size > remaining {
-			return 0, fmt.Errorf("the signature list at byte %d of write %d states %d bytes, and %d remain", n, index, size, remaining)
+			return 0, fmt.Errorf("the signature list at byte %d of write %d has a size field of %d bytes, and %d remain", n, index, size, remaining)
 		}
 		n += size
 	}
@@ -98,7 +103,7 @@ func writeLength(b []byte, index int) (int, error) {
 }
 
 // isWriteHeader reports whether b starts with the header of an
-// authenticated append.
+// authenticated append write.
 func isWriteHeader(b []byte) bool {
 	if len(b) < writeHeaderSize {
 		return false
@@ -107,7 +112,7 @@ func isWriteHeader(b []byte) bool {
 	return attributes&attrAppendWrite != 0 && attributes&attrTimeBasedAuth != 0 && isCertificate(b)
 }
 
-// isCertificate reports whether the certificate of the write at the
+// isCertificate reports whether the certificate in the write at the
 // start of b is a WIN_CERTIFICATE_UEFI_GUID of the PKCS7 type.
 func isCertificate(b []byte) bool {
 	cert := b[certOffset:]

@@ -31,10 +31,10 @@ func TestToRelease(t *testing.T) {
 			got := toRelease(tt.in)
 
 			if got.Version != tt.want.Version || got.Urgency != tt.want.Urgency {
-				t.Errorf("got %+v, want %+v", got, tt.want)
+				t.Errorf("toRelease gives %+v, want %+v", got, tt.want)
 			}
 			if (got.Cabinet == nil) != (tt.want.Cabinet == nil) || (got.Cabinet != nil && *got.Cabinet != *tt.want.Cabinet) {
-				t.Errorf("cabinet %+v, want %+v", got.Cabinet, tt.want.Cabinet)
+				t.Errorf("the cabinet is %+v, want %+v", got.Cabinet, tt.want.Cabinet)
 			}
 		})
 	}
@@ -52,7 +52,7 @@ func TestSummary(t *testing.T) {
 	}
 	for _, tt := range tests {
 		if got := summary(tt.devices); got != tt.want {
-			t.Errorf("got %q, want %q", got, tt.want)
+			t.Errorf("summary is %q, want %q", got, tt.want)
 		}
 	}
 }

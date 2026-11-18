@@ -22,8 +22,8 @@ const (
 
 var (
 	testCabinet = []byte("cabinet bytes")
-	// dbxBefore is a variable file as efivarfs shows it: the attributes
-	// of a stored dbx, then its signature lists.
+	// dbxBefore is a variable file as efivarfs shows it: the four
+	// attribute bytes of a stored dbx, then its signature lists.
 	dbxBefore = append([]byte{0x27, 0, 0, 0}, bytes.Repeat([]byte{0xaa}, 64)...)
 	// authAppend is what fwupd appends to the copy for a payload of one
 	// signature list: one authenticated write.
@@ -62,20 +62,20 @@ func newRehearsalRig(t *testing.T) *rehearsalRig {
 func writeFile(t *testing.T, path string, data []byte) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the directory of %s: %v", path, err)
 	}
 	if err := os.WriteFile(path, data, 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing %s: %v", path, err)
 	}
 }
 
-// appendTo plays fwupd's write to a variable in the copy, which is a
-// plain file opened to append.
+// appendTo appends data to a variable file in the copy, as fwupd does
+// when it writes a variable. The copy is a plain file.
 func (r *rehearsalRig) appendTo(t *testing.T, variable string, data []byte) {
 	t.Helper()
 	path := filepath.Join(r.copyDir, "efi", "efivars", variable)
-	held, _ := os.ReadFile(path)
-	writeFile(t, path, append(held, data...))
+	current, _ := os.ReadFile(path)
+	writeFile(t, path, append(current, data...))
 }
 
 func (r *rehearsalRig) installed() bool {
@@ -92,7 +92,7 @@ func TestARehearsalPassesOneAuthenticatedAppend(t *testing.T) {
 		Message: "the install appends 128 bytes to " + dbxFile + ", and the variable store has 65536 bytes free",
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("got  %+v\nwant %+v", got, want)
+		t.Errorf("the result is %+v, want %+v", got, want)
 	}
 }
 
@@ -115,7 +115,7 @@ func TestARehearsalPassesSeveralAuthenticatedWrites(t *testing.T) {
 		Message: "the install appends 304 bytes to " + dbxFile + " in 2 authenticated writes, and the variable store has 65536 bytes free",
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("got  %+v\nwant %+v", got, want)
+		t.Errorf("the result is %+v, want %+v", got, want)
 	}
 }
 
@@ -124,13 +124,13 @@ func TestARehearsalWritesNothingOnTheMachine(t *testing.T) {
 
 	r.rehearse(context.Background())
 
-	if held, _ := os.ReadFile(filepath.Join(r.hostDir, "efi", "efivars", dbxFile)); !bytes.Equal(held, dbxBefore) {
-		t.Errorf("the machine's dbx changed to %x", held)
+	if got, _ := os.ReadFile(filepath.Join(r.hostDir, "efi", "efivars", dbxFile)); !bytes.Equal(got, dbxBefore) {
+		t.Errorf("the machine's dbx is %x after the rehearsal, want it unchanged", got)
 	}
 }
 
-// fwupdtool install with a device ID plans the release for that device
-// twice, so the rehearsal names only the cabinet.
+// With a device ID, fwupdtool install plans the release for the device
+// twice, so the rehearsal passes only the cabinet.
 func TestARehearsalInstallsThePinnedCabinetOnce(t *testing.T) {
 	r := newRehearsalRig(t)
 
@@ -144,10 +144,10 @@ func TestARehearsalInstallsThePinnedCabinetOnce(t *testing.T) {
 
 func TestARehearsalAcceptsFwupdsReloadFailureAfterTheAppend(t *testing.T) {
 	r := newRehearsalRig(t)
-	r.tool.answers["install"] = answer{stderr: "failed to reload: failed to reload device: SignatureListSize invalid: 0x0\n", err: errors.New("exit status 1")}
+	r.tool.outputs["install"] = toolOutput{stderr: "failed to reload: failed to reload device: SignatureListSize invalid: 0x0\n", err: errors.New("exit status 1")}
 
 	if got := r.rehearse(context.Background()); got.Result != resultPassed {
-		t.Errorf("got %+v, want Passed", got)
+		t.Errorf("the result is %+v, want Passed", got)
 	}
 }
 
@@ -177,7 +177,7 @@ func TestARehearsalRefuses(t *testing.T) {
 		}, "the append to " + dbxFile + " has the attributes 0x47, which are not an authenticated append"},
 		{"an append that is not a sequence of authenticated writes", func(t *testing.T, r *rehearsalRig) {
 			r.appendTo(t, dbxFile, authAppend[:100])
-		}, "the append to " + dbxFile + " is not a sequence of authenticated writes: the signature list at byte 52 of write 1 states 76 bytes, and 48 remain"},
+		}, "the append to " + dbxFile + " is not a sequence of authenticated writes: the signature list at byte 52 of write 1 has a size field of 76 bytes, and 48 remain"},
 		{"no change", func(*testing.T, *rehearsalRig) {}, "the install did not change " + dbxFile},
 	}
 	for _, c := range cases {
@@ -188,7 +188,7 @@ func TestARehearsalRefuses(t *testing.T) {
 			got := r.rehearse(context.Background())
 
 			if got.Result != resultRefused || got.Message != c.want {
-				t.Errorf("got %+v, want Refused: %s", got, c.want)
+				t.Errorf("the result is %+v, want Refused: %s", got, c.want)
 			}
 		})
 	}
@@ -201,9 +201,10 @@ func TestARehearsalRefusesAnAppendTheStoreHasNoRoomFor(t *testing.T) {
 	got := r.rehearse(context.Background())
 
 	if got.Result != resultRefused || got.Message != "the append to "+dbxFile+" needs 124 bytes, and the variable store has 16 free" {
-		t.Errorf("got %+v, want Refused for the free space", got)
+		t.Errorf("the result is %+v, want Refused for the free space", got)
 	}
 }
+
 func TestARehearsalFails(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -214,16 +215,16 @@ func TestARehearsalFails(t *testing.T) {
 		{"another cabinet", func(t *testing.T, r *rehearsalRig) { r.web[testCabinetURL] = []byte("other bytes") },
 			"the SHA-256 of the cabinet is " + sum([]byte("other bytes")) + ", and the approval pins " + sum(testCabinet), false},
 		{"no cabinet", func(t *testing.T, r *rehearsalRig) { delete(r.web, testCabinetURL) },
-			"downloading the cabinet: " + testCabinetURL + " answered Not Found", false},
+			"downloading the cabinet: " + testCabinetURL + " returned Not Found", false},
 		{"no device", func(t *testing.T, r *rehearsalRig) { r.deviceID = "0000" }, "fwupd reports no device 0000", false},
 		{"a BIOS boot", func(t *testing.T, r *rehearsalRig) { os.RemoveAll(filepath.Join(r.hostDir, "efi")) },
 			"copying the firmware tables: the machine has no UEFI variable store", false},
 		{"an install error", func(t *testing.T, r *rehearsalRig) {
-			r.tool.answers["install"] = answer{stderr: "the device is busy\n", err: errors.New("exit status 1")}
+			r.tool.outputs["install"] = toolOutput{stderr: "the device is busy\n", err: errors.New("exit status 1")}
 		}, "fwupdtool install: the device is busy", true},
 		{"a reload failure with no append", func(t *testing.T, r *rehearsalRig) {
 			r.tool.effects["install"] = func() {}
-			r.tool.answers["install"] = answer{stderr: "SignatureListSize invalid: 0x0\n", err: errors.New("exit status 1")}
+			r.tool.outputs["install"] = toolOutput{stderr: "SignatureListSize invalid: 0x0\n", err: errors.New("exit status 1")}
 		}, "fwupdtool install: SignatureListSize invalid: 0x0", true},
 	}
 	for _, c := range cases {
@@ -234,7 +235,7 @@ func TestARehearsalFails(t *testing.T) {
 			got := r.rehearse(context.Background())
 
 			if got.Result != resultFailed || !strings.HasPrefix(got.Message, c.want) {
-				t.Errorf("got %+v, want Failed: %s", got, c.want)
+				t.Errorf("the result is %+v, want Failed: %s", got, c.want)
 			}
 			if r.installed() != c.installed {
 				t.Errorf("the rehearsal ran fwupdtool install: %v, want %v", r.installed(), c.installed)
@@ -243,17 +244,14 @@ func TestARehearsalFails(t *testing.T) {
 	}
 }
 
-// A jcat that names another file than the scan read means the
-// catalog moved since the scan. The rehearsal answers CatalogMoved, as
-// a scan does, so the operator reads the jcat again at once.
-func TestARehearsalOfAMovedCatalogAnswersCatalogMoved(t *testing.T) {
+func TestARehearsalOfAMovedCatalogReturnsCatalogMoved(t *testing.T) {
 	r := newRehearsalRig(t)
 	r.web[testCatalogURL+".jcat"] = jcatFor(t, "firmware-09139-stable.xml.zst", sum(testCatalog))
 
 	got := r.rehearse(context.Background())
 
-	if got.Result != resultCatalogMoved || got.Message != "the jcat now names firmware-09139-stable.xml.zst" || r.installed() {
-		t.Errorf("got %+v, and the install ran: %v; want CatalogMoved with the new file, and no install", got, r.installed())
+	if got.Result != resultCatalogMoved || got.Message != "the jcat now lists firmware-09139-stable.xml.zst" || r.installed() {
+		t.Errorf("the result is %+v and fwupdtool install ran %v, want CatalogMoved with the new file and no install", got, r.installed())
 	}
 }
 

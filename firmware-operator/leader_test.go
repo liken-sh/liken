@@ -1,9 +1,9 @@
 package main
 
-// These tests run the operator's whole process, from the election to
-// the release, against the fake API server and the fake Lease server of
-// electiontest. Each one runs in a synctest bubble, so the election's
-// waits take no real time.
+// These tests run the whole operator process, from the election to the
+// Lease release, against the fake API server and the fake Lease server
+// of electiontest. Each test runs in a synctest bubble, so the
+// election's waits take no real time.
 
 import (
 	"context"
@@ -20,11 +20,11 @@ import (
 	"github.com/liken-sh/liken/kubernetes/election/electiontest"
 )
 
-// anotherCopy is the identity of a copy of the operator in another pod.
+// anotherCopy is the Lease identity of an operator copy in another pod.
 const anotherCopy = "firmware-operator-1_0a0b0c0d"
 
-// processWorld is one process of the operator and the servers it
-// reaches.
+// processWorld is one operator process and the fake servers it talks
+// to.
 type processWorld struct {
 	api   *fakeAPI
 	lease *electiontest.Server
@@ -38,12 +38,12 @@ func newProcessWorld(t *testing.T) *processWorld {
 	return &processWorld{api: startFakeAPI(t), lease: electiontest.New(leaseName, operatorNS)}
 }
 
-// start runs the process of the operator in the pod, until shutdown
-// or the end of the test.
+// start runs the operator process as the named pod, until shutdown or
+// the end of the test.
 func (w *processWorld) start(t *testing.T, pod string) {
 	watcher, err := dynamic.NewForConfig(w.api.server.Config())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the dynamic client: %v", err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	w.stop, w.done = cancel, make(chan struct{})
@@ -67,16 +67,16 @@ func (w *processWorld) start(t *testing.T, pod string) {
 	})
 }
 
-// shutdown is the kubelet's SIGTERM. It answers what the process
-// returned.
+// shutdown stops the process as the kubelet's SIGTERM does, and returns
+// the error that the process returned.
 func (w *processWorld) shutdown() error {
 	w.stop()
 	<-w.done
 	return w.err
 }
 
-// A copy that waits for the Lease starts no upload, and a stop while it
-// waits ends it cleanly with the Lease untouched.
+// A copy that is waiting for the Lease starts no upload. A stop during
+// the wait ends the copy without changing the Lease.
 func TestAWaitingCopyDoesNotAct(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := newProcessWorld(t)
@@ -88,19 +88,19 @@ func TestAWaitingCopyDoesNotAct(t *testing.T) {
 		synctest.Wait()
 
 		if err := w.shutdown(); err != nil {
-			t.Errorf("the waiting copy answered %v, want nil", err)
+			t.Errorf("the waiting copy returned %v, want nil", err)
 		}
-		if got := w.api.created(uploadPodsPath); got != 0 {
+		if got := w.api.created(operatorPodsPath); got != 0 {
 			t.Errorf("the waiting copy created %d upload pods", got)
 		}
 		if got := w.lease.Holder(); got != anotherCopy {
-			t.Errorf("the Lease names %q, want %q", got, anotherCopy)
+			t.Errorf("the Lease holder is %q, want %q", got, anotherCopy)
 		}
 	})
 }
 
-// A copy that waits takes the Lease when its holder stops renewing,
-// acts, and releases the Lease when it stops.
+// A waiting copy takes the Lease when the holder stops renewing it,
+// starts the upload, and releases the Lease when it stops.
 func TestAWaitingCopyActsWhenTheLeaseExpires(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := newProcessWorld(t)
@@ -112,21 +112,21 @@ func TestAWaitingCopyActsWhenTheLeaseExpires(t *testing.T) {
 		synctest.Wait()
 
 		if holder := w.lease.Holder(); !strings.HasPrefix(holder, operatorPodName+"_") {
-			t.Errorf("the Lease names %q, want this process", holder)
+			t.Errorf("the Lease holder is %q, want this process", holder)
 		}
-		if got := w.api.created(uploadPodsPath); got != 1 {
+		if got := w.api.created(operatorPodsPath); got != 1 {
 			t.Errorf("the copy that took the Lease created %d upload pods, want 1", got)
 		}
 		if err := w.shutdown(); err != nil {
-			t.Errorf("the process answered %v, want nil", err)
+			t.Errorf("the process returned %v, want nil", err)
 		}
 		if got := w.lease.Holder(); got != "" {
-			t.Errorf("the Lease names %q after the shutdown, want no holder", got)
+			t.Errorf("the Lease holder is %q after the shutdown, want no holder", got)
 		}
 	})
 }
 
-// A process with no pod name has no identity to hold the Lease under.
+// A process with no pod name has no identity to hold the Lease with.
 func TestAProcessWithNoPodDoesNotStart(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := newProcessWorld(t)
@@ -134,7 +134,7 @@ func TestAProcessWithNoPodDoesNotStart(t *testing.T) {
 		<-w.done
 
 		if w.err == nil {
-			t.Error("the process answered nil, want the election's refusal")
+			t.Error("the process returned nil, want the election's refusal")
 		}
 	})
 }

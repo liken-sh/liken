@@ -1,9 +1,5 @@
 package main
 
-// These tests cover which rule runs on which device: two rules on one
-// device, a selector that does not compile, a selector that fails on
-// one device, and spec.machines.
-
 import (
 	"maps"
 	"slices"
@@ -14,21 +10,21 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// Two rules that match one device run neither, and each reports the
-// conflict and names the other. When one rule goes, the other runs.
+// Two rules that match one device run on neither, and each reports the
+// conflict and names the other rule. When one rule is deleted, the
+// other runs.
 func TestTwoRulesOnOneDeviceConflict(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.api.putFirmware(qhy5lii())
 		w.api.putFirmware(named(qhy5lii(), "qhy-fx2"))
-		// Both rules reach the operator's store before the device
-		// appears. A rule that arrives after an upload started leaves
-		// that upload to finish.
+		// A rule that arrives after an upload started does not stop
+		// it, so both rules must be cached before the device appears.
 		w.settle()
 		w.api.publish("liken-1", bareChip("1-4.1.2", 12))
 		w.settle()
 
-		if got := w.api.created(uploadPodsPath); got != 0 {
+		if got := w.api.created(operatorPodsPath); got != 0 {
 			t.Errorf("the operator created %d upload pods, want none", got)
 		}
 		for rule, other := range map[string]string{"qhy5l-ii": "qhy-fx2", "qhy-fx2": "qhy5l-ii"} {
@@ -54,8 +50,8 @@ func TestTwoRulesOnOneDeviceConflict(t *testing.T) {
 }
 
 // A rule that matches no device writes each upload count as 0, so its
-// printer columns show 0 and not an empty cell. It writes no count of an
-// update rule, so those columns stay empty.
+// printer columns show 0 and not an empty cell. An update rule gets no
+// counts, so its columns stay empty.
 func TestARuleWithNoDevicesWritesZeroCounts(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
@@ -72,8 +68,6 @@ func TestARuleWithNoDevicesWritesZeroCounts(t *testing.T) {
 	})
 }
 
-// A selector that does not compile sets Valid to False with the
-// compiler's message, and the rule runs nowhere. A fix sets it True.
 func TestASelectorThatDoesNotCompileIsInvalid(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
@@ -87,7 +81,7 @@ func TestASelectorThatDoesNotCompileIsInvalid(t *testing.T) {
 		if v := got.valid(); v.Status != "False" || v.Reason != reasonSelectorInvalid || v.Message == "" || v.ObservedGeneration != 1 {
 			t.Errorf("Valid = %+v, want False, %s, with the compiler's message", v, reasonSelectorInvalid)
 		}
-		if n := w.api.created(uploadPodsPath); n != 0 {
+		if n := w.api.created(operatorPodsPath); n != 0 {
 			t.Errorf("the operator created %d upload pods, want none", n)
 		}
 
@@ -108,7 +102,7 @@ func TestASelectorThatDoesNotCompileIsInvalid(t *testing.T) {
 func TestASelectorThatFailsOnADeviceSkipsIt(t *testing.T) {
 	selector, err := newSelectors().compile(`device.attributes["liken.sh"].serial == "abc"`)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("compiling the selector: %v", err)
 	}
 	cases := []struct {
 		name   string
@@ -127,7 +121,6 @@ func TestASelectorThatFailsOnADeviceSkipsIt(t *testing.T) {
 	}
 }
 
-// spec.machines limits a rule to the machines whose labels it selects.
 // A machine with no Machine object has no labels, so a rule with
 // spec.machines does not run there.
 func TestSpecMachinesLimitsTheRule(t *testing.T) {
@@ -150,7 +143,6 @@ func TestSpecMachinesLimitsTheRule(t *testing.T) {
 	})
 }
 
-// A label selector that does not parse sets Valid to False.
 func TestSpecMachinesThatDoesNotParseIsInvalid(t *testing.T) {
 	_, err := filterMachines(&metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "a", Operator: "Near"}}}, nil)
 	if v := validity(err); v.Status != "False" || v.Reason != reasonSelectorInvalid {
@@ -181,8 +173,6 @@ func TestOnlyADeviceWithAUSBNodeIsReachable(t *testing.T) {
 	}
 }
 
-// A Machine that gains the label spec.machines selects gets the upload
-// for the device it already has.
 func TestAMachineThatGainsTheLabelGetsTheUpload(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
@@ -192,13 +182,13 @@ func TestAMachineThatGainsTheLabelGetsTheUpload(t *testing.T) {
 		w.api.putFirmware(rule)
 		w.api.publish("liken-1", bareChip("1-4.1.2", 12))
 		w.settle()
-		if got := w.api.created(uploadPodsPath); got != 0 {
+		if got := w.api.created(operatorPodsPath); got != 0 {
 			t.Fatalf("before the label the operator created %d upload pods, want none", got)
 		}
 		w.api.putMachine("liken-1", map[string]string{"observatory": "true"})
 		w.settle()
 
-		if got := w.api.created(uploadPodsPath); got != 1 {
+		if got := w.api.created(operatorPodsPath); got != 1 {
 			t.Errorf("after the label the operator created %d upload pods, want 1", got)
 		}
 	})

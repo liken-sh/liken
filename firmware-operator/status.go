@@ -1,10 +1,10 @@
 package main
 
-// The status answers what a rule did on each port where it matched a
-// device. One entry describes the latest appearance in its port, so a
-// camera that is power-cycled every night keeps one entry, and the list
-// grows only with the number of ports. The entry and the upload pod's
-// annotations are the operator's whole record of an attempt.
+// Firmware.status.devices has one entry for each USB port where the
+// rule matched a device. Each new appearance of a device in a port
+// replaces the port's entry, so a device that is power-cycled every
+// night does not grow the list. The entry and the upload pod's
+// annotations are the only record of an upload attempt.
 
 import (
 	"reflect"
@@ -15,7 +15,8 @@ import (
 	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
-// plan is what one pass decided for one rule, before its status write.
+// plan lists the status changes that one reconcile pass computes for
+// one rule.
 type plan struct {
 	valid     condition
 	results   []attempt
@@ -23,8 +24,7 @@ type plan struct {
 	starts    []attempt
 }
 
-// attempt is one entry the plan writes: an appearance, the rule's
-// generation, and the result with its message.
+// attempt is one device entry that a plan writes.
 type attempt struct {
 	appearance
 	device     string
@@ -33,23 +33,25 @@ type attempt struct {
 	message    string
 }
 
-// notice is one Event that a status write posts after it lands.
+// notice is one Event that the operator posts after the status write
+// succeeds.
 type notice struct {
 	warning bool
 	reason  string
 	message string
 }
 
-// sameAttempt reports whether an entry records the attempt for an
-// appearance at a generation of the rule.
+// sameAttempt reports whether an entry is for this appearance of the
+// device and this generation of the rule.
 func sameAttempt(e deviceEntry, a appearance, generation int64) bool {
 	return e.DeviceNumber == a.deviceNumber && e.Generation == generation
 }
 
-// composeStatus answers the status that a plan gives a rule, the
-// Events it posts, and whether Valid transitioned. The plan was made
-// from a copy that can be older than the one held here, after a 409, so
-// each change is checked against the held entry again.
+// composeStatus applies a plan to a rule's current status f, and
+// returns the new status, the Events to post, and whether the Valid
+// condition transitioned. After a 409 conflict, the caller passes a
+// newer f than the one the plan was made from, so each change is
+// checked again against f's entry for the port.
 func composeStatus(f *firmware, p plan, now time.Time) (firmwareStatus, []notice, bool) {
 	stamp := now.UTC().Truncate(time.Second).Format(time.RFC3339)
 	entries := map[port]deviceEntry{}
@@ -65,29 +67,30 @@ func composeStatus(f *firmware, p plan, now time.Time) (firmwareStatus, []notice
 	}
 
 	for _, a := range p.results {
-		// A result belongs to the entry of its own attempt while that
-		// entry runs, or to a port with no entry, after a restart that
-		// came between the pod's create and the entry's write.
-		e, held := entries[a.port()]
-		if held && !(sameAttempt(e, a.appearance, a.generation) && e.Result == resultRunning) {
+		// A result replaces only its own attempt's entry, and only while
+		// that entry is Running. It is also written to a port with no
+		// entry, which happens when the operator restarted after it
+		// created the pod and before it wrote the entry.
+		e, found := entries[a.port()]
+		if found && !(sameAttempt(e, a.appearance, a.generation) && e.Result == resultRunning) {
 			continue
 		}
 		write(a)
 		notices = append(notices, resultNotice(a))
 	}
 	for _, a := range p.conflicts {
-		e, held := entries[a.port()]
-		if held && e.Result == resultConflict && sameAttempt(e, a.appearance, a.generation) && e.Message == a.message {
+		e, found := entries[a.port()]
+		if found && e.Result == resultConflict && sameAttempt(e, a.appearance, a.generation) && e.Message == a.message {
 			continue
 		}
 		write(a)
-		if !held || e.Result != resultConflict || e.DeviceNumber != a.deviceNumber {
+		if !found || e.Result != resultConflict || e.DeviceNumber != a.deviceNumber {
 			notices = append(notices, notice{warning: true, reason: reasonConflict, message: a.device + " on " + a.machine + ": " + a.message})
 		}
 	}
 	for _, a := range p.starts {
-		e, held := entries[a.port()]
-		if held && sameAttempt(e, a.appearance, a.generation) && e.Result != resultConflict {
+		e, found := entries[a.port()]
+		if found && sameAttempt(e, a.appearance, a.generation) && e.Result != resultConflict {
 			continue
 		}
 		write(a)
@@ -102,10 +105,10 @@ func composeStatus(f *firmware, p plan, now time.Time) (firmwareStatus, []notice
 	slices.SortFunc(next.Devices, func(a, b deviceEntry) int {
 		return strings.Compare(a.Machine+"\x00"+a.Address, b.Machine+"\x00"+b.Address)
 	})
-	// The list is cloned, because the held status is the API server's
-	// copy until the write lands. Set moves lastTransitionTime only when
-	// the status changes, so a write that changes nothing else changes
-	// nothing.
+	// conditions.Set edits the slice in place, so it works on a clone
+	// and f keeps the status read from the API server. Set moves
+	// lastTransitionTime only when the status changes, so a pass that
+	// changes nothing composes a status equal to f's.
 	next.Conditions = slices.Clone(f.Status.Conditions)
 	validity := p.valid
 	validity.ObservedGeneration = f.Metadata.Generation
@@ -130,13 +133,14 @@ func (c *UploadCounts) add(result string) {
 func resultNotice(a attempt) notice {
 	about := a.device + " on " + a.machine + ": " + a.message
 	if a.result == resultLoaded {
-		return notice{reason: reasonLoaded, message: "loaded " + about}
+		return notice{reason: reasonLoaded, message: "Loaded " + about}
 	}
-	return notice{warning: true, reason: reasonUploadFailed, message: "the upload failed on " + about}
+	return notice{warning: true, reason: reasonUploadFailed, message: "The upload failed on " + about}
 }
 
-// statusChanged reports whether a composed status differs from the one
-// the API server holds, so the operator writes only a change.
-func statusChanged(held, next firmwareStatus) bool {
-	return !reflect.DeepEqual(held, next)
+// statusChanged reports whether the composed status differs from the
+// status read from the API server. The operator writes only a status
+// that differs.
+func statusChanged(current, next firmwareStatus) bool {
+	return !reflect.DeepEqual(current, next)
 }

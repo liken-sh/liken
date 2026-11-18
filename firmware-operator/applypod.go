@@ -1,35 +1,36 @@
 package main
 
-// An apply is one bare pod on a machine that writes an approved Secure
-// Boot database update to the machine's real variable (scan/apply.go).
-// It runs the scan image as `scan apply`. The drain of the machine's
-// turn can evict the cluster's DNS, so the pod starts when the
-// machine's rehearsal passes, while the cluster is whole, and does all
-// its network work then: it loads the catalog, downloads the cabinet,
-// and rehearses the install again. When that prepare is done, its
-// readiness probe turns the pod Ready, and only then does the operator
-// ask for the turn, because on a machine with little to drain the turn
-// can hold within a second. The pod waits on the machine. When
-// machine-operator holds the turn after the drain (disruption.go), the
-// operator sends the signal: it sets the pod's annotation
-// firmware.liken.sh/write to go. The pod reads its own annotations
-// through a downward API volume, so it needs no credentials, and only
-// then writes, with no network.
+// An apply pod writes an approved Secure Boot database update to the
+// machine's variable store (scan/apply.go). It is a bare pod on the
+// machine that runs the scan image as `scan apply`.
 //
-// The pod stays on the machine through the drain. liken's drain skips
-// a pod that tolerates the cordon, node.kubernetes.io/unschedulable, by
-// its key, because the cordon does not keep such a pod off the machine,
-// and an eviction would move nothing. The pod has no deadline, because
-// the turn can come much later; the operator deletes the pod when its
-// record leaves.
+// The drain before the machine's reboot can evict the cluster's DNS, so
+// the operator creates the pod as soon as the machine's rehearsal
+// passes, and the pod does all its network work first: it loads the
+// catalog, downloads the cabinet, and rehearses the install again. When
+// that work is done, the readiness probe passes. The operator requests
+// the reboot turn only after the pod is Ready, because on a machine
+// with little to drain, machine-operator can hold the turn within a
+// second of the request.
+//
+// When machine-operator holds the turn after the drain (disruption.go),
+// the operator sets the pod's annotation firmware.liken.sh/write to go.
+// The pod reads its annotations from a downward API volume, so it needs
+// no API credentials, and the write itself needs no network.
+//
+// The pod stays on the machine through the drain, because the liken
+// drain does not evict a pod that tolerates the cordon taint by its
+// key. The pod has no activeDeadlineSeconds, because the turn can come
+// much later. The operator deletes a pod that has no signal when its
+// approval is withdrawn or its machine is no longer pending, and
+// deletes a pod that has ended after it writes the pod's result to
+// status.
 //
 // The pod is not privileged. It mounts the machine's /sys/firmware
-// read-write, so the efivarfs mount under it takes the write. It drops
-// every capability and adds two: DAC_READ_SEARCH, which reading the
-// variables needs, and LINUX_IMMUTABLE, which clearing the immutable
-// flag that efivarfs sets on the variable needs. Before it writes, it
-// rehearses the install again in memory, and it writes nothing unless
-// the append has the SHA-256 that the rehearsal recorded.
+// read-write, so the efivarfs mount under it accepts the write. It
+// drops every capability and adds DAC_READ_SEARCH, to read the
+// variables, and LINUX_IMMUTABLE, to clear the immutable flag that
+// efivarfs sets on a variable.
 
 import (
 	"crypto/sha256"
@@ -38,11 +39,11 @@ import (
 	"time"
 )
 
-// The label and the annotations of an apply pod. The label selects the
-// pods the operator watches, and the NetworkPolicy in deploy/apply.yaml.
-// The annotations record the attempt, so an operator that restarts
-// during an apply reads them from the pod. The other keys are the
-// rehearsal pod's.
+// The operator's watch and the NetworkPolicy in deploy/apply.yaml
+// select apply pods by applyLabel. The annotations record the attempt,
+// so an operator that restarts during an apply can read it back from
+// the pod. Its other annotation keys are the ones that the scan,
+// rehearsal, and upload pods use.
 const (
 	applyLabel      = "firmware.liken.sh/apply"
 	applyLabelValue = "true"
@@ -50,9 +51,9 @@ const (
 	applyContainer  = "apply"
 )
 
-// The annotations that carry the operator's signal to write, the value
-// of the first, and where the pod reads them. write-at is the time the
-// operator sent the signal, from which the apply's deadline counts.
+// The operator signals the pod to write by setting writeKey to writeGo
+// and writeAtKey to the time. The deadline of the apply counts from
+// that time. The pod reads its annotations at signalPath.
 const (
 	writeKey   = "firmware.liken.sh/write"
 	writeAtKey = "firmware.liken.sh/write-at"
@@ -61,20 +62,19 @@ const (
 )
 
 // The readiness probe of an apply pod runs `scan prepared`, which
-// reads the marker that `scan apply` creates in preparedPath when its
-// prepare passed. scanBinary is the program's path in the scan image
-// (scan/Dockerfile), because a probe names its whole command.
+// checks for the marker file that `scan apply` creates in preparedPath
+// when its network work has finished. scanBinary is the path of the
+// program in the scan image (scan/Dockerfile).
 const (
 	preparedPath = "/run/apply"
 	scanBinary   = "/scan"
 )
 
-// cordonTaint is the taint that a cordon sets on a node.
 const cordonTaint = "node.kubernetes.io/unschedulable"
 
-// signalOf answers when the operator sent an apply pod the signal to
-// write, or the zero time when it has not. A signal with no time, which
-// only a person writes, counts from the pod's creation.
+// signalOf returns when the operator signaled the apply pod to write,
+// or the zero time when it has not. A signal annotation with no time,
+// which only a person can write, counts from the pod's creation.
 func signalOf(p pod) time.Time {
 	notes := p.Metadata.Annotations
 	if notes[writeKey] != writeGo {
@@ -86,20 +86,18 @@ func signalOf(p pod) time.Time {
 	return parseTime(p.Metadata.CreationTimestamp)
 }
 
-// signalAnnotations answers the annotations of the signal sent at a
-// time.
 func signalAnnotations(sent time.Time) map[string]string {
 	return map[string]string{writeKey: writeGo, writeAtKey: stamp(sent)}
 }
 
-// appendSHA256Variable is the environment of `scan apply` beside the
-// rehearsal's: the SHA-256 of the append that the rehearsal recorded.
+// appendSHA256Variable passes the pod the SHA-256 of the append that
+// the rehearsal recorded.
 const appendSHA256Variable = "APPEND_SHA256"
 
 // applyAttempt is one write of one approval on one machine: the boot
 // the rehearsal passed on, the approved version and cabinet, and the
-// append. Each attempt runs once, and a person retries a failed one by
-// withdrawing the approval and approving it again.
+// append. An attempt runs once. To retry a failed one, a person
+// withdraws the approval and approves it again.
 type applyAttempt struct {
 	firmware string
 	machine  string
@@ -118,8 +116,8 @@ func attemptOfApply(firmware string, r applyRecord) applyAttempt {
 	return applyAttempt{firmware: firmware, machine: r.Machine, boot: r.Boot, version: r.Version, cabinet: r.CabinetSHA256, sha256: r.SHA256}
 }
 
-// applyPodName answers the one name of an attempt, for the reasons of
-// rehearsalPodName.
+// applyPodName returns the pod name of an attempt. The name is derived
+// from the attempt for the reasons given on rehearsalPodName.
 func applyPodName(a applyAttempt) string {
 	sum := sha256.Sum256([]byte(strings.Join([]string{a.firmware, a.machine, a.boot, a.version, a.cabinet, a.sha256}, "\x00")))
 	suffix := "-apply-" + hex.EncodeToString(sum[:6])
@@ -130,19 +128,21 @@ func applyPodName(a applyAttempt) string {
 	return strings.TrimRight(prefix, "-.") + suffix
 }
 
-// applyOf answers the attempt that an apply pod's annotations record.
+// applyOf returns the attempt that an apply pod's annotations record.
 func applyOf(p pod) applyAttempt {
 	notes := p.Metadata.Annotations
 	return applyAttempt{firmware: notes[firmwareKey], machine: notes[machineKey], boot: notes[bootKey],
 		version: notes[versionKey], cabinet: notes[cabinetKey], sha256: notes[appendKey]}
 }
 
-// buildApplyPod answers the pod of one attempt. r is the machine's
-// passed rehearsal, whose device the apply installs on, and c is its
-// FirmwareCatalog, whose current file the apply loads. The rehearsal
-// in the pod checks the append, so a catalog that moved since the
-// rehearsal changes nothing that is written. A pod built with a signal
-// time carries the signal, so it writes as soon as it has prepared.
+// buildApplyPod returns the pod for one attempt. r is the machine's
+// passed rehearsal, which names the device to install on, and c is the
+// FirmwareCatalog whose current file the pod loads. The pod rehearses
+// the install again and writes nothing unless the append has the
+// SHA-256 that the first rehearsal recorded, so a catalog that changed
+// since then cannot change what the pod writes. When signal is not
+// zero, the pod is created with the signal, so it writes as soon as its
+// network work is done.
 func buildApplyPod(f *firmware, a applyAttempt, r rehearsal, c *catalog, image, namespace string, signal time.Time) pod {
 	no := false
 	grace := int64(5)
@@ -165,15 +165,15 @@ func buildApplyPod(f *firmware, a applyAttempt, r rehearsal, c *catalog, image, 
 				appendKey:   a.sha256,
 				deviceIDKey: r.DeviceID,
 			},
-			// A deleted Firmware deletes its apply pods.
+			// Deleting the Firmware deletes its apply pods.
 			OwnerReferences: []ownerReference{{
 				APIVersion: firmwareAPIVersion, Kind: firmwareKind, Name: f.Metadata.Name, UID: f.Metadata.UID,
 			}},
 		},
 		Spec: withTrust(podSpec{
-			// The pod runs once. It tolerates every taint, so a taint
-			// on the machine does not stop it, and the cordon by its
-			// key, so the drain skips it.
+			// The pod runs once. The first toleration keeps any taint
+			// from evicting it. The second names the cordon taint by its
+			// key, so the liken drain does not evict it.
 			RestartPolicy:                 "Never",
 			TerminationGracePeriodSeconds: &grace,
 			NodeName:                      a.machine,
@@ -182,12 +182,12 @@ func buildApplyPod(f *firmware, a applyAttempt, r rehearsal, c *catalog, image, 
 			EnableServiceLinks:            &no,
 			Volumes: append([]volume{
 				{Name: "host-firmware", HostPath: &hostPath{Path: "/sys/firmware", Type: "Directory"}},
-				// The copy of the rehearsal before the write, as in the
-				// rehearsal pod.
+				// The pod rehearses the install again in this copy of
+				// the variables before it writes.
 				{Name: "rehearsal", EmptyDir: &emptyDir{Medium: "Memory", SizeLimit: "256Mi"}},
-				// The marker of the finished prepare.
+				// The marker file that makes the readiness probe pass.
 				{Name: "prepared", EmptyDir: &emptyDir{Medium: "Memory", SizeLimit: "1Mi"}},
-				// The pod's own annotations, which carry the signal.
+				// The pod's own annotations, which include the signal.
 				{Name: "signal", DownwardAPI: &downwardAPIVolume{Items: []downwardAPIFile{
 					{Path: "annotations", FieldRef: fieldRef{FieldPath: "metadata.annotations"}},
 				}}},
@@ -216,17 +216,14 @@ func buildApplyPod(f *firmware, a applyAttempt, r rehearsal, c *catalog, image, 
 					{Name: "prepared", MountPath: preparedPath},
 					{Name: "signal", MountPath: signalPath},
 				}, firmwareCopyMounts()...),
-				// The probe is how the operator learns that the prepare
-				// is done: the kubelet sets Ready, and the watch of the
-				// pods delivers it, so the operator reads no log.
 				ReadinessProbe:           &probe{Exec: &execAction{Command: []string{scanBinary, "prepared"}}, PeriodSeconds: 2},
 				Resources:                &resources{Requests: map[string]string{"cpu": "10m", "memory": "64Mi"}},
 				TerminationMessagePolicy: "FallbackToLogsOnError",
 			}},
 		}, c),
 	}
-	// A capsule's apply stages fwupd's updater and the capsule on the
-	// ESP of the next boot, so it mounts that ESP read-write.
+	// A capsule apply stages fwupd's updater and the capsule on the ESP
+	// of the next boot, so the pod mounts that ESP read-write.
 	if r.Capsule != nil {
 		p.Spec.Volumes = append(p.Spec.Volumes, volume{Name: nextESPVolume, HostPath: &hostPath{Path: provenESPLink, Type: "Directory"}})
 		p.Spec.Containers[0].VolumeMounts = append(p.Spec.Containers[0].VolumeMounts, volumeMount{Name: nextESPVolume, MountPath: nextESPPath})

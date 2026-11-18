@@ -7,21 +7,22 @@ import (
 	"regexp"
 )
 
-// enabledLine matches a remote's Enabled=true line in fwupd's key file
-// format, with any spacing around the equals sign.
+// enabledLine matches the Enabled=true line of a fwupd remote, with any
+// spacing around the equals sign.
 var enabledLine = regexp.MustCompile(`(?m)^(\s*Enabled\s*=\s*)true[ \t]*$`)
 
-// remoteID is the name fwupd gives the remote of one FirmwareCatalog. It shows
-// in each release as RemoteId, and the refresh command names it.
+// remoteID is the fwupd remote of a FirmwareCatalog. fwupd reports it as
+// RemoteId in each release.
 func remoteID(catalogName string) string {
 	return "catalog-" + catalogName
 }
 
-// configureRemotes makes the FirmwareCatalog the only source of releases. The
-// packages ship remotes for the LVFS and for vendor directories, and a
-// release from any of them would be one that no FirmwareCatalog vouches for.
-// The scan changes only the remote files, because fwupd hides real
-// updates when the configuration disables plugins.
+// configureRemotes makes the FirmwareCatalog fwupd's only source of
+// releases. It sets Enabled=false in each remote that the fwupd package
+// ships, such as the LVFS and the vendor directories, and writes a
+// remote for the catalog. It changes nothing else in fwupd's
+// configuration, because fwupd hides real updates when plugins are
+// disabled there.
 func configureRemotes(dir, catalogName, catalogURL string) error {
 	existing, err := filepath.Glob(filepath.Join(dir, "*.conf"))
 	if err != nil {

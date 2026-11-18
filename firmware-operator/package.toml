@@ -1,13 +1,11 @@
-# The Firmware and FirmwareCatalog kinds, and the operator that runs one short
-# pod on a machine for each piece of work: an upload that writes
-# firmware into a USB device that holds none of its own, each time the
-# device appears, and a scan that reads which firmware each device
-# keeps and which newer releases a catalog offers for it.
+# The Firmware and FirmwareCatalog kinds, and the operator that runs a
+# short pod on a machine for each piece of work. An upload pod writes
+# firmware into a USB device that keeps none of its own, each time the
+# device appears. A scan pod reads which firmware each device has and
+# which newer releases a catalog offers for it.
 #
-# Both images take the trust component's CA bundle. The operator reads
-# each FirmwareCatalog's jcat and catalog file over HTTPS, and the scan image
-# reads the catalog too. The operator verifies the API server with the
-# CA in its ServiceAccount's token volume, not with the bundle.
+# Both images include the CA bundle of the trust component, because
+# the operator and the scan program download catalogs over HTTPS.
 [package]
 name = "firmware-operator"
 license = "MIT"
@@ -18,9 +16,9 @@ components = ["kubernetes", "notices", "toolchains", "trust", "vulkan"]
 [docs]
 prefix = "firmware"
 
-# gofmt, vet, a tidy check of go.mod, and one run of the tests that
-# checks for races and writes the coverage profile, then the coverage
-# gate on that profile. .testcoverage.yml holds the floor.
+# gofmt, go vet, a tidy check of go.mod, and one test run that checks
+# for races and writes the coverage profile. Then the coverage gate
+# checks that profile against the floor in .testcoverage.yml.
 [[jobs]]
 name = "go"
 toolchain = "go"
@@ -35,34 +33,29 @@ toolchain = "hugo"
 module = "docs"
 run = "make test-docs"
 
-# The hooks in .pre-commit-config.yaml: the formatters, the linters,
-# and the hygiene checks. The jobs above run the tests and the
-# coverage gates.
+# The hooks in .pre-commit-config.yaml, except the ones that the go
+# job already runs.
 [[jobs]]
 name = "prek"
 toolchain = "prek"
-# The go job runs the same checks as these hooks.
 skip = ["gofmt", "go-vet", "go-mod-tidy"]
 
 [outputs]
 deploy = "deploy"
 
-# The image builds from this module's go.mod, which replaces the shared
-# kubernetes module with ../kubernetes, so it takes that directory as a
-# build context. The notices context holds the script that copies the
-# license files of the modules the binary links.
+# go.mod replaces the shared kubernetes module with ../kubernetes, so
+# the build needs that directory as a context. The notices context
+# provides the script that copies the license files of the linked
+# modules.
 [[outputs.images]]
 name = "firmware-operator"
 description = "firmware-operator, which uploads firmware to the USB devices that hold none, finds firmware updates, and applies the ones you approve."
 file = "Dockerfile"
 contexts = { kubernetes = "kubernetes", notices = "notices" }
 
-# The scan image holds fwupd from the Debian snapshot of the base images
-# and the scan program that the operator runs in a privileged pod on
-# each machine, and as `scan rehearse` in an unprivileged pod that
-# rehearses an approved install. The build takes the vulkan directory
-# as the context builder, for snapshot.sh, and vulkan's version as the
-# snapshot date.
+# The scan image installs fwupd from the Debian snapshot of the base
+# images. The build uses the vulkan directory as the context `builder`,
+# for snapshot.sh, and vulkan's version as the snapshot date.
 [[outputs.images]]
 name = "firmware-operator-scan"
 description = "fwupd and the scan program that firmware-operator runs on a machine to find, rehearse, and apply firmware updates."

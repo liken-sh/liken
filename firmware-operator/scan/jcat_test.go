@@ -33,7 +33,7 @@ func TestParseJcat(t *testing.T) {
 			got, err := parseJcat(tt.data)
 
 			if (err != nil) != tt.wantErr || got != tt.want {
-				t.Errorf("got %+v, %v; want %+v, error %v", got, err, tt.want, tt.wantErr)
+				t.Errorf("parseJcat = %+v, %v, want %+v, error %v", got, err, tt.want, tt.wantErr)
 			}
 		})
 	}

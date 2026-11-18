@@ -14,19 +14,21 @@ import (
 	"testing"
 )
 
-// fakeStore plays the kernel's efivarfs under an apply. It records each
-// call the apply makes, and its write plays the firmware, which merges
-// the signed list into the stored one: the variable grows by merged,
-// not by the whole append.
+// fakeStore records each call that an apply makes to the variable
+// store. Its write imitates the firmware's merge of the signed list, so
+// the variable grows by the length of merged, not by the length of the
+// write.
 type fakeStore struct {
-	held   uint32
+	// flags is the variable's inode flags.
+	flags  uint32
 	calls  []string
 	merged []byte
-	// fail answers an error for the call of that name, and restore for
-	// the setFlags call that sets the immutable flag again.
+	// fail makes the call of that name return its error. The name
+	// "restore" fails only the setFlags call that sets the immutable
+	// flag again.
 	fail map[string]error
-	// failWrite answers an error for the write of that number, counted
-	// from 1, after the firmware accepted the writes before it.
+	// failWrite makes the write with that number, counted from 1, return
+	// its error.
 	failWrite map[int]error
 	writes    int
 }
@@ -35,7 +37,7 @@ func (s *fakeStore) store() variableStore {
 	return variableStore{
 		flags: func(string) (uint32, error) {
 			s.calls = append(s.calls, "flags")
-			return s.held, s.fail["flags"]
+			return s.flags, s.fail["flags"]
 		},
 		setFlags: func(_ string, flags uint32) error {
 			s.calls = append(s.calls, fmt.Sprintf("setFlags 0x%x", flags))
@@ -45,7 +47,7 @@ func (s *fakeStore) store() variableStore {
 			if err := s.fail["restore"]; err != nil && flags&immutableFlag != 0 {
 				return err
 			}
-			s.held = flags
+			s.flags = flags
 			return nil
 		},
 		write: func(path string, data []byte) error {
@@ -57,33 +59,33 @@ func (s *fakeStore) store() variableStore {
 			if err := s.failWrite[s.writes]; err != nil {
 				return err
 			}
-			held, _ := os.ReadFile(path)
-			return os.WriteFile(path, append(held, s.merged...), 0o644)
+			current, _ := os.ReadFile(path)
+			return os.WriteFile(path, append(current, s.merged...), 0o644)
 		},
 	}
 }
 
-// applyRig is a rehearsalRig whose machine holds dbx with the
-// immutable flag that efivarfs sets, and an apply that expects the
-// append the rehearsal recorded. Its signal arrives at once, and is
-// recorded among the store's calls, so a test reads whether a call to
-// the store came before it. waited holds what the apply had printed
-// when it began to wait.
+// applyRig is an apply on a rehearsalRig whose dbx variable has the
+// immutable flag set, and whose recorded SHA-256 matches the
+// rehearsal's append. The signal arrives at once, and the rig records
+// it in the store's calls, so a test can check that no store call came
+// before it.
 type applyRig struct {
 	applier
 	rig      *rehearsalRig
 	efivars  *fakeStore
 	progress bytes.Buffer
-	waited   string
-	// arrives runs when the signal arrives, and its error ends the wait
-	// with no signal.
+	// waited is what the apply had printed when it began to wait.
+	waited string
+	// arrives runs when the signal would arrive. An error ends the wait
+	// with that error and no signal.
 	arrives func() error
 }
 
 func newApplyRig(t *testing.T) *applyRig {
 	t.Helper()
 	r := newRehearsalRig(t)
-	efivars := &fakeStore{held: immutableFlag, merged: []byte{1, 2, 3, 4, 5, 6, 7, 8}}
+	efivars := &fakeStore{flags: immutableFlag, merged: []byte{1, 2, 3, 4, 5, 6, 7, 8}}
 	a := &applyRig{rig: r, efivars: efivars, arrives: func() error { return nil }}
 	a.applier = applier{rehearser: r.rehearser, appendSHA256: sum(authAppend), store: efivars.store(),
 		marker: filepath.Join(t.TempDir(), "prepared"),
@@ -98,18 +100,17 @@ func newApplyRig(t *testing.T) *applyRig {
 	return a
 }
 
-// run runs the apply, with its lines printed to the rig's progress.
 func (a *applyRig) run() ApplyResult {
 	return a.apply(context.Background(), &a.progress)
 }
 
 func (a *applyRig) machineDBX(t *testing.T) []byte {
 	t.Helper()
-	held, err := os.ReadFile(filepath.Join(a.hostDir, "efi", "efivars", dbxFile))
+	data, err := os.ReadFile(filepath.Join(a.hostDir, "efi", "efivars", dbxFile))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the machine's dbx: %v", err)
 	}
-	return held
+	return data
 }
 
 func TestAnApplyWritesTheRehearsedAppendInOneWrite(t *testing.T) {
@@ -118,9 +119,9 @@ func TestAnApplyWritesTheRehearsedAppendInOneWrite(t *testing.T) {
 	got := a.run()
 
 	want := ApplyResult{Result: resultWritten, Variable: dbxFile, SHA256: sum(authAppend), Before: 68, After: 76,
-		Message: "wrote the 128-byte append to " + dbxFile + ", which grew from 68 to 76 bytes; the firmware merges the signed lists into the stored ones"}
+		Message: "wrote the 128-byte append to " + dbxFile + ", which grew from 68 to 76 bytes because the firmware merges the signed lists into the stored ones"}
 	if got != want {
-		t.Errorf("got  %+v\nwant %+v", got, want)
+		t.Errorf("the result is %+v, want %+v", got, want)
 	}
 	if want := []string{"signal", "flags", "setFlags 0x0", "write 128", "setFlags 0x10"}; !slices.Equal(a.efivars.calls, want) {
 		t.Errorf("the calls are %q, want the signal, the flag cleared, one write, and the flag restored: %q", a.efivars.calls, want)
@@ -128,7 +129,7 @@ func TestAnApplyWritesTheRehearsedAppendInOneWrite(t *testing.T) {
 }
 
 // newTwoWriteApplyRig is an applyRig whose install appends two
-// authenticated writes, as a cabinet of two payloads does.
+// authenticated writes.
 func newTwoWriteApplyRig(t *testing.T) *applyRig {
 	t.Helper()
 	a := newApplyRig(t)
@@ -140,40 +141,41 @@ func newTwoWriteApplyRig(t *testing.T) *applyRig {
 	return a
 }
 
-// The firmware verifies each write's signature over that write's own
-// lists, so the apply writes each one in its own call.
+// Each authenticated write has its own signature over its own data, so
+// the firmware cannot verify two writes sent in one call.
 func TestAnApplyWritesEachAuthenticatedWriteInItsOwnCall(t *testing.T) {
 	a := newTwoWriteApplyRig(t)
 
 	got := a.run()
 
-	if got.Result != resultWritten || got.Message != "wrote the 304-byte append to "+dbxFile+" in 2 authenticated writes, which grew from 68 to 84 bytes; the firmware merges the signed lists into the stored ones" {
-		t.Errorf("got %+v, want Written in 2 writes", got)
+	if got.Result != resultWritten || got.Message != "wrote the 304-byte append to "+dbxFile+" in 2 authenticated writes, which grew from 68 to 84 bytes because the firmware merges the signed lists into the stored ones" {
+		t.Errorf("the result is %+v, want Written in 2 writes", got)
 	}
 	if want := []string{"signal", "flags", "setFlags 0x0", "write 128", "write 176", "setFlags 0x10"}; !slices.Equal(a.efivars.calls, want) {
 		t.Errorf("the calls are %q, want each write in its own call: %q", a.efivars.calls, want)
 	}
 }
 
-// A write the firmware accepted cannot be undone, so a later write that
-// fails leaves a changed variable, which the machine's kernel enforces
-// only after a reboot.
+// A write that the firmware accepted cannot be undone, so when a later
+// write fails, the variable has still changed and the machine must
+// reboot.
 func TestAnApplyThatStopsAfterAnAcceptedWriteIsUncertain(t *testing.T) {
 	a := newTwoWriteApplyRig(t)
 	a.efivars.failWrite = map[int]error{2: syscall.EACCES}
 
 	got := a.run()
 
-	want := "the firmware accepted 1 of the 2 authenticated writes to " + dbxFile + ", and write 2 failed: permission denied; the variable changed, so the machine must reboot"
+	want := "the variable " + dbxFile + " changed, so the machine must reboot: the firmware accepted 1 of the 2 authenticated writes, and write 2 returned: permission denied"
 	if got.Result != resultUncertain || got.Message != want {
-		t.Errorf("got %+v, want Uncertain: %s", got, want)
+		t.Errorf("the result is %+v, want Uncertain: %s", got, want)
 	}
 	if last := a.efivars.calls[len(a.efivars.calls)-1]; last != "setFlags 0x10" {
 		t.Errorf("the last call is %q, want the immutable flag restored", last)
 	}
 }
 
-// A refusal of the first write changed nothing, however many follow it.
+// When the firmware refuses the first write, nothing changed, and the
+// apply sends no later write.
 func TestTheFirmwaresRefusalOfTheFirstWriteIsRefused(t *testing.T) {
 	a := newTwoWriteApplyRig(t)
 	a.efivars.failWrite = map[int]error{1: syscall.EACCES}
@@ -181,13 +183,13 @@ func TestTheFirmwaresRefusalOfTheFirstWriteIsRefused(t *testing.T) {
 	got := a.run()
 
 	if got.Result != resultRefused || slices.Contains(a.efivars.calls, "write 176") {
-		t.Errorf("got %+v after the calls %q, want Refused with no second write", got, a.efivars.calls)
+		t.Errorf("the result is %+v after the calls %q, want Refused with no second write", got, a.efivars.calls)
 	}
 }
 
 func TestAnApplyLeavesAVariableWithNoImmutableFlagAlone(t *testing.T) {
 	a := newApplyRig(t)
-	a.efivars.held = 0
+	a.efivars.flags = 0
 
 	a.run()
 
@@ -196,10 +198,8 @@ func TestAnApplyLeavesAVariableWithNoImmutableFlagAlone(t *testing.T) {
 	}
 }
 
-// When the rehearsal before the write gives another append, or does
-// not pass, the variables changed since the operator recorded the
-// append, and the apply writes nothing, and does not wait for the
-// signal.
+// When the prepare's rehearsal produces a different append, or does not
+// pass, the apply writes nothing and does not wait for the signal.
 func TestAnApplyWritesNothingWhenTheVariablesChanged(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -220,10 +220,10 @@ func TestAnApplyWritesNothingWhenTheVariablesChanged(t *testing.T) {
 			got := a.run()
 
 			if got.Result != resultFailed || got.Message != c.want {
-				t.Errorf("got %+v, want Failed: %s", got, c.want)
+				t.Errorf("the result is %+v, want Failed: %s", got, c.want)
 			}
 			if len(a.efivars.calls) != 0 || !slices.Equal(a.machineDBX(t), dbxBefore) {
-				t.Errorf("the apply touched the machine's dbx with %q", a.efivars.calls)
+				t.Errorf("the apply touched the machine's dbx with %q, want no calls", a.efivars.calls)
 			}
 			if isPrepared(a.marker) {
 				t.Error("the marker of a finished prepare exists, want none after a prepare that failed")
@@ -232,25 +232,25 @@ func TestAnApplyWritesNothingWhenTheVariablesChanged(t *testing.T) {
 	}
 }
 
-// A catalog that moved since the scan is the operator's to read again,
-// not a failure of the apply, so the prepare answers CatalogMoved. It
-// writes nothing, marks nothing, and does not wait for the signal.
-func TestAPrepareOfAMovedCatalogAnswersCatalogMoved(t *testing.T) {
+// A catalog that moved since the scan is not a failure. The operator
+// must read the jcat again, so the apply returns CatalogMoved.
+func TestAPrepareOfAMovedCatalogReturnsCatalogMoved(t *testing.T) {
 	a := newApplyRig(t)
 	a.rig.web[testCatalogURL+".jcat"] = jcatFor(t, "firmware-09139-stable.xml.zst", sum(testCatalog))
 
 	got := a.run()
 
-	if got.Result != resultCatalogMoved || got.Message != "the jcat now names firmware-09139-stable.xml.zst, so nothing was written" {
-		t.Errorf("got %+v, want CatalogMoved with the new file", got)
+	if got.Result != resultCatalogMoved || got.Message != "the jcat now lists firmware-09139-stable.xml.zst, so nothing was written" {
+		t.Errorf("the result is %+v, want CatalogMoved with the new file", got)
 	}
 	if isPrepared(a.marker) || a.waited != "" || len(a.efivars.calls) != 0 {
-		t.Errorf("the apply marked its prepare, waited, or touched the store with %q", a.efivars.calls)
+		t.Errorf("the apply marked its prepare, waited, or touched the store with %q, want none of these", a.efivars.calls)
 	}
 }
 
 // The kernel reports the firmware's EFI_SECURITY_VIOLATION as EACCES,
-// so a refused append is the firmware's answer, not a fault of the pod.
+// so the apply treats EACCES as the firmware refusing the append and
+// not as a fault in the pod.
 func TestTheFirmwaresRefusalIsRefused(t *testing.T) {
 	a := newApplyRig(t)
 	a.efivars.fail = map[string]error{"write": syscall.EACCES}
@@ -258,7 +258,7 @@ func TestTheFirmwaresRefusalIsRefused(t *testing.T) {
 	got := a.run()
 
 	if got.Result != resultRefused || got.Message != "the firmware refused the append to "+dbxFile+": permission denied" {
-		t.Errorf("got %+v, want Refused", got)
+		t.Errorf("the result is %+v, want Refused", got)
 	}
 	if last := a.efivars.calls[len(a.efivars.calls)-1]; last != "setFlags 0x10" {
 		t.Errorf("the last call is %q, want the immutable flag restored", last)
@@ -287,7 +287,7 @@ func TestAnApplyFails(t *testing.T) {
 			got := a.run()
 
 			if got.Result != resultFailed || got.Message != c.want {
-				t.Errorf("got %+v, want Failed: %s", got, c.want)
+				t.Errorf("the result is %+v, want Failed: %s", got, c.want)
 			}
 			if !slices.Equal(a.efivars.calls, c.calls) {
 				t.Errorf("the calls are %q, want %q", a.efivars.calls, c.calls)
@@ -296,22 +296,19 @@ func TestAnApplyFails(t *testing.T) {
 	}
 }
 
-// A write that landed is Written even when the flag cannot be set
-// again, because the variable holds the append either way.
+// The firmware accepted the write, so the result is Written even when
+// the immutable flag cannot be set again.
 func TestAWrittenAppendWhoseFlagStaysClearIsWritten(t *testing.T) {
 	a := newApplyRig(t)
 	a.efivars.fail = map[string]error{"restore": errors.New("the inode is busy")}
 
 	got := a.run()
 
-	if got.Result != resultWritten || !strings.HasSuffix(got.Message, "; setting the immutable flag again failed: the inode is busy") {
-		t.Errorf("got %+v, want Written with the flag's failure", got)
+	if got.Result != resultWritten || !strings.HasSuffix(got.Message, ", and the immutable flag was not set again: the inode is busy") {
+		t.Errorf("the result is %+v, want Written with the flag's failure", got)
 	}
 }
 
-// The apply prepares everything that needs the network, prints that it
-// is prepared, and only then waits for the signal. Nothing reaches the
-// variable store until the signal arrives.
 func TestAnApplyWaitsForTheSignalBeforeItTouchesTheStore(t *testing.T) {
 	a := newApplyRig(t)
 	a.arrives = func() error {
@@ -322,7 +319,7 @@ func TestAnApplyWaitsForTheSignalBeforeItTouchesTheStore(t *testing.T) {
 			t.Error("the apply waits with no marker of its finished prepare, want the marker for the readiness probe")
 		}
 		if !slices.Equal(a.machineDBX(t), dbxBefore) {
-			t.Error("the machine's dbx changed before the signal")
+			t.Error("the machine's dbx changed before the signal, want it unchanged")
 		}
 		return nil
 	}
@@ -338,8 +335,8 @@ func TestAnApplyWaitsForTheSignalBeforeItTouchesTheStore(t *testing.T) {
 	}
 }
 
-// The operator takes the last line of the log that has a result as the
-// apply's answer, so the progress line carries no result.
+// The operator reads the last log line that has a result key as the
+// result.
 func TestTheProgressLineIsNotAResult(t *testing.T) {
 	a := newApplyRig(t)
 
@@ -348,15 +345,13 @@ func TestTheProgressLineIsNotAResult(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(a.progress.String()), "\n")
 	var first map[string]any
 	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the progress line: %v", err)
 	}
 	if _, has := first["result"]; has || len(lines) != 1 {
 		t.Errorf("the apply printed %q, want one progress line with no result", lines)
 	}
 }
 
-// A wait that ends without the signal, such as the pod's stop, writes
-// nothing.
 func TestAnApplyWithNoSignalWritesNothing(t *testing.T) {
 	a := newApplyRig(t)
 	a.arrives = func() error { return context.Canceled }
@@ -364,16 +359,15 @@ func TestAnApplyWithNoSignalWritesNothing(t *testing.T) {
 	got := a.run()
 
 	if got.Result != resultFailed || got.Message != "waiting for the signal to write: context canceled, so nothing was written" {
-		t.Errorf("got %+v, want Failed with nothing written", got)
+		t.Errorf("the result is %+v, want Failed with nothing written", got)
 	}
 	if len(a.efivars.calls) != 0 || !slices.Equal(a.machineDBX(t), dbxBefore) {
-		t.Errorf("the apply touched the machine's dbx with %q", a.efivars.calls)
+		t.Errorf("the apply touched the machine's dbx with %q, want no calls", a.efivars.calls)
 	}
 }
 
-// The append extends the variable as the rehearsal copied it. A
-// variable that changed while the pod waited for its turn, such as by
-// another write, no longer matches, so the apply writes nothing.
+// The append extends the variable as the rehearsal copied it, so a
+// variable that changed during the wait is not written.
 func TestAVariableThatChangedDuringTheWaitIsNotWritten(t *testing.T) {
 	a := newApplyRig(t)
 	a.arrives = func() error {
@@ -384,28 +378,26 @@ func TestAVariableThatChangedDuringTheWaitIsNotWritten(t *testing.T) {
 	got := a.run()
 
 	if want := "the variable " + dbxFile + " changed while the apply waited for its turn, so nothing was written"; got.Result != resultFailed || got.Message != want {
-		t.Errorf("got %+v, want Failed: %s", got, want)
+		t.Errorf("the result is %+v, want Failed: %s", got, want)
 	}
 	if want := []string{"signal"}; !slices.Equal(a.efivars.calls, want) {
 		t.Errorf("the calls are %q, want only the signal", a.efivars.calls)
 	}
 }
 
-// The readiness probe runs `scan prepared`, which answers whether the
-// marker exists.
 func TestIsPreparedReadsTheMarker(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "prepared")
 	if isPrepared(marker) {
-		t.Error("isPrepared answers true with no marker")
+		t.Error("isPrepared returns true with no marker, want false")
 	}
 	writeFile(t, marker, nil)
 	if !isPrepared(marker) {
-		t.Error("isPrepared answers false with the marker")
+		t.Error("isPrepared returns false with the marker, want true")
 	}
 }
 
-// A marker that cannot be written leaves the pod unready for good, so
-// the apply ends before it waits, and the operator asks for no turn.
+// If the marker cannot be written, the pod never becomes Ready and the
+// operator never requests a turn, so the apply ends instead of waiting.
 func TestAnApplyThatCannotMarkItsPrepareWritesNothing(t *testing.T) {
 	a := newApplyRig(t)
 	a.marker = filepath.Join(t.TempDir(), "absent", "prepared")
@@ -413,10 +405,10 @@ func TestAnApplyThatCannotMarkItsPrepareWritesNothing(t *testing.T) {
 	got := a.run()
 
 	if got.Result != resultFailed || !strings.HasPrefix(got.Message, "marking the prepare as done: ") || !strings.HasSuffix(got.Message, ", so nothing was written") {
-		t.Errorf("got %+v, want Failed with nothing written", got)
+		t.Errorf("the result is %+v, want Failed with nothing written", got)
 	}
 	if a.waited != "" || len(a.efivars.calls) != 0 {
-		t.Errorf("the apply waited or touched the store with %q", a.efivars.calls)
+		t.Errorf("the apply waited or touched the store with %q, want neither", a.efivars.calls)
 	}
 }
 

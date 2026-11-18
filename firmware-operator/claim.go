@@ -1,24 +1,24 @@
 package main
 
-// Each upload pod names one ResourceClaim, with the pod's own name. The
-// claim asks for one device of the DeviceClass firmware-upload, and its
-// selector names the device's address and device number. The address
-// is the port path, unique on the machine even when two bare chips of
-// one model are connected. The device number limits the claim to this
-// appearance, so a claim that the scheduler did not allocate before a
-// replug cannot take the next appearance.
+// Each upload pod gets a ResourceClaim with the same name as the pod,
+// for one device of the DeviceClass firmware-upload. Its CEL selector
+// matches the device's address and device number. The address is the
+// USB port path, so two bare chips of the same model on one machine
+// get separate claims. The kernel assigns a new device number each time
+// the device enumerates, so a claim that is still unallocated when the
+// chip is replugged does not match the chip's next appearance.
 //
-// The upload makes the chip enumerate again with its loaded IDs, so
-// the device the claim holds leaves the bus while the pod runs.
-// machine-operator taints such a device liken.sh/unplugged with the
-// effect NoExecute, which evicts the pods that do not tolerate it. The
-// upload pod is a bare pod that the operator does not run again, and an
-// eviction would record a failure for an upload that worked, so the
-// claim tolerates the taint.
+// The upload makes the chip enumerate again with its loaded IDs, so the
+// claimed device leaves the bus while the pod runs. machine-operator
+// then taints the device liken.sh/unplugged with the effect NoExecute,
+// which evicts every pod that does not tolerate it. Nothing recreates
+// an upload pod, and an eviction would record a failure for an upload
+// that worked. So the claim tolerates the taint.
 //
-// The claim's owner is its pod, so the garbage collector deletes the
-// claim with the pod. That needs the pod's UID, so the operator creates
-// the pod first. The pod stays unscheduled until its claim exists.
+// The claim's owner reference points at its pod, so the garbage
+// collector deletes the claim with the pod. The reference needs the
+// pod's UID, so the operator creates the pod first, and the pod stays
+// unscheduled until its claim exists.
 
 import (
 	"fmt"
@@ -61,7 +61,7 @@ type deviceToleration struct {
 }
 
 // unpluggedTaint is the taint that machine-operator puts on a device
-// that a prepared claim held when it left the bus.
+// when it leaves the bus while a prepared claim holds it.
 const unpluggedTaint = "liken.sh/unplugged"
 
 type deviceSelector struct {
@@ -74,15 +74,17 @@ func claimsPathIn(namespace string) string {
 	return "/apis/resource.k8s.io/v1/namespaces/" + namespace + "/resourceclaims"
 }
 
-// claimSelector selects one appearance of a device. strconv.Quote
-// writes the address as a string literal that CEL reads the same way.
+// claimSelector returns a CEL expression that matches one appearance of
+// a device. strconv.Quote writes the address as a string literal that
+// CEL parses to the same value.
 func claimSelector(a appearance) string {
 	return fmt.Sprintf(`device.attributes["%s"].address == %s && device.attributes["%s"].deviceNumber == %d`,
 		driverName, strconv.Quote(a.address), driverName, a.deviceNumber)
 }
 
-// buildUploadClaim answers the claim of an upload pod that the API
-// server holds, with its UID.
+// buildUploadClaim returns the ResourceClaim for an upload pod. The pod
+// must be the object that the API server returned, because the claim's
+// owner reference needs its UID.
 func buildUploadClaim(upload pod) resourceClaim {
 	_, _, a := uploadOf(upload)
 	claim := resourceClaim{

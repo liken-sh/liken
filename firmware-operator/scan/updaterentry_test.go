@@ -45,14 +45,14 @@ func loadOptionOn(description string, hd []byte, file string) []byte {
 	return append(option, list...)
 }
 
-// slotAPartition is slot A's partition as sysfs gives it for the ESP's
-// mount: number 3, start 135168, size 2097152, in 512-byte sectors.
+// slotAPartition is slot A's partition as sysfs reports it for the
+// ESP's mount. Start and size are in 512-byte sectors.
 var slotAPartition = partition{number: 3, start: 135168, size: 2097152}
 
-// fwupd in a pod finds no partition for the ESP, so it writes an empty
-// hard drive node. The updater's entry then takes the node of liken's
-// entry for the same partition, which carries the partition's GUID.
-func TestTheUpdatersEntryTakesTheESPsPartition(t *testing.T) {
+// fwupd in a pod writes a hard drive node of zeros. The repair copies
+// the node of the liken entry for the same partition, including the
+// partition's GUID.
+func TestRepairCopiesTheESPsPartitionNodeIntoTheUpdatersEntry(t *testing.T) {
 	vars := t.TempDir()
 	slotA := loadOptionOn("liken slot A", hdNode(3, 135168, 2097152, 0xaa), `\vmlinuz`)
 	slotB := loadOptionOn("liken slot B", hdNode(4, 2232320, 2097152, 0xbb), `\vmlinuz`)
@@ -62,7 +62,7 @@ func TestTheUpdatersEntryTakesTheESPsPartition(t *testing.T) {
 	}
 
 	if err := repairUpdaterEntry(vars, slotAPartition, plainVariableWriter); err != nil {
-		t.Fatal(err)
+		t.Fatalf("repairing the updater's entry: %v", err)
 	}
 
 	got, _ := os.ReadFile(filepath.Join(vars, "Boot0008-"+efiGlobalGUID))
@@ -72,9 +72,10 @@ func TestTheUpdatersEntryTakesTheESPsPartition(t *testing.T) {
 	}
 }
 
-// An entry that names its partition already is fwupd's own, and a
-// store with no entry of the ESP's partition gives nothing to copy.
-func TestARepairChangesNothingItCannotImprove(t *testing.T) {
+// An updater entry that already has a partition node needs no repair,
+// and a store with no entry for the ESP's partition has no node to
+// copy.
+func TestRepairLeavesTheUpdatersEntryUnchangedWhenItCannotRepairIt(t *testing.T) {
 	cases := []struct {
 		name    string
 		updater []byte
@@ -92,11 +93,11 @@ func TestARepairChangesNothingItCannotImprove(t *testing.T) {
 			writeFile(t, filepath.Join(vars, "Boot0008-"+efiGlobalGUID), c.updater)
 
 			if err := repairUpdaterEntry(vars, slotAPartition, plainVariableWriter); err != nil {
-				t.Fatal(err)
+				t.Fatalf("repairing the updater's entry: %v", err)
 			}
 
 			if got, _ := os.ReadFile(filepath.Join(vars, "Boot0008-"+efiGlobalGUID)); !bytes.Equal(got, c.updater) {
-				t.Error("the updater's entry changed")
+				t.Error("the updater's entry changed, want it unchanged")
 			}
 		})
 	}
@@ -113,13 +114,13 @@ func TestESPPartitionReadsSysfs(t *testing.T) {
 	got, err := espPartition(mountinfo, sys, "/run/esp-next")
 
 	if err != nil || got != (partition{number: 3, start: 135168, size: 2097152}) {
-		t.Errorf("got %+v, %v", got, err)
+		t.Errorf("espPartition = %+v, %v, want partition 3 at 135168 with size 2097152", got, err)
 	}
 }
 
-// statusVariable builds fwupd's status variable, as efivarfs stores it:
-// the 52-byte header of its update info, then the device path of the
-// capsule's file.
+// statusVariable builds fwupd's status variable as efivarfs stores it:
+// the 4 bytes of attributes, the 52-byte update info header, then the
+// device path of the capsule's file.
 func statusVariable(hd []byte, file string) []byte {
 	option := loadOptionOn("", hd, file)
 	_, list, _ := devicePath(option[4:])
@@ -128,17 +129,17 @@ func statusVariable(hd []byte, file string) []byte {
 	return append(v, list...)
 }
 
-// fwupd's updater finds the capsule by the device path in fwupd's status
-// variable, which fwupd in a pod also writes with a hard drive node of
-// zeros.
-func TestTheStatusVariableTakesTheESPsPartition(t *testing.T) {
+// fwupd's updater finds the capsule through the device path in fwupd's
+// status variable, and fwupd in a pod writes a hard drive node of zeros
+// there too.
+func TestRepairCopiesTheESPsPartitionNodeIntoTheStatusVariable(t *testing.T) {
 	vars := t.TempDir()
 	writeFile(t, filepath.Join(vars, "Boot0002-"+efiGlobalGUID), loadOptionOn("liken slot A", hdNode(3, 135168, 2097152, 0xaa), `\vmlinuz`))
 	status := "fwupd-b0792605-c842-408f-adf2-edfb07638e83-0-" + fwupdVendorGUID
 	writeFile(t, filepath.Join(vars, status), statusVariable(hdNode(0, 0, 0, 0), `\EFI\ubuntu\fw\fwupd-b0792605.cap`))
 
 	if err := repairUpdaterEntry(vars, slotAPartition, plainVariableWriter); err != nil {
-		t.Fatal(err)
+		t.Fatalf("repairing the updater's entry: %v", err)
 	}
 
 	got, _ := os.ReadFile(filepath.Join(vars, status))
@@ -159,31 +160,31 @@ func TestESPPartitionFails(t *testing.T) {
 		want      string
 	}{
 		{"no mount", "29 1 252:33 / / rw - ext4 /dev/vdc1 rw\n", "/run/esp-next is not a mount point"},
-		{"no sysfs entry", "612 590 252:35 / /run/esp-next rw - vfat /dev/vdc3 rw\n", "reading the partition of /run/esp-next"},
-		{"a number that does not parse", "612 590 252:36 / /run/esp-next rw - vfat /dev/vdc4 rw\n", "reading the partition of /run/esp-next"},
-		{"a number past a uint32", "612 590 252:37 / /run/esp-next rw - vfat /dev/vdc5 rw\n", "outside the range of a GPT entry"},
+		{"no sysfs entry", "612 590 252:35 / /run/esp-next rw - vfat /dev/vdc3 rw\n", "the partition mounted at /run/esp-next"},
+		{"a number that does not parse", "612 590 252:36 / /run/esp-next rw - vfat /dev/vdc4 rw\n", "the partition mounted at /run/esp-next"},
+		{"a number past a uint32", "612 590 252:37 / /run/esp-next rw - vfat /dev/vdc5 rw\n", "the largest number of a GPT entry"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := espPartition(c.mountinfo, sys, "/run/esp-next")
 
 			if err == nil || !strings.Contains(err.Error(), c.want) {
-				t.Errorf("got %v, want %q", err, c.want)
+				t.Errorf("the error is %v, want one that contains %q", err, c.want)
 			}
 		})
 	}
 }
 
-func TestAMalformedDevicePathNamesNoPartition(t *testing.T) {
+func TestHardDriveNodeInRejectsAMalformedDevicePath(t *testing.T) {
 	for _, list := range [][]byte{{0x04, 0x01, 0x02, 0x00}, {0x04, 0x01, 0xff, 0x00}} {
 		if _, _, ok := hardDriveNodeIn(list); ok {
-			t.Errorf("% x names a partition", list)
+			t.Errorf("hardDriveNodeIn accepted the malformed device path % x", list)
 		}
 	}
 }
 
-// The rehearsal and the apply read the ESP's partition through
-// partitionOf, and a failure to read it fails the rehearsal.
+// The rehearsal reads the ESP's partition through partitionOf, and a
+// failure to read it fails the rehearsal.
 func TestARehearsalRepairsTheUpdatersEntry(t *testing.T) {
 	r := newCapsuleRig(t)
 	writeFile(t, filepath.Join(r.hostDir, "efi", "efivars", "Boot0002-"+efiGlobalGUID), loadOptionOn("liken slot A", hdNode(3, 135168, 2097152, 0xaa), `\vmlinuz`))
@@ -195,37 +196,38 @@ func TestARehearsalRepairsTheUpdatersEntry(t *testing.T) {
 
 	got := r.rehearse(context.Background())
 
-	held, _ := os.ReadFile(filepath.Join(r.copyDir, "efi", "efivars", updaterEntry))
-	if want := loadOptionOn("Linux Firmware Updater", hdNode(3, 135168, 2097152, 0xaa), `\EFI\ubuntu\fwupdx64.efi`); got.Result != resultPassed || !bytes.Equal(held, want) {
-		t.Errorf("got %+v with the entry % x, want Passed with the entry repaired", got, held)
+	entry, _ := os.ReadFile(filepath.Join(r.copyDir, "efi", "efivars", updaterEntry))
+	if want := loadOptionOn("Linux Firmware Updater", hdNode(3, 135168, 2097152, 0xaa), `\EFI\ubuntu\fwupdx64.efi`); got.Result != resultPassed || !bytes.Equal(entry, want) {
+		t.Errorf("the rehearsal is %+v with the entry % x, want Passed with the partition node repaired", got, entry)
 	}
 
 	r = newCapsuleRig(t)
 	r.partitionOf = func(string) (partition, error) { return partition{}, errors.New("/run/esp-next is not a mount point") }
 	if got := r.rehearse(context.Background()); got.Result != resultFailed || got.Message != "/run/esp-next is not a mount point" {
-		t.Errorf("got %+v, want Failed for the partition", got)
+		t.Errorf("the rehearsal is %+v, want Failed with the message that the ESP is not a mount point", got)
 	}
 }
 
-// efivarfs takes a whole variable in one write, with the immutable flag
-// cleared for it.
+// efivarfs accepts a variable only as one whole write, and only while
+// the immutable flag is clear, so replace clears the flag first and
+// sets it again afterward.
 func TestReplaceWritesTheWholeVariable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "Boot0008-"+efiGlobalGUID)
 	writeFile(t, path, []byte{7, 0, 0, 0, 1})
-	efivars := &fakeStore{held: immutableFlag}
+	efivars := &fakeStore{flags: immutableFlag}
 
 	if err := efivars.store().replace(path, []byte{7, 0, 0, 0, 2, 3}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("replacing the variable: %v", err)
 	}
 
-	if held, _ := os.ReadFile(path); !bytes.Equal(held, []byte{7, 0, 0, 0, 2, 3}) {
-		t.Errorf("the variable reads % x", held)
+	if got, _ := os.ReadFile(path); !bytes.Equal(got, []byte{7, 0, 0, 0, 2, 3}) {
+		t.Errorf("the variable is % x, want 07 00 00 00 02 03", got)
 	}
 	if want := []string{"flags", "setFlags 0x0", "setFlags 0x10"}; !slices.Equal(efivars.calls, want) {
 		t.Errorf("the calls are %q, want %q", efivars.calls, want)
 	}
 	efivars.fail = map[string]error{"flags": errors.New("no inode")}
 	if err := efivars.store().replace(path, nil); err == nil {
-		t.Error("a store whose flags cannot be read took the write")
+		t.Error("replace returned no error when the flags cannot be read, want one")
 	}
 }

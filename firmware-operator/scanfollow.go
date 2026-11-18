@@ -1,11 +1,10 @@
 package main
 
-// The operator follows each scan pod to its result. When the pod ends,
-// the operator reads its log, writes the result into the FirmwareCatalog's
-// record of the machine, then writes the discovered Firmware objects,
-// and then deletes the pod. An operator that stops between two of
-// those steps reads the same pod again and writes the same result, so
-// the pod is the record of a result until both writes landed.
+// When a scan pod ends, the operator reads the Result from its log,
+// writes it into the FirmwareCatalog's record of the machine and into
+// the discovered Firmware objects, and only then deletes the pod. So an
+// operator that restarts between those writes reads the same pod again
+// and writes the same result.
 
 import (
 	"errors"
@@ -15,7 +14,7 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// scanEnd is the result of one finished attempt.
+// scanEnd is the result of one finished scan attempt.
 type scanEnd struct {
 	attempt scanAttempt
 	result  string
@@ -26,8 +25,11 @@ type scanEnd struct {
 	scan *pod
 }
 
-// judgeScan decides the result of a scan pod. A pod that has not ended
-// answers false, with the time its deadline is due.
+// judgeScan returns the result of a scan pod that has ended or passed
+// scanDeadline. For a pod still within its deadline it returns false
+// and the deadline. It also returns false when the pod's log is gone.
+// For a succeeded pod whose log it cannot read before scanDeadline, it
+// returns an error.
 func (o *operator) judgeScan(p pod, now time.Time) (scanEnd, bool, time.Time, error) {
 	end := scanEnd{attempt: scanOf(p), result: resultFailed, scan: &p}
 	due := parseTime(p.Metadata.CreationTimestamp).Add(scanDeadline)
@@ -42,41 +44,43 @@ func (o *operator) judgeScan(p pod, now time.Time) (scanEnd, bool, time.Time, er
 	}
 	log, err := o.readPodLog(p, scanContainer)
 	if errors.Is(err, apiclient.ErrNotFound) {
-		// The store can still hold a pod that this operator deleted after
-		// it wrote the result. A pod that someone else deleted leaves a
-		// Running record, which endsOf fails once the store drops the
-		// pod.
+		// The pod is gone, so there is no result to read here. If the
+		// operator deleted it after it wrote the result, the informer's
+		// cache can still list it for a short time. If someone else
+		// deleted it, its record stays Running until the cache drops
+		// the pod, and then endsOf marks the record Failed.
 		return scanEnd{}, false, time.Time{}, nil
 	}
 	if err != nil && p.Status.Phase == podSucceeded {
-		// A scan that succeeded wrote its result, so the operator reads
-		// the log again on the next pass rather than lose the result,
-		// until the scan's deadline. A log that stays unreadable past it,
-		// such as one the operator has no permission to read, fails the
-		// scan, so the pass does not fail on it for good.
+		// The result of a succeeded scan is in its log. Until
+		// scanDeadline, return an error so that the next pass reads
+		// the log again. After it, fail the scan, so that a log the
+		// operator can never read, for example without permission,
+		// does not fail every pass.
 		if now.Before(due) {
 			return scanEnd{}, false, time.Time{}, fmt.Errorf("reading the log of the scan pod %s: %w", p.Metadata.Name, err)
 		}
-		end.message = "the operator could not read the scan's log: " + err.Error()
+		end.message = "the operator cannot read the log of the scan pod: " + err.Error()
 		return end, true, time.Time{}, nil
 	}
 	result, last, found := parseScanLog(log)
 	switch {
 	case !found && last != "":
-		end.message = "the scan wrote no result; its last line was: " + last
+		end.message = "the scan pod wrote no result, and its last log line is: " + last
 	case !found:
 		end.message = podFailure(p, "scan", scanContainer)
 	case result.Result == resultScanned || result.Result == resultCatalogMoved || result.Result == resultFailed:
 		end.result, end.message, end.devices = result.Result, result.Message, result.Devices
 	default:
-		end.message = fmt.Sprintf("the scan answered the result %q, which the operator does not know", result.Result)
+		end.message = fmt.Sprintf("the scan pod reported the result %q, which the operator does not recognize", result.Result)
 	}
 	return end, true, time.Time{}, nil
 }
 
-// podFailure says why a scan or rehearsal pod with no log failed, such
-// as the DeadlineExceeded of activeDeadlineSeconds before the container
-// ran. kind names the pod in the message.
+// podFailure returns why a scan or rehearsal pod that wrote no log
+// failed, for example DeadlineExceeded from activeDeadlineSeconds
+// before its container ran. kind is "scan" or "rehearsal", and the
+// message includes the exit code of container when it ended.
 func podFailure(p pod, kind, container string) string {
 	message := "the " + kind + " pod wrote no log"
 	for _, part := range []string{p.Status.Reason, p.Status.Message} {
@@ -93,10 +97,10 @@ func podFailure(p pod, kind, container string) string {
 	return message
 }
 
-// endsOf follows a FirmwareCatalog's scan pods, and answers the attempts that
-// ended, the machines with a scan pod, and the earliest deadline of a
-// scan in progress. A Running record whose pod is gone ends Failed, and
-// the operator does not run that attempt again.
+// endsOf returns a FirmwareCatalog's scan attempts that ended, the
+// machines that have a scan pod, and the earliest deadline among the
+// scans still running. A Running record whose pod is gone ends as
+// Failed, and the operator does not run that attempt again.
 func (o *operator) endsOf(c *catalog, scans []pod, now time.Time) ([]scanEnd, map[string]bool, time.Time, error) {
 	var ends []scanEnd
 	var problems []error
@@ -130,18 +134,16 @@ func (o *operator) endsOf(c *catalog, scans []pod, now time.Time) ([]scanEnd, ma
 		}
 		if gone {
 			ends = append(ends, scanEnd{attempt: a, result: resultFailed,
-				message: "the scan pod is gone; the operator does not run this scan again until the machine, its devices, or the catalog file change"})
+				message: "the scan pod no longer exists, and the operator does not run this scan again until the machine's boot, its devices, the catalog file, or the scan image changes"})
 		}
 	}
 	return ends, busy, due, errors.Join(problems...)
 }
 
-// recordOf answers the record that an attempt's end writes, after the
-// machine's previous record. A scan that answered keeps the GUIDs of
-// every device it reported, and the hash of their releases in the
-// catalog file it ran with. Any other result keeps the GUIDs and the
-// hash of the previous record, which are still the machine's last
-// report.
+// recordOf returns the machine record for an attempt's end. A Scanned
+// result sets the GUIDs that the scan reported and the hash of their
+// releases. Any other result keeps the previous record's GUIDs and
+// hash, because they are still the machine's last successful report.
 func recordOf(end scanEnd, previous machineRecord, releases string, now time.Time) machineRecord {
 	r := machineRecord{
 		Machine: end.attempt.machine, Boot: end.attempt.boot, Devices: end.attempt.devices, File: end.attempt.file, Image: end.attempt.image,
@@ -154,7 +156,8 @@ func recordOf(end scanEnd, previous machineRecord, releases string, now time.Tim
 	return r
 }
 
-// guidsOf answers every GUID of the devices a scan reported.
+// guidsOf returns the distinct GUIDs of a scan's devices, or nil when
+// there are none.
 func guidsOf(devices []scanDevice) []string {
 	var guids []string
 	for _, d := range devices {
@@ -166,7 +169,6 @@ func guidsOf(devices []scanDevice) []string {
 	return sortedSet(guids)
 }
 
-// endNotice answers the Event of an attempt's end.
 func endNotice(end scanEnd) notice {
 	about := end.attempt.machine + ": " + end.message
 	switch end.result {

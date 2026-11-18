@@ -1,11 +1,9 @@
 package main
 
-// These tests follow the apply of an approved update on a machine whose
-// rehearsal passed: the request for a held reboot turn, the hold that a
-// written update releases, the turn that a refused or failed write
-// withdraws, the scan after the reboot that proves the write or fails
-// it, and an operator that restarts in the middle. applysignal_test.go
-// follows the apply pod from the request to the signal to write.
+// These tests cover the apply of an approved update after a passed
+// rehearsal, from the Disruption to the scan after the reboot.
+// applysignal_test.go covers the apply pod from the Disruption to the
+// signal to write.
 
 import (
 	"encoding/json"
@@ -17,11 +15,12 @@ import (
 	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
-// turnName is the request for node-2's turn that the BIOS object files.
+// turnName is the name of the Disruption that the operator creates for
+// node-2's turn on the BIOS object.
 var turnName = disruptionName(biosObjectName, "node-2")
 
 // preparingWorld is approvedWorld after node-2's rehearsal passed, so
-// the apply pod runs on node-2 and prepares.
+// the apply pod is running on node-2 and preparing.
 func preparingWorld(t *testing.T) *world {
 	w := approvedWorld(t)
 	w.api.finishPod(t, w.onlyRehearsal(t).Metadata.Name, rehearsalContainer, podSucceeded, rehearsalLog(passed))
@@ -31,8 +30,9 @@ func preparingWorld(t *testing.T) *world {
 	return w
 }
 
-// rehearsedWorld is preparingWorld after the apply pod prepared and
-// turned Ready, so the operator has asked for node-2's turn.
+// rehearsedWorld is preparingWorld after the apply pod finished
+// preparing and became Ready, so the operator has created the
+// Disruption for node-2's turn.
 func rehearsedWorld(t *testing.T) *world {
 	w := preparingWorld(t)
 	w.api.readyPod(t, w.onlyApply(t).Metadata.Name)
@@ -50,7 +50,6 @@ func heldWorld(t *testing.T) *world {
 	return w
 }
 
-// applies answers every stored apply pod.
 func (a *fakeAPI) applies(t *testing.T) []pod {
 	t.Helper()
 	var out []pod
@@ -62,8 +61,8 @@ func (a *fakeAPI) applies(t *testing.T) []pod {
 	return out
 }
 
-// onlyApply answers the one apply pod, and fails the test when there
-// is not exactly one.
+// onlyApply returns the apply pod, and fails the test unless there is
+// exactly one.
 func (w *world) onlyApply(t *testing.T) pod {
 	t.Helper()
 	applies := w.api.applies(t)
@@ -73,19 +72,19 @@ func (w *world) onlyApply(t *testing.T) pod {
 	return applies[0]
 }
 
-// applyLog is the log of an apply that answered.
+// applyLog returns the log of an apply pod that printed the result r.
 func applyLog(r applyResult) string {
 	line, _ := json.Marshal(r)
 	return "fwupdtool: loading plugins\n" + string(line) + "\n"
 }
 
-// writtenResult is the answer of an apply whose append the firmware
+// writtenResult is the result of an apply whose append the firmware
 // merged into dbx.
 var writtenResult = applyResult{Result: resultWritten,
 	Message: "wrote the 17260-byte append to dbx-d719b2cb-3d3a-4596-a3bc-dad00e67656f, which grew from 21352 to 21476 bytes"}
 
-// onlyApplyRecord answers the BIOS object's one apply record, and fails
-// the test when there is not exactly one.
+// onlyApplyRecord returns the apply record of the BIOS object, and fails
+// the test unless there is exactly one.
 func (w *world) onlyApplyRecord(t *testing.T) applyRecord {
 	t.Helper()
 	records := w.api.firmware(t, biosObjectName).Status.Applies
@@ -95,8 +94,6 @@ func (w *world) onlyApplyRecord(t *testing.T) applyRecord {
 	return records[0]
 }
 
-// appliedOf answers the BIOS object's Applied condition, and whether it
-// holds one.
 func appliedOf(t *testing.T, w *world) (condition, bool) {
 	t.Helper()
 	return conditions.Find(w.api.firmware(t, biosObjectName).Status.Conditions, appliedCondition)
@@ -111,10 +108,10 @@ func TestAPassedRehearsalRequestsAHeldTurn(t *testing.T) {
 		want := disruptionSpec{Machine: "node-2", Requester: requester, Kind: "Reboot", Hold: true,
 			Reason: biosObjectName + ": install 0.0.4.2 of " + f.Spec.Update.Component}
 		if d.Spec != want {
-			t.Errorf("the request is %+v, want %+v", d.Spec, want)
+			t.Errorf("the Disruption's spec is %+v, want %+v", d.Spec, want)
 		}
 		if d.Metadata.Labels[disruptionLabel] != biosObjectName || len(d.Metadata.OwnerReferences) != 1 || d.Metadata.OwnerReferences[0].UID != f.Metadata.UID {
-			t.Errorf("the request's metadata is %+v, want the Firmware's label and the Firmware as its owner", d.Metadata)
+			t.Errorf("the Disruption's metadata is %+v, want the Firmware's label and the Firmware as its owner", d.Metadata)
 		}
 		r := w.onlyApplyRecord(t)
 		if r.Result != resultWaiting || r.SHA256 != passed.SHA256 || r.Boot != firstBoot || r.Disruption != turnName {
@@ -130,7 +127,7 @@ func TestAPassedRehearsalRequestsAHeldTurn(t *testing.T) {
 }
 
 // A machine whose rehearsal did not pass gets no turn, and the approval
-// has no Applied condition until one machine asks for its turn.
+// has no Applied condition while no machine has an apply record.
 func TestARehearsalThatDidNotPassRequestsNoTurn(t *testing.T) {
 	cases := []struct {
 		name string
@@ -150,9 +147,9 @@ func TestARehearsalThatDidNotPassRequestsNoTurn(t *testing.T) {
 				w.settle()
 
 				if w.api.disruptionExists(turnName) {
-					t.Error("the operator asked for node-2's turn")
+					t.Errorf("Disruption %s exists, want none", turnName)
 				}
-				if c, held := appliedOf(t, w); held {
+				if c, found := appliedOf(t, w); found {
 					t.Errorf("Applied is %+v, want none", c)
 				}
 			})
@@ -160,8 +157,8 @@ func TestARehearsalThatDidNotPassRequestsNoTurn(t *testing.T) {
 	}
 }
 
-// A rehearsal answers one boot, so a rehearsal that passed on the boot
-// before a reboot asks for no turn.
+// A rehearsal is valid only for the boot that it ran on, so a rehearsal
+// that passed before a reboot does not request a turn.
 func TestARehearsalOfAnEarlierBootRequestsNoTurn(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := approvedWorld(t)
@@ -172,7 +169,7 @@ func TestARehearsalOfAnEarlierBootRequestsNoTurn(t *testing.T) {
 		w.settle()
 
 		if w.api.disruptionExists(turnName) {
-			t.Error("the operator asked for a turn on the rehearsal of the first boot")
+			t.Errorf("Disruption %s exists, want none because the rehearsal ran on the first boot", turnName)
 		}
 	})
 }
@@ -187,7 +184,7 @@ func TestAWrittenUpdateReleasesTheHold(t *testing.T) {
 			t.Errorf("the record is %+v, want Written with the pod's message", r)
 		}
 		if d := w.api.disruption(t, turnName); d.Spec.Hold {
-			t.Errorf("the request is %+v, want no hold, so the turn reboots the machine", d.Spec)
+			t.Errorf("the Disruption's spec is %+v, want no hold, so the turn reboots the machine", d.Spec)
 		}
 		if got := len(w.api.applies(t)); got != 0 {
 			t.Errorf("%d apply pods remain, want none", got)
@@ -201,9 +198,9 @@ func TestAWrittenUpdateReleasesTheHold(t *testing.T) {
 	})
 }
 
-// A write that the firmware refused, or an apply that reports it wrote
-// nothing, needs no reboot, so the operator withdraws the turn, and
-// writes nothing again on its own.
+// A write that the firmware refused, or an apply that reports that it
+// wrote nothing, needs no reboot. The operator deletes the Disruption
+// and does not try the write again on its own.
 func TestARefusedOrFailedWriteWithdrawsTheTurn(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -233,7 +230,7 @@ func TestARefusedOrFailedWriteWithdrawsTheTurn(t *testing.T) {
 					t.Errorf("the record is %+v, want %s with %q", r, c.result, c.message)
 				}
 				if w.api.disruptionExists(turnName) {
-					t.Error("the request remains, want it withdrawn")
+					t.Error("the Disruption remains, want it deleted")
 				}
 				if ac, _ := appliedOf(t, w); ac.Status != conditions.False || ac.Reason != c.result {
 					t.Errorf("Applied is %+v, want False with the reason %s", ac, c.result)
@@ -249,10 +246,10 @@ func TestARefusedOrFailedWriteWithdrawsTheTurn(t *testing.T) {
 	}
 }
 
-// An apply whose end does not say whether it wrote may have written, so
-// the operator still releases the hold. The machine reboots in its
-// turn, and the next scan answers whether the firmware took the append,
-// instead of an unplanned boot later.
+// An apply that ends without saying whether it wrote may have written,
+// so the operator still removes the hold. The machine reboots during its
+// turn, and the next scan shows whether the firmware took the append,
+// instead of an unplanned reboot later.
 func TestAnUncertainWriteRebootsTheMachine(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -261,19 +258,19 @@ func TestAnUncertainWriteRebootsTheMachine(t *testing.T) {
 	}{
 		{"a crash", func(t *testing.T, w *world, name string) {
 			w.api.finishPod(t, name, applyContainer, podFailed, "fwupdtool: loading\npanic: runtime error\n")
-		}, "the apply wrote no result; its last line was: panic: runtime error"},
+		}, "the apply pod wrote no result, and its last log line is: panic: runtime error"},
 		{"a deleted pod", func(t *testing.T, w *world, name string) {
-			w.api.deleteObject(uploadPodsPath, name)
-		}, "the apply pod is gone"},
+			w.api.deleteObject(operatorPodsPath, name)
+		}, "the apply pod no longer exists"},
 		{"a pod that never finishes", func(t *testing.T, w *world, name string) {
 			time.Sleep(scanDeadline)
 		}, "the apply pod did not finish within 10m0s of the signal to write"},
 		{"a crash after the prepare", func(t *testing.T, w *world, name string) {
 			w.api.finishPod(t, name, applyContainer, podFailed, preparedLine+"\n")
-		}, "the apply wrote no result; its last line was: " + preparedLine},
+		}, "the apply pod wrote no result, and its last log line is: " + preparedLine},
 		{"an answer the operator does not know", func(t *testing.T, w *world, name string) {
 			w.api.finishPod(t, name, applyContainer, podSucceeded, applyLog(applyResult{Result: "Maybe", Message: "?"}))
-		}, `the apply answered the result "Maybe", which the operator does not know`},
+		}, `the apply pod reported the result "Maybe", which the operator does not recognize`},
 		{"a firmware that accepted only some of the writes", func(t *testing.T, w *world, name string) {
 			w.api.finishPod(t, name, applyContainer, podSucceeded, applyLog(applyResult{Result: resultUncertain,
 				Message: "the firmware accepted 1 of the 2 authenticated writes to db, and write 2 failed: permission denied"}))
@@ -292,7 +289,7 @@ func TestAnUncertainWriteRebootsTheMachine(t *testing.T) {
 					t.Errorf("the record is %+v, want Uncertain with %q", r, c.message)
 				}
 				if !w.api.disruptionExists(turnName) || w.api.disruption(t, turnName).Spec.Hold {
-					t.Error("want the request kept with no hold, so the turn reboots the machine")
+					t.Error("the Disruption was deleted or still has spec.hold, want it kept with no hold so the turn reboots the machine")
 				}
 				if ac, _ := appliedOf(t, w); ac.Status != conditions.Unknown || ac.Reason != resultUncertain {
 					t.Errorf("Applied is %+v, want Unknown with the reason Uncertain", ac)
@@ -308,11 +305,11 @@ func TestAnUncertainWriteRebootsTheMachine(t *testing.T) {
 	}
 }
 
-// A person who deletes the request while the apply pod runs ends the
-// turn before the write. A write that landed, or may have, takes effect
-// only at a reboot, so the operator asks for the machine's turn again,
+// A person who deletes the Disruption while the apply pod runs ends the
+// turn before the reboot. A write that happened, or may have, takes
+// effect only at a reboot, so the operator creates the Disruption again,
 // with no hold, while the machine still runs the boot of the write.
-func TestADeletedRequestIsFiledAgainAfterAWrite(t *testing.T) {
+func TestADeletedDisruptionIsCreatedAgainAfterAWrite(t *testing.T) {
 	cases := []struct {
 		name   string
 		result string
@@ -322,7 +319,7 @@ func TestADeletedRequestIsFiledAgainAfterAWrite(t *testing.T) {
 			w.api.finishPod(t, name, applyContainer, podSucceeded, applyLog(writtenResult))
 		}},
 		{"an uncertain write", resultUncertain, func(t *testing.T, w *world, name string) {
-			w.api.deleteObject(uploadPodsPath, name)
+			w.api.deleteObject(operatorPodsPath, name)
 		}},
 	}
 	for _, c := range cases {
@@ -339,10 +336,10 @@ func TestADeletedRequestIsFiledAgainAfterAWrite(t *testing.T) {
 					t.Errorf("the record is %+v, want %s", r, c.result)
 				}
 				if !w.api.disruptionExists(turnName) {
-					t.Fatal("no request, want the machine's turn asked for again")
+					t.Fatal("no Disruption exists, want one created again for the machine's turn")
 				}
 				if d := w.api.disruption(t, turnName); d.Spec.Hold || d.Spec.Kind != "Reboot" {
-					t.Errorf("the request is %+v, want a Reboot with no hold", d.Spec)
+					t.Errorf("the Disruption's spec is %+v, want a Reboot with no hold", d.Spec)
 				}
 			})
 		})
@@ -350,23 +347,23 @@ func TestADeletedRequestIsFiledAgainAfterAWrite(t *testing.T) {
 }
 
 // A machine that rebooted after the write needs no turn, even when its
-// request is gone before the scan of the new boot.
-func TestNoRequestIsFiledAgainAfterTheReboot(t *testing.T) {
+// Disruption is gone before the scan of the new boot.
+func TestNoDisruptionIsCreatedAgainAfterTheReboot(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := rebootedWorld(t, rebootingEnds[0].end)
 		w.api.deleteObject(disruptionsPath, turnName)
 		w.settle()
 
 		if w.api.disruptionExists(turnName) {
-			t.Error("a request after the reboot, want none")
+			t.Error("a Disruption exists after the reboot, want none")
 		}
 	})
 }
 
-// A machine-operator that does not hold a turn reboots the machine and
-// marks the request Complete, and a person can delete the request. The
-// operator then deletes the apply pod that waits, writes nothing, and
-// does not ask again on its own.
+// A machine-operator that does not support spec.hold reboots the machine
+// and marks the Disruption Complete, and a person can delete the
+// Disruption. The operator then deletes the waiting apply pod, writes
+// nothing, and does not request a turn again on its own.
 func TestATurnThatEndsWithoutAHoldFails(t *testing.T) {
 	cases := []struct {
 		name string
@@ -374,9 +371,9 @@ func TestATurnThatEndsWithoutAHoldFails(t *testing.T) {
 		want string
 	}{
 		{"a turn with no hold", func(t *testing.T, w *world) { w.api.completeTurn(t, turnName) },
-			"the machine left its turn before the hold took effect: the Disruption " + turnName + " is Complete"},
-		{"a deleted request", func(t *testing.T, w *world) { w.api.deleteObject(disruptionsPath, turnName) },
-			"the machine left its turn before the hold took effect: the Disruption " + turnName + " is gone"},
+			"the Disruption " + turnName + " is Complete, so the machine left its reboot turn"},
+		{"a deleted Disruption", func(t *testing.T, w *world) { w.api.deleteObject(disruptionsPath, turnName) },
+			"the Disruption " + turnName + " no longer exists, so the machine left its reboot turn"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -389,15 +386,15 @@ func TestATurnThatEndsWithoutAHoldFails(t *testing.T) {
 					t.Errorf("the record is %+v, want Failed with %q", r, c.want)
 				}
 				if w.api.disruptionExists(turnName) || len(w.api.applies(t)) != 0 {
-					t.Error("a request or an apply pod remains, want neither")
+					t.Error("a Disruption or an apply pod remains, want neither")
 				}
 			})
 		})
 	}
 }
 
-// rebootedWorld is heldWorld after the apply pod ended as end has it,
-// and after machine-operator rebooted node-2 and marked the request
+// rebootedWorld is heldWorld after the apply pod ended as end specifies,
+// and after machine-operator rebooted node-2 and marked the Disruption
 // Complete. The scan of the new boot has started.
 func rebootedWorld(t *testing.T, end func(t *testing.T, w *world, name string)) *world {
 	w := heldWorld(t)
@@ -409,8 +406,8 @@ func rebootedWorld(t *testing.T, end func(t *testing.T, w *world, name string)) 
 	return w
 }
 
-// The two ends of an apply that reboot the machine: the firmware took
-// the append, or the operator cannot tell whether it did.
+// The ends of an apply after which the machine reboots: the firmware
+// took the append, or the operator cannot tell whether it did.
 var rebootingEnds = []struct {
 	name   string
 	result string
@@ -421,12 +418,13 @@ var rebootingEnds = []struct {
 		w.api.finishPod(t, name, applyContainer, podSucceeded, applyLog(writtenResult))
 	}, "the machine rebooted after the write, and its next scan still reads version 0.0.3.5, not 0.0.4.2"},
 	{"an uncertain write", resultUncertain, func(t *testing.T, w *world, name string) {
-		w.api.deleteObject(uploadPodsPath, name)
+		w.api.deleteObject(operatorPodsPath, name)
 	}, "the machine rebooted, and its next scan still reads version 0.0.3.5, not 0.0.4.2, so the append was not written"},
 }
 
-// While an apply waits for the scan of the new boot, the machine
-// rehearses nothing, because the apply has its append.
+// While an apply waits for the scan of the new boot, the operator
+// starts no rehearsal on the machine, because the apply already has its
+// append.
 func TestNoRehearsalStartsWhileAWriteWaitsForItsReboot(t *testing.T) {
 	for _, c := range rebootingEnds {
 		t.Run(c.name, func(t *testing.T) {
@@ -457,11 +455,11 @@ func TestTheNextScanProvesTheWrite(t *testing.T) {
 				if c, _ := conditions.Find(f.Status.Conditions, approvedCondition); c.Reason != reasonInstalled {
 					t.Errorf("Approved is %+v, want the reason Installed", c)
 				}
-				if _, held := conditions.Find(f.Status.Conditions, appliedCondition); held || len(f.Status.Applies) != 0 {
-					t.Errorf("the status holds %+v and %v, want no apply once nothing is pending", f.Status.Applies, f.Status.Conditions)
+				if _, found := conditions.Find(f.Status.Conditions, appliedCondition); found || len(f.Status.Applies) != 0 {
+					t.Errorf("the status has %+v and %v, want no apply once nothing is pending", f.Status.Applies, f.Status.Conditions)
 				}
 				if w.api.disruptionExists(turnName) {
-					t.Error("the completed request remains, want it deleted")
+					t.Error("the Complete Disruption remains, want it deleted")
 				}
 			})
 		})
@@ -481,23 +479,23 @@ func TestAMachineThatStillReadsTheOldVersionAfterItsRebootFails(t *testing.T) {
 					t.Errorf("the record is %+v, want Failed: %s", r, c.failed)
 				}
 				if w.api.disruptionExists(turnName) {
-					t.Error("the request remains, want it deleted and no second turn")
+					t.Error("the Disruption remains, want it deleted and no second turn")
 				}
 			})
 		})
 	}
 }
 
-// An operator that stops after it sent the apply pod the signal, before
-// the record said Writing, finds the turn from the Disruption, the
-// attempt and the signal from the pod's annotations, and the record in
-// the status. It follows the one pod to its result, and sends no second
-// signal.
+// An operator that stops after it sends the apply pod the signal, and
+// before it records Writing, loses nothing. A new operator reads the turn
+// from the Disruption, the attempt and the signal from the pod's
+// annotations, and the record from status. It follows the same pod to
+// its result and does not send a second signal.
 func TestARestartDuringTheWriteFollowsThePod(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := &world{api: startFakeAPI(t)}
 		stopFirst := w.run(t)
-		seedDiscovery(w)
+		setUpDiscovery(w)
 		w.api.finishScan(t, w.onlyScan(t).Metadata.Name, podSucceeded,
 			resultLog(scanned("firmware-09138-stable.xml.zst", systemFirmware("0.0.3.5", "0.0.4.2"), secureBootDBX("2"))))
 		w.settle()
@@ -506,8 +504,9 @@ func TestARestartDuringTheWriteFollowsThePod(t *testing.T) {
 		w.settle()
 		w.api.readyPod(t, w.onlyApply(t).Metadata.Name)
 		w.settle()
-		// The API server refuses every status write until the first
-		// operator stops, so its record stays Waiting after its pod.
+		// The fake API server refuses every status write until the first
+		// operator stops, so the record stays Waiting after the pod
+		// receives the signal.
 		w.api.refuseStatusWrites(100)
 		w.api.holdTurn(t, turnName)
 		w.settle()
@@ -530,16 +529,16 @@ func TestARestartDuringTheWriteFollowsThePod(t *testing.T) {
 			t.Errorf("the record is %+v, want Written", r)
 		}
 		if d := w.api.disruption(t, turnName); d.Spec.Hold {
-			t.Error("the request still holds the turn")
+			t.Error("the Disruption still has spec.hold, want it removed")
 		}
-		if got := w.api.created(uploadPodsPath); got != 3 {
-			t.Errorf("the operators created %d pods, want the scan, the rehearsal, and one apply", got)
+		if got := w.api.created(operatorPodsPath); got != 3 {
+			t.Errorf("the operator created %d pods, want the scan, the rehearsal, and one apply", got)
 		}
 	})
 }
 
-// A withdrawn approval needs no turn, so the operator deletes a request
-// that still holds one, and the apply pod that waits for it.
+// A withdrawn approval needs no turn, so the operator deletes a
+// Disruption that still holds one, and the apply pod that waits for it.
 func TestWithdrawingTheApprovalWithdrawsTheTurn(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := rehearsedWorld(t)
@@ -549,7 +548,7 @@ func TestWithdrawingTheApprovalWithdrawsTheTurn(t *testing.T) {
 		w.settle()
 
 		if w.api.disruptionExists(turnName) {
-			t.Error("the request remains, want it withdrawn")
+			t.Error("the Disruption remains, want it deleted")
 		}
 		if records := w.api.firmware(t, biosObjectName).Status.Applies; len(records) != 0 {
 			t.Errorf("status.applies = %+v, want none with no approval", records)
@@ -560,9 +559,10 @@ func TestWithdrawingTheApprovalWithdrawsTheTurn(t *testing.T) {
 	})
 }
 
-// A request's name holds the machine and the Firmware for a person to
-// read, and stays a DNS subdomain however long they are.
-func TestTheRequestsNameIsADNSSubdomain(t *testing.T) {
+// A Disruption's name contains the machine and the Firmware so that a
+// person can read it, and it stays a valid DNS subdomain however long
+// they are.
+func TestTheDisruptionNameIsADNSSubdomain(t *testing.T) {
 	cases := []struct {
 		name, firmware, machine, want string
 	}{

@@ -1,12 +1,7 @@
 package main
 
-// These tests follow the discovered Firmware objects across scans: an
-// entry leaves when its machine's next scan omits the device or its
-// Machine is deleted, an object with no entry is deleted unless a
-// person changed its group or an apply is under way, a machine's newest offered release posts
-// UpdateAvailable when it changes, and each device is an entry in the
-// object of its catalog component, or of its set of GUIDs when no
-// catalog offers it a release.
+// These tests check how the operator creates, fills, and deletes
+// discovered Firmware objects as scans finish.
 
 import (
 	"slices"
@@ -15,7 +10,8 @@ import (
 	"testing/synctest"
 )
 
-// rescan reboots node-2 and answers its next scan with the devices.
+// rescan reboots node-2, which makes the operator scan it again, and
+// finishes that scan with a result that reports devices.
 func rescan(t *testing.T, w *world, devices ...scanDevice) {
 	t.Helper()
 	w.api.putFleetMachine("node-2", machineReady, secondBoot)
@@ -34,12 +30,12 @@ func TestAnObjectWithNoEntryIsDeletedUnlessChanged(t *testing.T) {
 		w.api.putFirmware(changed)
 		rescan(t, w)
 
-		if got := len(w.api.held(firmwaresPath)); got != 1 {
+		if got := len(w.api.stored(firmwaresPath)); got != 1 {
 			t.Fatalf("%d Firmware objects remain, want only the changed one", got)
 		}
-		kept := w.api.firmware(t, dbxGUIDsName)
-		if len(kept.Status.Machines) != 0 || updateCountsOf(t, &kept) != (UpdateCounts{}) {
-			t.Errorf("the changed object's status is %+v, want no entry and zero counts", kept.Status)
+		object := w.api.firmware(t, dbxGUIDsName)
+		if len(object.Status.Machines) != 0 || updateCountsOf(t, &object) != (UpdateCounts{}) {
+			t.Errorf("the changed object's status is %+v, want no entry and zero counts", object.Status)
 		}
 		if containsPosted(w.postedAbout(dbxGUIDsName), posted{"Normal", reasonDeleted}) {
 			t.Errorf("the operator posted a Deleted Event about the changed object %s", dbxGUIDsName)
@@ -48,7 +44,7 @@ func TestAnObjectWithNoEntryIsDeletedUnlessChanged(t *testing.T) {
 }
 
 // An approval whose release no machine is offered any longer installs
-// nothing, so its object goes with its last entry.
+// nothing, so the operator deletes its object with its last entry.
 func TestAnApprovedObjectWithNoEntryIsDeleted(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := scannedWorld(t)
@@ -59,8 +55,8 @@ func TestAnApprovedObjectWithNoEntryIsDeleted(t *testing.T) {
 		w.settle()
 		rescan(t, w, secureBootDBX("2"))
 
-		for _, held := range w.api.held(firmwaresPath) {
-			if held["metadata"].(map[string]any)["name"] == biosObjectName {
+		for _, object := range w.api.stored(firmwaresPath) {
+			if object["metadata"].(map[string]any)["name"] == biosObjectName {
 				t.Errorf("the approved object %s remains with no entry", biosObjectName)
 			}
 		}
@@ -70,9 +66,9 @@ func TestAnApprovedObjectWithNoEntryIsDeleted(t *testing.T) {
 	})
 }
 
-// retirable decides which discovered objects with no entry the operator
-// deletes: the ones nobody changed, and the ones whose only change is
-// an approval with no apply under way.
+// The operator deletes a discovered object with no entry when nobody
+// changed it, or when its only change is an approval with no apply
+// under way.
 func TestWhichObjectsWithNoEntryAreDeleted(t *testing.T) {
 	approval := func(edit func(*firmware)) *firmware {
 		f := &firmware{Spec: firmwareSpec{Update: &update{
@@ -154,9 +150,9 @@ func TestADeviceWithAFirstReleaseMovesToItsComponent(t *testing.T) {
 	})
 }
 
-// One device whose GUIDs differ between two machines is one entry on
-// each machine in one component object, because the catalog offers
-// both a release of that component.
+// A device whose GUIDs differ between two machines has an entry for
+// each machine in the same component object, because the catalog
+// offers both machines a release of that component.
 func TestOneComponentOnTwoMachinesIsOneObject(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := discoveryWorld(t)
@@ -183,8 +179,9 @@ func TestOneComponentOnTwoMachinesIsOneObject(t *testing.T) {
 	})
 }
 
-// A device offered releases of two components is an entry of the
-// newest release's component, and the operator posts ManyComponents.
+// A device offered releases of two components has its entry in the
+// object of the newest release's component, and the operator posts
+// ManyComponents.
 func TestReleasesOfTwoComponentsPostAWarning(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := scannedWorld(t)
@@ -218,8 +215,8 @@ func TestUpdateAvailablePostsOnlyForANewRelease(t *testing.T) {
 	})
 }
 
-// A deleted Machine leaves no record and no entry, and its discovered
-// objects go with the last entry.
+// A deleted Machine leaves no record and no entry, and the operator
+// deletes a discovered object when its last entry is removed.
 func TestADeletedMachineLeavesNoEntry(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := scannedWorld(t)
@@ -235,7 +232,6 @@ func TestADeletedMachineLeavesNoEntry(t *testing.T) {
 	})
 }
 
-// A machine that is off keeps its entries.
 func TestAMachineThatIsOffKeepsItsEntries(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := scannedWorld(t)
@@ -291,7 +287,8 @@ func TestTheShortComponentName(t *testing.T) {
 	}
 }
 
-// A component's longer name is its ID, part by part.
+// A component's longer name is its ID in lower case, with each part
+// made a valid DNS label.
 func TestTheComponentName(t *testing.T) {
 	cases := []struct {
 		name, id, want string
@@ -311,14 +308,14 @@ func TestTheComponentName(t *testing.T) {
 	}
 }
 
-// One set of GUIDs in any order or case names one model.
+// A set of GUIDs gives the same model key in any order or case.
 func TestTheModelKeyIgnoresOrderAndCase(t *testing.T) {
 	if modelKey([]string{"B", "a", "b"}) != modelKey([]string{"a", "b"}) {
 		t.Error("the model key differs for one set of GUIDs")
 	}
 }
 
-// A device that reports no GUID names no model, and gets no object.
+// A device that reports no GUID gets no group and no object.
 func TestADeviceWithNoGUIDIsNoModel(t *testing.T) {
 	s := entriesOf(machineRecord{Machine: "node-2"}, "lvfs", []scanDevice{{Name: "Unknown"}, systemFirmware("0.0.3.5")}, nil)
 	if len(s.byGroup) != 1 || len(s.byGroup[groupKey{guids: modelKey([]string{biosGUID})}]) != 1 {
@@ -326,9 +323,9 @@ func TestADeviceWithNoGUIDIsNoModel(t *testing.T) {
 	}
 }
 
-// A person who changed a discovered object's GUIDs keeps the object
-// under its name. A scan that reports the device of that name again
-// meets the object, and records the machine's entry in it.
+// When a person changes a discovered object's GUIDs, the object keeps
+// its name. A later scan of the device that the name was made from
+// records the machine's entry in that object.
 func TestAGroupWhoseObjectAPersonChangedKeepsItsName(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := scannedWorld(t)
@@ -337,14 +334,14 @@ func TestAGroupWhoseObjectAPersonChangedKeepsItsName(t *testing.T) {
 		w.api.putFirmware(changed)
 		rescan(t, w, secureBootDBX("2"))
 
-		kept := w.api.firmware(t, dbxGUIDsName)
-		if len(kept.Status.Machines) != 1 || !slices.Equal(kept.Spec.Update.GUIDs, []string{meGUID}) {
-			t.Errorf("the object is %+v, want the person's GUIDs and node-2's entry", kept)
+		object := w.api.firmware(t, dbxGUIDsName)
+		if len(object.Status.Machines) != 1 || !slices.Equal(object.Spec.Update.GUIDs, []string{meGUID}) {
+			t.Errorf("the object is %+v, want the person's GUIDs and node-2's entry", object)
 		}
 	})
 }
 
-// A group whose short name another Firmware holds, such as a person's
+// A group whose short name another Firmware uses, such as a person's
 // upload rule, gets its object under the longer name, and the other
 // Firmware keeps its spec.
 func TestATakenShortNameMovesTheObjectToTheLongerName(t *testing.T) {
@@ -360,8 +357,8 @@ func TestATakenShortNameMovesTheObjectToTheLongerName(t *testing.T) {
 		if bios.Spec.Update.Component != frameworkBIOS().id || len(bios.Status.Machines) != 1 {
 			t.Errorf("the BIOS object is %+v, want the component and node-2's entry", bios)
 		}
-		if kept := w.api.firmware(t, biosObjectName); kept.Spec.Upload == nil || len(kept.Status.Machines) != 0 {
-			t.Errorf("the upload rule is %+v, want its upload and no entry", kept)
+		if object := w.api.firmware(t, biosObjectName); object.Spec.Upload == nil || len(object.Status.Machines) != 0 {
+			t.Errorf("the upload rule is %+v, want its upload and no entry", object)
 		}
 	})
 }

@@ -28,7 +28,7 @@ func TestParseDevices(t *testing.T) {
 			got, err := parseDevices([]byte(tt.stdout), []byte(tt.stderr), errExit2)
 
 			if len(got) != tt.want || (err == nil) != (tt.wantErr == "") || (err != nil && !strings.Contains(err.Error(), tt.wantErr)) {
-				t.Errorf("got %d devices, %v; want %d, error %q", len(got), err, tt.want, tt.wantErr)
+				t.Errorf("got %d devices, %v, want %d, error %q", len(got), err, tt.want, tt.wantErr)
 			}
 		})
 	}
@@ -40,7 +40,7 @@ func TestDiscoverKeepsOnlyUpdatableDevices(t *testing.T) {
 	devices, err := discover(context.Background(), r.tool.run)
 
 	if err != nil || len(devices) != 2 {
-		t.Fatalf("got %d devices, %v; want 2", len(devices), err)
+		t.Fatalf("got %d devices, %v, want 2", len(devices), err)
 	}
 	if devices[0].Name != "System Firmware" || devices[1].Name != "UEFI dbx" {
 		t.Errorf("devices are %q and %q", devices[0].Name, devices[1].Name)
@@ -65,7 +65,7 @@ func TestExecFwupdtoolFailsWhenTheESPDirectoryCannotBeMade(t *testing.T) {
 	_, _, err := execFwupdtool(filepath.Join(blocker, "esp"))(context.Background(), "--version")
 
 	if err == nil {
-		t.Error("expected an error")
+		t.Error("execFwupdtool ran with a file in the place of the ESP directory, want an error")
 	}
 }
 

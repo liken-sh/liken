@@ -1,12 +1,11 @@
 package main
 
-// A pass first reads the world from the watches' stores: every device
-// that an upload can reach, the labels of every Machine, and every
-// upload pod. Then it matches each rule against each device. CEL
-// validates one object at a time, so the API server cannot refuse a
-// second rule that matches the same device as the first. The operator
-// finds that here, runs neither rule on the device, and reports the
-// conflict in the status of both.
+// A pass reads the current state from the informer caches, then
+// matches each upload rule against each device. CEL validation in the
+// CRD checks one object at a time, so the API server accepts two rules
+// that match the same device. match records every rule that matches
+// each port, and the pass (pass.go) runs neither rule on a port with
+// two and reports the conflict in the status of both.
 
 import (
 	"context"
@@ -14,26 +13,30 @@ import (
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
-// observed is what the watches hold at the start of a pass.
+// observed is the state that the informer caches hold at the start of a
+// pass.
 type observed struct {
-	devices  []device
-	present  map[appearance]bool
+	devices []device
+	present map[appearance]bool
+	// machines holds each Machine's labels, keyed by name.
 	machines map[string]map[string]string
-	// uploads holds the upload pods by the rule that each one runs.
+	// uploads holds the upload pods, keyed by the rule each runs.
 	uploads map[string][]pod
 
-	// fleet holds every Machine by its name.
+	// fleet holds every Machine, keyed by name.
 	fleet map[string]machine
-	// deviceSets holds the hash of the device names in each machine's
-	// slices (deviceSetHash).
+	// deviceSets holds the hash of the device names in each
+	// machine's slices, keyed by machine name (deviceSetHash).
 	deviceSets map[string]string
-	// scans holds the scan pods by the FirmwareCatalog that each one reads.
+	// scans holds the scan pods, keyed by the FirmwareCatalog each
+	// one reads.
 	scans map[string][]pod
-	// rehearsals holds the rehearsal pods by the Firmware that each one
-	// rehearses.
+	// rehearsals holds the rehearsal pods, keyed by the Firmware each
+	// one rehearses.
 	rehearsals map[string][]pod
-	// applies holds the apply pods, and disruptions the requests for a
-	// reboot turn, by the Firmware that each one applies.
+	// applies holds the apply pods, and disruptions holds the
+	// Disruptions that request a reboot turn. Both are keyed by the
+	// Firmware that each one applies.
 	applies     map[string][]pod
 	disruptions map[string][]disruption
 }
@@ -80,15 +83,16 @@ func (o *operator) observe() observed {
 	return w
 }
 
-// matching is every rule matched against every device.
+// matching is the result of matching every rule against every device.
 type matching struct {
 	// invalid holds the error of each rule whose selector or
 	// spec.machines does not compile. Such a rule runs nowhere.
 	invalid map[string]error
-	// devices holds the devices each valid rule matches.
+	// devices holds the devices that each valid rule matches, keyed
+	// by rule name.
 	devices map[string][]device
-	// rules holds the names of the rules that match the device in each
-	// port.
+	// rules holds the names of the rules that match a device, keyed
+	// by the port the device is in.
 	rules map[port][]string
 }
 
@@ -97,8 +101,7 @@ func (o *operator) match(ctx context.Context, rules []firmware, w observed) matc
 	inUse := map[string]bool{}
 	for index := range rules {
 		f := &rules[index]
-		// An update rule has no selector, and discovery answers it
-		// (discovered.go).
+		// Only an upload rule has a selector.
 		if f.Metadata.DeletionTimestamp != "" || f.Spec.Upload == nil {
 			continue
 		}

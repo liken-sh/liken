@@ -1,9 +1,9 @@
 package main
 
-// These tests change the machine, its devices, and the catalog after a
-// scan answered, and count the scans the operator starts. A machine is
-// scanned again when it booted, when a device name changed, or when a
-// new catalog file offers other releases for its GUIDs.
+// A machine is scanned again after a reboot, when a device name
+// changes, or when a new catalog file offers different releases for its
+// device GUIDs. These tests make each change after a scan and count the
+// scan pods that the operator creates.
 
 import (
 	"testing"
@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// A new boot time and a new device name start a scan. A new device
+// A new boot time or a new device name starts a scan. A new device
 // number, after a replug, does not.
 func TestWhatStartsAnotherScan(t *testing.T) {
 	cases := []struct {
@@ -31,7 +31,7 @@ func TestWhatStartsAnotherScan(t *testing.T) {
 				c.change(w)
 				w.settle()
 
-				if got := w.api.created(uploadPodsPath); got != c.want {
+				if got := w.api.created(operatorPodsPath); got != c.want {
 					t.Errorf("the operator created %d scan pods, want %d", got, c.want)
 				}
 			})
@@ -39,7 +39,6 @@ func TestWhatStartsAnotherScan(t *testing.T) {
 	}
 }
 
-// A machine that becomes Ready gets its scan then.
 func TestAMachineIsScannedWhenItBecomesReady(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
@@ -59,8 +58,8 @@ func TestAMachineIsScannedWhenItBecomesReady(t *testing.T) {
 	})
 }
 
-// fleetWorld is two machines scanned against the first file: node-2
-// keeps the BIOS and the dbx, and node-3 keeps only the dbx.
+// fleetWorld is two machines scanned against the first catalog file.
+// node-2 has the BIOS and the dbx, and node-3 has only the dbx.
 func fleetWorld(t *testing.T) *world {
 	w := discoveryWorld(t)
 	w.api.publish("node-3", camera("1-2", 3))
@@ -79,8 +78,9 @@ func fleetWorld(t *testing.T) *world {
 }
 
 // A new catalog file that changes no release for a machine's GUIDs
-// moves its record to the file with no scan. A file that changes the
-// BIOS's releases scans only the machine with the BIOS.
+// updates the machine's record to the new file without a scan. A file
+// that changes the BIOS's releases scans only the machine that has the
+// BIOS.
 func TestANewFileScansOnlyTheMachinesItChanges(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := fleetWorld(t)
@@ -99,7 +99,8 @@ func TestANewFileScansOnlyTheMachinesItChanges(t *testing.T) {
 	})
 }
 
-// A file that changes nothing for any machine scans none.
+// A new catalog file that changes no machine's releases scans no
+// machine.
 func TestANewFileWithTheSameReleasesScansNothing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := fleetWorld(t)
@@ -108,7 +109,7 @@ func TestANewFileWithTheSameReleasesScansNothing(t *testing.T) {
 		time.Sleep(time.Hour)
 		synctest.Wait()
 
-		if got := w.api.created(uploadPodsPath); got != 2 {
+		if got := w.api.created(operatorPodsPath); got != 2 {
 			t.Errorf("the operator created %d scan pods, want only the first two", got)
 		}
 		for _, machine := range []string{"node-2", "node-3"} {
@@ -120,8 +121,8 @@ func TestANewFileWithTheSameReleasesScansNothing(t *testing.T) {
 }
 
 // A new scan image can find devices and releases that the old one did
-// not, so an operator that starts with another scan image scans each
-// machine again, with no boot and no new catalog file.
+// not, so an operator that starts with a different scan image scans
+// each machine again, even with no reboot and no new catalog file.
 func TestAnOperatorWithANewScanImageScansAgain(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := &world{api: startFakeAPI(t)}
@@ -140,7 +141,7 @@ func TestAnOperatorWithANewScanImageScansAgain(t *testing.T) {
 		w.scanImage = "ghcr.io/liken-sh/firmware-operator-scan:next"
 		w.run(t)
 
-		if got := w.api.created(uploadPodsPath); got != 2 {
+		if got := w.api.created(operatorPodsPath); got != 2 {
 			t.Fatalf("the operators created %d scan pods, want 2", got)
 		}
 		if image := w.onlyScan(t).Spec.Containers[0].Image; image != w.scanImage {
@@ -152,9 +153,9 @@ func TestAnOperatorWithANewScanImageScansAgain(t *testing.T) {
 	})
 }
 
-// A restarted operator holds no index of the catalog, so it downloads
-// the file again before it compares releases, and still scans nothing
-// that the new file does not change.
+// A restarted operator has no cached copy of the old catalog file. It
+// downloads the file again to compare releases, and still scans only
+// the machines whose releases the new file changes.
 func TestARestartedOperatorComparesReleasesAgain(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := &world{api: startFakeAPI(t)}
@@ -173,7 +174,7 @@ func TestARestartedOperatorComparesReleasesAgain(t *testing.T) {
 		w.lvfs.publish("firmware-09139-stable.xml.zst", frameworkBIOS("0.0.3.5", "0.0.4.2"))
 		w.run(t)
 
-		if got := w.api.created(uploadPodsPath); got != 1 {
+		if got := w.api.created(operatorPodsPath); got != 1 {
 			t.Errorf("the operators created %d scan pods, want 1", got)
 		}
 		if r := w.record(t, "lvfs", "node-2"); r.File != "firmware-09139-stable.xml.zst" || r.Result != resultScanned {

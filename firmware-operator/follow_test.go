@@ -1,9 +1,8 @@
 package main
 
-// These tests play the kubelet and machine-operator after an upload
-// starts, and read the result the operator writes. The operator writes
-// the result first and then deletes the pod, and the claim goes with
-// the pod.
+// These tests act as the kubelet and machine-operator after an upload
+// starts. They end the upload pod and change the machine's slice, then
+// read the result that the operator writes.
 
 import (
 	"slices"
@@ -13,9 +12,9 @@ import (
 	"time"
 )
 
-// An upload loads when the loader exits 0 and the bare device leaves
-// the slice, and the device that comes back in its place matches no
-// rule.
+// An upload is Loaded when the loader exits 0 and the bare device
+// leaves the slice, and the device that appears in its place matches
+// no rule.
 func TestTheDeviceLeavingAfterSuccessIsLoaded(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startedUpload(t)
@@ -41,9 +40,9 @@ func TestTheDeviceLeavingAfterSuccessIsLoaded(t *testing.T) {
 	})
 }
 
-// A loader that exits 0 while the bare device stays has not loaded the
-// chip. The operator waits one minute after the loader ends, then
-// writes Failed.
+// A loader that exits 0 while the bare device stays in the slice has
+// not loaded the chip. The operator waits settleWindow after the
+// loader ends, then writes Failed.
 func TestExitZeroWithTheDeviceStayingFailsAfterAMinute(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startedUpload(t)
@@ -72,9 +71,9 @@ func TestExitZeroWithTheDeviceStayingFailsAfterAMinute(t *testing.T) {
 	})
 }
 
-// A loader that fails gives its exit code and the last line of its
-// log in the entry's message.
-func TestAFailedLoaderGivesItsExitCodeAndLastLine(t *testing.T) {
+// When a loader fails, the entry's message has its exit code and the
+// last line of its log.
+func TestAFailedLoaderReportsItsExitCodeAndLastLine(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startedUpload(t)
 		log := "fxload: opening /dev/bus/usb/001/012\nfxload: can't modify CPUCS: Protocol error\n"
@@ -92,8 +91,8 @@ func TestAFailedLoaderGivesItsExitCodeAndLastLine(t *testing.T) {
 	})
 }
 
-// A pod that never finishes, such as one whose claim never allocates,
-// fails five minutes after its creation.
+// A pod that never finishes, such as one whose claim is never
+// allocated, fails five minutes after its creation.
 func TestAnUploadThatDoesNotFinishFailsAfterFiveMinutes(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startedUpload(t)
@@ -110,35 +109,35 @@ func TestAnUploadThatDoesNotFinishFailsAfterFiveMinutes(t *testing.T) {
 	})
 }
 
-// A Running entry whose pod a person deleted fails, and the operator
-// does not run the upload again for that appearance.
+// A Running entry whose pod a person deleted becomes Failed, and the
+// operator does not run the upload again for that bare device.
 func TestARunningUploadWhosePodIsGoneFails(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startedUpload(t)
-		w.api.deleteObject(uploadPodsPath, w.onlyUpload(t).Metadata.Name)
+		w.api.deleteObject(operatorPodsPath, w.onlyUpload(t).Metadata.Name)
 		w.settle()
 
 		e := w.entry(t, "qhy5l-ii")
-		if e.Result != resultFailed || !strings.Contains(e.Message, "the upload pod is gone") {
-			t.Errorf("the entry is %+v, want Failed because the pod is gone", e)
+		if e.Result != resultFailed || !strings.Contains(e.Message, "the upload pod no longer exists") {
+			t.Errorf("the entry is %+v, want Failed because the pod no longer exists", e)
 		}
-		if got := w.api.created(uploadPodsPath); got != 1 {
+		if got := w.api.created(operatorPodsPath); got != 1 {
 			t.Errorf("the operator created %d upload pods, want 1", got)
 		}
 	})
 }
 
-// deleteObject deletes an object the way another writer does.
+// deleteObject removes an object from the fake API server and sends
+// its DELETED event, as a delete by another client does.
 func (a *fakeAPI) deleteObject(collection, name string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.store(collection, a.objects[collection][name], "DELETED")
 }
 
-// The pod's own failure, such as the deadline of
-// activeDeadlineSeconds, gives the pod's reason when the loader never
-// ended.
-func TestAFailedPodWithNoLoaderGivesThePodsReason(t *testing.T) {
+// When the pod fails before the loader ends, such as when it exceeds
+// activeDeadlineSeconds, the entry's message has the pod's reason.
+func TestAFailedPodWithNoLoaderReportsThePodsReason(t *testing.T) {
 	cases := []struct {
 		name   string
 		status podStatus
@@ -158,9 +157,9 @@ func TestAFailedPodWithNoLoaderGivesThePodsReason(t *testing.T) {
 	}
 }
 
-// A loader's exit reason other than the plain Error goes in the
-// message, and a long last line is cut.
-func TestALoadersFailureNamesItsReason(t *testing.T) {
+// The message includes a loader's exit reason unless it is the plain
+// Error, and cuts a long last line.
+func TestALoaderFailureMessageHasItsReasonAndACutLine(t *testing.T) {
 	long := strings.Repeat("x", 300)
 	cases := []struct {
 		name   string
@@ -179,7 +178,7 @@ func TestALoadersFailureNamesItsReason(t *testing.T) {
 	}
 }
 
-// earliest answers the earlier time, and the zero time is no time.
+// earliest returns the earlier of two times and ignores a zero time.
 func TestEarliest(t *testing.T) {
 	early, late := time.Unix(100, 0), time.Unix(200, 0)
 	cases := []struct {
@@ -200,9 +199,9 @@ func TestEarliest(t *testing.T) {
 	}
 }
 
-// A status write that the API server refuses keeps the pod, posts no
-// Event, and the pass after the retry delay writes the result and
-// then deletes the pod.
+// When the API server refuses a status write, the operator keeps the
+// pod and posts no Event. The pass after the retry delay writes the
+// result and then deletes the pod.
 func TestARefusedStatusWriteKeepsThePodUntilTheRetry(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startedUpload(t)

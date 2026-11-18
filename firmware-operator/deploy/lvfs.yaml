@@ -1,7 +1,7 @@
 # The Linux Vendor Firmware Service, the catalog that fwupd reads on a
 # desktop. firmware-operator scans every Ready machine against it. A
-# cluster with no route to the internet deletes this object and
-# declares a FirmwareCatalog for its own mirror.
+# cluster with no route to the internet should delete this object and
+# declare a FirmwareCatalog that points at its own mirror.
 ---
 apiVersion: firmware.liken.sh/v1alpha1
 kind: FirmwareCatalog

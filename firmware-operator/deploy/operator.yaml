@@ -1,12 +1,12 @@
-# The operator: one unprivileged Deployment for the cluster. It reads
-# every Firmware and every machine's ResourceSlice, starts an upload pod
-# on a device's machine for each new appearance of a matched device,
-# and writes each Firmware's status. It reads each FirmwareCatalog's jcat over
-# HTTPS, starts a scan pod on each Ready machine that needs a scan, and
-# writes each FirmwareCatalog's status and the discovered Firmware objects. It
-# keeps no state outside the status and the pods, so a new pod reads
-# both and carries on. Its memory holds the index of each catalog file,
-# which it reads again after a restart.
+# firmware-operator runs as one unprivileged Deployment for the whole
+# cluster. When a device that a Firmware matches appears, it starts an
+# upload pod on that device's machine. It downloads each
+# FirmwareCatalog's jcat over HTTPS, starts a scan pod on each Ready
+# machine that needs a scan, and creates the Firmware objects that the
+# scans discover. It keeps its state in object statuses and pods, so a
+# restarted operator reads them and continues. The only state in
+# memory is the index of each catalog file, which the operator
+# downloads again after a restart.
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -14,19 +14,19 @@ metadata:
   name: firmware-operator
 spec:
   # One replica is enough, because the kubelet restarts a crashed
-  # operator. Two are safe: the Lease named firmware-operator lets one
-  # copy act, and the other waits and takes over when the first stops
-  # (leader.go says what two acting copies would break).
+  # operator. Two replicas are also safe, because only the copy that
+  # holds the Lease firmware-operator acts, and the other takes over
+  # when it stops. leader.go explains why two acting copies would break
+  # the operator.
   replicas: 1
   selector:
     matchLabels:
       app: firmware-operator
-  # A rollout starts the new pod beside the old one, and stops the old
-  # one only when the new one runs. The new pod waits for the Lease while
-  # the old one leads. On SIGTERM the old pod finishes the Firmware it
-  # answers and releases the Lease, and the new pod takes it on its next
-  # read, within about 11 seconds. So the image pull happens while the
-  # old pod still leads.
+  # A rollout starts the new pod beside the old one and stops the old
+  # one only when the new one is running, so the new image is pulled
+  # before the old pod stops. The new pod waits for the Lease until the
+  # old pod releases it on SIGTERM, and then acquires it on its next
+  # retry, within about 11 seconds.
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -38,25 +38,23 @@ spec:
         app: firmware-operator
     spec:
       serviceAccountName: firmware-operator
-      # A shutdown finishes the writes of the Firmware in flight, and
-      # then releases the Lease. Those writes are the creates of an
-      # upload's pod and claim, a status write, which reads the Firmware
-      # again and writes once more after a conflict, and the deletes of
-      # finished upload pods, and the client bounds each request at
-      # 15 s. The release waits up to 11 s for client-go's election to
-      # end (its 10 s renew deadline and 1 s), and then up to 5 s for the
-      # release that follows a late renewal, 16 s in all. 60 s leaves the
-      # writes 44 s. A kill before the release leaves the Lease to
-      # expire, and a waiting copy then takes it 30 to 41 s after the
-      # last renewal instead of within about 11 s.
+      # On SIGTERM, the operator finishes the writes for the Firmware
+      # it is working on, and then releases the Lease. Each request has
+      # a 15 s timeout, and a status write that fails with a conflict
+      # reads the Firmware again and writes a second time. The release takes
+      # up to 16 s: up to 11 s for client-go's election to end, then up
+      # to 5 s to clear the Lease. So 60 s leaves 44 s for the writes.
+      # When the pod is killed before it releases the Lease, a waiting
+      # copy acquires it only after it expires, 30 to 41 s after the
+      # last renewal.
       terminationGracePeriodSeconds: 60
-      # The operator holds a machine drained while an apply writes, and
-      # only the operator removes the hold. So it must keep running on a
-      # machine that it holds drained: liken's drain skips a pod that
-      # tolerates the cordon by its key, and the scheduler places such a
-      # pod on a cordoned machine. Without it, a cluster whose other
-      # machines take no pod of the operator's would hold the machine
-      # drained for good.
+      # While an apply pod writes firmware, the machine stays drained
+      # until the operator removes spec.hold from the Disruption. So the
+      # operator must be able to run on a drained machine.
+      # machine-operator's drain does not evict a pod that tolerates the
+      # cordon's taint, and the scheduler can place such a pod on the
+      # cordoned machine. Without this toleration, when no other machine
+      # can run the operator, the machine stays drained.
       tolerations:
         - key: node.kubernetes.io/unschedulable
           operator: Exists
@@ -64,17 +62,16 @@ spec:
       containers:
         - name: operator
           image: ghcr.io/liken-sh/firmware-operator:latest
-          # With no --scan-image, the operator reads this container's
-          # image from its own pod and runs the scan pods on the image
-          # firmware-operator-scan at the same tag, so the pin of this
-          # image in the kustomization pins both. --catalog-interval is
-          # the time between two reads of a FirmwareCatalog's jcat, an hour by
-          # default.
+          # Without --scan-image, the operator reads this container's
+          # image from its own pod and runs its scan, rehearsal, and
+          # apply pods from the image firmware-operator-scan at the same
+          # tag, so pinning this image in the kustomization pins both.
+          # --catalog-interval sets the time between downloads of a
+          # FirmwareCatalog's jcat, an hour by default.
           env:
-            # The operator starts the upload pods in its own namespace.
-            # The two values also name the Lease the operator holds and
-            # the identity it holds it under, so the operator exits when
-            # either is unset.
+            # The operator starts its pods and keeps its Lease in
+            # POD_NAMESPACE, and holds the Lease as POD_NAME. It exits
+            # when either is unset.
             - name: POD_NAME
               valueFrom:
                 fieldRef:
@@ -91,15 +88,11 @@ spec:
             privileged: false
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
-          # The operator holds the watches of the Firmware and FirmwareCatalog
-          # objects, the slices, the Machines, and the pods, evaluates
-          # each selector in its own memory, and reads each catalog file
-          # into an index of its GUIDs and releases. LVFS's file
-          # decompresses to tens of megabytes, which the operator reads
-          # as a stream, so the index is the part it keeps. Its memory
-          # on a cluster is not measured yet, so the limit only bounds a
-          # leak, with room above the 20 to 30 MB that the other
-          # operators on client-go measured and for the index.
+          # The operator caches its watches and an index of GUIDs and
+          # releases for each catalog file. LVFS's catalog file
+          # decompresses to tens of megabytes, but the operator reads it
+          # as a stream and keeps only the index. Its memory use on a
+          # cluster is not measured, so the limit only bounds a leak.
           resources:
             requests:
               cpu: 10m

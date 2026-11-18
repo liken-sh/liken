@@ -16,9 +16,9 @@ built on a Cypress FX2 chip.
 
 ## Find out whether the device needs firmware
 
-A device that needs firmware from the host appears with one product
-ID before its firmware and another after it. List the USB devices that
-the machine publishes:
+A device that needs firmware from the host has one product ID before
+its firmware loads and another after. To list the USB devices that a
+machine publishes, read the machine's `ResourceSlice`:
 
 ```sh
 kubectl get resourceslice <node>-liken.sh -o yaml
@@ -38,10 +38,10 @@ A QHY5L-II with no firmware is the vendor `1618` and the product
     vendor: {string: "1618"}
 ```
 
-After its firmware, the same port holds the product `0921`, with a new
-device number. The vendor's Linux package tells you which IDs are the
-bare chip: its udev rules run a loader, often `fxload`, for the bare
-IDs. INDI's `85-qhyccd.rules` holds this rule for the QHY5L-II:
+After the firmware loads, the same port has the product `0921` and a
+new device number. The vendor's Linux package shows which IDs are the
+bare chip, because its udev rules run a loader, often `fxload`, for
+those IDs. INDI's `85-qhyccd.rules` has this rule for the QHY5L-II:
 
 ```
 ATTRS{idVendor}=="1618", ATTRS{idProduct}=="0920", RUN+="/sbin/fxload -t fx2 -I /lib/firmware/qhy/QHY5II.HEX -D $env{DEVNAME}"
@@ -49,8 +49,8 @@ ATTRS{idVendor}=="1618", ATTRS{idProduct}=="0920", RUN+="/sbin/fxload -t fx2 -I 
 
 ## Write the Firmware
 
-A `Firmware` holds the same three facts as the udev rule: the IDs
-that match, the loader, and the firmware file.
+A `Firmware` has the same parts as the udev rule: the IDs to match,
+the loader, and the firmware file.
 
 ```yaml
 apiVersion: firmware.liken.sh/v1alpha1
@@ -66,22 +66,23 @@ spec:
     command: [fxload, -t, fx2, -I, /lib/firmware/qhy/QHY5II.HEX, -D, $(LIKEN_DEVICE)]
 ```
 
-- `spec.selector` is a CEL expression with the same variables as a
+- `spec.selector` is a CEL expression that uses the same variables as a
   `DeviceClass` selector. Write it against the attributes in the
-  slice, as `device.attributes["liken.sh"].<name>`.
-- `spec.upload.image` is an image that holds the loader and the
-  firmware file. The firmware comes from the vendor and stays in that
-  image, never in the OS image.
+  `ResourceSlice`, as `device.attributes["liken.sh"].<name>`.
+- `spec.upload.image` is an image that contains the loader and the
+  firmware file. The firmware comes from the vendor, so it goes in this
+  image and not in the OS image.
 - `spec.upload.command` is the loader's command. In place of the udev
   rule's `$env{DEVNAME}`, write `$(LIKEN_DEVICE)`. The operator sets
-  `LIKEN_DEVICE` to the device's usbfs node, such as
-  `/dev/bus/usb/001/012`, and Kubernetes expands it.
+  the environment variable `LIKEN_DEVICE` to the path of the device's
+  usbfs node, such as `/dev/bus/usb/001/012`, and the kubelet expands
+  `$(LIKEN_DEVICE)` in the command.
 
 The upload pod runs the command as user 1000, with no capabilities and
-a read-only root file system, so the loader must run as a user that
-is not root, and the firmware file must be readable by that user. An
-FX2 or FX3 load is a series of USB control transfers on the usbfs
-node, and the claim gives the pod that node.
+a read-only root file system. So the loader must work without root,
+and user 1000 must be able to read the firmware file. An FX2 or FX3
+load is a series of USB control transfers on the usbfs node, and the
+pod's device claim gives the pod access to that node.
 
 Apply it:
 
@@ -91,9 +92,9 @@ kubectl apply -f qhy5l-ii.yaml
 
 ### Limit it to some machines
 
-With no `spec.machines`, the rule applies on every machine, so a
-portable camera loads wherever you connect it. To limit it, select
-the `Machine`s by their labels:
+When `spec.machines` is not set, the rule applies on every machine, so
+a portable camera loads its firmware wherever you connect it. To limit
+the rule, select `Machine` objects by their labels:
 
 ```yaml
 spec:
@@ -102,23 +103,23 @@ spec:
       observatory: "true"
 ```
 
-A machine with no `Machine` object has no labels, so a rule with
-`spec.machines` does not apply there.
+A machine that has no `Machine` object has no labels, so a rule that
+sets `spec.machines` does not apply to it.
 
 ## Read what it did
 
-Connect the camera, or power it on. Within a few seconds the operator
-starts the upload. `kubectl get firmware` counts the result of each
-port where the rule matched a device:
+Connect the camera or power it on. Within a few seconds the operator
+starts the upload. `kubectl get firmware` counts the results on the
+ports where the rule matched a device:
 
 ```
-NAME       VALID   LOADED   RUNNING   FAILED   CONFLICT   MACHINES   BEHIND   VERSION   APPROVED   PENDING   AGE
-qhy5l-ii   True    1        0         0        0                                                                   5m
+NAME       VALID   LOADED   RUNNING   FAILED   CONFLICT   MACHINES   BEHIND   VERSION   APPROVED   PENDING   REHEARSED   APPLIED   AGE
+qhy5l-ii   True    1        0         0        0                                                                                         5m
 ```
 
-`MACHINES`, `BEHIND`, `VERSION`, `APPROVED`, and `PENDING` belong to
-the `Firmware` objects that find and approve updates, so an upload
-rule leaves them empty.
+The columns from `MACHINES` to `APPLIED` are for the `Firmware`
+objects that record and approve updates, so they are empty for an
+upload rule.
 
 `status.devices` has one entry for each port:
 
@@ -137,13 +138,14 @@ kubectl get firmware qhy5l-ii -o jsonpath='{.status.devices}'
   time: "2026-10-19T22:01:09Z"
 ```
 
-The entry keeps the device number of the bare chip that loaded. The
-camera after the load is a new device in the slice, with the product
-`0921` and its own device number, and the pod that uses the camera
-claims it by those IDs. While the upload runs, the entry is `Running`,
-and its message names the upload pod in `liken-system`.
+The entry has the device number of the bare chip that the operator
+loaded. After the load, the camera is a new device in the
+`ResourceSlice`, with the product `0921` and its own device number,
+and the pod that uses the camera claims that device. While the upload
+runs, the `result` is `Running`, and the `message` gives the name of
+the upload pod in `liken-system`.
 
-The `Event`s give the same history for the last hour:
+The `Event`s from the last hour show the same history:
 
 ```sh
 kubectl describe firmware qhy5l-ii
@@ -153,26 +155,28 @@ kubectl describe firmware qhy5l-ii
 Events:
   Type    Reason         Age   From               Message
   ----    ------         ----  ----               -------
-  Normal  Compiled       5m    firmware-operator  the selector compiled
+  Normal  Compiled       5m    firmware-operator  The selectors compile
   Normal  UploadStarted  2m    firmware-operator  usb-1-4-1-2 on liken-1: the upload pod liken-system/qhy5l-ii-3f2a9c1b0d4e runs the loader
-  Normal  Loaded         2m    firmware-operator  loaded usb-1-4-1-2 on liken-1: the loader exited 0 and the bare device left the slice
+  Normal  Loaded         2m    firmware-operator  Loaded usb-1-4-1-2 on liken-1: the loader exited 0 and the bare device left the slice
 ```
 
-The firmware stays until the device loses power. After a power cycle
-or a replug, the bare chip appears with a new device number, and the
-operator uploads again. The new appearance replaces the port's entry.
+The device keeps the firmware until it loses power. After a power
+cycle or a replug, the bare chip appears with a new device number, and
+the operator uploads again and replaces the port's entry.
 
 ## A Conflict
 
-Two `Firmware` objects that match one device run neither. Each entry
-for that port is `Conflict`, and its message names the other rules.
-The operator posts a `Conflict` `Event`, a Warning, on each. Narrow
-one selector, or delete one of the rules. The rule that still matches
-then uploads to the device that is there.
+When two `Firmware` objects match one device, the operator runs
+neither. The entry for that port in each object has the `result`
+`Conflict`, and its `message` lists the other rules. The operator posts
+a `Warning` `Event` with the reason `Conflict` on each object. Narrow
+one selector or delete one of the rules, and the rule that still
+matches uploads to the connected device.
 
 ## Change the rule
 
-An edit to the spec moves the `Firmware`'s generation, and the
-operator uploads again to each matched device that is in a slice,
-with the new spec. Use it to try a fix after a failed upload: the
-operator does not retry a failure on its own.
+The operator does not retry a failed upload on its own. An edit to the
+spec changes the `Firmware`'s generation, and the operator then
+uploads again with the new spec to each matched device in a
+`ResourceSlice`. So to try a fix after a failed upload, edit the
+rule.

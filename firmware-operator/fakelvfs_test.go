@@ -1,11 +1,10 @@
 package main
 
-// A fake LVFS behind an in-memory http.RoundTripper, so a test reads a
-// catalog with no network and no socket, inside a synctest bubble. It
-// serves each file at its URL, answers 304 to a read whose ETag is the
-// file's own, and counts the reads of each URL. The builders write a
-// catalog the way LVFS does: AppStream XML compressed with zstd, and a
-// jcat of gzip JSON with bytes after the gzip stream.
+// fakeLVFS is an http.RoundTripper, so a test reads a catalog inside a
+// synctest bubble with no socket. It returns 304 to a request whose
+// If-None-Match is the file's ETag. The builders write LVFS's formats:
+// AppStream XML compressed with zstd, and a jcat of gzip JSON with
+// bytes after the gzip stream.
 
 import (
 	"bytes"
@@ -21,8 +20,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
-// lvfsURL is the catalog's unversioned URL, as the lvfs FirmwareCatalog names
-// it.
+// lvfsURL is the unversioned catalog URL of the lvfs FirmwareCatalog.
 const lvfsURL = "https://cdn.fwupd.org/downloads/firmware.xml.zst"
 
 type fakeLVFS struct {
@@ -42,7 +40,7 @@ func (l *fakeLVFS) RoundTrip(r *http.Request) (*http.Response, error) {
 	defer l.mu.Unlock()
 	address := r.URL.String()
 	l.reads[address]++
-	answer := func(status int, body []byte) *http.Response {
+	respond := func(status int, body []byte) *http.Response {
 		header := http.Header{}
 		if etag := l.etags[address]; etag != "" {
 			header.Set("ETag", etag)
@@ -50,24 +48,24 @@ func (l *fakeLVFS) RoundTrip(r *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: status, Status: fmt.Sprintf("%d %s", status, http.StatusText(status)),
 			Header: header, Body: io.NopCloser(bytes.NewReader(body)), Request: r}
 	}
-	body, held := l.files[address]
+	body, found := l.files[address]
 	switch {
-	case !held:
-		return answer(http.StatusNotFound, nil), nil
+	case !found:
+		return respond(http.StatusNotFound, nil), nil
 	case r.Header.Get("If-None-Match") != "" && r.Header.Get("If-None-Match") == l.etags[address]:
-		return answer(http.StatusNotModified, nil), nil
+		return respond(http.StatusNotModified, nil), nil
 	}
-	return answer(http.StatusOK, body), nil
+	return respond(http.StatusOK, body), nil
 }
 
-// read answers how many times a URL was read.
+// read returns the number of requests for a URL.
 func (l *fakeLVFS) read(address string) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.reads[address]
 }
 
-// serve puts a file at a URL, with a new ETag.
+// serve serves a file at a URL, with a new ETag.
 func (l *fakeLVFS) serve(address string, body []byte) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -76,9 +74,9 @@ func (l *fakeLVFS) serve(address string, body []byte) {
 	l.etags[address] = fmt.Sprintf(`"%d"`, l.versions)
 }
 
-// publish puts a catalog file in the catalog's directory, and a jcat
-// that names it with its SHA-256, the way LVFS publishes a new catalog.
-// It answers the file's name and SHA-256.
+// publish serves a new catalog file in lvfsURL's directory and a jcat
+// that lists its name and SHA-256, as LVFS does. It returns the name
+// and the SHA-256.
 func (l *fakeLVFS) publish(file string, components ...fwComponent) (string, string) {
 	body := zstdOf(appStreamOf(components...))
 	l.serve(directoryOf(lvfsURL)+file, body)
@@ -95,30 +93,28 @@ func directoryOf(address string) string {
 	return address[:strings.LastIndex(address, "/")+1]
 }
 
-// fwComponent is one firmware component of a catalog: the GUIDs it
-// flashes and its release versions.
+// fwComponent is one firmware component of a catalog, with the GUIDs
+// it flashes and its release versions.
 type fwComponent struct {
 	id       string
 	guids    []string
 	versions []string
 }
 
-// The GUIDs of the test fleet's devices.
+// The GUIDs of the devices of the test machines.
 const (
 	biosGUID = "9c13b7f1-d618-5d68-be61-6b17881014a7"
 	meGUID   = "69585d92-0000-0000-0000-000000000001"
 	dbxGUID  = "23192307-0000-0000-0000-000000000002"
-	// kekGUID is the GUID fwupd adds to the dbx device of a machine
-	// that enrolled one more Key Exchange Key.
+	// kekGUID is the GUID that fwupd adds to the dbx device of a
+	// machine that has enrolled an additional Key Exchange Key.
 	kekGUID = "d07ff664-0000-0000-0000-000000000003"
 )
 
-// frameworkBIOS is the component that offers the Framework's BIOS.
 func frameworkBIOS(versions ...string) fwComponent {
 	return fwComponent{id: "work.frame.Laptop.RyzenAI300.BIOS.firmware", guids: []string{biosGUID}, versions: versions}
 }
 
-// dbx is the component that offers the Secure Boot revocation list.
 func dbx(versions ...string) fwComponent {
 	return fwComponent{id: "com.microsoft.dbx.x64.firmware", guids: []string{dbxGUID}, versions: versions}
 }
@@ -149,9 +145,9 @@ func zstdOf(text string) []byte {
 	return out.Bytes()
 }
 
-// jcatOf builds a jcat with the blobs LVFS gives: a SHA-1, the SHA-256,
-// and a signature. LVFS serves bytes after the end of the gzip stream,
-// and so does this.
+// jcatOf builds a jcat with the blobs that LVFS includes: a SHA-1, the
+// SHA-256, and a signature. It appends bytes after the gzip stream, as
+// LVFS's jcat has.
 func jcatOf(file, sum string) []byte {
 	document := fmt.Sprintf(`{"JcatVersionMajor":0,"JcatVersionMinor":1,"Items":[{"Id":%q,"Blobs":[`+
 		`{"Kind":4,"Flags":1,"Timestamp":1,"Data":"0a0b0c0d0e0f00000000000000000000deadbeef"},`+

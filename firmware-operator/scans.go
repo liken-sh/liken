@@ -1,21 +1,21 @@
 package main
 
-// One pass answers each FirmwareCatalog in two steps. First it follows the
-// FirmwareCatalog's scan pods to their results, and writes each result to the
-// machine's record and to the discovered Firmware objects. Then it
-// reads the jcat when a read is due, and starts a scan of each Ready
-// machine that needs one, and writes both to the status in one write.
+// For each FirmwareCatalog, a pass writes the results of the finished
+// scan pods to the machine records in the FirmwareCatalog's status and
+// to the discovered Firmware objects. Then it reads the catalog file (a
+// jcat) when a read is due, and starts a scan on each Ready machine that
+// needs one.
 //
-// A machine needs a scan against a FirmwareCatalog when one of these changed
-// since its record: the time it booted, the set of device names in its
-// slice, or the catalog file. A version changes only across a reboot or
-// a flash, and a device number that changes on a replug does not count.
-// When only the file changed, and the new file offers the same releases
-// for the GUIDs the machine reported last, the operator records the new
-// file and scans nothing, and moves the machine's entries in the
-// Firmware objects to the new file too (discovered.go). Each attempt, a boot, a device set, and a
-// file, runs once, so a failed scan waits for one of the three to
-// change.
+// A machine needs a scan when its boot time, the hash of the device
+// names in its ResourceSlices, the catalog file, or the scan image
+// differs from its record. A device's version changes only at a reboot
+// or a flash. The device names leave out the device number, which
+// changes when a device is replugged. When only the catalog file
+// changed, and the new file offers the same releases for the GUIDs of
+// the machine's last scan, the operator moves the record and the
+// machine's discovered entries to the new file and starts no scan
+// (discovered.go). A failed scan runs again only after one of those
+// values changes.
 
 import (
 	"context"
@@ -32,8 +32,9 @@ import (
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
-// discover answers every FirmwareCatalog, and answers the earliest time at
-// which a scan's deadline or a jcat read is due.
+// discover reconciles every FirmwareCatalog and returns the earliest
+// time at which a scan deadline or a catalog file read is due, or the
+// zero time when none is.
 func (o *operator) discover(ctx context.Context, rules *[]firmware, w observed, now time.Time) (time.Time, error) {
 	catalogs, err := informer.List[catalog](o.client, o.catalogs, catalogsPath, catalogPath)
 	if err != nil {
@@ -47,20 +48,20 @@ func (o *operator) discover(ctx context.Context, rules *[]firmware, w observed, 
 		c := &catalogs[index]
 		present[c.Metadata.Name] = true
 		byName[c.Metadata.Name] = c
-		// The stop ends the pass between two FirmwareCatalogs, so a shutdown
-		// waits for the writes of one FirmwareCatalog and no more.
+		// Checking for shutdown between FirmwareCatalogs means a shutdown
+		// waits for the writes of at most one FirmwareCatalog.
 		if ctx.Err() != nil || c.Metadata.DeletionTimestamp != "" {
 			continue
 		}
-		due, err := o.answerCatalog(ctx, c, rules, w, now)
+		due, err := o.reconcileCatalog(ctx, c, rules, w, now)
 		if err != nil {
-			problems = append(problems, fmt.Errorf("the FirmwareCatalog %s: %w", c.Metadata.Name, err))
+			problems = append(problems, fmt.Errorf("reconciling the FirmwareCatalog %s: %w", c.Metadata.Name, err))
 		}
 		next = earliest(next, due)
 	}
-	o.forgetCaches(present)
+	o.deleteCachesOfDeletedCatalogs(present)
 	if ctx.Err() == nil {
-		problems = append(problems, o.forgetMachines(*rules, w.fleet))
+		problems = append(problems, o.removeEntriesOfDeletedMachines(*rules, w.fleet))
 	}
 	if ctx.Err() == nil {
 		due, err := o.approveAll(*rules, w, byName, now)
@@ -70,8 +71,7 @@ func (o *operator) discover(ctx context.Context, rules *[]firmware, w observed, 
 	return next, errors.Join(problems...)
 }
 
-// answerCatalog brings one FirmwareCatalog's status and its scans up to date.
-func (o *operator) answerCatalog(ctx context.Context, c *catalog, rules *[]firmware, w observed, now time.Time) (time.Time, error) {
+func (o *operator) reconcileCatalog(ctx context.Context, c *catalog, rules *[]firmware, w observed, now time.Time) (time.Time, error) {
 	ends, busy, due, err := o.endsOf(c, w.scans[c.Metadata.Name], now)
 	problems := []error{err}
 	if err := o.recordEnds(ctx, c, ends, rules, w, now); err != nil {
@@ -79,22 +79,23 @@ func (o *operator) answerCatalog(ctx context.Context, c *catalog, rules *[]firmw
 	}
 	moved := slices.ContainsFunc(ends, func(end scanEnd) bool { return end.result == resultCatalogMoved })
 	next, err := o.schedule(ctx, c, moved, busy, w, now)
-	problems = append(problems, err, o.refileEntries(*rules, c))
+	problems = append(problems, err, o.moveEntriesToScannedFile(*rules, c))
 	return earliest(due, next), errors.Join(problems...)
 }
 
-// recordEnds writes the end of each attempt to the FirmwareCatalog's status and
-// removes the record of each machine whose Machine is deleted. Then it
-// writes each answered scan to the discovered Firmware objects, and
-// deletes each finished pod whose result is written.
+// recordEnds writes the result of each finished scan to the
+// FirmwareCatalog's status, and drops the record of each machine whose
+// Machine is deleted. Then it writes the devices of each successful
+// scan to the discovered Firmware objects and deletes the finished scan
+// pods.
 func (o *operator) recordEnds(ctx context.Context, c *catalog, ends []scanEnd, rules *[]firmware, w observed, now time.Time) error {
 	releases := map[string]string{}
 	for _, end := range ends {
 		if end.result == resultScanned && end.attempt.file == c.Status.File {
 			index, err := o.indexOf(ctx, c, c.Status.File, c.Status.SHA256)
 			if err != nil {
-				// With no hash, the next catalog file scans the machine
-				// again, which costs a scan and loses nothing.
+				// The record gets no releases hash, so a change of
+				// catalog file scans this machine again.
 				fmt.Fprintf(os.Stderr, "firmware-operator: reading the catalog file of %s: %v\n", c.Metadata.Name, err)
 				continue
 			}
@@ -102,25 +103,25 @@ func (o *operator) recordEnds(ctx context.Context, c *catalog, ends []scanEnd, r
 		}
 	}
 	var notices []notice
-	written, err := o.settleCatalog(c, func(held catalogStatus) catalogStatus {
+	written, err := o.settleCatalog(c, func(current catalogStatus) catalogStatus {
 		notices = nil
 		records := map[string]machineRecord{}
-		for _, r := range held.Machines {
+		for _, r := range current.Machines {
 			if _, exists := w.fleet[r.Machine]; exists {
 				records[r.Machine] = r
 			}
 		}
 		for _, end := range ends {
-			previous, held := records[end.attempt.machine]
+			previous, found := records[end.attempt.machine]
 			_, exists := w.fleet[end.attempt.machine]
-			if !exists || (held && end.attempt.is(previous) && previous.Result != resultRunning) {
+			if !exists || (found && end.attempt.is(previous) && previous.Result != resultRunning) {
 				continue
 			}
 			records[end.attempt.machine] = recordOf(end, previous, releases[end.attempt.machine], now)
 			notices = append(notices, endNotice(end))
 		}
-		held.Machines = sortedRecords(records)
-		return held
+		current.Machines = sortedRecords(records)
+		return current
 	})
 	if err != nil {
 		return err
@@ -130,10 +131,10 @@ func (o *operator) recordEnds(ctx context.Context, c *catalog, ends []scanEnd, r
 	}
 	var problems []error
 	for _, end := range ends {
-		r, held := c.Status.record(end.attempt.machine)
-		if held && end.result == resultScanned && end.attempt.is(r) && r.Result == resultScanned {
+		r, found := c.Status.record(end.attempt.machine)
+		if found && end.result == resultScanned && end.attempt.is(r) && r.Result == resultScanned {
 			if err := o.applyScan(rules, entriesOf(r, c.Metadata.Name, end.devices, *rules)); err != nil {
-				// The pod stays, so the next pass reads its result again.
+				// The pod is kept, so the next pass reads its result again.
 				problems = append(problems, err)
 				continue
 			}
@@ -145,15 +146,14 @@ func (o *operator) recordEnds(ctx context.Context, c *catalog, ends []scanEnd, r
 	return errors.Join(problems...)
 }
 
-// refile moves a machine's record to a new catalog file with no scan,
-// because the file offers the same releases for its GUIDs.
-type refile struct {
+// fileMove moves a machine's record to a new catalog file without a scan.
+type fileMove struct {
 	machine, from, to string
 }
 
-// schedule reads the jcat when a read is due, starts a scan of each
-// Ready machine that needs one, and writes both. It answers when the
-// next timed read of the jcat is due.
+// schedule reads the catalog file when a read is due, starts the scans
+// that are needed, and writes both to the FirmwareCatalog's status. It
+// returns when the next timed read of the catalog file is due.
 func (o *operator) schedule(ctx context.Context, c *catalog, moved bool, busy map[string]bool, w observed, now time.Time) (time.Time, error) {
 	due, next := o.refreshDue(c, moved, now)
 	readiness, file, sum := c.Status.ready(), c.Status.File, c.Status.SHA256
@@ -164,7 +164,7 @@ func (o *operator) schedule(ctx context.Context, c *catalog, moved bool, busy ma
 		readiness, file, sum = f.ready, f.file, f.sha256
 	}
 	var starts []scanAttempt
-	var refiles []refile
+	var fileMoves []fileMove
 	var problems []error
 	if readiness.Status == conditions.True && file != "" {
 		for _, name := range sortedKeys(w.fleet) {
@@ -173,12 +173,12 @@ func (o *operator) schedule(ctx context.Context, c *catalog, moved bool, busy ma
 				continue
 			}
 			a := scanAttempt{catalog: c.Metadata.Name, machine: name, boot: m.Status.Boot.Time, devices: w.deviceSets[name], file: file, image: o.discovery.scanImage}
-			r, held := c.Status.record(name)
-			if held && a.is(r) {
+			r, found := c.Status.record(name)
+			if found && a.is(r) {
 				continue
 			}
-			if held && r.Boot == a.boot && r.Devices == a.devices && r.Image == a.image && r.Result == resultScanned && o.sameReleases(ctx, c, r, file, sum) {
-				refiles = append(refiles, refile{machine: name, from: r.File, to: file})
+			if found && r.Boot == a.boot && r.Devices == a.devices && r.Image == a.image && r.Result == resultScanned && o.sameReleases(ctx, c, r, file, sum) {
+				fileMoves = append(fileMoves, fileMove{machine: name, from: r.File, to: file})
 				continue
 			}
 			if err := o.startScan(c, a, sum); err != nil {
@@ -190,17 +190,17 @@ func (o *operator) schedule(ctx context.Context, c *catalog, moved bool, busy ma
 	}
 
 	var transitioned bool
-	written, err := o.settleCatalog(c, func(held catalogStatus) catalogStatus {
+	written, err := o.settleCatalog(c, func(current catalogStatus) catalogStatus {
 		transitioned = false
 		if read != nil {
-			held.File, held.SHA256, held.ETag, held.Checked = read.file, read.sha256, read.etag, read.checked
+			current.File, current.SHA256, current.ETag, current.Checked = read.file, read.sha256, read.etag, read.checked
 			readiness.ObservedGeneration = c.Metadata.Generation
 			readiness.LastTransitionTime = now.UTC().Truncate(time.Second)
-			held.Conditions = slices.Clone(held.Conditions)
-			transitioned = conditions.Set(&held.Conditions, readiness)
+			current.Conditions = slices.Clone(current.Conditions)
+			transitioned = conditions.Set(&current.Conditions, readiness)
 		}
 		records := map[string]machineRecord{}
-		for _, r := range held.Machines {
+		for _, r := range current.Machines {
 			records[r.Machine] = r
 		}
 		for _, a := range starts {
@@ -211,19 +211,19 @@ func (o *operator) schedule(ctx context.Context, c *catalog, moved bool, busy ma
 			records[a.machine] = machineRecord{
 				Machine: a.machine, Boot: a.boot, Devices: a.devices, File: a.file, Image: a.image,
 				GUIDs: previous.GUIDs, Releases: previous.Releases,
-				Result: resultRunning, Message: "the scan pod " + o.namespace + "/" + scanPodName(a) + " reads the machine's devices",
+				Result: resultRunning, Message: "the scan pod " + o.namespace + "/" + scanPodName(a) + " is scanning the machine's devices",
 				Time: stamp(now),
 			}
 		}
-		for _, move := range refiles {
+		for _, move := range fileMoves {
 			r, exists := records[move.machine]
 			if exists && r.Result == resultScanned && r.File == move.from {
 				r.File = move.to
 				records[move.machine] = r
 			}
 		}
-		held.Machines = sortedRecords(records)
-		return held
+		current.Machines = sortedRecords(records)
+		return current
 	})
 	if err != nil {
 		return next, errors.Join(append(problems, err)...)
@@ -232,16 +232,16 @@ func (o *operator) schedule(ctx context.Context, c *catalog, moved bool, busy ma
 		var notices []notice
 		for _, a := range starts {
 			notices = append(notices, notice{reason: reasonScanStarted, message: a.machine + ": the scan pod " +
-				o.namespace + "/" + scanPodName(a) + " reads the machine's devices against " + a.file})
+				o.namespace + "/" + scanPodName(a) + " scans the machine's devices against the catalog file " + a.file})
 		}
 		o.postCatalog(c, readiness, notices, transitioned)
 	}
 	return next, errors.Join(problems...)
 }
 
-// sameReleases reports whether a catalog file offers the same releases
-// for a machine's GUIDs as the file of its record. A file the operator
-// cannot read counts as different, so the machine is scanned.
+// sameReleases reports whether the catalog file offers the same releases
+// for a machine's GUIDs as the file in its record. A file that cannot be
+// read counts as different, so the machine is scanned.
 func (o *operator) sameReleases(ctx context.Context, c *catalog, r machineRecord, file, sum string) bool {
 	if r.Releases == "" {
 		return false
@@ -254,8 +254,8 @@ func (o *operator) sameReleases(ctx context.Context, c *catalog, r machineRecord
 	return index.releasesHash(r.GUIDs) == r.Releases
 }
 
-// startScan creates the pod of one attempt. A pod that already exists
-// under the name answers 409, which means the attempt runs.
+// startScan creates the scan pod of an attempt. The pod name is derived
+// from the attempt, so a 409 means that the attempt already has a pod.
 func (o *operator) startScan(c *catalog, a scanAttempt, sum string) error {
 	scan := buildScanPod(c, a, sum, o.namespace)
 	err := o.client.RequestJSON(http.MethodPost, podsPathIn(o.namespace), mustJSON(scan), nil)
@@ -265,17 +265,17 @@ func (o *operator) startScan(c *catalog, a scanAttempt, sum string) error {
 	return err
 }
 
-// settleCatalog writes the status that compose gives a FirmwareCatalog, and
-// writes nothing when the status already holds it. compose runs again
-// on the API server's copy after a 409. A FirmwareCatalog deleted during the
-// pass needs no status.
+// settleCatalog writes the status that compose returns, unless it equals
+// the current status. After a 409, compose runs again on the API
+// server's copy. A FirmwareCatalog deleted during the pass is not an
+// error.
 func (o *operator) settleCatalog(c *catalog, compose func(catalogStatus) catalogStatus) (bool, error) {
-	written, err := informer.SettleStatus[catalog](o.client, o.catalogs.Versions, catalogPath(c.Metadata.Name), c, func(held *catalog) bool {
-		next := compose(held.Status)
-		if reflect.DeepEqual(held.Status, next) {
+	written, err := informer.SettleStatus[catalog](o.client, o.catalogs.Versions, catalogPath(c.Metadata.Name), c, func(current *catalog) bool {
+		next := compose(current.Status)
+		if reflect.DeepEqual(current.Status, next) {
 			return false
 		}
-		held.APIVersion, held.Kind, held.Status = firmwareAPIVersion, catalogKind, next
+		current.APIVersion, current.Kind, current.Status = firmwareAPIVersion, catalogKind, next
 		return true
 	})
 	if errors.Is(err, apiclient.ErrNotFound) {

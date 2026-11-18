@@ -19,7 +19,7 @@ func TestConfigureRemotesDisablesEveryShippedRemote(t *testing.T) {
 	}
 
 	if err := configureRemotes(dir, "mirror", "https://m.test/firmware.xml.zst"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("configuring the remotes: %v", err)
 	}
 
 	want := map[string]string{
@@ -41,6 +41,6 @@ func TestConfigureRemotesFailsOnAnUnreadableFile(t *testing.T) {
 	os.Mkdir(filepath.Join(dir, "dir.conf"), 0o755)
 
 	if err := configureRemotes(dir, "x", "https://x"); err == nil {
-		t.Error("expected an error")
+		t.Error("configureRemotes read a directory named dir.conf as a file, want an error")
 	}
 }

@@ -1,11 +1,14 @@
 package main
 
-// The operator follows each upload pod to its result. An upload
-// succeeds when the pod exits 0 and the bare device leaves the
-// machine's slice. The exit code alone is not enough, because a loader
-// can exit 0 after it writes firmware that the chip does not run. The
-// operator writes the result to status first and then deletes the pod,
-// so an operator that stops between the two reads the same pod again
+// An upload pod writes firmware to a bare device, a chip that has
+// enumerated with no firmware loaded. A chip that runs its new firmware
+// enumerates again with its loaded IDs, so the bare device leaves the
+// machine's slice. The operator records an upload as Loaded only when
+// the loader exits 0 and the bare device has left the slice, because a
+// loader can exit 0 after it writes firmware that the chip does not run.
+//
+// The operator writes the result to status before it deletes the pod,
+// so an operator that restarts between the two reads the same pod again
 // and writes the same result.
 
 import (
@@ -14,21 +17,20 @@ import (
 	"time"
 )
 
-// uploadDeadline bounds an upload, from its pod's creation. The pod's
-// own activeDeadlineSeconds has the same value, but counts only from
-// the start of a pod that runs, and a pod whose claim never allocates
+// uploadDeadline limits an upload, counted from the pod's creation. The
+// pod's activeDeadlineSeconds has the same value, but the kubelet counts
+// it from when the pod starts, and a pod whose claim is never allocated
 // never starts.
 const uploadDeadline = 5 * time.Minute
 
-// settleWindow is how long the operator waits for the bare device to
-// leave the slice after the loader exits 0. A chip that took its
-// firmware resets and enumerates again within seconds, so a minute
-// leaves room for a slow hub without holding a failed upload open.
+// settleWindow is how long the operator waits, after the loader exits
+// 0, for the bare device to leave the slice. A chip that runs its new
+// firmware enumerates again within seconds, and a minute leaves room
+// for a slow USB hub.
 const settleWindow = time.Minute
 
-// verdict is the result of one upload pod. A zero result means the
-// upload is still in progress, and due is when the operator decides it
-// at the latest.
+// verdict is the result of one upload pod. An empty result means the
+// upload is in progress, and the operator checks the pod again by due.
 type verdict struct {
 	result  string
 	message string
@@ -37,8 +39,8 @@ type verdict struct {
 
 func (v verdict) decided() bool { return v.result != "" }
 
-// follow decides an upload pod's result from the pod and from whether
-// its appearance is still in the slice.
+// follow returns an upload pod's result. present is whether the bare
+// device is still in the slice.
 func follow(p pod, present bool, now time.Time) verdict {
 	loader := p.loader()
 	switch p.Status.Phase {
@@ -66,9 +68,9 @@ func follow(p pod, present bool, now time.Time) verdict {
 	return verdict{result: resultFailed, message: fmt.Sprintf("the upload pod did not finish within %s of its creation", uploadDeadline)}
 }
 
-// failure says why a pod failed: the loader's exit code and the last
-// line it wrote, or the pod's own reason when the loader never ended,
-// such as the DeadlineExceeded of activeDeadlineSeconds.
+// failure describes why a pod failed: the loader's exit code and the
+// last line of its log, or the pod's own reason when the loader never
+// ran to the end, such as DeadlineExceeded from activeDeadlineSeconds.
 func failure(p pod, loader *terminated) string {
 	if loader == nil {
 		message := "the upload pod failed"
@@ -89,12 +91,11 @@ func failure(p pod, loader *terminated) string {
 	return message
 }
 
-// maxLineSize bounds the line of the loader's log that a status entry
-// quotes. The kubelet already limits the message to the last 2048
-// bytes of the log.
+// maxLineSize is the most of the loader's last log line that a status
+// entry quotes. The termination message that the kubelet copies from
+// the log is already at most 2048 bytes or 80 lines.
 const maxLineSize = 256
 
-// lastLine answers the last line of a log that holds text.
 func lastLine(log string) string {
 	lines := strings.Split(strings.TrimSpace(log), "\n")
 	line := strings.TrimSpace(lines[len(lines)-1])
@@ -104,8 +105,9 @@ func lastLine(log string) string {
 	return line
 }
 
-// parseTime reads a time the API server wrote. A time that does not
-// parse is the zero time, which makes every deadline due.
+// parseTime reads a time written by the API server. A value that does
+// not parse gives the zero time, so every deadline counted from it is
+// already due.
 func parseTime(value string) time.Time {
 	parsed, _ := time.Parse(time.RFC3339, value)
 	return parsed

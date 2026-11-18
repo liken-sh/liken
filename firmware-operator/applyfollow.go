@@ -1,18 +1,17 @@
 package main
 
-// The operator follows each apply pod from its start to its end
-// (applypod.go). The signal to write divides the pod's life in two.
-// Before the signal the pod cannot have written, because `scan apply`
-// reaches the variable store only after the signal, so any end of the
-// pod is Failed, and the machine leaves its turn with no reboot. After
-// the signal only the pod's own answer says whether it wrote, and every
-// other end is Uncertain (apply.go).
+// The operator follows each apply pod (applypod.go) from its start to
+// its end. `scan apply` writes nothing until the operator sends the pod
+// the signal to write. So any end of the pod before the signal is
+// Failed, and the machine leaves its reboot turn without a reboot.
+// After the signal, only a result that the pod reports says whether it
+// wrote, and any other end is Uncertain (apply.go).
 //
-// A pod that answers CatalogMoved found its jcat naming another file
-// than the machine's scan read, and stopped in its prepare, so it wrote
-// nothing. That needs no person: the operator reads the jcat again at
-// once, drops the record, and the apply starts again on its own with
-// the new file.
+// A pod that reports CatalogMoved found that its jcat lists a different
+// file than the machine's scan read. It stopped during its prepare, so
+// it wrote nothing, and no person needs to act. The operator reads the
+// jcat again, deletes the apply's record, and starts the apply again
+// with the new file.
 
 import (
 	"errors"
@@ -24,8 +23,8 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// createApplyPod creates an apply pod. A pod that exists under the name
-// answers 409, which is the same result.
+// createApplyPod creates an apply pod. A 409 Conflict means the pod
+// already exists, which is the state the caller needs, so it is not an error.
 func (o *operator) createApplyPod(p pod) error {
 	err := o.client.RequestJSON(http.MethodPost, podsPathIn(o.namespace), mustJSON(p), nil)
 	if errors.Is(err, apiclient.ErrConflict) {
@@ -34,12 +33,14 @@ func (o *operator) createApplyPod(p pod) error {
 	return err
 }
 
-// requestWhenReady files the request for the turn of a machine whose
-// apply pod is Ready, which means its prepare is done. A pod that ended
-// is left to applyEnds, which fails the record. A pod that is gone
-// before it was Ready wrote nothing, and its machine needs no turn. The
-// pass asks the API server whether the pod is gone, because the watch
-// can lag a pod that the operator created a moment ago.
+// requestWhenReady creates the Disruption that requests the reboot turn
+// of a machine whose apply pod is Ready, which means the pod finished
+// its prepare. It does nothing for a pod that has ended, because
+// applyEnds fails the record. A pod that is gone before it was Ready
+// wrote nothing, so the machine needs no turn and the step is Failed.
+// It reads the pod from the API server before it treats the pod as
+// gone, because the watch can lag behind a pod that the operator
+// created a moment ago.
 func (o *operator) requestWhenReady(f *firmware, r applyRecord, pods []pod) (*applyStep, error) {
 	name := applyPodName(attemptOfApply(f.Metadata.Name, r))
 	if i := slices.IndexFunc(pods, func(p pod) bool { return p.Metadata.Name == name }); i >= 0 {
@@ -48,11 +49,11 @@ func (o *operator) requestWhenReady(f *firmware, r applyRecord, pods []pod) (*ap
 			return nil, nil
 		}
 		d := buildDisruption(f, r.Machine, updateSubject(f, r.Machine))
-		if err := o.fileDisruption(d); err != nil {
-			return nil, fmt.Errorf("requesting the turn of %s: %w", r.Machine, err)
+		if err := o.createDisruption(d); err != nil {
+			return nil, fmt.Errorf("creating the Disruption for the reboot turn of %s: %w", r.Machine, err)
 		}
 		r.Disruption = d.Metadata.Name
-		s := step(r, resultWaiting, fmt.Sprintf("the apply pod %s prepared the write, and the Disruption %s asks for the machine's reboot turn, which holds after the drain for the write",
+		s := step(r, resultWaiting, fmt.Sprintf("the apply pod %s is ready to write, and the Disruption %s requests the machine's reboot turn, so the operator signals the write after machine-operator drains the machine",
 			name, r.Disruption), resultWaiting)
 		return &s, nil
 	}
@@ -60,15 +61,16 @@ func (o *operator) requestWhenReady(f *firmware, r applyRecord, pods []pod) (*ap
 	if err != nil || !gone {
 		return nil, err
 	}
-	s := step(r, resultFailed, "the apply pod is gone before it prepared, so nothing was written, and the operator asked for no turn", resultWaiting)
+	s := step(r, resultFailed, "the apply pod no longer exists and did not finish preparing, so nothing was written and the operator created no Disruption", resultWaiting)
 	return &s, nil
 }
 
-// signal sends the apply pod of a machine whose turn holds the signal
-// to write, and answers the step to Writing. A pod that ended, or whose
-// deletion started, is left to applyEnds and to the next pass. A pod
-// that already carries the signal, because an operator stopped after it
-// sent it, gets no second one, so the deadline keeps its start.
+// signal sends the signal to write to the apply pod of a machine that
+// holds its reboot turn, and returns a Writing step. It does nothing for
+// a pod that has ended or is being deleted, which applyEnds and the next
+// pass handle. A pod that already has the signal, because the operator
+// restarted after it sent it, gets no second one, so the deadline keeps
+// its original start.
 func (o *operator) signal(f *firmware, r applyRecord, pods []pod, catalogs map[string]*catalog, now time.Time) (*applyStep, error) {
 	name := applyPodName(attemptOfApply(f.Metadata.Name, r))
 	i := slices.IndexFunc(pods, func(p pod) bool { return p.Metadata.Name == name })
@@ -85,23 +87,24 @@ func (o *operator) signal(f *firmware, r applyRecord, pods []pod, catalogs map[s
 	patch := mustJSON(map[string]any{"metadata": map[string]any{"annotations": signalAnnotations(now)}})
 	err := o.client.Request(http.MethodPatch, podPath(o.namespace, name), "application/merge-patch+json", patch, nil)
 	if errors.Is(err, apiclient.ErrNotFound) {
-		return o.startSignalled(f, r, catalogs, now)
+		return o.startWithSignal(f, r, catalogs, now)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("sending the apply pod %s the signal to write: %w", name, err)
+		return nil, fmt.Errorf("patching the apply pod %s with the signal to write: %w", name, err)
 	}
 	s := step(r, resultWriting, fmt.Sprintf("the machine is drained, and the operator sent the apply pod %s the signal to write the append", name), resultWaiting)
 	return &s, nil
 }
 
-// startSignalled starts the apply pod again, with the signal, when the
-// one that waited is gone. A drain that does not skip the pod evicts
-// it, and nothing was written, because the pod had no signal. The new
-// pod prepares on the drained machine and writes at once.
-func (o *operator) startSignalled(f *firmware, r applyRecord, catalogs map[string]*catalog, now time.Time) (*applyStep, error) {
+// startWithSignal creates the apply pod again, with the signal already
+// set, when the pod that was waiting is gone. A drain that does not
+// skip the pod evicts it, and nothing was written, because the pod had
+// no signal. The new pod prepares on the drained machine and writes as
+// soon as the prepare ends.
+func (o *operator) startWithSignal(f *firmware, r applyRecord, catalogs map[string]*catalog, now time.Time) (*applyStep, error) {
 	rh, rehearsed := rehearsalRecord(f.Status.Rehearsals, r.Machine)
 	if !rehearsed || rh.Append == nil || rh.Append.SHA256 != r.SHA256 {
-		s := step(r, resultFailed, "the machine's rehearsal no longer records the append that the turn was asked for, so nothing was written", resultWaiting)
+		s := step(r, resultFailed, "the machine's rehearsal no longer records the append that the Disruption was created for, so nothing was written", resultWaiting)
 		return &s, nil
 	}
 	c := catalogs[rh.Catalog]
@@ -111,18 +114,19 @@ func (o *operator) startSignalled(f *firmware, r applyRecord, catalogs map[strin
 	}
 	p := buildApplyPod(f, attemptOfApply(f.Metadata.Name, r), rh, c, o.discovery.scanImage, o.namespace, now)
 	if err := o.createApplyPod(p); err != nil {
-		return nil, fmt.Errorf("starting the apply on %s again: %w", r.Machine, err)
+		return nil, fmt.Errorf("creating the apply pod again for %s: %w", r.Machine, err)
 	}
-	s := step(r, resultWriting, fmt.Sprintf("the machine is drained, and the apply pod that waited is gone, so the apply pod %s starts with the signal to write the append to %s",
+	s := step(r, resultWriting, fmt.Sprintf("the machine is drained, and the apply pod that waited no longer exists, so the apply pod %s starts with the signal to write the append to %s",
 		p.Metadata.Name, rh.Append.Variable), resultWaiting)
 	return &s, nil
 }
 
-// applyEnds follows a Firmware's apply pods, and answers the steps of
-// those that ended, the pods to delete once their results are written,
-// and the earliest deadline of an apply that writes. A Writing record
-// whose pod is gone ends Uncertain. A Waiting record whose pod is gone
-// waits for its turn, and signal starts the pod again.
+// applyEnds follows a Firmware's apply pods. It returns the steps of
+// the pods that ended, the pods to delete once their results are
+// written, and the earliest deadline among the applies that are
+// writing. A Writing record whose pod is gone ends Uncertain. A Waiting
+// record whose pod is gone keeps waiting for its turn, and signal
+// creates the pod again.
 func (o *operator) applyEnds(f *firmware, pods []pod, now time.Time) ([]applyStep, []pod, time.Time, error) {
 	var steps []applyStep
 	var finished []pod
@@ -148,14 +152,15 @@ func (o *operator) applyEnds(f *firmware, pods []pod, now time.Time) ([]applySte
 			if rh, rehearsed := rehearsalRecord(f.Status.Rehearsals, a.machine); rehearsed {
 				o.catalogMoved(rh.Catalog)
 			}
-			result.Message += "; the operator reads the jcat again, and the apply starts again"
+			result.Message += ", so the operator reads the jcat again and starts the apply again"
 		}
 		r := applyRecord{Machine: a.machine, Boot: a.boot, Version: a.version, CabinetSHA256: a.cabinet, SHA256: a.sha256}
-		// A record that the pod's end cannot find is no capsule's, so
-		// its reboot keeps liken's own BootNext, and a capsule does not
-		// run unconfirmed.
-		if held, found := applyRecordOf(f.Status.Applies, a.machine); found && a.is(held) {
-			r.Disruption, r.Capsule = held.Disruption, held.Capsule
+		// When no record in the status matches the pod, the step leaves
+		// Capsule false. The reboot then uses the BootNext that `liken`
+		// sets and not the one that fwupd set, so a capsule runs only for
+		// a record that staged it.
+		if recorded, found := applyRecordOf(f.Status.Applies, a.machine); found && a.is(recorded) {
+			r.Disruption, r.Capsule = recorded.Disruption, recorded.Capsule
 		}
 		steps = append(steps, step(r, result.Result, result.Message, resultWaiting, resultWriting))
 		finished = append(finished, p)
@@ -171,20 +176,21 @@ func (o *operator) applyEnds(f *firmware, pods []pod, now time.Time) ([]applySte
 		}
 		if gone {
 			steps = append(steps, step(r, resultUncertain,
-				"the apply pod is gone, and the operator cannot tell whether it wrote, so the machine reboots and its next scan reads what the firmware holds", resultWriting))
+				"the apply pod no longer exists, and the operator cannot tell whether it wrote, so the machine reboots and its next scan reads the version that the firmware has", resultWriting))
 		}
 	}
 	return steps, finished, due, errors.Join(problems...)
 }
 
-// writeDeadline answers the earliest deadline of a Writing record that
-// is still ahead. No event marks a deadline, and the pass that sends the
-// signal reads a copy of the pod from before it, so the pass after the
-// signal is timed from the records. The record's time is the signal's,
-// or later after a restart, so the pass comes no sooner than the
-// deadline. A deadline already past is left to the pod's next change,
-// so a pod that the operator cannot judge yet does not run the pass
-// again and again.
+// writeDeadline returns the earliest deadline of a Writing record that
+// is still in the future, so that the operator schedules a pass for it.
+// No event arrives when a deadline passes. applyEnds reads deadlines from
+// the pods, but the pass that sends the signal has a copy of the pod
+// from before the signal, so this function reads them from the records.
+// A record's time is the time of the signal or later, so the scheduled
+// pass never runs before the pod's deadline. A deadline in the past is
+// left out, so a pod that the operator cannot judge yet waits for its
+// next change and does not run the pass again in a loop.
 func writeDeadline(records []applyRecord, now time.Time) time.Time {
 	var due time.Time
 	for _, r := range records {
@@ -195,31 +201,28 @@ func writeDeadline(records []applyRecord, now time.Time) time.Time {
 	return due
 }
 
-// signalSent answers when the operator sent an apply pod the signal, or
-// the zero time when it has not. The watch's copy of the pod can lag
-// the patch that sent it, so a Writing record of the pod's attempt
-// counts as the signal too, from the time of the record.
+// signalSent returns when the operator sent the apply pod the signal to
+// write, or the zero time when it has not. The watch's copy of the pod
+// can lag behind the patch that sent the signal, so a Writing record of
+// the pod's attempt also counts as the signal, at the time of the
+// record.
 func signalSent(f *firmware, a applyAttempt, p pod) time.Time {
 	if sent := signalOf(p); !sent.IsZero() {
 		return sent
 	}
-	if r, held := applyRecordOf(f.Status.Applies, a.machine); held && a.is(r) && r.Result == resultWriting {
+	if r, found := applyRecordOf(f.Status.Applies, a.machine); found && a.is(r) && r.Result == resultWriting {
 		return parseTime(r.Time)
 	}
 	return time.Time{}
 }
 
-// judgeApply decides the result of an apply pod, the way
-// judgeRehearsal decides a rehearsal's. sent is when the operator sent
-// the signal to write, or the zero time.
-//
-// Before the signal the pod waits with no deadline, and any end is
-// Failed. After it, only the pod's own answer says whether it wrote.
-// Every other end, a deadline, a crash, a log that does not answer, or
-// an answer the operator does not know, is Uncertain, because the pod
-// may have written before it stopped. The deadline counts from the
-// signal, because the pod can wait for its turn far longer than a write
-// takes.
+// judgeApply returns the result of an apply pod, as judgeRehearsal does
+// for a rehearsal. sent is when the operator sent the signal to write,
+// or the zero time. After the signal, a missed deadline, a crash, a log
+// with no result, and a result that the operator does not recognize all
+// end Uncertain, because the pod may have written before it stopped.
+// The deadline counts from the signal, because a pod can wait for its
+// turn much longer than a write takes.
 func (o *operator) judgeApply(p pod, sent time.Time, now time.Time) (applyResult, bool, time.Time, error) {
 	if sent.IsZero() {
 		return o.judgeUnsignalled(p)
@@ -241,20 +244,20 @@ func (o *operator) judgeApply(p pod, sent time.Time, now time.Time) (applyResult
 		if now.Before(due) {
 			return applyResult{}, false, time.Time{}, fmt.Errorf("reading the log of the apply pod %s: %w", p.Metadata.Name, err)
 		}
-		uncertain.Message = "the operator could not read the apply's log: " + err.Error()
+		uncertain.Message = "the operator cannot read the log of the apply pod: " + err.Error()
 		return uncertain, true, time.Time{}, nil
 	}
-	answer, why := answerOf(p, log)
+	reported, why := applyResultOf(p, log)
 	if why != "" {
 		uncertain.Message = why
 		return uncertain, true, time.Time{}, nil
 	}
-	return answer, true, time.Time{}, nil
+	return reported, true, time.Time{}, nil
 }
 
-// judgeUnsignalled decides the end of an apply pod that had no signal.
-// It wrote nothing, so the log only explains the end, and a log that
-// cannot be read changes nothing.
+// judgeUnsignalled returns the end of an apply pod that never got the
+// signal. The pod wrote nothing, so the log only explains the end, and
+// a log that cannot be read does not change the result.
 func (o *operator) judgeUnsignalled(p pod) (applyResult, bool, time.Time, error) {
 	if !p.over() {
 		return applyResult{}, false, time.Time{}, nil
@@ -263,44 +266,45 @@ func (o *operator) judgeUnsignalled(p pod) (applyResult, bool, time.Time, error)
 	if errors.Is(err, apiclient.ErrNotFound) {
 		return applyResult{}, false, time.Time{}, nil
 	}
-	answer, why := answerOf(p, log)
+	reported, why := applyResultOf(p, log)
 	switch {
 	case err != nil:
-		why = "the operator could not read the apply's log: " + err.Error()
-	case why == "" && (answer.Result == resultFailed || answer.Result == resultCatalogMoved):
-		return answer, true, time.Time{}, nil
+		why = "the operator cannot read the log of the apply pod: " + err.Error()
+	case why == "" && (reported.Result == resultFailed || reported.Result == resultCatalogMoved):
+		return reported, true, time.Time{}, nil
 	case why == "":
-		why = fmt.Sprintf("the apply answered the result %q", answer.Result)
+		why = fmt.Sprintf("the apply pod reported the result %q", reported.Result)
 	}
 	return applyResult{Result: resultFailed, Message: "the apply pod ended before the signal to write, so nothing was written: " + why}, true, time.Time{}, nil
 }
 
-// answerOf reads the log of an apply pod that ended: the pod's own
-// answer, or why there is none. The pod answers Uncertain itself when
-// the firmware accepted some of its writes and not the rest. The progress line that the pod prints
-// before it waits has no result, so it is never the answer. CatalogMoved
-// is an answer after the signal too, because a pod that the operator
-// started with the signal prepares after it.
-func answerOf(p pod, log string) (applyResult, string) {
+// applyResultOf reads the log of an apply pod that ended. It returns
+// the result that the pod reported, or the reason why the log has none.
+// The pod reports Uncertain itself when the firmware accepted some of
+// its writes and not the rest. The progress line that the pod prints
+// before it waits has no result, so it never counts as the result.
+// CatalogMoved is a valid result after the signal too, because a pod
+// that the operator started with the signal prepares after the signal.
+func applyResultOf(p pod, log string) (applyResult, string) {
 	result, last, found := parseResultLine[applyResult](log, func(r applyResult) string { return r.Result })
 	switch {
 	case !found && last != "":
-		return applyResult{}, "the apply wrote no result; its last line was: " + last
+		return applyResult{}, "the apply pod wrote no result, and its last log line is: " + last
 	case !found:
 		return applyResult{}, podFailure(p, "apply", applyContainer)
 	case slices.Contains([]string{resultWritten, resultUncertain, resultRefused, resultFailed, resultCatalogMoved}, result.Result):
 		return result, ""
 	}
-	return applyResult{}, fmt.Sprintf("the apply answered the result %q, which the operator does not know", result.Result)
+	return applyResult{}, fmt.Sprintf("the apply pod reported the result %q, which the operator does not recognize", result.Result)
 }
 
-// retireApplyPods deletes each apply pod that waits for a signal no
-// record will send: its approval was withdrawn, its request ended
-// without a hold, or its machine is no longer pending. It runs after
-// the status write, against the records the write left. A pod with the
-// signal may be writing, so it is never deleted before it ends. The
-// watch's copy can lag the patch that sent the signal, so the pod is
-// read again from the API server before its delete.
+// retireApplyPods deletes each apply pod that is waiting for the signal
+// when no Waiting or Writing record matches it, for example because its
+// approval was withdrawn or its machine is no longer pending. It runs
+// after the status write, against the records that the write left. A
+// pod with the signal may be writing, so it is never deleted before it
+// ends. The watch's copy can lag behind the patch that sent the signal,
+// so the pod is read again from the API server before the delete.
 func (o *operator) retireApplyPods(records []applyRecord, pods []pod) error {
 	var problems []error
 	for _, p := range pods {
@@ -311,7 +315,7 @@ func (o *operator) retireApplyPods(records []applyRecord, pods []pod) error {
 			}) {
 			continue
 		}
-		held, err := apiclient.Get[pod](o.client, podPath(p.Metadata.Namespace, p.Metadata.Name))
+		current, err := apiclient.Get[pod](o.client, podPath(p.Metadata.Namespace, p.Metadata.Name))
 		if errors.Is(err, apiclient.ErrNotFound) {
 			continue
 		}
@@ -319,7 +323,7 @@ func (o *operator) retireApplyPods(records []applyRecord, pods []pod) error {
 			problems = append(problems, fmt.Errorf("reading the apply pod %s: %w", p.Metadata.Name, err))
 			continue
 		}
-		if signalOf(*held).IsZero() {
+		if signalOf(*current).IsZero() {
 			problems = append(problems, o.remove(p))
 		}
 	}

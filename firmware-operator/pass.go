@@ -1,14 +1,13 @@
 package main
 
-// One pass answers every Firmware: it follows the rule's upload pods
-// to their results, starts an upload for each new appearance of a
-// device that the rule alone matches, reports each conflict, and
-// writes the status. Then it answers every FirmwareCatalog (scans.go). The
-// watches wake a pass (watch.go). A pass reads
-// each Firmware from the watch's store, and from the API server when
-// the store's copy is older than the operator's own last write, so a
-// pass never starts an upload again because its own status write has
-// not reached the watch yet.
+// A pass reconciles every Firmware and then every FirmwareCatalog
+// (scans.go). A watch event, a deadline, or a retry starts a pass
+// (watch.go).
+//
+// A pass reads each Firmware from the watch's store, but reads it from
+// the API server when the store's copy is older than the operator's last
+// write. Otherwise a pass could start a second upload because the watch
+// had not yet sent the status write of the previous pass.
 
 import (
 	"context"
@@ -42,12 +41,12 @@ type operator struct {
 
 	selectors *selectors
 
-	// discovery holds the flags of discovery, and catalogCaches what the
-	// operator keeps in memory of each FirmwareCatalog (catalogfetch.go).
+	// discovery has the settings from flags. catalogCaches caches the
+	// catalog file of each FirmwareCatalog (catalogfetch.go).
 	discovery     discoverySettings
 	catalogCaches map[string]*catalogCache
 
-	// recorder posts the Events (events.go). Nil posts none.
+	// recorder posts the Events (events.go). A nil recorder posts none.
 	recorder *events.Recorder
 }
 
@@ -56,13 +55,15 @@ func newOperator(client *apiclient.Client, namespace string, recorder *events.Re
 		discovery: discovery, catalogCaches: map[string]*catalogCache{}}
 }
 
-// pass answers every Firmware and every FirmwareCatalog, and answers the
-// earliest time at which an upload or a scan in progress is due, or a
-// jcat read, or the zero time when none is. A pass before the watches
-// of the slices, the pods, the Machines, and the Disruptions hold their
-// first read does nothing, because a pass that sees no pod for a device
-// or a machine starts one, and a pass that sees no request for a
-// machine's turn files one. The first read of each watch wakes another pass.
+// pass returns the earliest time at which an upload or a scan in
+// progress is due, or a catalog file read is due, or the zero time when
+// none is.
+//
+// A pass does nothing until the watches of the ResourceSlices, the
+// pods, the Machines, and the Disruptions have each finished their
+// first read. Before that, a pass could start a second upload or scan
+// because it cannot see the pod of the first, or create a second
+// Disruption. Each watch starts a pass when its first read ends.
 func (o *operator) pass(ctx context.Context) (time.Time, error) {
 	if !o.slices.Ready() || !o.pods.Ready() || !o.scanPods.Ready() || !o.rehearsalPods.Ready() || !o.applyPods.Ready() ||
 		!o.machines.Ready() || !o.disruptions.Ready() {
@@ -77,8 +78,7 @@ func (o *operator) pass(ctx context.Context) (time.Time, error) {
 	var next time.Time
 	var problems []error
 	for index := range rules {
-		// The stop ends the pass between two rules, so a shutdown waits
-		// for the writes of one rule and no more.
+		// A shutdown waits for the writes of at most one Firmware.
 		if ctx.Err() != nil {
 			break
 		}
@@ -86,9 +86,9 @@ func (o *operator) pass(ctx context.Context) (time.Time, error) {
 		if f.Metadata.DeletionTimestamp != "" || f.Spec.Upload == nil {
 			continue
 		}
-		due, err := o.answer(f, m, w, time.Now())
+		due, err := o.reconcileFirmware(f, m, w, time.Now())
 		if err != nil {
-			problems = append(problems, fmt.Errorf("the Firmware %s: %w", f.Metadata.Name, err))
+			problems = append(problems, fmt.Errorf("reconciling the Firmware %s: %w", f.Metadata.Name, err))
 		}
 		next = earliest(next, due)
 	}
@@ -99,16 +99,19 @@ func (o *operator) pass(ctx context.Context) (time.Time, error) {
 	return earliest(next, due), errors.Join(append(problems, err)...)
 }
 
-// answer brings one rule's status up to date, and answers when its
+// reconcileFirmware reads the results of a Firmware's upload pods,
+// starts an upload for each new appearance of a device that only this
+// Firmware matches, records a conflict for each device that another
+// Firmware also matches, and writes the status. It returns when the
 // earliest upload in progress is due.
-func (o *operator) answer(f *firmware, m matching, w observed, now time.Time) (time.Time, error) {
+func (o *operator) reconcileFirmware(f *firmware, m matching, w observed, now time.Time) (time.Time, error) {
 	p := plan{valid: validity(m.invalid[f.Metadata.Name])}
 	var problems []error
 	var finished []pod
 	var due time.Time
 
-	// A port with an upload pod of this rule takes no new upload until
-	// the pod is gone, so one device never has two uploads at once.
+	// A port that has an upload pod of this Firmware gets no new upload
+	// until the pod is gone, so one device never has two uploads at once.
 	busy := map[port]bool{}
 	for _, upload := range w.uploads[f.Metadata.Name] {
 		_, generation, a := uploadOf(upload)
@@ -119,10 +122,10 @@ func (o *operator) answer(f *firmware, m matching, w observed, now time.Time) (t
 		v := follow(upload, w.present[a], now)
 		if !v.decided() {
 			due = earliest(due, v.due)
-			// An operator that stopped between the pod's create and the
-			// claim's left a pod with no claim, which never schedules.
-			// So a pod that is not scheduled gets its claim again, and a
-			// claim that exists answers 409.
+			// When the operator stopped between creating the pod and its
+			// claim, the pod never schedules. So the claim of every
+			// unscheduled Pending pod is created again, and a 409 means
+			// that it exists.
 			if upload.Status.Phase == podPending && !upload.scheduled() {
 				problems = append(problems, o.claim(upload))
 			}
@@ -144,7 +147,7 @@ func (o *operator) answer(f *firmware, m matching, w observed, now time.Time) (t
 		}
 		if gone {
 			p.results = append(p.results, attempt{appearance: a, device: e.Device, generation: e.Generation,
-				result: resultFailed, message: "the upload pod is gone; the operator does not run it again for this appearance"})
+				result: resultFailed, message: "the upload pod no longer exists, and the operator does not run it again until the device enumerates again"})
 		}
 	}
 
@@ -160,7 +163,7 @@ func (o *operator) answer(f *firmware, m matching, w observed, now time.Time) (t
 			p.conflicts = append(p.conflicts, a)
 			continue
 		}
-		if e, held := entryFor(f.Status, d.port()); held && sameAttempt(e, d.appearance, generation) && e.Result != resultConflict {
+		if e, found := entryFor(f.Status, d.port()); found && sameAttempt(e, d.appearance, generation) && e.Result != resultConflict {
 			continue
 		}
 		name, err := o.start(f, d)
@@ -175,26 +178,26 @@ func (o *operator) answer(f *firmware, m matching, w observed, now time.Time) (t
 	if err := o.settle(f, p, now); err != nil {
 		return time.Time{}, errors.Join(append(problems, err)...)
 	}
-	// The pods are deleted after their results are in the status.
+	// A finished pod is deleted only after its result is in the status.
 	for _, upload := range finished {
 		problems = append(problems, o.remove(upload))
 	}
 	return due, errors.Join(problems...)
 }
 
-// settle writes the status that a plan gives a rule, and writes nothing
-// when the status already holds it. A rule deleted during the pass
-// needs no status.
+// settle writes the status that the plan gives a Firmware, unless it
+// equals the current status. A Firmware deleted during the pass is not
+// an error.
 func (o *operator) settle(f *firmware, p plan, now time.Time) error {
 	var next firmwareStatus
 	var notices []notice
 	var transitioned bool
-	written, err := informer.SettleStatus[firmware](o.client, o.firmwares.Versions, firmwarePath(f.Metadata.Name), f, func(held *firmware) bool {
-		next, notices, transitioned = composeStatus(held, p, now)
-		if !statusChanged(held.Status, next) {
+	written, err := informer.SettleStatus[firmware](o.client, o.firmwares.Versions, firmwarePath(f.Metadata.Name), f, func(current *firmware) bool {
+		next, notices, transitioned = composeStatus(current, p, now)
+		if !statusChanged(current.Status, next) {
 			return false
 		}
-		held.APIVersion, held.Kind, held.Status = firmwareAPIVersion, firmwareKind, next
+		current.APIVersion, current.Kind, current.Status = firmwareAPIVersion, firmwareKind, next
 		return true
 	})
 	if written {
@@ -206,13 +209,13 @@ func (o *operator) settle(f *firmware, p plan, now time.Time) error {
 	return err
 }
 
-// validity answers the Valid condition of a rule whose selector and
-// spec.machines compiled, or failed to with err.
+// validity returns the Valid condition of a Firmware. err is the
+// failure to compile its selector or spec.machines.
 func validity(err error) condition {
 	if err != nil {
 		return condition{Type: valid, Status: conditions.False, Reason: reasonSelectorInvalid, Message: err.Error()}
 	}
-	return condition{Type: valid, Status: conditions.True, Reason: reasonCompiled, Message: "the selector compiled"}
+	return condition{Type: valid, Status: conditions.True, Reason: reasonCompiled, Message: "The selectors compile"}
 }
 
 func entryFor(s firmwareStatus, at port) (deviceEntry, bool) {
@@ -224,8 +227,8 @@ func entryFor(s firmwareStatus, at port) (deviceEntry, bool) {
 	return deviceEntry{}, false
 }
 
-// earliest answers the earlier of two times, where the zero time is no
-// time at all.
+// earliest returns the earlier of two times. The zero time means no
+// time, so it loses to any other.
 func earliest(a, b time.Time) time.Time {
 	if a.IsZero() || (!b.IsZero() && b.Before(a)) {
 		return b

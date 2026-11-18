@@ -1,11 +1,9 @@
 package main
 
-// spec.machines limits a Firmware to the machines whose labels it
-// selects. A Machine has the name of its node, so the nodeName of a
-// slice names the Machine that the slice describes. Discovery reads two
-// facts of a Machine's status: its phase, because only a Ready machine
-// is scanned, and the time it booted, because a firmware version
-// changes only across a reboot or a flash.
+// A Machine has the same name as its node, so the nodeName of a
+// ResourceSlice is the name of its Machine. The operator scans only a
+// Ready machine, and scans it again after each boot, because a firmware
+// version changes only across a reboot or a flash.
 
 import (
 	"fmt"
@@ -30,21 +28,18 @@ type machine struct {
 	} `json:"status"`
 }
 
-// hasNextESP reports whether the machine has an ESP for its next boot.
-// liken's init links one only on a machine whose store names a proven
-// slot, which is also when it reports status.firmware.bootOrderKept.
+// hasNextESP reports whether init has linked the next boot's EFI system
+// partition at /run/liken/proven-esp. init links it only on a machine
+// that records a proven slot, and only such a machine reports
+// status.firmware.bootOrderKept.
 func (m machine) hasNextESP() bool { return m.Status.Firmware.BootOrderKept != nil }
 
-// machineReady is the phase of a Machine whose every condition holds.
 const machineReady = "Ready"
 
-// machineFilter answers whether a Firmware applies on a machine.
 type machineFilter func(machine string) bool
 
-// filterMachines builds the filter of spec.machines from the labels of
-// each Machine. With no spec.machines the rule applies on every
-// machine. A machine with no Machine object has no labels to match, so
-// a rule with spec.machines does not apply there.
+// filterMachines builds the filter for spec.machines. A Firmware with
+// spec.machines does not apply on a node that has no Machine.
 func filterMachines(selector *metav1.LabelSelector, machineLabels map[string]map[string]string) (machineFilter, error) {
 	if selector == nil {
 		return func(string) bool { return true }, nil
@@ -54,7 +49,7 @@ func filterMachines(selector *metav1.LabelSelector, machineLabels map[string]map
 		return nil, fmt.Errorf("spec.machines: %w", err)
 	}
 	return func(name string) bool {
-		held, exists := machineLabels[name]
-		return exists && parsed.Matches(labels.Set(held))
+		set, exists := machineLabels[name]
+		return exists && parsed.Matches(labels.Set(set))
 	}, nil
 }

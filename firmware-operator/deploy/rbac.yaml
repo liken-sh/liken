@@ -1,75 +1,65 @@
-# The operator's identity. It reads every Firmware, every FirmwareCatalog,
-# every slice that machine-operator publishes, and every Machine, and
-# writes the status of each Firmware and each FirmwareCatalog. It creates and
-# deletes the discovered Firmware objects, and the Disruptions that ask
-# for a machine's reboot turn. It creates, reads, and deletes the upload
-# pods and their claims and the scan, rehearsal, and apply pods in its
-# own namespace, patches an apply pod's annotations, reads the log of
-# each pod that reports a result, and posts the Events about each
-# Firmware and each FirmwareCatalog.
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: firmware-operator
 ---
-# A ClusterRole for the cluster-scoped kinds: a Firmware, a FirmwareCatalog, a
-# ResourceSlice, a Machine, and a Disruption.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: firmware-operator
 rules:
-  # The watches wake the pass, and the pass reads each Firmware and
-  # each FirmwareCatalog from the watch's store. get reads one again after a
-  # status write that met a conflict, and reads a discovered Firmware
-  # whose create met one that exists.
+  # The operator reconciles from its watch cache. It reads from the API
+  # server with get only after a status write fails with a conflict,
+  # and after the create of a discovered Firmware fails because the
+  # Firmware already exists.
   - apiGroups: [firmware.liken.sh]
     resources: [firmwares, firmwarecatalogs]
     verbs: [get, list, watch]
-  # The operator creates one Firmware for each group of devices a scan
-  # reports, and deletes it when no machine's entry is left and nobody
-  # changed its spec. It never updates a spec: a spec it wrote is the
-  # one in its create.
+  # The operator creates one Firmware for each group of devices that a
+  # scan reports. It deletes that Firmware when no machine reports the
+  # group any more, unless a person has edited its spec. It never
+  # updates a spec, so any spec that differs from the one it created was
+  # edited by a person.
   - apiGroups: [firmware.liken.sh]
     resources: [firmwares]
     verbs: [create, delete]
-  # The status is the one thing the operator writes to an object it did
-  # not create. It replaces the whole status with a PUT, which is the
-  # update verb.
+  # The operator replaces the whole status with a PUT, which needs
+  # update.
   - apiGroups: [firmware.liken.sh]
     resources: [firmwares/status, firmwarecatalogs/status]
     verbs: [update]
-  # Each machine's devices. The watch selects the slices whose driver is
-  # liken.sh with a field selector, which needs list and watch on every
+  # The operator watches only the slices whose driver is liken.sh, but
+  # RBAC cannot limit a field selector, so list and watch cover every
   # slice.
   - apiGroups: [resource.k8s.io]
     resources: [resourceslices]
     verbs: [get, list, watch]
-  # The labels that spec.machines selects.
+  # The operator matches the labels of each Machine against
+  # spec.machines.
   - apiGroups: [liken.sh]
     resources: [machines]
     verbs: [get, list, watch]
-  # The requests for a machine's reboot turn that an approved database
-  # update files, with spec.hold. The watch selects the operator's own
-  # requests by the label firmware.liken.sh/firmware, which needs list
-  # and watch on every request. get reads a request the watch does not
-  # hold yet, and create files one. patch removes spec.hold after the
-  # write, so the turn reboots the machine, and delete withdraws a
-  # request whose write was refused or failed, or whose approval
-  # changed. liken's admission policy refuses a change to
-  # spec.approvedHash from any service account, and the operator never
-  # sends one.
+  # For an approved Secure Boot database update, the operator creates a
+  # Disruption with spec.hold to request the machine's reboot turn. It
+  # watches its own Disruptions by the label firmware.liken.sh/firmware,
+  # and RBAC cannot limit a label selector, so list and watch cover
+  # every Disruption. get reads a Disruption that the watch cache does
+  # not have yet. patch removes spec.hold after the write, so the
+  # machine reboots. delete withdraws the Disruption when the write was
+  # refused or failed, or when the approval changed. The operator never
+  # changes spec.approvedHash, and liken's admission policy
+  # disruption-approvals.liken.sh refuses that change from any service
+  # account.
   - apiGroups: [liken.sh]
     resources: [disruptions]
     verbs: [get, list, watch, create, patch, delete]
-  # The Events about a Firmware and a FirmwareCatalog: one for each
-  # change of a condition, each upload or scan and its result, and each
-  # discovered model and offered release. Each kind is cluster-scoped, and the API server takes an Event about a
-  # cluster-scoped object only in default or kube-system, so the Events go
-  # to default. The ClusterRole grants them, so a namespace override of the
-  # install moves no grant away from default. patch counts a repeat on the
-  # Event it repeats.
+  # Firmware and FirmwareCatalog are cluster-scoped, and the API server
+  # accepts an Event about a cluster-scoped object only in default or
+  # kube-system, so the operator posts its Events in default. The grant
+  # is in the ClusterRole so that it still covers default when the
+  # operator is installed in another namespace. patch increments the
+  # count of an Event that repeats.
   - apiGroups: [""]
     resources: [events]
     verbs: [create, patch]
@@ -87,20 +77,23 @@ subjects:
     name: firmware-operator
     namespace: liken-system
 ---
-# The upload pods and their claims, and the scan, rehearsal, and apply
-# pods, which run in the operator's own namespace. The watches select
-# the pods by the labels firmware.liken.sh/upload,
-# firmware.liken.sh/scan, firmware.liken.sh/rehearsal, and
-# firmware.liken.sh/apply, and a watch by label selector needs list and
-# watch on every pod in the namespace. get reads a pod after a create
-# that met a conflict, checks that a running pod still exists, and
-# reads the operator's own pod for the image the scan image is named
-# from. patch sets the annotation that sends an apply pod the signal to
-# write. delete removes a pod after its result is in the status, and an
-# apply pod that waits for a turn that is no longer wanted, and the
-# garbage collector deletes an upload pod's claim. The operator patches
-# and deletes only a pod that carries one of the four labels. pods/log
-# reads the result line that a scan, rehearsal, or apply pod writes.
+# The operator creates its upload, scan, rehearsal, and apply pods, and
+# the claims of the upload pods, in its own namespace. It watches the
+# pods by the labels firmware.liken.sh/upload, firmware.liken.sh/scan,
+# firmware.liken.sh/rehearsal, and firmware.liken.sh/apply, and RBAC
+# cannot limit a label selector, so list and watch cover every pod in
+# the namespace. The operator patches and deletes only pods with one of
+# these labels.
+#
+# get reads a pod after a create fails with a conflict, checks that a
+# pod recorded as running still exists, and reads the operator's own
+# pod to find its image, from which it derives the scan image. patch
+# sets the annotation firmware.liken.sh/write that tells an apply pod
+# to write. delete removes a pod after its result is in the status, and
+# an apply pod that waits for a reboot turn that is no longer needed. pods/log reads the
+# result line of a scan, rehearsal, or apply pod. An upload pod's claim
+# has the pod as its owner, so the garbage collector deletes the claim
+# with the pod.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -129,11 +122,9 @@ subjects:
     name: firmware-operator
     namespace: liken-system
 ---
-# The Lease that elects the one copy of the operator that acts
-# (leader.go). client-go's election reads the Lease with a get, takes
-# and renews it with an update, and releases it with an update. A
-# namespaced Role, because the Lease is in the operator's own namespace,
-# and the operator has no reason to read any other Lease.
+# The Lease firmware-operator elects which copy of the operator acts
+# (leader.go). client-go's leader election reads the Lease with get,
+# and takes, renews, and releases it with update.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -143,8 +134,8 @@ rules:
     resources: [leases]
     resourceNames: [firmware-operator]
     verbs: [get, update]
-  # create carries no resourceNames, because RBAC cannot read a name off
-  # a create. The first copy to start creates the Lease.
+  # RBAC cannot match a name on a create request, so create has no
+  # resourceNames.
   - apiGroups: [coordination.k8s.io]
     resources: [leases]
     verbs: [create]

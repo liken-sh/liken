@@ -6,19 +6,20 @@ import (
 	"io"
 )
 
-// The three outcomes of a scan. The operator reads the result to decide
-// what to record and whether to run the scan again: Scanned is a full
-// answer, CatalogMoved tells the operator to read the jcat again at
-// once, and Failed waits for the machine or the catalog to change.
+// The results of a scan. CatalogMoved means the jcat lists a different
+// catalog file than CATALOG_FILE, so the operator reads the jcat again
+// and starts a new scan. The operator does not retry a Failed scan
+// until the machine's boot, its devices, the catalog file, or the scan
+// image changes.
 const (
 	resultScanned      = "Scanned"
 	resultCatalogMoved = "CatalogMoved"
 	resultFailed       = "Failed"
 )
 
-// Result is the one line of JSON that the scan prints. The operator
-// takes the last line of the pod's log that parses as an object with a
-// result key, so this line is the last thing the program writes.
+// Result is the line of JSON that the scan prints last. The operator
+// reads the last line of the pod's log that parses as JSON with a
+// non-empty result.
 type Result struct {
 	Result  string   `json:"result"`
 	Message string   `json:"message"`
@@ -47,8 +48,8 @@ type Release struct {
 	Cabinet   *Cabinet `json:"cabinet,omitempty"`
 }
 
-// Cabinet is the file that carries a release's payload. Plan 05
-// downloads it and checks the SHA-256 before it applies anything.
+// Cabinet is the .cab file that holds a release's firmware. An approval
+// on a Firmware pins its URL and SHA-256.
 type Cabinet struct {
 	URL    string `json:"url"`
 	SHA256 string `json:"sha256"`
@@ -59,14 +60,13 @@ func failed(file, format string, args ...any) Result {
 	return Result{Result: resultFailed, File: file, Message: fmt.Sprintf(format, args...)}
 }
 
-// emit writes a scan's or a rehearsal's result as one line.
-// json.Encoder ends the line with a newline and never writes one
-// inside, so the line is whole.
+// emit writes a scan's or a rehearsal's result as one line of JSON.
+// json.Encoder escapes the newlines inside strings.
 func emit(w io.Writer, r any) error {
 	return json.NewEncoder(w).Encode(r)
 }
 
-// summary describes a scan for a person who reads the FirmwareCatalog's status.
+// summary is the scan's message in the FirmwareCatalog's status.
 func summary(devices []Device) string {
 	withUpdates := 0
 	for _, d := range devices {

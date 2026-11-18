@@ -1,15 +1,14 @@
 package main
 
-// A jcat is the small file beside an LVFS catalog that names the
-// catalog's current versioned file and its checksums and signatures.
-// It is gzip-compressed JSON. Each item names one file in Id, and each
-// blob holds one checksum or signature of it, with its kind.
+// A jcat is the gzip-compressed JSON file that LVFS serves beside a
+// catalog. Its first item has the name of the catalog's current
+// versioned file in Id, and a list of blobs, each one a checksum or a
+// signature of that file.
 //
-// The operator reads only the name and the SHA-256. It does not check
-// the signature, because it never decides that a release applies: it
-// reads the catalog only to choose which machines to scan again. fwupd
-// checks the signature in each scan pod, and refuses a catalog that
-// fails.
+// The operator reads only the file name and its SHA-256, to detect a new
+// catalog file and choose which machines to scan again. It does not
+// check the signatures, because fwupd in each scan pod refuses a catalog
+// whose jcat it cannot verify.
 
 import (
 	"bytes"
@@ -22,21 +21,21 @@ import (
 	"strings"
 )
 
-// jcatSHA256 is the blob kind of a SHA-256 checksum.
+// jcatSHA256 is the value of Kind for a SHA-256 checksum blob.
 const jcatSHA256 = 1
 
-// jcatEntry is the file a jcat names and its SHA-256, in lowercase hex.
+// jcatEntry is the catalog file name and its SHA-256, in lowercase hex,
+// from a jcat.
 type jcatEntry struct {
 	file   string
 	sha256 string
 }
 
-// hexSHA256 matches a SHA-256 in hex.
 var hexSHA256 = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
-// readJcat reads the first item of a jcat. LVFS serves the gzip stream
-// with bytes after its end, so the reader stops at the end of the
-// first member and ignores the rest.
+// readJcat reads the first item of a jcat. LVFS can send bytes after
+// the end of the gzip stream, so readJcat stops at the end of the first
+// gzip member and ignores the rest.
 func readJcat(body []byte) (jcatEntry, error) {
 	unzipped, err := gzip.NewReader(bytes.NewReader(body))
 	if err != nil {
@@ -60,13 +59,13 @@ func readJcat(body []byte) (jcatEntry, error) {
 		return jcatEntry{}, fmt.Errorf("the jcat is not JSON: %w", err)
 	}
 	if len(parsed.Items) == 0 {
-		return jcatEntry{}, errors.New("the jcat names no file")
+		return jcatEntry{}, errors.New("the jcat has no items")
 	}
 	item := parsed.Items[0]
-	// The name becomes part of a URL in the catalog's directory, so a
-	// name that leaves the directory is refused.
+	// The caller builds a URL in the catalog's directory from this name,
+	// so readJcat refuses a name that could point outside the directory.
 	if item.ID == "" || strings.ContainsAny(item.ID, "/\\?#") || item.ID == "." || item.ID == ".." {
-		return jcatEntry{}, fmt.Errorf("the jcat names the file %q, which is not a file name", item.ID)
+		return jcatEntry{}, fmt.Errorf("the first jcat item has the Id %q, which is not a file name", item.ID)
 	}
 	for _, blob := range item.Blobs {
 		sum := strings.ToLower(blob.Data)
@@ -74,9 +73,10 @@ func readJcat(body []byte) (jcatEntry, error) {
 			return jcatEntry{file: item.ID, sha256: sum}, nil
 		}
 	}
-	return jcatEntry{}, fmt.Errorf("the jcat gives no SHA-256 for %s", item.ID)
+	return jcatEntry{}, fmt.Errorf("the jcat has no SHA-256 blob for %s", item.ID)
 }
 
-// maxJcatSize bounds a decompressed jcat. LVFS's jcat holds one item
-// with a few checksums and signatures, so a larger one is a mistake.
+// maxJcatSize limits how many decompressed bytes readJcat reads. A jcat
+// from LVFS has one item with a few checksums and signatures, far less
+// than this.
 const maxJcatSize = 1 << 20

@@ -8,7 +8,7 @@ import (
 	"io"
 )
 
-// The blob kind of a SHA-256 digest in a jcat file.
+// jcatKindSHA256 is libjcat's blob kind for a SHA-256 digest.
 const jcatKindSHA256 = 1
 
 type jcat struct {
@@ -21,18 +21,17 @@ type jcat struct {
 	} `json:"Items"`
 }
 
-// catalogItem is what the scan needs from a jcat: the versioned file
-// name, and the SHA-256 the jcat gives for it, empty when it gives none.
+// catalogItem is the versioned catalog file that a jcat lists, and its
+// SHA-256, which is empty when the jcat has none.
 type catalogItem struct {
 	file   string
 	sha256 string
 }
 
-// parseJcat reads the first item of a jcat file. A jcat is gzip-compressed
-// JSON, and the LVFS server can append bytes after the gzip stream. The
-// reader stops at the end of the first member, so those bytes never
-// reach the decoder. fwupd checks the signatures in the same file when
-// it refreshes, so this program reads only the name and the digest.
+// parseJcat reads the first item of a jcat file, which is gzip-compressed
+// JSON. The LVFS server can append bytes after the gzip stream, so the
+// reader stops at the end of the first gzip member. parseJcat does not
+// check the signatures, because fwupdtool refresh checks them.
 func parseJcat(data []byte) (catalogItem, error) {
 	zr, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
@@ -48,7 +47,7 @@ func parseJcat(data []byte) (catalogItem, error) {
 		return catalogItem{}, err
 	}
 	if len(parsed.Items) == 0 {
-		return catalogItem{}, errors.New("the jcat holds no item")
+		return catalogItem{}, errors.New("the jcat has no item")
 	}
 	item := catalogItem{file: parsed.Items[0].ID}
 	for _, blob := range parsed.Items[0].Blobs {

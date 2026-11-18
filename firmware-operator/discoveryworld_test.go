@@ -1,9 +1,8 @@
 package main
 
-// The part of the test world that discovery needs: a FirmwareCatalog, Machines
-// with a phase and a boot time, the scan pods, and the result line a
-// scan writes. A test plays a person, machine-operator, the kubelet,
-// and the scan program.
+// The parts of the test world that discovery needs. With these helpers
+// a test acts as a person who applies a FirmwareCatalog, as
+// machine-operator, as the kubelet, and as the scan program.
 
 import (
 	"encoding/json"
@@ -11,14 +10,14 @@ import (
 	"time"
 )
 
-// The boot times of a test machine, before and after a reboot.
+// The boot times of a test machine before and after a reboot.
 const (
 	firstBoot  = "2026-10-20T01:47:55Z"
 	secondBoot = "2026-10-21T06:00:00Z"
 )
 
-// putCatalog creates a FirmwareCatalog, or replaces its spec the way kubectl
-// apply does. A change of the spec moves the generation.
+// putCatalog creates a FirmwareCatalog, or replaces its spec as kubectl
+// apply does. A changed spec.url increments metadata.generation.
 func (a *fakeAPI) putCatalog(name, address string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -28,11 +27,11 @@ func (a *fakeAPI) putCatalog(name, address string) {
 		"spec":     map[string]any{"url": address},
 	}
 	kind := "ADDED"
-	if held, exists := a.objects[catalogsPath][name]; exists {
+	if stored, exists := a.objects[catalogsPath][name]; exists {
 		kind = "MODIFIED"
-		object["status"] = held["status"]
-		generation := held["metadata"].(map[string]any)["generation"].(float64)
-		if held["spec"].(map[string]any)["url"] != address {
+		object["status"] = stored["status"]
+		generation := stored["metadata"].(map[string]any)["generation"].(float64)
+		if stored["spec"].(map[string]any)["url"] != address {
 			generation++
 		}
 		object["metadata"].(map[string]any)["generation"] = generation
@@ -40,7 +39,6 @@ func (a *fakeAPI) putCatalog(name, address string) {
 	a.store(catalogsPath, object, kind)
 }
 
-// catalog answers the stored FirmwareCatalog.
 func (a *fakeAPI) catalog(t *testing.T, name string) catalog {
 	t.Helper()
 	var out catalog
@@ -51,8 +49,8 @@ func (a *fakeAPI) catalog(t *testing.T, name string) catalog {
 	return out
 }
 
-// putFleetMachine stores a Machine in a phase, booted at a time, the way
-// the OS reports it.
+// putFleetMachine stores a Machine with the given status.phase and
+// status.boot.time, as machine-operator reports them.
 func (a *fakeAPI) putFleetMachine(name, phase, boot string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -67,7 +65,6 @@ func (a *fakeAPI) putFleetMachine(name, phase, boot string) {
 	}, kind)
 }
 
-// scans answers every stored scan pod.
 func (a *fakeAPI) scans(t *testing.T) []pod {
 	t.Helper()
 	var out []pod
@@ -79,8 +76,7 @@ func (a *fakeAPI) scans(t *testing.T) []pod {
 	return out
 }
 
-// onlyScan answers the one scan pod, and fails the test when there is
-// not exactly one.
+// onlyScan fails the test unless there is exactly one scan pod.
 func (w *world) onlyScan(t *testing.T) pod {
 	t.Helper()
 	scans := w.api.scans(t)
@@ -90,20 +86,18 @@ func (w *world) onlyScan(t *testing.T) pod {
 	return scans[0]
 }
 
-// finishScan plays the kubelet and the scan program: the scan pod wrote
-// the log and ended in the phase.
 func (a *fakeAPI) finishScan(t *testing.T, name, phase, log string) {
 	t.Helper()
 	a.finishPod(t, name, scanContainer, phase, log)
 }
 
-// finishPod plays the kubelet and the program in a scan or rehearsal
-// pod: the container wrote the log and the pod ended in the phase.
+// finishPod acts as the kubelet and the program in a scan or rehearsal
+// pod: the container writes log and the pod ends in phase.
 func (a *fakeAPI) finishPod(t *testing.T, name, container, phase, log string) {
 	t.Helper()
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	next := clone(a.objects[uploadPodsPath][name])
+	next := clone(a.objects[operatorPodsPath][name])
 	if next == nil {
 		t.Fatalf("there is no scan pod %s", name)
 	}
@@ -119,25 +113,24 @@ func (a *fakeAPI) finishPod(t *testing.T, name, container, phase, log string) {
 			"state": map[string]any{"terminated": map[string]any{"exitCode": exitCode, "finishedAt": time.Now().UTC().Format(time.RFC3339)}},
 		}},
 	}
-	a.store(uploadPodsPath, next, "MODIFIED")
+	a.store(operatorPodsPath, next, "MODIFIED")
 }
 
-// record answers a machine's record in a FirmwareCatalog's status, and fails
-// the test when there is none.
+// record fails the test when the FirmwareCatalog's status has no record
+// of the machine.
 func (w *world) record(t *testing.T, catalog, machine string) machineRecord {
 	t.Helper()
-	r, held := w.api.catalog(t, catalog).Status.record(machine)
-	if !held {
-		t.Fatalf("the FirmwareCatalog %s holds no record of %s", catalog, machine)
+	r, found := w.api.catalog(t, catalog).Status.record(machine)
+	if !found {
+		t.Fatalf("the FirmwareCatalog %s has no record of %s", catalog, machine)
 	}
 	return r
 }
 
-// discoveredObjects answers every stored discovered Firmware.
 func (a *fakeAPI) discoveredObjects(t *testing.T) []firmware {
 	t.Helper()
 	var out []firmware
-	for _, object := range a.held(firmwaresPath) {
+	for _, object := range a.stored(firmwaresPath) {
 		var f firmware
 		a.decode(t, object, &f)
 		if f.Metadata.Labels[discoveredLabel] == discoveredLabelValue {
@@ -147,20 +140,20 @@ func (a *fakeAPI) discoveredObjects(t *testing.T) []firmware {
 	return out
 }
 
-// resultLog is the log of a scan that answered: a line fwupd wrote, and
-// the result line last.
+// resultLog returns the log of a scan: a line from fwupdtool, then the
+// result as the last line.
 func resultLog(result scanResult) string {
 	line, _ := json.Marshal(result)
 	return "fwupdtool: loading plugins\n" + string(line) + "\n"
 }
 
-// scanned is the result of a scan against a file that found devices.
+// scanned returns the result of a successful scan.
 func scanned(file string, devices ...scanDevice) scanResult {
 	return scanResult{Result: resultScanned, Message: "the scan found the devices", File: file, Devices: devices}
 }
 
-// systemFirmware is the Framework's BIOS at a version, with the
-// releases the catalog offers for it.
+// systemFirmware returns the Framework laptop's BIOS device at a
+// version, with the releases that the catalog offers for it.
 func systemFirmware(version string, offered ...string) scanDevice {
 	d := scanDevice{Name: "System Firmware", DeviceID: "3fcf", Plugin: "uefi_capsule", GUIDs: []string{biosGUID}, Version: version, Vendor: "Framework"}
 	for _, release := range offered {
@@ -170,7 +163,8 @@ func systemFirmware(version string, offered ...string) scanDevice {
 	return d
 }
 
-// secureBootDBX is the Secure Boot revocation list at a version.
+// secureBootDBX returns the Secure Boot revocation list (dbx) device at
+// a version, with the releases that the catalog offers for it.
 func secureBootDBX(version string, offered ...string) scanDevice {
 	d := scanDevice{Name: "UEFI dbx", DeviceID: "a1b2", Plugin: "uefi_dbx", GUIDs: []string{dbxGUID}, Version: version}
 	for _, release := range offered {
@@ -179,8 +173,8 @@ func secureBootDBX(version string, offered ...string) scanDevice {
 	return d
 }
 
-// postedAboutCatalog answers what the operator posted about one
-// FirmwareCatalog, in the order it posted it.
+// postedAboutCatalog returns the Events about a FirmwareCatalog, in the
+// order the operator posted them.
 func (w *world) postedAboutCatalog(name string) []posted {
 	var out []posted
 	for _, event := range w.api.recorded.About(catalogKind, name) {
@@ -189,22 +183,22 @@ func (w *world) postedAboutCatalog(name string) []posted {
 	return out
 }
 
-// discoveryWorld runs the operator with the lvfs FirmwareCatalog at a file that
-// offers BIOS 0.0.4.2, and one Ready machine, node-2, with a camera on
-// a USB port. It answers once the first scan has started.
+// discoveryWorld starts the operator with the lvfs FirmwareCatalog and a
+// catalog file that offers BIOS 0.0.4.2, and one Ready machine, node-2,
+// with a camera on a USB port. It returns once the first scan has
+// started.
 func discoveryWorld(t *testing.T) *world {
 	w := startWorld(t)
-	seedDiscovery(w)
+	setUpDiscovery(w)
 	return w
 }
 
-// seedDiscovery plays the steps of discoveryWorld on a world whose
-// operator runs.
-func seedDiscovery(w *world) {
+// setUpDiscovery is the setup of discoveryWorld, for a world whose
+// operator is already running.
+func setUpDiscovery(w *world) {
 	w.lvfs.publish("firmware-09138-stable.xml.zst", frameworkBIOS("0.0.3.5", "0.0.4.2"), dbx("1", "2"))
-	// The machine's slice reaches the operator before the Machine and
-	// the FirmwareCatalog, the way it does on a cluster where the machine has
-	// run a while.
+	// The ResourceSlice exists before the Machine and the
+	// FirmwareCatalog, as on a machine that has been running for a while.
 	w.api.publish("node-2", camera("1-3", 4))
 	w.settle()
 	w.api.putFleetMachine("node-2", machineReady, firstBoot)
@@ -213,18 +207,18 @@ func seedDiscovery(w *world) {
 	w.settle()
 }
 
-// The names of scannedWorld's discovered objects: the BIOS's catalog
-// component, which offers it a release, and the set of GUIDs of the
-// dbx, which runs the newest release.
-// dbxObjectName is the dbx's object once a catalog offers it a release.
+// The names of the discovered Firmware objects. A device's object is
+// named for its catalog component once a catalog offers the device a
+// release, and for its set of GUIDs until then. In scannedWorld the
+// dbx has no offered release, so its object is dbxGUIDsName.
 const (
 	biosObjectName = "frame-laptop-ryzenai300-bios"
 	dbxGUIDsName   = "uefi-dbx-7bc32f04"
 	dbxObjectName  = "microsoft-dbx-x64"
 )
 
-// scannedWorld is discoveryWorld after node-2's scan answered with its
-// BIOS, behind by one release, and its dbx, current.
+// scannedWorld is discoveryWorld after node-2's scan returned its BIOS,
+// which is one release behind, and its dbx, which is current.
 func scannedWorld(t *testing.T) *world {
 	w := discoveryWorld(t)
 	w.api.finishScan(t, w.onlyScan(t).Metadata.Name, podSucceeded,

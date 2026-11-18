@@ -1,11 +1,12 @@
 package main
 
-// A FirmwareCatalog that the LVFS did not sign names its signer's
-// certificate with spec.trust, and the operator mounts that ConfigMap in
-// the pod at trustDir (catalogtrust.go in the operator). fwupd refreshes
-// only from a catalog whose jcat it verifies against a key in its pki
-// directory for metadata, so installTrust copies each certificate there,
-// beside the LVFS's keys, before the refresh.
+// fwupd refreshes only from a catalog whose jcat it can verify against
+// a key in its metadata pki directory. A FirmwareCatalog that the LVFS
+// did not sign names a ConfigMap of its signer's certificates in
+// spec.trust, and the operator mounts that ConfigMap in the pod at
+// trustDir (catalogtrust.go in the operator). So before the refresh,
+// installTrust copies each certificate into the pki directory, beside
+// the LVFS's keys.
 
 import (
 	"errors"
@@ -17,19 +18,18 @@ import (
 )
 
 const (
-	// trustDir is where a pod mounts its catalog's ConfigMap.
 	trustDir = "/run/catalog-trust"
-	// pkiDir is the directory of keys that fwupd trusts for metadata.
+	// pkiDir holds the keys that fwupd trusts to sign metadata.
 	pkiDir = "/etc/pki/fwupd-metadata"
 )
 
-// installTrust copies each key of the mounted ConfigMap into pki under
-// a name that starts with the catalog's, such as
-// catalog-lab-signer.pem, so it never replaces one of the LVFS's keys.
-// fwupd reads a certificate by its name's extension, so the key's own
-// name keeps it. The kubelet keeps its bookkeeping in entries whose
-// names start with "..", which are skipped. A pod with no trust has no
-// directory, and nothing changes.
+// installTrust copies each key of the ConfigMap mounted at trust into
+// pki, as catalog-<catalogName>-<key>, so that a copy cannot replace
+// one of the LVFS's keys. The name ends with the key's own name,
+// because fwupd uses the file extension to tell what kind of
+// certificate it is. The kubelet adds entries whose names start with
+// "..", and installTrust skips them. When trust does not exist, the
+// catalog has no trust, and installTrust changes nothing.
 func installTrust(trust, pki, catalogName string) error {
 	entries, err := os.ReadDir(trust)
 	if errors.Is(err, fs.ErrNotExist) {

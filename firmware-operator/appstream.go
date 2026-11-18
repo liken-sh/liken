@@ -1,7 +1,7 @@
 package main
 
 // An LVFS catalog is an AppStream XML file, compressed with zstd. It
-// holds one component for each firmware the service offers, with the
+// has one component for each firmware the service offers, with the
 // GUIDs of the devices that the firmware flashes and the list of its
 // releases:
 //
@@ -11,11 +11,11 @@ package main
 //	  <releases><release version="0.0.4.2">…</release></releases>
 //	</component>
 //
-// The operator reads the catalog only to decide which machines to scan
-// again when the catalog names a new file, so it keeps, for each GUID,
-// the components and versions that a scan could offer for it. fwupd in
-// the scan pod decides which release applies. LVFS's catalog is tens of
-// megabytes of XML, so the reader streams it and keeps nothing else.
+// fwupd in the scan pod chooses the release that applies to a device.
+// The operator reads a catalog file only to find the machines whose
+// offered releases changed when the file changed, so for each GUID it
+// keeps the component IDs and versions and nothing else. The reader
+// streams the XML, so the whole document is never in memory.
 
 import (
 	"crypto/sha256"
@@ -30,26 +30,25 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
-// catalogIndex is what the operator keeps of one catalog file: for
-// each GUID, the releases of the components that flash it, as
-// "<component id> <version>", sorted. The index is a cache. The
-// operator reads the file again after a restart when it needs the
-// index, and the FirmwareCatalog's status holds the file's name and SHA-256.
+// catalogIndex maps each GUID of one catalog file to the sorted
+// releases of the components that flash it, each as
+// "<component id> <version>". The index is only a cache. After a
+// restart the operator downloads the file again, by the name and
+// SHA-256 in the FirmwareCatalog's status.
 type catalogIndex struct {
 	file     string
 	releases map[string][]string
 }
 
-// maxCatalogSize bounds the decompressed catalog. LVFS's catalog is
-// tens of megabytes, so a stream past this size is a mistake or a
-// decompression bomb, and the reader refuses it.
+// maxCatalogSize limits the decompressed size of a catalog, so that a
+// decompression bomb cannot exhaust the operator's memory. readCatalog
+// stops reading at this size, and the truncated XML then fails to parse.
 const maxCatalogSize = 512 << 20
 
-// readCatalog decompresses and parses a catalog file.
 func readCatalog(file string, compressed io.Reader) (catalogIndex, error) {
 	decoder, err := zstd.NewReader(compressed, zstd.WithDecoderConcurrency(1))
 	if err != nil {
-		return catalogIndex{}, fmt.Errorf("the catalog is not zstd: %w", err)
+		return catalogIndex{}, fmt.Errorf("decompressing the catalog: %w", err)
 	}
 	defer decoder.Close()
 	releases, err := parseAppStream(io.LimitReader(decoder, maxCatalogSize))
@@ -59,16 +58,14 @@ func readCatalog(file string, compressed io.Reader) (catalogIndex, error) {
 	return catalogIndex{file: file, releases: releases}, nil
 }
 
-// firmwareComponent is the part of one firmware component that the
-// index keeps, while the parser reads it.
+// firmwareComponent collects the index's fields of one component while
+// the parser reads it.
 type firmwareComponent struct {
 	id       string
 	guids    []string
 	versions []string
 }
 
-// parseAppStream reads each firmware component of an AppStream
-// document, and answers the releases of each GUID.
 func parseAppStream(document io.Reader) (map[string][]string, error) {
 	decoder := xml.NewDecoder(document)
 	releases := map[string][]string{}
@@ -81,7 +78,7 @@ func parseAppStream(document io.Reader) (map[string][]string, error) {
 			break
 		}
 		if err != nil {
-			return nil, fmt.Errorf("the catalog is not XML: %w", err)
+			return nil, fmt.Errorf("parsing the catalog XML: %w", err)
 		}
 		switch t := token.(type) {
 		case xml.StartElement:
@@ -122,8 +119,8 @@ func parseAppStream(document io.Reader) (map[string][]string, error) {
 	return releases, nil
 }
 
-// index adds a component's releases under each GUID it flashes. fwupd
-// reports a GUID in lowercase, so the index keys it that way.
+// index adds a component's releases under each GUID that it flashes.
+// fwupd reports GUIDs in lowercase, so the keys are lowercase.
 func (c *firmwareComponent) index(releases map[string][]string) {
 	id := strings.TrimSpace(c.id)
 	for _, guid := range c.guids {
@@ -146,10 +143,9 @@ func attribute(element xml.StartElement, name string) string {
 	return ""
 }
 
-// releasesHash answers a hash of the catalog's releases for a set of
-// GUIDs. Two catalog files give the same hash when they offer the same
-// releases for those GUIDs, so a new file with the same hash has
-// nothing new for the machine that reported them.
+// releasesHash returns a hash of the releases that the file offers for
+// a machine's GUIDs. When a new file gives the same hash as the file of
+// the machine's last scan, the new file offers that machine nothing new.
 func (ix catalogIndex) releasesHash(guids []string) string {
 	sum := sha256.New()
 	for _, guid := range sortedSet(guids) {
@@ -158,7 +154,7 @@ func (ix catalogIndex) releasesHash(guids []string) string {
 	return shortHex(sum.Sum(nil))
 }
 
-// sortedSet answers the distinct values in order, in lowercase.
+// sortedSet returns the distinct values, in lowercase and sorted.
 func sortedSet(values []string) []string {
 	out := make([]string, 0, len(values))
 	for _, v := range values {
@@ -168,8 +164,8 @@ func sortedSet(values []string) []string {
 	return slices.Compact(out)
 }
 
-// shortHex is the first 16 hex digits of a hash, enough to tell two
-// sets apart in a status that a person reads.
+// shortHex returns the first 16 hex digits of a hash, short enough for
+// a person to compare in a status.
 func shortHex(sum []byte) string {
 	return hex.EncodeToString(sum)[:16]
 }

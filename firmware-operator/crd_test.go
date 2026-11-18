@@ -1,11 +1,9 @@
 package main
 
 // These tests run objects through the CRDs' own schemas, with the
-// validators and the pruning the API server uses, so a schema edit that
-// refuses a valid object, accepts an invalid one, or prunes a field the
-// operator writes fails here. The structural schema and the
-// x-kubernetes-validations rules are two passes in the API server, and
-// a case runs both.
+// validators and the pruning code of the API server. A schema edit that
+// rejects a valid object, accepts an invalid one, or prunes a field the
+// operator writes fails here.
 
 import (
 	"encoding/json"
@@ -27,7 +25,6 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// The definitions this module ships.
 const (
 	firmwareCRD = "deploy/firmware-crd.yaml"
 	catalogCRD  = "deploy/firmwarecatalog-crd.yaml"
@@ -37,7 +34,7 @@ func loadCRD(t *testing.T, path string) *apiextensionsv1.CustomResourceDefinitio
 	t.Helper()
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading %s: %v", path, err)
 	}
 	crd := &apiextensionsv1.CustomResourceDefinition{}
 	if err := yaml.UnmarshalStrict(raw, crd); err != nil {
@@ -60,7 +57,7 @@ func TestCRDIdentity(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if c.got != c.want {
-				t.Errorf("got %q, want %q", c.got, c.want)
+				t.Errorf("%s is %q, want %q", c.name, c.got, c.want)
 			}
 		})
 	}
@@ -73,12 +70,13 @@ func TestCRDPrinterColumns(t *testing.T) {
 	}
 	want := []string{"Valid", "Loaded", "Running", "Failed", "Conflict", "Machines", "Behind", "Version", "Approved", "Pending", "Rehearsed", "Applied", "Age"}
 	if !slices.Equal(names, want) {
-		t.Errorf("printer columns %v, want %v", names, want)
+		t.Errorf("the printer columns are %v, want %v", names, want)
 	}
 }
 
-// validateObject runs an object through both passes the API server
-// runs: the structural schema and the CEL rules.
+// validateObject runs an object through the two checks that the API
+// server makes in separate steps: the structural schema and the
+// x-kubernetes-validations CEL rules.
 func validateObject(t *testing.T, path string, object map[string]any) field.ErrorList {
 	t.Helper()
 	validator, _, err := validation.NewSchemaValidator(internalSchema(t, path))
@@ -94,7 +92,6 @@ func validateObject(t *testing.T, path string, object map[string]any) field.Erro
 	return errs
 }
 
-// internalSchema is a CRD's schema as the API server's own type.
 func internalSchema(t *testing.T, path string) *apiextensions.JSONSchemaProps {
 	t.Helper()
 	scheme := runtime.NewScheme()
@@ -110,19 +107,19 @@ func structuralSchema(t *testing.T, path string) *structuralschema.Structural {
 	t.Helper()
 	structural, err := structuralschema.NewStructural(internalSchema(t, path))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the structural schema of %s: %v", path, err)
 	}
 	return structural
 }
 
-// prunedFrom answers the fields the API server would drop from an
-// object, because a CRD's schema does not name them.
+// prunedFrom returns the fields that the API server would drop from an
+// object, because the CRD's schema does not define them.
 func prunedFrom(t *testing.T, path string, object map[string]any) []string {
 	t.Helper()
 	return pruning.PruneWithOptions(object, structuralSchema(t, path), true, structuralschema.UnknownFieldPathOptions{TrackUnknownFieldPaths: true})
 }
 
-// object is a Firmware with the spec given, as kubectl sends it.
+// object returns a Firmware with the given spec, as kubectl sends it.
 func object(spec map[string]any) map[string]any {
 	return map[string]any{
 		"apiVersion": firmwareAPIVersion, "kind": firmwareKind,
@@ -131,8 +128,8 @@ func object(spec map[string]any) map[string]any {
 	}
 }
 
-// The component and the cabinet of a dbx release that a person
-// approves.
+// The component and the cabinet SHA-256 of a dbx release, as test
+// values.
 const (
 	dbxComponent = "com.microsoft.dbx.x64-kek2023.firmware"
 	dbxCabinet   = "1bf2dd354e35e86138478f17c83724be644e0dc4c2b82fa95a2cfc7ebfad13d5"
@@ -184,14 +181,12 @@ func TestCRDValidatesExamples(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			errs := validateObject(t, firmwareCRD, object(c.spec))
 			if got := len(errs) > 0; got != c.wantErr {
-				t.Errorf("got errors %v, want an error: %v", errs, c.wantErr)
+				t.Errorf("the schema returned the errors %v, want errors: %v", errs, c.wantErr)
 			}
 		})
 	}
 }
 
-// The status the operator composes is one the CRD's schema takes, and
-// the API server prunes none of its fields.
 func TestTheOperatorsStatusValidates(t *testing.T) {
 	f := qhy5lii()
 	f.APIVersion, f.Kind = firmwareAPIVersion, firmwareKind
@@ -207,13 +202,13 @@ func TestTheOperatorsStatusValidates(t *testing.T) {
 	assertTheSchemaKeeps(t, firmwareCRD, f)
 }
 
-// assertTheSchemaKeeps checks that a CRD's schema takes an object the
-// operator writes, and prunes none of its fields.
+// assertTheSchemaKeeps checks that a CRD's schema accepts an object the
+// operator writes and prunes none of its fields.
 func assertTheSchemaKeeps(t *testing.T, path string, object any) {
 	t.Helper()
 	var written map[string]any
 	if err := json.Unmarshal(mustJSON(object), &written); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the operator's object: %v", err)
 	}
 	if errs := validateObject(t, path, written); len(errs) > 0 {
 		t.Errorf("the schema refuses the operator's object: %v", errs)

@@ -1,20 +1,20 @@
 package main
 
-// A database update takes effect at the machine's next boot, and the
-// write must happen while no workload runs there. liken grants both
-// through a Disruption (liken.sh/v1alpha1), its request for one
-// machine's reboot turn. The operator files one with spec.hold, so the
-// turn stops after the drain: machine-operator then sets Held to True,
-// the apply pod writes on the drained machine, and the operator
-// removes spec.hold, so the turn goes on to the reboot. A refused or
-// failed write deletes the request instead, and the machine leaves its
-// turn without a reboot it does not need.
+// A Secure Boot database update must be written while no workload runs
+// on the machine, and takes effect at the next boot. A Disruption
+// (liken.sh/v1alpha1) asks machine-operator for a machine's turn to
+// drain and reboot, so the apply uses one. The operator creates it with
+// spec.hold set, so machine-operator drains the machine, sets the Held
+// condition, and waits. The apply pod writes, and the operator removes
+// spec.hold so the reboot follows. When the write is refused or fails,
+// the operator deletes the Disruption instead, and the machine ends its
+// turn without a reboot.
 //
-// The operator declares its own struct for the fields it reads and
-// writes, the way it does for a Pod, and links nothing from liken.
-// Each request carries the label of its Firmware, which selects the
-// requests the operator watches, and names the Firmware as its owner,
-// so a deleted Firmware deletes its requests.
+// The operator declares its own struct with only the fields it uses, as
+// it does for a Pod, and does not import liken/disruption. The label
+// disruptionLabel selects the Disruptions that the operator watches, and
+// the owner reference to the Firmware makes the garbage collector delete
+// them with it.
 
 import (
 	"errors"
@@ -35,14 +35,14 @@ const (
 
 func disruptionPath(name string) string { return disruptionsPath + "/" + name }
 
-// The requester the operator names in each request, and the label that
-// names the request's Firmware.
+// requester is the value of spec.requester in each Disruption, and
+// disruptionLabel holds the name of the Disruption's Firmware.
 const (
 	requester       = "firmware.liken.sh/firmware-operator"
 	disruptionLabel = "firmware.liken.sh/firmware"
 )
 
-// The conditions that machine-operator writes on a request.
+// The conditions that machine-operator sets on a Disruption.
 const (
 	heldCondition     = "Held"
 	completeCondition = "Complete"
@@ -65,17 +65,17 @@ type disruptionMeta struct {
 	DeletionTimestamp string            `json:"deletionTimestamp,omitempty"`
 }
 
-// disruptionSpec leaves out hash and approvedHash. machine-operator
-// fills hash with the running boot, and only a person may set
-// approvedHash, which an admission policy enforces.
+// disruptionSpec omits hash and approvedHash. machine-operator sets
+// hash to the current boot, and an admission policy lets only a person
+// set approvedHash.
 type disruptionSpec struct {
 	Machine   string `json:"machine"`
 	Requester string `json:"requester"`
 	Kind      string `json:"kind"`
 	Reason    string `json:"reason,omitempty"`
 	Hold      bool   `json:"hold,omitempty"`
-	// KeepBootNext asks liken's init to leave BootNext as fwupd set it
-	// at the turn's reboot (liken's milestone 33).
+	// KeepBootNext tells liken's init, at the turn's reboot, to leave
+	// the BootNext variable as fwupd set it.
 	KeepBootNext bool `json:"keepBootNext,omitempty"`
 }
 
@@ -83,12 +83,12 @@ type disruptionStatus struct {
 	Conditions []condition `json:"conditions,omitempty"`
 }
 
-// held reports whether machine-operator drained the machine and waits
-// for the operator to remove spec.hold.
+// held reports whether machine-operator has drained the machine and is
+// waiting for the operator to remove spec.hold.
 func (d *disruption) held() bool { return d.conditionTrue(heldCondition) }
 
-// complete reports whether the machine runs a boot after the one the
-// request named, so the turn is over.
+// complete reports whether machine-operator has seen the machine boot
+// again after the Disruption was created, so the turn is over.
 func (d *disruption) complete() bool { return d.conditionTrue(completeCondition) }
 
 func (d *disruption) conditionTrue(kind string) bool {
@@ -96,9 +96,10 @@ func (d *disruption) conditionTrue(kind string) bool {
 	return found && c.Status == conditions.True
 }
 
-// disruptionName answers the one request of a Firmware for a machine,
-// so a second create of it answers 409. The name is a DNS subdomain of
-// at most 253 characters.
+// disruptionName returns the name of a Firmware's Disruption for a
+// machine. The name is deterministic, so creating the Disruption twice
+// returns 409. It is cut to 253 characters, the limit for a DNS
+// subdomain.
 func disruptionName(firmware, machine string) string {
 	name := machine + ".firmware-" + firmware
 	if len(name) > 253 {
@@ -107,9 +108,8 @@ func disruptionName(firmware, machine string) string {
 	return strings.TrimRight(name, "-.")
 }
 
-// buildDisruption answers the request for one machine's turn. It names
-// no hash, so machine-operator names the running boot, and the request
-// is spent by the reboot that ends the turn.
+// buildDisruption returns the Disruption that requests a machine's turn
+// for an apply of f.
 func buildDisruption(f *firmware, machine, what string) disruption {
 	return disruption{
 		APIVersion: disruptionAPIVersion,
@@ -134,9 +134,9 @@ func buildDisruption(f *firmware, machine, what string) disruption {
 	}
 }
 
-// fileDisruption creates a request. A request that exists under the
-// name answers 409, which is the same result.
-func (o *operator) fileDisruption(d disruption) error {
+// createDisruption creates a Disruption. A 409 means it already exists,
+// which is not an error.
+func (o *operator) createDisruption(d disruption) error {
 	err := o.client.RequestJSON(http.MethodPost, disruptionsPath, mustJSON(d), nil)
 	if errors.Is(err, apiclient.ErrConflict) {
 		return nil
@@ -144,27 +144,27 @@ func (o *operator) fileDisruption(d disruption) error {
 	return err
 }
 
-// readDisruption answers a request by name, or nil when it does not
-// exist. It reads the watch's store, and the API server for a request
-// the store does not hold, because the store can lag a request that the
-// operator created a moment ago, and a request reported gone in error
-// would fail an apply that waits for its turn.
+// readDisruption returns a Disruption by name, or nil when it does not
+// exist. When the informer's store does not have it, readDisruption asks
+// the API server, because the store can lag behind a Disruption that the
+// operator just created, and a missing Disruption fails an apply that
+// waits for its turn.
 func (o *operator) readDisruption(name string) (*disruption, error) {
-	if held, found := informer.Cached[disruption](o.disruptions, name); found {
-		return held, nil
+	if cached, found := informer.Cached[disruption](o.disruptions, name); found {
+		return cached, nil
 	}
-	held, err := apiclient.Get[disruption](o.client, disruptionPath(name))
+	d, err := apiclient.Get[disruption](o.client, disruptionPath(name))
 	if errors.Is(err, apiclient.ErrNotFound) {
 		return nil, nil
 	}
-	return held, err
+	return d, err
 }
 
-// releaseHold removes spec.hold, so the turn goes on to the reboot. A
-// merge patch with a null removes the field, and leaves the rest of
-// the spec, which machine-operator also writes, as it is. A capsule's
-// release sets spec.keepBootNext in the same patch, so no reboot can
-// run between the two.
+// releaseHold removes spec.hold so the turn continues to the reboot. A
+// merge patch with a null value removes only that field, and leaves
+// the rest of the spec, which machine-operator also writes. For a
+// capsule update, the same patch sets spec.keepBootNext, so the reboot
+// cannot happen between the two changes.
 func (o *operator) releaseHold(name string, keepBootNext bool) error {
 	patch := `{"spec":{"hold":null}}`
 	if keepBootNext {
@@ -173,8 +173,8 @@ func (o *operator) releaseHold(name string, keepBootNext bool) error {
 	return o.client.Request(http.MethodPatch, disruptionPath(name), "application/merge-patch+json", []byte(patch), nil)
 }
 
-// withdraw deletes a request. A 404 means it is already gone.
-func (o *operator) withdraw(name string) error {
+// deleteDisruption deletes a Disruption. A 404 means it is already gone.
+func (o *operator) deleteDisruption(name string) error {
 	err := o.client.RequestJSON(http.MethodDelete, disruptionPath(name), nil, nil)
 	if errors.Is(err, apiclient.ErrNotFound) {
 		return nil
@@ -182,9 +182,9 @@ func (o *operator) withdraw(name string) error {
 	return err
 }
 
-// disruptionMark is the part of a request whose change needs a pass:
-// its spec, through the generation, the conditions that machine-operator
-// sets, and the start of its deletion.
+// disruptionMark is a string that changes whenever a Disruption changes
+// in a way that needs a new pass: its spec (through the generation),
+// the Held and Complete conditions, and the start of its deletion.
 func disruptionMark(item disruption) string {
 	return fmt.Sprint(item.Metadata.UID, item.Metadata.Generation, item.Metadata.DeletionTimestamp, item.held(), item.complete())
 }

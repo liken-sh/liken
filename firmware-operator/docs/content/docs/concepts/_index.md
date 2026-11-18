@@ -9,6 +9,7 @@ weight: 5
 starts an upload, how it decides the result, and why it never retries
 one on its own.
 
-[How discovery works](/docs/concepts/discovery/) explains why the
-operator finds updates apart from approving and applying them, what a
-scan reads, and why each `Firmware` it creates is a catalog component.
+[How discovery works](/docs/concepts/discovery/) explains why finding,
+approving, and applying an update are separate steps, what a scan
+reads, and why the operator creates one `Firmware` for each catalog
+component.

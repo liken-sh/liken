@@ -1,13 +1,14 @@
-# A Firmware is a rule for one device model. With upload, it writes
-# firmware into the USB devices it matches, on any machine of the
-# cluster, each time one appears. With update, it covers the devices
-# that keep their firmware and that a catalog offers releases of one
-# component for, and firmware-operator creates one such object for
-# each component a scan finds. It is cluster-scoped because it
-# describes a kind of device, the way a DeviceClass does, and a device
-# can move from one machine to another. firmware-operator writes the
-# status: one entry for each port where an upload rule matched a
-# device, and one for each machine's device in an update rule's group.
+# A Firmware is a rule for one kind of device. An upload rule writes
+# firmware into the bare USB devices that it matches, on any machine,
+# each time one appears. An update rule covers devices that keep their
+# own firmware, when a catalog offers them releases of one component.
+# firmware-operator creates one update rule for each component
+# that a scan finds. The kind is cluster-scoped because a rule
+# describes a kind of device, as a DeviceClass does, and a device can
+# move from one machine to another. firmware-operator writes the
+# status: an entry for each port where an upload rule matched a
+# device, and an entry for each machine's device that an update rule
+# covers.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -25,9 +26,8 @@ spec:
     - name: v1alpha1
       served: true
       storage: true
-      # The status subresource splits spec and status into two write
-      # paths. People declare the spec, and firmware-operator writes the
-      # status.
+      # With the status subresource, people write only the spec and
+      # firmware-operator writes only the status.
       subresources:
         status: {}
       additionalPrinterColumns:
@@ -77,20 +77,19 @@ spec:
           properties:
             spec:
               type: object
-              # A rule loads a device that holds no firmware, or covers a
-              # device that keeps its own, never both: an upload matches a
-              # bare chip, and an update matches a device that already
-              # runs firmware. selector and machines choose the devices of
-              # an upload. An update chooses its devices by a catalog
-              # component or by their GUIDs, and machines limits only an
-              # approval, so it needs update.version.
+              # An upload rule writes firmware into a bare chip that has none. An
+              # update rule covers a device that already runs its own firmware. A
+              # Firmware is one or the other. selector chooses the devices of an
+              # upload, and an update chooses its devices by update.component or
+              # update.guids. machines limits an upload to some machines. On an
+              # update it limits only the approval, so it needs update.version.
               x-kubernetes-validations:
                 - rule: has(self.upload) != has(self.update)
                   message: a Firmware has exactly one of upload and update
                 - rule: "!has(self.upload) || has(self.selector)"
                   message: an upload needs a selector
                 - rule: "!has(self.update) || !has(self.selector)"
-                  message: selector belongs to upload; an update selects its devices by update.component or update.guids
+                  message: only an upload has a selector, because an update selects its devices by update.component or update.guids
                 - rule: "!has(self.update) || !has(self.machines) || has(self.update.version)"
                   message: machines limits an approval, so an update with machines needs update.version
               properties:
@@ -98,26 +97,23 @@ spec:
                   type: string
                   minLength: 1
                   description: >-
-                    A CEL expression that selects the devices an upload
-                    loads, with the same variables as a `DeviceClass`
-                    selector, for example
+                    A CEL expression that selects the devices an upload loads. It uses
+                    the same variables as a `DeviceClass` selector, for example
                     `device.attributes["liken.sh"].vendor == "1618" &&
                     device.attributes["liken.sh"].product == "0920"`.
-                    `firmware-operator` compiles it with the CEL
-                    environment of Kubernetes' dynamic resource
-                    allocation, so it means here what it means in a
-                    `DeviceClass`. A selector that does not compile sets
-                    `Valid` to `False`, and the rule runs nowhere.
-                    Required with `upload`, and refused with `update`.
+                    `firmware-operator` compiles it in the CEL environment that
+                    Kubernetes uses for dynamic resource allocation, so it behaves as it
+                    does in a `DeviceClass`. When it does not compile, `Valid` is `False`
+                    and the rule runs on no machine. Required with `upload`. Refused with
+                    `update`.
                 machines:
                   type: object
                   description: >-
-                    A label selector on `Machine` objects. An upload runs
-                    only on the machines whose labels it selects, and an
-                    approval in `update.version` covers only those
-                    machines. Optional. With no value, the upload runs on
-                    every machine, and the approval covers every machine.
-                    Refused with an `update` that has no `version`.
+                    A label selector on `Machine` objects. An upload runs only on the
+                    machines whose labels match it, and an approval in `update.version`
+                    covers only those machines. When it is not set, the upload runs on
+                    every machine and the approval covers every machine. Refused with an
+                    `update` that has no `version`.
                   properties:
                     matchLabels:
                       type: object
@@ -147,40 +143,36 @@ spec:
                   type: object
                   required: [image, command]
                   description: >-
-                    The pod that writes the firmware into a device that
-                    holds none of its own. `firmware-operator` runs it
-                    once for each appearance of a matched device, on the
-                    device's machine, with a claim on that one device.
+                    The pod that writes firmware into a device that has none of its own.
+                    `firmware-operator` runs it once each time a matched device appears,
+                    on the device's machine, with a claim on that device.
                   properties:
                     image:
                       type: string
                       minLength: 1
                       description: >-
-                        The image that holds the loader and the firmware
-                        files, usually the vendor's own image, such as
-                        `ghcr.io/liken-sh/indi-qhy`. The pod runs it as
-                        user 1000 with no capabilities and a read-only
-                        root file system.
+                        The image that has the loader and the firmware files, usually the
+                        vendor's image, such as `ghcr.io/liken-sh/indi-qhy`. The pod runs it
+                        as user 1000, with all capabilities dropped and a read-only root file
+                        system.
                     command:
                       type: array
                       minItems: 1
                       items:
                         type: string
                       description: >-
-                        The loader's command, such as `[fxload, -t, fx2,
-                        -I, /lib/firmware/qhy/QHY5II.HEX, -D,
-                        $(LIKEN_DEVICE)]`. The pod sets `LIKEN_DEVICE` to
-                        the device's usbfs node,
-                        `/dev/bus/usb/<bus>/<device>`, and Kubernetes
-                        expands `$(LIKEN_DEVICE)` in the command. The
-                        upload succeeds when the command exits 0 and the
-                        bare device leaves the machine's
+                        The loader's command, such as `[fxload, -t, fx2, -I,
+                        /lib/firmware/qhy/QHY5II.HEX, -D, $(LIKEN_DEVICE)]`. The pod sets
+                        `LIKEN_DEVICE` to the device's usbfs node,
+                        `/dev/bus/usb/<bus>/<device>`, and Kubernetes expands
+                        `$(LIKEN_DEVICE)` in the command. The upload succeeds when the
+                        command exits 0 and the bare device leaves the machine's
                         `ResourceSlice` within one minute.
                     args:
                       type: array
                       items:
                         type: string
-                      description: "Arguments after the command. Kubernetes expands `$(LIKEN_DEVICE)` in them too. Optional."
+                      description: "Arguments for the command. Kubernetes expands `$(LIKEN_DEVICE)` in them too. Optional."
                 update:
                   type: object
                   x-kubernetes-validations:
@@ -189,34 +181,35 @@ spec:
                     - rule: has(self.version) == has(self.cabinet)
                       message: an approval needs both version and cabinet
                     - rule: "!has(self.version) || has(self.component)"
-                      message: only an update of a component takes a version, because no catalog offers a release for a set of GUIDs
+                      message: only an update of a component can set version, because no catalog offers a release for a set of GUIDs
                   description: >-
-                    Marks the rule for the firmware of a device that
-                    keeps its own firmware, such as a board's UEFI
-                    firmware or an SSD. `firmware-operator` creates one
-                    such `Firmware` for each catalog component that a
-                    scan finds a release of, and one for each set of
-                    GUIDs of an updatable device with no release. Each
-                    carries the label `firmware.liken.sh/discovered`.
-                    `status.machines` records the version each machine
-                    runs and the releases each `FirmwareCatalog` offers.
-                    A person approves one release with `version` and
-                    `cabinet`. The approval installs nothing.
+                    Makes the rule cover the firmware of devices that keep their own,
+                    such as a board's UEFI firmware or an SSD. `firmware-operator`
+                    creates a `Firmware` with this field for each catalog component that
+                    a scan finds a release of, and for each set of GUIDs of an updatable
+                    device that has no release. It labels each one
+                    `firmware.liken.sh/discovered`. `status.machines` lists the version
+                    that each machine runs and the releases that each `FirmwareCatalog`
+                    offers. To approve one release, set `version` and `cabinet`.
+                    `firmware-operator` then rehearses the install on each machine and
+                    records the result in `status.rehearsals`. After a rehearsal passes,
+                    it writes the update in the machine's reboot turn and records that in
+                    `status.applies`.
                   properties:
                     component:
                       type: string
                       minLength: 1
                       description: >-
                         The ID of the catalog component, such as
-                        `org.linuxfoundation.dbx.x64.firmware`. A device
-                        belongs to the rule when a catalog offers it a
-                        release of this component. A device keeps its
-                        entry after it installs the newest release, by
-                        its fwupd device ID. A discovered `Firmware` is
-                        named by this ID with no top-level domain and no
-                        `firmware` part, such as `microsoft-dbx-x64`, or
-                        by the whole ID in lowercase when another
-                        `Firmware` has that name.
+                        `org.linuxfoundation.dbx.x64.firmware`. A device belongs to the rule
+                        when a catalog offers it a release of this component. After the
+                        device installs the newest release, no catalog offers it a release,
+                        but it stays in this rule, because `firmware-operator` matches its
+                        entry by fwupd's device ID. `firmware-operator` names a
+                        discovered `Firmware` after this ID, without the top-level domain
+                        and without a `firmware` part, such as `microsoft-dbx-x64`. When
+                        another `Firmware` already has that name, it uses the whole ID in
+                        lowercase.
                     guids:
                       type: array
                       minItems: 1
@@ -224,103 +217,90 @@ spec:
                         type: string
                         minLength: 1
                       description: >-
-                        The GUIDs that fwupd reports for a device that no
-                        catalog offers a release for, sorted. A device
-                        whose set of GUIDs is exactly this set belongs
-                        to the rule, until a catalog offers it a
-                        release. A discovered `Firmware` is named by the
-                        device's name and eight hex digits of a hash of
-                        this set, such as `uefi-ca-7420e8dc`.
+                        The GUIDs that fwupd reports for a device that no catalog offers a
+                        release for, sorted. A device belongs to the rule when its set of
+                        GUIDs is exactly this set, until a catalog offers it a release.
+                        `firmware-operator` names a discovered `Firmware` after the device's
+                        name and the first eight hex digits of a hash of this set, such as
+                        `uefi-ca-7420e8dc`.
                     version:
                       type: string
                       minLength: 1
                       description: >-
-                        The version of the component that a person
-                        approves, as `status.machines` lists it in a
-                        release, such as `20260707`. Optional. It needs
-                        `component` and `cabinet`. `firmware-operator`
-                        answers it with the `Approved` condition and
-                        `status.counts.pending`. With no value, the
-                        `Firmware` approves nothing.
+                        The version of the component that you approve, as `status.machines`
+                        lists it in a release, such as `20260707`. Optional. Needs
+                        `component` and `cabinet`. `firmware-operator` reports on it in the
+                        `Approved` condition and in `status.counts.pending`. When it is not
+                        set, the `Firmware` approves nothing.
                     cabinet:
                       type: object
                       required: [url, sha256]
                       description: >-
-                        The cabinet file of the approved release, copied
-                        from the release in `status.machines`. Required
-                        with `version`.
+                        The cabinet file of the approved release, copied from the release in
+                        `status.machines`. Required with `version`.
                       properties:
                         url:
                           type: string
                           pattern: "^https?://"
                           description: >-
-                            Where the cabinet downloads from. The
-                            approval does not compare it with the
-                            catalog's URL, so a mirror works. A mirror
-                            over HTTP works too, because each pod checks
-                            the cabinet against sha256 before it uses
-                            it.
+                            Where the cabinet downloads from. It does not have to match the
+                            catalog's URL, so you can use a mirror, even over plain HTTP, because
+                            each pod checks the cabinet against `sha256` before it uses it.
                         sha256:
                           type: string
                           pattern: "^[0-9a-f]{64}$"
                           description: >-
-                            The cabinet's SHA-256, in lowercase hex. It
-                            pins the file the way a digest pins an image:
-                            a catalog that offers the version in another
-                            cabinet does not match the approval.
+                            The cabinet's SHA-256, in lowercase hex. When a catalog offers the
+                            version only in a cabinet with another SHA-256, the approval does not
+                            match it, and `Approved` is `False` with `CabinetDiffers`.
             status:
               type: object
               properties:
                 observedGeneration:
                   type: integer
                   format: int64
-                  description: "The generation of the spec that the status answers."
+                  description: "The `metadata.generation` of the spec that the status describes."
                 conditions:
                   type: array
                   description: >-
-                    An upload has `Valid`. It is `True` with the reason
-                    `Compiled` when the selector and `spec.machines`
-                    compile. It is `False` with the reason
-                    `SelectorInvalid` when either one does not, and the
-                    message gives the error. A rule that is not valid
-                    runs nowhere. An update with `version` has
-                    `Approved`, over the machines that `spec.machines`
-                    covers. It is `True` with the reason `Offered` when a
-                    catalog offers the version in the pinned cabinet to
-                    at least one machine, and with `Installed` when none
-                    is offered it and at least one runs it. It is `False`
-                    with `CabinetDiffers` when a catalog offers the
-                    version only in another cabinet, with `NotOffered`
-                    when no catalog offers it, and with `MachinesInvalid`
-                    when `spec.machines` does not compile. The message
-                    names the machines. An approval that a catalog
-                    offers to at least one machine also has `Rehearsed`,
-                    over the rehearsals in `rehearsals`. It is `True`
-                    with the reason `Passed` when the install passed its
-                    rehearsal on every machine the approval waits for.
-                    It is `False` with `Refused` when a rehearsal shows
-                    that the install writes more than one authenticated
-                    append, or that the variable store has no room for
-                    it, and with `Failed` when a rehearsal could not
-                    run. It is `Unknown` with `Rehearsing` while a
-                    machine waits for its rehearsal, which includes a
-                    machine whose rehearsal found the catalog moved. The
-                    message names the machines. An approval with a machine that asked
-                    for its reboot turn also has `Applied`, over the
-                    records in `applies`. It is `True` with the reason
-                    `Written` when the firmware took the update on every
-                    machine the approval waits for. It is `False` with
-                    `Refused` when the firmware refused the write on a
-                    machine, and with `Failed` when a write could not
-                    run, an apply pod ended before the signal to write,
-                    a machine left its turn before the hold, or a
-                    machine still reads the old version after its
-                    reboot. It is `Unknown` with `Uncertain` when the
-                    operator cannot tell whether a write landed, until
-                    the scan after the machine's reboot answers, and
-                    with `Applying` while a machine waits for its
-                    rehearsal, its turn, or its write. The message names
-                    the machines.
+                    An upload has `Valid`. It is `True` with the reason `Compiled` when
+                    the selector and `spec.machines` compile. It is `False` with the
+                    reason `SelectorInvalid` when either one does not compile, and the
+                    message gives the error. A rule that is not valid runs on no machine.
+
+                    An update with `version` has `Approved`, over the machines that
+                    `spec.machines` covers. It is `True` with the reason `Offered` when a
+                    catalog offers the version in the pinned cabinet to at least one
+                    machine. It is `True` with `Installed` when no machine is offered it
+                    and at least one machine runs it. It is `False` with
+                    `CabinetDiffers` when a catalog offers the version only in another
+                    cabinet, with `NotOffered` when no catalog offers it, and with
+                    `MachinesInvalid` when `spec.machines` does not compile. The message
+                    lists the machines.
+
+                    An approval that a catalog offers to at least one machine also has
+                    `Rehearsed`, over the records in `rehearsals`. It is `True` with the
+                    reason `Passed` when the install passed its rehearsal on every
+                    machine the approval waits for. It is `False` with `Refused` when a
+                    rehearsal shows that the install writes something that a rehearsal
+                    does not allow, or that the variable store or the ESP has no room for
+                    it. It is `False` with `Failed` when a rehearsal could not run. It is `Unknown` with
+                    `Rehearsing` while a machine waits for its rehearsal, including a
+                    machine whose rehearsal found that the catalog moved. The message
+                    lists the machines.
+
+                    An approval with at least one record in `applies` also has `Applied`.
+                    It is `True` with the reason `Written` when the firmware took the
+                    update on every machine the approval waits for. It is `False` with
+                    `Refused` when the firmware refused the write on a machine, or when a
+                    machine must take a capsule and its `status.firmware.bootOrderKept`
+                    is not `true`. It is `False` with `Failed` when a write could not run, an apply pod ended
+                    before the signal to write, a machine left its reboot turn before
+                    `machine-operator` held it, or a machine still reads the old version
+                    after its reboot. It is `Unknown` with `Uncertain` when the operator cannot tell whether a
+                    write took effect, until the scan after the machine's reboot shows
+                    it. It is `Unknown` with `Applying` while a machine waits for its
+                    rehearsal, its turn, or its write. The message lists the machines.
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   items:
@@ -333,7 +313,7 @@ spec:
                       status:
                         type: string
                         enum: ["True", "False", "Unknown"]
-                        description: "Whether the condition holds."
+                        description: "Whether the condition is true, false, or not yet known."
                       reason:
                         type: string
                         description: "One word for the cause."
@@ -343,7 +323,7 @@ spec:
                       observedGeneration:
                         type: integer
                         format: int64
-                        description: "The generation of the spec that the condition answers."
+                        description: "The `metadata.generation` of the spec that the condition describes."
                       lastTransitionTime:
                         type: string
                         format: date-time
@@ -351,11 +331,11 @@ spec:
                 devices:
                   type: array
                   description: >-
-                    One entry for each port, a machine and a USB address,
-                    where the rule matched a device. The entry describes
-                    the latest appearance of a device in the port, so the
-                    list grows only with the number of ports. A `Loaded`
-                    entry stays after the bare device leaves.
+                    One entry for each port, meaning a machine and a USB address, where
+                    the rule matched a device. The entry describes the latest appearance
+                    of a device in that port, so the list grows with the number of ports
+                    and not with the number of uploads. A `Loaded` entry stays after the
+                    bare device leaves.
                   items:
                     type: object
                     required: [machine, device, address, deviceNumber, generation, result, time]
@@ -373,30 +353,27 @@ spec:
                         type: integer
                         format: int64
                         description: >-
-                          The device number that the kernel gave this
-                          appearance. A new number is a new appearance,
-                          after a replug or a power cycle, and gets a new
-                          upload.
+                          The device number that the kernel gave this appearance. A new number
+                          means a new appearance, after a replug or a power cycle, and gets a
+                          new upload.
                       generation:
                         type: integer
                         format: int64
-                        description: "The generation of the rule that this entry ran. A new generation gets a new upload."
+                        description: "The `metadata.generation` of the rule that this entry ran. A new generation gets a new upload."
                       result:
                         type: string
                         enum: [Running, Loaded, Failed, Conflict]
                         description: >-
-                          `Running` while the upload pod runs. `Loaded`
-                          when the loader exited 0 and the bare device
-                          left the slice. `Failed` when the loader failed,
-                          the device stayed for a minute after it exited
-                          0, the pod did not finish within five minutes,
-                          or the pod is gone. `Conflict` when another rule
-                          matches the same device, so neither runs. A
-                          `Failed` upload does not run again until the
+                          `Running` while the upload pod runs. `Loaded` when the loader exited
+                          0 and the bare device left the slice. `Failed` when the loader
+                          failed, the device stayed in the slice for a minute after the loader
+                          exited 0, the pod did not finish within five minutes, or the pod is
+                          gone. `Conflict` when another rule matches the same device, so
+                          neither rule runs. A `Failed` upload does not run again until the
                           device appears again or the rule changes.
                       message:
                         type: string
-                        description: "Why the entry has its result, such as the loader's exit code and the last line of its log."
+                        description: "The reason for the result, such as the loader's exit code and the last line of its log."
                       time:
                         type: string
                         format: date-time
@@ -404,12 +381,12 @@ spec:
                 machines:
                   type: array
                   description: >-
-                    One entry for each machine's device in an update
-                    rule's group, from that machine's last scan against
-                    each `FirmwareCatalog`. A scan replaces its machine's entries.
-                    An entry leaves only when the machine's next scan does
-                    not report the device, or when its `Machine` is
-                    deleted, so a machine that is off keeps its entries.
+                    One entry for each device of each machine that the update rule
+                    covers, from that machine's latest scan against each
+                    `FirmwareCatalog`. A scan replaces its machine's entries. An entry
+                    is removed only when the machine's next scan does not report the
+                    device, or when its `Machine` is deleted, so a machine that is off
+                    keeps its entries.
                   items:
                     type: object
                     required: [machine, device, catalog, file, time]
@@ -423,25 +400,24 @@ spec:
                       deviceId:
                         type: string
                         description: >-
-                          fwupd's ID of the device on the machine. It
-                          keeps the entry in its component's object
-                          after the device installs the newest release.
+                          fwupd's ID of the device on the machine. `firmware-operator` matches
+                          the entry to its component's `Firmware` by this ID, so the entry stays
+                          there after the device installs the newest release.
                       version:
                         type: string
                         description: "The version of the firmware the device runs, as fwupd reports it."
                       catalog:
                         type: string
-                        description: "The `FirmwareCatalog` the scan matched the device against."
+                        description: "The `FirmwareCatalog` that the scan matched the device against."
                       file:
                         type: string
-                        description: "The catalog file the scan read, such as `firmware-09138-stable.xml.zst`, or a newer file that offers the machine the same releases, which the operator records with no scan."
+                        description: "The catalog file that the scan read, such as `firmware-09138-stable.xml.zst`. It can instead be a newer file that offers the machine the same releases, which the operator records without a new scan."
                       releases:
                         type: array
                         description: >-
-                          Each release the catalog offers for the device,
-                          newest first, as fwupd offered it. Empty when the
-                          device runs the newest release the catalog has
-                          for it.
+                          The releases that the catalog offers for the device, newest first,
+                          as fwupd reports them. Empty when the device runs the newest release
+                          that the catalog has for it.
                         items:
                           type: object
                           required: [version]
@@ -451,14 +427,14 @@ spec:
                               description: "The release's version."
                             id:
                               type: string
-                              description: "The AppStream ID of the catalog's component that offers the release."
+                              description: "The AppStream ID of the catalog component that offers the release."
                             urgency:
                               type: string
-                              description: "How urgent the vendor says the release is, such as `high`."
+                              description: "The urgency that the vendor gives the release, such as `high`."
                             cabinet:
                               type: object
                               required: [url, sha256]
-                              description: "The cabinet file that carries the release."
+                              description: "The cabinet file that contains the release."
                               properties:
                                 url:
                                   type: string
@@ -469,23 +445,21 @@ spec:
                                 size:
                                   type: integer
                                   format: int64
-                                  description: "The size of the firmware payload the release installs, in bytes, as the catalog states it. The cabinet file is larger."
+                                  description: "The size in bytes of the firmware payload that the release installs, as the catalog gives it. The cabinet file is larger."
                       time:
                         type: string
                         format: date-time
-                        description: "When the scan that reported the entry ended."
+                        description: "When the scan that reported the entry finished."
                 rehearsals:
                   type: array
                   description: >-
-                    One record for each machine that an approval waits
-                    for, from the latest rehearsal of the approved
-                    install on that machine. A rehearsal runs the
-                    install against a copy of the machine's firmware
-                    variables in memory, and records what it would
-                    write. It runs once for each boot of the machine,
-                    device, approved version and cabinet, and catalog
-                    file. A record leaves when its machine is no longer
-                    pending, or when the approval changes.
+                    One record for each machine that an approval waits for, from the
+                    latest rehearsal of the approved install on that machine. A rehearsal
+                    runs the install against an in-memory copy of the machine's firmware
+                    variables and records what the install would write. It runs once for
+                    each combination of the machine's boot, the device, the approved
+                    version and cabinet, and the catalog file. A record is removed when
+                    its machine is no longer pending or when the approval changes.
                   items:
                     type: object
                     required: [machine, boot, deviceId, version, cabinetSHA256, catalog, file, result, time]
@@ -495,7 +469,7 @@ spec:
                         description: "The `Machine`, which has the name of its node."
                       boot:
                         type: string
-                        description: "The time the machine booted, from its `Machine`'s status, when the rehearsal started."
+                        description: "The machine's boot time, from its `Machine`'s `status.boot.time`, when the rehearsal started."
                       deviceId:
                         type: string
                         description: "fwupd's ID of the device the rehearsal installed on."
@@ -507,51 +481,49 @@ spec:
                         description: "The SHA-256 of the approved cabinet."
                       catalog:
                         type: string
-                        description: "The `FirmwareCatalog` of the machine's last scan."
+                        description: "The `FirmwareCatalog` of the machine's latest scan."
                       file:
                         type: string
-                        description: "The catalog file the rehearsal loaded, which is the one the machine's entry names."
+                        description: "The catalog file that the rehearsal loaded, which is the file in the machine's entry in `status.machines`."
                       result:
                         type: string
                         enum: [Running, Passed, Refused, Failed, CatalogMoved]
                         description: >-
-                          `Running` while the rehearsal pod runs.
-                          `Passed` when the install wrote one
-                          authenticated append to its device's own
-                          variable, nothing else, and the variable store
-                          has room for it. `Refused` when the install
-                          would write anything else, or the store has no
-                          room. `Failed` when the rehearsal could not
-                          run, such as a cabinet whose SHA-256 is not the
-                          pinned one. `CatalogMoved` when the catalog's
-                          jcat names another file than the machine's
-                          scan read. That is no failure: the operator
-                          reads the jcat again at once, and the machine
-                          rehearses again against the new file, after a
-                          scan of it when it offers the machine other
-                          releases.
+                          `Running` while the rehearsal pod runs. `Passed` when a Secure Boot
+                          database install wrote only authenticated appends to its device's own
+                          variable and the variable store has room for them, or when a capsule
+                          install wrote only the variables and ESP files that a capsule needs
+                          and the ESP has room for them. `Refused` when the install would write
+                          anything else, when the store or the ESP has no room, or when fwupd
+                          updates the device through a plugin that a rehearsal does not cover.
+                          `Failed` when the rehearsal could not run, for example when the
+                          cabinet's SHA-256 is not the pinned one. `CatalogMoved` when the
+                          catalog's jcat lists a different file from the one the machine's scan
+                          read. That is not a failure. The operator reads the jcat again at
+                          once and rehearses the machine again against the new file. When the
+                          new file offers the machine other releases, a scan runs first.
                       message:
                         type: string
-                        description: "Why the rehearsal has its result."
+                        description: "The reason for the result."
                       append:
                         type: object
                         required: [variable, bytes, sha256]
-                        description: "The append that a passed rehearsal of a Secure Boot database update recorded."
+                        description: "The authenticated append that a passed rehearsal of a Secure Boot database update recorded."
                         properties:
                           variable:
                             type: string
-                            description: "The variable, as efivarfs names its file, such as `dbx-d719b2cb-3d3a-4596-a3bc-dad00e67656f`."
+                            description: "The variable, named as its file in efivarfs, such as `dbx-d719b2cb-3d3a-4596-a3bc-dad00e67656f`."
                           bytes:
                             type: integer
                             format: int64
-                            description: "The length of the append: for each authenticated write, four bytes of attributes, then the signed payload."
+                            description: "The length of the append in bytes. For each authenticated write it is four bytes of attributes followed by the signed payload."
                           sha256:
                             type: string
                             description: "The SHA-256 of the append's bytes, in hex."
                       capsule:
                         type: object
                         required: [writes, bytes, sha256, espFree]
-                        description: "What a passed rehearsal of a UEFI capsule recorded: each variable and file that fwupd wrote to the copies of the machine's variables and of the ESP of its next boot."
+                        description: "What a passed rehearsal of a UEFI capsule recorded: each variable and file that fwupd wrote to the copies of the machine's variables and of the EFI system partition (ESP) of its next boot."
                         properties:
                           writes:
                             type: array
@@ -563,29 +535,32 @@ spec:
                                 kind:
                                   type: string
                                   enum: [variable, file]
+                                  description: "`variable` for a firmware variable, or `file` for a file on the ESP."
                                 name:
                                   type: string
-                                  description: "The variable as efivarfs names its file, or the file's path on the ESP."
+                                  description: "The variable, named as its file in efivarfs, or the file's path on the ESP."
                                 bytes:
                                   type: integer
                                   format: int64
+                                  description: "The size in bytes of the variable or the file after the install."
                                 sha256:
                                   type: string
+                                  description: "The SHA-256 of the variable or the file after the install, in hex."
                           bytes:
                             type: integer
                             format: int64
-                            description: "The bytes of the files that the capsule stages on the ESP."
+                            description: "The size in bytes of the files that the capsule stages on the ESP."
                           sha256:
                             type: string
-                            description: "One SHA-256 over the writes, which the apply compares with what fwupd writes."
+                            description: "One SHA-256 over all the writes. The apply compares it with what fwupd writes."
                           espFree:
                             type: integer
                             format: int64
-                            description: "The free space of the ESP of the machine's next boot, in bytes."
+                            description: "The free space in bytes on the ESP of the machine's next boot."
                       free:
                         type: integer
                         format: int64
-                        description: "The bytes free in the machine's variable store when the rehearsal ran."
+                        description: "The free space in bytes in the machine's variable store when the rehearsal ran."
                       time:
                         type: string
                         format: date-time
@@ -593,31 +568,27 @@ spec:
                 applies:
                   type: array
                   description: >-
-                    One record for each machine that an approval waits
-                    for and whose rehearsal passed on the boot it runs.
-                    The operator starts an apply pod on the machine,
-                    which rehearses the install again while the cluster
-                    is whole and then waits. When that prepare is done,
-                    the pod's readiness probe turns it `Ready`, and the
-                    operator files a `Disruption` with `spec.hold`, so
-                    the turn stops after the drain. When
-                    the turn holds, the operator sets the pod's
-                    annotation `firmware.liken.sh/write` to `go`, and
-                    the pod writes the recorded append to the real
-                    variable with no network. The operator then removes
-                    `spec.hold`, so the machine reboots. The machine's
-                    next scan proves the write.
-                    A record leaves when its machine is no longer
-                    pending, or when the approval changes. The operator
-                    does not write again after a refused or failed
-                    record. A person who withdraws the approval and
-                    approves it again removes the record, and the
-                    machine rehearses and asks for its turn again. An
-                    apply pod that finds the catalog's jcat naming
-                    another file than the machine's scan read writes
-                    nothing and asks for no turn. Its record leaves, the
-                    operator reads the jcat again at once, and the apply
-                    starts again with the new file.
+                    One record for each machine that an approval waits for and whose
+                    rehearsal passed on the boot it runs. The operator starts an apply
+                    pod on the machine. The pod rehearses the install again before the
+                    drain, while the cluster's DNS still works, and then waits. When that preparation is done, the
+                    pod's readiness probe makes it `Ready`, and the operator creates a
+                    `Disruption` with `spec.hold`, so the machine's reboot turn stops
+                    after the drain. When the turn is held, the operator sets the pod's
+                    annotation `firmware.liken.sh/write` to `go`. The pod then writes the
+                    recorded append to the real variable, or stages the capsule, with no
+                    network. The operator then removes `spec.hold`, so the machine
+                    reboots. The machine's next scan shows whether the write took effect.
+
+                    A record is removed when its machine is no longer pending or when the
+                    approval changes. The operator does not write again after a record
+                    with the result `Refused` or `Failed`. To try again, withdraw the
+                    approval and approve it again. That removes the record, and the
+                    machine is rehearsed again and requests its turn again. When an apply
+                    pod finds that the catalog's jcat lists a different file from the one
+                    the machine's scan read, it writes nothing and requests no turn. The
+                    operator removes its record, reads the jcat again at once, and starts
+                    the apply again with the new file.
                   items:
                     type: object
                     required: [machine, boot, version, cabinetSHA256, sha256, result, time]
@@ -627,7 +598,7 @@ spec:
                         description: "The `Machine`, which has the name of its node."
                       boot:
                         type: string
-                        description: "The time the machine booted, from its `Machine`'s status, when its rehearsal passed."
+                        description: "The machine's boot time, from its `Machine`'s `status.boot.time`, when its rehearsal passed."
                       version:
                         type: string
                         description: "The approved version."
@@ -636,41 +607,35 @@ spec:
                         description: "The SHA-256 of the approved cabinet."
                       sha256:
                         type: string
-                        description: "The SHA-256 of the append that the rehearsal recorded, which is the only append the apply writes."
+                        description: "The SHA-256 of the append that the rehearsal recorded. The apply writes only that append."
                       disruption:
                         type: string
-                        description: "The `Disruption` that asks for the machine's reboot turn. It is absent while the apply pod prepares, because the operator files the request only when the pod is `Ready`."
+                        description: "The `Disruption` that requests the machine's reboot turn. It is not set while the apply pod prepares, because the operator creates the `Disruption` only when the pod is `Ready`."
                       capsule:
                         type: boolean
-                        description: "True for the apply of a capsule. Its `sha256` is then the digest of the rehearsal's writes, and its turn reboots with `BootNext` at fwupd's updater once the pod staged the capsule."
+                        description: "True for the apply of a UEFI capsule. Its `sha256` is then the digest of all the rehearsal's writes. After the pod stages the capsule, the turn reboots the machine with `BootNext` set to fwupd's updater."
                       result:
                         type: string
                         enum: [Waiting, Writing, Written, Uncertain, Refused, Failed]
                         description: >-
-                          `Waiting` while the apply pod prepares, and
-                          then while it waits for `machine-operator`
-                          to drain the machine and hold its turn.
-                          `Writing` after the operator sent the apply
-                          pod the signal to write. `Written` when the
-                          firmware took the append; the machine then
-                          reboots, and the record stays until its next
-                          scan. `Uncertain` when the apply pod ended
-                          after the signal without saying whether it
-                          wrote: it is gone, it ran past its deadline,
-                          which counts from the signal, or it crashed.
-                          The machine reboots in its turn all the
-                          same, and its next scan reads what the
-                          firmware holds. `Refused` when the firmware
-                          refused the append, which changes nothing.
-                          `Failed` when the apply could not run, the
-                          apply pod ended or was gone before the
-                          signal, the variables changed since the
-                          rehearsal, the machine left its turn before
-                          the hold, or the machine still reads the old
-                          version after its reboot.
+                          `Waiting` while the apply pod prepares, and then while it waits for
+                          `machine-operator` to drain the machine and hold its turn. `Writing`
+                          after the operator sent the apply pod the signal to write. `Written`
+                          when the firmware took the append. The machine then reboots, and the
+                          record stays until its next scan. `Uncertain` when the apply pod
+                          ended after the signal without reporting whether it wrote, because
+                          the pod is gone, ran past its deadline, or crashed. The deadline
+                          counts from the signal. The machine reboots in its turn anyway, and
+                          its next scan reads what the firmware has. `Refused` when the
+                          firmware refused the append, which changes nothing, or when the
+                          machine must take a capsule and its `status.firmware.bootOrderKept`
+                          is not `true`. `Failed` when the apply could not run, the apply pod ended or was gone before the
+                          signal, the variables changed since the rehearsal, the machine left
+                          its turn before the hold, or the machine still reads the old version
+                          after its reboot.
                       message:
                         type: string
-                        description: "Why the record has its result."
+                        description: "The reason for the result."
                       time:
                         type: string
                         format: date-time
@@ -678,13 +643,13 @@ spec:
                 counts:
                   type: object
                   description: >-
-                    The counts of the rule's own kind. An upload has the
-                    number of entries in `devices` with each result. An
-                    update has the machines that `machines` names, the
-                    ones a catalog offers a release, and the ones an
-                    approval waits for. A rule writes its own counts even
-                    when they are 0, and never the other kind's, so the
-                    other kind's printer columns stay empty.
+                    The counts for the rule's own kind. An upload has the number of
+                    entries in `devices` with each result. An update has the number of
+                    machines that have an entry in `status.machines`, the number that a
+                    catalog offers a release, and the number that an approval waits for.
+                    `firmware-operator` writes a rule's own counts even when they are 0,
+                    and never the counts of the other kind, so the printer columns of the
+                    other kind stay empty.
                   properties:
                     running:
                       type: integer
@@ -700,13 +665,13 @@ spec:
                       description: "Entries that are `Conflict`."
                     machines:
                       type: integer
-                      description: "The machines that `machines` names."
+                      description: "The number of machines that have an entry in `status.machines`."
                     behind:
                       type: integer
-                      description: "The machines with at least one release offered in `machines`."
+                      description: "The number of machines that have at least one release offered in `status.machines`."
                     pending:
                       type: integer
                       description: >-
-                        The machines that an approval covers and waits
-                        for: a catalog offers one of the machine's devices
-                        the approved version in the pinned cabinet.
+                        The number of machines that an approval covers and waits for.
+                        A machine counts when a catalog offers one of its devices the
+                        approved version in the pinned cabinet.

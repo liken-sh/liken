@@ -1,13 +1,10 @@
 package main
 
-// A fake API server that holds the Firmware and FirmwareCatalog objects, the
-// slices, the Machines, the upload and scan pods, the upload pods'
-// claims, and the Disruptions, and serves the requests the operator
-// sends: a list and a watch of each collection, a status write, an
-// object's create, read, merge patch, and delete, and a pod's log. It answers
-// over the in-memory connections of apiservertest, so each test runs in
-// a synctest bubble on the fake clock. A test plays machine-operator
-// and the kubelet: it publishes a slice and finishes an upload pod.
+// A fake API server for the requests that the operator sends. It serves
+// them over the in-memory connections of apiservertest, so each test
+// runs in a synctest bubble on the fake clock. A test acts as
+// machine-operator and the kubelet: it publishes a ResourceSlice and
+// sets a pod's final phase.
 
 import (
 	"encoding/json"
@@ -31,20 +28,20 @@ const (
 )
 
 var (
-	uploadPodsPath = podsPathIn(operatorNS)
-	claimsPath     = claimsPathIn(operatorNS)
+	operatorPodsPath = podsPathIn(operatorNS)
+	claimsPath       = claimsPathIn(operatorNS)
 )
 
-// kinds names the apiVersion and kind of each collection's objects,
-// which a list and a bookmark carry.
+// kinds maps each collection path to the apiVersion and kind of its
+// objects, for list responses and bookmark events.
 var kinds = map[string][2]string{
-	firmwaresPath:   {firmwareAPIVersion, firmwareKind},
-	catalogsPath:    {firmwareAPIVersion, catalogKind},
-	slicesPath:      {"resource.k8s.io/v1", "ResourceSlice"},
-	machinesPath:    {"liken.sh/v1alpha1", "Machine"},
-	uploadPodsPath:  {"v1", "Pod"},
-	claimsPath:      {"resource.k8s.io/v1", "ResourceClaim"},
-	disruptionsPath: {disruptionAPIVersion, disruptionKind},
+	firmwaresPath:    {firmwareAPIVersion, firmwareKind},
+	catalogsPath:     {firmwareAPIVersion, catalogKind},
+	slicesPath:       {"resource.k8s.io/v1", "ResourceSlice"},
+	machinesPath:     {"liken.sh/v1alpha1", "Machine"},
+	operatorPodsPath: {"v1", "Pod"},
+	claimsPath:       {"resource.k8s.io/v1", "ResourceClaim"},
+	disruptionsPath:  {disruptionAPIVersion, disruptionKind},
 }
 
 type fakeEvent struct {
@@ -57,28 +54,26 @@ type fakeEvent struct {
 type fakeAPI struct {
 	server *apiservertest.Server
 
-	// recorded holds the Events the operator posts.
 	recorded *eventstest.Events
 
 	mu      sync.Mutex
 	version int
 	uids    int
 	objects map[string]map[string]map[string]any // collection, name, object
-	creates map[string]int                       // collection, creates that landed
+	creates map[string]int                       // collection, successful creates
 	events  []fakeEvent
 	changed chan struct{}
-	// logs holds each pod's log, by the pod's name. logsForbidden
-	// refuses every read of a log, the way RBAC refuses an operator with
-	// no grant on pods/log.
+	// logs maps a pod's name to its log. When logsForbidden is set,
+	// every read of a log gets 403, as when RBAC grants the operator no
+	// access to pods/log.
 	logs          map[string]string
 	logsForbidden bool
 
-	// refusals is how many status writes the server refuses next, the
-	// way an API server that restarts does.
+	// refusals is the number of next status writes that fail with 503, as
+	// when an API server restarts.
 	refusals int
 }
 
-// refuseStatusWrites makes the server refuse the next status writes.
 func (a *fakeAPI) refuseStatusWrites(count int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -97,14 +92,15 @@ func startFakeAPI(t *testing.T) *fakeAPI {
 		api.objects[collection] = map[string]map[string]any{}
 	}
 	api.server = apiservertest.Start(t, api.recorded.Around(api))
-	// The reflector waits out its backoff after a refused list without
-	// reading its context, so the bubble waits past it (apiservertest).
+	// After a failed list, client-go's reflector waits out its backoff,
+	// and its context does not end that wait. The sleep keeps the bubble
+	// alive until the wait ends (apiservertest).
 	t.Cleanup(func() { time.Sleep(time.Minute) })
 	return api
 }
 
-// store records an object at the next version and tells each watch.
-// The caller holds the lock.
+// store saves an object at the next resourceVersion and wakes each
+// watch. The caller holds a.mu.
 func (a *fakeAPI) store(collection string, object map[string]any, kind string) map[string]any {
 	a.version++
 	object = clone(object)
@@ -155,7 +151,7 @@ func (a *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		name, status := strings.CutSuffix(rest, "/status")
-		if pod, log := strings.CutSuffix(rest, "/log"); log && collection == uploadPodsPath {
+		if pod, log := strings.CutSuffix(rest, "/log"); log && collection == operatorPodsPath {
 			a.log(w, r, pod)
 			return
 		}
@@ -174,9 +170,9 @@ func (a *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
-// selects answers whether an object matches a label selector of the
-// form key=value and a field selector of the form path.to.field=value.
-// An empty selector selects every object.
+// selects reports whether an object matches the request's label
+// selector and field selector. Each selector supports only one
+// key=value term, and a field selector's key is a dotted path.
 func selects(r *http.Request, object map[string]any) bool {
 	if key, value, found := strings.Cut(r.URL.Query().Get("labelSelector"), "="); found {
 		labels, _ := object["metadata"].(map[string]any)["labels"].(map[string]any)
@@ -185,11 +181,11 @@ func selects(r *http.Request, object map[string]any) bool {
 		}
 	}
 	if path, value, found := strings.Cut(r.URL.Query().Get("fieldSelector"), "="); found {
-		var held any = object
+		var field any = object
 		for _, part := range strings.Split(path, ".") {
-			held, _ = held.(map[string]any)[part]
+			field, _ = field.(map[string]any)[part]
 		}
-		if held != value {
+		if field != value {
 			return false
 		}
 	}
@@ -212,10 +208,9 @@ func (a *fakeAPI) list(w http.ResponseWriter, r *http.Request, collection string
 	})
 }
 
-// watch answers a streaming list the way the API server does: an ADDED
-// event for each object, a bookmark that ends the initial events, and
-// then every later change. A watch from a version sends each change
-// after that version.
+// watch sends each change after the requested resourceVersion. With
+// sendInitialEvents, it first sends an ADDED event for each object and
+// the bookmark that ends the initial events.
 func (a *fakeAPI) watch(w http.ResponseWriter, r *http.Request, collection string) {
 	a.mu.Lock()
 	from, _ := strconv.Atoi(r.URL.Query().Get("resourceVersion"))
@@ -262,16 +257,15 @@ func writeEvent(w http.ResponseWriter, kind string, object map[string]any) {
 func (a *fakeAPI) get(w http.ResponseWriter, collection, name string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	object, held := a.objects[collection][name]
-	if !held {
+	object, found := a.objects[collection][name]
+	if !found {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 	_ = json.NewEncoder(w).Encode(object)
 }
 
-// create stores a new pod or claim, with a UID and a creation time,
-// and answers 409 for a name that exists.
+// create responds 409 when the name exists.
 func (a *fakeAPI) create(w http.ResponseWriter, r *http.Request, collection string) {
 	var created map[string]any
 	_ = json.NewDecoder(r.Body).Decode(&created)
@@ -285,7 +279,7 @@ func (a *fakeAPI) create(w http.ResponseWriter, r *http.Request, collection stri
 	a.uids++
 	metadata["uid"] = fmt.Sprintf("uid-%d", a.uids)
 	metadata["creationTimestamp"] = time.Now().UTC().Format(time.RFC3339)
-	if collection == uploadPodsPath {
+	if collection == operatorPodsPath {
 		created["status"] = map[string]any{"phase": podPending}
 	}
 	if collection == firmwaresPath {
@@ -296,25 +290,24 @@ func (a *fakeAPI) create(w http.ResponseWriter, r *http.Request, collection stri
 	_ = json.NewEncoder(w).Encode(a.store(collection, created, "ADDED"))
 }
 
-// delete removes an object. A pod takes its claims with it, the way the
-// garbage collector follows their owner references.
+// delete also deletes each claim that the object owns, as the garbage
+// collector does.
 func (a *fakeAPI) delete(w http.ResponseWriter, collection, name string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	held, exists := a.objects[collection][name]
+	stored, exists := a.objects[collection][name]
 	if !exists {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	// The API server keeps an object whose deletion already started
-	// until its kubelet or its finalizers end it, and a second delete
-	// changes nothing.
-	if started, _ := held["metadata"].(map[string]any)["deletionTimestamp"].(string); started != "" {
+	// An object with a deletionTimestamp stays until its kubelet or its
+	// finalizers finish, so a second delete changes nothing.
+	if started, _ := stored["metadata"].(map[string]any)["deletionTimestamp"].(string); started != "" {
 		_, _ = fmt.Fprint(w, `{"kind":"Status","status":"Success"}`)
 		return
 	}
-	a.store(collection, held, "DELETED")
-	uid := held["metadata"].(map[string]any)["uid"]
+	a.store(collection, stored, "DELETED")
+	uid := stored["metadata"].(map[string]any)["uid"]
 	for _, claim := range a.objects[claimsPath] {
 		owners, _ := claim["metadata"].(map[string]any)["ownerReferences"].([]any)
 		for _, owner := range owners {
@@ -326,14 +319,14 @@ func (a *fakeAPI) delete(w http.ResponseWriter, collection, name string) {
 	_, _ = fmt.Fprint(w, `{"kind":"Status","status":"Success"}`)
 }
 
-// writeStatus replaces a Firmware's status, and refuses a write from a
-// copy older than the stored one, as the API server does.
+// writeStatus responds 409 to a write whose resourceVersion differs
+// from the stored object's, as the API server does.
 func (a *fakeAPI) writeStatus(w http.ResponseWriter, r *http.Request, collection, name string) {
 	var written map[string]any
 	_ = json.NewDecoder(r.Body).Decode(&written)
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	held, exists := a.objects[collection][name]
+	stored, exists := a.objects[collection][name]
 	if !exists {
 		w.WriteHeader(http.StatusNotFound)
 		return
@@ -343,17 +336,17 @@ func (a *fakeAPI) writeStatus(w http.ResponseWriter, r *http.Request, collection
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
-	if written["metadata"].(map[string]any)["resourceVersion"] != held["metadata"].(map[string]any)["resourceVersion"] {
+	if written["metadata"].(map[string]any)["resourceVersion"] != stored["metadata"].(map[string]any)["resourceVersion"] {
 		w.WriteHeader(http.StatusConflict)
 		return
 	}
-	next := clone(held)
+	next := clone(stored)
 	next["status"] = written["status"]
 	_ = json.NewEncoder(w).Encode(a.store(collection, next, "MODIFIED"))
 }
 
-// log answers the end of a pod's log as text, the way the kubelet does
-// for tailLines.
+// log responds with the last tailLines lines of a pod's log, as the
+// kubelet does.
 func (a *fakeAPI) log(w http.ResponseWriter, r *http.Request, name string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -361,8 +354,8 @@ func (a *fakeAPI) log(w http.ResponseWriter, r *http.Request, name string) {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
-	log, held := a.logs[name]
-	if _, exists := a.objects[uploadPodsPath][name]; !exists || !held {
+	log, found := a.logs[name]
+	if _, exists := a.objects[operatorPodsPath][name]; !exists || !found {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}

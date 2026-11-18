@@ -1,8 +1,8 @@
 package main
 
-// These tests read the scan pod the operator creates for a Ready
-// machine with no record, and the record and the discovered Firmware
-// objects that the pod's result becomes.
+// These tests check the scan pod that the operator creates for a Ready
+// machine with no scan record, and the record and the discovered
+// Firmware objects that the pod's result produces.
 
 import (
 	"slices"
@@ -11,8 +11,8 @@ import (
 	"testing/synctest"
 )
 
-// A Ready machine with no record gets one scan pod on its node, which
-// runs the scan image with the catalog's file and its SHA-256.
+// A Ready machine with no scan record gets one scan pod on its node.
+// The pod runs the scan image with the catalog's file and its SHA-256.
 func TestAMachineWithNoRecordGetsAScanPod(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := discoveryWorld(t)
@@ -46,8 +46,8 @@ func TestAMachineWithNoRecordGetsAScanPod(t *testing.T) {
 			{"no token", !*spec.AutomountServiceAccountToken},
 			{"no service links", !*spec.EnableServiceLinks},
 		}
-		// t.Run is not allowed inside a bubble, so each check names
-		// itself in its error.
+		// t.Run cannot be called inside a synctest bubble, so each
+		// check names itself in its error message.
 		for _, c := range checks {
 			if !c.ok {
 				t.Errorf("%s is wrong in the scan pod %+v", c.name, scan)
@@ -64,10 +64,10 @@ func TestAMachineWithNoRecordGetsAScanPod(t *testing.T) {
 	})
 }
 
-// A scan's result becomes the machine's record, with the GUIDs of its
-// devices, and one discovered Firmware for each group: the BIOS's
-// catalog component and the dbx's set of GUIDs. Then the operator
-// deletes the pod.
+// A scan's result becomes the machine's scan record, with its devices'
+// GUIDs, and one discovered Firmware for each group: the BIOS's catalog
+// component and the dbx's set of GUIDs. Then the operator deletes the
+// pod.
 func TestAScanResultBecomesTheRecordAndTheDiscoveredObjects(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := scannedWorld(t)
@@ -120,13 +120,14 @@ func TestAScanResultBecomesTheRecordAndTheDiscoveredObjects(t *testing.T) {
 	})
 }
 
-// entriesEqual compares two entries, release by release.
+// entriesEqual compares two entries by their JSON, because a
+// machineEntry has slices and == cannot compare it.
 func entriesEqual(a, b machineEntry) bool {
 	return string(mustJSON(a)) == string(mustJSON(b))
 }
 
-// A discovered object is an update rule, so the upload pass leaves it
-// alone: it gets no Valid condition and no upload pod.
+// A discovered Firmware is an update rule, not an upload rule, so the
+// upload pass skips it. It gets no Valid condition and no upload pod.
 func TestTheUploadPassSkipsADiscoveredObject(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := scannedWorld(t)
@@ -137,14 +138,14 @@ func TestTheUploadPassSkipsADiscoveredObject(t *testing.T) {
 		if len(bios.Status.Conditions) != 0 || len(bios.Status.Devices) != 0 {
 			t.Errorf("the discovered object's status is %+v, want no condition and no upload entry", bios.Status)
 		}
-		if got := w.api.created(uploadPodsPath); got != 2 {
+		if got := w.api.created(operatorPodsPath); got != 2 {
 			t.Errorf("the operator created %d pods, want the two scan pods and no upload pod", got)
 		}
 	})
 }
 
-// A scan pod's name holds the catalog and the machine for a person to
-// read, and stays a DNS label however long they are.
+// A scan pod's name contains the catalog and machine names so a person
+// can read it, and it stays a valid DNS label however long they are.
 func TestTheScanPodsNameIsADNSLabel(t *testing.T) {
 	cases := []struct {
 		name, catalog, machine, wantPrefix string

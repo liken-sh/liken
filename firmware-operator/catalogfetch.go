@@ -1,17 +1,17 @@
 package main
 
-// The operator reads a FirmwareCatalog's jcat when the FirmwareCatalog changes, once
-// after the operator starts, when a scan answers CatalogMoved, and once
-// an interval after the last read. LVFS publishes no feed of its
-// changes to subscribe to, so the interval is the only way to see a new
-// catalog. Each read sends the ETag of the last one, so an unchanged
-// jcat costs one small answer.
+// The operator reads a FirmwareCatalog's jcat when the FirmwareCatalog
+// changes, once after the operator starts, when a scan returns
+// CatalogMoved, and once every interval. LVFS has no change feed to
+// subscribe to, so only the interval finds a new catalog. Each read
+// sends the ETag of the previous one, so an unchanged jcat costs one
+// 304 response.
 //
-// When the jcat names a new file, the operator downloads that file
-// once, checks its SHA-256 against the jcat, and reads it into a
-// catalogIndex. The index is a cache: the status holds the file's name
-// and SHA-256, and an operator that needs the index after a restart
-// downloads the file again and checks it against the status.
+// When the jcat lists a new file, the operator downloads it, checks its
+// SHA-256 against the jcat, and parses it into a catalogIndex. The
+// index is only a cache. The status keeps the file's name and SHA-256,
+// so after a restart the operator downloads the file again and checks
+// it against the status.
 
 import (
 	"bytes"
@@ -28,40 +28,37 @@ import (
 	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
-// discoverySettings are the operator's flags for discovery.
+// discoverySettings are the operator's flags for reading catalogs.
 type discoverySettings struct {
-	// scanImage is the image of the scan pods.
 	scanImage string
-	// interval is the time between two reads of a jcat.
+	// interval is the time between timed reads of a jcat.
 	interval time.Duration
-	// http reads the catalogs. Its timeout bounds each read, because a
-	// read runs inside the pass.
+	// http reads the catalogs. Its timeout bounds each read, because
+	// reads run inside the reconcile pass.
 	http *http.Client
 }
 
-// catalogCache is what the operator keeps of each FirmwareCatalog in memory:
-// whether it has read the jcat since it started, whether a rehearsal or
-// an apply found the jcat naming another file since the last read, and
-// the index of the file. All three are caches. Losing them costs one
-// read of the jcat and one download of the file. A lost mark of a moved
-// jcat costs at most one interval, after which the timed read finds the
-// new file.
+// catalogCache is the in-memory state for one FirmwareCatalog. A restart
+// loses it, which costs one jcat read and one file download. A lost
+// moved flag delays the read of a new file until the next timed read.
 type catalogCache struct {
 	read  bool
 	moved bool
 	index *catalogIndex
 }
 
-// catalogMoved marks a FirmwareCatalog's jcat for a read at once. A
-// scan that answers CatalogMoved reads it in the same pass, but a
-// rehearsal or an apply ends later in the pass, after the catalogs are
-// answered, so its mark waits for the next pass. The delete of the
-// finished pod wakes that pass.
+// catalogMoved records that a rehearsal or an apply returned
+// CatalogMoved, so the next pass reads the FirmwareCatalog's jcat. A
+// pass judges rehearsals and applies after it reads the catalogs, so the
+// read waits for the pass that the deletion of the finished pod starts.
+// A scan's CatalogMoved does not come here: reconcileCatalog reads it
+// before the read and passes it to refreshDue.
 func (o *operator) catalogMoved(name string) {
 	o.cache(name).moved = true
 }
 
-// fetched is what one read of a jcat gives a FirmwareCatalog's status.
+// fetched is the result of one jcat read, to be written to the
+// FirmwareCatalog's status.
 type fetched struct {
 	file, sha256, etag, checked string
 	ready                       condition
@@ -70,12 +67,10 @@ type fetched struct {
 // errChecksum marks a download whose SHA-256 differs from the jcat's.
 var errChecksum = errors.New("the SHA-256 differs")
 
-// maxFileSize bounds a downloaded catalog file. LVFS's compressed
-// catalog is a few megabytes.
 const maxFileSize = 64 << 20
 
-// refreshDue reports whether a FirmwareCatalog's jcat needs a read, and when
-// the next timed read is due.
+// refreshDue reports whether a FirmwareCatalog's jcat needs a read now,
+// and when the next timed read is due.
 func (o *operator) refreshDue(c *catalog, moved bool, now time.Time) (bool, time.Time) {
 	next := parseTime(c.Status.Checked).Add(o.discovery.interval)
 	r := c.Status.ready()
@@ -84,9 +79,12 @@ func (o *operator) refreshDue(c *catalog, moved bool, now time.Time) (bool, time
 	return due, next
 }
 
-// refresh reads a FirmwareCatalog's jcat, and the file it names when that file
-// is new. It answers what the status takes. A failure keeps the last
-// good file and its ETag, so the next read gets the whole jcat again.
+// refresh reads a FirmwareCatalog's jcat, and downloads the file it
+// lists when that file is new. On failure it returns a False Ready
+// condition with the previous file, SHA-256, and ETag. The ETag must
+// stay with the file it was read with: if the status kept the new ETag
+// beside the old file, the next read would get 304 and never retry the
+// download.
 func (o *operator) refresh(ctx context.Context, c *catalog, now time.Time) fetched {
 	out := fetched{file: c.Status.File, sha256: c.Status.SHA256, etag: c.Status.ETag, checked: stamp(now)}
 	cached := o.cache(c.Metadata.Name)
@@ -101,31 +99,31 @@ func (o *operator) refresh(ctx context.Context, c *catalog, now time.Time) fetch
 	}
 	body, nextTag, err := o.get(ctx, c.Spec.URL+".jcat", etag, maxJcatSize)
 	if err != nil {
-		return fail(reasonJcatUnreadable, err)
+		return fail(reasonJcatUnreadable, fmt.Errorf("the operator cannot read the jcat: %w", err))
 	}
 	entry := jcatEntry{file: c.Status.File, sha256: c.Status.SHA256}
 	if body != nil {
 		if entry, err = readJcat(body); err != nil {
-			return fail(reasonJcatUnreadable, fmt.Errorf("%s.jcat: %w", c.Spec.URL, err))
+			return fail(reasonJcatUnreadable, fmt.Errorf("the operator cannot read the jcat: %s.jcat: %w", c.Spec.URL, err))
 		}
 	}
 	if entry != (jcatEntry{file: c.Status.File, sha256: c.Status.SHA256}) {
 		index, err := o.download(ctx, c.Spec.URL, entry)
 		if errors.Is(err, errChecksum) {
-			return fail(reasonChecksumMismatch, err)
+			return fail(reasonChecksumMismatch, fmt.Errorf("the catalog file does not match the jcat: %w", err))
 		}
 		if err != nil {
-			return fail(reasonFileUnreadable, err)
+			return fail(reasonFileUnreadable, fmt.Errorf("the operator cannot read the catalog file: %w", err))
 		}
 		cached.index = &index
 	}
 	out.file, out.sha256, out.etag = entry.file, entry.sha256, nextTag
-	out.ready = condition{Type: ready, Status: conditions.True, Reason: reasonFetched, Message: "the jcat names " + entry.file}
+	out.ready = condition{Type: ready, Status: conditions.True, Reason: reasonFetched, Message: "The jcat lists the catalog file " + entry.file}
 	return out
 }
 
-// indexOf answers the index of a file that a FirmwareCatalog's status names,
-// and downloads it when the cache does not hold it.
+// indexOf returns the index of the file that a FirmwareCatalog's status
+// records. It downloads the file when the cache does not have it.
 func (o *operator) indexOf(ctx context.Context, c *catalog, file, sum string) (catalogIndex, error) {
 	cached := o.cache(c.Metadata.Name)
 	if cached.index != nil && cached.index.file == file {
@@ -140,17 +138,17 @@ func (o *operator) indexOf(ctx context.Context, c *catalog, file, sum string) (c
 }
 
 func (o *operator) cache(name string) *catalogCache {
-	cached, held := o.catalogCaches[name]
-	if !held {
+	cached, found := o.catalogCaches[name]
+	if !found {
 		cached = &catalogCache{}
 		o.catalogCaches[name] = cached
 	}
 	return cached
 }
 
-// forgetCaches drops the caches of the FirmwareCatalogs that are gone, so the
-// memory grows only with the FirmwareCatalogs.
-func (o *operator) forgetCaches(present map[string]bool) {
+// deleteCachesOfDeletedCatalogs deletes the caches of FirmwareCatalogs
+// that no longer exist.
+func (o *operator) deleteCachesOfDeletedCatalogs(present map[string]bool) {
 	for name := range o.catalogCaches {
 		if !present[name] {
 			delete(o.catalogCaches, name)
@@ -158,8 +156,9 @@ func (o *operator) forgetCaches(present map[string]bool) {
 	}
 }
 
-// download reads the versioned file of a jcat entry from the directory
-// of the catalog's URL, checks its SHA-256, and reads it.
+// download fetches the file that a jcat entry names from the directory
+// of the catalog's URL, checks its SHA-256 against the entry, and
+// parses it.
 func (o *operator) download(ctx context.Context, base string, entry jcatEntry) (catalogIndex, error) {
 	address, err := fileURL(base, entry.file)
 	if err != nil {
@@ -171,7 +170,7 @@ func (o *operator) download(ctx context.Context, base string, entry jcatEntry) (
 	}
 	sum := sha256.Sum256(body)
 	if got := hex.EncodeToString(sum[:]); got != entry.sha256 {
-		return catalogIndex{}, fmt.Errorf("%s: %w: the file has %s, and the jcat names %s", address, errChecksum, got, entry.sha256)
+		return catalogIndex{}, fmt.Errorf("%s: %w: the file has %s, and the jcat lists %s", address, errChecksum, got, entry.sha256)
 	}
 	index, err := readCatalog(entry.file, bytes.NewReader(body))
 	if err != nil {
@@ -180,8 +179,8 @@ func (o *operator) download(ctx context.Context, base string, entry jcatEntry) (
 	return index, nil
 }
 
-// fileURL answers the URL of a file in the directory of a catalog's
-// URL.
+// fileURL returns the URL of a file in the same directory as the
+// catalog's URL.
 func fileURL(base, file string) (string, error) {
 	parsed, err := url.Parse(base)
 	if err != nil {
@@ -190,8 +189,9 @@ func fileURL(base, file string) (string, error) {
 	return parsed.ResolveReference(&url.URL{Path: file}).String(), nil
 }
 
-// get reads one URL, and answers its body and ETag. With an ETag, an
-// answer of 304 means nothing changed, and answers no body.
+// get fetches one URL and returns its body and ETag. When etag is set
+// and the server returns 304, get returns a nil body and the same
+// ETag.
 func (o *operator) get(ctx context.Context, address, etag string, limit int64) ([]byte, string, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
 	if err != nil {
@@ -216,12 +216,13 @@ func (o *operator) get(ctx context.Context, address, etag string, limit int64) (
 		return nil, "", fmt.Errorf("%s: %w", address, err)
 	}
 	if int64(len(body)) > limit {
-		return nil, "", fmt.Errorf("%s: the answer is larger than %d bytes", address, limit)
+		return nil, "", fmt.Errorf("%s: the response is larger than %d bytes", address, limit)
 	}
 	return body, response.Header.Get("ETag"), nil
 }
 
-// stamp writes a time the way the API server keeps it, to the second.
+// stamp formats a time in UTC, truncated to the second, as the API
+// server stores timestamps.
 func stamp(now time.Time) string {
 	return now.UTC().Truncate(time.Second).Format(time.RFC3339)
 }

@@ -1,10 +1,5 @@
 package main
 
-// These tests follow the rehearsal of an approved release on each
-// machine the approval waits for: the pod that starts, the record and
-// the Rehearsed condition that each result writes, the attempt that
-// runs once, and the records that leave with the approval.
-
 import (
 	"encoding/json"
 	"slices"
@@ -16,7 +11,6 @@ import (
 	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
-// rehearsals answers every stored rehearsal pod.
 func (a *fakeAPI) rehearsals(t *testing.T) []pod {
 	t.Helper()
 	var out []pod
@@ -28,8 +22,8 @@ func (a *fakeAPI) rehearsals(t *testing.T) []pod {
 	return out
 }
 
-// onlyRehearsal answers the one rehearsal pod, and fails the test when
-// there is not exactly one.
+// onlyRehearsal returns the rehearsal pod, and fails the test unless
+// there is exactly one.
 func (w *world) onlyRehearsal(t *testing.T) pod {
 	t.Helper()
 	rehearsals := w.api.rehearsals(t)
@@ -39,26 +33,22 @@ func (w *world) onlyRehearsal(t *testing.T) pod {
 	return rehearsals[0]
 }
 
-// rehearsalLog is the log of a rehearsal that answered.
+// rehearsalLog is the pod log of a rehearsal that printed r.
 func rehearsalLog(r rehearsalResult) string {
 	line, _ := json.Marshal(r)
 	return "fwupdtool: loading plugins\n" + string(line) + "\n"
 }
 
-// passed is the result of a rehearsal whose install appended 17,260
-// bytes to dbx.
 var passed = rehearsalResult{Result: resultPassed, Message: "the install appends 17260 bytes to dbx",
 	Variable: "dbx-d719b2cb-3d3a-4596-a3bc-dad00e67656f", Bytes: 17260, SHA256: "cf901743", Free: 65536}
 
-// rehearsedOf answers the BIOS object's Rehearsed condition, and
-// whether it holds one.
 func rehearsedOf(t *testing.T, w *world) (condition, bool) {
 	t.Helper()
 	return conditions.Find(w.api.firmware(t, biosObjectName).Status.Conditions, rehearsedCondition)
 }
 
-// approvedWorld is scannedWorld after a person approved BIOS 0.0.4.2,
-// which node-2 waits for, so its rehearsal has started.
+// approvedWorld is scannedWorld after a person approved BIOS 0.0.4.2.
+// node-2 is pending, so its rehearsal has started.
 func approvedWorld(t *testing.T) *world {
 	w := scannedWorld(t)
 	approve(t, w, "0.0.4.2", biosCabinet, nil)
@@ -155,7 +145,7 @@ func TestARehearsalRunsOncePerBoot(t *testing.T) {
 		w.settle()
 		time.Sleep(time.Hour)
 		synctest.Wait()
-		if got := w.api.created(uploadPodsPath); got != 2 {
+		if got := w.api.created(operatorPodsPath); got != 2 {
 			t.Fatalf("before the reboot the operator created %d pods, want the scan and one rehearsal", got)
 		}
 
@@ -195,8 +185,8 @@ func TestWithdrawingTheApprovalRemovesTheRehearsals(t *testing.T) {
 		w.settle()
 
 		f = w.api.firmware(t, biosObjectName)
-		if _, held := conditions.Find(f.Status.Conditions, rehearsedCondition); held || len(f.Status.Rehearsals) != 0 {
-			t.Errorf("the status holds %+v and %v, want no rehearsal with no approval", f.Status.Rehearsals, f.Status.Conditions)
+		if _, found := conditions.Find(f.Status.Conditions, rehearsedCondition); found || len(f.Status.Rehearsals) != 0 {
+			t.Errorf("the status has %+v and %v, want no rehearsal with no approval", f.Status.Rehearsals, f.Status.Conditions)
 		}
 	})
 }
@@ -209,19 +199,19 @@ func TestARehearsalThatEndsBadlyFails(t *testing.T) {
 	}{
 		{"a crash", func(t *testing.T, w *world, name string) {
 			w.api.finishPod(t, name, rehearsalContainer, podFailed, "fwupdtool: loading\npanic: runtime error\n")
-		}, "the rehearsal wrote no result; its last line was: panic: runtime error"},
+		}, "the rehearsal pod wrote no result, and its last log line is: panic: runtime error"},
 		{"no log", func(t *testing.T, w *world, name string) {
 			w.api.finishPod(t, name, rehearsalContainer, podFailed, "")
 		}, "the rehearsal pod wrote no log: the rehearsal exited with code 1"},
 		{"a deleted pod", func(t *testing.T, w *world, name string) {
-			w.api.deleteObject(uploadPodsPath, name)
-		}, "the rehearsal pod is gone"},
+			w.api.deleteObject(operatorPodsPath, name)
+		}, "the rehearsal pod no longer exists"},
 		{"a pod that never finishes", func(t *testing.T, w *world, name string) {
 			time.Sleep(scanDeadline)
 		}, "the rehearsal pod did not finish within 10m0s of its creation"},
 		{"an unknown result", func(t *testing.T, w *world, name string) {
 			w.api.finishPod(t, name, rehearsalContainer, podSucceeded, `{"result":"Maybe"}`+"\n")
-		}, `the rehearsal answered the result "Maybe", which the operator does not know`},
+		}, `the rehearsal pod reported the result "Maybe", which the operator does not recognize`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -242,8 +232,8 @@ func TestARehearsalThatEndsBadlyFails(t *testing.T) {
 	}
 }
 
-// A rehearsal pod's name holds the Firmware and the machine for a
-// person to read, and stays a DNS label however long they are.
+// A rehearsal pod's name starts with the Firmware and machine names,
+// and stays a valid DNS label however long they are.
 func TestTheRehearsalPodsNameIsADNSLabel(t *testing.T) {
 	cases := []struct {
 		name, firmware, machine, wantPrefix string
@@ -261,8 +251,6 @@ func TestTheRehearsalPodsNameIsADNSLabel(t *testing.T) {
 	}
 }
 
-// An entry that names no fwupd device ID gives a rehearsal no device to
-// install on, so the machine waits for a scan that records one.
 func TestAnEntryWithNoDeviceIDStartsNoRehearsal(t *testing.T) {
 	entries := []machineEntry{
 		{Machine: "node-3", DeviceID: "3fcf", Releases: systemFirmware("0.0.3.5", "0.0.4.2").Releases},
@@ -271,6 +259,6 @@ func TestAnEntryWithNoDeviceIDStartsNoRehearsal(t *testing.T) {
 	approved := &update{Version: "0.0.4.2", Cabinet: &pinnedCabinet{SHA256: biosCabinet}}
 
 	if e, offered := offeredEntry(entries, "node-2", approved); offered {
-		t.Errorf("offeredEntry answered %+v, want none for an entry with no device ID", e)
+		t.Errorf("offeredEntry returned %+v, want none for an entry with no device ID", e)
 	}
 }

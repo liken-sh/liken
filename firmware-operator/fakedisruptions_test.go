@@ -1,8 +1,8 @@
 package main
 
-// The part of the fake API server that the applies need: a merge patch,
-// which the operator sends to remove spec.hold, and the writes that
-// machine-operator makes on a Disruption, which a test plays.
+// The fake API server's support for the apply tests: the merge patch
+// that the operator sends to remove spec.hold, and helpers that write a
+// Disruption's status as machine-operator would.
 
 import (
 	"encoding/json"
@@ -14,9 +14,9 @@ import (
 	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
-// patch applies a JSON merge patch to an object, the way the API server
-// does for application/merge-patch+json. A change of the spec moves the
-// generation.
+// patch applies an application/merge-patch+json request. Like the API
+// server, it increments metadata.generation when the patch changes the
+// spec.
 func (a *fakeAPI) patch(w http.ResponseWriter, r *http.Request, collection, name string) {
 	body, _ := io.ReadAll(r.Body)
 	var changes map[string]any
@@ -26,12 +26,12 @@ func (a *fakeAPI) patch(w http.ResponseWriter, r *http.Request, collection, name
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	held, exists := a.objects[collection][name]
+	stored, exists := a.objects[collection][name]
 	if !exists {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	next := mergePatch(clone(held), changes)
+	next := mergePatch(clone(stored), changes)
 	if _, spec := changes["spec"]; spec {
 		metadata := next["metadata"].(map[string]any)
 		generation, _ := metadata["generation"].(float64)
@@ -40,18 +40,18 @@ func (a *fakeAPI) patch(w http.ResponseWriter, r *http.Request, collection, name
 	_ = json.NewEncoder(w).Encode(a.store(collection, next, "MODIFIED"))
 }
 
-// mergePatch merges changes into an object as RFC 7386 states: a null
-// removes a field, an object merges into an object, and any other value
+// mergePatch merges changes into an object by RFC 7386: a null deletes
+// the field, an object merges into an object, and any other value
 // replaces the field.
 func mergePatch(object, changes map[string]any) map[string]any {
 	for key, change := range changes {
 		nested, isObject := change.(map[string]any)
-		held, heldObject := object[key].(map[string]any)
+		current, currentIsObject := object[key].(map[string]any)
 		switch {
 		case change == nil:
 			delete(object, key)
-		case isObject && heldObject:
-			object[key] = mergePatch(held, nested)
+		case isObject && currentIsObject:
+			object[key] = mergePatch(current, nested)
 		default:
 			object[key] = change
 		}
@@ -59,7 +59,7 @@ func mergePatch(object, changes map[string]any) map[string]any {
 	return object
 }
 
-// disruption answers a stored request for a reboot turn, and fails the
+// disruption returns the stored Disruption with this name, and fails the
 // test when there is none.
 func (a *fakeAPI) disruption(t *testing.T, name string) disruption {
 	t.Helper()
@@ -67,14 +67,13 @@ func (a *fakeAPI) disruption(t *testing.T, name string) disruption {
 	object := clone(a.objects[disruptionsPath][name])
 	a.mu.Unlock()
 	if object == nil {
-		t.Fatalf("there is no Disruption %s", name)
+		t.Fatalf("the fake API server has no Disruption %s", name)
 	}
 	var out disruption
 	a.decode(t, object, &out)
 	return out
 }
 
-// disruptionExists reports whether a request is stored.
 func (a *fakeAPI) disruptionExists(name string) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -82,7 +81,7 @@ func (a *fakeAPI) disruptionExists(name string) bool {
 	return exists
 }
 
-// setTurn plays machine-operator: it sets one condition on a request.
+// setTurn sets one condition on a Disruption, as machine-operator does.
 func (a *fakeAPI) setTurn(t *testing.T, name, kind, reason string) {
 	t.Helper()
 	d := a.disruption(t, name)
@@ -95,15 +94,15 @@ func (a *fakeAPI) setTurn(t *testing.T, name, kind, reason string) {
 	a.store(disruptionsPath, next, "MODIFIED")
 }
 
-// holdTurn plays machine-operator once it drained the machine of a
-// request with spec.hold.
+// holdTurn sets the condition that machine-operator sets after it
+// drains the machine for a Disruption with spec.hold.
 func (a *fakeAPI) holdTurn(t *testing.T, name string) {
 	t.Helper()
 	a.setTurn(t, name, heldCondition, "Drained")
 }
 
-// completeTurn plays machine-operator once the machine runs a boot after
-// the one the request named.
+// completeTurn sets the condition that machine-operator sets when the
+// machine has booted again after the Disruption.
 func (a *fakeAPI) completeTurn(t *testing.T, name string) {
 	t.Helper()
 	a.setTurn(t, name, completeCondition, "BootChanged")

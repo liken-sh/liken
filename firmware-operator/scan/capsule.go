@@ -1,25 +1,25 @@
 package main
 
-// A capsule updates a device's own firmware, such as a board's UEFI,
-// through the firmware itself: fwupd stages the capsule, and the
-// firmware applies it at the next boot, before any kernel loads. fwupd
-// stages it in one of two ways. In NVRAM mode it writes its updater and
-// the capsule to the ESP, a boot entry for the updater, BootNext naming
-// that entry, and a status variable of its own, and the updater hands
-// the capsule to the firmware at the next boot. In capsule-on-disk mode
-// it writes the capsule to \EFI\UpdateCapsule and sets a bit in
-// OsIndications, and the firmware reads the file itself. fwupd 2.1.1
-// and 2.1.6 wrote exactly these under OVMF (liken's milestone 33, the
-// firmware under QEMU), and with some firmware fwupd adds the updater's
-// entry to the end of BootOrder.
+// A capsule update installs new firmware for a device, such as a
+// board's UEFI. fwupd stages the capsule, and the firmware applies it
+// at the next boot, before any kernel loads. fwupd stages it in one of
+// two modes. In NVRAM mode it writes its updater and the capsule to the
+// ESP, creates a boot entry for the updater, sets BootNext to that
+// entry, and sets a status variable of its own. At the next boot the
+// updater hands the capsule to the firmware. In capsule-on-disk mode it
+// writes the capsule to \EFI\UpdateCapsule and sets a bit in
+// OsIndications, and the firmware reads the file itself. Under OVMF,
+// fwupd 2.1.1 and 2.1.6 wrote exactly these. With some firmware, fwupd
+// also appends the updater's entry to BootOrder.
 //
 // A rehearsal runs the install against a copy of the variables and a
 // copy of the ESP's \EFI directory, and passes when the install wrote
-// these and nothing else. It cannot show whether the firmware accepts
-// the capsule: that happens before any kernel loads, and a copy has no
-// firmware. The ESP is the one that the machine's next boot reads,
-// which liken links at /run/liken/proven-esp, and the operator mounts
-// it read-only at espSource.
+// only the variables and files above. It cannot show whether the
+// firmware accepts the capsule, because the firmware checks it at the
+// next boot and a copy has no firmware. The ESP is the one that the
+// machine reads at its next boot. `liken` links it at
+// /run/liken/proven-esp, and the operator mounts it read-only at
+// espSource.
 
 import (
 	"bytes"
@@ -41,15 +41,15 @@ const (
 	// record each staged capsule's path and status for the updater.
 	fwupdVendorGUID = "0abba7dc-e516-4167-bbf5-4d9d1c739416"
 	// fileCapsuleDelivery is the bit of OsIndications that asks the
-	// firmware for capsule-on-disk.
+	// firmware to read capsules from the ESP (capsule-on-disk).
 	fileCapsuleDelivery = 0x4
 )
 
 var (
 	bootEntryVariable = regexp.MustCompile(`^Boot([0-9A-F]{4})-` + efiGlobalGUID + `$`)
-	// capsuleFiles are the files a capsule writes on the ESP: the
-	// updater and the capsule under the directory fwupd names for the
-	// operating system, and a capsule-on-disk.
+	// capsuleFiles match the files that fwupd writes on the ESP: the
+	// updater and the capsule in the directory that fwupd names for
+	// the operating system, and a capsule-on-disk file.
 	capsuleFiles = []*regexp.Regexp{
 		regexp.MustCompile(`(?i)^EFI/[^/]+/fwupdx64\.efi$`),
 		regexp.MustCompile(`(?i)^EFI/[^/]+/fw/[^/]+\.cap$`),
@@ -57,8 +57,7 @@ var (
 	}
 )
 
-// Write is one variable or file that a capsule's install wrote, as the
-// rehearsal records it.
+// Write is one variable or file that a capsule's install wrote.
 type Write struct {
 	Kind   string `json:"kind"`
 	Name   string `json:"name"`
@@ -71,8 +70,9 @@ const (
 	writeKindFile     = "file"
 )
 
-// rehearseCapsule rehearses the install of a capsule on device.
-// It answers the cabinet it saved too, which an apply installs.
+// rehearseCapsule rehearses the install of a capsule on device. It also
+// returns the path of the cabinet it downloaded, which the apply
+// installs.
 func (r rehearser) rehearseCapsule(ctx context.Context, device fwupdDevice) (RehearsalResult, string) {
 	result := r.rehearseCapsuleIn(ctx, device)
 	return result, filepath.Join(r.workDir, "update.cab")
@@ -80,7 +80,7 @@ func (r rehearser) rehearseCapsule(ctx context.Context, device fwupdDevice) (Reh
 
 func (r rehearser) rehearseCapsuleIn(ctx context.Context, device fwupdDevice) RehearsalResult {
 	if info, err := os.Stat(r.espSource); r.espSource == "" || err != nil || !info.IsDir() {
-		return rehearsalRefused("the machine has no ESP for its next boot, because its store names no proven slot, so %s has nowhere to stage a capsule", device.Name)
+		return rehearsalRefused("the machine has no ESP for its next boot, because liken has recorded no proven boot slot on it, so %s has nowhere to stage a capsule", device.Name)
 	}
 	if err := copyTree(filepath.Join(r.espSource, "EFI"), filepath.Join(r.espDir, "EFI")); err != nil && !os.IsNotExist(err) {
 		return rehearsalFailed("copying the ESP's EFI directory: %v", err)
@@ -144,44 +144,44 @@ func (r rehearser) rehearseCapsuleIn(ctx context.Context, device fwupdDevice) Re
 	return result
 }
 
-// judgeCapsule checks the difference that an install made in the copies
-// against what a capsule may write. It answers each write, sorted by
-// kind and name, or a refusal that names the first write it does not
-// allow.
+// judgeCapsule compares the variables and ESP files before and after an
+// install with what a capsule install may write. It returns each write,
+// sorted by kind and name. When the install did something else, it
+// returns a refusal message that names the first such change.
 func judgeCapsule(before, after map[string][]byte, espBefore, espAfter map[string][]byte) ([]Write, string) {
 	var writes []Write
 	var entries []string
 	for _, name := range sortedNames(before, after) {
-		was, held := before[name]
-		is, kept := after[name]
+		was, existedBefore := before[name]
+		is, existsAfter := after[name]
 		switch {
-		case !kept:
+		case !existsAfter:
 			return nil, fmt.Sprintf("the install removed %s", name)
-		case held && bytes.Equal(was, is):
+		case existedBefore && bytes.Equal(was, is):
 			continue
 		case bootEntryVariable.MatchString(name):
-			// An entry that fwupd created, or its entry from an earlier
-			// update, which it writes again.
+			// Either a new entry for the updater, or the entry from an
+			// earlier update, which fwupd writes again.
 			path, ok := loadOptionPath(is[4:])
 			if !ok || !isUpdater(path) {
-				if held {
+				if existedBefore {
 					return nil, fmt.Sprintf("the install changed %s, which a capsule does not write", name)
 				}
 				return nil, fmt.Sprintf("the install created %s, which boots %s, not fwupd's updater", name, path)
 			}
-			if !held {
+			if !existedBefore {
 				entries = append(entries, name)
 			}
 		case name == "BootNext-"+efiGlobalGUID, name == "BootOrder-"+efiGlobalGUID:
-			// Checked below, against the entry the install created.
+			// judgeBootVariables checks these against the new entry.
 		case strings.HasPrefix(name, "fwupd-") && strings.HasSuffix(name, "-"+fwupdVendorGUID):
 		case name == "OsIndications-"+efiGlobalGUID:
 			old, now := osIndications(was), osIndications(is)
 			if now != old|fileCapsuleDelivery {
-				return nil, fmt.Sprintf("the install set OsIndications to %#x, which asks for more than capsule-on-disk", now)
+				return nil, fmt.Sprintf("the install set OsIndications to %#x, which requests more than capsule-on-disk", now)
 			}
 		default:
-			if held {
+			if existedBefore {
 				return nil, fmt.Sprintf("the install changed %s, which a capsule does not write", name)
 			}
 			return nil, fmt.Sprintf("the install created %s, which a capsule does not write", name)
@@ -196,12 +196,12 @@ func judgeCapsule(before, after map[string][]byte, espBefore, espAfter map[strin
 	}
 
 	for _, name := range sortedNames(espBefore, espAfter) {
-		was, held := espBefore[name]
-		is, kept := espAfter[name]
+		was, existedBefore := espBefore[name]
+		is, existsAfter := espAfter[name]
 		switch {
-		case !kept:
+		case !existsAfter:
 			return nil, fmt.Sprintf("the install removed %s from the ESP", name)
-		case held && bytes.Equal(was, is):
+		case existedBefore && bytes.Equal(was, is):
 			continue
 		case !slices.ContainsFunc(capsuleFiles, func(re *regexp.Regexp) bool { return re.MatchString(name) }):
 			return nil, fmt.Sprintf("the install wrote %s on the ESP, where a capsule writes nothing", name)
@@ -220,9 +220,11 @@ func judgeCapsule(before, after map[string][]byte, espBefore, espAfter map[strin
 	return writes, ""
 }
 
-// judgeBootVariables checks BootNext and BootOrder against the entries
-// that boot fwupd's updater after the install: BootNext names one, and
-// BootOrder keeps its old order and gains, at most, one at its end.
+// judgeBootVariables returns a refusal message unless the install left
+// BootNext and BootOrder as fwupd leaves them. BootNext, when changed,
+// must name one entry that boots fwupd's updater. BootOrder, when
+// changed, must keep its old entries in order and add only an entry for
+// the updater at the end.
 func judgeBootVariables(before, after map[string][]byte) string {
 	updater := func(n uint16) bool {
 		entry, ok := after[fmt.Sprintf("Boot%04X-%s", n, efiGlobalGUID)]
@@ -254,8 +256,8 @@ func isUpdater(path string) bool {
 	return strings.HasSuffix(strings.ToLower(path), `\fwupdx64.efi`)
 }
 
-// bootNumbers reads the entry numbers of BootNext or BootOrder, after
-// the four bytes of attributes.
+// bootNumbers returns the boot entry numbers in BootNext or BootOrder,
+// which follow the four bytes of variable attributes.
 func bootNumbers(variable []byte) []uint16 {
 	var numbers []uint16
 	for i := 4; i+2 <= len(variable); i += 2 {
@@ -272,8 +274,9 @@ func bootIDs(numbers []uint16) string {
 	return strings.Join(ids, ",")
 }
 
-// osIndications reads the variable's bits, after the four bytes of
-// attributes. An absent variable has none.
+// osIndications returns the 64-bit value of OsIndications, which follows
+// the four bytes of variable attributes. It returns 0 for a variable
+// that is absent or too short.
 func osIndications(variable []byte) uint64 {
 	if len(variable) < 12 {
 		return 0
@@ -281,8 +284,8 @@ func osIndications(variable []byte) uint64 {
 	return binary.LittleEndian.Uint64(variable[4:])
 }
 
-// loadOptionPath reads the file that an EFI_LOAD_OPTION boots: the path
-// of the first file path node of its device path.
+// loadOptionPath returns the file that an EFI_LOAD_OPTION boots, which
+// is the path in the first file path node of its device path.
 func loadOptionPath(option []byte) (string, bool) {
 	_, list, ok := devicePath(option)
 	if !ok {
@@ -308,9 +311,9 @@ func loadOptionPath(option []byte) (string, bool) {
 }
 
 // readESPFiles reads every file under an ESP's \EFI directory, keyed by
-// its path from the ESP's root, such as EFI/BOOT/BOOTX64.EFI. It reads
-// nothing else, because a slot's ESP holds a whole release beside its
-// \EFI directory, and fwupd writes only under \EFI.
+// its path from the ESP's root, such as EFI/BOOT/BOOTX64.EFI. It skips
+// the rest of the ESP, because the ESP of a slot also holds a whole
+// release, and fwupd writes only under \EFI.
 func readESPFiles(esp string) (map[string][]byte, error) {
 	files, err := readFiles(filepath.Join(esp, "EFI"))
 	if err != nil {
@@ -324,7 +327,7 @@ func readESPFiles(esp string) (map[string][]byte, error) {
 }
 
 // readFiles reads every file under dir, keyed by its path relative to
-// dir with forward slashes. A directory that does not exist holds none.
+// dir with forward slashes. It returns no files when dir does not exist.
 func readFiles(dir string) (map[string][]byte, error) {
 	files := map[string][]byte{}
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
@@ -345,8 +348,9 @@ func readFiles(dir string) (map[string][]byte, error) {
 	return files, err
 }
 
-// writesDigest is one SHA-256 over a capsule's writes, which the
-// operator records, and an apply compares with what fwupd writes.
+// writesDigest returns one SHA-256 over a capsule's writes. The operator
+// records it from the rehearsal, and the apply compares it with the
+// digest of what fwupd wrote.
 func writesDigest(writes []Write) string {
 	var b strings.Builder
 	for _, w := range writes {
@@ -355,15 +359,16 @@ func writesDigest(writes []Write) string {
 	return sum([]byte(b.String()))
 }
 
-// stageCapsule installs the prepared capsule on the machine itself: the
-// real variable store and the ESP of the next boot, which the pod mounts
-// read-write. fwupd makes the writes in its own order, so the apply runs
-// fwupd instead of replaying the rehearsal, and then judges what fwupd
-// wrote the way the rehearsal judged the copies. Only writes whose
-// digest is the rehearsal's answer Written, which lets the operator
-// hand BootNext to fwupd's updater. Anything else that wrote answers
-// Uncertain, so the turn reboots with liken's own BootNext, and the
-// capsule does not run.
+// stageCapsule runs fwupd's install on the machine itself: the real
+// variable store, and the ESP of the next boot, which the pod mounts
+// read-write. It runs fwupd instead of replaying the rehearsal's
+// writes, because fwupd makes its writes in its own order. Then it
+// checks fwupd's writes with judgeCapsule, as the rehearsal checked the
+// copies. It returns Written only when the digest of the writes equals
+// the rehearsal's digest, and only then does the reboot keep the
+// BootNext that fwupd set. After any other write it returns Uncertain,
+// and the reboot uses the BootNext that `liken` sets, so fwupd's
+// updater does not run.
 func (a applier) stageCapsule(ctx context.Context, p prepared) ApplyResult {
 	vars := filepath.Join(a.hostDir, "efi", "efivars")
 	before, err := readVariables(vars)
@@ -374,17 +379,17 @@ func (a applier) stageCapsule(ctx context.Context, p prepared) ApplyResult {
 	if err != nil {
 		return applyFailed("reading the ESP before the install: %v, so nothing was written", err)
 	}
-	// The machine's firmware tables are at another path than the
-	// copies, so fwupd gives the device another ID here, and the install
-	// names no device: fwupd installs the cabinet on the device whose
-	// GUID it carries, which the rehearsal just found.
 	if err := a.releaseStatusVariables(vars, before); err != nil {
 		return applyFailed("%v, so nothing was written", err)
 	}
+	// The install passes no device ID, because fwupd derives the ID from
+	// the path of the firmware tables, and the rehearsal's ID came from
+	// copies at another path. fwupd installs the cabinet on the device
+	// whose GUID the cabinet lists.
 	_, stderr, installErr := a.installer(ctx, "install", "--assume-yes", "--no-reboot-check", p.cabinet)
 	if installErr == nil {
 		if err := a.repairUpdater(vars, a.store.replace); err != nil {
-			return ApplyResult{Result: resultUncertain, Message: fmt.Sprintf("%v; the reboot keeps liken's BootNext, so the capsule does not run", err)}
+			return ApplyResult{Result: resultUncertain, Message: fmt.Sprintf("%v, so the reboot keeps liken's BootNext and the capsule does not run", err)}
 		}
 	}
 	after, err := readVariables(vars)
@@ -401,12 +406,12 @@ func (a applier) stageCapsule(ctx context.Context, p prepared) ApplyResult {
 	case installErr != nil && !wrote:
 		return applyFailed("fwupdtool install: %s, and it wrote nothing", lastLine(stderr))
 	case installErr != nil:
-		return ApplyResult{Result: resultUncertain, Message: fmt.Sprintf("fwupdtool install: %s, after it wrote to the machine; the reboot keeps liken's BootNext, so the capsule does not run", lastLine(stderr))}
+		return ApplyResult{Result: resultUncertain, Message: fmt.Sprintf("fwupdtool install: %s, after it wrote to the machine, so the reboot keeps liken's BootNext and the capsule does not run", lastLine(stderr))}
 	case refusal != "":
-		return ApplyResult{Result: resultUncertain, Message: refusal + "; the reboot keeps liken's BootNext, so the capsule does not run"}
+		return ApplyResult{Result: resultUncertain, Message: refusal + ", so the reboot keeps liken's BootNext and the capsule does not run"}
 	}
 	if got := writesDigest(writes); got != a.appendSHA256 {
-		return ApplyResult{Result: resultUncertain, Message: fmt.Sprintf("fwupd's writes differ from the rehearsal's: their digest is %s, and the rehearsal recorded %s; the reboot keeps liken's BootNext, so the capsule does not run",
+		return ApplyResult{Result: resultUncertain, Message: fmt.Sprintf("fwupd's writes differ from the rehearsal's: their digest is %s, and the rehearsal recorded %s, so the reboot keeps liken's BootNext and the capsule does not run",
 			got, a.appendSHA256)}
 	}
 	variables := 0
@@ -417,16 +422,15 @@ func (a applier) stageCapsule(ctx context.Context, p prepared) ApplyResult {
 	}
 	next := "the firmware reads it from \\EFI\\UpdateCapsule"
 	if is, ok := after["BootNext-"+efiGlobalGUID]; ok && !bytes.Equal(before["BootNext-"+efiGlobalGUID], is) {
-		next = "BootNext names " + bootIDs(bootNumbers(is))
+		next = "BootNext is " + bootIDs(bootNumbers(is))
 	}
 	return ApplyResult{Result: resultWritten, SHA256: a.appendSHA256,
-		Message: fmt.Sprintf("staged the capsule with %d variables and %d files, as rehearsed; %s", variables, len(writes)-variables, next)}
+		Message: fmt.Sprintf("staged the capsule with %d variables and %d files, as rehearsed, and %s", variables, len(writes)-variables, next)}
 }
 
-// repairUpdater repairs the updater's entry in the variable store at
-// vars (updaterentry.go), with the partition of the ESP of the next
-// boot. A rehearser with no way to read that partition, as in a test,
-// repairs nothing.
+// repairUpdater runs repairUpdaterEntry on the variable store at vars,
+// with the partition of the ESP of the next boot. It does nothing when
+// the rehearser has no partitionOf, as in a test.
 func (r rehearser) repairUpdater(vars string, write variableWriter) error {
 	if r.partitionOf == nil {
 		return nil
@@ -438,25 +442,25 @@ func (r rehearser) repairUpdater(vars string, write variableWriter) error {
 	return repairUpdaterEntry(vars, esp, write)
 }
 
-// releaseStatusVariables clears efivarfs's immutable flag on fwupd's
-// status variables that an earlier update left, which fwupd opens to
-// write again and cannot while the flag is set. The variables are
-// fwupd's own, and the install replaces them.
-func (a applier) releaseStatusVariables(vars string, held map[string][]byte) error {
-	for name := range held {
+// releaseStatusVariables clears efivarfs's immutable flag on the fwupd
+// status variables that an earlier update left. The install rewrites
+// these variables, and fwupd cannot open one for writing while its flag
+// is set.
+func (a applier) releaseStatusVariables(vars string, existing map[string][]byte) error {
+	for name := range existing {
 		if !strings.HasPrefix(name, "fwupd-") || !strings.HasSuffix(name, "-"+fwupdVendorGUID) {
 			continue
 		}
 		path := filepath.Join(vars, name)
 		flags, err := a.store.flags(path)
 		if err != nil {
-			return fmt.Errorf("reading the flags of %s: %w", name, err)
+			return fmt.Errorf("reading the flags of the variable %s: %w", name, err)
 		}
 		if flags&immutableFlag == 0 {
 			continue
 		}
 		if err := a.store.setFlags(path, flags&^immutableFlag); err != nil {
-			return fmt.Errorf("clearing the immutable flag of %s: %w", name, err)
+			return fmt.Errorf("clearing the immutable flag of the variable %s: %w", name, err)
 		}
 	}
 	return nil

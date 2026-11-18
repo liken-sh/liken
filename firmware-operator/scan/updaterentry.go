@@ -1,23 +1,21 @@
 package main
 
-// fwupd's install of a capsule in NVRAM mode writes a boot entry for
-// its updater, whose device path names the ESP's partition with a hard
-// drive node: its number, its start and size, and its GUID. fwupd reads
-// those from udisks over D-Bus, and a pod has neither, so in a pod it
-// writes a node of zeros, and the firmware cannot find the updater. The
-// firmware then boots the next entry of BootOrder, and the capsule does
-// not run.
+// When fwupd installs a capsule in NVRAM mode, it writes a boot entry
+// for its updater. The entry's device path names the ESP's partition
+// with a hard drive node: the partition number, start, size, and GUID.
+// fwupd reads those from udisks over D-Bus, and a pod has no udisks, so
+// in a pod fwupd writes a node of zeros. The firmware cannot find the
+// updater through that entry, so it boots the next entry in BootOrder
+// and the capsule does not run. The updater also locates the capsule
+// through the device path in fwupd's status variable, and that path has
+// the same node of zeros.
 //
-// The updater then finds the capsule by the device path in fwupd's
-// status variable, which has the same node of zeros.
-//
-// liken's init keeps an entry for each slot, whose hard drive node
-// names the slot's partition in full. The ESP that fwupd wrote to is
-// the proven slot's, so repairUpdaterEntry copies the node of liken's
-// entry for the ESP's partition into the updater's entry and into the
-// status variable. The rehearsal
-// makes the same repair in its copy, so its record holds the same
-// bytes that the apply writes.
+// Each liken slot has a boot entry whose hard drive node describes the
+// slot's partition completely. fwupd writes to the ESP of the next
+// boot, so repairUpdaterEntry copies the node of the boot entry for
+// that partition into the updater's entry and into the status variable.
+// The rehearsal makes the same repair in its copy of the variables, so
+// the bytes it records are the bytes the apply writes.
 
 import (
 	"bytes"
@@ -30,37 +28,38 @@ import (
 	"strings"
 )
 
-// partition is a partition's place on its disk, in 512-byte sectors, as
-// sysfs gives it and a hard drive node holds it.
+// partition is a partition's number and its start and size in 512-byte
+// sectors, as sysfs reports them and a hard drive node stores them.
 type partition struct {
 	number uint32
 	start  uint64
 	size   uint64
 }
 
-// updateInfoHeaderSize is the length of the header of fwupd's status
-// variable, FWUPD_UPDATE_INFO, before the capsule's device path: its
-// version, the device's GUID, the capsule's flags, the hardware
+// updateInfoHeaderSize is the length of the fixed header of fwupd's
+// status variable (FWUPD_UPDATE_INFO), before the capsule's device path:
+// the version, the device's GUID, the capsule's flags, the hardware
 // instance, the time of the attempt, and the status.
 const updateInfoHeaderSize = 4 + 16 + 4 + 8 + 16 + 4
 
-// hardDriveNodeSize is the length of a hard drive media node: the
-// header, the number, the start, the size, the signature, and the two
-// bytes of its format and signature type.
+// hardDriveNodeSize is the length of a hard drive media device path
+// node: the 4-byte node header, the partition number, start, and size,
+// the 16-byte signature, and one byte each for the partition format and
+// the signature type.
 const hardDriveNodeSize = 42
 
-// variableWriter replaces one variable file with data, which starts
-// with the four bytes of attributes.
+// variableWriter replaces the variable file at path with data. The
+// first four bytes of data are the variable's attributes.
 type variableWriter func(path string, data []byte) error
 
-// plainVariableWriter writes a variable of a rehearsal's copy, which is
-// a plain file.
+// plainVariableWriter writes a variable in a rehearsal's copy, where
+// each variable is an ordinary file.
 func plainVariableWriter(path string, data []byte) error { return os.WriteFile(path, data, 0o644) }
 
-// repairUpdaterEntry gives each entry that boots fwupd's updater, and
-// each of fwupd's status variables, whose hard drive node names
-// partition 0, the node of the entry that boots from esp. It changes
-// nothing when no entry names esp's partition.
+// repairUpdaterEntry replaces the hard drive node of zeros in each boot
+// entry for fwupd's updater, and in each of fwupd's status variables,
+// with the node of a boot entry for esp's partition. It changes
+// nothing when no boot entry has that partition.
 func repairUpdaterEntry(vars string, esp partition, write variableWriter) error {
 	entries, err := readVariables(vars)
 	if err != nil {
@@ -103,14 +102,15 @@ func repairUpdaterEntry(vars string, esp partition, write variableWriter) error 
 		fixed := bytes.Clone(data)
 		copy(fixed[at:], source)
 		if err := write(filepath.Join(vars, name), fixed); err != nil {
-			return fmt.Errorf("repairing the partition of %s: %w", name, err)
+			return fmt.Errorf("writing the repaired partition node to %s: %w", name, err)
 		}
 	}
 	return nil
 }
 
-// hardDriveNode answers the offset in option of the first hard drive
-// node of its device path, and the partition it names.
+// hardDriveNode returns the offset in option of the first hard drive
+// node in its device path, and the partition that node describes. It
+// returns false when the path has no such node.
 func hardDriveNode(option []byte) (int, partition, bool) {
 	start, list, ok := devicePath(option)
 	if !ok {
@@ -120,8 +120,9 @@ func hardDriveNode(option []byte) (int, partition, bool) {
 	return start + at, p, ok
 }
 
-// hardDriveNodeIn answers the offset in a device path of its first hard
-// drive node, and the partition it names.
+// hardDriveNodeIn returns the offset in a device path of its first hard
+// drive node, and the partition that node describes. It returns false
+// when the path has no such node or is malformed.
 func hardDriveNodeIn(list []byte) (int, partition, bool) {
 	for at := 0; at+4 <= len(list); {
 		nodeType, subType, length := list[at], list[at+1], int(binary.LittleEndian.Uint16(list[at+2:]))
@@ -141,9 +142,9 @@ func hardDriveNodeIn(list []byte) (int, partition, bool) {
 	return 0, partition{}, false
 }
 
-// devicePath answers the offset of an EFI_LOAD_OPTION's device path, and
-// the path: the attributes, the path's length, and the description,
-// which ends with a UTF-16 zero, come first.
+// devicePath returns the device path of an EFI_LOAD_OPTION and its
+// offset in option. The path follows the 4-byte attributes, the 2-byte
+// path length, and the description, which ends with a UTF-16 zero.
 func devicePath(option []byte) (int, []byte, bool) {
 	if len(option) < 6 {
 		return 0, nil, false
@@ -162,8 +163,9 @@ func devicePath(option []byte) (int, []byte, bool) {
 	return i, option[i : i+listLength], true
 }
 
-// espPartition answers the partition mounted at mount: mountinfo names
-// its block device's numbers, and sysfs under sys gives the partition.
+// espPartition returns the partition mounted at mount. It finds the
+// mount's block device number in mountinfo, then reads the partition's
+// number, start, and size from the sysfs tree at sys.
 func espPartition(mountinfo, sys, mount string) (partition, error) {
 	for _, line := range strings.Split(mountinfo, "\n") {
 		fields := strings.Fields(line)
@@ -175,22 +177,22 @@ func espPartition(mountinfo, sys, mount string) (partition, error) {
 		for i, name := range []string{"partition", "start", "size"} {
 			data, err := os.ReadFile(filepath.Join(dir, name))
 			if err != nil {
-				return partition{}, fmt.Errorf("reading the partition of %s: %w", mount, err)
+				return partition{}, fmt.Errorf("reading the %s of the partition mounted at %s: %w", name, mount, err)
 			}
 			if values[i], err = strconv.ParseUint(strings.TrimSpace(string(data)), 10, 64); err != nil {
-				return partition{}, fmt.Errorf("reading the partition of %s: %w", mount, err)
+				return partition{}, fmt.Errorf("parsing the %s of the partition mounted at %s: %w", name, mount, err)
 			}
 		}
 		number := values[0]
 		if number > math.MaxUint32 {
-			return partition{}, fmt.Errorf("the partition number %d of %s is outside the range of a GPT entry", number, mount)
+			return partition{}, fmt.Errorf("the partition number %d of %s is above %d, the largest number of a GPT entry", number, mount, uint32(math.MaxUint32))
 		}
 		return partition{number: uint32(number), start: values[1], size: values[2]}, nil
 	}
 	return partition{}, fmt.Errorf("%s is not a mount point", mount)
 }
 
-// mountedPartition answers the partition mounted at mount in this
+// mountedPartition returns the partition mounted at mount in this
 // process's mount namespace.
 func mountedPartition(mount string) (partition, error) {
 	mountinfo, err := os.ReadFile("/proc/self/mountinfo")

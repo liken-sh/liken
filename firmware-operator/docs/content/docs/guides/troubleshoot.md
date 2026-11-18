@@ -1,76 +1,78 @@
 ---
 title: Troubleshoot uploads, scans, approvals, rehearsals, and applies
 weight: 30
-description: "Find why a Firmware's upload failed or never started: a Failed entry and its message, a Conflict between two rules, a selector that does not compile or matches nothing, an upload pod that stays Pending, and a claimed device that stays Pending because its firmware is not loaded. Find why discovery found nothing: a FirmwareCatalog that is not Ready, a scan record that is Failed or CatalogMoved, a machine that is never scanned, and a discovered Firmware that keeps the entry of a machine that is off. Find why an approval's Approved condition is False: CabinetDiffers, NotOffered, or MachinesInvalid, and why the API server refuses an approval. Find why the Rehearsed condition is False with Refused or Failed, or stays Unknown, from the message of each record in status.rehearsals. Find why the Applied condition is False with Refused or Failed, or stays Unknown, from the message of each record in status.applies and the Disruption that asks for the machine's turn, and release a machine that stays drained. Use when kubectl get firmware shows Failed or Conflict, when a bare chip gets no upload, when a pod that claims a camera does not start, when kubectl get firmwarecatalog shows Ready False, when a machine has no scan record, when kubectl get firmware shows Approved False, when it shows Rehearsed or Applied False or Unknown, or when a machine stays drained in a turn that the operator holds."
+description: "Find why a Firmware's upload failed or never started: a Failed entry and its message, a Conflict between two rules, a selector that does not compile or matches nothing, an upload pod that stays Pending, and a claimed device that stays Pending because its firmware is not loaded. Find why discovery found nothing: a FirmwareCatalog that is not Ready, a scan record that is Failed or CatalogMoved, a machine that is never scanned, and a discovered Firmware that keeps the entry of a machine that is off. Find why an approval's Approved condition is False: CabinetDiffers, NotOffered, or MachinesInvalid, and why the API server refuses an approval. Find why the Rehearsed condition is False with Refused or Failed, or stays Unknown, from the message of each record in status.rehearsals. Find why the Applied condition is False with Refused or Failed, or stays Unknown, from the message of each record in status.applies and the Disruption that requests the machine's turn to reboot, and release a machine that stays drained. Use when kubectl get firmware shows Failed or Conflict, when a bare chip gets no upload, when a pod that claims a camera does not start, when kubectl get firmwarecatalog shows Ready False, when a machine has no scan record, when kubectl get firmware shows Approved False, when it shows Rehearsed or Applied False or Unknown, or when a machine stays drained in a turn that the operator holds."
 ---
 
 # Troubleshoot uploads, scans, approvals, rehearsals, and applies
 
-The first part of this guide covers uploads, the second part covers
-the scans that find updates ([Find firmware updates](../find-updates/)),
-the third part covers approvals
-([Approve a firmware update](../approve-an-update/)), the fourth part
-covers the rehearsal of an approved install on each machine, and the
-fifth part covers the apply of the install in each machine's reboot
-turn.
+Each section starts from the object to read, then lists symptoms and
+their fixes. [Find firmware updates](../find-updates/) explains scans,
+and [Approve a firmware update](../approve-an-update/) explains
+approvals. A rehearsal is a test run of an approved install on each
+machine, against a copy of the machine's firmware variables. An apply
+is the real install. It runs while the machine is drained in a reboot
+turn, which `machine-operator` grants through a `Disruption`, as
+[Apply the update](../approve-an-update/#apply-the-update) describes.
 
 ## Uploads
 
 Start from the `Firmware`. `kubectl get firmware` shows whether the
-rule is valid and counts the result of each port where it matched a
-device. `kubectl describe firmware <name>` shows the entries in
-`status.devices` and the `Event`s of the last hour. Find the symptom
-below.
+rule is valid, and how many of the devices it matched are loaded,
+running, failed, or in conflict. `kubectl describe firmware <name>`
+shows the entries in `status.devices` and the `Event`s of the last
+hour.
 
 ### The entry is Failed
 
 The entry's `message` says why. The operator does not retry a failed
-upload. A new attempt starts when the device appears again, after a
-power cycle or a replug, or when you edit the `Firmware`'s spec.
+upload on its own. It runs the upload again when the device appears
+again, after a power cycle or a replug, or when you edit the
+`Firmware`'s spec. To try again without a replug, change the spec, for
+example by adding an argument that the loader accepts, or delete the
+`Firmware` and apply it again.
 
 | Message | Cause and fix |
 |---|---|
-| `the loader exited with code <n>: <line>` | The loader failed. The last line of its log follows the code. Check the command, the path of the firmware file in the image, and the loader type, such as `-t fx2` or `-t fx3`. A loader that runs only as root fails here, because the upload pod runs as user 1000. |
-| `the loader exited 0 and the device stayed in the slice for 1m0s after it` | The loader reported success, and the bare chip did not reset. The firmware file is usually wrong for the chip, or the chip needs a second stage, such as `fxload -s` for some older QHY cameras. |
-| `the upload pod did not finish within 5m0s of its creation` | The pod never ran, or ran for five minutes. See [The upload pod stays Pending](#the-upload-pod-stays-pending). |
+| `the loader exited with code <n>: <line>` | The loader failed, and `<line>` is the last line of its log. Check the command, the path of the firmware file in the image, and the loader type, such as `-t fx2` or `-t fx3`. The upload pod runs as user 1000, so a loader that needs root fails here. |
+| `the loader exited 0 and the device stayed in the slice for 1m0s after it` | The loader reported success, but the bare chip did not reset. Usually the firmware file is wrong for the chip, or the chip needs a second stage, such as `fxload -s` for some older QHY cameras. |
+| `the upload pod did not finish within 5m0s of its creation` | The pod never ran, or it ran for five minutes. See [The upload pod stays Pending](#the-upload-pod-stays-pending). |
 | `the upload pod failed: DeadlineExceeded: ...` | The loader ran longer than five minutes, and the kubelet stopped it. |
-| `the upload pod is gone; ...` | Someone deleted the upload pod before the operator read its result. |
-
-To try again without a replug, edit the spec, for example with an
-argument that the loader accepts, or delete the `Firmware` and apply
-it again.
+| `the upload pod no longer exists, ...` | Someone deleted the upload pod before the operator read its result. |
 
 ### The entry is Conflict
 
-Two or more `Firmware` objects match the same device, so the operator
-runs none of them on it. The message names the other rules:
+More than one `Firmware` matches the same device, so the operator runs
+none of them on it. The message names the other rules. List the
+selectors with:
 
 ```sh
 kubectl get firmware -o custom-columns=NAME:.metadata.name,SELECTOR:.spec.selector
 ```
 
 Narrow one selector, for example with the product ID, or delete the
-duplicate. The rule that still matches then uploads to the device
-that is in the slice.
+duplicate. The rule that still matches then uploads to the device.
 
 ### Valid is False
 
-The selector or `spec.machines` does not compile, and the rule runs
-nowhere. The condition's message gives the compiler's error:
+The CEL selector does not compile, or `spec.machines` is not a valid
+label selector, so the rule runs nowhere. The condition's message
+gives the error:
 
 ```sh
 kubectl get firmware <name> -o jsonpath='{.status.conditions[?(@.type=="Valid")].message}'
 ```
 
 A selector reads attributes as `device.attributes["liken.sh"].<name>`.
-An attribute that a device does not have makes the selector fail on
-that device, and the device counts as not matched. Guard such an
-attribute with `has()`, for example
+When a device does not have an attribute that the selector reads, the
+selector fails on that device, and the operator treats the device as
+not matched. Guard such an attribute with `has()`, for example
 `has(device.attributes["liken.sh"].serial)`.
 
 ### No entry appears
 
-The rule matched no device. Check the device in the machine's slice:
+The rule matched no device. Look for the device in the machine's
+`ResourceSlice`:
 
 ```sh
 kubectl get resourceslice <node>-liken.sh -o yaml
@@ -81,51 +83,53 @@ kubectl get resourceslice <node>-liken.sh -o yaml
   [hardware modules guide](https://liken.sh/docs/guides/hardware-modules/)
   covers a device that the machine does not publish.
 - **The IDs differ.** Compare the `vendor` and `product` attributes
-  with the selector. Each is four lowercase hexadecimal digits, as a
-  string.
+  with the selector. Each is a string of four lowercase hexadecimal
+  digits.
 - **The device has no `busNumber` or `deviceNumber`.** The operator
-  uploads only to a device with both, because it builds the usbfs path
-  from them. An older `liken` release does not publish them; upgrade
-  the machine.
+  builds the usbfs path from these attributes, so it uploads only to a
+  device that has both. An older `liken` release does not publish
+  them, so upgrade the machine.
 - **`spec.machines` leaves the machine out.** Compare the selector
   with the labels of the `Machine`:
   `kubectl get machine <node> --show-labels`.
 
 ### The upload pod stays Pending
 
-The entry is `Running`, and the pod in `liken-system` does not start:
+The entry is `Running`, but the pod in `liken-system` does not start:
 
 ```sh
 kubectl -n liken-system get pods -l firmware.liken.sh/upload=true
 kubectl -n liken-system describe pod <pod>
 ```
 
-- **The claim is not allocated.** The claim has the pod's name, and
-  selects the device by its port path and device number. When the
-  device left or enumerated again before the scheduler allocated the
-  claim, the claim matches nothing. The operator writes `Failed` five
-  minutes after it created the pod, and the new appearance gets its
-  own upload. Check the class with
-  `kubectl get deviceclass firmware-upload`: the base ships it.
-- **The image does not pull.** The pod's `Event`s name the error.
-  Check the tag in `spec.upload.image`. The network policy that
-  denies the pod's traffic does not apply to the pull, because the
-  node's container runtime pulls the image, not the pod.
+- **The claim is not allocated.** The pod's `ResourceClaim` selects
+  the device by its USB port path and its device number, which changes
+  each time the device enumerates. So when the device left, or
+  enumerated again, before the scheduler allocated the claim, the
+  claim matches no device. The
+  operator writes `Failed` five minutes after it created the pod, and
+  the device's new appearance gets its own upload. Also check that the
+  `DeviceClass` exists with `kubectl get deviceclass firmware-upload`.
+  The operator's manifests install it.
+- **The image does not pull.** The pod's `Event`s give the error.
+  Check the tag in `spec.upload.image`. The `NetworkPolicy` that
+  denies the pod's traffic does not block the pull, because the node's
+  container runtime pulls the image, not the pod.
 
 ### A pod that claims the loaded device stays Pending
 
 A pod that claims the camera by its loaded IDs, such as `0921`, stays
-`Pending` until the device with those IDs is in the slice. That is
-the expected wait while the upload runs. When the upload is `Failed`
-or `Conflict`, fix that first. When the camera has no `Firmware` at
-all, nothing loads it, and the pod waits for good.
+`Pending` until a device with those IDs is in the slice. That is
+expected while the upload runs. When the upload is `Failed` or
+`Conflict`, fix that first. When no `Firmware` covers the camera,
+nothing loads its firmware, and the pod stays `Pending`.
 
 ## Scans
 
-Start from the `FirmwareCatalog`. `kubectl get firmwarecatalog` shows whether the
-last read of the jcat succeeded, and `kubectl describe firmwarecatalog <name>`
-shows its `Event`s of the last hour. The record of each machine is in
-`status.machines`:
+Start from the `FirmwareCatalog`. `kubectl get firmwarecatalog` shows
+whether the operator's last read of the catalog's jcat succeeded, and
+`kubectl describe firmwarecatalog <name>` shows its `Event`s of the
+last hour. `status.machines` has one record for each machine:
 
 ```sh
 kubectl get firmwarecatalog <name> -o jsonpath='{range .status.machines[*]}{.machine}{"\t"}{.result}{"\t"}{.message}{"\n"}{end}'
@@ -134,8 +138,9 @@ kubectl get firmwarecatalog <name> -o jsonpath='{range .status.machines[*]}{.mac
 ### A FirmwareCatalog is not Ready
 
 `Ready` is `False` when the operator could not read the jcat or the
-file it names. The condition's message gives the error. The status
-keeps the last good `file`, and no scan starts while `Ready` is `False`.
+catalog file that the jcat lists. No scan starts while `Ready` is
+`False`, and `status.file` keeps the last file that the operator read
+successfully. The condition's reason and message give the error:
 
 ```sh
 kubectl get firmwarecatalog <name> -o jsonpath='{.status.conditions[?(@.type=="Ready")]}'
@@ -143,37 +148,39 @@ kubectl get firmwarecatalog <name> -o jsonpath='{.status.conditions[?(@.type=="R
 
 | Reason | Cause and fix |
 |---|---|
-| `JcatUnreadable` | The operator could not download the jcat at `spec.url` with `.jcat` added, the answer was not `200`, or the jcat did not parse. Check `spec.url`, and check that the operator's pod can reach the host over HTTPS. The `firmware-scan` policy applies only to the scan pods. |
-| `FileUnreadable` | The operator downloaded the jcat, and could not download or read the versioned file that it names. The file must be in the same directory as `spec.url`. A mirror must serve the versioned file under the name the jcat gives. |
-| `ChecksumMismatch` | The SHA-256 of the versioned file differs from the one in the jcat. A mirror that serves a stale jcat, or a stale file, causes this. Fix the mirror. |
+| `JcatUnreadable` | The operator could not download the jcat at `spec.url` with `.jcat` added, the HTTP response was not `200`, or the jcat did not parse. Check `spec.url`, and check that the operator's pod can reach the host over HTTPS. The `firmware-scan` policy applies only to the scan pods. |
+| `FileUnreadable` | The operator downloaded the jcat, but could not download or read the versioned catalog file that it names. The file must be in the same directory as `spec.url`, so a mirror must serve it there under the name the jcat gives. |
+| `ChecksumMismatch` | The SHA-256 of the catalog file differs from the one in the jcat. A mirror that serves a stale jcat or a stale file causes this. Fix the mirror. |
 
-The operator reads the jcat again after an hour, when you edit the
-`FirmwareCatalog`, and when the operator starts. To read it now, edit the
-`FirmwareCatalog` or restart the operator.
+The operator reads the jcat when it starts, when you edit the
+`FirmwareCatalog`, and once an hour (the `--catalog-interval` flag).
+To read it now, edit the `FirmwareCatalog` or restart the operator.
 
 ### A scan record is Failed
 
-The record's `message` says why. A failed scan does not run again
-until the machine boots, its set of device names changes, the catalog
-names a new file that offers other releases for its devices, or the
-operator runs another scan image.
+The record's `message` says why. The operator does not run a failed
+scan again until the machine reboots, the set of device names on the
+machine changes, the jcat lists a new file that offers other
+releases for the machine's devices, or the operator runs another scan
+image.
 
 | Message | Cause and fix |
 |---|---|
-| `downloading the jcat: ...` or `downloading <file>: ...` | The scan pod could not reach the catalog's host. Check the `NetworkPolicy` `firmware-scan`, a policy of your own that denies egress from `liken-system`, and DNS. A mirror on a port other than 443 needs a policy of its own. |
-| `the SHA-256 of <file> is <a>, and the operator expects <b>` | The scan pod downloaded a file whose SHA-256 differs from the one the operator read. A mirror that serves different bytes to two readers causes this. |
-| `mounting efivarfs at /sys/firmware/efi/efivars: ...` | The pod could not mount `efivarfs`. Check that the pod is privileged, and that the policy of your cluster admits a privileged pod. |
-| `fwupdtool refresh: ...` | fwupd refused the catalog, for example because the signature of the jcat does not verify. The message is the last line of fwupd's error. A catalog that the LVFS did not sign needs its signer's certificate in `spec.trust`, as in [A catalog that the LVFS did not sign](../find-updates/#a-catalog-that-the-lvfs-did-not-sign). |
+| `downloading the jcat: ...` or `downloading <file>: ...` | The scan pod could not reach the catalog's host. Check the `NetworkPolicy` `firmware-scan`, any policy of your own that denies egress from `liken-system`, and DNS. `firmware-scan` allows only TCP port 443, so a mirror on another port needs a policy of its own. |
+| `the SHA-256 of <file> is <a>, and the operator expects <b>` | The scan pod downloaded a file whose SHA-256 differs from the one the operator read. A mirror that serves different bytes to different readers causes this. |
+| `copying the firmware tables: ...` | The pod could not copy the machine's `/sys/firmware`, which it mounts read-only, into the copy that fwupd reads. The rest of the message gives the error. |
+| `fwupdtool refresh: ...` | fwupd refused the catalog, for example because the signature of the jcat does not verify. The message ends with the last line of fwupd's error. A catalog that the LVFS did not sign needs its signer's certificate in `spec.trust`, as in [A catalog that the LVFS did not sign](../find-updates/#a-catalog-that-the-lvfs-did-not-sign). |
 | `installing the catalog's certificates from spec.trust: ...` | The pod could not copy a certificate from the `ConfigMap` that `spec.trust` names. The message gives the error. |
-| `fwupdtool get-devices: ...` or `fwupdtool get-updates: ...` | fwupd failed to read the devices or to match the releases. The message is the last line of fwupd's error. |
-| `the scan pod did not finish within 10m0s of its creation` | The pod never ran, or ran for 10 minutes. Check for a pod that stays `Pending` or does not pull its image. |
+| `fwupdtool get-devices: ...` or `fwupdtool get-updates: ...` | fwupd could not read the devices or match the releases to them. The message ends with the last line of fwupd's error. |
+| `the scan pod did not finish within 10m0s of its creation` | The pod never ran, or it ran for 10 minutes. Check for a pod that stays `Pending` or does not pull its image. |
 | `the scan pod wrote no log: ...` | The pod ended with no log, for example with `DeadlineExceeded`. The message adds the pod's reason and, if the container ran, its exit code. |
-| `the scan wrote no result; its last line was: ...` | The scan program crashed. The message holds the last line of its log. |
-| `the scan pod is gone; ...` | Someone deleted the scan pod before the operator read its result. |
+| `the scan pod wrote no result, and its last log line is: ...` | The scan program crashed. The message gives the last line of its log. |
+| `the scan pod no longer exists, ...` | Someone deleted the scan pod before the operator read its result. |
 
-The operator deletes a scan pod after it writes the result, so the
-log of a failed scan is gone. Reboot the machine to run the scan again.
-While a scan runs, its pod is in `liken-system`:
+The operator deletes a scan pod after it records the result, so you
+cannot read the log of a failed scan afterward. To see the log,
+reboot the machine to run the scan again, and read the pod's log
+while the scan runs:
 
 ```sh
 kubectl -n liken-system get pods -l firmware.liken.sh/scan=true
@@ -182,54 +189,55 @@ kubectl -n liken-system logs <pod>
 
 ### A scan record is CatalogMoved
 
-The scan pod read a jcat that names another file than the one the
-operator gave it, because LVFS published a new catalog between the
-operator's read and the scan's. The record's message gives the new
-file name. The operator reads the jcat at once. When the jcat names the
-new file, the `FirmwareCatalog`'s `status.file` changes, and the machine is
-scanned against the new file. This needs no action.
+The LVFS published a new catalog between the operator's read of the
+jcat and the scan pod's read, so the scan pod read a jcat that lists a
+different file than the one the operator gave it. The record's message
+gives the new file name. This needs no action. The operator reads the
+jcat again immediately and scans the machine against the new file.
 
 When the record stays `CatalogMoved`, the jcat that the operator reads
-still names the old file. The machine is scanned again when that jcat
-names a new file.
+still lists the old file. The operator scans the machine again when
+that jcat lists a new file.
 
 ### A machine is never scanned
 
-A machine has no record in `status.machines`. Check these in order:
+The machine has no record in `status.machines`. Check these in order:
 
 - **The machine is not Ready.** The operator scans only a `Machine`
   whose `status.phase` is `Ready`. Check with
   `kubectl get machine <node>`.
 - **The FirmwareCatalog is not Ready.** No scan starts against it. See
   [A FirmwareCatalog is not Ready](#a-firmwarecatalog-is-not-ready).
-- **The API server refuses the scan pod.** A privileged pod fails the
-  admission of a `liken-system` that carries a Pod Security level below
-  `privileged`. The operator's log gives the error:
+- **The API server refuses the scan pod.** The scan pod is privileged,
+  so the API server refuses it when `liken-system` has a Pod Security
+  label below `privileged`. The operator's log gives the error:
   `kubectl -n liken-system logs deployment/firmware-operator`.
 - **The scan pod cannot reach the catalog.** The record is `Running`
   until the scan fails with a `downloading` message, up to 10 minutes
   after the pod started. See
   [A scan record is Failed](#a-scan-record-is-failed).
-- **The operator does not lead.** Only the copy that holds the `Lease`
-  scans. See [Confirm that it leads](../install/#confirm-that-it-leads).
+- **The operator is not the leader.** Only the copy that holds the
+  `Lease` scans. See [Confirm that it leads](../install/#confirm-that-it-leads).
 
 ### A discovered Firmware keeps an entry for a machine that is off
 
-This is expected. A scan replaces the entries of its own machine only,
-so the entries of a machine that is off, or that cannot be scanned,
-stay at the version and the releases of its last scan. The `time` of
-each entry says when that was. An entry leaves when the machine's next
-scan does not report the device, or when you delete the `Machine`.
+This is expected. A scan replaces only the entries of its own machine.
+So the entries of a machine that is off, or that cannot be scanned,
+keep the version and the releases from its last scan, and each
+entry's `time` says when that scan ran. The operator removes an entry
+when the machine's next scan does not report the device, or when you
+delete the `Machine`.
 
-The operator deletes a discovered `Firmware` when no entry is left,
-unless someone changed its group or an apply on it waits for a turn or
-writes. An approval alone does not keep it: with no entry, no machine
-is offered the approved release. The operator posts a `Deleted` `Event`
-about each object it deletes, and `kubectl get events -n default
---field-selector involvedObject.name=<name>` shows it for an hour. An
-object whose group someone changed
-stays, and you delete it with `kubectl delete firmware <name>`. The operator then
-creates it again at the next scan that reports a device of its group.
+The operator deletes a discovered `Firmware` when no entry is left.
+An approval alone does not keep the object, because with no entry, no
+machine is offered the approved release. The object stays when someone
+changed its group, or when an apply on it is waiting for a turn or
+writing.
+The operator posts a `Deleted` `Event` for each object it deletes,
+which `kubectl get events -n default --field-selector involvedObject.name=<name>`
+shows for an hour. You delete an object whose group you changed with
+`kubectl delete firmware <name>`, and the operator creates it again at
+the next scan that reports a device of its group.
 
 ## Approvals
 
@@ -243,30 +251,31 @@ kubectl get firmware <name> -o jsonpath='{.status.conditions[?(@.type=="Approved
 
 ### The API server refuses the approval
 
-The CRD checks an approval before the operator sees it:
+The CRD validates an approval before the operator reads it:
 
 - `an approval needs both version and cabinet`: add the one that is
   missing.
-- `only an update of a component takes a version`: the `Firmware` is
-  for a set of GUIDs, such as `uefi-ca-7420e8dc`. No catalog offers its
-  device a release, so it has nothing to approve.
+- `only an update of a component can set version`: the `Firmware`
+  updates a set of GUIDs, such as `uefi-ca-7420e8dc`. No catalog
+  offers a release for a set of GUIDs, so there is nothing to approve.
 - `machines limits an approval`: `spec.machines` needs
   `spec.update.version`.
-- A `sha256` that is not 64 lowercase hex digits, or a `url` that does
-  not start with `https://`, fails the schema.
+- A `sha256` that is not 64 lowercase hexadecimal digits, or a `url`
+  that does not start with `http://` or `https://`, fails the schema.
 
 ### Approved is False with CabinetDiffers
 
 A catalog offers the version you approved, but in a cabinet whose
-SHA-256 is not the one you pinned. Compare your `spec.update.cabinet.sha256`
-with the release's `cabinet.sha256` in `status.machines`. When you
-copied it wrong, fix it. When you copied it right, the catalog serves
-another file under the same version. Read the release again, and
-decide whether to approve the new file.
+SHA-256 is not the one you pinned. Compare
+`spec.update.cabinet.sha256` with the release's `cabinet.sha256` in
+`status.machines`. If you copied it wrong, fix it. If you copied it
+correctly, the catalog now serves a different file under the same
+version. Read the release again, and decide whether to approve the new
+file.
 
 ### Approved is False with NotOffered
 
-No catalog offers the version to a machine that the approval covers.
+No catalog offers the version to any machine that the approval covers.
 Check each of these:
 
 - **The version.** It must match a release's `version` in
@@ -274,29 +283,31 @@ Check each of these:
 - **`spec.machines`.** It must select a `Machine` that has an entry in
   `status.machines`. List the labels with
   `kubectl get machine --show-labels`.
-- **The catalog withdrew the release.** LVFS can remove a release. The
-  scan after that writes entries with no such release, and the
-  approval moves to `False`. Choose another release.
+- **The catalog withdrew the release.** The LVFS can remove a release.
+  The next scan writes entries without it, and the approval changes to
+  `False`. Choose another release.
 
 ### Approved is False with MachinesInvalid
 
-`spec.machines` does not compile, such as a label key with a space in
-it. The message gives the error. Fix the selector.
+`spec.machines` is not a valid label selector, for example because a
+label key has a space in it. The message gives the error. Fix the
+selector.
 
 ## Rehearsals
 
 `kubectl get firmware` shows the `Rehearsed` condition in the
-`REHEARSED` column. The condition's message names each machine with
-its rehearsal's message, and `status.rehearsals` holds the records:
+`REHEARSED` column. The condition's message gives each machine with
+its rehearsal's message, and `status.rehearsals` has one record for
+each machine:
 
 ```sh
 kubectl get firmware <name> -o jsonpath='{range .status.rehearsals[*]}{.machine}{"\t"}{.result}{"\t"}{.message}{"\n"}{end}'
 ```
 
-A rehearsal runs once for each boot of the machine, the approval, and
-the catalog file. So a rehearsal that failed runs again only after the
-machine reboots, you change the approval, or the machine's next scan
-reads a new catalog file.
+The operator runs a rehearsal once for each combination of the
+machine's boot, the approval, and the catalog file. So a failed
+rehearsal runs again only after the machine reboots, you change the
+approval, or the machine's next scan reads a new catalog file.
 
 ### Rehearsed is False with Refused
 
@@ -304,23 +315,23 @@ The install would write something that the operator does not apply:
 
 | Message | What it means |
 |---|---|
-| `fwupd's ... plugin updates ..., and a rehearsal covers only the Secure Boot databases and UEFI capsules` | The device is one that fwupd writes directly, such as an SSD or a dock, and no copy can rehearse it. |
-| `the machine has no ESP for its next boot, ...` | The machine's store names no proven slot, so `liken` links no ESP for a capsule. A machine has a proven slot after its first upgrade. |
+| `fwupd's ... plugin updates ..., and a rehearsal covers only the Secure Boot databases and UEFI capsules` | fwupd writes this device directly, as it does an SSD or a dock, so a copy cannot rehearse the install. |
+| `the machine has no ESP for its next boot, ...` | `liken` has not recorded a proven boot slot on this machine, so it keeps no link to the ESP that the next boot reads, and a capsule has nowhere to be staged. A machine has a proven slot after its first upgrade. |
 | `the install created ..., which boots ..., not fwupd's updater` | The capsule's install created a boot entry for another program. |
-| `the install created ... boot entries, and a capsule needs one` | The install created more than the updater's entry. |
-| `the install set BootNext to ..., not to the updater's entry` | The install aimed the next boot at another entry. |
+| `the install created ... boot entries, and a capsule needs one` | The install created boot entries besides the updater's. |
+| `the install set BootNext to ..., not to the updater's entry` | The install pointed the next boot at another entry. |
 | `the install changed BootOrder by more than adding the updater's entry at its end` | The install reordered the machine's boot entries. |
-| `the install set OsIndications to ..., which asks for more than capsule-on-disk` | The install asked the firmware for more than the capsule. |
+| `the install set OsIndications to ..., which requests more than capsule-on-disk` | The install requested more from the firmware than the capsule. |
 | `the install wrote ... on the ESP, where a capsule writes nothing` | The install wrote a file other than fwupd's updater and the capsule, such as a shim or a loader. |
-| `the install changed ..., which a capsule does not write` | The install changed a variable other than the boot entries, `BootNext`, `BootOrder`, `OsIndications`, and fwupd's own. |
-| `the capsule's files need ... bytes on the ESP, and it has ... free` | The ESP of the machine's next boot is too full for the updater and the capsule. |
+| `the install changed ..., which a capsule does not write` | The install changed a variable other than the boot entries, `BootNext`, `BootOrder`, `OsIndications`, and fwupd's own variables. |
+| `the capsule's files need ... bytes on the ESP, and it has ... free` | The ESP that the next boot reads has too little free space for the updater and the capsule. |
 | `the install changed ..., which is not ...`, `the install created ...`, `the install removed ...` | The install writes a variable other than its device's own. |
-| `the install wrote ... under the ESP path` | The install stages a file on the ESP. |
+| `the install wrote ... under the ESP path` | The install puts a file on the ESP. |
 | `the install rewrote ... instead of appending to it` | The install replaces the list instead of appending to it. |
 | `the append to ... has the attributes ...` | The write is not an authenticated append, so the firmware would check no signature. |
-| `the append to ... is not a sequence of authenticated writes: ...` | The bytes that the install appended do not split into authenticated writes, each a header, a PKCS7 certificate, and signature lists. The apply writes each one in its own call, so it cannot write bytes it cannot split. The rest of the message names the first byte that is not part of a write. |
-| `the install did not change ...` | The device already holds the release's entries. |
-| `the append to ... needs ... bytes, and the variable store has ... free` | The machine's variable store is too full for the write. |
+| `the append to ... is not a sequence of authenticated writes: ...` | The appended bytes do not split into authenticated writes, each made of a header, a PKCS7 certificate, and signature lists. The apply writes each one in its own call, so it cannot write bytes that it cannot split. The rest of the message gives the first byte that is not part of a write. |
+| `the install did not change ...` | The device already has the release's entries. |
+| `the append to ... needs ... bytes, and the variable store has ... free` | The machine's variable store has too little free space for the write. |
 
 ### Rehearsed is False with Failed
 
@@ -329,12 +340,12 @@ The rehearsal could not run:
 | Message | What to check |
 |---|---|
 | `the SHA-256 of the cabinet is ..., and the approval pins ...` | The cabinet at `spec.update.cabinet.url` is not the file you pinned. Check the URL and the SHA-256. |
-| `downloading the cabinet: ...` | The pod could not download the cabinet. The policy in `deploy/rehearsal.yaml` allows HTTPS on port 443 only. |
-| `fwupd reports no device ...` | fwupd in the pod does not find the device that the scan reported. |
+| `downloading the cabinet: ...` | The pod could not download the cabinet. The `firmware-rehearsal` policy in `deploy/rehearsal.yaml` allows egress only to DNS and to TCP port 443, so a mirror on another port needs a policy of its own. |
+| `fwupd reports no device ...` | fwupd in the rehearsal pod does not find the device that the scan reported. |
 | `copying the firmware tables: the machine has no UEFI variable store` | The machine booted in BIOS mode. |
 | `fwupdtool install: ...` | fwupd refused the install. The rest of the line is fwupd's reason. |
-| `the rehearsal pod did not finish within 10m0s of its creation` | The pod never ran, such as an image that does not pull, or it hung. Check `kubectl -n liken-system get events`. |
-| `the rehearsal pod is gone` | Someone deleted the pod before it ended. |
+| `the rehearsal pod did not finish within 10m0s of its creation` | The pod never ran, for example because its image does not pull, or it hung. Check `kubectl -n liken-system get events`. |
+| `the rehearsal pod no longer exists, ...` | Someone deleted the pod before it ended. |
 
 ### Rehearsed stays Unknown
 
@@ -343,178 +354,173 @@ A pending machine waits for its rehearsal. Check each of these:
 - **The machine is not `Ready`.** A rehearsal starts only on a `Ready`
   machine.
 - **The machine's last scan read an older catalog file.** The
-  rehearsal loads the file that the scan read, so it waits for the scan
-  of the current file.
-- **The rehearsal found the catalog moved.** The record's result is
-  `CatalogMoved`, and its message starts with `the jcat now names` and
-  the new file. LVFS published a new catalog after the machine's scan.
-  The operator reads the jcat again at once, with no wait for
-  `--catalog-interval`, and the machine rehearses again against the new
-  file. When the new file offers the machine other releases, the
-  machine is scanned against it first. When it offers the same
-  releases, the operator moves the machine's scan record and its
-  entries to the new file with no scan. This needs no action, and the
-  operator posts a `Normal` `RehearsalCatalogMoved`.
-- **The API server refuses the rehearsal pod.** The pod mounts a host
-  path, which the `baseline` Pod Security level forbids. A cluster
-  that labels `liken-system` with a level below `privileged` refuses
-  it. Look for the refusal in the operator's log.
+  rehearsal loads the catalog file that the scan read, so it waits for
+  a scan of the current file.
+- **The rehearsal found that the catalog moved.** The record's result
+  is `CatalogMoved`, and its message starts with `the jcat now lists`
+  and the new file. The LVFS published a new catalog after the
+  machine's scan. This needs no action, and the operator posts a
+  `Normal` `RehearsalCatalogMoved` `Event`. The operator reads the
+  jcat again immediately, and the machine rehearses again against the
+  new file, after a new scan when the file offers the machine other
+  releases.
+- **The API server refuses the rehearsal pod.** The pod mounts a
+  `hostPath` volume, which the `baseline` Pod Security level forbids.
+  So a cluster that labels `liken-system` with a level below
+  `privileged` refuses it. Look for the refusal in the operator's log.
 
 ## Applies
 
 `kubectl get firmware` shows the `Applied` condition in the `APPLIED`
-column. The condition's message names each machine with its record's
-message, and `status.applies` holds the records:
+column. The condition's message gives each machine with its record's
+message, and `status.applies` has one record for each machine:
 
 ```sh
 kubectl get firmware <name> -o jsonpath='{range .status.applies[*]}{.machine}{"\t"}{.result}{"\t"}{.disruption}{"\t"}{.message}{"\n"}{end}'
 ```
 
-The operator does not write again on its own after a record reads
-`Refused` or `Failed`. To try again, withdraw the approval and approve
-it again. The withdrawal removes the machine's rehearsal and its
-record, so the machine rehearses again, and asks for its turn again
-when the rehearsal passes.
+After a record reads `Refused` or `Failed`, the operator does not
+write again on its own. To try again, withdraw the approval and
+approve it again. The withdrawal removes the machine's rehearsal and
+its apply record, so the machine rehearses again, and requests a turn
+again when the rehearsal passes.
 
 ### Applied is False with Refused
 
 The message is `the firmware refused the append to <variable>:
 permission denied`. The kernel reports the firmware's refusal of an
-authenticated write as permission denied. The firmware checks the
-append's signature against `KEK`, or against `PK` for a `KEK` update,
-and refuses an append whose signer does not chain to one of them. A
-`KEK` that holds only an older Microsoft key, while the release is
-signed by a newer one, causes this. A refused append changes nothing,
+authenticated write as permission denied. The firmware refuses an
+append whose signer does not chain to `KEK`, or to `PK` for a `KEK`
+update. This happens when the machine's `KEK` has only an older
+Microsoft key and a newer one signed the release. A refused append changes nothing,
 and the operator deletes the `Disruption`, so the machine leaves its
-turn with no reboot. Choose the release of the component whose signer
-the machine's `KEK` holds, such as `microsoft-dbx-x64` instead of
+turn without a reboot. Choose the release of a component whose signer
+the machine's `KEK` has, such as `microsoft-dbx-x64` instead of
 `microsoft-dbx-x64-kek2023`.
 
-A capsule's record is also `Refused` with
-`the machine's status.firmware.bootOrderKept is not true, ...` when the
-machine's firmware did not keep `BootOrder` through its last reset, or
-when the machine has not proven a release yet. The operator asks for no
-turn. Read the machine's `status.firmware.bootOrderKept`, and see
-`liken`'s guide to a reboot that did not keep a component's
-`BootNext`.
+A capsule's record is also `Refused`, with
+`the machine's status.firmware.bootOrderKept is not true, ...`, when
+the machine's firmware did not keep `BootOrder` through its last
+reset, or when the machine has not proven a release yet. The operator
+requests no turn. Read the machine's `status.firmware.bootOrderKept`,
+and see `liken`'s guide
+[A reboot did not keep a component's BootNext](https://liken.sh/docs/guides/troubleshoot/#a-reboot-did-not-keep-a-components-bootnext).
 
 ### Applied is False with Failed
 
 | Message | What to check |
 |---|---|
-| `the machine left its turn before the hold took effect: the Disruption ... is Complete ...` | The machine rebooted without holding its turn, so nothing was written. A `liken` release whose `Disruption` has no `spec.hold` does this. Upgrade the cluster, then approve again. |
-| `the machine left its turn before the hold took effect: the Disruption ... is gone ...` | Someone deleted the `Disruption` before the hold. Approve again. |
-| `the append's SHA-256 is now ..., and the rehearsal recorded ...` | Another writer changed the machine's variables after the rehearsal, such as another operating system or the firmware's setup menu. Nothing was written. Approve again to rehearse against the variables as they are now. |
-| `the rehearsal before the write did not pass, so nothing was written: ...` | The rehearsal in the apply pod failed or was refused. The rest of the message is the rehearsal's, and the [rehearsal tables](#rehearsals) explain it. |
-| `the apply pod ended before the signal to write, so nothing was written: ...` | The apply pod stopped while it prepared or waited for the machine's turn, such as at a reboot of the machine or when the kernel killed it for memory. The rest of the message gives its last line or the pod's reason. The pod writes only after the signal, so the operator deletes the `Disruption`, if it filed one, and the machine leaves its turn with no reboot. Approve again. |
-| `the apply pod is gone before it prepared, so nothing was written, and the operator asked for no turn` | Someone deleted the apply pod, or the machine's drain for another turn evicted it, before it was `Ready`. Approve again. |
+| `the Disruption ... is Complete, so the machine left its reboot turn before machine-operator held it ...` | The machine rebooted without holding its turn, so nothing was written. A `machine-operator` from a `liken` release whose `Disruption` has no `spec.hold` does this. Upgrade the cluster, then approve again. |
+| `the Disruption ... no longer exists, so the machine left its reboot turn before machine-operator held it ...` | Someone deleted the `Disruption` before `machine-operator` held it. Approve again. |
+| `the append's SHA-256 is now ..., and the rehearsal recorded ...` | Something else changed the machine's variables after the rehearsal, such as another operating system or the firmware's setup menu. Nothing was written. Approve again to rehearse against the variables as they are now. |
+| `the rehearsal before the write did not pass, so nothing was written: ...` | The rehearsal that the apply pod runs before it writes failed or was refused. The rest of the message is the rehearsal's, and the [rehearsal tables](#rehearsals) explain it. |
+| `the apply pod ended before the signal to write, so nothing was written: ...` | The apply pod stopped while it prepared or waited for the machine's turn, for example because the machine rebooted or the kernel killed the pod for memory. The rest of the message gives its last line or the pod's reason. The pod writes only after the signal, so the operator deletes the `Disruption`, if it created one, and the machine leaves its turn without a reboot. Approve again. |
+| `the apply pod no longer exists and did not finish preparing, so nothing was written and the operator created no Disruption` | Someone deleted the apply pod, or a drain for another turn evicted it, before it was `Ready`. Approve again. |
 | `marking the prepare as done: ..., so nothing was written` | The apply pod could not create its marker file in `/run/apply`, so its readiness probe could never pass. The rest of the message gives the error. |
-| `the variable ... changed while the apply waited for its turn, so nothing was written` | Another writer changed the variable after the apply pod prepared and before the signal, such as another operating system or the firmware's setup menu. Approve again to rehearse against the variable as it is now. |
-| `waiting for the signal to write: ..., so nothing was written` | The apply pod could not watch its annotations. The rest of the message gives the error. |
+| `the variable ... changed while the apply waited for its turn, so nothing was written` | Something else changed the variable after the apply pod prepared and before the signal, such as another operating system or the firmware's setup menu. Approve again to rehearse against the variable as it is now. |
+| `waiting for the signal to write: ..., so nothing was written` | The apply pod could not read its annotations. The rest of the message gives the error. |
 | `clearing the immutable flag of ...: operation not permitted` | The pod lacks `CAP_LINUX_IMMUTABLE`. A policy of your cluster that removes capabilities from pods in `liken-system` causes this. |
-| `writing the append to ...: read-only file system` | The machine's `efivarfs` is mounted read-only, so the pod's read-write mount of `/sys/firmware` cannot write it. |
+| `writing the append to ...: read-only file system` | The machine's `efivarfs` is mounted read-only, so the pod cannot write it through its read-write mount of `/sys/firmware`. |
 | `writing the append to ...: ...` | The kernel refused the write for another reason, which the message gives. |
-| `fwupdtool install: ..., and it wrote nothing` | fwupd refused a capsule's install on the machine, and changed nothing there. The rest of the line is fwupd's reason. |
-| `the FirmwareCatalog ... has no current file ...` | The `FirmwareCatalog` of the machine's scan was deleted or never read its jcat. See [A FirmwareCatalog is not Ready](#a-firmwarecatalog-is-not-ready). |
-| `the machine rebooted after the write, and its next scan still reads version ..., not ...` | The firmware took the write and did not keep it across the reboot. A firmware that resets Secure Boot to its defaults discards the appended entries. Check the firmware's Secure Boot settings before you approve again. |
-| `the machine rebooted, and its next scan still reads version ..., not ..., so the append was not written` | An uncertain apply, below, did not write. Approve again. |
+| `fwupdtool install: ..., and it wrote nothing` | fwupd refused a capsule's install on the machine and changed nothing. The rest of the line is fwupd's reason. |
+| `the FirmwareCatalog ... has no current file ...` | The `FirmwareCatalog` that the machine's scan used was deleted, or it never read its jcat. See [A FirmwareCatalog is not Ready](#a-firmwarecatalog-is-not-ready). |
+| `the machine rebooted after the write, and its next scan still reads version ..., not ...` | The firmware accepted the write but did not keep it across the reboot. A firmware that resets Secure Boot to its defaults discards the appended entries. Check the firmware's Secure Boot settings before you approve again. |
+| `the machine rebooted, and its next scan still reads version ..., not ..., so the append was not written` | An uncertain apply, described below, did not write. Approve again. |
 
-A failed or refused record deletes its `Disruption`, unless the
-operator already removed `spec.hold`. Then the turn still reboots the
-machine.
+A failed or refused record makes the operator delete its
+`Disruption`, unless the operator already removed `spec.hold`. In that
+case the turn still reboots the machine.
 
 ### Applied is Unknown with Uncertain
 
-The apply pod ended after the signal to write without saying whether
-it wrote, or the firmware accepted only some of the writes of the
-append. A write may have landed, so the operator removes the hold, the
-machine reboots in its turn, and the next scan reads the version. The
-record then ends, or turns `Failed` when the machine still reads the
-old version.
+The apply pod ended after the signal to write without reporting
+whether it wrote, or the firmware accepted only some of the writes of
+the append. The write may have reached the firmware, so the operator
+removes the hold, the machine reboots in its turn, and the next scan
+reads the version. The record then ends, or changes to `Failed` when
+the machine still reads the old version.
 
 | Message | What to check |
 |---|---|
-| `the apply pod is gone, ...` | Someone deleted the apply pod before it ended. |
-| `the apply pod did not finish within 10m0s of the signal to write` | The pod hung after the signal, or a pod that the operator started at the hold never ran, such as an image that does not pull. Check `kubectl -n liken-system get events`. |
-| `the apply wrote no result; its last line was: ...` or `the apply pod wrote no log: ...` | The apply program crashed. The message holds its last line, or the pod's reason. |
-| `the apply answered the result ..., which the operator does not know` | The scan image and the operator are from different releases. Pin both to one tag. |
-| `fwupd's writes differ from the rehearsal's: ...` | fwupd wrote other bytes to the machine than to the rehearsal's copies, such as a capsule file that changed. The reboot boots the proven slot, so the capsule does not run. Approve again to rehearse against the machine as it is now. |
-| `the install ... ; the reboot keeps liken's BootNext, so the capsule does not run` | fwupd wrote something on the machine that a capsule does not write. The message names it, as in the [rehearsal tables](#rehearsals). |
-| `fwupdtool install: ..., after it wrote to the machine; ...` | fwupd stopped with an error after it wrote. The reboot boots the proven slot. |
-| `the firmware accepted ... of the ... authenticated writes to ..., and write ... failed: ...` | The firmware took the first writes of the append and refused or failed the one the message names. `permission denied` is a signature that does not chain to `KEK`, as in [Applied is False with Refused](#applied-is-false-with-refused). The next scan reads which entries the variable holds. |
+| `the apply pod no longer exists, ...` | Someone deleted the apply pod before it ended. |
+| `the apply pod did not finish within 10m0s of the signal to write` | The pod hung after the signal, or a pod that the operator started again during the hold never ran, for example because its image does not pull. Check `kubectl -n liken-system get events`. |
+| `the apply pod wrote no result, and its last log line is: ...` or `the apply pod wrote no log: ...` | The apply program crashed. The message gives its last line, or the pod's reason. |
+| `the apply pod reported the result ..., which the operator does not recognize` | The scan image and the operator are from different releases. Pin both to one tag. |
+| `fwupd's writes differ from the rehearsal's: ...` | fwupd wrote different bytes to the machine than to the rehearsal's copies, for example because a capsule file changed. The reboot boots the proven slot, so the capsule does not run. Approve again to rehearse against the machine as it is now. |
+| `the install ..., so the reboot keeps liken's BootNext and the capsule does not run` | fwupd wrote something on the machine that a capsule does not write. The message names it, as in the [rehearsal tables](#rehearsals). |
+| `fwupdtool install: ..., after it wrote to the machine, so ...` | fwupd stopped with an error after it wrote. The reboot boots the proven slot. |
+| `the variable ... changed, so the machine must reboot: the firmware accepted ... of the ... authenticated writes, and write ... returned: ...` | The firmware accepted the first writes of the append and refused or failed the one that the message gives. `permission denied` means a signature that does not chain to `KEK`, as in [Applied is False with Refused](#applied-is-false-with-refused). The next scan reads which entries the variable has. |
 
 ### Applied stays Unknown
 
-Find the machine's record and its `Disruption`:
+Find the machine's record, and its `Disruption`:
 
 ```sh
 kubectl get disruptions -l firmware.liken.sh/firmware=<name>
 ```
 
-- **The machine has no record.** Its rehearsal has not passed on the
-  boot it runs. See [Rehearsals](#rehearsals). The operator also asks
-  for no turn on a `liken` release that has no `Disruption` kind. An
-  apply pod that found the catalog moved also leaves no record: it
-  wrote nothing and asked for no turn, and the operator posts a
-  `Normal` `ApplyCatalogMoved`, reads the jcat again at once, and
-  starts the apply again with the new file.
-- **The record is `Waiting` with no `disruption`.** The apply pod
-  prepares on the machine, and the operator asks for the turn when
-  the pod is `Ready`:
+- **The machine has no record.** Its rehearsal has not passed on its
+  current boot. See [Rehearsals](#rehearsals). The operator also
+  requests no turn on a `liken` release that has no `Disruption` kind.
+  An apply pod that found the catalog moved leaves no record either.
+  It wrote nothing and requested no turn. The operator posts a
+  `Normal` `ApplyCatalogMoved` `Event`, reads the jcat again
+  immediately, and starts the apply again with the new file.
+- **The record is `Waiting` with no `disruption`.** The apply pod is
+  preparing on the machine, and the operator requests the turn when
+  the pod is `Ready`. List the pod with
   `kubectl -n liken-system get pods -l firmware.liken.sh/apply=true`.
-  The pod's log ends with a line whose `phase` is `prepared` once it
-  waits. A pod that is not `Ready` still prepares. The prepare has 10
-  minutes, and a pod that does not finish it ends `Failed`. The pod mounts a
-  host path, which the `baseline` Pod Security level forbids, so a
+  A pod that has prepared logs a line whose `phase` is `prepared`.
+  A pod that does not finish the prepare in 10 minutes ends `Failed`. The pod mounts a `hostPath`
+  volume, which the `baseline` Pod Security level forbids, so a
   cluster that labels `liken-system` with a level below `privileged`
   refuses it. Look for the refusal in the operator's log.
 - **The record is `Waiting` with a `disruption`.** The pod has
   prepared, and the machine waits for its turn. An `APPROVED` of
-  `False` means the machine's `rebootPolicy` is `Manual`,
-  and the request waits for you:
+  `False` on the `Disruption` means the machine's `rebootPolicy` is
+  `Manual`, and the turn waits for you to approve it.
   [Apply the update](../approve-an-update/#apply-the-update) gives the
-  command that approves it. A `GRANTED` of `False` means a budget has
-  no room, and the `Granted` condition's message names what the turn
-  waits for. Once the turn is granted, `machine-operator` drains the
-  machine and sets `HELD` to `True`.
+  command. A `GRANTED` of `False` means a budget has no room, and the
+  `Granted` condition's message says what the turn waits for. When the
+  turn is granted, `machine-operator` drains the machine and sets
+  `HELD` to `True`.
 - **The record is `Writing`.** The operator sent the apply pod the
-  signal, and the pod writes on the drained machine. Its annotation
-  `firmware.liken.sh/write-at` gives the time of the signal, and the
-  operator waits 10 minutes from it for the pod's answer.
+  signal, and the pod writes on the drained machine. The pod's
+  annotation `firmware.liken.sh/write-at` gives the time of the
+  signal, and the operator waits 10 minutes from that time for the
+  pod's result.
 - **The record is `Written` or `Uncertain`.** The machine reboots, and
-  its next scan ends the record. A scan waits for the machine to be
+  its next scan ends the record. A scan waits until the machine is
   `Ready`.
 
 ### A machine stays drained
 
-A machine whose `Disruption` reads `HELD` `True` is drained and waits
+A machine whose `Disruption` shows `HELD` `True` is drained and waits
 for the operator, and a hold has no deadline. The operator removes the
 hold after a write, and deletes the `Disruption` after a refusal or a
-failure. A machine stays drained when the operator does not run, or
-does not lead. Check the operator first: see
+failure. So a machine stays drained when the operator is not running
+or is not the leader. Check the operator first: see
 [Confirm that it leads](../install/#confirm-that-it-leads). The
-operator's pod tolerates the cordon by its key, so it can run on the
-drained machine. A `liken` drain that evicts it anyway, on a cluster
-whose other machines take no pod of the operator's, leaves the
-operator with nowhere to run, and the machine stays drained until you
-release it.
+operator's pod tolerates the cordon's taint
+`node.kubernetes.io/unschedulable`, so the `liken` drain does not
+evict it, and the scheduler can place it on the drained machine.
 
-To release the machine yourself, remove the hold or delete the request.
-Removing the hold reboots the machine:
+To release the machine yourself, remove the hold or delete the
+`Disruption`. Removing the hold reboots the machine:
 
 ```sh
 kubectl patch disruption <machine>.firmware-<name> --type merge -p '{"spec":{"hold":null}}'
 ```
 
-Deleting the request ends the turn with no reboot:
+Deleting the `Disruption` ends the turn without a reboot:
 
 ```sh
 kubectl delete disruption <machine>.firmware-<name>
 ```
 
-If the record reads `Writing` and the apply pod is still running, wait
-for it to end first, so that its result is in the record. When the pod writes, or ends without
-saying whether it wrote, after you deleted the request, the operator
-files the request again with no hold. The write takes effect only at a
-reboot, so the machine takes its turn again, under its budgets, and
-reboots.
+If the record shows `Writing` and the apply pod is still running, wait
+for the pod to end first, so that the record gets its result. If you
+deleted the `Disruption` and the pod then writes, or ends without
+reporting whether it wrote, the operator creates the `Disruption`
+again with no hold. The write takes effect only at a reboot, so the
+machine takes its turn again, within its budgets, and reboots.

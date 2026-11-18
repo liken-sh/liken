@@ -5,14 +5,15 @@ import (
 	"syscall"
 )
 
-// directoryEvents are the inotify events that a change of the volume
-// makes: the kubelet creates a directory for the new copy and a link
-// to it, renames the link over ..data, and removes the old copy.
+// directoryEvents are the inotify events of a downward API update. The
+// kubelet writes the new version into a new directory, renames a
+// symbolic link to it over ..data, and removes the old directory.
 const directoryEvents = syscall.IN_CREATE | syscall.IN_MOVED_TO | syscall.IN_DELETE | syscall.IN_CLOSE_WRITE
 
-// inotifyWatch watches one directory with inotify. The descriptor is
-// non-blocking, so os.File reads it through Go's poller, and a close
-// ends a read that waits.
+// inotifyWatch sends on the watcher's changes channel whenever the
+// directory changes, and closes the channel when the watcher is closed.
+// The descriptor is non-blocking so that os.File reads it through Go's
+// poller, where a close ends a read that is waiting.
 func inotifyWatch(dir string) (watcher, error) {
 	fd, err := syscall.InotifyInit1(syscall.IN_CLOEXEC | syscall.IN_NONBLOCK)
 	if err != nil {
@@ -26,9 +27,9 @@ func inotifyWatch(dir string) (watcher, error) {
 	changes := make(chan struct{}, 1)
 	go func() {
 		defer close(changes)
-		// The events themselves are not decoded: any change of the
-		// directory sends the waiter to read the file again. A queue
-		// that overflowed also ends a read, which is a change too.
+		// The events are not decoded, because the waiter reads the file
+		// again after any event, a queue overflow included. The channel
+		// has a buffer of one, so a burst of events sends one signal.
 		buf := make([]byte, 64*1024)
 		for {
 			if _, err := events.Read(buf); err != nil {

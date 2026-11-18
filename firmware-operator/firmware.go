@@ -1,9 +1,8 @@
 package main
 
-// The Firmware kind, as the operator reads and writes it. The struct
-// holds the fields the operator reads, and every status field, because
-// a write to the status subresource replaces the whole status: a
-// status field missing here would be erased by each write.
+// The types hold every status field of a Firmware, not only those the
+// operator reads, because a write to the status subresource replaces
+// the whole status and would erase a field missing here.
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -43,8 +42,9 @@ type firmware struct {
 
 func (f *firmware) GetObjectMeta() informer.Meta { return &f.Metadata }
 
-// firmwareSpec holds exactly one of upload and update, which the CRD
-// enforces. selector and machines belong to upload alone.
+// The CRD requires exactly one of Upload and Update, and Selector only
+// with Upload. Machines limits where an upload runs, or which machines
+// an update's approval covers.
 type firmwareSpec struct {
 	Selector string                `json:"selector,omitempty"`
 	Machines *metav1.LabelSelector `json:"machines,omitempty"`
@@ -52,19 +52,18 @@ type firmwareSpec struct {
 	Update   *update               `json:"update,omitempty"`
 }
 
-// upload names the image that holds the loader and the firmware, and
-// the command that writes the firmware into one device.
+// upload is the image that holds the loader and the firmware, and the
+// command that writes the firmware into one device.
 type upload struct {
 	Image   string   `json:"image"`
 	Command []string `json:"command"`
 	Args    []string `json:"args,omitempty"`
 }
 
-// update marks a Firmware as the rule for the firmware that a device
-// keeps. Exactly one of Component and GUIDs names the group of devices
-// it covers (grouping.go): a catalog component, or a set of GUIDs.
-// Version and Cabinet are a person's approval of one release of the
-// component (approval.go).
+// update makes a Firmware cover the installed firmware of devices that
+// fwupd updates. Exactly one of Component, a catalog component, and
+// GUIDs selects those devices (grouping.go). Version and Cabinet record
+// a person's approval of one release (approval.go).
 type update struct {
 	Component string         `json:"component,omitempty"`
 	GUIDs     []string       `json:"guids,omitempty"`
@@ -72,8 +71,9 @@ type update struct {
 	Cabinet   *pinnedCabinet `json:"cabinet,omitempty"`
 }
 
-// pinnedCabinet is the file an approval installs, pinned by its SHA-256
-// the way a digest pins an image.
+// pinnedCabinet is the cabinet file, fwupd's .cab archive, that an
+// approval installs. The SHA-256 pins its content, the way a digest
+// pins an image.
 type pinnedCabinet struct {
 	URL    string `json:"url"`
 	SHA256 string `json:"sha256"`
@@ -89,8 +89,8 @@ type firmwareStatus struct {
 	Counts             counts         `json:"counts,omitzero"`
 }
 
-// deviceEntry is the latest appearance of a matched device in one
-// port, a machine and an address, and what the operator did with it.
+// deviceEntry records an upload Firmware's latest appearance of a
+// matched device, keyed by machine and address, and the upload's result.
 type deviceEntry struct {
 	Machine      string `json:"machine"`
 	Device       string `json:"device"`
@@ -102,7 +102,7 @@ type deviceEntry struct {
 	Time         string `json:"time"`
 }
 
-// The results of an entry.
+// The values of deviceEntry.Result.
 const (
 	resultRunning  = "Running"
 	resultLoaded   = "Loaded"
@@ -110,20 +110,19 @@ const (
 	resultConflict = "Conflict"
 )
 
-// counts holds the counts of one kind of rule: an upload rule's or an
-// update rule's, never both. The JSON encoder writes an embedded
-// struct's fields at the level of counts, and writes none of them when
-// its pointer is nil. So a rule's own counts are written even when they
-// are zero, and its printer columns show 0, and the other kind's
-// columns stay empty.
+// counts sets exactly one of its embedded pointers, for an upload or
+// an update Firmware. encoding/json writes the embedded struct's fields
+// at the level of counts, and none of them when the pointer is nil. So
+// the Firmware's own printer columns show 0 when a count is zero, and
+// the other kind's columns stay empty.
 type counts struct {
 	*UploadCounts
 	*UpdateCounts
 }
 
-// UploadCounts gives the number of an upload rule's entries in each
-// result. It is exported because the JSON decoder cannot allocate an
-// embedded pointer to an unexported type.
+// UploadCounts counts an upload Firmware's device entries by result.
+// It is exported because encoding/json cannot allocate an embedded
+// pointer to an unexported type when it decodes.
 type UploadCounts struct {
 	Running  int `json:"running"`
 	Loaded   int `json:"loaded"`
@@ -131,24 +130,22 @@ type UploadCounts struct {
 	Conflict int `json:"conflict"`
 }
 
-// UpdateCounts gives the number of machines that an update rule's
-// entries name, the number of those that a catalog offers a release,
-// and the number that an approval waits for.
+// UpdateCounts counts the machines in an update Firmware's entries
+// (Machines), those that a catalog offers any release (Behind), and
+// those that a catalog offers the approved version in the pinned
+// cabinet, among the machines that spec.machines selects (Pending).
 type UpdateCounts struct {
 	Machines int `json:"machines"`
 	Behind   int `json:"behind"`
 	Pending  int `json:"pending"`
 }
 
-// condition is the condition type that every liken component reports,
-// with the shape of metav1.Condition.
 type condition = conditions.Condition
 
-// valid is the one condition of a Firmware: whether its selector
+// valid is the condition type that reports whether spec.selector
 // compiles.
 const valid = "Valid"
 
-// The reasons of Valid.
 const (
 	reasonCompiled        = "Compiled"
 	reasonSelectorInvalid = "SelectorInvalid"
@@ -159,7 +156,8 @@ func (s firmwareStatus) valid() condition {
 	return c
 }
 
-// reference names a Firmware in its Events.
+// reference returns the object reference for Events about this
+// Firmware.
 func (f *firmware) reference() eventReference {
 	return eventReference{APIVersion: firmwareAPIVersion, Kind: firmwareKind, Name: f.Metadata.Name, UID: f.Metadata.UID}
 }

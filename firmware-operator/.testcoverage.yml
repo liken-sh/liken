@@ -1,29 +1,22 @@
-# This is the coverage gate, enforced in CI (see
-# .github/workflows/ci.yaml).
+# The coverage gate that `make test-go` runs, locally and in CI.
 #
-# The threshold only rises over time. It is set just under what the
-# tests measure today. So a change that loses coverage fails the
-# check, and a change that gains coverage should raise the number
-# here to keep the gain.
-#
-# The numbers are measured with Go 1.27.2 and later, which count each basic
-# block once.
+# The threshold is just under the measured coverage, so a change that
+# loses coverage fails. When a change gains coverage, raise the
+# threshold to keep the gain.
 
 profile: coverage.out
 
-# go test never calls main(), so the statements in the two main.go
-# files never run under the gate. The operator's holds only the wiring
-# of the in-cluster clients, and the scan program's holds only the
-# wiring of fwupdtool and the paths of its pod. The gate measures every
-# other file.
+# Tests never call main(). The operator's main.go only creates the
+# in-cluster clients, and the scan program's main.go only starts
+# fwupdtool and sets the paths of its pod.
 exclude:
   paths:
     - ^main\.go$
     - ^scan/main\.go$
 
 threshold:
-  # One package, so the total is the whole gate. The rest below 100 is
-  # the error paths of requests that the fake API server always
-  # answers, a watch handler's report of an object that does not
-  # convert, and the stop that ends a pass between two rules.
+  # The uncovered statements are error paths of requests that the fake
+  # API server never fails, a watch handler's report of an object that
+  # does not convert, and the check in pass.go that ends a pass between
+  # two Firmware objects on shutdown.
   total: 93

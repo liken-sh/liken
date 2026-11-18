@@ -8,8 +8,9 @@ import (
 	"time"
 )
 
-// A capsule's rehearsal records its writes and the ESP's free space,
-// and no append, so the apply of a database update never takes it.
+// A passed capsule rehearsal records the capsule's writes and the ESP's
+// free space. It records no Append, which only a Secure Boot database
+// update has.
 func TestAPassedCapsuleRehearsalRecordsItsWrites(t *testing.T) {
 	writes := []capsuleWrite{
 		{Kind: "file", Name: "EFI/debian/fwupdx64.efi", Bytes: 69176, SHA256: "aa"},
@@ -26,8 +27,8 @@ func TestAPassedCapsuleRehearsalRecordsItsWrites(t *testing.T) {
 	}
 }
 
-// The rehearsal pod of a machine whose store names a proven slot mounts
-// that slot's ESP, which init links, read-only, for the copy.
+// A rehearsal pod mounts the next boot's ESP read-only, through the
+// link that `liken`'s init writes, only when the machine has that link.
 func TestARehearsalPodMountsTheNextBootsESP(t *testing.T) {
 	c := trustedCatalog()
 	c.Spec.Trust = nil
@@ -46,7 +47,6 @@ func TestARehearsalPodMountsTheNextBootsESP(t *testing.T) {
 	}
 }
 
-// The schema keeps a capsule's record whole.
 func TestTheSchemaKeepsACapsulesRehearsal(t *testing.T) {
 	f := firmware{APIVersion: firmwareAPIVersion, Kind: firmwareKind, Metadata: firmwareMeta{Name: "lab-fmp"},
 		Spec: firmwareSpec{Update: &update{Component: "sh.liken.lab.fmp.firmware", Version: "2",
@@ -58,8 +58,9 @@ func TestTheSchemaKeepsACapsulesRehearsal(t *testing.T) {
 	assertTheSchemaKeeps(t, firmwareCRD, f)
 }
 
-// keepBootOrder sets what a Machine reports in
-// status.firmware.bootOrderKept, keeping the rest of its status.
+// keepBootOrder sets status.firmware.bootOrderKept on a Machine, or
+// removes status.firmware when kept is nil. It keeps the rest of the
+// Machine's status.
 func (a *fakeAPI) keepBootOrder(name string, kept *bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -82,8 +83,8 @@ var passedCapsule = rehearsalResult{Result: resultPassed, Message: "the install 
 	Bytes: 72135, SHA256: "ee", Free: 4096, ESPFree: 1 << 24,
 	Writes: []capsuleWrite{{Kind: "file", Name: "EFI/debian/fwupdx64.efi", Bytes: 69176, SHA256: "aa"}}}
 
-// capsuleWorld is approvedWorld whose node-2 reports kept, after the
-// BIOS's capsule passed its rehearsal there.
+// capsuleWorld is approvedWorld after the BIOS's capsule passed its
+// rehearsal on node-2, with node-2's bootOrderKept set to kept.
 func capsuleWorld(t *testing.T, kept *bool) *world {
 	t.Helper()
 	w := approvedWorld(t)
@@ -94,9 +95,9 @@ func capsuleWorld(t *testing.T, kept *bool) *world {
 	return w
 }
 
-// The boot after a capsule's comes from the head of BootOrder, so a
-// capsule applies only on a machine whose firmware kept BootOrder
-// through its last reset.
+// After fwupd's updater runs, the machine boots from the first entry of
+// BootOrder. So the operator refuses to apply a capsule on a machine
+// whose firmware did not keep BootOrder through its last reset.
 func TestACapsuleAppliesOnlyWhereTheFirmwareKeepsBootOrder(t *testing.T) {
 	no := false
 	for _, kept := range []*bool{nil, &no} {
@@ -113,7 +114,7 @@ func TestACapsuleAppliesOnlyWhereTheFirmwareKeepsBootOrder(t *testing.T) {
 	}
 }
 
-// The apply pod of a capsule mounts the ESP of the next boot read-write,
+// The apply pod of a capsule mounts the next boot's ESP read-write,
 // because fwupd stages the updater and the capsule there.
 func TestACapsulesApplyPodMountsTheNextBootsESP(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
@@ -132,10 +133,11 @@ func TestACapsulesApplyPodMountsTheNextBootsESP(t *testing.T) {
 	})
 }
 
-// A staged capsule needs the reboot to boot fwupd's updater once, so
-// the operator removes the hold and asks to keep BootNext. A capsule
-// whose staging the pod could not confirm reboots with liken's own
-// BootNext, so the capsule does not run.
+// The reboot after a staged capsule must start fwupd's updater, so the
+// operator removes spec.hold and sets spec.keepBootNext on the
+// Disruption. When the pod could not confirm that it staged the
+// capsule, keepBootNext stays false, the reboot uses the BootNext that
+// `liken` sets, and the capsule does not run.
 func TestACapsulesTurnKeepsBootNextOnlyWhenItWasStaged(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -160,7 +162,7 @@ func TestACapsulesTurnKeepsBootNextOnlyWhenItWasStaged(t *testing.T) {
 
 			d := w.api.disruption(t, turnName)
 			if d.Spec.Hold || d.Spec.KeepBootNext != c.keep {
-				t.Errorf("%s: the request is %+v, want no hold and keepBootNext %v", c.name, d.Spec, c.keep)
+				t.Errorf("%s: the Disruption's spec is %+v, want no hold and keepBootNext %v", c.name, d.Spec, c.keep)
 			}
 		})
 	}

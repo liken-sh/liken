@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-// trustedCatalog is a catalog signed by a key other than the LVFS's,
-// whose certificate the ConfigMap lab-catalog-signer holds.
+// trustedCatalog is a catalog signed by a key other than the LVFS's.
+// The ConfigMap lab-catalog-signer contains its certificate.
 func trustedCatalog() *catalog {
 	return &catalog{
 		Metadata: firmwareMeta{Name: "lab"},
@@ -16,8 +16,8 @@ func trustedCatalog() *catalog {
 	}
 }
 
-// eachCatalogPod builds every pod that loads a catalog: a scan, a
-// rehearsal, and an apply.
+// eachCatalogPod builds a pod of each kind that loads a catalog: a
+// scan, a rehearsal, and an apply.
 func eachCatalogPod(c *catalog) map[string]pod {
 	f := &firmware{Metadata: firmwareMeta{Name: "lab-fmp"}, Spec: firmwareSpec{Update: &update{
 		Component: "sh.liken.lab.fmp.firmware", Version: "2",
@@ -29,7 +29,7 @@ func eachCatalogPod(c *catalog) map[string]pod {
 	}
 }
 
-// fwupd refreshes only a catalog whose jcat it verifies against a key
+// fwupd refreshes only a catalog whose jcat it can verify against a key
 // in its pki directory, so each pod that loads the catalog mounts the
 // signer's certificate where the scan program reads it.
 func TestEachPodThatLoadsACatalogMountsItsTrust(t *testing.T) {
@@ -57,12 +57,12 @@ func TestACatalogSignedByTheLVFSMountsNoTrust(t *testing.T) {
 	}
 }
 
-// fwupd's uefi_capsule plugin sees devices only when the variable store
-// it reads is a writable mount point, and it names a capsule device by
-// the path of its ESRT entry. Each pod gives fwupd a copy of the
-// machine's /sys/firmware at the same path, so a device has the same
-// ID in each, and mounts a directory in memory exactly where the
-// copy's efivars go.
+// fwupd's uefi_capsule plugin finds devices only when the variable
+// store that it reads is a writable mount point, and it derives a
+// capsule device's ID from the path of the device's ESRT entry. So
+// every pod copies the machine's /sys/firmware to the same path, and a
+// device has the same ID in each pod. A second in-memory volume is
+// mounted at the copy's efi/efivars.
 func TestEachPodMountsItsCopysVariableStore(t *testing.T) {
 	for name, p := range eachCatalogPod(trustedCatalog()) {
 		for volumeName, path := range map[string]string{firmwareCopyVolume: "/run/fw", copyVariablesVolume: "/run/fw/efi/efivars"} {
@@ -76,8 +76,8 @@ func TestEachPodMountsItsCopysVariableStore(t *testing.T) {
 	}
 }
 
-// The scan reads the machine's firmware tables through a read-only
-// mount, and copies them.
+// The scan pod mounts the machine's /sys/firmware read-only and copies
+// it.
 func TestTheScanPodReadsTheFirmwareReadOnly(t *testing.T) {
 	p := eachCatalogPod(trustedCatalog())["scan"]
 	if !slices.Contains(p.Spec.Containers[0].VolumeMounts, volumeMount{Name: "host-firmware", MountPath: hostFirmwarePath, ReadOnly: true, RecursiveReadOnly: "Enabled"}) {

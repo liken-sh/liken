@@ -30,9 +30,9 @@ func fixture(t *testing.T, name string) []byte {
 	return data
 }
 
-// jcatFor builds a jcat file that names file and gives digest as its
-// SHA-256, from the jcat fixture. The bytes after the gzip stream are
-// the trailing garbage that the LVFS server sometimes sends.
+// jcatFor builds a jcat file from the jcat fixture, with file as its
+// item and digest as its SHA-256. It appends bytes after the gzip
+// stream, as the LVFS server sometimes does.
 func jcatFor(t *testing.T, file, digest string) []byte {
 	t.Helper()
 	plain := string(fixture(t, "jcat.json"))
@@ -46,8 +46,8 @@ func jcatFor(t *testing.T, file, digest string) []byte {
 	return buf.Bytes()
 }
 
-// server answers requests from a table of URL to body, and 404 for any
-// other URL. A missing body is how a test makes a download fail.
+// server is a fake HTTP transport that returns the body for each URL in
+// the map and 404 for any other URL.
 type server map[string][]byte
 
 func (s server) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -62,16 +62,17 @@ func (s server) RoundTrip(req *http.Request) (*http.Response, error) {
 	}, nil
 }
 
-// tool is a fake fwupdtool. Each command answers from a table keyed by
-// its first argument, and the calls are recorded. An effect plays what
-// a command writes, such as an install's write to the variable store.
+// tool is a fake fwupdtool. It returns the output stored for each
+// subcommand and records the arguments of every call. An effect runs
+// with its subcommand, to imitate a change that the subcommand makes,
+// such as an install that writes to the variable store.
 type tool struct {
-	answers map[string]answer
+	outputs map[string]toolOutput
 	effects map[string]func()
 	calls   [][]string
 }
 
-type answer struct {
+type toolOutput struct {
 	stdout string
 	stderr string
 	err    error
@@ -82,24 +83,25 @@ func (f *tool) run(_ context.Context, args ...string) ([]byte, []byte, error) {
 	if effect := f.effects[args[0]]; effect != nil {
 		effect()
 	}
-	a := f.answers[args[0]]
+	a := f.outputs[args[0]]
 	return []byte(a.stdout), []byte(a.stderr), a.err
 }
 
 var errExit2 = errors.New("exit status 2")
 
-// framework is the answer of a Framework laptop: three devices, two of
-// them updatable, one with a release.
-func framework(t *testing.T) map[string]answer {
-	return map[string]answer{
+// framework returns the outputs of fwupdtool on a Framework laptop:
+// three devices, two of them updatable, and releases for both of those.
+func framework(t *testing.T) map[string]toolOutput {
+	return map[string]toolOutput{
 		"refresh":     {},
 		"get-devices": {stdout: string(fixture(t, "devices.json"))},
 		"get-updates": {stdout: string(fixture(t, "updates.json"))},
 	}
 }
 
-// rig is a scanner with a server that holds the catalog and its jcat,
-// the fwupdtool fake, and a remotes directory with one shipped remote.
+// rig is a scanner with fakes: a server for the catalog and its jcat, a
+// fake fwupdtool, and a remotes directory with a remote like the one
+// that the fwupd package ships.
 type rig struct {
 	scanner
 	tool *tool
@@ -110,10 +112,10 @@ func newRig(t *testing.T) *rig {
 	t.Helper()
 	remotes := t.TempDir()
 	if err := os.WriteFile(filepath.Join(remotes, "lvfs.conf"), fixture(t, "remote.conf"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing lvfs.conf: %v", err)
 	}
 	r := &rig{
-		tool: &tool{answers: framework(t)},
+		tool: &tool{outputs: framework(t)},
 		web: server{
 			testCatalogURL + ".jcat": jcatFor(t, testFile, sum(testCatalog)),
 			testFileURL:              testCatalog,
@@ -122,8 +124,8 @@ func newRig(t *testing.T) *rig {
 	r.scanner = scanner{
 		cfg:    config{name: "lvfs", url: testCatalogURL, file: testFile, sha256: sum(testCatalog)},
 		client: &http.Client{Transport: r.web},
-		// A machine with no variable store, as a BIOS machine has,
-		// unless a test writes one.
+		// An empty directory is a BIOS machine, with no EFI variable
+		// store.
 		firmwareHost: t.TempDir(),
 		firmwareCopy: filepath.Join(t.TempDir(), "fw"),
 		fwupdtool:    r.tool.run,

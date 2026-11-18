@@ -16,9 +16,9 @@ type fwupdRelease struct {
 	Size        int64    `json:"Size"`
 }
 
-// toRelease converts a release of get-updates. The cabinet carries the
-// first location and the SHA-256 digest, which is what a later download
-// checks the file against. A release with no location has no cabinet.
+// toRelease converts a release from get-updates. Its Cabinet has the
+// first location and the SHA-256 digest, which a later download is
+// checked against. A release with no location has no cabinet.
 func toRelease(r fwupdRelease) Release {
 	release := Release{
 		Version: r.Version, ID: r.AppstreamID, ReleaseID: r.ReleaseID, Urgency: r.Urgency,

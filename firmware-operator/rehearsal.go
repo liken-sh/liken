@@ -1,22 +1,24 @@
 package main
 
-// Before any machine installs an approved release, the operator
-// rehearses the install on each machine the approval waits for, and
-// records exactly what it would write. A rehearsal starts when a
-// machine is pending (approval.go), Ready, and its last scan read the
-// FirmwareCatalog's current file, so fwupd in the rehearsal offers the
-// releases the scan saw. Each attempt runs once.
+// Before a machine installs an approved release, the operator runs the
+// install in a rehearsal pod on the machine, against a copy of the
+// machine's firmware variables, and records what the install would
+// write. A rehearsal starts when the machine is pending (approval.go),
+// its phase is Ready, and its last scan read the FirmwareCatalog's
+// current file, so that fwupd in the rehearsal offers the same releases
+// that the scan found. Each attempt runs once. A new boot, a new
+// approval, or a new catalog file is a new attempt.
 //
-// status.rehearsals holds one record for each pending machine, and the
-// Rehearsed condition sums them: True when the install passed on every
-// pending machine, False when it was refused or failed on one, and
-// Unknown while one waits. A rehearsal that finds its jcat naming
-// another file than the machine's scan read answers CatalogMoved. That
-// is no failure: the operator reads the jcat again at once, and the new
-// file starts a new attempt, after a scan of it when it offers the
-// machine other releases (scans.go). A record leaves when its machine is no
-// longer pending, or when the approval changes, because a rehearsal
-// answers one release on one boot.
+// status.rehearsals has one record for each pending machine. The
+// Rehearsed condition is True when the install passed on every pending
+// machine, False when it was refused or failed on one, and Unknown
+// while a rehearsal runs or waits to start. When the jcat lists another
+// file than the one the machine's scan read, the rehearsal returns
+// CatalogMoved, which is not a failure. The operator reads the jcat
+// again at once, and the machine rehearses again against the new file,
+// after a new scan if the file offers it other releases (scans.go). A
+// record is removed when its machine is no longer pending or when the
+// approval changes.
 
 import (
 	"errors"
@@ -48,19 +50,19 @@ type rehearsal struct {
 }
 
 // variableEdit is the append that a passed rehearsal of a Secure Boot
-// database update recorded: the variable, and the bytes the apply
-// writes, which are each authenticated write's four attribute bytes
-// and its signed payload.
+// database update recorded. Bytes and SHA256 describe what the apply
+// writes: for each authenticated write, its four attribute bytes
+// followed by its signed payload.
 type variableEdit struct {
 	Variable string `json:"variable"`
 	Bytes    int64  `json:"bytes"`
 	SHA256   string `json:"sha256"`
 }
 
-// capsuleRecord is what a passed rehearsal of a capsule recorded: each
-// variable and file that fwupd wrote to the copies, the bytes of the
-// files, the digest of the writes, and the free space of the ESP of the
-// machine's next boot.
+// capsuleRecord is what a passed rehearsal of a capsule recorded. Writes
+// lists each variable and file that fwupd wrote to the rehearsal's
+// copies. Bytes is the total size of the files, and ESPFree is the free
+// space on the ESP of the machine's next boot.
 type capsuleRecord struct {
 	Writes  []capsuleWrite `json:"writes"`
 	Bytes   int64          `json:"bytes"`
@@ -75,7 +77,8 @@ type capsuleWrite struct {
 	SHA256 string `json:"sha256"`
 }
 
-// The results of a rehearsal, beside resultRunning and resultFailed.
+// The results of a rehearsal, in addition to resultRunning,
+// resultCatalogMoved, and resultFailed.
 const (
 	resultPassed  = "Passed"
 	resultRefused = "Refused"
@@ -84,10 +87,12 @@ const (
 // rehearsedCondition is the condition of an approval's rehearsals.
 const rehearsedCondition = "Rehearsed"
 
-// The reasons of Rehearsed. Refused and Failed are the results'.
+// The Rehearsed condition's reason while it is Unknown. Its other
+// reasons are the results Refused, Failed, and Passed.
 const reasonRehearsing = "Rehearsing"
 
-// The reasons of the Events that change no condition.
+// The reasons of the Events for rehearsal steps that change no
+// condition.
 const (
 	reasonRehearsalStarted      = "RehearsalStarted"
 	reasonRehearsalCatalogMoved = "RehearsalCatalogMoved"
@@ -96,16 +101,17 @@ const (
 	reasonRehearsalFailed       = "RehearsalFailed"
 )
 
-// rehearsalEnd is the result of one finished rehearsal.
+// rehearsalEnd is the outcome of one finished rehearsal.
 type rehearsalEnd struct {
 	attempt rehearsalAttempt
 	result  rehearsalResult
-	// rehearsal is the pod to delete once the result is written, or nil
-	// for a pod that is already gone.
-	rehearsal *pod
+	// pod is the pod to delete after the result is written, or
+	// nil when the pod is already gone.
+	pod *pod
 }
 
-// rehearsalResult is the line `scan rehearse` writes.
+// rehearsalResult is the line of JSON that `scan rehearse` prints as
+// its result.
 type rehearsalResult struct {
 	Result   string         `json:"result"`
 	Message  string         `json:"message"`
@@ -117,7 +123,7 @@ type rehearsalResult struct {
 	ESPFree  int64          `json:"espFree"`
 }
 
-// recordOfRehearsal answers the record that a rehearsal's end writes.
+// recordOfRehearsal returns the status record for a finished rehearsal.
 func recordOfRehearsal(a rehearsalAttempt, r rehearsalResult, now time.Time) rehearsal {
 	record := runningRecord(a, now)
 	record.Result, record.Message, record.Free = r.Result, r.Message, r.Free
@@ -142,8 +148,8 @@ func attemptOfRecord(firmware string, r rehearsal) rehearsalAttempt {
 		version: r.Version, cabinet: r.CabinetSHA256, catalog: r.Catalog, file: r.File}
 }
 
-// startRehearsals creates the pod of each attempt that a pending,
-// Ready machine needs, and answers the attempts it started.
+// startRehearsals creates a rehearsal pod for each pending, Ready
+// machine that needs one, and returns the attempts it started.
 func (o *operator) startRehearsals(f *firmware, pending map[string]bool, w observed, catalogs map[string]*catalog, busy map[string]bool) ([]rehearsalAttempt, error) {
 	u := f.Spec.Update
 	var starts []rehearsalAttempt
@@ -160,13 +166,13 @@ func (o *operator) startRehearsals(f *firmware, pending map[string]bool, w obser
 		}
 		a := rehearsalAttempt{firmware: f.Metadata.Name, machine: name, boot: m.Status.Boot.Time, device: e.DeviceID,
 			version: u.Version, cabinet: u.Cabinet.SHA256, catalog: e.Catalog, file: e.File}
-		if r, held := rehearsalRecord(f.Status.Rehearsals, name); held && a.is(r) {
+		if r, found := rehearsalRecord(f.Status.Rehearsals, name); found && a.is(r) {
 			continue
 		}
-		// A machine in its turn, or written and waiting for its reboot,
-		// rehearses nothing more: the apply already has the append it
-		// writes, and the next scan after the reboot ends the record.
-		if r, held := currentApply(f, name); held && r.live() {
+		// A machine whose apply pod waits for its turn, writes, or waits
+		// to reboot needs no more rehearsals. The apply pod already has
+		// what it writes.
+		if r, found := currentApply(f, name); found && r.needsDisruption() {
 			continue
 		}
 		p := buildRehearsalPod(f, a, c, u.Cabinet.URL, o.discovery.scanImage, o.namespace, m.hasNextESP())
@@ -180,9 +186,10 @@ func (o *operator) startRehearsals(f *firmware, pending map[string]bool, w obser
 	return starts, errors.Join(problems...)
 }
 
-// offeredEntry answers a machine's entry whose device a catalog offers
-// the approved version in the pinned cabinet. An entry from before
-// fwupd's device ID was recorded names no device to rehearse.
+// offeredEntry returns the machine's entry for a device that the
+// catalog offers the approved version for, in the pinned cabinet. An
+// entry with no DeviceID never matches, because the rehearsal has no
+// device to install on.
 func offeredEntry(entries []machineEntry, machine string, u *update) (machineEntry, bool) {
 	for _, e := range entries {
 		if e.Machine != machine || e.DeviceID == "" {
@@ -205,9 +212,10 @@ func rehearsalRecord(records []rehearsal, machine string) (rehearsal, bool) {
 	return records[i], true
 }
 
-// composeRehearsals answers the records of the pending machines after
-// the ends and the starts of this pass, and the Events of each. It
-// keeps no record of another machine or of another approval.
+// composeRehearsals returns the records of the pending machines with
+// this pass's ended and started rehearsals applied, and an Event for
+// each change. It drops the records of machines that are not pending
+// and the records of another approval.
 func composeRehearsals(f *firmware, pending map[string]bool, ends []rehearsalEnd, starts []rehearsalAttempt, now time.Time) ([]rehearsal, []notice) {
 	u := f.Spec.Update
 	if u == nil || u.Version == "" || u.Cabinet == nil {
@@ -224,15 +232,15 @@ func composeRehearsals(f *firmware, pending map[string]bool, ends []rehearsalEnd
 	}
 	var notices []notice
 	for _, end := range ends {
-		previous, held := records[end.attempt.machine]
-		if !current(end.attempt) || (held && (!end.attempt.is(previous) || previous.Result != resultRunning)) {
+		previous, found := records[end.attempt.machine]
+		if !current(end.attempt) || (found && (!end.attempt.is(previous) || previous.Result != resultRunning)) {
 			continue
 		}
 		records[end.attempt.machine] = recordOfRehearsal(end.attempt, end.result, now)
 		notices = append(notices, rehearsalNotice(end))
 	}
 	for _, a := range starts {
-		if previous, held := records[a.machine]; held && a.is(previous) {
+		if previous, found := records[a.machine]; found && a.is(previous) {
 			continue
 		}
 		records[a.machine] = runningRecord(a, now)
@@ -259,11 +267,11 @@ func rehearsalNotice(end rehearsalEnd) notice {
 	return notice{warning: true, reason: reasonRehearsalFailed, message: about}
 }
 
-// rehearsed answers the Rehearsed condition over the pending machines'
-// records, and false when the approval waits for no machine. A refusal
-// outweighs a failure, and both outweigh a machine that waits. A
-// machine whose catalog moved waits for its next rehearsal, and the
-// message says why.
+// rehearsed returns the Rehearsed condition for the pending machines'
+// records, and false when no machine is pending. Refused takes
+// precedence over Failed, and both take precedence over a rehearsal
+// that runs or waits. A machine whose catalog moved counts as waiting,
+// and the message gives the reason.
 func rehearsed(records []rehearsal, pending map[string]bool) (condition, bool) {
 	if len(pending) == 0 {
 		return condition{}, false
@@ -271,9 +279,9 @@ func rehearsed(records []rehearsal, pending map[string]bool) (condition, bool) {
 	byResult := map[string][]string{}
 	var moved []string
 	for _, name := range sortedKeys(pending) {
-		r, held := rehearsalRecord(records, name)
+		r, found := rehearsalRecord(records, name)
 		switch {
-		case !held || r.Result == resultRunning:
+		case !found || r.Result == resultRunning:
 			byResult[resultRunning] = append(byResult[resultRunning], name)
 		case r.Result == resultCatalogMoved:
 			byResult[resultRunning] = append(byResult[resultRunning], name)
@@ -285,26 +293,26 @@ func rehearsed(records []rehearsal, pending map[string]bool) (condition, bool) {
 	c := condition{Type: rehearsedCondition}
 	switch {
 	case len(byResult[resultRefused]) > 0:
-		c.Status, c.Reason, c.Message = conditions.False, resultRefused, strings.Join(byResult[resultRefused], "; ")
+		c.Status, c.Reason, c.Message = conditions.False, resultRefused, strings.Join(byResult[resultRefused], ". ")
 	case len(byResult[resultFailed]) > 0:
-		c.Status, c.Reason, c.Message = conditions.False, resultFailed, strings.Join(byResult[resultFailed], "; ")
+		c.Status, c.Reason, c.Message = conditions.False, resultFailed, strings.Join(byResult[resultFailed], ". ")
 	case len(byResult[resultRunning]) > 0:
 		c.Status, c.Reason, c.Message = conditions.Unknown, reasonRehearsing,
-			"the approval waits for the rehearsal on "+strings.Join(byResult[resultRunning], ", ")
+			"The rehearsal is not finished on "+strings.Join(byResult[resultRunning], ", ")
 		if len(moved) > 0 {
-			c.Message += "; " + strings.Join(moved, "; ")
+			c.Message += ". " + strings.Join(moved, ". ")
 		}
 	default:
 		c.Status, c.Reason, c.Message = conditions.True, resultPassed,
-			"the install passed its rehearsal on "+strings.Join(sortedKeys(pending), ", ")
+			"The install passed its rehearsal on "+strings.Join(sortedKeys(pending), ", ")
 	}
 	return c, true
 }
 
-// rehearsalEnds follows a Firmware's rehearsal pods, and answers the
-// attempts that ended, the machines with a rehearsal pod, and the
-// earliest deadline of a rehearsal in progress. A Running record whose
-// pod is gone ends Failed.
+// rehearsalEnds reads a Firmware's rehearsal pods and returns the
+// attempts that ended, the machines that have a rehearsal pod, and the
+// earliest deadline among the rehearsals still running. A Running
+// record whose pod is gone ends as Failed.
 func (o *operator) rehearsalEnds(f *firmware, pods []pod, now time.Time) ([]rehearsalEnd, map[string]bool, time.Time, error) {
 	var ends []rehearsalEnd
 	var problems []error
@@ -341,16 +349,17 @@ func (o *operator) rehearsalEnds(f *firmware, pods []pod, now time.Time) ([]rehe
 		}
 		if gone {
 			ends = append(ends, rehearsalEnd{attempt: a, result: rehearsalResult{Result: resultFailed,
-				Message: "the rehearsal pod is gone; the operator does not run this rehearsal again until the machine reboots, the approval changes, or the machine's next scan reads another catalog file"}})
+				Message: "the rehearsal pod no longer exists, and the operator does not run this rehearsal again until the machine reboots, the approval changes, or the machine's next scan reads another catalog file"}})
 		}
 	}
 	return ends, busy, due, errors.Join(problems...)
 }
 
-// judgeRehearsal decides the result of a rehearsal pod, the way
-// judgeScan decides a scan's.
+// judgeRehearsal reads the result of a rehearsal pod the way judgeScan
+// reads a scan pod's. Its bool is false while the result is not known
+// yet, with the pod's deadline when the pod is still running.
 func (o *operator) judgeRehearsal(p pod, now time.Time) (rehearsalEnd, bool, time.Time, error) {
-	end := rehearsalEnd{attempt: rehearsalOf(p), result: rehearsalResult{Result: resultFailed}, rehearsal: &p}
+	end := rehearsalEnd{attempt: rehearsalOf(p), result: rehearsalResult{Result: resultFailed}, pod: &p}
 	due := parseTime(p.Metadata.CreationTimestamp).Add(scanDeadline)
 	switch p.Status.Phase {
 	case podSucceeded, podFailed:
@@ -369,22 +378,22 @@ func (o *operator) judgeRehearsal(p pod, now time.Time) (rehearsalEnd, bool, tim
 		if now.Before(due) {
 			return rehearsalEnd{}, false, time.Time{}, fmt.Errorf("reading the log of the rehearsal pod %s: %w", p.Metadata.Name, err)
 		}
-		end.result.Message = "the operator could not read the rehearsal's log: " + err.Error()
+		end.result.Message = "the operator cannot read the log of the rehearsal pod: " + err.Error()
 		return end, true, time.Time{}, nil
 	}
 	result, last, found := parseResultLine[rehearsalResult](log, func(r rehearsalResult) string { return r.Result })
 	switch {
 	case !found && last != "":
-		end.result.Message = "the rehearsal wrote no result; its last line was: " + last
+		end.result.Message = "the rehearsal pod wrote no result, and its last log line is: " + last
 	case !found:
 		end.result.Message = podFailure(p, "rehearsal", rehearsalContainer)
 	case result.Result == resultPassed || result.Result == resultRefused || result.Result == resultFailed:
 		end.result = result
 	case result.Result == resultCatalogMoved:
 		end.result = result
-		end.result.Message += "; the operator reads the jcat again, and the machine rehearses again against the new file"
+		end.result.Message += ", so the operator reads the jcat again and rehearses the machine again against the new file"
 	default:
-		end.result.Message = fmt.Sprintf("the rehearsal answered the result %q, which the operator does not know", result.Result)
+		end.result.Message = fmt.Sprintf("the rehearsal pod reported the result %q, which the operator does not recognize", result.Result)
 	}
 	return end, true, time.Time{}, nil
 }

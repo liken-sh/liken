@@ -1,8 +1,7 @@
 package main
 
-// These tests run FirmwareCatalogs and discovered Firmware objects through the
-// CRDs' schemas, so a schema edit that refuses what a person or the
-// operator writes, or prunes a field the operator writes, fails here.
+// These tests fail on a schema change that rejects what a person or
+// the operator writes, or that prunes a field the operator writes.
 
 import (
 	"slices"
@@ -32,7 +31,7 @@ func TestCatalogCRDIdentity(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if !c.ok {
-				t.Errorf("%s is wrong", c.name)
+				t.Errorf("the CRD has the wrong %s", c.name)
 			}
 		})
 	}
@@ -57,30 +56,27 @@ func TestCatalogCRDValidatesExamples(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			object := map[string]any{"apiVersion": firmwareAPIVersion, "kind": catalogKind, "metadata": map[string]any{"name": "lvfs"}, "spec": c.spec}
 			if errs := validateObject(t, catalogCRD, object); (len(errs) > 0) != c.wantErr {
-				t.Errorf("got errors %v, want an error: %v", errs, c.wantErr)
+				t.Errorf("validation returned %v, want errors: %v", errs, c.wantErr)
 			}
 		})
 	}
 }
 
-// The status the operator writes to a FirmwareCatalog is one the schema takes
-// and keeps whole.
 func TestTheOperatorsCatalogStatusValidates(t *testing.T) {
 	when := time.Date(2026, 10, 20, 15, 12, 4, 0, time.UTC)
 	c := catalog{APIVersion: firmwareAPIVersion, Kind: catalogKind, Spec: catalogSpec{URL: lvfsURL}}
 	c.Metadata.Name = "lvfs"
 	c.Status = catalogStatus{
 		File: "firmware-09138-stable.xml.zst", SHA256: "5ad15d60", ETag: `"1"`, Checked: stamp(when),
-		Conditions: []condition{{Type: ready, Status: "True", Reason: reasonFetched, Message: "the jcat names it", ObservedGeneration: 1, LastTransitionTime: when}},
+		Conditions: []condition{{Type: ready, Status: "True", Reason: reasonFetched, Message: "The jcat lists the catalog file it", ObservedGeneration: 1, LastTransitionTime: when}},
 		Machines: []machineRecord{{Machine: "node-2", Boot: firstBoot, Devices: "3f9a", File: "firmware-09138-stable.xml.zst",
 			Releases: "77c1", GUIDs: []string{biosGUID}, Result: resultScanned, Message: "1 device, 1 with updates", Time: stamp(when)}},
 	}
 	assertTheSchemaKeeps(t, catalogCRD, c)
 }
 
-// A discovered Firmware that a person approved, as the operator writes
-// its status with a passed rehearsal and a written apply, is one the
-// schema takes and keeps whole.
+// The Firmware has the status that the operator writes after a passed
+// rehearsal and a written apply.
 func TestADiscoveredFirmwareValidates(t *testing.T) {
 	approved := &update{Component: frameworkBIOS().id, Version: "0.0.4.2",
 		Cabinet: &pinnedCabinet{URL: "https://fwupd.org/downloads/0.0.4.2.cab", SHA256: dbxCabinet}}

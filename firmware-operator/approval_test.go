@@ -1,12 +1,5 @@
 package main
 
-// These tests follow a person's approval of a version through the
-// Approved condition and the pending count: a version a catalog offers
-// with the pinned cabinet waits for its machines, a device that
-// installs it keeps the approval, a catalog that withdraws it or serves
-// another cabinet ends the approval, and spec.machines limits the
-// machines the approval covers.
-
 import (
 	"testing"
 	"testing/synctest"
@@ -17,11 +10,12 @@ import (
 )
 
 // biosCabinet is the SHA-256 of the cabinet that systemFirmware's
-// releases carry.
+// releases have.
 const biosCabinet = "9c085d03"
 
-// approve plays a person who approves a version of the BIOS's
-// component, pinned to a cabinet, on the machines a selector chooses.
+// approve sets a version and a pinned cabinet on the BIOS Firmware, as a
+// person does, and limits the approval to the machines that a selector
+// chooses.
 func approve(t *testing.T, w *world, version, sha256 string, machines *metav1.LabelSelector) {
 	t.Helper()
 	f := w.api.firmware(t, biosObjectName)
@@ -32,8 +26,8 @@ func approve(t *testing.T, w *world, version, sha256 string, machines *metav1.La
 	w.settle()
 }
 
-// approved answers the BIOS object's Approved condition and its
-// pending count.
+// approved returns the Approved condition and the pending count of the
+// BIOS Firmware.
 func approved(t *testing.T, w *world) (condition, int) {
 	t.Helper()
 	f := w.api.firmware(t, biosObjectName)
@@ -103,8 +97,8 @@ func TestAWithdrawnReleaseEndsTheApproval(t *testing.T) {
 	})
 }
 
-// labelMachine plays a person who labels a Machine, and keeps the
-// status the OS wrote.
+// labelMachine sets the labels of a Machine and keeps the status that
+// the OS wrote.
 func (a *fakeAPI) labelMachine(name string, labels map[string]string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -132,7 +126,7 @@ func TestAnApprovalCoversOnlyTheMachinesItSelects(t *testing.T) {
 	})
 }
 
-func TestAnApprovalOnMachinesThatDoNotCompileIsNotApproved(t *testing.T) {
+func TestAnApprovalWithAnInvalidMachineSelectorIsNotApproved(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := scannedWorld(t)
 		approve(t, w, "0.0.4.2", biosCabinet, &metav1.LabelSelector{MatchLabels: map[string]string{"not a key!": "x"}})
@@ -152,8 +146,8 @@ func TestRemovingTheVersionRemovesTheApproval(t *testing.T) {
 		w.api.putFirmware(f)
 		w.settle()
 
-		if _, held := conditions.Find(w.api.firmware(t, biosObjectName).Status.Conditions, approvedCondition); held {
-			t.Error("the Firmware holds Approved with no version")
+		if _, found := conditions.Find(w.api.firmware(t, biosObjectName).Status.Conditions, approvedCondition); found {
+			t.Error("the Firmware has an Approved condition with no spec.update.version, want none")
 		}
 	})
 }

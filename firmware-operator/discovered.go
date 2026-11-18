@@ -1,15 +1,16 @@
 package main
 
-// The operator keeps one Firmware for each group of devices that a scan
-// reports as updatable: a catalog component, or a set of GUIDs for a
-// device with no release. grouping.go chooses the group. The object
-// carries the label firmware.liken.sh/discovered, its spec.update names
-// the group, and its status.machines holds one entry for each machine's
-// device in the group, with the releases each catalog offers.
+// The operator creates one Firmware for each group of devices that a
+// scan reports as updatable. A group is a catalog component, or a set
+// of GUIDs for a device that no catalog offers a release. grouping.go
+// chooses the group. The object has the label
+// firmware.liken.sh/discovered, its spec.update names the group, and
+// its status.machines has one entry for each machine's device in the
+// group, with the releases that each catalog offers.
 //
 // A scan replaces its machine's entries for its FirmwareCatalog in every
-// discovered object. An entry leaves only when that machine's next scan
-// does not report the device, or when its Machine is deleted, so a
+// discovered object. An entry is removed only when that machine's next
+// scan does not report the device, or when its Machine is deleted. A
 // machine that is off keeps its entries.
 
 import (
@@ -30,9 +31,10 @@ const (
 )
 
 // machineEntry is one machine's device in a discovered group, matched
-// against one FirmwareCatalog's file. DeviceID is fwupd's ID of the
-// device, which keeps the entry in its component's object once the
-// device runs the newest release.
+// against one FirmwareCatalog's file. DeviceID is fwupd's ID for the
+// device. grouping.go finds the component object of a device by its
+// DeviceID, so the entry stays in that object after the device installs
+// the newest release and the catalog stops offering it one.
 type machineEntry struct {
 	Machine  string           `json:"machine"`
 	Device   string           `json:"device"`
@@ -44,8 +46,8 @@ type machineEntry struct {
 	Time     string           `json:"time"`
 }
 
-// newest answers the release fwupd offers first, which is its newest,
-// or "" when it offers none.
+// newest returns the first release that fwupd offers, which is the
+// newest, or "" when it offers none.
 func (e machineEntry) newest() string {
 	if len(e.Releases) == 0 {
 		return ""
@@ -53,26 +55,27 @@ func (e machineEntry) newest() string {
 	return e.Releases[0].Version
 }
 
-// discovered reports whether a Firmware is one the operator keeps.
+// discovered reports whether the operator created f for a group and f
+// is not being deleted.
 func discovered(f *firmware) bool {
 	return f.Spec.Update != nil && f.Metadata.Labels[discoveredLabel] == discoveredLabelValue && f.Metadata.DeletionTimestamp == ""
 }
 
-// pristine reports whether a person has left a discovered object's
-// spec as the operator created it. The operator writes the spec only in
-// the create, so any edit of the spec moves the generation past 1.
+// pristine reports whether nobody has edited a discovered object's spec.
+// The operator writes the spec only when it creates the object, so any
+// edit of the spec raises the generation above 1.
 func pristine(f *firmware) bool {
 	return f.Metadata.Generation == 1
 }
 
-// retirable reports whether the operator deletes a discovered object
-// that is left with no entry. A pristine object goes. So does an object
-// whose only edit is an approval: its component is still the one its
-// name came from, and it names no GUIDs. With no entry, no machine is
-// offered the approved release, so the approval installs nothing. A
-// person who changed the group keeps the object. An apply that waits
-// for its turn or writes keeps it too, because the operator still has
-// to release that machine's hold.
+// retirable reports whether the operator may delete a discovered object
+// that has no entries. That is true for a pristine object. It is also
+// true for an object whose only edit is an approval: spec.update names
+// no GUIDs and the component that the object's name was made from. With
+// no entries, no machine is offered the approved release, so the
+// approval installs nothing. It is false while an apply waits for its
+// turn or writes, because the operator still has to release that
+// machine's hold.
 func retirable(f *firmware) bool {
 	if pristine(f) {
 		return true
@@ -89,9 +92,9 @@ func retirable(f *firmware) bool {
 
 // applyScan replaces a machine's entries for a FirmwareCatalog in every
 // discovered object with what its scan reported, creates an object for
-// a group that has none, and deletes an object that is left with no
-// entry. objects holds every Firmware the pass read, and gains the ones
-// the operator creates.
+// each reported group that has none, and deletes an object that has no
+// entries left. objects is every Firmware that the pass read, and
+// applyScan appends each object it creates.
 func (o *operator) applyScan(objects *[]firmware, s scanEntries) error {
 	var problems []error
 	present := map[groupKey]bool{}
@@ -122,36 +125,35 @@ func (o *operator) applyScan(objects *[]firmware, s scanEntries) error {
 	return errors.Join(problems...)
 }
 
-// refileEntries moves the file of each machine's entries for a
-// FirmwareCatalog to the file of the machine's Scanned record. The
-// record moves to a new catalog file with no scan when the new file
-// offers the same releases for the machine's GUIDs (scans.go), and the
-// entries must name that file too: a rehearsal and an apply load the
-// file an entry names, and start only when it is the FirmwareCatalog's
-// current one. A scan writes its entries with its record's file, so
-// this changes only the entries of a record that moved. It reads the
-// records rather than the moves of this pass, so an operator that
-// stopped between the two writes moves the entries in its next pass.
-func (o *operator) refileEntries(objects []firmware, c *catalog) error {
+// moveEntriesToScannedFile sets the File of each machine's entries for
+// catalog c to the file in that machine's Scanned record. scans.go
+// moves a record to the catalog's new file without a scan when the new
+// file offers the same releases for the machine's GUIDs. A rehearsal
+// and an apply load the file that an entry names, and start only when
+// that is the catalog's current file, so the entries must follow the
+// record. moveEntriesToScannedFile reads the records instead of the
+// moves of this pass, so when the operator stops between the record
+// write and the entry write, the next pass still updates the entries.
+func (o *operator) moveEntriesToScannedFile(objects []firmware, c *catalog) error {
 	files := map[string]string{}
 	for _, r := range c.Status.Machines {
 		if r.Result == resultScanned {
 			files[r.Machine] = r.File
 		}
 	}
-	behind := func(e machineEntry) bool {
+	stale := func(e machineEntry) bool {
 		return e.Catalog == c.Metadata.Name && files[e.Machine] != "" && e.File != files[e.Machine]
 	}
 	var problems []error
 	for index := range objects {
 		f := &objects[index]
-		if !discovered(f) || !slices.ContainsFunc(f.Status.Machines, behind) {
+		if !discovered(f) || !slices.ContainsFunc(f.Status.Machines, stale) {
 			continue
 		}
-		problems = append(problems, o.settleEntries(f, func(held []machineEntry) []machineEntry {
-			next := slices.Clone(held)
+		problems = append(problems, o.settleEntries(f, func(current []machineEntry) []machineEntry {
+			next := slices.Clone(current)
 			for i := range next {
-				if behind(next[i]) {
+				if stale(next[i]) {
 					next[i].File = files[next[i].Machine]
 				}
 			}
@@ -161,28 +163,28 @@ func (o *operator) refileEntries(objects []firmware, c *catalog) error {
 	return errors.Join(problems...)
 }
 
-// replace answers the change that swaps the scan's machine's entries
-// for its FirmwareCatalog in an object for entries.
+// replace returns a change for settleEntries that replaces the scan's
+// machine's entries for the scan's FirmwareCatalog with entries.
 func (s scanEntries) replace(entries []machineEntry) func([]machineEntry) []machineEntry {
-	return func(held []machineEntry) []machineEntry {
-		kept := slices.DeleteFunc(slices.Clone(held), func(e machineEntry) bool {
+	return func(current []machineEntry) []machineEntry {
+		others := slices.DeleteFunc(slices.Clone(current), func(e machineEntry) bool {
 			return e.Machine == s.machine && e.Catalog == s.catalog
 		})
-		return append(kept, entries...)
+		return append(others, entries...)
 	}
 }
 
-// forgetMachines removes the entries of every machine whose Machine is
-// deleted, from every discovered object.
-func (o *operator) forgetMachines(objects []firmware, fleet map[string]machine) error {
+// removeEntriesOfDeletedMachines removes, from every discovered object,
+// the entries of each machine that has no Machine in fleet.
+func (o *operator) removeEntriesOfDeletedMachines(objects []firmware, fleet map[string]machine) error {
 	var problems []error
 	for index := range objects {
 		f := &objects[index]
 		if !discovered(f) {
 			continue
 		}
-		problems = append(problems, o.settleEntries(f, func(held []machineEntry) []machineEntry {
-			return slices.DeleteFunc(slices.Clone(held), func(e machineEntry) bool {
+		problems = append(problems, o.settleEntries(f, func(current []machineEntry) []machineEntry {
+			return slices.DeleteFunc(slices.Clone(current), func(e machineEntry) bool {
 				_, exists := fleet[e.Machine]
 				return !exists
 			})
@@ -191,16 +193,12 @@ func (o *operator) forgetMachines(objects []firmware, fleet map[string]machine) 
 	return errors.Join(problems...)
 }
 
-// createDiscovered creates the object of a group under the first of
-// its names that no other group's object holds. An object that already
-// exists under a name answers 409, and the operator reads it: the
-// group's own object, such as one a create in an earlier pass made
-// before the watch showed it, ends the search, and any other object
-// moves it to the next name. A set of GUIDs' object whose GUIDs a
-// person changed also ends the search, and keeps the entries of the
-// device its name was made from. A component's object never takes
-// another component's entries, because an approval of plan 04 names
-// one component.
+// createDiscovered creates the object of a group under the first name in
+// groupNames that another group's object does not use. When a name is
+// taken, the create fails with 409 and the operator reads the existing
+// object. It returns that object when ownedBy reports it as the group's
+// own, which happens when an earlier pass created it before the watch
+// reported it. Otherwise it tries the next name.
 func (o *operator) createDiscovered(key groupKey, d scanDevice) (*firmware, error) {
 	u := &update{Component: key.component}
 	about := fmt.Sprintf("%s, the catalog component %s", d.Name, key.component)
@@ -215,13 +213,13 @@ func (o *operator) createDiscovered(key groupKey, d scanDevice) (*firmware, erro
 		f.Metadata.Labels = map[string]string{discoveredLabel: discoveredLabelValue, "app.kubernetes.io/managed-by": component}
 		created := true
 		stored, err := memo.Written[firmware](o.firmwares.Versions, name, func() (*firmware, error) {
-			var answer firmware
-			err := o.client.RequestJSON(http.MethodPost, firmwaresPath, mustJSON(f), &answer)
+			var response firmware
+			err := o.client.RequestJSON(http.MethodPost, firmwaresPath, mustJSON(f), &response)
 			if errors.Is(err, apiclient.ErrConflict) {
 				created = false
 				return apiclient.Get[firmware](o.client, firmwarePath(name))
 			}
-			return &answer, err
+			return &response, err
 		})
 		if err != nil {
 			return nil, fmt.Errorf("creating the Firmware %s: %w", name, err)
@@ -234,30 +232,34 @@ func (o *operator) createDiscovered(key groupKey, d scanDevice) (*firmware, erro
 		}
 		return stored, nil
 	}
-	return nil, fmt.Errorf("creating the Firmware of %s: other Firmware objects hold the names %s", d.Name, strings.Join(names, " and "))
+	return nil, fmt.Errorf("creating the Firmware of %s: the names %s belong to other Firmware objects", d.Name, strings.Join(names, " and "))
 }
 
-// ownedBy reports whether an object under one of a group's names holds
-// the group's entries.
+// ownedBy reports whether f, which has one of the group's names, is the
+// object for the group's entries. A GUID object that a person edited
+// counts as its group's own, so it keeps the entries of the device that
+// its name was made from. A component's object never gets another
+// component's entries, because an approval applies to one component.
 func ownedBy(f *firmware, key groupKey) bool {
 	if !discovered(f) {
 		return false
 	}
-	held := keyOf(f.Spec.Update)
-	return held == key || (key.component == "" && held.component == "" && !pristine(f))
+	existing := keyOf(f.Spec.Update)
+	return existing == key || (key.component == "" && existing.component == "" && !pristine(f))
 }
 
-// settleEntries writes the entries that change gives a discovered
-// object, and deletes a retirable object that is left with none. change
-// runs again on the API server's copy after a 409.
+// settleEntries writes the entries that change returns for a discovered
+// object, and deletes the object when it has no entries and is
+// retirable. When the write fails because f is stale, change runs
+// again on a fresh copy from the API server.
 func (o *operator) settleEntries(f *firmware, change func([]machineEntry) []machineEntry) error {
 	var notices []notice
-	written, err := informer.SettleStatus[firmware](o.client, o.firmwares.Versions, firmwarePath(f.Metadata.Name), f, func(held *firmware) bool {
-		before := held.Status
-		next := held.Status
-		next.Machines = change(held.Status.Machines)
+	written, err := informer.SettleStatus[firmware](o.client, o.firmwares.Versions, firmwarePath(f.Metadata.Name), f, func(latest *firmware) bool {
+		before := latest.Status
+		next := latest.Status
+		next.Machines = change(latest.Status.Machines)
 		sortEntries(next.Machines)
-		next.Counts = counts{UpdateCounts: updateCounts(next.Machines, held.Status.Counts.pending())}
+		next.Counts = counts{UpdateCounts: updateCounts(next.Machines, latest.Status.Counts.pending())}
 		if len(next.Machines) == 0 {
 			next.Machines = nil
 		}
@@ -265,10 +267,10 @@ func (o *operator) settleEntries(f *firmware, change func([]machineEntry) []mach
 		if !statusChanged(before, next) {
 			return false
 		}
-		held.APIVersion, held.Kind, held.Status = firmwareAPIVersion, firmwareKind, next
+		latest.APIVersion, latest.Kind, latest.Status = firmwareAPIVersion, firmwareKind, next
 		return true
 	})
-	// An object deleted during the pass needs no entries.
+	// Another writer deleted the object during the pass.
 	if errors.Is(err, apiclient.ErrNotFound) {
 		return nil
 	}
@@ -288,13 +290,14 @@ func (o *operator) settleEntries(f *firmware, change func([]machineEntry) []mach
 	if err != nil {
 		return err
 	}
-	// The Event outlives the object by the hour the API server keeps
-	// it, so a person who finds an approval gone can read why.
+	// The API server keeps the Event for an hour after the delete, so a
+	// person who finds an approval gone can read why.
 	o.recorder.Normal(f.reference(), reasonDeleted, deletedMessage(f))
 	return nil
 }
 
-// deletedMessage says why the operator deleted a discovered object.
+// deletedMessage returns the message of the Event that the operator posts
+// when it deletes a discovered object.
 func deletedMessage(f *firmware) string {
 	if pristine(f) {
 		return "No machine reports a device that this object covers, so the operator deleted it."
@@ -308,11 +311,11 @@ func sortEntries(entries []machineEntry) {
 	})
 }
 
-// updateCounts answers an update rule's counts: the machines the
-// entries name, the machines with at least one release offered, and
-// the machines an approval waits for, which approval.go counts. The
-// counts are new, so a change to them never writes through to the
-// status that the API server holds.
+// updateCounts returns the counts for an update rule: the machines in
+// the entries, the machines with at least one release offered, and the
+// machines that an approval waits for, which approval.go counts. It
+// returns a new value because settleEntries compares the new status
+// with the old one, and both start with the old UpdateCounts pointer.
 func updateCounts(entries []machineEntry, pending int) *UpdateCounts {
 	all, behind := map[string]bool{}, map[string]bool{}
 	for _, e := range entries {
@@ -324,8 +327,8 @@ func updateCounts(entries []machineEntry, pending int) *UpdateCounts {
 	return &UpdateCounts{Machines: len(all), Behind: len(behind), Pending: pending}
 }
 
-// pending answers the count of machines an approval waits for, or 0
-// when the status holds no update counts.
+// pending returns the count of machines that an approval waits for, or
+// 0 when the status has no update counts.
 func (c counts) pending() int {
 	if c.UpdateCounts == nil {
 		return 0
@@ -333,18 +336,18 @@ func (c counts) pending() int {
 	return c.UpdateCounts.Pending
 }
 
-// offers answers an UpdateAvailable notice for each entry whose newest
-// offered release changed, against the entry of the same machine,
-// catalog, and device before.
+// offers returns an UpdateAvailable notice for each entry in after whose
+// newest offered release differs from the newest release of the entry
+// in before for the same machine, catalog, and device.
 func offers(before, after []machineEntry) []notice {
-	held := map[string]string{}
+	previous := map[string]string{}
 	for _, e := range before {
-		held[e.Machine+"\x00"+e.Catalog+"\x00"+e.Device] = e.newest()
+		previous[e.Machine+"\x00"+e.Catalog+"\x00"+e.Device] = e.newest()
 	}
 	var out []notice
 	for _, e := range after {
 		newest := e.newest()
-		if newest == "" || held[e.Machine+"\x00"+e.Catalog+"\x00"+e.Device] == newest {
+		if newest == "" || previous[e.Machine+"\x00"+e.Catalog+"\x00"+e.Device] == newest {
 			continue
 		}
 		out = append(out, notice{reason: reasonUpdateAvailable, message: fmt.Sprintf(

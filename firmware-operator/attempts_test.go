@@ -1,10 +1,10 @@
 package main
 
-// Each appearance of a device gets one attempt for each generation of
-// the rule. A loop that writes to a device again and again can disturb
-// it, so nothing retries a failed upload until the device appears again
-// or the rule changes. The status entry and the pod's annotations are
-// the whole record, so a restart of the operator starts nothing twice.
+// Each appearance of a device gets one upload attempt for each
+// generation of the rule. Repeated writes to a device can disturb it, so
+// the operator does not retry a failed upload until the device appears
+// again or the rule changes. A restarted operator reads the status
+// entries and the upload pods so that it does not start an upload twice.
 
 import (
 	"testing"
@@ -12,8 +12,8 @@ import (
 	"time"
 )
 
-// failedUpload runs an upload whose loader fails, with the bare chip
-// still in the slice.
+// failedUpload runs an upload whose loader fails, and leaves the bare
+// chip in the ResourceSlice.
 func failedUpload(t *testing.T) *world {
 	w := startedUpload(t)
 	w.api.finish(t, w.onlyUpload(t).Metadata.Name, podFailed, 1, "fxload: Protocol error")
@@ -21,17 +21,18 @@ func failedUpload(t *testing.T) *world {
 	return w
 }
 
-// A failed upload does not run again while the same appearance stays,
-// even long after.
+// A failed upload does not run again while the same appearance of the
+// device stays in the ResourceSlice.
 func TestAFailedUploadDoesNotRunAgainForTheSameAppearance(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := failedUpload(t)
-		// A slice change that leaves the device as it was wakes a pass.
+		// A ResourceSlice update that does not change the device still
+		// starts a pass.
 		w.api.publish("liken-1", bareChip("1-4.1.2", 12), camera("1-3", 4))
 		time.Sleep(time.Hour)
 		synctest.Wait()
 
-		if got := w.api.created(uploadPodsPath); got != 1 {
+		if got := w.api.created(operatorPodsPath); got != 1 {
 			t.Errorf("the operator created %d upload pods, want 1", got)
 		}
 		if e := w.entry(t, "qhy5l-ii"); e.Result != resultFailed {
@@ -40,9 +41,8 @@ func TestAFailedUploadDoesNotRunAgainForTheSameAppearance(t *testing.T) {
 	})
 }
 
-// A new appearance of the device, after a replug or a power cycle,
-// and a new generation of the rule each start a new attempt, which
-// replaces the port's entry.
+// A replug of the device or a new generation of the rule starts a new
+// attempt, which replaces the port's entry.
 func TestANewAppearanceOrGenerationRunsAgain(t *testing.T) {
 	cases := []struct {
 		name           string
@@ -67,7 +67,7 @@ func TestANewAppearanceOrGenerationRunsAgain(t *testing.T) {
 				c.change(w)
 				w.settle()
 
-				if got := w.api.created(uploadPodsPath); got != 2 {
+				if got := w.api.created(operatorPodsPath); got != 2 {
 					t.Errorf("the operator created %d upload pods, want 2", got)
 				}
 				e := w.entry(t, "qhy5l-ii")
@@ -79,8 +79,8 @@ func TestANewAppearanceOrGenerationRunsAgain(t *testing.T) {
 	}
 }
 
-// An operator that restarts during an upload creates no second pod,
-// and the new copy follows the first pod to its result.
+// An operator that restarts during an upload creates no second pod, and
+// writes the first pod's result.
 func TestARestartDuringAnUploadCreatesNoSecondPod(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := &world{api: startFakeAPI(t)}
@@ -95,7 +95,7 @@ func TestARestartDuringAnUploadCreatesNoSecondPod(t *testing.T) {
 		w.api.publish("liken-1", camera("1-4.1.2", 13))
 		w.settle()
 
-		if got := w.api.created(uploadPodsPath); got != 1 {
+		if got := w.api.created(operatorPodsPath); got != 1 {
 			t.Errorf("the operators created %d upload pods, want 1", got)
 		}
 		if e := w.entry(t, "qhy5l-ii"); e.Result != resultLoaded {
@@ -104,10 +104,10 @@ func TestARestartDuringAnUploadCreatesNoSecondPod(t *testing.T) {
 	})
 }
 
-// A copy that stopped after it created the pod and before it wrote
-// the entry leaves a pod with no entry. The next copy follows that pod
-// and writes its result, with no second pod.
-func TestAPodWithNoEntryIsFollowed(t *testing.T) {
+// When an operator stops after it creates the pod and before it writes
+// the entry, the next operator writes that pod's result and creates no
+// second pod.
+func TestAPodWithNoEntryGetsItsResultWritten(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)
 		api.putFirmware(qhy5lii())
@@ -120,7 +120,7 @@ func TestAPodWithNoEntryIsFollowed(t *testing.T) {
 		w.api.finish(t, w.onlyUpload(t).Metadata.Name, podFailed, 1, "fxload: Protocol error")
 		w.settle()
 
-		if got := w.api.created(uploadPodsPath); got != 0 {
+		if got := w.api.created(operatorPodsPath); got != 0 {
 			t.Errorf("the operator created %d upload pods, want none", got)
 		}
 		if e := w.entry(t, "qhy5l-ii"); e.Result != resultFailed {
@@ -132,8 +132,8 @@ func TestAPodWithNoEntryIsFollowed(t *testing.T) {
 	})
 }
 
-// putUpload stores an upload pod that an earlier copy of the operator
-// created, and no claim for it.
+// putUpload stores an upload pod that an earlier operator process
+// created, without its claim.
 func (a *fakeAPI) putUpload(upload pod) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -142,11 +142,11 @@ func (a *fakeAPI) putUpload(upload pod) {
 	metadata["uid"] = "uid-earlier"
 	metadata["creationTimestamp"] = time.Now().UTC().Format(time.RFC3339)
 	object["status"] = map[string]any{"phase": podPending}
-	a.store(uploadPodsPath, object, "ADDED")
+	a.store(operatorPodsPath, object, "ADDED")
 }
 
-// A pending pod whose claim is missing gets its claim from the next
-// pass, with the pod as its owner.
+// The next pass creates the missing claim of a Pending upload pod, owned
+// by the pod.
 func TestAPendingPodGetsItsMissingClaim(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)

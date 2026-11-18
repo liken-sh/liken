@@ -1,10 +1,10 @@
 package main
 
-// The world a test runs the operator in: the fake API server, the
+// The environment a test runs the operator in: a fake API server, the
 // operator's loop, and builders for the objects that machine-operator,
-// a person, and the kubelet write. The server answers over the
-// in-memory connections of apiservertest, so a test runs in a synctest
-// bubble, and a five-minute deadline takes no real time.
+// a person, and the kubelet write. The server uses the in-memory
+// connections of apiservertest, so a test runs in a synctest bubble
+// and a five-minute deadline takes no real time.
 
 import (
 	"context"
@@ -23,18 +23,18 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events"
 )
 
-// world is one running operator, the server it talks to, and the LVFS
-// it reads catalogs from.
+// world is one running operator, the fake API server it talks to, and
+// the fake LVFS it reads catalogs from.
 type world struct {
 	api  *fakeAPI
 	lvfs *fakeLVFS
-	// scanImage is the scan image of the next operator that runs, and
-	// testScanImage when it is empty.
+	// scanImage is the scan image for the next operator that starts.
+	// It defaults to testScanImage.
 	scanImage string
 }
 
-// discovery answers the operator's settings for discovery, with the
-// world's LVFS as the catalogs' server.
+// discovery returns the operator's catalog settings, with the world's
+// fake LVFS as the catalog server.
 func (w *world) discovery() discoverySettings {
 	if w.lvfs == nil {
 		w.lvfs = newFakeLVFS()
@@ -49,21 +49,21 @@ func (w *world) discovery() discoverySettings {
 // testScanImage is the scan image of the test operator.
 const testScanImage = "ghcr.io/liken-sh/firmware-operator-scan:test"
 
-// startWorld runs the operator until the test ends. The test runs in a
-// synctest bubble.
+// startWorld starts an operator that runs until the test ends. The
+// test must run in a synctest bubble.
 func startWorld(t *testing.T) *world {
 	w := &world{api: startFakeAPI(t)}
 	w.run(t)
 	return w
 }
 
-// run starts a copy of the operator's loop against the world's server,
-// and answers the function that stops it and waits for it to end.
+// run starts another operator loop against the world's server. It
+// returns a function that stops the loop and waits for it to end.
 func (w *world) run(t *testing.T) (stop func()) {
 	client := apiclient.New(apiservertest.Host, w.api.server.Client(), "").WithContext(t.Context())
 	watcher, err := dynamic.NewForConfig(w.api.server.Config())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the dynamic client: %v", err)
 	}
 	recorder := events.New(t.Context(), client, component, events.Options{Instance: operatorPodName, Log: io.Discard})
 	ctx, cancel := context.WithCancel(t.Context())
@@ -81,13 +81,16 @@ func (w *world) run(t *testing.T) (stop func()) {
 	return stop
 }
 
-// settle lets the operator do all it can at the present moment.
+// settle moves the fake clock one second forward and waits until every
+// goroutine in the bubble is blocked, so the operator has finished the
+// passes that the last change started.
 func (w *world) settle() {
 	time.Sleep(time.Second)
 	synctest.Wait()
 }
 
-// qhy5lii is the rule for the bare FX2 chip of a QHY5L-II camera.
+// qhy5lii is the upload Firmware for the bare FX2 chip of a QHY5L-II
+// camera.
 func qhy5lii() firmware {
 	f := firmware{Spec: firmwareSpec{
 		Selector: `device.attributes["liken.sh"].vendor == "1618" && device.attributes["liken.sh"].product == "0920"`,
@@ -100,7 +103,7 @@ func qhy5lii() firmware {
 	return f
 }
 
-// named answers a copy of a rule under another name.
+// named returns a copy of a Firmware with another name.
 func named(f firmware, name string) firmware {
 	f.Metadata.Name = name
 	return f
@@ -113,19 +116,19 @@ type usb struct {
 	busNumber, devNumber int64
 }
 
-// bareChip is the QHY5L-II before its firmware, on bus 1.
+// bareChip is a QHY5L-II before its firmware loads, on bus 1.
 func bareChip(address string, number int64) usb {
 	return usb{address: address, vendor: "1618", product: "0920", busNumber: 1, devNumber: number}
 }
 
-// camera is the QHY5L-II after its firmware: the same port, a new
+// camera is a QHY5L-II after its firmware loads: the same port, a new
 // product ID, and a new device number.
 func camera(address string, number int64) usb {
 	return usb{address: address, vendor: "1618", product: "0921", busNumber: 1, devNumber: number}
 }
 
-// name is the device's name in the slice, as machine-operator derives
-// it from the bus and the address.
+// name returns the device's name in the ResourceSlice, which
+// machine-operator derives from the bus and the address.
 func (u usb) name() string {
 	out := []byte("usb-" + u.address)
 	for i, c := range out {
@@ -145,16 +148,16 @@ func (u usb) sliceDevice() sliceDevice {
 	}}
 }
 
-// publish plays machine-operator: the machine's slice now holds these
-// devices, at the next pool generation.
+// publish acts as machine-operator: it writes the machine's
+// ResourceSlice with these devices at the next pool generation.
 func (a *fakeAPI) publish(machine string, devices ...usb) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	name := machine + "-" + driverName
 	generation := 1.0
 	kind := "ADDED"
-	if held, exists := a.objects[slicesPath][name]; exists {
-		generation = held["spec"].(map[string]any)["pool"].(map[string]any)["generation"].(float64) + 1
+	if stored, exists := a.objects[slicesPath][name]; exists {
+		generation = stored["spec"].(map[string]any)["pool"].(map[string]any)["generation"].(float64) + 1
 		kind = "MODIFIED"
 	}
 	listed := []any{}
@@ -172,7 +175,7 @@ func (a *fakeAPI) publish(machine string, devices ...usb) {
 	}, kind)
 }
 
-// putMachine stores a Machine with its labels.
+// putMachine stores a Machine with the given labels.
 func (a *fakeAPI) putMachine(name string, labels map[string]string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -186,8 +189,8 @@ func (a *fakeAPI) putMachine(name string, labels map[string]string) {
 	}, kind)
 }
 
-// putFirmware creates a rule, or replaces its spec the way kubectl
-// apply does. A change of the spec moves the generation.
+// putFirmware creates a Firmware, or replaces its spec as kubectl apply
+// does. A change to the spec increases the generation.
 func (a *fakeAPI) putFirmware(f firmware) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -195,13 +198,13 @@ func (a *fakeAPI) putFirmware(f firmware) {
 	object["apiVersion"], object["kind"] = firmwareAPIVersion, firmwareKind
 	metadata := object["metadata"].(map[string]any)
 	kind := "ADDED"
-	if held, exists := a.objects[firmwaresPath][f.Metadata.Name]; exists {
+	if stored, exists := a.objects[firmwaresPath][f.Metadata.Name]; exists {
 		kind = "MODIFIED"
-		heldMeta := held["metadata"].(map[string]any)
-		metadata["uid"], metadata["generation"] = heldMeta["uid"], heldMeta["generation"]
-		object["status"] = held["status"]
-		if string(mustJSON(held["spec"])) != string(mustJSON(object["spec"])) {
-			metadata["generation"] = heldMeta["generation"].(float64) + 1
+		storedMeta := stored["metadata"].(map[string]any)
+		metadata["uid"], metadata["generation"] = storedMeta["uid"], storedMeta["generation"]
+		object["status"] = stored["status"]
+		if string(mustJSON(stored["spec"])) != string(mustJSON(object["spec"])) {
+			metadata["generation"] = storedMeta["generation"].(float64) + 1
 		}
 	} else {
 		metadata["uid"], metadata["generation"] = "uid-"+f.Metadata.Name, 1
@@ -210,7 +213,7 @@ func (a *fakeAPI) putFirmware(f firmware) {
 	a.store(firmwaresPath, object, kind)
 }
 
-// firmware answers the stored rule.
+// firmware returns the stored Firmware with the given name.
 func (a *fakeAPI) firmware(t *testing.T, name string) firmware {
 	t.Helper()
 	var out firmware
@@ -221,11 +224,11 @@ func (a *fakeAPI) firmware(t *testing.T, name string) firmware {
 	return out
 }
 
-// uploads answers every stored upload pod.
+// uploads returns every stored upload pod.
 func (a *fakeAPI) uploads(t *testing.T) []pod {
 	t.Helper()
 	var out []pod
-	for _, object := range a.held(uploadPodsPath) {
+	for _, object := range a.stored(operatorPodsPath) {
 		var p pod
 		a.decode(t, object, &p)
 		out = append(out, p)
@@ -233,11 +236,11 @@ func (a *fakeAPI) uploads(t *testing.T) []pod {
 	return out
 }
 
-// claims answers every stored claim.
+// claims returns every stored ResourceClaim.
 func (a *fakeAPI) claims(t *testing.T) []resourceClaim {
 	t.Helper()
 	var out []resourceClaim
-	for _, object := range a.held(claimsPath) {
+	for _, object := range a.stored(claimsPath) {
 		var c resourceClaim
 		a.decode(t, object, &c)
 		out = append(out, c)
@@ -245,7 +248,7 @@ func (a *fakeAPI) claims(t *testing.T) []resourceClaim {
 	return out
 }
 
-func (a *fakeAPI) held(collection string) []map[string]any {
+func (a *fakeAPI) stored(collection string) []map[string]any {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	var out []map[string]any
@@ -265,17 +268,18 @@ func (a *fakeAPI) decode(t *testing.T, object map[string]any, out any) {
 	t.Helper()
 	body, _ := json.Marshal(object)
 	if err := json.Unmarshal(body, out); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the object into %T: %v", out, err)
 	}
 }
 
-// finish plays the kubelet: the upload pod's loader ended with the exit
-// code and the end of its log, now, and the pod ended in the phase.
+// finish acts as the kubelet: it ends the upload pod's loader container
+// now, with the given exit code and termination message, and moves the
+// pod to the given phase.
 func (a *fakeAPI) finish(t *testing.T, name, phase string, exitCode int, log string) {
 	t.Helper()
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	next := clone(a.objects[uploadPodsPath][name])
+	next := clone(a.objects[operatorPodsPath][name])
 	if next == nil {
 		t.Fatalf("there is no upload pod %s", name)
 	}
@@ -289,11 +293,11 @@ func (a *fakeAPI) finish(t *testing.T, name, phase string, exitCode int, log str
 			}},
 		}},
 	}
-	a.store(uploadPodsPath, next, "MODIFIED")
+	a.store(operatorPodsPath, next, "MODIFIED")
 }
 
-// onlyUpload answers the one upload pod, and fails the test when there
-// is not exactly one.
+// onlyUpload returns the upload pod. It fails the test unless there is
+// exactly one.
 func (w *world) onlyUpload(t *testing.T) pod {
 	t.Helper()
 	uploads := w.api.uploads(t)
@@ -303,8 +307,8 @@ func (w *world) onlyUpload(t *testing.T) pod {
 	return uploads[0]
 }
 
-// entry answers a rule's one status entry, and fails the test when
-// there is not exactly one.
+// entry returns the only entry in a Firmware's status.devices. It
+// fails the test unless there is exactly one.
 func (w *world) entry(t *testing.T, rule string) deviceEntry {
 	t.Helper()
 	devices := w.api.firmware(t, rule).Status.Devices
@@ -314,14 +318,14 @@ func (w *world) entry(t *testing.T, rule string) deviceEntry {
 	return devices[0]
 }
 
-// posted is the part of an Event a test compares: its type and its
-// reason.
+// posted is the type and reason of an Event, the two fields that tests
+// compare.
 type posted struct {
 	kind, reason string
 }
 
-// postedAbout answers what the operator posted about one rule, in the
-// order it posted it.
+// postedAbout returns the Events the operator posted about one
+// Firmware, in the order it posted them.
 func (w *world) postedAbout(name string) []posted {
 	var out []posted
 	for _, event := range w.api.recorded.About(firmwareKind, name) {
@@ -330,8 +334,8 @@ func (w *world) postedAbout(name string) []posted {
 	return out
 }
 
-// uploadCountsOf answers an upload rule's counts, and fails the test
-// when the status holds no upload counts or holds an update rule's.
+// uploadCountsOf returns an upload Firmware's counts. It fails the test
+// when status.counts has no upload counts or has update counts.
 func uploadCountsOf(t *testing.T, f firmware) UploadCounts {
 	t.Helper()
 	if f.Status.Counts.UploadCounts == nil || f.Status.Counts.UpdateCounts != nil {
@@ -340,8 +344,8 @@ func uploadCountsOf(t *testing.T, f firmware) UploadCounts {
 	return *f.Status.Counts.UploadCounts
 }
 
-// updateCountsOf answers an update rule's counts, and fails the test
-// when the status holds no update counts or holds an upload rule's.
+// updateCountsOf returns an update Firmware's counts. It fails the test
+// when status.counts has no update counts or has upload counts.
 func updateCountsOf(t *testing.T, f *firmware) UpdateCounts {
 	t.Helper()
 	if f.Status.Counts.UpdateCounts == nil || f.Status.Counts.UploadCounts != nil {

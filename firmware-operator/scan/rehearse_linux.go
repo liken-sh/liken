@@ -2,9 +2,9 @@ package main
 
 import "syscall"
 
-// freeBytes answers the bytes free in the filesystem at path. On
-// efivarfs, the kernel answers from the firmware's QueryVariableInfo,
-// so the count is the variable store's own.
+// freeBytes returns the bytes available in the filesystem at path. On
+// efivarfs the kernel reads the number from the firmware's
+// QueryVariableInfo, so it is the free space of the UEFI variable store.
 func freeBytes(path string) (int64, error) {
 	var st syscall.Statfs_t
 	if err := syscall.Statfs(path, &st); err != nil {

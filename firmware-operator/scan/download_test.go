@@ -19,7 +19,7 @@ func TestSiblingURL(t *testing.T) {
 			got, err := siblingURL(tt.catalog, tt.file)
 
 			if err != nil || got != tt.want {
-				t.Errorf("got %q, %v; want %q", got, err, tt.want)
+				t.Errorf("got %q, %v, want %q", got, err, tt.want)
 			}
 		})
 	}
@@ -27,7 +27,7 @@ func TestSiblingURL(t *testing.T) {
 
 func TestSiblingURLRejectsAnInvalidURL(t *testing.T) {
 	if _, err := siblingURL("https://bad host/%zz", "f"); err == nil {
-		t.Error("expected an error")
+		t.Error("siblingURL accepted a URL that does not parse, want an error")
 	}
 }
 
@@ -38,12 +38,12 @@ func TestGetRefusesBodiesPastTheLimit(t *testing.T) {
 	_, err := get(context.Background(), client, "https://x.test/big")
 
 	if err == nil || !strings.Contains(err.Error(), "is larger than") {
-		t.Errorf("got %v", err)
+		t.Errorf("get returned %v, want an error that contains %q", err, "is larger than")
 	}
 }
 
 func TestGetRejectsABadURL(t *testing.T) {
 	if _, err := get(context.Background(), http.DefaultClient, "://"); err == nil {
-		t.Error("expected an error")
+		t.Error("get accepted the address \"://\", want an error")
 	}
 }

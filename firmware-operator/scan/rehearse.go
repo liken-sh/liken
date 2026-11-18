@@ -1,19 +1,21 @@
 package main
 
-// A rehearsal runs one approved install against a copy of the
-// machine's firmware variables, and reports exactly what the install
-// would write. fwupd has no dry run: fwupdtool install writes the
+// A rehearsal runs an approved install against a copy of the machine's
+// firmware variables and reports what the install would write.
+// fwupdtool has no dry run, because `fwupdtool install` writes the
 // device. But fwupd reads the variable store, the ESRT, and the DMI
-// tables through one directory that FWUPD_SYSFSFWDIR moves, so a copy
-// of those three in memory takes every write, and the machine's own
-// store takes none. The pod mounts /sys/firmware read-only, so a
-// rehearsal that goes wrong still cannot write the real store.
+// tables through one directory, which FWUPD_SYSFSFWDIR moves. So the
+// rehearsal points fwupd at an in-memory copy of those three trees, and
+// the install writes to the copy and not to the machine's store. The
+// pod also mounts /sys/firmware read-only, so a rehearsal that goes
+// wrong still cannot write the real store.
 //
-// A rehearsal covers the Secure Boot databases and UEFI capsules. An
-// update of each database is one or more authenticated appends to its
-// own variable, which the firmware verifies against KEK or PK and
-// merges into the list (authwrites.go). A capsule writes a boot entry,
-// BootNext, and files on the ESP of the next boot (capsule.go).
+// A rehearsal covers Secure Boot database updates and UEFI capsules. A
+// database update is one or more authenticated appends to the
+// database's own variable. The firmware verifies each append against
+// the KEK or the PK and merges it into the list (authwrites.go). A
+// capsule update writes a boot entry, BootNext, and files on the ESP of
+// the next boot (capsule.go).
 
 import (
 	"bytes"
@@ -28,15 +30,16 @@ import (
 	"strings"
 )
 
-// The vendor GUIDs of the Secure Boot variables: PK and KEK are global
-// variables, and db and dbx belong to the image security database.
+// The vendor GUIDs in the efivarfs file names of the Secure Boot
+// variables. PK and KEK use the EFI global variable GUID, and db and
+// dbx use the image security database GUID.
 const (
 	efiGlobalGUID     = "8be4df61-93ca-11d2-aa0d-00e098032b8c"
 	imageSecurityGUID = "d719b2cb-3d3a-4596-a3bc-dad00e67656f"
 )
 
-// databaseVariables names the one variable that each Secure Boot
-// database plugin of fwupd writes, as efivarfs names its file.
+// databaseVariables maps each fwupd plugin that updates a Secure Boot
+// database to the efivarfs file name of the variable it writes.
 var databaseVariables = map[string]string{
 	"uefi_dbx": "dbx-" + imageSecurityGUID,
 	"uefi_db":  "db-" + imageSecurityGUID,
@@ -45,32 +48,34 @@ var databaseVariables = map[string]string{
 
 // An authenticated append sets both of these attributes. Without
 // append-write, the write replaces the list. Without time-based
-// authentication, the firmware checks no signature.
+// authentication, the firmware does not check a signature.
 const (
 	attrTimeBasedAuth = 0x20
 	attrAppendWrite   = 0x40
 )
 
-// reloadFailure is how fwupd's database install ends against a copy.
-// A plain file stores the raw authenticated append, where firmware
-// would verify it and merge its entries into the list, so fwupd's read
-// of the variable after its write fails. The rehearsal accepts it only
-// after the append that the difference shows.
+// reloadFailure is the error that fwupd's database install ends with
+// against a copy. The copy is a plain file, so it stores the raw
+// authenticated append. Firmware would have verified the append and
+// merged its entries into the list, so fwupd's read of the variable
+// after its write fails. The rehearsal accepts this error only when
+// the variables show an append (rehearseAppend).
 const reloadFailure = "SignatureListSize invalid"
 
-// The results of a rehearsal beside Failed and CatalogMoved: Passed is
-// an install that wrote authenticated appends to its device's own
-// variable, with room for them in the store, and Refused is an install
-// that would write anything else.
+// The results of a rehearsal besides Failed and CatalogMoved. Passed
+// means the install made only the writes that a rehearsal allows, and
+// there is room for them. Refused means the rehearsal does not cover the
+// device, the install made a write that it does not allow, or there is
+// no room for the writes.
 const (
 	resultPassed  = "Passed"
 	resultRefused = "Refused"
 )
 
-// RehearsalResult is the one line of JSON that a rehearsal prints.
-// Bytes and SHA256 describe the append as the apply writes it: each
-// authenticated write's four attribute bytes and payload, one write
-// after the other.
+// RehearsalResult is the line of JSON that a rehearsal prints. Bytes
+// and SHA256 describe the append as the apply writes it: for each
+// authenticated write in order, its four attribute bytes and then its
+// payload.
 type RehearsalResult struct {
 	Result   string `json:"result"`
 	Message  string `json:"message"`
@@ -78,9 +83,10 @@ type RehearsalResult struct {
 	Bytes    int64  `json:"bytes,omitempty"`
 	SHA256   string `json:"sha256,omitempty"`
 	Free     int64  `json:"free,omitempty"`
-	// Writes are a capsule's variables and files, and ESPFree the
-	// free space of the ESP they go to. For a capsule, Bytes counts the
-	// files, and SHA256 is the digest of the writes (writesDigest).
+	// Writes lists a capsule's variable and file writes, and ESPFree is
+	// the free space of the ESP that they go to. For a capsule, Bytes is
+	// the size of the files, and SHA256 is the digest of the writes
+	// (writesDigest).
 	Writes  []Write `json:"writes,omitempty"`
 	ESPFree int64   `json:"espFree,omitempty"`
 }
@@ -93,8 +99,8 @@ func rehearsalRefused(format string, args ...any) RehearsalResult {
 	return RehearsalResult{Result: resultRefused, Message: fmt.Sprintf(format, args...)}
 }
 
-// rehearser holds what a rehearsal touches outside the process. Its
-// scanner loads the catalog, and its fwupdtool reads the copy.
+// rehearser runs a rehearsal in the rehearsal pod. Its scanner loads
+// the catalog, and its fwupdtool runs against the copy.
 type rehearser struct {
 	scanner
 	cabinetURL    string // CABINET_URL, the approved cabinet
@@ -104,8 +110,8 @@ type rehearser struct {
 	copyDir       string // the copy that FWUPD_SYSFSFWDIR names
 	espDir        string // the directory that FWUPD_UEFI_ESP_PATH names
 	espSource     string // the ESP of the next boot, mounted read-only, when the machine has one
-	// partitionOf answers the partition mounted at a path, which the
-	// repair of the updater's entry needs (updaterentry.go).
+	// partitionOf returns the partition mounted at a path. The repair
+	// of the updater's boot entry needs it (updaterentry.go).
 	partitionOf func(mount string) (partition, error)
 	free        func(path string) (int64, error)
 }
@@ -118,36 +124,38 @@ func rehearserFromEnv(getenv func(string) string) rehearser {
 	}
 }
 
-// rehearse runs the steps in order and stops at the first that fails.
-// Every outcome is a RehearsalResult for the operator to read.
+// rehearse returns a RehearsalResult for every outcome, a failure
+// included, because the operator reads the result from the pod's log.
 func (r rehearser) rehearse(ctx context.Context) RehearsalResult {
 	result, _ := r.rehearseAppend(ctx)
 	return result
 }
 
-// rehearsedAppend is the bytes of a passed rehearsal: the variable as
-// the rehearsal copied it, and the authenticated writes that the
+// rehearsedAppend holds the bytes of a passed rehearsal: the variable
+// as the rehearsal copied it, and the authenticated writes that the
 // install appended to it, in order.
 //
-// For a capsule, cabinet is the cabinet the rehearsal saved, which an
-// apply installs.
+// For a capsule, cabinet is the path of the cabinet that the rehearsal
+// saved, which the apply installs.
 type rehearsedAppend struct {
 	before  []byte
 	writes  [][]byte
 	cabinet string
 }
 
-// rehearseAppend is rehearse, and answers the bytes of a passed
-// rehearsal too, which an apply writes (apply.go). The result keeps
-// only the append's length and SHA-256, so the bytes leave the pod only
-// in the write.
+// rehearseAppend runs the steps of a rehearsal in order and stops at
+// the first that fails. It returns the bytes of a passed rehearsal too,
+// which the apply writes (apply.go). The result keeps only the append's
+// length and SHA-256, so the bytes leave the pod only when the apply
+// writes them.
 func (r rehearser) rehearseAppend(ctx context.Context) (RehearsalResult, rehearsedAppend) {
 	if err := copyFirmware(r.hostDir, r.copyDir); err != nil {
 		return rehearsalFailed("copying the firmware tables: %v", err), rehearsedAppend{}
 	}
-	// A jcat that names another file than the scan read ends the
-	// rehearsal as CatalogMoved, as it ends a scan, so the operator reads
-	// the jcat again at once and the machine scans the new file.
+	// When the jcat lists a different file than the scan read, the
+	// rehearsal ends as CatalogMoved, the same as a scan does. The
+	// operator then reads the jcat again, and the machine scans the new
+	// file.
 	if end := r.loadCatalog(ctx); end != nil {
 		return RehearsalResult{Result: end.Result, Message: end.Message}, rehearsedAppend{}
 	}
@@ -214,23 +222,23 @@ func (r rehearser) rehearseAppend(ctx context.Context) (RehearsalResult, rehears
 	return result, rehearsedAppend{before: before[variable], writes: writes}
 }
 
-// install runs fwupdtool install on the cabinet alone, with no device
-// ID. With a device ID, fwupdtool plans the release for the device
-// twice: once as a member of the device's composite group, which holds
-// the device itself, and once more as the device. fwupd then installs
-// a database update twice, and refuses the second install of a
-// capsule, because the first hides the device until the next boot.
-// With the cabinet alone, fwupd plans each device that the cabinet
-// matches once, and the judges refuse a write to anything but the
-// approved device's variable or capsule.
+// install runs `fwupdtool install` on the cabinet with no device ID.
+// With a device ID, fwupdtool plans the release for the device twice:
+// once as a member of the device's composite group, which contains the
+// device, and once as the device itself. fwupd then installs a database
+// update twice, and refuses the second install of a capsule because
+// the first install hides the device until the next boot. Without a
+// device ID, fwupd plans each device that the cabinet matches once. The
+// rehearsal then refuses any write to something other than the approved
+// device's variable or capsule.
 func (r rehearser) install(ctx context.Context, cabPath string) ([]byte, error) {
 	_, stderr, err := r.fwupdtool(ctx, "install", "--assume-yes", "--no-reboot-check", cabPath)
 	return stderr, err
 }
 
-// fetchCabinet downloads the approved cabinet, checks it against the
-// approval's pin, and saves it for the install. A result other than nil
-// ends the rehearsal.
+// fetchCabinet downloads the approved cabinet, checks its SHA-256
+// against the approval's pin, and saves it for the install. It returns
+// a non-nil RehearsalResult when the rehearsal must end.
 func (r rehearser) fetchCabinet(ctx context.Context) (string, *RehearsalResult) {
 	end := func(result RehearsalResult) (string, *RehearsalResult) { return "", &result }
 	cab, err := get(ctx, r.client, r.cabinetURL)
@@ -247,21 +255,21 @@ func (r rehearser) fetchCabinet(ctx context.Context) (string, *RehearsalResult) 
 	return cabPath, nil
 }
 
-// judge checks the difference that an install made in the copy against
+// judge compares the copy's variables before and after the install with
 // what a Secure Boot database update may write: authenticated appends
-// to its own variable, and nothing else. It answers the appends, or a
-// refusal that says what else the install wrote.
+// to its own variable, and nothing else. It returns the appended
+// writes, or a refusal message that says what else the install wrote.
 func judge(variable string, before, after map[string][]byte, written []string) ([][]byte, string) {
 	if len(written) > 0 {
 		return nil, fmt.Sprintf("the install wrote %s under the ESP path", strings.Join(written, ", "))
 	}
 	for _, name := range sortedNames(before, after) {
-		was, held := before[name]
-		is, kept := after[name]
+		was, existed := before[name]
+		is, remains := after[name]
 		switch {
-		case !kept:
+		case !remains:
 			return nil, fmt.Sprintf("the install removed %s", name)
-		case !held:
+		case !existed:
 			return nil, fmt.Sprintf("the install created %s", name)
 		case name != variable && !bytes.Equal(was, is):
 			return nil, fmt.Sprintf("the install changed %s, which is not %s", name, variable)
@@ -276,7 +284,7 @@ func judge(variable string, before, after map[string][]byte, written []string) (
 	}
 	appended := is[len(was):]
 	if len(appended) <= 4 {
-		return nil, fmt.Sprintf("the install appended %d bytes to %s, which hold no payload", len(appended), variable)
+		return nil, fmt.Sprintf("the install appended %d bytes to %s, which is too few to hold a payload", len(appended), variable)
 	}
 	attributes := binary.LittleEndian.Uint32(appended)
 	if attributes&attrAppendWrite == 0 || attributes&attrTimeBasedAuth == 0 {
@@ -303,10 +311,11 @@ func sortedNames(sets ...map[string][]byte) []string {
 }
 
 // copyFirmware copies the three trees that fwupd reads through
-// FWUPD_SYSFSFWDIR. A machine that booted in BIOS mode has no variable
-// store to rehearse against. The ESRT and the DMI tables are optional:
-// a virtual machine can lack the ESRT, and fwupd reads its DMI facts
-// elsewhere when the tables are missing.
+// FWUPD_SYSFSFWDIR. It fails on a machine that booted in BIOS mode,
+// because that machine has no variable store to rehearse against. The
+// ESRT and the DMI tables are optional: a virtual machine can lack the
+// ESRT, and fwupd reads its DMI facts from another source when the
+// tables are missing.
 func copyFirmware(host, copy string) error {
 	if _, err := os.Stat(filepath.Join(host, "efi", "efivars")); err != nil {
 		return fmt.Errorf("the machine has no UEFI variable store: %w", err)
@@ -338,10 +347,10 @@ func copyFirmware(host, copy string) error {
 	return nil
 }
 
-// copyTree copies the regular files and directories under src. It
-// reads each file to its end, because sysfs reports a size that is not
-// the file's, and efivarfs refuses a seek. It skips symbolic links,
-// which in sysfs point at the kernel's other objects.
+// copyTree copies the regular files and directories under src to dst.
+// It reads each file to its end, because sysfs reports a size that is
+// not the file's size, and efivarfs refuses a seek. It skips symbolic
+// links, which in sysfs point at other kernel objects.
 func copyTree(src, dst string) error {
 	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -363,7 +372,6 @@ func copyTree(src, dst string) error {
 	})
 }
 
-// readVariables reads every variable file of a variable store directory.
 func readVariables(dir string) (map[string][]byte, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -380,8 +388,8 @@ func readVariables(dir string) (map[string][]byte, error) {
 	return variables, nil
 }
 
-// filesUnder answers the files under a directory, relative to it. A
-// directory that does not exist holds none.
+// filesUnder returns the paths of the files under dir, relative to dir.
+// A directory that does not exist has none.
 func filesUnder(dir string) ([]string, error) {
 	var files []string
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {

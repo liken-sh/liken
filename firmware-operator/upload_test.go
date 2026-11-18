@@ -1,8 +1,5 @@
 package main
 
-// These tests read the pod and the claim that the operator creates for
-// a device that a rule matches.
-
 import (
 	"slices"
 	"strings"
@@ -10,8 +7,8 @@ import (
 	"testing/synctest"
 )
 
-// startedUpload runs the operator with the QHY5L-II rule and the bare
-// chip on liken-1, and answers the world once the upload has started.
+// startedUpload returns a world in which the qhy5l-ii rule has started
+// an upload to a bare chip on liken-1.
 func startedUpload(t *testing.T) *world {
 	w := startWorld(t)
 	w.api.putFirmware(qhy5lii())
@@ -20,8 +17,6 @@ func startedUpload(t *testing.T) *world {
 	return w
 }
 
-// A matching device gets one pod on its node, which runs the rule's
-// command against the device's usbfs node, unprivileged.
 func TestAMatchingDeviceGetsOneUploadPod(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startedUpload(t)
@@ -57,8 +52,8 @@ func TestAMatchingDeviceGetsOneUploadPod(t *testing.T) {
 			{"no capabilities", slices.Equal(loader.SecurityContext.Capabilities.Drop, []string{"ALL"})},
 			{"the log in the termination message", loader.TerminationMessagePolicy == "FallbackToLogsOnError"},
 		}
-		// t.Run is not allowed inside a bubble, so each check names
-		// itself in its error.
+		// t.Run is not allowed inside a synctest bubble, so each
+		// check puts its own name in its error message.
 		for _, c := range checks {
 			if !c.ok {
 				t.Errorf("%s is wrong in the upload pod %+v", c.name, upload)
@@ -67,8 +62,6 @@ func TestAMatchingDeviceGetsOneUploadPod(t *testing.T) {
 	})
 }
 
-// The pod's claim has the pod's name, belongs to the pod, and selects
-// this one appearance of the device.
 func TestTheUploadPodsClaimSelectsTheAppearance(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startedUpload(t)
@@ -99,11 +92,11 @@ func TestTheUploadPodsClaimSelectsTheAppearance(t *testing.T) {
 }
 
 // The claim's selector compiles in the CEL environment of a
-// DeviceClass, matches the appearance it names, and matches no other.
+// DeviceClass.
 func TestTheClaimSelectorMatchesOnlyItsAppearance(t *testing.T) {
 	selector, err := newSelectors().compile(claimSelector(appearance{"liken-1", "1-4.1.2", 12}))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("compiling the claim selector: %v", err)
 	}
 	cases := []struct {
 		name   string
@@ -124,7 +117,7 @@ func TestTheClaimSelectorMatchesOnlyItsAppearance(t *testing.T) {
 	}
 }
 
-// sliceOf builds the slice machine-operator would publish for a
+// sliceOf builds the slice that machine-operator publishes for a
 // machine's devices.
 func sliceOf(machine string, devices ...usb) resourceSlice {
 	var slice resourceSlice
@@ -135,8 +128,6 @@ func sliceOf(machine string, devices ...usb) resourceSlice {
 	return slice
 }
 
-// The status records the upload as Running, and the operator posts
-// UploadStarted.
 func TestAStartedUploadIsRunningInTheStatus(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startedUpload(t)
@@ -156,7 +147,6 @@ func TestAStartedUploadIsRunningInTheStatus(t *testing.T) {
 	})
 }
 
-// A device that the rule does not match gets no pod.
 func TestADeviceTheRuleDoesNotMatchGetsNoPod(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
@@ -173,8 +163,7 @@ func TestADeviceTheRuleDoesNotMatchGetsNoPod(t *testing.T) {
 	})
 }
 
-// A pod name holds the rule's name for a person to read, and stays a
-// DNS label however long the rule's name is.
+// A pod name starts with the rule's name so that a person can read it.
 func TestTheUploadPodsNameIsADNSLabel(t *testing.T) {
 	a := appearance{"liken-1", "1-4.1.2", 12}
 	cases := []struct {
@@ -193,9 +182,9 @@ func TestTheUploadPodsNameIsADNSLabel(t *testing.T) {
 	}
 }
 
-// A create that answers 409, for a pod the watch does not hold yet,
-// reads the pod that exists, and its claim names that pod as its
-// owner.
+// When the create of an upload pod returns 409 because a pod the watch
+// has not seen exists, the operator reads that pod and creates a claim
+// that it owns.
 func TestACreateThatMeetsAnExistingPodClaimsForIt(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)
@@ -203,7 +192,7 @@ func TestACreateThatMeetsAnExistingPodClaimsForIt(t *testing.T) {
 		chip := bareChip("1-4.1.2", 12)
 		rule := api.firmware(t, "qhy5l-ii")
 		hidden := buildUploadPod(&rule, devicesOf(sliceOf("liken-1", chip))[0], operatorNS)
-		// With no upload label, the watch never holds the pod.
+		// Without the upload label, the watch never receives the pod.
 		hidden.Metadata.Labels = nil
 		api.putUpload(hidden)
 		w := &world{api: api}

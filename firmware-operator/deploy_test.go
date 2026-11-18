@@ -1,10 +1,7 @@
 package main
 
-// These tests read the manifests in deploy/ for the facts the code
-// depends on: the environment the operator reads, the class an upload's
-// claim names, the policy that keeps an upload pod off the network, the
-// policies that let a scan, rehearsal, or apply pod reach only DNS and
-// HTTPS, the grant on the Disruptions, and the lvfs FirmwareCatalog.
+// These tests read the manifests in deploy/ and check the facts that
+// the code depends on.
 
 import (
 	"fmt"
@@ -18,18 +15,17 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// documents answers each YAML document of a manifest, decoded.
 func documents(t *testing.T, file string) []map[string]any {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("deploy", file))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading deploy/%s: %v", file, err)
 	}
 	var out []map[string]any
 	for _, part := range strings.Split(string(raw), "\n---\n") {
 		var document map[string]any
 		if err := yaml.Unmarshal([]byte(part), &document); err != nil {
-			t.Fatal(err)
+			t.Fatalf("parsing a document of deploy/%s: %v", file, err)
 		}
 		if document != nil {
 			out = append(out, document)
@@ -38,7 +34,6 @@ func documents(t *testing.T, file string) []map[string]any {
 	return out
 }
 
-// find answers the one document of a kind in a manifest.
 func find(t *testing.T, file, kind string) map[string]any {
 	t.Helper()
 	for _, document := range documents(t, file) {
@@ -50,7 +45,8 @@ func find(t *testing.T, file, kind string) map[string]any {
 	return nil
 }
 
-// dig answers the value at a path of keys and list indexes.
+// dig returns the value at a path of map keys and list indexes, or nil
+// when the path does not exist.
 func dig(object any, path ...any) any {
 	for _, step := range path {
 		switch key := step.(type) {
@@ -67,8 +63,6 @@ func dig(object any, path ...any) any {
 	return object
 }
 
-// The operator reads its pod's name and namespace from the environment
-// the Deployment sets.
 func TestTheDeploymentSetsTheOperatorsEnvironment(t *testing.T) {
 	container := dig(find(t, "operator.yaml", "Deployment"), "spec", "template", "spec", "containers", 0)
 	var names []string
@@ -82,8 +76,6 @@ func TestTheDeploymentSetsTheOperatorsEnvironment(t *testing.T) {
 	}
 }
 
-// The class an upload's claim names exists, and selects only the USB
-// devices of liken.sh.
 func TestTheUploadClassSelectsUSBDevicesOfLiken(t *testing.T) {
 	class := find(t, "upload.yaml", "DeviceClass")
 	if got := dig(class, "metadata", "name"); got != uploadClass {
@@ -100,8 +92,8 @@ func TestTheUploadClassSelectsUSBDevicesOfLiken(t *testing.T) {
 	}
 }
 
-// The network policy selects every upload pod, names both directions,
-// and allows nothing, so it denies every packet.
+// A NetworkPolicy that lists Ingress and Egress with no rules for
+// either blocks all traffic.
 func TestTheUploadPodsHaveNoNetwork(t *testing.T) {
 	policy := find(t, "upload.yaml", "NetworkPolicy")
 	if got := dig(policy, "spec", "podSelector", "matchLabels", uploadLabel); got != uploadLabelValue {
@@ -116,8 +108,6 @@ func TestTheUploadPodsHaveNoNetwork(t *testing.T) {
 	}
 }
 
-// The scan, rehearsal, and apply pods' policies each select every pod
-// of their kind, allow nothing in, and allow out only DNS and HTTPS.
 func TestTheScanRehearsalAndApplyPodsReachOnlyDNSAndHTTPS(t *testing.T) {
 	cases := []struct{ file, label, value string }{
 		{"scan.yaml", scanLabel, scanLabelValue},
@@ -148,10 +138,8 @@ func TestTheScanRehearsalAndApplyPodsReachOnlyDNSAndHTTPS(t *testing.T) {
 	}
 }
 
-// The ClusterRole grants each request the operator sends about a
-// Disruption: the watch, the read of one, the create, the patch that
-// removes spec.hold, and the delete.
-func TestTheOperatorMayRequestATurn(t *testing.T) {
+// The operator patches a Disruption to remove spec.hold.
+func TestTheClusterRoleGrantsEveryRequestTheOperatorSendsOnDisruptions(t *testing.T) {
 	var verbs []any
 	for _, rule := range dig(find(t, "rbac.yaml", "ClusterRole"), "rules").([]any) {
 		if slices.Contains(dig(rule, "resources").([]any), any("disruptions")) {
@@ -160,25 +148,27 @@ func TestTheOperatorMayRequestATurn(t *testing.T) {
 	}
 	for _, want := range []string{"get", "list", "watch", "create", "patch", "delete"} {
 		if !slices.Contains(verbs, any(want)) {
-			t.Errorf("the ClusterRole grants %v on disruptions, which lacks %s", verbs, want)
+			t.Errorf("the ClusterRole grants %v on disruptions, want %s too", verbs, want)
 		}
 	}
 }
 
-// The operator removes the hold on a machine it drained, so it must
-// keep running there. liken's drain skips a pod that tolerates the
-// cordon by its key, and the scheduler places it on a cordoned machine.
+// The operator removes spec.hold after machine-operator drains the
+// machine, and the operator's own pod can run on that machine, so the
+// drain must not evict it. The drain skips a pod that tolerates the
+// cordon taint, and the scheduler can place such a pod on a cordoned
+// machine.
 func TestTheOperatorToleratesTheCordon(t *testing.T) {
 	tolerations, _ := dig(find(t, "operator.yaml", "Deployment"), "spec", "template", "spec", "tolerations").([]any)
 	want := map[string]any{"key": "node.kubernetes.io/unschedulable", "operator": "Exists", "effect": "NoSchedule"}
-	if !slices.ContainsFunc(tolerations, func(held any) bool { return reflect.DeepEqual(held, want) }) {
+	if !slices.ContainsFunc(tolerations, func(toleration any) bool { return reflect.DeepEqual(toleration, want) }) {
 		t.Errorf("the operator tolerates %v, want %v", tolerations, want)
 	}
 }
 
-// The Role grants the patch that sends an apply pod the signal to
-// write.
-func TestTheOperatorMaySignalAnApplyPod(t *testing.T) {
+// The operator signals an apply pod to write by patching an annotation
+// onto it.
+func TestTheRoleGrantsPatchOnPodsToSignalAnApplyPod(t *testing.T) {
 	var verbs []any
 	for _, rule := range dig(find(t, "rbac.yaml", "Role"), "rules").([]any) {
 		if slices.Contains(dig(rule, "resources").([]any), any("pods")) {
@@ -186,30 +176,28 @@ func TestTheOperatorMaySignalAnApplyPod(t *testing.T) {
 		}
 	}
 	if !slices.Contains(verbs, any("patch")) {
-		t.Errorf("the Role grants %v on pods, which lacks patch", verbs)
+		t.Errorf("the Role grants %v on pods, want patch too", verbs)
 	}
 }
 
-// The lvfs FirmwareCatalog names LVFS's catalog.
-func TestTheLVFSCatalog(t *testing.T) {
+func TestTheLVFSFirmwareCatalogPointsAtLVFS(t *testing.T) {
 	lvfs := find(t, "lvfs.yaml", catalogKind)
 	if dig(lvfs, "metadata", "name") != "lvfs" || dig(lvfs, "spec", "url") != lvfsURL {
 		t.Errorf("the FirmwareCatalog is %v, want lvfs at %s", lvfs, lvfsURL)
 	}
 }
 
-// The kustomization names every manifest in deploy/, so a file added
-// there is installed.
-func TestTheKustomizationNamesEveryManifest(t *testing.T) {
+// A manifest that the kustomization does not list is never installed.
+func TestTheKustomizationListsEveryManifest(t *testing.T) {
 	listed := dig(documents(t, "kustomization.yaml")[0], "resources").([]any)
 	files, err := filepath.Glob("deploy/*.yaml")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("listing the manifests of deploy/: %v", err)
 	}
 	for _, file := range files {
 		name := filepath.Base(file)
 		if name != "kustomization.yaml" && !slices.Contains(listed, any(name)) {
-			t.Errorf("the kustomization does not name %s", name)
+			t.Errorf("deploy/kustomization.yaml does not list %s", name)
 		}
 	}
 }

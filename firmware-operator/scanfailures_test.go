@@ -1,10 +1,8 @@
 package main
 
-// These tests cover the scans that do not answer: a catalog that moved
-// under the scan, a scan that failed or crashed, a pod that never
-// finishes or is deleted, and an operator that restarts during a scan.
-// Each attempt runs once, so nothing retries a failed scan until the
-// machine, its devices, or the catalog file change.
+// A scan attempt runs once. A failed scan runs again only when the
+// machine boots again, its devices change, the catalog file changes,
+// or the scan image changes.
 
 import (
 	"slices"
@@ -14,19 +12,19 @@ import (
 	"time"
 )
 
-// A scan that finds another file named in the jcat answers
-// CatalogMoved, and the operator reads the jcat at once, not at the
-// next hour, and scans against the new file.
+// A scan that reports CatalogMoved makes the operator read the jcat at
+// once, not at the next -catalog-interval, and scan against the new
+// file.
 func TestCatalogMovedReadsTheJcatAtOnce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := discoveryWorld(t)
 		w.lvfs.publish("firmware-09139-stable.xml.zst", frameworkBIOS("0.0.3.5", "0.0.4.2", "0.0.4.3"))
-		moved := scanResult{Result: resultCatalogMoved, Message: "the jcat names firmware-09139-stable.xml.zst", File: "firmware-09139-stable.xml.zst"}
+		moved := scanResult{Result: resultCatalogMoved, Message: "the jcat now lists firmware-09139-stable.xml.zst", File: "firmware-09139-stable.xml.zst"}
 		w.api.finishScan(t, w.onlyScan(t).Metadata.Name, podSucceeded, resultLog(moved))
 		w.settle()
 
 		if got := w.api.catalog(t, "lvfs").Status.File; got != "firmware-09139-stable.xml.zst" {
-			t.Errorf("the status names %s, want the new file at once", got)
+			t.Errorf("the status has file %s, want the new file at once", got)
 		}
 		scan := w.onlyScan(t)
 		if got := scanOf(scan).file; got != "firmware-09139-stable.xml.zst" {
@@ -39,8 +37,7 @@ func TestCatalogMovedReadsTheJcatAtOnce(t *testing.T) {
 	})
 }
 
-// A failed scan does not run again for the same boot, devices, and
-// file, even an hour later and after a replug.
+// A failed scan does not run again an hour later or after a replug.
 func TestAFailedScanDoesNotRunAgain(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := discoveryWorld(t)
@@ -51,7 +48,7 @@ func TestAFailedScanDoesNotRunAgain(t *testing.T) {
 		time.Sleep(time.Hour)
 		synctest.Wait()
 
-		if got := w.api.created(uploadPodsPath); got != 1 {
+		if got := w.api.created(operatorPodsPath); got != 1 {
 			t.Errorf("the operator created %d scan pods, want 1", got)
 		}
 		r := w.record(t, "lvfs", "node-2")
@@ -65,7 +62,6 @@ func TestAFailedScanDoesNotRunAgain(t *testing.T) {
 	})
 }
 
-// A scan that ends with no result line fails, and the record says why.
 func TestAScanWithNoResultFails(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -73,9 +69,9 @@ func TestAScanWithNoResultFails(t *testing.T) {
 		log   string
 		want  string
 	}{
-		{"a crash", podFailed, "fwupdtool: loading\npanic: runtime error\n", "the scan wrote no result; its last line was: panic: runtime error"},
+		{"a crash", podFailed, "fwupdtool: loading\npanic: runtime error\n", "the scan pod wrote no result, and its last log line is: panic: runtime error"},
 		{"no log", podFailed, "", "the scan pod wrote no log: the scan exited with code 1"},
-		{"an unknown result", podSucceeded, `{"result":"Maybe"}` + "\n", `the scan answered the result "Maybe", which the operator does not know`},
+		{"an unknown result", podSucceeded, `{"result":"Maybe"}` + "\n", `the scan pod reported the result "Maybe", which the operator does not recognize`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -95,8 +91,8 @@ func TestAScanWithNoResultFails(t *testing.T) {
 	}
 }
 
-// A scan pod that never finishes, such as one whose image never pulls,
-// fails ten minutes after its creation.
+// A scan pod that never finishes, such as one whose image cannot be
+// pulled, fails at scanDeadline.
 func TestAScanThatDoesNotFinishFailsAfterTenMinutes(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := discoveryWorld(t)
@@ -118,26 +114,24 @@ func TestAScanThatDoesNotFinishFailsAfterTenMinutes(t *testing.T) {
 	})
 }
 
-// A Running record whose pod a person deleted fails, and the operator
-// does not run the scan again for that attempt.
+// A Running record whose pod a person deleted becomes Failed, and the
+// operator does not run the scan again for that attempt.
 func TestARunningScanWhosePodIsGoneFails(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := discoveryWorld(t)
-		w.api.deleteObject(uploadPodsPath, w.onlyScan(t).Metadata.Name)
+		w.api.deleteObject(operatorPodsPath, w.onlyScan(t).Metadata.Name)
 		w.settle()
 
 		r := w.record(t, "lvfs", "node-2")
-		if r.Result != resultFailed || !strings.Contains(r.Message, "the scan pod is gone") {
-			t.Errorf("the record is %+v, want Failed because the pod is gone", r)
+		if r.Result != resultFailed || !strings.Contains(r.Message, "the scan pod no longer exists") {
+			t.Errorf("the record is %+v, want Failed because the pod no longer exists", r)
 		}
-		if got := w.api.created(uploadPodsPath); got != 1 {
+		if got := w.api.created(operatorPodsPath); got != 1 {
 			t.Errorf("the operator created %d scan pods, want 1", got)
 		}
 	})
 }
 
-// An operator that restarts during a scan creates no second pod, and
-// the new copy follows the first pod to its result.
 func TestARestartDuringAScanCreatesNoSecondPod(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := &world{api: startFakeAPI(t)}
@@ -154,7 +148,7 @@ func TestARestartDuringAScanCreatesNoSecondPod(t *testing.T) {
 		w.api.finishScan(t, name, podSucceeded, resultLog(scanned("firmware-09138-stable.xml.zst", systemFirmware("0.0.3.5", "0.0.4.2"))))
 		w.settle()
 
-		if got := w.api.created(uploadPodsPath); got != 1 {
+		if got := w.api.created(operatorPodsPath); got != 1 {
 			t.Errorf("the operators created %d scan pods, want 1", got)
 		}
 		if r := w.record(t, "lvfs", "node-2"); r.Result != resultScanned || r.Releases == "" {
@@ -163,9 +157,8 @@ func TestARestartDuringAScanCreatesNoSecondPod(t *testing.T) {
 	})
 }
 
-// A status write that the API server refuses keeps the scan pod, and
-// the pass after the retry delay writes the result and then deletes the
-// pod.
+// The operator deletes a scan pod only after it writes the pod's result
+// to the status, so a refused write is retried from the same pod.
 func TestARefusedCatalogWriteKeepsThePodUntilTheRetry(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := discoveryWorld(t)
@@ -193,8 +186,8 @@ func TestARefusedCatalogWriteKeepsThePodUntilTheRetry(t *testing.T) {
 }
 
 // A restarted operator that cannot download the catalog file records
-// the scan with no releases hash, so the next file scans the machine
-// again rather than skip a release it could not compare.
+// the scan with no releases hash. The next catalog file then scans the
+// machine again, because there is no hash to compare its releases with.
 func TestAFileThatCannotBeReadAgainScansAgain(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := &world{api: startFakeAPI(t)}
@@ -218,14 +211,14 @@ func TestAFileThatCannotBeReadAgainScansAgain(t *testing.T) {
 		time.Sleep(time.Hour)
 		synctest.Wait()
 
-		if got := w.api.created(uploadPodsPath); got != 2 {
+		if got := w.api.created(operatorPodsPath); got != 2 {
 			t.Errorf("the operators created %d scan pods, want a second for the new file", got)
 		}
 	})
 }
 
-// A scan whose log the operator cannot read stays Running while the
-// operator tries again, and fails at the scan's deadline.
+// While the operator cannot read a scan pod's log, the record stays
+// Running until scanDeadline, then becomes Failed.
 func TestAScanWhoseLogCannotBeReadFailsAtTheDeadline(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := discoveryWorld(t)
@@ -241,7 +234,7 @@ func TestAScanWhoseLogCannotBeReadFailsAtTheDeadline(t *testing.T) {
 		synctest.Wait()
 
 		r := w.record(t, "lvfs", "node-2")
-		if r.Result != resultFailed || !strings.Contains(r.Message, "could not read the scan's log") {
+		if r.Result != resultFailed || !strings.Contains(r.Message, "cannot read the log of the scan pod") {
 			t.Errorf("the record is %+v, want Failed because the log could not be read", r)
 		}
 	})

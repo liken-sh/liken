@@ -13,10 +13,9 @@ import (
 	"unicode/utf16"
 )
 
-// The names of the variables and files that fwupd 2.1.1 wrote for a
-// capsule in NVRAM mode under OVMF (liken's milestone 33, the firmware
-// under QEMU): an entry for its updater, BootNext, its status variable,
-// the updater, and the capsule.
+// The variables and files that fwupd 2.1.1 wrote for a capsule in NVRAM
+// mode under OVMF: an entry for its updater, BootNext, its status
+// variable, the updater, and the capsule.
 var (
 	updaterEntry = "Boot0007-" + efiGlobalGUID
 	bootNextFile = "BootNext-" + efiGlobalGUID
@@ -27,8 +26,8 @@ var (
 	capsuleFile  = "EFI/debian/fw/fwupd-9c13b7f1-d618-5d68-be61-6b17881014a7.cap"
 )
 
-// loadOption builds an EFI_LOAD_OPTION that boots one file, as
-// efivarfs stores it: the attributes of the variable, then the option.
+// loadOption builds an EFI_LOAD_OPTION that boots one file, in the form
+// efivarfs stores: four bytes of variable attributes, then the option.
 func loadOption(description, file string) []byte {
 	utf16z := func(s string) []byte {
 		var b []byte
@@ -57,10 +56,10 @@ func u16(values ...uint16) []byte {
 	return b
 }
 
-// capsuleRig is a rehearsalRig for the System Firmware device, whose
-// machine has two liken slot entries in BootOrder and the next boot's
-// ESP with its fallback loader. Its install writes what fwupd wrote
-// for a capsule in NVRAM mode, unless a test changes the effect.
+// capsuleRig is a rehearsalRig for the System Firmware device. Its
+// machine has two `liken` slot entries in BootOrder, and the ESP of the
+// next boot has a fallback loader. Its install writes what fwupd wrote
+// for a capsule in NVRAM mode, unless a test changes that.
 type capsuleRig struct {
 	*rehearsalRig
 	esp string
@@ -119,15 +118,13 @@ func TestARehearsalPassesACapsule(t *testing.T) {
 		t.Errorf("got %d bytes on an ESP with %d free, want the two files' bytes and the ESP's free space", got.Bytes, got.ESPFree)
 	}
 	if !strings.HasPrefix(got.Message, "the install stages a capsule with 3 variables and 2 files") {
-		t.Errorf("the message is %q", got.Message)
+		t.Errorf("the message is %q, want it to start with the staged variable and file counts", got.Message)
 	}
 }
 
-// The copy of the ESP holds its \EFI directory alone, which is where
-// fwupd looks and writes, so a rehearsal does not copy a release.
-// fwupdtool install with a device ID plans the release for that device
-// twice, and fwupd refuses the second install of a capsule, so the
-// rehearsal names only the cabinet, as the apply does.
+// The rehearsal passes fwupdtool install the cabinet and no device ID,
+// as the apply does. With a device ID, fwupdtool plans the release for
+// that device twice, and fwupd refuses the second install of a capsule.
 func TestACapsuleRehearsalInstallsThePinnedCabinetOnce(t *testing.T) {
 	r := newCapsuleRig(t)
 
@@ -139,6 +136,8 @@ func TestACapsuleRehearsalInstallsThePinnedCabinetOnce(t *testing.T) {
 	}
 }
 
+// The copy of the ESP has only its \EFI directory, where fwupd looks
+// and writes, so a rehearsal does not copy a release.
 func TestACapsuleRehearsalCopiesTheESPsEFIDirectory(t *testing.T) {
 	r := newCapsuleRig(t)
 
@@ -199,7 +198,7 @@ func TestARehearsalRefusesACapsuleThatWritesMore(t *testing.T) {
 		{"another bit in OsIndications", func(t *testing.T, r *capsuleRig) {
 			r.variable(t, osIndication, []byte{0x07, 0, 0, 0, 0x05, 0, 0, 0, 0, 0, 0, 0})
 			r.file(t, "EFI/UpdateCapsule/fwupd-9c13b7f1.cap", []byte("the capsule"))
-		}, "the install set OsIndications to 0x5, which asks for more than capsule-on-disk"},
+		}, "the install set OsIndications to 0x5, which requests more than capsule-on-disk"},
 		{"the fallback loader", func(t *testing.T, r *capsuleRig) {
 			r.nvramInstall(t)
 			r.file(t, "EFI/BOOT/BOOTX64.EFI", []byte("another loader"))
@@ -224,8 +223,9 @@ func TestARehearsalRefusesACapsuleThatWritesMore(t *testing.T) {
 	}
 }
 
-// A machine whose store names no proven slot has no ESP for the next
-// boot, so the operator mounts none, and no capsule can be staged.
+// A machine on which liken has recorded no proven boot slot has no ESP
+// for the next boot, so the operator mounts none and no capsule can be
+// staged.
 func TestACapsuleRehearsalRefusesAMachineWithNoESPForTheNextBoot(t *testing.T) {
 	r := newCapsuleRig(t)
 	r.espSource = ""
@@ -257,22 +257,22 @@ func TestLoadOptionPathReadsTheFile(t *testing.T) {
 	got, ok := loadOptionPath(loadOption("Linux Firmware Updater", `\EFI\ubuntu\fwupdx64.efi`)[4:])
 
 	if !ok || got != `\EFI\ubuntu\fwupdx64.efi` {
-		t.Errorf("got %q, %v", got, ok)
+		t.Errorf("got path %q and ok %t, want the updater path and true", got, ok)
 	}
 	if _, ok := loadOptionPath(bytes.Repeat([]byte{0xff}, 3)); ok {
 		t.Error("a truncated option has no path")
 	}
 }
 
-// capsuleApplyRig is an applier on a capsuleRig's machine, which expects
-// the writes that an identical machine's rehearsal recorded. Its
-// installer plays fwupd on the machine itself: the real variable store
-// and the ESP of the next boot. The signal arrives at once.
+// capsuleApplyRig is an applier on a capsuleRig's machine. It expects
+// the writes that the rehearsal recorded on an identical machine. Its
+// installer fakes fwupd on the machine itself, in the real variable
+// store and the ESP of the next boot. The write signal arrives at once.
 type capsuleApplyRig struct {
 	applier
 	rig      *capsuleRig
 	installs int
-	// install plays what fwupd writes on the machine.
+	// install makes the writes that fwupd makes on the machine.
 	install func(t *testing.T)
 	fail    error
 	efivars *fakeStore
@@ -325,19 +325,18 @@ func TestAnApplyStagesTheRehearsedCapsule(t *testing.T) {
 
 	got := a.run()
 
-	if got.Result != resultWritten || got.Message != "staged the capsule with 3 variables and 2 files, as rehearsed; BootNext names Boot0007" {
+	if got.Result != resultWritten || got.Message != "staged the capsule with 3 variables and 2 files, as rehearsed, and BootNext is Boot0007" {
 		t.Errorf("got %+v, want Written", got)
 	}
-	if held, _ := os.ReadFile(filepath.Join(a.rig.esp, capsuleFile)); string(held) != "the capsule" {
-		t.Errorf("the ESP holds %q, want the capsule", held)
+	if got, _ := os.ReadFile(filepath.Join(a.rig.esp, capsuleFile)); string(got) != "the capsule" {
+		t.Errorf("the ESP holds %q, want the capsule", got)
 	}
 }
 
-// fwupd writes the machine itself, so the apply checks what it wrote
-// against the rehearsal afterward. Writes that differ, or a failure
-// after a write, leave a staged capsule nobody vouched for, so the
-// apply answers Uncertain: the turn reboots with liken's own BootNext,
-// and the capsule does not run.
+// When fwupd's writes on the machine differ from the rehearsal's, or
+// the install fails after a write, the machine has a staged capsule
+// that no rehearsal passed. The apply returns Uncertain, so the reboot
+// uses the BootNext that `liken` sets and fwupd's updater does not run.
 func TestAnApplyThatDivergesFromTheRehearsal(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -392,25 +391,25 @@ func TestACapsulesApplyInstallsOnlyAfterTheSignal(t *testing.T) {
 }
 
 // fwupd's capsule install reads the files directly under efi/, such as
-// fw_platform_size, which says whether the firmware runs 64-bit code,
-// so the copy holds them beside the variables, the ESRT, and the DMI
+// fw_platform_size, which says whether the firmware runs 64-bit code.
+// So the copy has them beside the variables, the ESRT, and the DMI
 // tables.
-func TestTheCopyHoldsTheEFIDirectorysOwnFiles(t *testing.T) {
+func TestTheCopyHasTheEFIDirectorysOwnFiles(t *testing.T) {
 	host, copy := t.TempDir(), filepath.Join(t.TempDir(), "fw")
 	writeFile(t, filepath.Join(host, "efi", "efivars", "BootOrder-"+efiGlobalGUID), []byte{7, 0, 0, 0})
 	writeFile(t, filepath.Join(host, "efi", "fw_platform_size"), []byte("64\n"))
 
 	if err := copyFirmware(host, copy); err != nil {
-		t.Fatal(err)
+		t.Fatalf("copying the firmware directory: %v", err)
 	}
 
-	if held, err := os.ReadFile(filepath.Join(copy, "efi", "fw_platform_size")); err != nil || string(held) != "64\n" {
-		t.Errorf("the copy's fw_platform_size reads %q, %v", held, err)
+	if got, err := os.ReadFile(filepath.Join(copy, "efi", "fw_platform_size")); err != nil || string(got) != "64\n" {
+		t.Errorf("the copy's fw_platform_size reads %q with error %v, want \"64\\n\"", got, err)
 	}
 }
 
-// fwupd keeps its updater's entry after an update, and a later install
-// writes the same entry again and names it in BootNext.
+// fwupd keeps its updater's boot entry after an update. A later install
+// writes the same entry again and sets BootNext to it.
 func TestARehearsalPassesACapsuleOverAnEarlierUpdatersEntry(t *testing.T) {
 	r := newCapsuleRig(t)
 	writeFile(t, filepath.Join(r.hostDir, "efi", "efivars", "Boot0008-"+efiGlobalGUID), loadOption("Linux Firmware Updater", `\EFI\ubuntu\fwupdx64.efi`))
@@ -427,13 +426,13 @@ func TestARehearsalPassesACapsuleOverAnEarlierUpdatersEntry(t *testing.T) {
 	}
 }
 
-// fwupd's status variable from an earlier update carries efivarfs's
-// immutable flag, and fwupd cannot open it to write it again, so the
+// A fwupd status variable from an earlier update has efivarfs's
+// immutable flag set, and fwupd cannot open it for writing. So the
 // apply clears the flag on fwupd's own variables before the install.
 func TestAnApplyLetsFwupdWriteItsEarlierStatusVariable(t *testing.T) {
 	a := newCapsuleApplyRig(t)
 	a.variable(t, statusVar, []byte{0x07, 0, 0, 0, 3, 0, 0, 0})
-	a.efivars.held = immutableFlag
+	a.efivars.flags = immutableFlag
 	var flagsAtInstall []string
 	install := a.install
 	a.install = func(t *testing.T) { flagsAtInstall = slices.Clone(a.efivars.calls); install(t) }
@@ -449,7 +448,7 @@ func TestAnApplyThatCannotReleaseFwupdsVariableWritesNothing(t *testing.T) {
 	for _, fail := range []map[string]error{{"flags": errors.New("no inode")}, {"setFlags": errors.New("not permitted")}} {
 		a := newCapsuleApplyRig(t)
 		a.variable(t, statusVar, []byte{0x07, 0, 0, 0, 3, 0, 0, 0})
-		a.efivars.held, a.efivars.fail = immutableFlag, fail
+		a.efivars.flags, a.efivars.fail = immutableFlag, fail
 
 		got := a.run()
 

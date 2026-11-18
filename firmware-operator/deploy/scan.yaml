@@ -1,15 +1,12 @@
-# The network policy of every scan pod. A scan pod reads the catalog's
-# jcat and its versioned file over HTTPS, and needs DNS to find the
-# catalog's host. So the policy allows its egress to port 53 and to
-# TCP port 443, on any address, and allows nothing in. A FirmwareCatalog that
-# names a mirror on another port needs a policy of its own beside this
-# one. A cluster with no network policy controller ignores it.
+# A scan pod downloads the catalog's jcat and its versioned file over
+# HTTPS. So this policy allows egress only to DNS and to TCP port 443,
+# on any address, and no ingress. A FirmwareCatalog that points at a
+# mirror on another port needs another policy beside this one.
 #
 # A scan pod is privileged, because fwupd reads SMBIOS tables,
-# efivarfs, sysfs, and device nodes. It runs in liken-system, which
-# carries no Pod Security label, so the API server admits it. A cluster
-# that labels liken-system with a Pod Security level below privileged
-# refuses the scan pods.
+# efivarfs, sysfs, and device nodes. The API server admits it because
+# liken-system has no Pod Security label. A Pod Security level below
+# privileged on liken-system rejects the scan pods.
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

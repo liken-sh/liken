@@ -1,9 +1,10 @@
 package main
 
-// These tests play LVFS and read what the operator writes into a
-// FirmwareCatalog's status: the file the jcat names, its SHA-256 and ETag, and
-// the Ready condition. The operator reads the jcat when the FirmwareCatalog
-// changes and once an hour, on the bubble's clock.
+// These tests serve a fake LVFS and read what the operator writes into
+// a FirmwareCatalog's status: the file the jcat lists, its SHA-256 and
+// ETag, and the Ready condition. The operator reads the jcat when the
+// FirmwareCatalog changes and once per interval, which the test world
+// sets to an hour.
 
 import (
 	"slices"
@@ -13,8 +14,8 @@ import (
 	"time"
 )
 
-// catalogWorld runs the operator with the lvfs FirmwareCatalog and LVFS
-// serving one file, and no machine.
+// catalogWorld runs the operator with a FirmwareCatalog named lvfs, an
+// LVFS that serves one file, and no machine.
 func catalogWorld(t *testing.T) *world {
 	w := startWorld(t)
 	w.lvfs.publish("firmware-09138-stable.xml.zst", frameworkBIOS("0.0.4.2"))
@@ -23,8 +24,8 @@ func catalogWorld(t *testing.T) *world {
 	return w
 }
 
-// A jcat that names a file gives the FirmwareCatalog's status the file, its
-// SHA-256, and the jcat's ETag, and sets Ready.
+// A jcat that names a file puts the file, its SHA-256, and the jcat's
+// ETag in the FirmwareCatalog's status and sets Ready to True.
 func TestANewJcatFileUpdatesTheStatus(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := catalogWorld(t)
@@ -41,7 +42,8 @@ func TestANewJcatFileUpdatesTheStatus(t *testing.T) {
 }
 
 // A file whose SHA-256 differs from the jcat's sets Ready to False and
-// keeps the last good file. A machine gets no scan while it is False.
+// keeps the last good file in status. No machine is scanned while Ready
+// is False.
 func TestASHA256ThatDiffersSetsReadyFalse(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := catalogWorld(t)
@@ -58,7 +60,7 @@ func TestASHA256ThatDiffersSetsReadyFalse(t *testing.T) {
 			t.Errorf("Ready = %+v, want False, %s", r, reasonChecksumMismatch)
 		}
 		if status.File != "firmware-09138-stable.xml.zst" || status.SHA256 != good {
-			t.Errorf("the status names %s %s, want the last good file", status.File, status.SHA256)
+			t.Errorf("the status has file %s and SHA-256 %s, want the last good file", status.File, status.SHA256)
 		}
 		if got := len(w.api.scans(t)); got != 0 {
 			t.Errorf("%d scan pods, want none while the FirmwareCatalog is not Ready", got)
@@ -71,8 +73,8 @@ func TestASHA256ThatDiffersSetsReadyFalse(t *testing.T) {
 }
 
 // An hour after a read, the operator reads the jcat again with its
-// ETag. An unchanged jcat answers 304, and the operator downloads no
-// file and changes nothing but the time it checked.
+// ETag. An unchanged jcat returns 304, and the operator downloads no
+// file and changes only the time of the check.
 func TestAnUnchangedETagChangesNothing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := catalogWorld(t)
@@ -98,7 +100,6 @@ func statusEqual(a, b catalogStatus) bool {
 	return string(mustJSON(a)) == string(mustJSON(b))
 }
 
-// A new file on LVFS reaches the status at the next hourly read.
 func TestTheHourlyReadFindsANewFile(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := catalogWorld(t)
@@ -106,20 +107,20 @@ func TestTheHourlyReadFindsANewFile(t *testing.T) {
 		time.Sleep(59 * time.Minute)
 		synctest.Wait()
 		if got := w.api.catalog(t, "lvfs").Status.File; got != "firmware-09138-stable.xml.zst" {
-			t.Errorf("before the hour the status names %s, want the first file", got)
+			t.Errorf("before the hour the status has file %s, want the first file", got)
 		}
 		time.Sleep(time.Minute)
 		synctest.Wait()
 
 		status := w.api.catalog(t, "lvfs").Status
 		if status.File != "firmware-09139-stable.xml.zst" || status.SHA256 != sum {
-			t.Errorf("after the hour the status names %s %s, want the new file", status.File, status.SHA256)
+			t.Errorf("after the hour the status has file %s and SHA-256 %s, want the new file", status.File, status.SHA256)
 		}
 	})
 }
 
-// A jcat or a file that cannot be read sets Ready to False with the
-// reason that names which.
+// A jcat or a file that cannot be read sets Ready to False, with the
+// reason JcatUnreadable or FileUnreadable.
 func TestAReadThatFailsSetsReadyFalse(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -152,7 +153,6 @@ func TestAReadThatFailsSetsReadyFalse(t *testing.T) {
 	}
 }
 
-// A changed spec reads the jcat at once, from the new URL.
 func TestAChangedCatalogReadsAtOnce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := catalogWorld(t)
@@ -170,7 +170,6 @@ func TestAChangedCatalogReadsAtOnce(t *testing.T) {
 	})
 }
 
-// A jcat larger than any LVFS serves is refused, not read into memory.
 func TestAJcatThatIsTooLargeIsRefused(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
@@ -185,8 +184,6 @@ func TestAJcatThatIsTooLargeIsRefused(t *testing.T) {
 	})
 }
 
-// A deleted FirmwareCatalog starts no scan, and the operator forgets what it
-// kept of it.
 func TestADeletedCatalogStartsNoScan(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := catalogWorld(t)

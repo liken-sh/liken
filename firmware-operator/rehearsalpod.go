@@ -1,15 +1,15 @@
 package main
 
-// A rehearsal is one bare pod on a machine that runs an approved
-// install against a copy of the machine's firmware variables, and
-// writes what the install would write to its log (scan/rehearse.go).
-// It runs the scan image as `scan rehearse`.
+// A rehearsal is a bare pod that runs `scan rehearse` on the machine. It
+// performs the approved install against a copy of the machine's firmware
+// variables in memory, and logs what the install would write
+// (scan/rehearse.go).
 //
 // The pod is not privileged. It mounts the machine's /sys/firmware
-// read-only, recursively, so the efivarfs mount under it is read-only
+// recursively read-only, so the efivarfs mount under it is read-only
 // too, and a rehearsal that goes wrong cannot write the real variable
-// store. It drops every capability and adds DAC_READ_SEARCH, which
-// reading the variables needs. fwupd's writes go to a copy in memory.
+// store. It drops every capability except DAC_READ_SEARCH, which it
+// needs to read the variables.
 
 import (
 	"crypto/sha256"
@@ -17,12 +17,11 @@ import (
 	"strings"
 )
 
-// The label and the annotations of a rehearsal pod. The label selects
-// the pods the operator watches, and the NetworkPolicy in
-// deploy/rehearsal.yaml. The annotations record the attempt, so an
-// operator that restarts during a rehearsal reads them from the pod.
-// firmwareKey is the upload pod's, and machineKey, bootKey, catalogKey,
-// and fileKey are the scan pod's.
+// The operator and the NetworkPolicy in deploy/rehearsal.yaml select
+// rehearsal pods by rehearsalLabel. The annotations record the attempt,
+// so an operator that restarts during a rehearsal reads the attempt from
+// the pod. The pod also has firmwareKey and machineKey (uploadpod.go),
+// and bootKey, catalogKey, and fileKey (scanpod.go).
 const (
 	rehearsalLabel      = "firmware.liken.sh/rehearsal"
 	rehearsalLabelValue = "true"
@@ -32,50 +31,49 @@ const (
 	rehearsalContainer  = "rehearse"
 )
 
-// The environment of `scan rehearse` beside the catalog's.
+// The environment variables of `scan rehearse`, in addition to the
+// catalog's.
 const (
 	cabinetURLVariable    = "CABINET_URL"
 	cabinetSHA256Variable = "CABINET_SHA256"
 	deviceIDVariable      = "DEVICE_ID"
 )
 
-// Where the rehearsal pod mounts the machine's /sys/firmware and its
-// directory in memory. scan/main.go names the same two paths.
+// The mount paths of the rehearsal pod's /sys/firmware and of its
+// directory in memory. scan/main.go has the same paths as hostFirmware
+// and rehearsalDir.
 const (
 	hostFirmwarePath = "/host/firmware"
 	rehearsalPath    = "/run/rehearsal"
 
-	// provenESPLink is the link that liken's init keeps to the ESP of
-	// the machine's next boot (liken's milestone 33). A rehearsal of a
-	// capsule copies its EFI directory, and an apply stages the capsule
-	// there.
+	// provenESPLink is a link that `liken`'s init points at the ESP of
+	// the machine's next boot. A rehearsal of a capsule copies the EFI
+	// directory of that ESP, and an apply stages the capsule there.
 	provenESPLink = "/run/liken/proven-esp"
 	nextESPVolume = "next-esp"
 
-	// copyVariablesVolume is a directory in memory where a pod's copy
-	// of the variable store goes. fwupd's uefi_capsule plugin reads
-	// devices only from a variable store that is a writable mount
-	// point, and a copy in an ordinary directory is neither, so each
-	// pod that gives fwupd a copy mounts this volume where the copy's
-	// efivars go. The copy holds well under a megabyte.
+	// copyVariablesVolume is a pod's copy of the variable store, in
+	// memory. fwupd's uefi_capsule plugin finds devices only in a
+	// variable store that is a writable mount point, so each pod that
+	// gives fwupd a copy mounts this volume at the copy's efivars path.
 	copyVariablesVolume = "copy-efivars"
 
-	// firmwareCopyPath is where every pod copies the machine's firmware
-	// tables for fwupd (firmwareCopy in scan/main.go). fwupd names a
-	// capsule device by the path of its ESRT entry, so the scan, the
-	// rehearsal, and the apply's prepare must copy to the same path for
-	// the device to keep the ID that the scan recorded.
+	// firmwareCopyPath is where each pod copies the machine's firmware
+	// tables for fwupd (firmwareCopy in scan/main.go). fwupd derives a
+	// capsule device's ID from the path of its ESRT entry, so the scan,
+	// the rehearsal, and the apply must copy to the same path to see the
+	// device ID that the scan recorded.
 	firmwareCopyPath   = "/run/fw"
 	firmwareCopyVolume = "firmware-copy"
-	// nextESPPath is where a pod mounts it. The scan program reads the
-	// same path (nextESPPath in scan/main.go).
+	// nextESPPath is where a pod mounts the next boot's ESP. The scan
+	// program uses the same path (nextESPPath in scan/main.go).
 	nextESPPath = "/run/esp-next"
 )
 
-// rehearsalAttempt is one rehearsal of one approval on one machine's
-// device: the boot, the device, the approved version and cabinet, and
-// the catalog file of the machine's last scan. Each attempt runs once,
-// so a failed rehearsal waits for one of them to change.
+// rehearsalAttempt identifies a rehearsal by the machine's boot, the
+// device, the approved version and cabinet, and the catalog file of the
+// machine's last scan. Each attempt runs once, so a failed rehearsal is
+// not retried until one of these fields changes.
 type rehearsalAttempt struct {
 	firmware string
 	machine  string
@@ -92,9 +90,9 @@ func (a rehearsalAttempt) is(r rehearsal) bool {
 		r.Version == a.version && r.CabinetSHA256 == a.cabinet && r.Catalog == a.catalog && r.File == a.file
 }
 
-// rehearsalPodName answers the one name of an attempt, for the reasons
-// of scanPodName. The name starts with the Firmware and the machine,
-// for a person who reads kubectl get pods.
+// rehearsalPodName returns the pod name of an attempt: the Firmware and
+// the machine, cut to fit the 63-character limit, and a hash of the
+// whole attempt, for the reasons given at scanPodName.
 func rehearsalPodName(a rehearsalAttempt) string {
 	sum := sha256.Sum256([]byte(strings.Join([]string{a.firmware, a.machine, a.boot, a.device, a.version, a.cabinet, a.catalog, a.file}, "\x00")))
 	suffix := "-rehearsal-" + hex.EncodeToString(sum[:6])
@@ -105,8 +103,6 @@ func rehearsalPodName(a rehearsalAttempt) string {
 	return strings.TrimRight(prefix, "-.") + suffix
 }
 
-// rehearsalOf answers the attempt that a rehearsal pod's annotations
-// record.
 func rehearsalOf(p pod) rehearsalAttempt {
 	notes := p.Metadata.Annotations
 	return rehearsalAttempt{firmware: notes[firmwareKey], machine: notes[machineKey], boot: notes[bootKey],
@@ -114,12 +110,10 @@ func rehearsalOf(p pod) rehearsalAttempt {
 		catalog: notes[catalogKey], file: notes[fileKey]}
 }
 
-// buildRehearsalPod answers the pod of one attempt. c is the
-// FirmwareCatalog of the machine's last scan, whose file the
-// rehearsal reads, and cabinetURL is the approval's.
-//
-// nextESP says that the machine has an ESP for its next boot, which the
-// pod mounts read-only for a capsule's rehearsal.
+// buildRehearsalPod returns the pod for an attempt. c is the
+// FirmwareCatalog of the machine's last scan. nextESP is true when the
+// machine has an ESP for its next boot, and the pod then mounts it
+// read-only for the rehearsal of a capsule.
 func buildRehearsalPod(f *firmware, a rehearsalAttempt, c *catalog, cabinetURL, image, namespace string, nextESP bool) pod {
 	no := false
 	deadline, grace := int64(scanDeadline.Seconds()), int64(5)
@@ -149,8 +143,8 @@ func buildRehearsalPod(f *firmware, a rehearsalAttempt, c *catalog, cabinetURL, 
 			}},
 		},
 		Spec: withTrust(podSpec{
-			// The pod runs once, and stops at the deadline, for the
-			// reasons of the scan pod (scanpod.go).
+			// The pod runs once and stops at the deadline, for the
+			// reasons given in scanpod.go.
 			RestartPolicy:                 "Never",
 			ActiveDeadlineSeconds:         &deadline,
 			TerminationGracePeriodSeconds: &grace,
@@ -160,12 +154,11 @@ func buildRehearsalPod(f *firmware, a rehearsalAttempt, c *catalog, cabinetURL, 
 			EnableServiceLinks:            &no,
 			Volumes: append([]volume{
 				{Name: "host-firmware", HostPath: &hostPath{Path: "/sys/firmware", Type: "Directory"}},
-				// The copy of the variable store is under a megabyte. The
-				// rest is the catalog, the cabinet, and fwupd's cache of
-				// the catalog, and for a capsule the copy of the ESP's EFI
-				// directory and the capsule that fwupd stages there. A
-				// board's capsule is tens of megabytes, and the cabinet
-				// holds it once more.
+				// This volume stores the catalog, the cabinet, and fwupd's
+				// cache of the catalog. For a capsule it also stores the
+				// copy of the ESP's EFI directory and the capsule that
+				// fwupd stages there. The size limit allows for a board's
+				// capsule to be stored twice, in the cabinet and staged.
 				{Name: "rehearsal", EmptyDir: &emptyDir{Medium: "Memory", SizeLimit: "256Mi"}},
 			}, firmwareCopyVolumes()...),
 			Containers: []container{{
@@ -202,9 +195,9 @@ func buildRehearsalPod(f *firmware, a rehearsalAttempt, c *catalog, cabinetURL, 
 	return p
 }
 
-// firmwareCopyVolumes are the two directories in memory that hold a
-// pod's copy of the firmware tables: the copy, and its variable store,
-// which fwupd reads only from a mount point of its own.
+// firmwareCopyVolumes returns the volumes in memory for a pod's copy of
+// the firmware tables and, as a separate mount point, the copy's
+// variable store (copyVariablesVolume).
 func firmwareCopyVolumes() []volume {
 	return []volume{
 		{Name: firmwareCopyVolume, EmptyDir: &emptyDir{Medium: "Memory", SizeLimit: "16Mi"}},

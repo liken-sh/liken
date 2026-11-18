@@ -13,27 +13,27 @@ import (
 	"strings"
 )
 
-// fwupdErrorNothingFound is the fwupd error code for "No detected
-// devices" and "No updatable devices". Both mean an empty answer, so
-// they are not failures of the scan.
-const fwupdErrorNothingFound = 9
+// fwupdErrorNothingToDo is libfwupd's FWUPD_ERROR_NOTHING_TO_DO, which
+// fwupdtool returns with messages such as "No detected devices" and "No
+// updatable devices". The scan reads it as an empty list, not a failure.
+const fwupdErrorNothingToDo = 9
 
-// fwupdtool runs one fwupdtool command and returns what it printed on
-// stdout and stderr. The error is non-nil when the command exits
-// non-zero, and the output is still returned: get-updates exits
-// non-zero when there is nothing to update, and the scan reads its
-// stdout to tell that from a real failure.
+// fwupdtool runs one fwupdtool command and returns its stdout and
+// stderr, together with the error of a non-zero exit. get-updates exits
+// non-zero when there is nothing to update, so the caller reads stdout
+// to tell that from a real failure.
 type fwupdtool func(ctx context.Context, args ...string) (stdout, stderr []byte, err error)
 
-// execFwupdtool runs the real program. Its stderr goes to the pod's log
-// as well, and its stdout never does, because the last line of stdout
-// is the scan's result.
+// execFwupdtool runs the real fwupdtool and copies its stderr to the
+// pod's log. It does not copy stdout, because the operator reads the
+// pod's result from a JSON line in the log, and fwupdtool's own JSON
+// must not mix with it.
 //
-// FWUPD_UEFI_ESP_PATH points the uefi_capsule plugin at an empty
-// directory. Without an ESP it reports the device as not updatable, and
-// with the machine's real ESP the plugin would read it. The scan never
-// stages a capsule, so an empty directory is all it needs. A rehearsal
-// passes more of fwupd's variables in env (rehearse.go).
+// fwupd finds the EFI system partition through udisks on the system
+// D-Bus, which a pod does not have. Without an ESP, fwupd marks every
+// UEFI device updatable-hidden and offers no update for it.
+// FWUPD_UEFI_ESP_PATH skips that search. A scan passes an empty
+// directory, because it never stages a capsule.
 func execFwupdtool(espDir string, env ...string) fwupdtool {
 	return func(ctx context.Context, args ...string) ([]byte, []byte, error) {
 		if err := os.MkdirAll(espDir, 0o755); err != nil {
@@ -49,8 +49,8 @@ func execFwupdtool(espDir string, env ...string) fwupdtool {
 	}
 }
 
-// lastLine is the last non-empty line of fwupdtool's stderr, which is
-// where it states why a command failed.
+// lastLine returns the last line of fwupdtool's stderr, where fwupdtool
+// prints why a command failed.
 func lastLine(stderr []byte) string {
 	lines := strings.Split(strings.TrimSpace(string(stderr)), "\n")
 	return strings.TrimSpace(lines[len(lines)-1])
@@ -72,9 +72,10 @@ type fwupdDevice struct {
 	Releases []fwupdRelease `json:"Releases"`
 }
 
-// parseDevices reads the JSON of get-devices or get-updates. A fwupd
-// "nothing found" error is an empty list. Any other error object, and
-// output that is not JSON, is a failure that carries stderr's last line.
+// parseDevices parses the JSON that get-devices or get-updates prints.
+// fwupdErrorNothingToDo gives an empty list. Another fwupd error gives
+// its message. Output that is not JSON gives the last line of stderr,
+// or the exit error when stderr is empty.
 func parseDevices(stdout, stderr []byte, runErr error) ([]fwupdDevice, error) {
 	var out struct {
 		Devices []fwupdDevice `json:"Devices"`
@@ -87,13 +88,12 @@ func parseDevices(stdout, stderr []byte, runErr error) ([]fwupdDevice, error) {
 		}
 		return nil, errors.New(reason)
 	}
-	if out.Error != nil && out.Error.Code != fwupdErrorNothingFound {
+	if out.Error != nil && out.Error.Code != fwupdErrorNothingToDo {
 		return nil, errors.New(out.Error.Message)
 	}
 	return out.Devices, nil
 }
 
-// query runs get-devices or get-updates and returns the devices it names.
 func query(ctx context.Context, run fwupdtool, command string) ([]fwupdDevice, error) {
 	stdout, stderr, err := run(ctx, command, "--json")
 	devices, parseErr := parseDevices(stdout, stderr, err)
@@ -103,9 +103,8 @@ func query(ctx context.Context, run fwupdtool, command string) ([]fwupdDevice, e
 	return devices, nil
 }
 
-// discover lists the devices that fwupd can update and attaches to each
-// the releases that get-updates offered for it. A device whose Flags
-// lack updatable is left out: no release could apply to it.
+// discover returns the devices whose Flags include updatable, each
+// with the releases that get-updates offered for it.
 func discover(ctx context.Context, run fwupdtool) ([]Device, error) {
 	found, err := query(ctx, run, "get-devices")
 	if err != nil {

@@ -10,13 +10,12 @@ import (
 	"time"
 )
 
-// testTimeout bounds each wait on a goroutine or a real watch, so a
-// broken wait fails in seconds instead of hanging the test run.
+// testTimeout limits each wait, so a broken wait fails the test instead
+// of hanging the test run.
 const testTimeout = 10 * time.Second
 
-// annotations writes the file of a downward API volume's annotations
-// into dir, in the kubelet's format: one key="value" line for each
-// annotation, the value quoted as Go quotes a string.
+// annotations writes the annotations file of a downward API volume into
+// dir. content is in the kubelet's format (readSignal).
 func annotations(t *testing.T, dir, content string) {
 	t.Helper()
 	writeFile(t, filepath.Join(dir, annotationsFile), []byte(content))
@@ -48,8 +47,8 @@ func TestTheSignalIsTheWriteAnnotationWithGo(t *testing.T) {
 	}
 }
 
-// A volume the kubelet has not filled yet holds no file, which is no
-// signal. Any other failure to read ends the wait.
+// A missing annotations file means no signal. Any other read error is
+// returned.
 func TestReadingTheSignal(t *testing.T) {
 	missing, err := readSignal(t.TempDir())
 	if missing || err != nil {
@@ -57,15 +56,15 @@ func TestReadingTheSignal(t *testing.T) {
 	}
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, annotationsFile), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating a directory in place of the annotations file: %v", err)
 	}
 	if _, err := readSignal(dir); err == nil {
-		t.Error("readSignal of a directory in the file's place answered no error")
+		t.Error("readSignal of a directory in the file's place returned no error")
 	}
 }
 
-// fakeWatch is a directory watch that a test drives: opened runs when
-// the wait opens it, and a send on changes plays an event.
+// fakeWatch is a directory watch that a test controls. opened runs when
+// the wait opens the watch, and a send on changes is a watch event.
 type fakeWatch struct {
 	opened  func()
 	changes chan struct{}
@@ -77,7 +76,6 @@ func (f *fakeWatch) open(string) (watcher, error) {
 	return watcher{changes: f.changes, close: func() error { f.closed = true; return nil }}, nil
 }
 
-// await runs awaitSignal in a goroutine, and answers its end.
 func await(t *testing.T, dir string, f *fakeWatch) <-chan error {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
@@ -87,8 +85,8 @@ func await(t *testing.T, dir string, f *fakeWatch) <-chan error {
 	return done
 }
 
-// The wait reads the file once after the watch opens, so a signal that
-// arrived before the watch, and sent the watch no event, is seen.
+// The signal is written while the watch opens, and no watch event
+// follows. Only the read after the open can find it.
 func TestASignalBeforeTheWatchOpensIsSeen(t *testing.T) {
 	dir := t.TempDir()
 	annotations(t, dir, "firmware.liken.sh/machine=\"node-2\"")
@@ -111,9 +109,8 @@ func TestAnEventAfterTheSignalEndsTheWait(t *testing.T) {
 
 	f.changes <- struct{}{}
 	annotations(t, dir, "firmware.liken.sh/write=\"go\"")
-	// The wait reads the file after each event, so its read for the
-	// first event can see the signal written just after it and end
-	// before the second event. Either end is the signal.
+	// The read after the first event can already find the signal and
+	// end the wait before the second event is sent. Both orders pass.
 	var err error
 	select {
 	case f.changes <- struct{}{}:
@@ -138,7 +135,7 @@ func TestAWaitThatCannotWatchEnds(t *testing.T) {
 			changes := make(chan struct{})
 			close(changes)
 			return watcher{changes: changes, close: func() error { return nil }}, nil
-		}, "the watch of DIR ended"},
+		}, "the watch of DIR ended before the signal arrived"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -154,7 +151,6 @@ func TestAWaitThatCannotWatchEnds(t *testing.T) {
 	}
 }
 
-// The pod's stop ends the wait with no signal.
 func TestAStoppedWaitEnds(t *testing.T) {
 	dir := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())

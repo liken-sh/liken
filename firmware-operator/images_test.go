@@ -1,8 +1,5 @@
 package main
 
-// The scan image is the operator's repository with -scan added, at the
-// operator's tag, unless --scan-image names one.
-
 import (
 	"testing"
 	"testing/synctest"
@@ -25,14 +22,12 @@ func TestScanImageFor(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			got, err := scanImageFor(c.operator)
 			if got != c.want || (err == nil) != (c.want != "") {
-				t.Errorf("scanImageFor = %q, %v; want %q", got, err, c.want)
+				t.Errorf("scanImageFor = %q, %v, want %q", got, err, c.want)
 			}
 		})
 	}
 }
 
-// The operator reads its own pod for its image, and the flag wins over
-// it.
 func TestResolveScanImage(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)
@@ -51,7 +46,7 @@ func TestResolveScanImage(t *testing.T) {
 		for _, c := range cases {
 			got, err := resolveScanImage(client, c.flag, operatorNS, c.pod)
 			if got != c.want || (err == nil) != (c.want != "") {
-				t.Errorf("%s: resolveScanImage = %q, %v; want %q", c.name, got, err, c.want)
+				t.Errorf("%s: resolveScanImage = %q, %v, want %q", c.name, got, err, c.want)
 			}
 		}
 	})

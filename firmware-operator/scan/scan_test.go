@@ -45,7 +45,7 @@ func TestScanned(t *testing.T) {
 	gotJSON, _ := json.Marshal(got)
 	wantJSON, _ := json.Marshal(want)
 	if string(gotJSON) != string(wantJSON) {
-		t.Errorf("got  %s\nwant %s", gotJSON, wantJSON)
+		t.Errorf("the result is %s, want %s", gotJSON, wantJSON)
 	}
 }
 
@@ -58,7 +58,7 @@ func TestScanRefreshesTheCatalogUnderItsRemote(t *testing.T) {
 		"refresh", filepath.Join(r.workDir, testFile), filepath.Join(r.workDir, testFile+".jcat"), "catalog-lvfs",
 	}
 	if got := r.tool.calls[0]; strings.Join(got, " ") != strings.Join(want, " ") {
-		t.Errorf("first command %v, want %v", got, want)
+		t.Errorf("the first fwupdtool command is %v, want %v", got, want)
 	}
 }
 
@@ -74,7 +74,7 @@ func TestScanWritesTheRemotes(t *testing.T) {
 	}
 	want := "[fwupd Remote]\nEnabled=true\nTitle=lvfs\nMetadataURI=" + testCatalogURL + "\n"
 	if string(ours) != want {
-		t.Errorf("remote file:\n%s\nwant:\n%s", ours, want)
+		t.Errorf("the remote file is:\n%s\nwant:\n%s", ours, want)
 	}
 }
 
@@ -87,19 +87,19 @@ func TestScanOutcomes(t *testing.T) {
 	}{
 		{
 			"no updates", func(t *testing.T, r *rig) {
-				r.tool.answers["get-updates"] = answer{stdout: string(fixture(t, "updates_none.json")), err: errExit2}
+				r.tool.outputs["get-updates"] = toolOutput{stdout: string(fixture(t, "updates_none.json")), err: errExit2}
 			},
 			"Scanned", "2 devices, no updates",
 		},
 		{
 			"nothing to update, as an error object", func(t *testing.T, r *rig) {
-				r.tool.answers["get-updates"] = answer{stdout: string(fixture(t, "devices_none.json")), err: errExit2}
+				r.tool.outputs["get-updates"] = toolOutput{stdout: string(fixture(t, "devices_none.json")), err: errExit2}
 			},
 			"Scanned", "2 devices, no updates",
 		},
 		{
 			"no devices", func(t *testing.T, r *rig) {
-				r.tool.answers["get-devices"] = answer{stdout: string(fixture(t, "devices_none.json")), err: errExit2}
+				r.tool.outputs["get-devices"] = toolOutput{stdout: string(fixture(t, "devices_none.json")), err: errExit2}
 			},
 			"Scanned", "0 devices, no updates",
 		},
@@ -107,13 +107,13 @@ func TestScanOutcomes(t *testing.T) {
 			"the catalog moved", func(t *testing.T, r *rig) {
 				r.web[testCatalogURL+".jcat"] = jcatFor(t, "firmware-09139-stable.xml.zst", sum(testCatalog))
 			},
-			"CatalogMoved", "the jcat now names firmware-09139-stable.xml.zst",
+			"CatalogMoved", "the jcat now lists firmware-09139-stable.xml.zst",
 		},
 		{
 			"the jcat download fails", func(t *testing.T, r *rig) {
 				delete(r.web, testCatalogURL+".jcat")
 			},
-			"Failed", "downloading the jcat: " + testCatalogURL + ".jcat answered Not Found",
+			"Failed", "downloading the jcat: " + testCatalogURL + ".jcat returned Not Found",
 		},
 		{
 			"the jcat is not gzip", func(t *testing.T, r *rig) {
@@ -125,7 +125,7 @@ func TestScanOutcomes(t *testing.T) {
 			"the file download fails", func(t *testing.T, r *rig) {
 				delete(r.web, testFileURL)
 			},
-			"Failed", "downloading " + testFile + ": " + testFileURL + " answered Not Found",
+			"Failed", "downloading " + testFile + ": " + testFileURL + " returned Not Found",
 		},
 		{
 			"the file differs from the operator's digest", func(t *testing.T, r *rig) {
@@ -141,19 +141,19 @@ func TestScanOutcomes(t *testing.T) {
 		},
 		{
 			"the refresh fails", func(t *testing.T, r *rig) {
-				r.tool.answers["refresh"] = answer{stderr: "starting\nfailed to verify signature\n", err: errExit2}
+				r.tool.outputs["refresh"] = toolOutput{stderr: "starting\nfailed to verify signature\n", err: errExit2}
 			},
 			"Failed", "fwupdtool refresh: failed to verify signature",
 		},
 		{
 			"get-devices fails", func(t *testing.T, r *rig) {
-				r.tool.answers["get-devices"] = answer{stdout: string(fixture(t, "error.json")), err: errExit2}
+				r.tool.outputs["get-devices"] = toolOutput{stdout: string(fixture(t, "error.json")), err: errExit2}
 			},
 			"Failed", "fwupdtool get-devices: Failed to load plugin",
 		},
 		{
 			"get-updates prints nothing", func(t *testing.T, r *rig) {
-				r.tool.answers["get-updates"] = answer{stderr: "killed\n", err: errExit2}
+				r.tool.outputs["get-updates"] = toolOutput{stderr: "killed\n", err: errExit2}
 			},
 			"Failed", "fwupdtool get-updates: killed",
 		},
@@ -189,10 +189,10 @@ func TestScanOutcomes(t *testing.T) {
 			got := r.scan(context.Background())
 
 			if got.Result != tt.result || !strings.HasPrefix(got.Message, tt.message) {
-				t.Errorf("got %s %q, want %s %q", got.Result, got.Message, tt.result, tt.message)
+				t.Errorf("the result is %s %q, want %s starting with %q", got.Result, got.Message, tt.result, tt.message)
 			}
 			if got.File != testFile {
-				t.Errorf("file is %q, want %q", got.File, testFile)
+				t.Errorf("the result's file is %q, want %q", got.File, testFile)
 			}
 		})
 	}
@@ -204,7 +204,7 @@ func TestEmitWritesOneLine(t *testing.T) {
 	emit(&out, Result{Result: "Failed", Message: "a\nb", File: testFile})
 
 	if strings.Count(out.String(), "\n") != 1 || !strings.HasSuffix(out.String(), "}\n") {
-		t.Errorf("output is not one line: %q", out.String())
+		t.Errorf("emit wrote %q, want one line ending in a newline", out.String())
 	}
 }
 
@@ -217,13 +217,10 @@ func TestConfigFromEnv(t *testing.T) {
 
 	want := config{name: "lvfs", url: testCatalogURL, file: testFile, sha256: "abc"}
 	if got != want {
-		t.Errorf("got %+v, want %+v", got, want)
+		t.Errorf("configFromEnv returned %+v, want %+v", got, want)
 	}
 }
 
-// fwupd reads a copy of the machine's firmware tables, whose variable
-// store the pod mounts in memory, so the uefi_capsule plugin finds a
-// writable store and the machine's own is never written.
 func TestAScanGivesFwupdACopyOfTheFirmwareTables(t *testing.T) {
 	r := newRig(t)
 	writeFile(t, filepath.Join(r.firmwareHost, "efi", "efivars", "BootOrder-"+efiGlobalGUID), []byte{7, 0, 0, 0, 2, 0})
@@ -236,18 +233,16 @@ func TestAScanGivesFwupdACopyOfTheFirmwareTables(t *testing.T) {
 	got := r.scan(context.Background())
 
 	if got.Result != resultScanned || string(copied) != "1\n" {
-		t.Errorf("got %+v with the copy's ESRT reading %q, want Scanned over a copy of the tables", got, copied)
+		t.Errorf("the result is %+v and the copy's ESRT entry reads %q, want Scanned over a copy of the tables", got, copied)
 	}
 }
 
-// A machine that booted in BIOS mode has no variable store, and fwupd
-// then finds no UEFI devices, which is a valid answer.
 func TestAScanOfABIOSMachineCopiesNothing(t *testing.T) {
 	r := newRig(t)
 
 	got := r.scan(context.Background())
 
 	if got.Result != resultScanned {
-		t.Errorf("got %+v, want Scanned", got)
+		t.Errorf("the result is %+v, want Scanned", got)
 	}
 }
